@@ -518,6 +518,12 @@ fn invoke_base_url(value: &serde_json::Value) -> Option<String> {
     Some(format!("https://{label}.chutes.ai"))
 }
 
+/// Validates `params` against the cord's full (possibly nested) JSON Schema
+/// -- not just its top-level `required`/`properties` -- so a payload that
+/// gets the outer shape right (e.g. the `args` wrapper some cords require)
+/// but has the wrong fields *inside* a nested object is rejected locally,
+/// with a precise error, instead of round-tripping to Chutes for a generic
+/// "Invalid input parameters" 400.
 fn validate_schema_fields(
     schema: &Option<serde_json::Value>,
     params: &serde_json::Map<String, serde_json::Value>,
@@ -526,39 +532,65 @@ fn validate_schema_fields(
     let Some(schema) = schema.as_ref() else {
         return Ok(());
     };
-    let missing = schema
-        .get("required")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .filter(|key| !params.contains_key(*key))
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        Err(format!(
-            "missing required cord fields: {}",
-            missing.join(", ")
-        ))
-    } else if !allow_unknown
-        && let Some(properties) = schema
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-    {
-        let unknown = params
-            .keys()
-            .filter(|key| !properties.contains_key(*key))
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        if unknown.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "unknown cord fields: {}. Call describe_media_model again or set CHUTES_ALLOW_UNKNOWN_PARAMS=1 to bypass this guard",
-                unknown.join(", ")
-            ))
-        }
-    } else {
+    let mut schema = schema.clone();
+    close_object_schemas(&mut schema, !allow_unknown);
+    let validator = jsonschema::validator_for(&schema)
+        .map_err(|error| format!("cord input_schema is not a valid JSON Schema: {error}"))?;
+    let instance = serde_json::Value::Object(params.clone());
+    let errors: Vec<String> = validator
+        .iter_errors(&instance)
+        .map(|error| {
+            let path = error.instance_path.to_string();
+            if path.is_empty() {
+                error.to_string()
+            } else {
+                format!("{path}: {error}")
+            }
+        })
+        .collect();
+    if errors.is_empty() {
         Ok(())
+    } else {
+        Err(format!(
+            "params do not match the cord's input schema: {}. Call describe_media_model again to see the exact schema{}",
+            errors.join("; "),
+            if allow_unknown {
+                ""
+            } else {
+                ", or set CHUTES_ALLOW_UNKNOWN_PARAMS=1 to bypass unknown-field checks"
+            }
+        ))
+    }
+}
+
+/// Recursively force (`close = true`) or lift (`close = false`)
+/// `additionalProperties` on every object schema segment that declares
+/// `properties`. Chutes cord schemas rarely set `additionalProperties`
+/// themselves, but this tool treats every declared-`properties` object as
+/// closed by default (catches typo'd field names instead of silently
+/// dropping/forwarding them) -- `CHUTES_ALLOW_UNKNOWN_PARAMS=1` lifts that
+/// back to standard JSON Schema's open-by-default behavior.
+fn close_object_schemas(schema: &mut serde_json::Value, close: bool) {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if map.contains_key("properties") {
+                if close {
+                    map.insert("additionalProperties".to_owned(), serde_json::json!(false));
+                } else {
+                    map.remove("additionalProperties");
+                    map.remove("unevaluatedProperties");
+                }
+            }
+            for value in map.values_mut() {
+                close_object_schemas(value, close);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                close_object_schemas(item, close);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -986,6 +1018,46 @@ mod tests {
     #[test]
     fn output_filename_is_sanitized() {
         assert_eq!(sanitize_filename("../my unsafe/image.png"), "image");
+    }
+
+    #[test]
+    fn schema_guard_catches_wrong_fields_nested_inside_a_required_wrapper() {
+        // Mirrors a real cord shape: the top-level payload must wrap the
+        // actual arguments in `args`, and `args` itself has its own
+        // required/known fields. The old top-level-only checker accepted
+        // any payload with an `args` key, regardless of what was inside it.
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "required": ["prompt"],
+                    "properties": {
+                        "prompt": { "type": "string" },
+                        "size": { "type": "string" }
+                    }
+                }
+            }
+        }));
+        let correct = serde_json::json!({"args": {"prompt": "a cat"}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert!(validate_schema_fields(&schema, &correct, false).is_ok());
+
+        let missing_nested = serde_json::json!({"args": {"size": "1024x1024"}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert!(validate_schema_fields(&schema, &missing_nested, false).is_err());
+
+        let unknown_nested = serde_json::json!({"args": {"prompt": "a cat", "typo": true}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert!(validate_schema_fields(&schema, &unknown_nested, false).is_err());
+        assert!(validate_schema_fields(&schema, &unknown_nested, true).is_ok());
     }
 
     #[test]
