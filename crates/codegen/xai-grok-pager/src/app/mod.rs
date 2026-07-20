@@ -1333,7 +1333,10 @@ fn terminal_title_string(title: &str) -> String {
     if sanitized.is_empty() {
         "chutes-build".into()
     } else {
-        let truncated: String = sanitized.chars().take(80 - "chutes-build".len() - 3).collect();
+        let truncated: String = sanitized
+            .chars()
+            .take(80 - "chutes-build".len() - 3)
+            .collect();
         format!("{} - chutes-build", truncated)
     }
 }
