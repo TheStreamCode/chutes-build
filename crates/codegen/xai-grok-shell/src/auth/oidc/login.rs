@@ -387,11 +387,17 @@ pub async fn run_login_flow_with_config(
     let state = uuid::Uuid::now_v7().to_string();
     let nonce = uuid::Uuid::now_v7().to_string();
 
-    // In local-dev mode, use a fixed callback port so the redirect_uri is stable
-    // and can be pre-registered with the local OAuth2 provider. In production the
-    // OS picks a random available port.
+    // In local-dev mode, and for the built-in "Sign in with Chutes" app, use a
+    // fixed callback port so the redirect_uri is stable and matches the exact
+    // value pre-registered with the OAuth2 provider (Chutes validates
+    // `redirect_uri` by exact match, with no wildcard/any-port loopback
+    // support documented). Enterprise OIDC providers the user configures
+    // themselves get a random OS-assigned port, since their app registration
+    // is outside our control.
     let callback_port: u16 = if super::super::config::use_local_auth() {
         56121
+    } else if super::super::config::is_xai_oauth2_issuer(&oidc.issuer) {
+        8765
     } else {
         0
     };

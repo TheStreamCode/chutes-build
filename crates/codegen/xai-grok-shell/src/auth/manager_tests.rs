@@ -87,13 +87,14 @@ fn has_usable_token_covers_memory_and_disk() {
 #[test]
 fn auth_scope_uses_oauth2_when_present() {
     let cfg = GrokComConfig::default();
-    // Default config always has oauth2 set to the xAI defaults.
+    // Default config always has oauth2 set to the built-in "Sign in with
+    // Chutes" defaults.
     assert_eq!(
         cfg.auth_scope(),
         format!(
             "{}::{}",
             crate::auth::config::XAI_OAUTH2_ISSUER,
-            obfstr::obfstr!("b1a00492-073a-47ea-816f-4c329264a828"),
+            crate::auth::config::DEFAULT_OAUTH2_CLIENT_ID,
         )
     );
 }

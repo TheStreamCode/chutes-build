@@ -10,18 +10,19 @@ fn default_oidc_scopes() -> Vec<String> {
         "api:access".into(),
     ]
 }
-/// Default scopes for explicitly configured enterprise OAuth providers.
+/// Default scopes for "Sign in with Chutes" (the built-in Chutes Build OAuth
+/// app; see `XAI_OAUTH2_ISSUER`/`default_oauth2_client_id`). Kept to the
+/// minimum the client actually uses: `account:read` backs the usage/quota
+/// indicator, `chutes:read` backs model/media discovery, `chutes:invoke`
+/// backs inference and media generation. Broader scopes (`admin`,
+/// `*:write`, `*:delete`, `secrets:*`) are deliberately not requested.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
         "profile".into(),
-        "email".into(),
-        "offline_access".into(),
-        "api:access".into(),
-        "conversations:read".into(),
-        "conversations:write".into(),
-        "workspaces:read".into(),
-        "workspaces:write".into(),
+        "account:read".into(),
+        "chutes:read".into(),
+        "chutes:invoke".into(),
     ]
 }
 fn default_team_oauth2_scopes() -> Vec<String> {
@@ -126,7 +127,18 @@ pub struct OAuth2ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
 }
-pub const XAI_OAUTH2_ISSUER: &str = "http://127.0.0.1:9/chutes-build-oauth-disabled";
+/// Issuer for the built-in "Sign in with Chutes" OAuth app. Matches the
+/// `issuer` field in `https://idp.chutes.ai/.well-known/openid-configuration`
+/// (that document is itself served from `idp.chutes.ai`, but the issuer it
+/// declares -- and the value the token/authorize endpoints validate against
+/// -- is `api.chutes.ai`).
+pub const XAI_OAUTH2_ISSUER: &str = "https://api.chutes.ai";
+/// `client_id` for the "Chutes Build" app registered at
+/// `https://api.chutes.ai/idp/apps` (public client, PKCE, no client secret
+/// shipped -- see `token_endpoint_auth_methods_supported: none` in the
+/// discovery document). Overridable via `CHUTES_BUILD_OAUTH2_CLIENT_ID` for
+/// downstream forks that register their own app.
+pub const DEFAULT_OAUTH2_CLIENT_ID: &str = "cid_je9zzf0z7ayrj93dgxqvrgah";
 /// Production accounts-app origin allowlist — the only origins builds without
 /// non-production builds accept. Lives in its own const, referenced by both
 /// profiles below, so the frozen-contract test (monorepo CI compiles with
@@ -225,9 +237,17 @@ impl OAuth2ProviderConfig {
     pub fn is_team_principal(&self) -> bool {
         self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE)
     }
+    /// Always returns `Some`: falls back to the built-in "Sign in with
+    /// Chutes" issuer/client_id (see [`XAI_OAUTH2_ISSUER`] /
+    /// [`DEFAULT_OAUTH2_CLIENT_ID`]) so OAuth login works without any
+    /// environment configuration. `CHUTES_BUILD_OAUTH2_ISSUER` /
+    /// `CHUTES_BUILD_OAUTH2_CLIENT_ID` remain available to point a
+    /// downstream fork at its own registered app.
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("CHUTES_BUILD_OAUTH2_ISSUER").ok()?;
-        let client_id = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_ID").ok()?;
+        let issuer = std::env::var("CHUTES_BUILD_OAUTH2_ISSUER")
+            .unwrap_or_else(|_| xai_oauth2_issuer().to_owned());
+        let client_id = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_ID")
+            .unwrap_or_else(|_| DEFAULT_OAUTH2_CLIENT_ID.to_owned());
         let principal_type = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE").ok();
         let principal_id = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_ID").ok();
         let default_scopes = match principal_type.as_deref() {
@@ -288,7 +308,11 @@ impl Default for GrokComConfig {
                 .ok()
                 .map(|v| env_flag_enabled(&v)),
             force_login_team_uuid: None,
-            preferred_method: Some(PreferredAuthMethod::ApiKey),
+            // `None` = multi-method fallthrough (see the field doc above): both
+            // `CHUTES_API_KEY` and interactive "Sign in with Chutes" are offered
+            // when available, instead of pinning to API-key-only and hiding the
+            // OAuth login method the welcome screen otherwise cannot reach.
+            preferred_method: None,
         }
     }
 }
@@ -372,27 +396,16 @@ mod tests {
         assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://chutes.ai"]);
         assert_eq!(allowed_accounts_app_origins(), PROD_ACCOUNTS_APP_ORIGINS);
     }
-    /// FROZEN client contract: the 10 scopes the xAI OAuth2 client requests.
-    /// The server must keep accepting all of them; existing tokens carry
-    /// exactly this set. Frozen OAuth client scope contract.
+    /// FROZEN client contract: the scopes the "Sign in with Chutes" OAuth
+    /// client requests. The server must keep accepting all of them; existing
+    /// tokens carry exactly this set.
     #[test]
     fn default_oauth2_scopes_are_frozen() {
         let scopes = default_oauth2_scopes();
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
         assert_eq!(
             scopes,
-            [
-                "openid",
-                "profile",
-                "email",
-                "offline_access",
-                "grok-cli:access",
-                "api:access",
-                "conversations:read",
-                "conversations:write",
-                "workspaces:read",
-                "workspaces:write",
-            ]
+            ["openid", "profile", "account:read", "chutes:read", "chutes:invoke"]
         );
     }
     #[test]
