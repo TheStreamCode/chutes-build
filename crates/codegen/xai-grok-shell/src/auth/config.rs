@@ -174,7 +174,7 @@ pub fn accounts_app_cors_layer(method: axum::http::Method) -> tower_http::cors::
 }
 /// Local-dev OAuth2 issuer (accounts-app running on localhost).
 const XAI_OAUTH2_LOCAL_ISSUER: &str = "http://localhost:22255";
-const DEFAULT_OAUTH2_REFERRER: &str = "grok-build";
+const DEFAULT_OAUTH2_REFERRER: &str = "chutes-build";
 /// Returns `true` when `CHUTES_BUILD_LOCAL_AUTH=1` is set,
 /// indicating the local accounts-app should be used as the OAuth2 issuer.
 pub fn use_local_auth() -> bool {
