@@ -271,6 +271,23 @@ impl BlockContent for OtherToolCallBlock {
             // No inline graphics: centered "[Open]" button between blank
             // spacers (its click target is registered in render.rs).
             if let Some((_, kind)) = self.inline_open_button() {
+                // Image/video previews render inline only on terminals with
+                // Kitty-protocol support; without that this is the only
+                // preview a user gets. Say so explicitly instead of letting
+                // "no picture appeared" read as a failure.
+                if matches!(
+                    kind,
+                    crate::scrollback::block::MediaButtonKind::Image
+                        | crate::scrollback::block::MediaButtonKind::Video
+                ) {
+                    lines.push(
+                        Line::from(Span::styled(
+                            "Inline preview isn't supported in this terminal — open the file to view it.",
+                            ratatui::style::Style::default().fg(theme.gray_dim),
+                        ))
+                        .into(),
+                    );
+                }
                 let label = crate::scrollback::render::media_open_button_label(kind);
                 let col = crate::scrollback::render::media_open_button_col(
                     ctx.content_width() as u16,
