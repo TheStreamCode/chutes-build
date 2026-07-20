@@ -209,6 +209,7 @@ pub(super) fn dispatch_show_login_menu(app: &mut AppView) -> Vec<Effect> {
     }
 
     abort_prior_auth(app);
+    app.auth_show_raw_url = false;
     app.auth_state = AuthState::Pending { error: None };
 
     vec![]
@@ -242,6 +243,7 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
     }
 
     abort_prior_auth(app);
+    app.auth_show_raw_url = false;
 
     let request_seq = app.next_auth_request_seq;
     app.next_auth_request_seq += 1;
@@ -276,6 +278,7 @@ pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
     }
 
     abort_prior_auth(app);
+    app.auth_show_raw_url = false;
 
     app.login_method_id = Some(agent_client_protocol::AuthMethodId::new(
         xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID,

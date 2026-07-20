@@ -3160,6 +3160,12 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             return InputOutcome::ActionThenForward(Action::NewSession);
         }
         if *ctx.prompt_focused {
+            if matches!(ctx.auth_state, AuthState::Authenticating { .. }) {
+                tracing::debug!(
+                    show_raw_url = *ctx.show_raw_url,
+                    "DIAG: prompt_focused intercepted a key during Authenticating"
+                );
+            }
             match ctx.prompt.handle_key(key) {
                 crate::views::prompt_widget::PromptEvent::Edited => {
                     return InputOutcome::Changed;
@@ -3250,6 +3256,11 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 }
                 if let crossterm::event::KeyCode::Char(c) = key.code {
                     ctx.auth_code_input.push(c);
+                    tracing::debug!(
+                        mode = ?mode,
+                        input_len = ctx.auth_code_input.len(),
+                        "DIAG: auth input char received"
+                    );
                     return InputOutcome::Changed;
                 }
             }
