@@ -1331,10 +1331,10 @@ pub(crate) fn set_terminal_title(title: &str) {
 fn terminal_title_string(title: &str) -> String {
     let sanitized: String = title.chars().filter(|c| !c.is_control()).collect();
     if sanitized.is_empty() {
-        "grok".into()
+        "chutes-build".into()
     } else {
-        let truncated: String = sanitized.chars().take(80 - 6).collect();
-        format!("{} - grok", truncated)
+        let truncated: String = sanitized.chars().take(80 - "chutes-build".len() - 3).collect();
+        format!("{} - chutes-build", truncated)
     }
 }
 fn set_panic_hook(mode: ScreenMode) {
@@ -1377,11 +1377,11 @@ mod tests {
     fn terminal_title_strips_control_characters() {
         assert_eq!(
             terminal_title_string("evil\x07\x1b]52;c;payload\x07title"),
-            "evil]52;c;payloadtitle - grok"
+            "evil]52;c;payloadtitle - chutes-build"
         );
-        assert_eq!(terminal_title_string("\x07\x1b\x00"), "grok");
-        assert_eq!(terminal_title_string(""), "grok");
-        assert_eq!(terminal_title_string("My chat"), "My chat - grok");
+        assert_eq!(terminal_title_string("\x07\x1b\x00"), "chutes-build");
+        assert_eq!(terminal_title_string(""), "chutes-build");
+        assert_eq!(terminal_title_string("My chat"), "My chat - chutes-build");
     }
     #[test]
     fn hunk_tracker_mode_nothing_set_is_none() {
