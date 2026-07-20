@@ -76,7 +76,6 @@ npx chutes-build
 
 The npm launcher selects a native binary for Windows, macOS, or Linux. It does
 not collect telemetry and does not download executables from an install script.
-Before the first npm release, use the source build below.
 
 ## Build from source
 
@@ -100,7 +99,13 @@ Linux it is `target/release/chutes-build`.
 
 ## Quick start
 
-Create an API key in Chutes, then either expose it only to the current process:
+Run `chutes-build` with no prior setup and log in from the welcome screen:
+press `l` for "Login with Chutes" (opens your browser) or `k` to paste a
+Chutes API key directly. `/login` reopens this choice at any time and
+`/apikey` jumps straight to the API-key prompt.
+
+To provide a key non-interactively instead, create one in Chutes and either
+expose it only to the current process:
 
 ```powershell
 $env:CHUTES_API_KEY = "your-api-key"

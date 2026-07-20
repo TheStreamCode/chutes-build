@@ -31,6 +31,35 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bounded account quota fallback concurrency and cached model-capability
   discovery to reduce unnecessary API work.
 
+### Fixed
+
+- Interactive login: the welcome screen and `/login` had no working path to
+  the OAuth method the rebrand advertised, and no way to enter an API key
+  from inside the running app at all (only the separate `chutes-build login`
+  CLI subcommand worked, before ever starting the TUI). Added "Sign in with
+  Chutes" OAuth end-to-end (issuer, client, scopes, loopback callback) and an
+  in-TUI API key entry reachable from the welcome screen (`k`), `/login`, and
+  `/apikey`, and fixed two stale-state bugs (`auth_show_raw_url`,
+  `welcome_prompt_focused`) that silently swallowed keyboard input on the
+  auth screen.
+- `get_chutes_usage` and all media tools 401'd by default: the account/media
+  HTTP client sent the API key without the `Bearer` prefix `api.chutes.ai`
+  requires.
+- The macOS native build failed to compile (a stray `cfg` left an
+  `std::process` import unreachable in a macOS-only module).
+- The secret sanitizer that filters Sentry/Mixpanel/log output did not
+  recognize the `cpk_` Chutes API key prefix, so real keys were not redacted
+  from those sinks.
+- The browser automation tool left a dead session in place after any
+  connection-level failure (closed socket, crashed browser), making it
+  unusable for the rest of the session until an explicit `close`.
+- `generate_media` only validated the top-level shape of `params` against a
+  cord's schema, so a payload with the right outer wrapper (e.g. `args`) but
+  wrong fields nested inside it passed local validation and round-tripped to
+  Chutes for a generic "Invalid input parameters" error instead of a precise
+  local one.
+- The terminal window/tab title showed "grok" instead of "chutes-build".
+
 ### Security
 
 - Restricted credential-bearing media invocation to Chutes HTTPS hosts,
