@@ -353,7 +353,10 @@ pub(super) fn dispatch_submit_api_key(app: &mut AppView, api_key: String) -> Vec
         _ => return vec![],
     };
 
-    vec![Effect::SubmitApiKey { request_seq, api_key }]
+    vec![Effect::SubmitApiKey {
+        request_seq,
+        api_key,
+    }]
 }
 
 // TaskResult handlers.

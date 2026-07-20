@@ -686,7 +686,11 @@ pub fn render_welcome(
         AuthState::Pending { error } => {
             let label = params.login_label.unwrap_or("Chutes API key");
             let login_text = format!("Login with {}", label);
-            let menu = [("l", login_text.as_str()), ("k", "Enter API key"), ("q", "Quit")];
+            let menu = [
+                ("l", login_text.as_str()),
+                ("k", "Enter API key"),
+                ("q", "Quit"),
+            ];
             let msg = error.as_deref().map(|e| (e, theme.accent_error));
             let info = PromptInfo {
                 model_name: params.model_name,

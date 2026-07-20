@@ -81,7 +81,13 @@ impl BrowserClient {
             *guard = Some(BrowserSession::launch().await?);
         }
         let session = guard.as_mut().expect("browser session initialized");
-        match input.action {
+        // Wrapped in an async block so `?` inside each arm resolves this
+        // block's Result instead of returning from `execute` directly --
+        // that lets us inspect the outcome below and evict a session that
+        // died mid-command instead of leaving a dead connection in `guard`
+        // for every subsequent call to fail against.
+        let result: Result<serde_json::Value, String> = async {
+            match input.action {
             BrowserAction::Navigate => {
                 let url = validate_navigation_url(required(input.url, "url")?)?;
                 session
@@ -156,8 +162,30 @@ impl BrowserClient {
                 Ok(serde_json::json!({"path": output, "format": "png"}))
             }
             BrowserAction::Close => unreachable!(),
+            }
         }
+        .await;
+
+        if let Err(ref message) = result
+            && is_connection_error(message)
+            && let Some(mut dead_session) = guard.take()
+        {
+            let _ = dead_session.child.kill().await;
+        }
+
+        result
     }
+}
+
+/// Whether `message` (an `execute()`/`BrowserSession::command()` error
+/// string) indicates the CDP WebSocket transport itself died, as opposed to
+/// a command-level or validation failure that leaves the connection usable
+/// for the next call.
+fn is_connection_error(message: &str) -> bool {
+    message.starts_with("Failed to send browser command:")
+        || message.starts_with("Browser connection failed:")
+        || message == "Browser connection closed"
+        || message == "Browser connection ended before the command completed"
 }
 
 impl BrowserSession {
