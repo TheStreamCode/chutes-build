@@ -199,13 +199,28 @@ jobs:
             echo "Expected 6 native packages, found ${#archives[@]}." >&2
             exit 1
           fi
+          version="$(node -p "require('./package.json').version")"
           for archive in "${archives[@]}"; do
+            base="$(basename "$archive" .tgz)"
+            pkg="${base%-$version}"
+            # Idempotent: a prior run of this job may have already published
+            # some packages before failing on a later one (e.g. npm's
+            # burst-publish spam heuristic). Re-publishing the same
+            # name@version is a hard error, so skip what's already live.
+            if npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+              echo "Skipping ${pkg}@${version}: already published."
+              continue
+            fi
             # npm-package-arg treats a single-slash relative path (e.g.
             # "dist/foo.tgz") as GitHub shorthand ("user/repo") before it
             # checks whether the path exists locally, so npm publish tries
             # to `git ls-remote` it instead of reading the tarball. The `./`
             # prefix disambiguates it as an explicit local path.
             npm publish "./$archive" --access public --provenance
+            # Publishing several brand-new packages back to back can trip
+            # npm's burst/spam heuristic (403 "triggered spam detection").
+            # A short pause between publishes keeps us under that threshold.
+            sleep 15
           done
       - name: Publish launcher
         shell: bash
@@ -214,4 +229,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          npm publish "./dist/chutes-build-${version}.tgz" --access public --provenance
+          if npm view "chutes-build@${version}" version >/dev/null 2>&1; then
+            echo "Skipping chutes-build@${version}: already published."
+          else
+            npm publish "./dist/chutes-build-${version}.tgz" --access public --provenance
+          fi
