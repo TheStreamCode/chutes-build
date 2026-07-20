@@ -1,6 +1,7 @@
 //! Top-level action router: maps actions and action results to handlers.
 use super::auth::{
-    dispatch_cancel_login, dispatch_login, dispatch_logout, dispatch_submit_auth_code,
+    dispatch_cancel_login, dispatch_enter_api_key, dispatch_login, dispatch_logout,
+    dispatch_show_login_menu, dispatch_submit_api_key, dispatch_submit_auth_code,
     dispatch_switch_account,
 };
 use super::billing::dispatch_open_supergrok_url;
@@ -1032,8 +1033,11 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::Login => dispatch_login(app),
+        Action::ShowLoginMenu => dispatch_show_login_menu(app),
         Action::CancelLogin => dispatch_cancel_login(app),
         Action::SubmitAuthCode(code) => dispatch_submit_auth_code(app, code),
+        Action::EnterApiKey => dispatch_enter_api_key(app),
+        Action::SubmitApiKey(api_key) => dispatch_submit_api_key(app, api_key),
         Action::CopyAuthUrl => {
             if let AuthState::Authenticating {
                 auth_url: Some(url),

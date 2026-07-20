@@ -360,6 +360,8 @@ pub enum AuthMode {
     Loopback,
     /// RFC 8628 device flow: device code + copyable URL, no paste box.
     Device,
+    /// User is entering a Chutes API key directly (no browser, no URL).
+    ApiKeyEntry,
 }
 /// Folder-trust state for the welcome screen.
 ///
@@ -3209,6 +3211,9 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 if key!('l').matches(key) || key!(Enter).matches(key) {
                     return InputOutcome::Action(Action::Login);
                 }
+                if key!('k').matches(key) {
+                    return InputOutcome::Action(Action::EnterApiKey);
+                }
             }
             AuthState::Authenticating { .. } if *ctx.show_raw_url => {
                 if key!('q', CONTROL).matches(key) || key!('c', CONTROL).matches(key) {
@@ -3217,7 +3222,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 return InputOutcome::Unchanged;
             }
             AuthState::Authenticating {
-                mode: AuthMode::Loopback,
+                mode: mode @ (AuthMode::Loopback | AuthMode::ApiKeyEntry),
                 ..
             } => {
                 if key!(Esc).matches(key)
@@ -3231,10 +3236,13 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 }
                 if key!(Enter).matches(key) {
                     let trimmed = ctx.auth_code_input.trim().to_string();
-                    if !trimmed.is_empty() {
-                        return InputOutcome::Action(Action::SubmitAuthCode(trimmed));
+                    if trimmed.is_empty() {
+                        return InputOutcome::Unchanged;
                     }
-                    return InputOutcome::Unchanged;
+                    return InputOutcome::Action(match mode {
+                        AuthMode::ApiKeyEntry => Action::SubmitApiKey(trimmed),
+                        _ => Action::SubmitAuthCode(trimmed),
+                    });
                 }
                 if key!(Backspace).matches(key) {
                     ctx.auth_code_input.pop();
@@ -3267,7 +3275,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
                 return InputOutcome::ActionThenForward(Action::NewSession);
             }
             AuthState::Authenticating {
-                mode: AuthMode::Loopback,
+                mode: AuthMode::Loopback | AuthMode::ApiKeyEntry,
                 ..
             } => {
                 let cleaned: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
@@ -3481,7 +3489,8 @@ fn handle_menu_nav(
 fn dispatch_pending_menu_action(index: usize) -> InputOutcome {
     match index {
         0 => InputOutcome::Action(Action::Login),
-        1 => InputOutcome::Action(Action::Quit),
+        1 => InputOutcome::Action(Action::EnterApiKey),
+        2 => InputOutcome::Action(Action::Quit),
         _ => InputOutcome::Unchanged,
     }
 }

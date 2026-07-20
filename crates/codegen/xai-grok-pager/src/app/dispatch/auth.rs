@@ -199,6 +199,21 @@ pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
     }
 }
 
+/// Show the login choice menu ("Login with Chutes" / "Enter API key" /
+/// "Quit"). Triggered by the `/login` slash command, so the user picks a
+/// method instead of the command jumping straight into OAuth.
+pub(super) fn dispatch_show_login_menu(app: &mut AppView) -> Vec<Effect> {
+    if !matches!(app.active_view, ActiveView::Welcome) {
+        app.auth_return_view = Some(app.active_view);
+        show_welcome(app);
+    }
+
+    abort_prior_auth(app);
+    app.auth_state = AuthState::Pending { error: None };
+
+    vec![]
+}
+
 /// Start an interactive login flow. Triggered by pressing 'l' on the
 /// welcome screen or by the `/login` slash command.
 ///
@@ -247,6 +262,36 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
         },
         Effect::PollAuthUrl { request_seq },
     ]
+}
+
+/// Start API key entry. Triggered by the welcome-screen "Enter API key"
+/// option or the `/apikey` slash command. Unlike [`dispatch_login`], this
+/// never depends on an OAuth method being advertised or reachable -- it
+/// always works, since it just prompts for text and stores it via
+/// `chutes.build/setApiKey`.
+pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
+    if !matches!(app.active_view, ActiveView::Welcome) {
+        app.auth_return_view = Some(app.active_view);
+        show_welcome(app);
+    }
+
+    abort_prior_auth(app);
+
+    app.login_method_id = Some(agent_client_protocol::AuthMethodId::new(
+        xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID,
+    ));
+
+    let request_seq = app.next_auth_request_seq;
+    app.next_auth_request_seq += 1;
+    app.auth_code_input.clear();
+    app.auth_state = AuthState::Authenticating {
+        request_seq,
+        handle: None,
+        auth_url: None,
+        mode: AuthMode::ApiKeyEntry,
+    };
+
+    vec![]
 }
 
 /// Cancel a login that was started from inside a session and restore the
@@ -299,6 +344,16 @@ pub(super) fn dispatch_submit_auth_code(app: &mut AppView, code: String) -> Vec<
     };
 
     vec![Effect::SubmitAuthCode { request_seq, code }]
+}
+
+/// User submitted a pasted Chutes API key in API-key-entry mode.
+pub(super) fn dispatch_submit_api_key(app: &mut AppView, api_key: String) -> Vec<Effect> {
+    let request_seq = match &app.auth_state {
+        AuthState::Authenticating { request_seq, .. } => *request_seq,
+        _ => return vec![],
+    };
+
+    vec![Effect::SubmitApiKey { request_seq, api_key }]
 }
 
 // TaskResult handlers.

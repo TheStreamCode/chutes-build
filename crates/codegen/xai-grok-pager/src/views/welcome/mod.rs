@@ -686,7 +686,7 @@ pub fn render_welcome(
         AuthState::Pending { error } => {
             let label = params.login_label.unwrap_or("Chutes API key");
             let login_text = format!("Login with {}", label);
-            let menu = [("l", login_text.as_str()), ("q", "Quit")];
+            let menu = [("l", login_text.as_str()), ("k", "Enter API key"), ("q", "Quit")];
             let msg = error.as_deref().map(|e| (e, theme.accent_error));
             let info = PromptInfo {
                 model_name: params.model_name,
@@ -1437,6 +1437,61 @@ fn render_welcome_authenticating(
             Paragraph::new(hints).render(hint_area, buf);
 
             (click_rect, fallback_rect)
+        }
+
+        AuthMode::ApiKeyEntry => {
+            let h_pad: u16 = content_area.width / 6;
+            let [_, logo_area, _, msg_area, _, prompt_area, _, hint_area, _] = Layout::vertical([
+                Constraint::Length(top_pad),
+                Constraint::Length(logo_line_count),
+                Constraint::Length(1), // gap
+                Constraint::Length(1), // instruction
+                Constraint::Min(1),    // gap
+                Constraint::Length(5), // prompt box
+                Constraint::Length(1), // gap
+                Constraint::Length(1), // hints
+                Constraint::Min(0),
+            ])
+            .areas(content_area);
+
+            render_logo(logo_area, buf, theme, content_area.height);
+
+            let lines = vec![
+                Line::from(Span::styled(
+                    "Enter your Chutes API key:",
+                    Style::default().fg(theme.gray_bright),
+                ))
+                .alignment(Alignment::Center),
+            ];
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().padding(Padding::horizontal(h_pad)))
+                .render(msg_area, buf);
+
+            let prompt_width = content_area.width;
+            let [_, prompt_centered, _] = Layout::horizontal([
+                Constraint::Min(0),
+                Constraint::Length(prompt_width),
+                Constraint::Min(0),
+            ])
+            .flex(Flex::Center)
+            .areas(prompt_area);
+            render_auth_input_box(prompt_centered, buf, theme, auth_code_input);
+
+            let mut hint_spans = vec![
+                Span::styled(
+                    "enter",
+                    Style::default()
+                        .fg(theme.accent_user)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  submit    ", Style::default().fg(theme.gray)),
+            ];
+            hint_spans.extend(quit_hint_spans(theme));
+            let hints = Line::from(hint_spans).alignment(Alignment::Center);
+            Paragraph::new(hints).render(hint_area, buf);
+
+            (None, None)
         }
 
         AuthMode::Command => render_browser_status_arm(

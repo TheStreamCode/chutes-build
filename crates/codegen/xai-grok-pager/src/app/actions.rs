@@ -605,6 +605,9 @@ pub enum Action {
     SwitchAccount,
     /// User pressed login on the welcome screen.
     Login,
+    /// `/login`: show the login choice menu (Chutes / API key / Quit)
+    /// instead of jumping straight into a specific method.
+    ShowLoginMenu,
     /// Cancel an in-progress login that was started from inside a session
     /// (`/login` or a 401 re-auth prompt) and return to the previous view.
     /// Distinct from `Quit`: abandoning a mid-session re-auth must not exit
@@ -612,6 +615,11 @@ pub enum Action {
     CancelLogin,
     /// User submitted a manually-pasted auth token (loopback mode).
     SubmitAuthCode(String),
+    /// User chose to enter a Chutes API key directly (welcome screen or
+    /// `/apikey`), bypassing OAuth entirely.
+    EnterApiKey,
+    /// User submitted a pasted Chutes API key (API key entry mode).
+    SubmitApiKey(String),
     /// Copy the auth URL to the clipboard during authentication.
     CopyAuthUrl,
     /// Show the raw auth URL with mouse capture disabled for manual copy.
@@ -1665,6 +1673,9 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
+    /// Submit a pasted Chutes API key: stores it (chutes.build/setApiKey),
+    /// then authenticates with the chutes.api_key method.
+    SubmitApiKey { request_seq: u64, api_key: String },
     /// Fetch MCP server list from the shell (chutes.build/mcp/list).
     FetchMcpsList {
         agent_id: AgentId,

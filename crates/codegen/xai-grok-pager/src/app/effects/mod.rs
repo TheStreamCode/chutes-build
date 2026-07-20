@@ -1982,6 +1982,37 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::SubmitApiKey { request_seq, api_key } => {
+            let tx = acp_tx.clone();
+            tasks.spawn(async move {
+                let params = serde_json::json!({ "key": api_key });
+                let req = acp::ExtRequest::new(
+                    "chutes.build/setApiKey",
+                    serde_json::value::to_raw_value(&params)
+                        .expect("serialize api key params")
+                        .into(),
+                );
+                if let Err(e) = acp_send(req, &tx).await {
+                    let error = sanitize_user_error(&e.to_string());
+                    ulog::error(
+                        "auth failed",
+                        None,
+                        Some(serde_json::json!({ "error": &error })),
+                    );
+                    return TaskResult::AuthFailed { request_seq, error };
+                }
+                send_authenticate(
+                    &tx,
+                    request_seq,
+                    acp::AuthMethodId::new(
+                        xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID,
+                    ),
+                    false,
+                    true,
+                )
+                .await
+            });
+        }
         Effect::FetchMcpsList { agent_id, session_id, cache } => {
             let tx = acp_tx.clone();
             tasks
