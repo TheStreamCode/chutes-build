@@ -405,7 +405,13 @@ mod tests {
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
         assert_eq!(
             scopes,
-            ["openid", "profile", "account:read", "chutes:read", "chutes:invoke"]
+            [
+                "openid",
+                "profile",
+                "account:read",
+                "chutes:read",
+                "chutes:invoke"
+            ]
         );
     }
     #[test]
