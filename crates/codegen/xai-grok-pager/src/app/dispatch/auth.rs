@@ -210,6 +210,12 @@ pub(super) fn dispatch_show_login_menu(app: &mut AppView) -> Vec<Effect> {
 
     abort_prior_auth(app);
     app.auth_show_raw_url = false;
+    // `/login` is typed into the chat/welcome prompt, which leaves it
+    // focused. Clear it so the Pending menu's key handling ('l'/'k'/'q')
+    // -- and, once a method is chosen, the Authenticating input box --
+    // actually receive keystrokes instead of them being typed into the
+    // now-hidden prompt textarea.
+    app.welcome_prompt_focused = false;
     app.auth_state = AuthState::Pending { error: None };
 
     vec![]
@@ -244,6 +250,7 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
 
     abort_prior_auth(app);
     app.auth_show_raw_url = false;
+    app.welcome_prompt_focused = false;
 
     let request_seq = app.next_auth_request_seq;
     app.next_auth_request_seq += 1;
@@ -279,6 +286,7 @@ pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
 
     abort_prior_auth(app);
     app.auth_show_raw_url = false;
+    app.welcome_prompt_focused = false;
 
     app.login_method_id = Some(agent_client_protocol::AuthMethodId::new(
         xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID,
