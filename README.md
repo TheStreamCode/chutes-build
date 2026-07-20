@@ -1,9 +1,15 @@
 # Chutes Build
 
+[![CI](https://github.com/TheStreamCode/chutes-build/actions/workflows/ci.yml/badge.svg)](https://github.com/TheStreamCode/chutes-build/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/chutes-build.svg)](https://www.npmjs.com/package/chutes-build)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Chutes Build is a privacy-first, open-source coding agent optimized for the
 [Chutes](https://chutes.ai) ecosystem. It combines an interactive terminal UI,
 coding tools, model routing, parallel subagents, multimodal generation, web
 research, browser automation, and local memory in one CLI.
+
+![Chutes Build terminal UI](assets/chutes/screenshot/chutes-build.png)
 
 > **Development preview:** the project is under active development. Build it
 > from source and review agent actions before approving changes.
