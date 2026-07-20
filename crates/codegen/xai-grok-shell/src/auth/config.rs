@@ -138,7 +138,7 @@ pub const XAI_OAUTH2_ISSUER: &str = "https://api.chutes.ai";
 /// shipped -- see `token_endpoint_auth_methods_supported: none` in the
 /// discovery document). Overridable via `CHUTES_BUILD_OAUTH2_CLIENT_ID` for
 /// downstream forks that register their own app.
-pub const DEFAULT_OAUTH2_CLIENT_ID: &str = "cid_je9zzf0z7ayrj93dgxqvrgah";
+pub const DEFAULT_OAUTH2_CLIENT_ID: &str = "cid_nyt9i000ht1wubapyssg4zlt";
 /// Production accounts-app origin allowlist — the only origins builds without
 /// non-production builds accept. Lives in its own const, referenced by both
 /// profiles below, so the frozen-contract test (monorepo CI compiles with
