@@ -144,7 +144,7 @@ pub(crate) fn set_minimal_mode_active_for_test(on: bool) {
     MINIMAL_MODE_ACTIVE.store(on, Ordering::Release);
 }
 /// Whether the opt-in mouse-reporting toggle feature is enabled
-/// (`[ui] mouse_reporting_toggle` / `GROK_MOUSE_REPORTING_TOGGLE`). Seeded once
+/// (`[ui] mouse_reporting_toggle` / `CHUTES_BUILD_MOUSE_REPORTING_TOGGLE`). Seeded once
 /// at startup; gates both the `Ctrl+R` shortcut registration and the
 /// `/toggle-mouse-reporting` slash command's visibility/execution.
 pub(crate) static MOUSE_REPORTING_TOGGLE_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -183,28 +183,22 @@ pub(crate) fn voice_mode_config_value() -> Option<bool> {
 }
 /// Resolve voice availability.
 ///
-/// Precedence: requirements > `GROK_VOICE_MODE` > config/managed
-/// `[features] voice_mode` > remote `voice_mode_enabled` > default on.
-///
-/// When `is_api_key` and the only off-source is remote, force on. Requirement /
-/// env / config `false` still wins.
+/// Precedence: requirements > `CHUTES_BUILD_VOICE_MODE` > config/managed
+/// `[features] voice_mode` > remote `voice_mode_enabled` > default off.
 pub(crate) fn resolve_voice_mode_enabled(
     requirement: Option<bool>,
     config: Option<bool>,
     remote: Option<bool>,
-    is_api_key: bool,
+    _is_api_key: bool,
 ) -> bool {
-    use xai_grok_shell::agent::config::{BoolFlag, ConfigSource};
-    let resolved = BoolFlag::env("GROK_VOICE_MODE")
+    use xai_grok_shell::agent::config::BoolFlag;
+    let resolved = BoolFlag::env("CHUTES_BUILD_VOICE_MODE")
         .requirement(requirement)
         .config(config)
         .feature_flag(remote)
-        .default(true)
+        .default(false)
         .resolve();
-    if resolved.value {
-        return true;
-    }
-    is_api_key && resolved.source == ConfigSource::Remote
+    resolved.value
 }
 /// Resolve from live policy + env + remote + API-key state.
 pub(crate) fn resolve_voice_mode_live(remote: Option<bool>, is_api_key: bool) -> bool {
@@ -219,8 +213,8 @@ pub(crate) fn resolve_voice_mode_live(remote: Option<bool>, is_api_key: bool) ->
 mod voice_gate_tests {
     use super::resolve_voice_mode_enabled;
     #[test]
-    fn api_key_force_on_over_remote_kill_only() {
-        assert!(resolve_voice_mode_enabled(None, None, Some(false), true));
+    fn remote_disable_applies_to_api_key_sessions() {
+        assert!(!resolve_voice_mode_enabled(None, None, Some(false), true));
         assert!(!resolve_voice_mode_enabled(None, None, Some(false), false));
     }
     #[test]
@@ -436,7 +430,7 @@ fn resolve_hunk_tracker_mode(
 /// its history). Sessions not found locally are restored from remote storage.
 ///
 /// Returns `Ok(true)` when the user accepted a pending update. The caller
-/// should print a message telling the user to relaunch `grok`.
+/// should print a message telling the user to relaunch `chutes-build`.
 pub async fn run(
     args: PagerArgs,
     bg_update_rx: Option<
@@ -564,7 +558,7 @@ pub async fn run(
         } => original_cwd.clone(),
         _ => None,
     };
-    let env_hunk_tracker_mode = std::env::var("GROK_HUNK_TRACKER").ok();
+    let env_hunk_tracker_mode = std::env::var("CHUTES_BUILD_HUNK_TRACKER").ok();
     let config_hunk_tracker_mode = raw_config
         .get("ui")
         .and_then(|ui| ui.get("hunk_tracker_mode"))
@@ -1767,7 +1761,7 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Grok Build TUI",
+                "Chutes Build TUI",
                 "",
                 "Usage: grok [OPTIONS] [PROMPT] [COMMAND]",
                 "",

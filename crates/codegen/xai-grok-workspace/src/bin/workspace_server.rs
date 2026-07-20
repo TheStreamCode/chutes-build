@@ -1,6 +1,6 @@
 //! Standalone workspace ToolServer for remote sandboxes.
 //!
-//! Reads OIDC credentials from `~/.grok/auth.json`, connects to a
+//! Reads OIDC credentials from `~/.chutes-build/auth.json`, connects to a
 //! server, exposes workspace tools, and refreshes tokens
 //! automatically.
 use clap::Parser;
@@ -29,7 +29,7 @@ struct Args {
     /// launcher a definitive feature probe.
     #[arg(long)]
     capabilities: bool,
-    #[arg(long, default_value = "wss://computer-hub.grok.com/v1/tools")]
+    #[arg(long, default_value = "wss://computer-hub.chutes-build.com/v1/tools")]
     hub_url: String,
     #[arg(long)]
     auth_config: Option<PathBuf>,
@@ -68,11 +68,11 @@ struct Args {
     /// `gcs::upload_bytes` path.
     ///
     /// Enabled by default. Pass `--upload-queue-enabled false` (or set the
-    /// `GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
+    /// `CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
     /// the legacy inline path. Accepts `true`/`false`.
     #[arg(
         long,
-        env = "GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED",
+        env = "CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -81,13 +81,13 @@ struct Args {
     /// instead of widening to the built-in default catalog.
     #[arg(long)]
     require_explicit_toolset: bool,
-    /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`,
+    /// Confine `chutes.build/fs/*` resolution to the workspace root (reject `..`,
     /// absolute-outside-root, symlink escapes). On by default: the standalone
     /// server always backs a remote-sandbox workspace, a real tenant boundary.
-    /// Override with `GROK_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
+    /// Override with `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
     #[arg(
         long,
-        env = "GROK_WORKSPACE_CONFINE_FS_TO_ROOT",
+        env = "CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -217,7 +217,7 @@ async fn run(args: Args, cwd: PathBuf) -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(donating.clone())
         .init();
-    let direct_otlp = match std::env::var("GROK_WORKSPACE_OTLP_ENDPOINT") {
+    let direct_otlp = match std::env::var("CHUTES_BUILD_WORKSPACE_OTLP_ENDPOINT") {
         Ok(endpoint) if !endpoint.is_empty() => {
             match xai_tracing::init_fastrace(endpoint.clone(), SERVICE_NAME.to_owned(), None) {
                 Ok(()) => {
@@ -235,7 +235,7 @@ async fn run(args: Args, cwd: PathBuf) -> anyhow::Result<()> {
     let url = Url::parse(&args.hub_url).map_err(|e| anyhow::anyhow!("invalid --hub-url: {e}"))?;
     {
         use xai_grok_sandbox::{ProfileName, SandboxManager};
-        let profile = match std::env::var("GROK_SANDBOX_PROFILE").ok() {
+        let profile = match std::env::var("CHUTES_BUILD_SANDBOX_PROFILE").ok() {
             Some(val) => {
                 let parsed = val
                     .parse::<ProfileName>()
@@ -243,7 +243,7 @@ async fn run(args: Args, cwd: PathBuf) -> anyhow::Result<()> {
                 if matches!(parsed, ProfileName::Custom(_)) {
                     tracing::warn!(
                         value = % val,
-                        "Unrecognized GROK_SANDBOX_PROFILE, defaulting to workspace"
+                        "Unrecognized CHUTES_BUILD_SANDBOX_PROFILE, defaulting to workspace"
                     );
                     ProfileName::Workspace
                 } else {
@@ -257,7 +257,7 @@ async fn run(args: Args, cwd: PathBuf) -> anyhow::Result<()> {
         if profile == ProfileName::Off {
             tracing::info!(
                 profile = % profile_name,
-                "Sandbox explicitly disabled via GROK_SANDBOX_PROFILE=off"
+                "Sandbox explicitly disabled via CHUTES_BUILD_SANDBOX_PROFILE=off"
             );
         } else {
             let mut sandbox = SandboxManager::new(profile, &cwd);
@@ -285,7 +285,7 @@ async fn run(args: Args, cwd: PathBuf) -> anyhow::Result<()> {
     let auth_provider = xai_grok_workspace::hub_auth::provider(&url, args.auth_config.as_deref())?;
     tracing::info!(hub_url = % url, cwd = % cwd.display(), "Starting workspace server");
     let cwd_display = cwd.display().to_string();
-    let session_id = std::env::var("GROK_SESSION_ID").ok();
+    let session_id = std::env::var("CHUTES_BUILD_SESSION_ID").ok();
     let parsed_metadata = match args.metadata {
         Some(json_str) => Some(
             serde_json::from_str(&json_str)
@@ -533,7 +533,7 @@ mod tests {
             "--preview-instance-suffix",
             ".inst.example",
             "--preview-auth-redirect",
-            "https://grok.com/preview-auth",
+            "https://chutes.ai/preview-auth",
             "--preview-allow-public",
             "--preview-workspace-server-port",
             "8470",
@@ -548,7 +548,7 @@ mod tests {
         assert_eq!(cfg.instance_suffix.as_deref(), Some(".inst.example"));
         assert_eq!(
             cfg.auth_redirect.as_deref(),
-            Some("https://grok.com/preview-auth")
+            Some("https://chutes.ai/preview-auth")
         );
         assert!(cfg.allow_public);
         assert_eq!(cfg.workspace_server_port, Some(8470));
@@ -565,7 +565,7 @@ mod tests {
                 "--instance-suffix",
                 ".inst.example",
                 "--auth-redirect",
-                "https://grok.com/preview-auth",
+                "https://chutes.ai/preview-auth",
                 "--allow-public",
                 "--workspace-server-port",
                 "8470",

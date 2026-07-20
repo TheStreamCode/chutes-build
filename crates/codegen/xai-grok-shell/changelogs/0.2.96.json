@@ -11,7 +11,7 @@
   },
   {
     "category": "features",
-    "description": "**x.ai/pr/status** now reports whether an open PR is in the merge queue.",
+    "description": "**chutes.build/pr/status** now reports whether an open PR is in the merge queue.",
     "breaking_change": false
   },
   {
@@ -86,7 +86,7 @@
   },
   {
     "category": "features",
-    "description": "**`grok worktree ls`** now works as a short alias for `grok worktree list`.",
+    "description": "**`chutes-build worktree ls`** now works as a short alias for `chutes-build worktree list`.",
     "breaking_change": false
   },
   {
@@ -121,7 +121,7 @@
   },
   {
     "category": "features",
-    "description": "**MCP tool output truncation** can now be set per-repo in `.grok/config.toml`.",
+    "description": "**MCP tool output truncation** can now be set per-repo in `.chutes-build/config.toml`.",
     "breaking_change": false
   },
   {

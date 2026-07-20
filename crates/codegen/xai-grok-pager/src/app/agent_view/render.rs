@@ -1301,6 +1301,17 @@ impl AgentView {
         ) {
             status.push("context", ctx_line);
         }
+        if let Some(balance) = self.credit_balance.as_ref()
+            && let Some(account_line) = crate::views::credit_bar::account_usage_line_for_session(
+                balance,
+                self.account_plan.as_deref(),
+                self.hit_credits.hovered,
+                &theme,
+                self.chat_kind,
+            )
+        {
+            status.push("credits", account_line);
+        }
         let running = self.session.current_prompt_id.as_deref();
         let queue_len = self.session.queue_len()
             + self
@@ -3882,14 +3893,170 @@ impl AgentView {
                         .push((fp_rect, path.clone()));
                 }
                 if let Some(open_rect) = placement.open_button_screen_rect {
-                    self.inline_media_hits
-                        .open_buttons
-                        .push((open_rect, path.clone()));
+                    if matches!(
+                        placement.text_button_kind,
+                        Some(crate::scrollback::block::MediaButtonKind::Audio)
+                    ) {
+                        let audio = self
+                            .inline_audio
+                            .as_ref()
+                            .filter(|audio| audio.path == *path);
+                        let playing = audio.is_some_and(|audio| audio.is_playing());
+                        let position = audio.map_or(0.0, |audio| audio.position_secs());
+                        let duration = audio.and_then(|audio| audio.duration_secs);
+                        let volume = audio.map_or(80, |audio| audio.volume_percent);
+                        let waveform = audio
+                            .map(|audio| audio.waveform.clone())
+                            .unwrap_or_default();
+                        let analysis_pending =
+                            audio.is_some_and(|audio| audio.analysis_rx.is_some());
+
+                        if let Some(wave_rect) = placement.audio_waveform_screen_rect {
+                            buf.set_string_safe(
+                                wave_rect.x,
+                                wave_rect.y,
+                                " ".repeat(wave_rect.width as usize),
+                                Style::default(),
+                            );
+                            if waveform.is_empty() {
+                                let label = if analysis_pending {
+                                    "Analyzing waveform..."
+                                } else {
+                                    "Waveform loads on Play"
+                                };
+                                buf.set_string_safe(
+                                    wave_rect.x,
+                                    wave_rect.y,
+                                    label,
+                                    Style::default().fg(theme.gray_dim),
+                                );
+                            } else {
+                                const BARS: [&str; 8] = [
+                                    "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}",
+                                    "\u{2586}", "\u{2587}", "\u{2588}",
+                                ];
+                                let progress = duration
+                                    .filter(|duration| *duration > 0.0)
+                                    .map_or(0.0, |duration| position / duration);
+                                for col in 0..wave_rect.width as usize {
+                                    let index = col * waveform.len() / wave_rect.width as usize;
+                                    let level = waveform[index].min(7) as usize;
+                                    let style = if col as f64 / wave_rect.width as f64 <= progress {
+                                        Style::default().fg(theme.md_code)
+                                    } else {
+                                        Style::default().fg(theme.gray_dim)
+                                    };
+                                    buf.set_string_safe(
+                                        wave_rect.x + col as u16,
+                                        wave_rect.y,
+                                        BARS[level],
+                                        style,
+                                    );
+                                }
+                            }
+                        }
+
+                        #[derive(Clone, Copy)]
+                        enum AudioAction {
+                            Toggle,
+                            Seek(i32),
+                            Volume(i8),
+                            Open,
+                        }
+                        let format_time = |seconds: f64| {
+                            let seconds = seconds.max(0.0).round() as u64;
+                            format!("{}:{:02}", seconds / 60, seconds % 60)
+                        };
+                        let mut prefix = duration.map_or_else(String::new, |duration| {
+                            format!("{}/{}  ", format_time(position), format_time(duration))
+                        });
+                        let mut buttons = vec![
+                            (
+                                if playing { "[Pause]" } else { "[Play]" }.to_string(),
+                                AudioAction::Toggle,
+                            ),
+                            ("[-10s]".to_string(), AudioAction::Seek(-10)),
+                            ("[+10s]".to_string(), AudioAction::Seek(10)),
+                            ("[-Vol]".to_string(), AudioAction::Volume(-10)),
+                            ("[+Vol]".to_string(), AudioAction::Volume(10)),
+                            (format!("{volume}%"), AudioAction::Volume(0)),
+                            ("[Open]".to_string(), AudioAction::Open),
+                        ];
+                        let row_width = |prefix: &str, buttons: &[(String, AudioAction)]| {
+                            prefix.len()
+                                + buttons.iter().map(|(label, _)| label.len()).sum::<usize>()
+                                + buttons.len().saturating_sub(1)
+                        };
+                        if row_width(&prefix, &buttons) > open_rect.width as usize {
+                            buttons.retain(|(_, action)| !matches!(action, AudioAction::Volume(_)));
+                        }
+                        if row_width(&prefix, &buttons) > open_rect.width as usize {
+                            prefix.clear();
+                        }
+                        if row_width(&prefix, &buttons) > open_rect.width as usize {
+                            buttons.retain(|(_, action)| !matches!(action, AudioAction::Seek(_)));
+                        }
+                        buf.set_string_safe(
+                            open_rect.x,
+                            open_rect.y,
+                            " ".repeat(open_rect.width as usize),
+                            Style::default(),
+                        );
+                        let total_width = row_width(&prefix, &buttons) as u16;
+                        let mut x = open_rect.x + open_rect.width.saturating_sub(total_width) / 2;
+                        if !prefix.is_empty() {
+                            buf.set_string_safe(
+                                x,
+                                open_rect.y,
+                                &prefix,
+                                Style::default().fg(theme.gray_dim),
+                            );
+                            x += prefix.len() as u16;
+                        }
+                        for (index, (label, action)) in buttons.iter().enumerate() {
+                            if index > 0 {
+                                x += 1;
+                            }
+                            let rect = Rect::new(x, open_rect.y, label.len() as u16, 1);
+                            buf.set_string_safe(
+                                x,
+                                open_rect.y,
+                                label,
+                                Style::default().fg(theme.md_code),
+                            );
+                            match action {
+                                AudioAction::Toggle => self
+                                    .inline_media_hits
+                                    .audio_play_buttons
+                                    .push((rect, path.clone())),
+                                AudioAction::Seek(delta) => self
+                                    .inline_media_hits
+                                    .audio_seek_buttons
+                                    .push((rect, path.clone(), *delta)),
+                                AudioAction::Volume(delta) if *delta != 0 => self
+                                    .inline_media_hits
+                                    .audio_volume_buttons
+                                    .push((rect, path.clone(), *delta)),
+                                AudioAction::Open => self
+                                    .inline_media_hits
+                                    .open_buttons
+                                    .push((rect, path.clone())),
+                                AudioAction::Volume(_) => {}
+                            }
+                            x += label.len() as u16;
+                        }
+                    } else {
+                        self.inline_media_hits
+                            .open_buttons
+                            .push((open_rect, path.clone()));
+                    }
                     continue;
                 }
                 if !crate::terminal::image::scrollback_inline_overlay_active() {
                     continue;
                 }
+                let preview_unavailable = self.inline_media_load_failures.contains(path)
+                    || (placement.info.is_video && !crate::inline_media_ffmpeg::ffmpeg_available());
                 if !self.inline_media_cache.contains_key(path) && placement.screen_rect.height >= 1
                 {
                     let rect = placement.screen_rect;
@@ -3907,6 +4074,15 @@ impl AgentView {
                             let dim = Style::default().fg(theme.gray_dim);
                             buf.set_string_safe(center_x(cmd.len()), rect.y + 1, cmd, dim);
                         }
+                    } else if self.inline_media_load_failures.contains(path) {
+                        let label = "Preview unavailable";
+                        let cy = rect.y + rect.height / 2;
+                        buf.set_string_safe(
+                            center_x(label.len()),
+                            cy,
+                            label,
+                            Style::default().fg(theme.gray_dim),
+                        );
                     } else {
                         let spinner_frames = crate::glyphs::braille_spinner_frames();
                         let tick = self.scrollback.current_tick() as usize;
@@ -3920,6 +4096,28 @@ impl AgentView {
                             Style::default().fg(theme.gray_dim),
                         );
                     }
+                }
+                if preview_unavailable {
+                    let rect = placement.screen_rect;
+                    if placement.has_button_row {
+                        let button_y = rect.y + rect.height + 1;
+                        let sb_area = self.pane_areas.scrollback;
+                        if button_y >= sb_area.y && button_y < sb_area.y + sb_area.height {
+                            let label = "[Open]";
+                            let x = rect.x + rect.width.saturating_sub(label.len() as u16) / 2;
+                            let button_rect = Rect::new(x, button_y, label.len() as u16, 1);
+                            buf.set_string_safe(
+                                x,
+                                button_y,
+                                label,
+                                Style::default().fg(theme.gray),
+                            );
+                            self.inline_media_hits
+                                .open_buttons
+                                .push((button_rect, path.clone()));
+                        }
+                    }
+                    continue;
                 }
                 if let Some(esc) = self.build_inline_media_escapes(placement) {
                     all_escapes.push_str(&esc);
@@ -3939,61 +4137,83 @@ impl AgentView {
                             .video_play_areas
                             .push((rect, path.clone()));
                         if button_visible {
-                            let is_playing = matches!(
-                                self.inline_video, Some(ref vid) if vid.path == * path && !
-                                vid.finished
-                            );
-                            let play_label: String = if is_playing {
-                                let vid = self.inline_video.as_ref().unwrap();
-                                let dur_s = vid.frames.len() as f64 / vid.fps;
-                                let pos_s = vid.current_frame as f64 / vid.fps;
-                                format!(
-                                    "{}:{:02} / {}:{:02}",
-                                    pos_s as u32 / 60,
-                                    pos_s as u32 % 60,
-                                    dur_s as u32 / 60,
-                                    dur_s as u32 % 60,
-                                )
-                            } else {
-                                "[Play]".to_string()
-                            };
-                            let open_label = "[Open]";
-                            let gap = 3u16;
-                            let total = play_label.len() as u16 + gap + open_label.len() as u16;
-                            let start_x = rect.x + rect.width.saturating_sub(total) / 2;
-                            buf.set_string_safe(
-                                start_x,
-                                button_y,
-                                &play_label,
-                                Style::default().fg(theme.gray),
-                            );
-                            if !is_playing {
-                                self.inline_media_hits.play_buttons.push((
-                                    Rect {
-                                        x: start_x,
-                                        y: button_y,
-                                        width: play_label.len() as u16,
-                                        height: 1,
-                                    },
-                                    path.clone(),
-                                ));
+                            #[derive(Clone, Copy)]
+                            enum VideoAction {
+                                Toggle,
+                                Seek(i32),
+                                Open,
+                                Status,
                             }
-                            let open_x = start_x + play_label.len() as u16 + gap;
-                            buf.set_string_safe(
-                                open_x,
-                                button_y,
-                                open_label,
-                                Style::default().fg(theme.gray),
-                            );
-                            self.inline_media_hits.open_buttons.push((
-                                Rect {
-                                    x: open_x,
-                                    y: button_y,
-                                    width: open_label.len() as u16,
-                                    height: 1,
-                                },
-                                path.clone(),
-                            ));
+                            let active = self
+                                .inline_video
+                                .as_ref()
+                                .filter(|video| video.path == *path);
+                            let playing = active.is_some_and(|video| video.viewer.playing);
+                            let mut buttons = vec![(
+                                if playing { "[Pause]" } else { "[Play]" }.to_string(),
+                                VideoAction::Toggle,
+                            )];
+                            if let Some(video) = active {
+                                let pos = video.viewer.position_secs().round() as u64;
+                                let dur = video.viewer.duration_secs.round() as u64;
+                                buttons.extend([
+                                    ("[-1s]".to_string(), VideoAction::Seek(-1)),
+                                    ("[+1s]".to_string(), VideoAction::Seek(1)),
+                                    (
+                                        format!(
+                                            "{}:{:02}/{}:{:02}",
+                                            pos / 60,
+                                            pos % 60,
+                                            dur / 60,
+                                            dur % 60
+                                        ),
+                                        VideoAction::Status,
+                                    ),
+                                ]);
+                            }
+                            buttons.push(("[Open]".to_string(), VideoAction::Open));
+                            let row_width = |buttons: &[(String, VideoAction)]| {
+                                buttons.iter().map(|(label, _)| label.len()).sum::<usize>()
+                                    + buttons.len().saturating_sub(1)
+                            };
+                            if row_width(&buttons) > rect.width as usize {
+                                buttons
+                                    .retain(|(_, action)| !matches!(action, VideoAction::Status));
+                            }
+                            if row_width(&buttons) > rect.width as usize {
+                                buttons
+                                    .retain(|(_, action)| !matches!(action, VideoAction::Seek(_)));
+                            }
+                            let total = row_width(&buttons) as u16;
+                            let mut x = rect.x + rect.width.saturating_sub(total) / 2;
+                            for (index, (label, action)) in buttons.iter().enumerate() {
+                                if index > 0 {
+                                    x += 1;
+                                }
+                                let button_rect = Rect::new(x, button_y, label.len() as u16, 1);
+                                buf.set_string_safe(
+                                    x,
+                                    button_y,
+                                    label,
+                                    Style::default().fg(theme.gray),
+                                );
+                                match action {
+                                    VideoAction::Toggle => self
+                                        .inline_media_hits
+                                        .play_buttons
+                                        .push((button_rect, path.clone())),
+                                    VideoAction::Seek(delta) => self
+                                        .inline_media_hits
+                                        .video_seek_buttons
+                                        .push((button_rect, path.clone(), *delta)),
+                                    VideoAction::Open => self
+                                        .inline_media_hits
+                                        .open_buttons
+                                        .push((button_rect, path.clone())),
+                                    VideoAction::Status => {}
+                                }
+                                x += label.len() as u16;
+                            }
                         }
                     } else {
                         self.inline_media_hits

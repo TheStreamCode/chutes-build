@@ -1,4 +1,4 @@
-//! Leader-mode (`grok agent --leader stdio`) test harness.
+//! Leader-mode (`chutes-build agent --leader stdio`) test harness.
 //!
 //! Spawns the real binary as a stdio client whose bridge elects a leader
 //! subprocess hosting the actual sessions, speaks ACP over pipes, and
@@ -20,11 +20,11 @@ use crate::process::spawn_piped_with_stderr_capture;
 
 /// Env var naming the binary that elects/hosts the leader in a two-binary
 /// (version-skew) test. Falls back to [`grok_binary`]'s resolution.
-pub const LEADER_BINARY_ENV: &str = "GROK_BINARY_LEADER";
+pub const LEADER_BINARY_ENV: &str = "CHUTES_BUILD_BINARY_LEADER";
 
 /// Env var naming the binary for the second (usually newer) client in a
 /// two-binary test. Falls back to [`grok_binary`]'s resolution.
-pub const CLIENT_BINARY_ENV: &str = "GROK_BINARY_CLIENT";
+pub const CLIENT_BINARY_ENV: &str = "CHUTES_BUILD_BINARY_CLIENT";
 
 fn role_binary(env_key: &str) -> PathBuf {
     if let Ok(path) = std::env::var(env_key) {
@@ -36,12 +36,12 @@ fn role_binary(env_key: &str) -> PathBuf {
 }
 
 /// Binary for the leader-electing side of a version-skew test
-/// (`GROK_BINARY_LEADER`, else the shared [`grok_binary`] resolution).
+/// (`CHUTES_BUILD_BINARY_LEADER`, else the shared [`grok_binary`] resolution).
 pub fn leader_binary() -> PathBuf {
     role_binary(LEADER_BINARY_ENV)
 }
 
-/// Binary for the client side of a version-skew test (`GROK_BINARY_CLIENT`,
+/// Binary for the client side of a version-skew test (`CHUTES_BUILD_BINARY_CLIENT`,
 /// else the shared [`grok_binary`] resolution).
 pub fn client_binary() -> PathBuf {
     role_binary(CLIENT_BINARY_ENV)
@@ -93,7 +93,7 @@ impl acp::Client for LeaderAcpClient {
     }
 
     async fn ext_notification(&self, args: acp::ExtNotification) -> acp::Result<()> {
-        if &*args.method == "x.ai/leader_reconnected" {
+        if &*args.method == "chutes.build/leader_reconnected" {
             self.capture
                 .reconnected_count
                 .fetch_add(1, Ordering::SeqCst);
@@ -102,7 +102,7 @@ impl acp::Client for LeaderAcpClient {
     }
 }
 
-/// A `grok agent --leader stdio` client subprocess speaking ACP over pipes.
+/// A `chutes-build agent --leader stdio` client subprocess speaking ACP over pipes.
 /// The leader subprocess it elects hosts the actual sessions.
 pub struct LeaderStdioClient {
     pub conn: acp::ClientSideConnection,
@@ -128,28 +128,31 @@ impl LeaderStdioClient {
         let mut cmd = tokio::process::Command::new(binary);
         cmd.args(["agent", "--leader", "stdio"])
             .current_dir(cwd)
-            // Hermetic env: the developer's shell may export GROK_* vars
-            // (e.g. GROK_LEADER_SOCKET pointing at a REAL leader on this
+            // Hermetic env: the developer's shell may export CHUTES_BUILD_* vars
+            // (e.g. CHUTES_BUILD_LEADER_SOCKET pointing at a REAL leader on this
             // machine). env_clear + explicit allowlist guarantees the test
             // can never touch a leader outside its sandbox home.
             .env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", home)
-            .env("GROK_HOME", home.join(".grok"))
+            .env("CHUTES_BUILD_HOME", home.join(".chutes-build"))
             // Pin the socket inside the sandbox. The lock file is the
             // sibling `.lock` (leader.sock -> leader.lock), and the spawned
             // leader subprocess inherits/forwards this env var, so every
             // (re-)elected leader binds the same sandboxed path.
-            .env("GROK_LEADER_SOCKET", home.join(".grok").join("leader.sock"))
-            .env("GROK_CLI_CHAT_PROXY_BASE_URL", server.url())
-            .env("GROK_XAI_API_BASE_URL", server.url())
-            .env("XAI_API_KEY", "test-key-for-ci")
-            .env("GROK_TELEMETRY_ENABLED", "false")
-            .env("GROK_FEEDBACK_ENABLED", "false")
-            .env("GROK_TRACE_UPLOAD", "false")
-            .env("GROK_INSTRUMENTATION", "disabled")
+            .env(
+                "CHUTES_BUILD_LEADER_SOCKET",
+                home.join(".chutes-build").join("leader.sock"),
+            )
+            .env("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL", server.url())
+            .env("CHUTES_BUILD_XAI_API_BASE_URL", server.url())
+            .env("CHUTES_API_KEY", "test-key-for-ci")
+            .env("CHUTES_BUILD_TELEMETRY_ENABLED", "false")
+            .env("CHUTES_BUILD_FEEDBACK_ENABLED", "false")
+            .env("CHUTES_BUILD_TRACE_UPLOAD", "false")
+            .env("CHUTES_BUILD_INSTRUMENTATION", "disabled")
             // Inherited by the spawned leader, whose stderr goes to
-            // ~/.grok/leader.log — keep it chatty for diagnosis.
+            // ~/.chutes-build/leader.log — keep it chatty for diagnosis.
             .env("RUST_LOG", "xai_grok_shell=debug");
 
         let (mut child, stderr) = spawn_piped_with_stderr_capture(cmd);
@@ -215,8 +218,8 @@ impl LeaderStdioClient {
         let api_key_method = init
             .auth_methods
             .iter()
-            .find(|m| &*m.id().0 == "xai.api_key")
-            .expect("xai.api_key auth method");
+            .find(|m| &*m.id().0 == "chutes.api_key")
+            .expect("chutes.api_key auth method");
         self.conn
             .authenticate(
                 acp::AuthenticateRequest::new(api_key_method.id().clone())
@@ -284,7 +287,7 @@ impl LeaderStdioClient {
 }
 
 pub fn leader_lock_path(home: &Path) -> PathBuf {
-    home.join(".grok").join("leader.lock")
+    home.join(".chutes-build").join("leader.lock")
 }
 
 pub fn read_leader_pid(home: &Path) -> Option<u32> {
@@ -330,8 +333,8 @@ pub async fn wait_for_new_leader(home: &Path, old_pid: u32, timeout: Duration) -
 
 /// Wait for evidence that the bridge finished its reconnect replay.
 ///
-/// The `x.ai/leader_reconnected` ext notification is dropped by the typed
-/// `ClientSideConnection` (bare `x.ai/*` methods are rejected by the ACP
+/// The `chutes.build/leader_reconnected` ext notification is dropped by the typed
+/// `ClientSideConnection` (bare `chutes.build/*` methods are rejected by the ACP
 /// decoder), so we wait for the replayed `session/load` to emit session
 /// notifications instead: the notification count rises above `baseline`.
 pub async fn wait_for_replay_notifications(
@@ -350,5 +353,5 @@ pub async fn wait_for_replay_notifications(
 }
 
 pub fn leader_log(home: &Path) -> String {
-    std::fs::read_to_string(home.join(".grok").join("leader.log")).unwrap_or_default()
+    std::fs::read_to_string(home.join(".chutes-build").join("leader.log")).unwrap_or_default()
 }

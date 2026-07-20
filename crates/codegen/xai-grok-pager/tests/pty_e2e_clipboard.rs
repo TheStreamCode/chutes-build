@@ -99,7 +99,7 @@ async fn unknown_ssh_clipboard_delivery_is_unverified() {
         .wait_for_text("status       unverified", Duration::from_secs(10))
         .expect("unverified clipboard status");
     harness
-        .wait_for_text("grok wrap <ssh command>", Duration::from_secs(10))
+        .wait_for_text("chutes-build wrap <ssh command>", Duration::from_secs(10))
         .expect("wrapped SSH guidance");
     assert!(!harness.contains_text("Copy failed"));
     assert!(!harness.contains_text("panicked"));

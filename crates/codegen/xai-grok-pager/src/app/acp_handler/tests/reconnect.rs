@@ -802,7 +802,7 @@
                 meta,
             };
             acp::ExtNotification::new(
-                "x.ai/session/update",
+                "chutes.build/session/update",
                 std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
             )
         }
@@ -882,7 +882,7 @@
             meta: Some(serde_json::json!({ "isReplay": true, "eventId": "sess-sub-3" })),
         };
         let notif = acp::ExtNotification::new(
-            "x.ai/session_notification",
+            "chutes.build/session_notification",
             serde_json::value::to_raw_value(&payload).unwrap().into(),
         );
         assert!(handle_ext_notification(&notif, &mut app));

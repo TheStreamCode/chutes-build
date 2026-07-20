@@ -1,12 +1,12 @@
 //! I/O integration tests for the auto-update crate.
 //!
-//! These tests touch global process state — `GROK_HOME` (a `OnceLock` in
-//! `xai-grok-config`), `GROK_TEST_VERSION`, and `NPM_TOKEN` — so they
-//! must run serially. Once `GROK_HOME` is initialized for a process, it can't
+//! These tests touch global process state — `CHUTES_BUILD_HOME` (a `OnceLock` in
+//! `xai-grok-config`), `CHUTES_BUILD_TEST_VERSION`, and `NPM_TOKEN` — so they
+//! must run serially. Once `CHUTES_BUILD_HOME` is initialized for a process, it can't
 //! be changed; we set it from a single shared `OnceLock` and reset the
 //! contents of the directory between tests.
 //!
-//! The patterns here mirror the GROK_HOME isolation used in other
+//! The patterns here mirror the CHUTES_BUILD_HOME isolation used in other
 //! integration tests.
 
 mod common;
@@ -156,7 +156,7 @@ fn write_cache_with_timestamp(version: &str, ts: time::OffsetDateTime) {
 /// its on-disk contract: file shape + freshness logic via the public
 /// `GrokVersion` JSON layout.
 async fn cache_is_fresh() -> bool {
-    // Mirror the implementation: look at version.json under GROK_HOME,
+    // Mirror the implementation: look at version.json under CHUTES_BUILD_HOME,
     // parse, and check the TTL.
     let path = version_cache_path();
     let Ok(body) = tokio::fs::read_to_string(&path).await else {
@@ -279,7 +279,7 @@ async fn write_version_cache_idempotent_for_same_version() {
 // ─────────────────────────────────────────────────────────────────────────────
 // get_installed_grok_version env override
 //
-// The function honors `GROK_TEST_VERSION` for testing. We exercise it
+// The function honors `CHUTES_BUILD_TEST_VERSION` for testing. We exercise it
 // via the public re-export only — no private items leaked.
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -293,12 +293,12 @@ async fn get_installed_version_uses_env_var_override() {
     reset();
 
     unsafe {
-        std::env::set_var("GROK_TEST_VERSION", "9.9.9");
+        std::env::set_var("CHUTES_BUILD_TEST_VERSION", "9.9.9");
     }
     let v = xai_grok_update::version::get_installed_grok_version();
     assert_eq!(v, "9.9.9");
     unsafe {
-        std::env::remove_var("GROK_TEST_VERSION");
+        std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
     }
 }
 
@@ -309,7 +309,7 @@ async fn get_installed_version_falls_back_to_cargo_pkg_version_when_env_unset() 
     reset();
 
     unsafe {
-        std::env::remove_var("GROK_TEST_VERSION");
+        std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
     }
     let v = xai_grok_update::version::get_installed_grok_version();
     // The compile-time CARGO_PKG_VERSION must be a parseable semver string.
@@ -326,20 +326,20 @@ async fn get_installed_version_with_env_var_takes_precedence() {
 
     let real = {
         unsafe {
-            std::env::remove_var("GROK_TEST_VERSION");
+            std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
         }
         xai_grok_update::version::get_installed_grok_version()
     };
 
     unsafe {
-        std::env::set_var("GROK_TEST_VERSION", "0.0.0-test");
+        std::env::set_var("CHUTES_BUILD_TEST_VERSION", "0.0.0-test");
     }
     let overridden = xai_grok_update::version::get_installed_grok_version();
     assert_ne!(real, overridden);
     assert_eq!(overridden, "0.0.0-test");
 
     unsafe {
-        std::env::remove_var("GROK_TEST_VERSION");
+        std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
     }
 }
 
@@ -350,12 +350,12 @@ async fn get_installed_version_handles_alpha_prerelease_in_env() {
     reset();
 
     unsafe {
-        std::env::set_var("GROK_TEST_VERSION", "0.1.200-alpha.5");
+        std::env::set_var("CHUTES_BUILD_TEST_VERSION", "0.1.200-alpha.5");
     }
     let v = xai_grok_update::version::get_installed_grok_version();
     assert_eq!(v, "0.1.200-alpha.5");
     unsafe {
-        std::env::remove_var("GROK_TEST_VERSION");
+        std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
     }
 }
 
@@ -368,11 +368,11 @@ async fn get_installed_version_does_not_validate_env_var_format() {
     reset();
 
     unsafe {
-        std::env::set_var("GROK_TEST_VERSION", "not-a-version");
+        std::env::set_var("CHUTES_BUILD_TEST_VERSION", "not-a-version");
     }
     let v = xai_grok_update::version::get_installed_grok_version();
     assert_eq!(v, "not-a-version");
     unsafe {
-        std::env::remove_var("GROK_TEST_VERSION");
+        std::env::remove_var("CHUTES_BUILD_TEST_VERSION");
     }
 }

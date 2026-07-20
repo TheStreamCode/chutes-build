@@ -1,7 +1,7 @@
 //! Vendor compatibility configuration for third-party agent surfaces
 //! (skills, rules, agents, MCPs, hooks, sessions).
 //!
-//! Historically the agent hard-coded the dir lists `[".grok", ".agents",
+//! Historically the agent hard-coded the dir lists `[".chutes-build", ".agents",
 //! ".claude", ".cursor"]` (and `RULES_DIRS` / `AGENT_FILENAMES`) across ~6
 //! call sites in three crates. This module now owns the canonical cell registry
 //! used by runtime resolution and diagnostics (env var → config TOML → remote
@@ -127,109 +127,109 @@ pub const COMPAT_CELLS: [CompatCell; 18] = [
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Skills,
-        "GROK_CURSOR_SKILLS_ENABLED",
+        "CHUTES_BUILD_CURSOR_SKILLS_ENABLED",
         Some(CompatRemoteKey::CursorSkills),
     ),
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Rules,
-        "GROK_CURSOR_RULES_ENABLED",
+        "CHUTES_BUILD_CURSOR_RULES_ENABLED",
         Some(CompatRemoteKey::CursorRules),
     ),
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Agents,
-        "GROK_CURSOR_AGENTS_ENABLED",
+        "CHUTES_BUILD_CURSOR_AGENTS_ENABLED",
         Some(CompatRemoteKey::CursorAgents),
     ),
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Mcps,
-        "GROK_CURSOR_MCPS_ENABLED",
+        "CHUTES_BUILD_CURSOR_MCPS_ENABLED",
         Some(CompatRemoteKey::CursorMcps),
     ),
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Hooks,
-        "GROK_CURSOR_HOOKS_ENABLED",
+        "CHUTES_BUILD_CURSOR_HOOKS_ENABLED",
         Some(CompatRemoteKey::CursorHooks),
     ),
     CompatCell::new(
         CompatVendor::Cursor,
         CompatSurface::Sessions,
-        "GROK_CURSOR_SESSIONS_ENABLED",
+        "CHUTES_BUILD_CURSOR_SESSIONS_ENABLED",
         Some(CompatRemoteKey::CursorSessions),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Skills,
-        "GROK_CLAUDE_SKILLS_ENABLED",
+        "CHUTES_BUILD_CLAUDE_SKILLS_ENABLED",
         Some(CompatRemoteKey::ClaudeSkills),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Rules,
-        "GROK_CLAUDE_RULES_ENABLED",
+        "CHUTES_BUILD_CLAUDE_RULES_ENABLED",
         Some(CompatRemoteKey::ClaudeRules),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Agents,
-        "GROK_CLAUDE_AGENTS_ENABLED",
+        "CHUTES_BUILD_CLAUDE_AGENTS_ENABLED",
         Some(CompatRemoteKey::ClaudeAgents),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Mcps,
-        "GROK_CLAUDE_MCPS_ENABLED",
+        "CHUTES_BUILD_CLAUDE_MCPS_ENABLED",
         Some(CompatRemoteKey::ClaudeMcps),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Hooks,
-        "GROK_CLAUDE_HOOKS_ENABLED",
+        "CHUTES_BUILD_CLAUDE_HOOKS_ENABLED",
         Some(CompatRemoteKey::ClaudeHooks),
     ),
     CompatCell::new(
         CompatVendor::Claude,
         CompatSurface::Sessions,
-        "GROK_CLAUDE_SESSIONS_ENABLED",
+        "CHUTES_BUILD_CLAUDE_SESSIONS_ENABLED",
         Some(CompatRemoteKey::ClaudeSessions),
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Skills,
-        "GROK_CODEX_SKILLS_ENABLED",
+        "CHUTES_BUILD_CODEX_SKILLS_ENABLED",
         None,
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Rules,
-        "GROK_CODEX_RULES_ENABLED",
+        "CHUTES_BUILD_CODEX_RULES_ENABLED",
         None,
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Agents,
-        "GROK_CODEX_AGENTS_ENABLED",
+        "CHUTES_BUILD_CODEX_AGENTS_ENABLED",
         None,
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Mcps,
-        "GROK_CODEX_MCPS_ENABLED",
+        "CHUTES_BUILD_CODEX_MCPS_ENABLED",
         None,
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Hooks,
-        "GROK_CODEX_HOOKS_ENABLED",
+        "CHUTES_BUILD_CODEX_HOOKS_ENABLED",
         None,
     ),
     CompatCell::new(
         CompatVendor::Codex,
         CompatSurface::Sessions,
-        "GROK_CODEX_SESSIONS_ENABLED",
+        "CHUTES_BUILD_CODEX_SESSIONS_ENABLED",
         Some(CompatRemoteKey::CodexSessions),
     ),
 ];
@@ -358,14 +358,14 @@ impl CompatConfig {
     }
 
     /// Config directories that may contain `skills/` subdirectories, in
-    /// priority order. `.grok` and `.agents` are always included; `.claude`
+    /// priority order. `.chutes-build` and `.agents` are always included; `.claude`
     /// and `.cursor` are gated on their respective `skills` cell.
     ///
-    /// Replaces the hard-coded `[".grok", ".agents", ".claude", ".cursor"]`
+    /// Replaces the hard-coded `[".chutes-build", ".agents", ".claude", ".cursor"]`
     /// in `collect_skill_config_dirs`. When all cells are on, the returned
     /// list is identical to the historical constant.
     pub fn skill_config_dirs(&self) -> Vec<&'static str> {
-        let mut dirs = vec![".grok", ".agents"];
+        let mut dirs = vec![".chutes-build", ".agents"];
         if self.claude.skills {
             dirs.push(".claude");
         }
@@ -375,14 +375,14 @@ impl CompatConfig {
         dirs
     }
 
-    /// Subdirectories scanned for `*.md` rules files. `.grok/rules` is always
+    /// Subdirectories scanned for `*.md` rules files. `.chutes-build/rules` is always
     /// included; `.claude/rules` and `.cursor/rules` are gated on their
     /// respective `rules` cell.
     ///
     /// Replaces the hard-coded `RULES_DIRS` constant. When all cells are on,
     /// the returned list is identical.
     pub fn rules_dirs(&self) -> Vec<&'static str> {
-        let mut dirs = vec![".grok/rules"];
+        let mut dirs = vec![".chutes-build/rules"];
         if self.claude.rules {
             dirs.push(".claude/rules");
         }
@@ -511,10 +511,10 @@ mod tests {
 
     #[test]
     fn skill_config_dirs_all_on_matches_legacy_constant() {
-        // Historical constant was `[".grok", ".agents", ".claude", ".cursor"]`.
+        // Historical constant was `[".chutes-build", ".agents", ".claude", ".cursor"]`.
         assert_eq!(
             CompatConfig::default().skill_config_dirs(),
-            vec![".grok", ".agents", ".claude", ".cursor"]
+            vec![".chutes-build", ".agents", ".claude", ".cursor"]
         );
     }
 
@@ -522,23 +522,29 @@ mod tests {
     fn skill_config_dirs_gates_each_vendor() {
         let mut c = CompatConfig::default();
         c.cursor.skills = false;
-        assert_eq!(c.skill_config_dirs(), vec![".grok", ".agents", ".claude"]);
+        assert_eq!(
+            c.skill_config_dirs(),
+            vec![".chutes-build", ".agents", ".claude"]
+        );
 
         c.claude.skills = false;
-        assert_eq!(c.skill_config_dirs(), vec![".grok", ".agents"]);
+        assert_eq!(c.skill_config_dirs(), vec![".chutes-build", ".agents"]);
 
         // Only the `cursor` cell on (`claude` off): `cursor` still appended last.
         let mut c2 = CompatConfig::default();
         c2.claude.skills = false;
-        assert_eq!(c2.skill_config_dirs(), vec![".grok", ".agents", ".cursor"]);
+        assert_eq!(
+            c2.skill_config_dirs(),
+            vec![".chutes-build", ".agents", ".cursor"]
+        );
     }
 
     #[test]
     fn rules_dirs_all_on_matches_legacy_constant() {
-        // Historical `RULES_DIRS` was `[".grok/rules", ".claude/rules", ".cursor/rules"]`.
+        // Historical `RULES_DIRS` was `[".chutes-build/rules", ".claude/rules", ".cursor/rules"]`.
         assert_eq!(
             CompatConfig::default().rules_dirs(),
-            vec![".grok/rules", ".claude/rules", ".cursor/rules"]
+            vec![".chutes-build/rules", ".claude/rules", ".cursor/rules"]
         );
     }
 
@@ -546,9 +552,9 @@ mod tests {
     fn rules_dirs_gates_each_vendor() {
         let mut c = CompatConfig::default();
         c.cursor.rules = false;
-        assert_eq!(c.rules_dirs(), vec![".grok/rules", ".claude/rules"]);
+        assert_eq!(c.rules_dirs(), vec![".chutes-build/rules", ".claude/rules"]);
         c.claude.rules = false;
-        assert_eq!(c.rules_dirs(), vec![".grok/rules"]);
+        assert_eq!(c.rules_dirs(), vec![".chutes-build/rules"]);
     }
 
     #[test]

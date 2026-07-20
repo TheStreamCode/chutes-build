@@ -12,7 +12,7 @@
 //! │  ┌─────────────────────────────────────────────────────────┐│
 //! │  │                      Agent (MvpAgent)                    ││
 //! │  │   - Shared state across all clients                      ││
-//! │  │   - Persists to ~/.grok/                                 ││
+//! │  │   - Persists to ~/.chutes-build/                                 ││
 //! │  └─────────────────────────────────────────────────────────┘│
 //! │                           ▲                                  │
 //! │                           │ ACP                              │
@@ -23,7 +23,7 @@
 //! │  │   - Tracks session ownership for routing                 ││
 //! │  └────────────────────────┬────────────────────────────────┘│
 //! └───────────────────────────┼──────────────────────────────────┘
-//!                             │ IPC (Unix socket at ~/.grok/leader.sock)
+//!                             │ IPC (Unix socket at ~/.chutes-build/leader.sock)
 //!         ┌───────────────────┼───────────────────┐
 //!         ▼                   ▼                   ▼
 //! ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
@@ -108,7 +108,7 @@ fn should_evict(leader_version: Option<&str>, client_version: &str) -> bool {
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 /// Maximum delay between reconnection attempts (caps exponential backoff).
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
-/// Maximum reconnection attempts for bounded mode (headless/`grok -p`).
+/// Maximum reconnection attempts for bounded mode (headless/`chutes-build -p`).
 /// TUI mode uses unlimited retries controlled by a cancellation token.
 const RECONNECT_MAX_ATTEMPTS_BOUNDED: u32 = 5;
 /// Environment URLs to pass to the leader subprocess.
@@ -884,7 +884,7 @@ pub enum ReconnectPolicy {
     /// Suitable for interactive TUI sessions where the user expects persistence.
     Unbounded,
     /// Retry up to a fixed number of attempts, then fail.
-    /// Suitable for headless/`grok -p` where hanging forever is unacceptable.
+    /// Suitable for headless/`chutes-build -p` where hanging forever is unacceptable.
     Bounded { max_attempts: u32 },
 }
 impl ReconnectPolicy {
@@ -1336,8 +1336,8 @@ pub async fn connect_or_spawn(
 /// Resolve the binary to spawn as the leader subprocess.
 ///
 /// For a **managed install** — the running binary lives under `grok_home`
-/// (e.g. `~/.grok/...`) — prefer the managed `~/.grok/bin/grok` symlink. After an
-/// auto-update or `grok update` atomically swaps that symlink, `current_exe()`
+/// (e.g. `~/.chutes-build/...`) — prefer the managed `~/.chutes-build/bin/grok` symlink. After an
+/// auto-update or `chutes-build update` atomically swaps that symlink, `current_exe()`
 /// still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target,
 /// so spawning it would relaunch the stale binary. The symlink always points to
 /// the freshly-installed version. This mirrors
@@ -1347,14 +1347,14 @@ pub async fn connect_or_spawn(
 /// not under `grok_home`), keep `current_exe()` so the spawned leader matches the
 /// calling binary.
 ///
-/// Falls back to `~/.grok/bin/grok` only when `current_exe()` is unavailable.
+/// Falls back to `~/.chutes-build/bin/grok` only when `current_exe()` is unavailable.
 fn resolve_exe_for_spawn() -> Result<std::path::PathBuf, ConnectionError> {
     resolve_binary_with_home(&crate::util::grok_home::grok_home())
 }
 fn resolve_binary_with_home(grok_home: &Path) -> Result<std::path::PathBuf, ConnectionError> {
     resolve_binary_impl(grok_home, std::env::current_exe().ok())
 }
-/// Binary file name for the managed grok install (`grok` / `grok.exe`).
+/// Binary file name for the managed grok install (`chutes-build` / `grok.exe`).
 fn managed_grok_bin_name() -> &'static str {
     if cfg!(windows) { "grok.exe" } else { "grok" }
 }
@@ -1393,16 +1393,16 @@ fn spawn_leader_subprocess(env_urls: &LeaderEnvUrls) -> Result<u32, ConnectionEr
     cmd.arg("agent").arg("leader");
     cmd.arg("--no-exit-on-disconnect");
     cmd.arg("--relay-on-demand");
-    cmd.arg("--grok-ws-url").arg(&env_urls.grok_ws_url);
-    cmd.arg("--grok-ws-origin").arg(&env_urls.grok_ws_origin);
+    cmd.arg("--chutes-ws-url").arg(&env_urls.grok_ws_url);
+    cmd.arg("--chutes-ws-origin").arg(&env_urls.grok_ws_origin);
     if let Some(socket) = std::env::var_os(crate::leader::LEADER_SOCKET_ENV) {
         cmd.env(crate::leader::LEADER_SOCKET_ENV, socket);
     }
     for key in [
-        "GROK_DEBUG_LOG",
-        "GROK_HOOKS_LOG",
-        "GROK_LOG_SAMPLING",
-        "GROK_INSTRUMENTATION",
+        "CHUTES_BUILD_DEBUG_LOG",
+        "CHUTES_BUILD_HOOKS_LOG",
+        "CHUTES_BUILD_LOG_SAMPLING",
+        "CHUTES_BUILD_INSTRUMENTATION",
     ] {
         if let Some(v) = std::env::var_os(key) {
             cmd.env(key, v);
@@ -1421,7 +1421,7 @@ fn spawn_leader_subprocess(env_urls: &LeaderEnvUrls) -> Result<u32, ConnectionEr
             cmd.stderr(std::process::Stdio::null());
         }
     }
-    let leader_log = std::env::var("GROK_LEADER_LOG")
+    let leader_log = std::env::var("CHUTES_BUILD_LEADER_LOG")
         .or_else(|_| std::env::var("RUST_LOG"))
         .unwrap_or_else(|_| "xai_grok_shell=info,xai_acp_lib=warn,xai_grok_mcp=warn".into());
     cmd.env("RUST_LOG", leader_log);

@@ -18,7 +18,7 @@ use crate::terminal::{TerminalName, terminal_context};
 /// Fed from three places, all off the render path:
 ///   - [`cwd_git_info_lazy`] — a lazy, throttled refresh when a view reads a cwd.
 ///   - [`populate_from_cwd_async`] — an eager warm at startup / on a cwd change.
-///   - [`update_from_notification`] — the `x.ai/git_head_changed` ACP
+///   - [`update_from_notification`] — the `chutes.build/git_head_changed` ACP
 ///     notification, so a branch switch inside an agent reflects immediately
 ///     instead of waiting out [`CWD_GIT_REFRESH_TTL`].
 type CwdCacheEntry = (Option<CwdGitInfo>, Instant);
@@ -225,6 +225,7 @@ fn compute_snapshot(cwd: &Path) -> GitSnapshot {
     // path uses the same convention.
     let branch = repo.head().ok().map(|head| {
         head.shorthand()
+            .ok()
             .filter(|s| *s != "HEAD")
             .map(str::to_string)
             .unwrap_or_default()
@@ -311,12 +312,12 @@ fn collapse_home(path: &Path) -> String {
 /// codepoint, so it renders as "tofu" without a patched font. Where one can't
 /// be assumed we fall back to a glyph the platform's stock fonts cover.
 ///
-/// `GROK_NERD_FONTS=1` forces Powerline; `GROK_NERD_FONTS=0` forces the fallback.
+/// `CHUTES_BUILD_NERD_FONTS=1` forces Powerline; `CHUTES_BUILD_NERD_FONTS=0` forces the fallback.
 pub(crate) fn branch_icon() -> &'static str {
     static ICON: OnceLock<&str> = OnceLock::new();
     ICON.get_or_init(|| {
         decide_branch_icon(
-            std::env::var("GROK_NERD_FONTS").ok().as_deref(),
+            std::env::var("CHUTES_BUILD_NERD_FONTS").ok().as_deref(),
             HostOs::current(),
             terminal_context().brand,
         )
@@ -344,7 +345,7 @@ fn decide_branch_icon(nerd_fonts: Option<&str>, host: HostOs, brand: TerminalNam
 /// Whether a Nerd Font (Private Use Area glyphs) is plausible for this
 /// host/terminal. Used by [`decide_branch_icon`] to pick a Powerline glyph.
 ///
-/// An explicit `GROK_NERD_FONTS` override (`0`/`false` → off, anything else →
+/// An explicit `CHUTES_BUILD_NERD_FONTS` override (`0`/`false` → off, anything else →
 /// on) always wins. Otherwise PUA glyphs are assumed everywhere except Windows
 /// consoles and the macOS terminals that ship stock fonts (Apple Terminal,
 /// iTerm2), which tofu them.

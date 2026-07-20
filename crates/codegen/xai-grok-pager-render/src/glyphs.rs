@@ -500,7 +500,7 @@ fn to_legacy_glyphs(s: &str) -> String {
 /// font is known not to ship the Dingbats glyphs we use as chrome.
 /// Cached for process lifetime.
 ///
-/// `GROK_FORCE_LEGACY_CONSOLE=1` (or `true`) forces this on regardless of
+/// `CHUTES_BUILD_FORCE_LEGACY_CONSOLE=1` (or `true`) forces this on regardless of
 /// host/terminal, and `=0` (or `false`) forces it off — a QA aid for
 /// eyeballing the ASCII fallbacks (or confirming the fancy glyphs) on any
 /// platform without a real ConHost.
@@ -517,9 +517,13 @@ pub fn is_legacy_windows_console() -> bool {
     })
 }
 
-/// Read the `GROK_FORCE_LEGACY_CONSOLE` escape hatch from the environment.
+/// Read the `CHUTES_BUILD_FORCE_LEGACY_CONSOLE` escape hatch from the environment.
 fn forced_legacy_console_override() -> Option<bool> {
-    parse_forced_legacy_console(std::env::var("GROK_FORCE_LEGACY_CONSOLE").ok().as_deref())
+    parse_forced_legacy_console(
+        std::env::var("CHUTES_BUILD_FORCE_LEGACY_CONSOLE")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// Pure parse of the override value so tests don't touch the environment.
@@ -554,6 +558,7 @@ fn decide_legacy_windows_console(host: HostOs, brand: TerminalName) -> bool {
             | TerminalName::Alacritty
             | TerminalName::Ghostty
             | TerminalName::Rio
+            | TerminalName::WarpTerminal
             | TerminalName::GrokDesktop
     )
 }
@@ -797,6 +802,7 @@ mod tests {
             TerminalName::Alacritty,
             TerminalName::Ghostty,
             TerminalName::Rio,
+            TerminalName::WarpTerminal,
             TerminalName::GrokDesktop,
         ] {
             assert!(!decide_legacy_windows_console(HostOs::Windows, brand));
@@ -811,7 +817,6 @@ mod tests {
             TerminalName::AppleTerminal,
             TerminalName::Vte,
             TerminalName::Iterm2,
-            TerminalName::WarpTerminal,
         ] {
             assert!(decide_legacy_windows_console(HostOs::Windows, brand));
         }

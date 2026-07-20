@@ -310,7 +310,7 @@ fn is_session_load_request(json: &serde_json::Value) -> bool {
         .is_some_and(|m| m == "session/load")
 }
 /// Extract the leader unicast target `ClientId` from a notification's
-/// `params._meta["x.ai/leaderClientId"]`.
+/// `params._meta["chutes.build/leaderClientId"]`.
 ///
 /// The agent stamps this onto every `session/load` replay notification (echoing
 /// the id the leader injected into the load request) so the replay can be routed
@@ -320,12 +320,12 @@ fn extract_target_client_id(json: &serde_json::Value) -> Option<ClientId> {
     let params = json.get("params")?;
     params
         .get("_meta")
-        .and_then(|m| m.get("x.ai/leaderClientId"))
+        .and_then(|m| m.get("chutes.build/leaderClientId"))
         .or_else(|| {
             params
                 .get("params")
                 .and_then(|inner| inner.get("_meta"))
-                .and_then(|m| m.get("x.ai/leaderClientId"))
+                .and_then(|m| m.get("chutes.build/leaderClientId"))
         })
         .and_then(|v| v.as_u64())
         .map(ClientId)
@@ -354,13 +354,13 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
 /// must be **broadcast to every client** instead of falling through to the
 /// last-active-client fallback:
 ///
-/// - `x.ai/sessions/changed` — roster delta; every open dashboard must stay
+/// - `chutes.build/sessions/changed` — roster delta; every open dashboard must stay
 ///   in sync.
-/// - `x.ai/models/update` — the model catalog changed (config.toml
+/// - `chutes.build/models/update` — the model catalog changed (config.toml
 ///   `[model.*]`/`[models]` hot-reload, `models_cache.json` external write,
 ///   auth change, response-header etag refresh). Every connected client's
 ///   model picker must refresh, not just the most recently active one.
-/// - `x.ai/mcp/servers_updated` — the MCP catalog resolved/changed (managed
+/// - `chutes.build/mcp/servers_updated` — the MCP catalog resolved/changed (managed
 ///   connectors fetched in the background after `initialize`). Deliberately
 ///   session-agnostic on the wire (no `sessionId`, see
 ///   `extensions::mcp::notify_servers_updated`); the push fires seconds after
@@ -369,28 +369,28 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
 ///   connectors then "disappeared" from every other client's `/mcp` view.
 ///   Broadcast is safe: the pager handler only debounce-refetches `mcp/list`
 ///   for agents with an open extensions modal.
-/// - `x.ai/announcements/update` — the announcements list changed (startup
+/// - `chutes.build/announcements/update` — the announcements list changed (startup
 ///   one-shot or the periodic settings refresh). Session-agnostic; every
 ///   client renders its own banner, so last-active-client fallback would
 ///   leave every other client's banner stale. Broadcast is safe: the pager
 ///   handler is idempotent and drops stale generations via its `gen` gate.
-///   (`x.ai/settings/update` stays non-broadcast — it carries auth/gate state.)
+///   (`chutes.build/settings/update` stays non-broadcast — it carries auth/gate state.)
 ///
 /// Matched via [`method_of`], NOT the raw top-level `method`: agent ext
-/// notifications arrive `_`-prefixed on the wire (`_x.ai/sessions/changed`),
+/// notifications arrive `_`-prefixed on the wire (`_chutes.build/sessions/changed`),
 /// so a raw compare would miss the production form.
 fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
         Some(
-            "x.ai/sessions/changed"
-                | "x.ai/models/update"
-                | "x.ai/mcp/servers_updated"
-                | "x.ai/announcements/update"
+            "chutes.build/sessions/changed"
+                | "chutes.build/models/update"
+                | "chutes.build/mcp/servers_updated"
+                | "chutes.build/announcements/update"
         )
     )
 }
-/// Whether a payload is the `x.ai/scheduled_task_inject_prompt` notification.
+/// Whether a payload is the `chutes.build/scheduled_task_inject_prompt` notification.
 ///
 /// This notification tells the receiving client to enqueue AND drive a
 /// scheduled (`/loop`) cron prompt. Unlike ordinary `sessionId`-bearing
@@ -402,8 +402,8 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
 /// `session/update` deltas, exactly like any other turn the driver runs.
 /// The namespaced method a leader payload carries, normalizing the two ext wire
 /// forms the gateway produces:
-///   - direct:  `{"method":"x.ai/foo", ...}`                                 -> `x.ai/foo`
-///   - wrapped: `{"method":"_x.ai/foo","params":{"method":"x.ai/foo",...}}`  -> `x.ai/foo`
+///   - direct:  `{"method":"chutes.build/foo", ...}`                                 -> `chutes.build/foo`
+///   - wrapped: `{"method":"_chutes.build/foo","params":{"method":"chutes.build/foo",...}}`  -> `chutes.build/foo`
 ///
 /// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`
 /// — e.g. `ask_user_question`, `exit_plan_mode`, `scheduled_task_inject_prompt`,
@@ -438,7 +438,7 @@ fn interaction_inner_params(json: &serde_json::Value) -> Option<&serde_json::Val
         Some(params)
     }
 }
-/// Whether a payload is the `x.ai/scheduled_task_inject_prompt` notification.
+/// Whether a payload is the `chutes.build/scheduled_task_inject_prompt` notification.
 ///
 /// This notification tells the receiving client to enqueue AND drive a
 /// scheduled (`/loop`) cron prompt. Unlike ordinary `sessionId`-bearing
@@ -449,7 +449,7 @@ fn interaction_inner_params(json: &serde_json::Value) -> Option<&serde_json::Val
 /// turns). The other clients render the resulting turn from the broadcast
 /// `session/update` deltas, exactly like any other turn the driver runs.
 fn is_scheduled_task_inject_prompt(json: &serde_json::Value) -> bool {
-    method_of(json) == Some("x.ai/scheduled_task_inject_prompt")
+    method_of(json) == Some("chutes.build/scheduled_task_inject_prompt")
 }
 /// Whether a payload is a blocking *interaction* reverse-request — a tool
 /// permission, `ask_user_question`, or plan-approval. Unlike other
@@ -459,7 +459,11 @@ fn is_scheduled_task_inject_prompt(json: &serde_json::Value) -> bool {
 fn is_interaction_request(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
-        Some("session/request_permission" | "x.ai/ask_user_question" | "x.ai/exit_plan_mode")
+        Some(
+            "session/request_permission"
+                | "chutes.build/ask_user_question"
+                | "chutes.build/exit_plan_mode"
+        )
     )
 }
 /// Extract the `tool_call_id` an interaction reverse-request carries, so the
@@ -485,12 +489,12 @@ fn extract_interaction_tool_call_id(json: &serde_json::Value) -> Option<String> 
         .map(String::from)
 }
 /// If a payload is the `InteractionResolved` broadcast (an
-/// `x.ai/session_notification` whose `update.sessionUpdate ==
+/// `chutes.build/session_notification` whose `update.sessionUpdate ==
 /// "interaction_resolved"`), return its `tool_call_id` so the leader can evict
 /// the cached interaction request (first-answer-wins). Tolerant of the gateway
 /// wrapper and camel/snake spelling for the inner field.
 fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option<String> {
-    if method_of(json) != Some("x.ai/session_notification") {
+    if method_of(json) != Some("chutes.build/session_notification") {
         return None;
     }
     let update = interaction_inner_params(json)?.get("update")?;
@@ -506,7 +510,7 @@ fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option
 /// Extract session_id from a prompt-complete notification.
 fn extract_session_id_from_prompt_complete(json: &serde_json::Value) -> Option<String> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/session/prompt_complete" {
+    if method != "chutes.build/session/prompt_complete" {
         return None;
     }
     json.get("params")?
@@ -685,9 +689,9 @@ fn inject_capabilities_into_session_new(
                     serde_json::json!(client_type),
                 );
             }
-            if !meta_obj.contains_key("x.ai/leaderClientId") {
+            if !meta_obj.contains_key("chutes.build/leaderClientId") {
                 meta_obj.insert(
-                    "x.ai/leaderClientId".to_string(),
+                    "chutes.build/leaderClientId".to_string(),
                     serde_json::json!(client_id.0),
                 );
             }
@@ -763,25 +767,25 @@ fn inject_client_identity_into_initialize(
     }
     (mutated, true)
 }
-/// Extract yolo_mode change from x.ai/yolo_mode_changed notification.
+/// Extract yolo_mode change from chutes.build/yolo_mode_changed notification.
 ///
 /// Returns Some(yolo_mode) if this is a yolo mode change notification.
 fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/yolo_mode_changed" {
+    if method != "chutes.build/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
     params.get("yolo_mode").and_then(|v| v.as_bool())
 }
-/// Extract the auto-mode intent from an `x.ai/yolo_mode_changed` notification, so
+/// Extract the auto-mode intent from an `chutes.build/yolo_mode_changed` notification, so
 /// the leader can keep `ClientCapabilities.auto_mode` fresh the same way it tracks
 /// `yolo_mode`. Without this, a stale connect-time `auto_mode` capability would be
 /// injected into later `session/new` requests, re-enabling Auto after the user opted
 /// out. Returns `None` when the notification doesn't change auto state.
 fn extract_auto_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/yolo_mode_changed" {
+    if method != "chutes.build/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
@@ -812,7 +816,7 @@ fn inject_client_identity_into_yolo_notification(
     let is_yolo = json
         .get("method")
         .and_then(|m| m.as_str())
-        .is_some_and(|m| m == "x.ai/yolo_mode_changed");
+        .is_some_and(|m| m == "chutes.build/yolo_mode_changed");
     if !is_yolo {
         return false;
     }
@@ -953,7 +957,7 @@ fn leader_info_payload(control_state: &LeaderServerControlState) -> ControlPaylo
         profile_formats: manager.profile_formats().to_vec(),
     }
 }
-const PROD_COMPUTER_HUB_URL: &str = "wss://computer-hub.grok.com/v1/tools";
+const PROD_COMPUTER_HUB_URL: &str = "wss://computer-hub.chutes-build.com/v1/tools";
 const WORKSPACE_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 fn workspace_err(message: impl Into<String>) -> ControlError {
     ControlError {
@@ -1084,7 +1088,7 @@ async fn handle_workspace_start(
         .to_string_lossy(), "cwd" : cwd_path.display().to_string(), }
     );
     let upload_queue_enabled =
-        std::env::var("GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED").as_deref() != Ok("false");
+        std::env::var("CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED").as_deref() != Ok("false");
     crate::agent::folder_trust::resolve_and_record(&cwd_path, None, false);
     let project_lsp_trusted = crate::agent::folder_trust::project_scope_allowed(&cwd_path);
     let handle = xai_grok_workspace::connect_local_workspace(
@@ -1427,7 +1431,7 @@ fn make_version_mismatch_notification(
     }
     Some(
         serde_json::json!(
-            { "jsonrpc" : "2.0", "method" : "x.ai/leader/version_mismatch", "params" : {
+            { "jsonrpc" : "2.0", "method" : "chutes.build/leader/version_mismatch", "params" : {
             "clientVersion" : client_version, "leaderVersion" : leader_version, "message"
             :
             format!("Client version {client_version} differs from leader version \
@@ -1580,7 +1584,7 @@ pub async fn run_leader_server(
             .remove(& sid); } } } if last_active_client == Some(id) { last_active_client
             = None; } if ! detached_sessions.is_empty() { let evict_notification =
             serde_json::json!({ "jsonrpc" : "2.0", "method" :
-            "x.ai/internal/evict_sessions", "params" : { "sessionIds" : detached_sessions
+            "chutes.build/internal/evict_sessions", "params" : { "sessionIds" : detached_sessions
             } }); let _ = acp_tx.send(evict_notification.to_string()); info!(client_id =
             id.0, session_count = detached_sessions.len(),
             "Sent client-disconnect detach notification for disconnected client"); }
@@ -2412,7 +2416,7 @@ mod tests {
     /// Relay demand gate (relay-on-demand): Stdio registrations must NOT
     /// signal relay demand — a leader serving only interactive clients (TUI
     /// dashboard, IDE) keeps the grok.com relay off. The first Headless
-    /// registration (devbox / `grok agent headless` flow) flips the watch so
+    /// registration (devbox / `chutes-build agent headless` flow) flips the watch so
     /// `run_leader` starts the deferred relay connection.
     #[tokio::test]
     async fn relay_demand_signals_only_on_headless_registration() {
@@ -2787,13 +2791,13 @@ mod tests {
     #[test]
     fn is_scheduled_task_inject_prompt_detects_only_inject() {
         assert!(is_scheduled_task_inject_prompt(&pv(
-            r#"{"method":"x.ai/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}"#
+            r#"{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}"#
         )));
         assert!(is_scheduled_task_inject_prompt(&pv(
-            r#"{"method":"_x.ai/scheduled_task_inject_prompt","params":{"method":"x.ai/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}}"#
+            r#"{"method":"_chutes.build/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}}"#
         )));
         assert!(!is_scheduled_task_inject_prompt(&pv(
-            r#"{"method":"x.ai/scheduled_task_fired","params":{"sessionId":"s1"}}"#
+            r#"{"method":"chutes.build/scheduled_task_fired","params":{"sessionId":"s1"}}"#
         )));
         assert!(!is_scheduled_task_inject_prompt(&pv(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1"}}"#
@@ -2803,8 +2807,8 @@ mod tests {
     fn is_interaction_request_detects_only_interaction_methods() {
         for m in [
             "session/request_permission",
-            "x.ai/ask_user_question",
-            "x.ai/exit_plan_mode",
+            "chutes.build/ask_user_question",
+            "chutes.build/exit_plan_mode",
         ] {
             let payload = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"{m}","params":{{}}}}"#);
             assert!(
@@ -2812,7 +2816,10 @@ mod tests {
                 "{m} (direct) must be an interaction"
             );
         }
-        for m in ["x.ai/ask_user_question", "x.ai/exit_plan_mode"] {
+        for m in [
+            "chutes.build/ask_user_question",
+            "chutes.build/exit_plan_mode",
+        ] {
             let payload = format!(
                 r#"{{"jsonrpc":"2.0","id":1,"method":"_{m}","params":{{"method":"{m}","params":{{}}}}}}"#
             );
@@ -2825,14 +2832,14 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"method":"fs/read_text_file","params":{}}"#
         )));
         assert!(!is_interaction_request(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/sessions/changed","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/sessions/changed","params":{}}"#
         )));
     }
     #[test]
     fn extract_interaction_tool_call_id_handles_direct_and_nested() {
         assert_eq!(
             extract_interaction_tool_call_id(&
-            pv(r#"{"id":1,"method":"x.ai/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-q"}}"#))
+            pv(r#"{"id":1,"method":"chutes.build/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-q"}}"#))
             .as_deref(), Some("tc-q")
         );
         assert_eq!(
@@ -2842,7 +2849,7 @@ mod tests {
         );
         assert_eq!(
             extract_interaction_tool_call_id(&
-            pv(r#"{"id":1,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-w"}}}"#))
+            pv(r#"{"id":1,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-w"}}}"#))
             .as_deref(), Some("tc-w")
         );
         assert_eq!(
@@ -2854,17 +2861,17 @@ mod tests {
     fn extract_interaction_resolved_tool_call_id_matches_only_resolved() {
         assert_eq!(
             extract_interaction_resolved_tool_call_id(&
-            pv(r#"{"method":"x.ai/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-r"}}}"#))
+            pv(r#"{"method":"chutes.build/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-r"}}}"#))
             .as_deref(), Some("tc-r")
         );
         assert_eq!(
             extract_interaction_resolved_tool_call_id(&
-            pv(r#"{"method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-rw"}}}}"#))
+            pv(r#"{"method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-rw"}}}}"#))
             .as_deref(), Some("tc-rw")
         );
         assert_eq!(
             extract_interaction_resolved_tool_call_id(&pv(
-                r#"{"method":"x.ai/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"pending_interaction","tool_call_id":"tc-r","kind":"permission"}}}"#
+                r#"{"method":"chutes.build/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"pending_interaction","tool_call_id":"tc-r","kind":"permission"}}}"#
             )),
             None
         );
@@ -2941,7 +2948,7 @@ mod tests {
         let acp = pv(r#"{"params":{"sessionId":"019e-aa","_meta":{"eventId":"019e-aa-42"}}}"#);
         assert_eq!(event_seq_of(&acp), Some(42));
         let ext = pv(
-            r#"{"params":{"method":"x.ai/session/update","params":{"sessionId":"019e-aa","_meta":{"eventId":"019e-aa-7"}}}}"#,
+            r#"{"params":{"method":"chutes.build/session/update","params":{"sessionId":"019e-aa","_meta":{"eventId":"019e-aa-7"}}}}"#,
         );
         assert_eq!(event_seq_of(&ext), Some(7));
         let none = pv(r#"{"params":{"sessionId":"019e-aa","_meta":{}}}"#);
@@ -3279,11 +3286,9 @@ mod tests {
     }
     #[test]
     fn extract_yolo_mode_change_returns_value() {
-        let payload =
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"yolo_mode":true}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
         assert_eq!(extract_yolo_mode_change(&pv(payload)), Some(true));
-        let payload =
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"yolo_mode":false}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":false}}"#;
         assert_eq!(extract_yolo_mode_change(&pv(payload)), Some(false));
     }
     #[test]
@@ -3294,23 +3299,21 @@ mod tests {
     /// Branch 1: an explicit `auto_mode` flag wins, even over `permission_mode`.
     #[test]
     fn extract_auto_mode_change_explicit_flag_wins() {
-        let payload =
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"auto_mode":true}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":true}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), Some(true));
-        let payload =
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"auto_mode":false}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":false}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), Some(false));
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"auto_mode":false,"permission_mode":"auto"}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":false,"permission_mode":"auto"}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), Some(false));
     }
     /// Branch 2: with no explicit flag, derive from `permission_mode`.
     #[test]
     fn extract_auto_mode_change_derives_from_permission_mode() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"permission_mode":"auto"}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"permission_mode":"auto"}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), Some(true));
         for mode in ["ask", "always-approve", "default"] {
             let payload = format!(
-                r#"{{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{{"permission_mode":"{mode}"}}}}"#
+                r#"{{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{{"permission_mode":"{mode}"}}}}"#
             );
             assert_eq!(
                 extract_auto_mode_change(&pv(&payload)),
@@ -3325,8 +3328,7 @@ mod tests {
     fn extract_auto_mode_change_returns_none_when_no_auto_signal() {
         let payload = r#"{"jsonrpc":"2.0","method":"other/method","params":{"auto_mode":true}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), None);
-        let payload =
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"yolo_mode":true}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
         assert_eq!(extract_auto_mode_change(&pv(payload)), None);
     }
     #[test]
@@ -3487,12 +3489,12 @@ mod tests {
     }
     #[test]
     fn extract_session_id_from_nested_params_works() {
-        let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"sess-nested"}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-nested"}}}"#;
         assert_eq!(
             extract_session_id(&pv(payload)),
             Some("sess-nested".to_string())
         );
-        let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/fs_notify","params":{"method":"x.ai/fs_notify","params":{"session_id":"sess-nested-2","event":{}}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/fs_notify","params":{"method":"chutes.build/fs_notify","params":{"session_id":"sess-nested-2","event":{}}}}"#;
         assert_eq!(
             extract_session_id(&pv(payload)),
             Some("sess-nested-2".to_string())
@@ -3505,7 +3507,7 @@ mod tests {
     }
     #[test]
     fn extract_session_id_from_prompt_complete_works() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session/prompt_complete","params":{"sessionId":"sess-prompt"}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session/prompt_complete","params":{"sessionId":"sess-prompt"}}"#;
         assert_eq!(
             extract_session_id_from_prompt_complete(&pv(payload)),
             Some("sess-prompt".to_string())
@@ -3513,12 +3515,12 @@ mod tests {
     }
     #[test]
     fn extract_session_id_from_prompt_complete_ignores_other_methods() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-prompt"}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-prompt"}}"#;
         assert_eq!(extract_session_id_from_prompt_complete(&pv(payload)), None);
     }
     #[test]
     fn extract_child_session_event_spawned() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-1"}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-1"}}}"#;
         match extract_child_session_event(&pv(payload)) {
             Some(ChildSessionEvent::Spawned(id)) => assert_eq!(id, "child-1"),
             other => panic!("Expected Spawned, got {:?}", other),
@@ -3526,7 +3528,7 @@ mod tests {
     }
     #[test]
     fn extract_child_session_event_finished() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-2"}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-2"}}}"#;
         match extract_child_session_event(&pv(payload)) {
             Some(ChildSessionEvent::Finished(id)) => assert_eq!(id, "child-2"),
             other => panic!("Expected Finished, got {:?}", other),
@@ -3534,7 +3536,7 @@ mod tests {
     }
     #[test]
     fn extract_child_session_event_nested_ext_notification() {
-        let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-3"}}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-3"}}}}"#;
         match extract_child_session_event(&pv(payload)) {
             Some(ChildSessionEvent::Spawned(id)) => assert_eq!(id, "child-3"),
             other => panic!("Expected Spawned, got {:?}", other),
@@ -3542,7 +3544,7 @@ mod tests {
     }
     #[test]
     fn extract_child_session_event_nested_ext_notification_finished() {
-        let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-4"}}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-4"}}}}"#;
         match extract_child_session_event(&pv(payload)) {
             Some(ChildSessionEvent::Finished(id)) => assert_eq!(id, "child-4"),
             other => panic!("Expected Finished, got {:?}", other),
@@ -3550,12 +3552,12 @@ mod tests {
     }
     #[test]
     fn extract_child_session_event_none_for_other_updates() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"message_delta","content":"hello"}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"message_delta","content":"hello"}}}"#;
         assert!(extract_child_session_event(&pv(payload)).is_none());
     }
     #[test]
     fn extract_child_session_event_none_without_child_id() {
-        let payload = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned"}}}"#;
+        let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned"}}}"#;
         assert!(extract_child_session_event(&pv(payload)).is_none());
     }
     #[test]
@@ -3682,29 +3684,29 @@ mod tests {
         let mut json = pv(&payload);
         inject_capabilities_into_session_new(&mut json, &caps, "grok-tui", ClientId(42));
         assert_eq!(
-            json["params"]["_meta"]["x.ai/leaderClientId"].as_u64(),
+            json["params"]["_meta"]["chutes.build/leaderClientId"].as_u64(),
             Some(42)
         );
     }
     #[test]
     fn inject_capabilities_does_not_override_existing_leader_client_id() {
         let payload = format!(
-            r#"{{"jsonrpc":"2.0","method":"{}","id":1,"params":{{"sessionId":"sess-1","_meta":{{"x.ai/leaderClientId":7}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"{}","id":1,"params":{{"sessionId":"sess-1","_meta":{{"chutes.build/leaderClientId":7}}}}}}"#,
             AGENT_METHOD_NAMES.session_load
         );
         let caps = ClientCapabilities::default();
         let mut json = pv(&payload);
         inject_capabilities_into_session_new(&mut json, &caps, "grok-tui", ClientId(42));
         assert_eq!(
-            json["params"]["_meta"]["x.ai/leaderClientId"].as_u64(),
+            json["params"]["_meta"]["chutes.build/leaderClientId"].as_u64(),
             Some(7)
         );
     }
     #[test]
     fn extract_target_client_id_some_when_meta_present() {
-        let direct = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","_meta":{"x.ai/leaderClientId":9}}}"#;
+        let direct = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","_meta":{"chutes.build/leaderClientId":9}}}"#;
         assert_eq!(extract_target_client_id(&pv(direct)), Some(ClientId(9)));
-        let nested = r#"{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"params":{"sessionId":"sess-1","_meta":{"x.ai/leaderClientId":11}}}}"#;
+        let nested = r#"{"jsonrpc":"2.0","method":"_chutes.build/session/update","params":{"params":{"sessionId":"sess-1","_meta":{"chutes.build/leaderClientId":11}}}}"#;
         assert_eq!(extract_target_client_id(&pv(nested)), Some(ClientId(11)));
     }
     #[test]
@@ -3718,7 +3720,7 @@ mod tests {
     #[test]
     fn inject_yolo_notification_adds_client_identifier() {
         let mut json = pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"yolo_mode":true}}"#,
+            r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#,
         );
         assert!(inject_client_identity_into_yolo_notification(
             &mut json, "grok-tui"
@@ -3728,7 +3730,7 @@ mod tests {
     }
     #[test]
     fn inject_yolo_notification_skips_non_yolo_methods() {
-        let mut json = pv(r#"{"jsonrpc":"2.0","method":"x.ai/other","params":{"data":1}}"#);
+        let mut json = pv(r#"{"jsonrpc":"2.0","method":"chutes.build/other","params":{"data":1}}"#);
         let before = json.clone();
         assert!(!inject_client_identity_into_yolo_notification(
             &mut json, "grok-tui"
@@ -3805,7 +3807,7 @@ mod tests {
         let payload = make_version_mismatch_notification("0.1.157", "0.1.150")
             .expect("should produce notification");
         let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
-        assert_eq!(json["method"], "x.ai/leader/version_mismatch");
+        assert_eq!(json["method"], "chutes.build/leader/version_mismatch");
         assert_eq!(json["params"]["clientVersion"], "0.1.157");
         assert_eq!(json["params"]["leaderVersion"], "0.1.150");
         assert!(
@@ -4215,7 +4217,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"sess-A","update":{"sessionUpdate":"retry_state","attempt":1,"maxRetries":3,"reason":"transient"}}}}"#
+                r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-A","update":{"sessionUpdate":"retry_state","attempt":1,"maxRetries":3,"reason":"transient"}}}}"#
                     .into(),
             )
             .unwrap();
@@ -4227,7 +4229,7 @@ mod tests {
         match msg {
             ServerMessage::Acp { payload } => {
                 let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
-                assert_eq!(json["method"], "_x.ai/session_notification");
+                assert_eq!(json["method"], "_chutes.build/session_notification");
             }
             other => panic!("Expected Acp message, got {:?}", other),
         }
@@ -4596,7 +4598,7 @@ mod tests {
         cancel.cancel();
     }
     /// When a client disconnects after interacting with a session, the server
-    /// sends an `x.ai/internal/evict_sessions` notification through acp_tx
+    /// sends an `chutes.build/internal/evict_sessions` notification through acp_tx
     /// so the agent can release session memory.
     #[tokio::test]
     async fn evict_sessions_notification_on_disconnect() {
@@ -4651,7 +4653,7 @@ mod tests {
             .expect("channel should not be closed");
         let json: serde_json::Value =
             serde_json::from_str(&eviction_msg).expect("should be valid JSON");
-        assert_eq!(json["method"], "x.ai/internal/evict_sessions");
+        assert_eq!(json["method"], "chutes.build/internal/evict_sessions");
         let session_ids = json["params"]["sessionIds"]
             .as_array()
             .expect("sessionIds should be an array");
@@ -4842,7 +4844,7 @@ mod tests {
         );
         cancel.cancel();
     }
-    /// A `x.ai/scheduled_task_inject_prompt` (cron `/loop` fire) must be routed
+    /// A `chutes.build/scheduled_task_inject_prompt` (cron `/loop` fire) must be routed
     /// to the SINGLE session driver, not fanned out to every subscriber. If it
     /// broadcast, each attached dashboard would enqueue + try to drive the same
     /// cron turn (phantom `#N` queue rows, competing drivers, stuck turns). The
@@ -4862,7 +4864,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_b).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let inject = r#"{"method":"_x.ai/scheduled_task_inject_prompt","params":{"method":"x.ai/scheduled_task_inject_prompt","params":{"sessionId":"sess-cron","taskId":"task-1","prompt":"echo hello","humanSchedule":"every 1m"}}}"#;
+        let inject = r#"{"method":"_chutes.build/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"sess-cron","taskId":"task-1","prompt":"echo hello","humanSchedule":"every 1m"}}}"#;
         response_tx.send(inject.to_string()).unwrap();
         let got_a = next_acp_payload(&mut reader_a).await;
         let got_b = next_acp_payload(&mut reader_b).await;
@@ -4898,7 +4900,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_b).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let req = r#"{"jsonrpc":"2.0","id":501,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-q","questions":[]}}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":501,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-q","questions":[]}}}"#;
         response_tx.send(req.to_string()).unwrap();
         let got_a = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
         let got_b = next_acp_payload_matching(&mut reader_b, "ask_user_question").await;
@@ -4925,7 +4927,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let req = r#"{"jsonrpc":"2.0","id":601,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-late","questions":[]}}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":601,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-late","questions":[]}}}"#;
         response_tx.send(req.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -4983,7 +4985,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-sub","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-sub"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-sub","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-sub"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         assert!(
             next_acp_payload_matching(&mut reader_a, "subagent_spawned")
@@ -5007,7 +5009,7 @@ mod tests {
                 .is_some(),
             "live child updates must reach the reattached client via backfill"
         );
-        let child_reverse = r#"{"jsonrpc":"2.0","id":777,"method":"x.ai/child_thing","params":{"sessionId":"child-sub"}}"#;
+        let child_reverse = r#"{"jsonrpc":"2.0","id":777,"method":"chutes.build/child_thing","params":{"sessionId":"child-sub"}}"#;
         response_tx.send(child_reverse.to_string()).unwrap();
         assert!(
             next_acp_payload_matching(&mut reader_a2, "child_thing")
@@ -5033,7 +5035,7 @@ mod tests {
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
         let spawned_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-fresh","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-fresh"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-fresh","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-fresh"}}}}}}"#,
             a_id.0
         );
         response_tx.send(spawned_replay).unwrap();
@@ -5066,7 +5068,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-sub2","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-sub2"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-sub2","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-sub2"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         let (mut reader_b, mut writer_b) = connect_and_register(&sock_path, "client-b").await;
@@ -5103,7 +5105,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-tear","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-tear"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-tear","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-tear"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         let (mut reader_b, mut writer_b, b_id) =
@@ -5113,7 +5115,7 @@ mod tests {
         let _ = next_acp_payload(&mut reader_b).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
         let finished_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-tear","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-tear"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-tear","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-tear"}}}}}}"#,
             b_id.0
         );
         response_tx.send(finished_replay).unwrap();
@@ -5148,10 +5150,10 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_child = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-nest","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-nest"}}}"#;
+        let spawned_child = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-nest","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-nest"}}}"#;
         response_tx.send(spawned_child.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
-        let spawned_grandchild = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"child-nest","update":{"sessionUpdate":"subagent_spawned","child_session_id":"grandchild-nest"}}}"#;
+        let spawned_grandchild = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"child-nest","update":{"sessionUpdate":"subagent_spawned","child_session_id":"grandchild-nest"}}}"#;
         response_tx.send(spawned_grandchild.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "grandchild-nest").await;
         drop(reader_a);
@@ -5187,13 +5189,13 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_a = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-rep","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-a"}}}"#;
+        let spawned_a = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-rep","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-a"}}}"#;
         response_tx.send(spawned_a.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "child-a").await;
-        let spawned_b = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"child-a","update":{"sessionUpdate":"subagent_spawned","child_session_id":"grandchild-b"}}}"#;
+        let spawned_b = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"child-a","update":{"sessionUpdate":"subagent_spawned","child_session_id":"grandchild-b"}}}"#;
         response_tx.send(spawned_b.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "grandchild-b").await;
-        let finished_a = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-rep","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-a"}}}"#;
+        let finished_a = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-rep","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-a"}}}"#;
         response_tx.send(finished_a.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_finished").await;
         drop(reader_a);
@@ -5227,10 +5229,10 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-dead","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-dead"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-dead","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-dead"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
-        let finished_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-dead","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-dead"}}}"#;
+        let finished_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-dead","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-dead"}}}"#;
         response_tx.send(finished_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_finished").await;
         drop(reader_a);
@@ -5267,13 +5269,13 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-detach","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-detach"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-detach","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-detach"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         drop(reader_a);
         drop(writer_a);
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let finished_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-detach","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-detach"}}}"#;
+        let finished_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-detach","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-detach"}}}"#;
         response_tx.send(finished_live.to_string()).unwrap();
         tokio::time::sleep(Duration::from_millis(30)).await;
         let (mut reader_a2, mut writer_a2) = connect_and_register(&sock_path, "client-a").await;
@@ -5308,7 +5310,7 @@ mod tests {
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
         let spawned_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-leak","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-leak"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-leak","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-leak"}}}}}}"#,
             a_id.0
         );
         response_tx.send(spawned_replay).unwrap();
@@ -5317,7 +5319,7 @@ mod tests {
         drop(writer_a);
         tokio::time::sleep(Duration::from_millis(50)).await;
         let finished_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-leak","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-leak"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-leak","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-leak"}}}}}}"#,
             a_id.0
         );
         response_tx.send(finished_replay).unwrap();
@@ -5353,7 +5355,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-hold","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-hold"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-hold","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-hold"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         let (reader_b, writer_b, b_id) = connect_register_get_id(&sock_path, "client-b").await;
@@ -5361,7 +5363,7 @@ mod tests {
         drop(writer_b);
         tokio::time::sleep(Duration::from_millis(50)).await;
         let finished_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-hold","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-hold"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-hold","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-hold"}}}}}}"#,
             b_id.0
         );
         response_tx.send(finished_replay).unwrap();
@@ -5390,7 +5392,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-union","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-union"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-union","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-union"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         let (mut reader_b, mut writer_b, b_id) =
@@ -5400,7 +5402,7 @@ mod tests {
         let _ = next_acp_payload(&mut reader_b).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
         let spawned_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-union","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-union"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-union","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-union"}}}}}}"#,
             b_id.0
         );
         response_tx.send(spawned_replay).unwrap();
@@ -5437,13 +5439,13 @@ mod tests {
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
         let spawned_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-last","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-last"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-last","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_spawned","child_session_id":"child-last"}}}}}}"#,
             a_id.0
         );
         response_tx.send(spawned_replay).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         let finished_replay = format!(
-            r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"sess-last","_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-last"}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"sess-last","_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}},"update":{{"sessionUpdate":"subagent_finished","child_session_id":"child-last"}}}}}}"#,
             a_id.0
         );
         response_tx.send(finished_replay).unwrap();
@@ -5485,7 +5487,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let spawned_live = r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-midload","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-midload"}}}"#;
+        let spawned_live = r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-midload","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-midload"}}}"#;
         response_tx.send(spawned_live.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
         drop(reader_a);
@@ -5524,7 +5526,7 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let req = r#"{"jsonrpc":"2.0","id":801,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-reconnect","questions":[]}}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":801,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-reconnect","questions":[]}}}"#;
         response_tx.send(req.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -5553,7 +5555,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (sock_path, cancel, response_tx, mut acp_rx) =
             setup_persistent_server_with_agent(&temp).await;
-        let req = r#"{"jsonrpc":"2.0","id":901,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-nosub","questions":[]}}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":901,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-nosub","questions":[]}}}"#;
         response_tx.send(req.to_string()).unwrap();
         tokio::time::sleep(Duration::from_millis(40)).await;
         let (mut reader_a, mut writer_a) = connect_and_register(&sock_path, "client-a").await;
@@ -5579,10 +5581,10 @@ mod tests {
         complete_load(&mut acp_rx, &response_tx).await;
         let _ = next_acp_payload(&mut reader_a).await;
         tokio::time::sleep(Duration::from_millis(30)).await;
-        let req = r#"{"jsonrpc":"2.0","id":701,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-ev","questions":[]}}}"#;
+        let req = r#"{"jsonrpc":"2.0","id":701,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-ev","questions":[]}}}"#;
         response_tx.send(req.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
-        let resolved = r#"{"method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"sess-int","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-ev"}}}}"#;
+        let resolved = r#"{"method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-int","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-ev"}}}}"#;
         response_tx.send(resolved.to_string()).unwrap();
         let _ = next_acp_payload_matching(&mut reader_a, "interaction_resolved").await;
         tokio::time::sleep(Duration::from_millis(30)).await;
@@ -5655,7 +5657,7 @@ mod tests {
         );
         cancel.cancel();
     }
-    /// `x.ai/sessions/changed` is a machine-wide roster notification with no
+    /// `chutes.build/sessions/changed` is a machine-wide roster notification with no
     /// sessionId; it must broadcast to every registered client (not just the
     /// last-active one) so all open dashboards stay in sync.
     #[tokio::test]
@@ -5665,7 +5667,7 @@ mod tests {
         let (mut reader_a, _writer_a) = connect_and_register(&sock_path, "client-a").await;
         let (mut reader_b, _writer_b) = connect_and_register(&sock_path, "client-b").await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let changed = r#"{"jsonrpc":"2.0","method":"x.ai/sessions/changed","params":{"upserted":[{"sessionId":"sess-roster","cwd":"/repo","isWorktree":false,"yolo":false,"activity":"working","resident":true,"lastChangeUnixMs":1,"origin":{"kind":"local"}}],"removed":[]}}"#;
+        let changed = r#"{"jsonrpc":"2.0","method":"chutes.build/sessions/changed","params":{"upserted":[{"sessionId":"sess-roster","cwd":"/repo","isWorktree":false,"yolo":false,"activity":"working","resident":true,"lastChangeUnixMs":1,"origin":{"kind":"local"}}],"removed":[]}}"#;
         response_tx.send(changed.to_string()).unwrap();
         let got_a = next_acp_payload(&mut reader_a).await;
         let got_b = next_acp_payload(&mut reader_b).await;
@@ -5679,11 +5681,11 @@ mod tests {
         );
         cancel.cancel();
     }
-    /// `x.ai/models/update` is a machine-wide catalog notification with no
+    /// `chutes.build/models/update` is a machine-wide catalog notification with no
     /// sessionId; it must broadcast to every registered client so every model
     /// picker refreshes after a config.toml / models_cache.json hot-reload —
     /// not just the last-active client. Uses the production wire form: agent
-    /// ext notifications arrive `_`-prefixed (`_x.ai/models/update`).
+    /// ext notifications arrive `_`-prefixed (`_chutes.build/models/update`).
     #[tokio::test]
     async fn models_update_broadcasts_to_all_clients() {
         let temp = TempDir::new().unwrap();
@@ -5691,7 +5693,7 @@ mod tests {
         let (mut reader_a, _writer_a) = connect_and_register(&sock_path, "client-a").await;
         let (mut reader_b, _writer_b) = connect_and_register(&sock_path, "client-b").await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let update = r#"{"jsonrpc":"2.0","method":"_x.ai/models/update","params":{"currentModelId":"grok-new","availableModels":[{"modelId":"grok-new","name":"Grok New"}]}}"#;
+        let update = r#"{"jsonrpc":"2.0","method":"_chutes.build/models/update","params":{"currentModelId":"grok-new","availableModels":[{"modelId":"grok-new","name":"Grok New"}]}}"#;
         response_tx.send(update.to_string()).unwrap();
         let got_a = next_acp_payload(&mut reader_a).await;
         let got_b = next_acp_payload(&mut reader_b).await;
@@ -5705,7 +5707,7 @@ mod tests {
         );
         cancel.cancel();
     }
-    /// `x.ai/mcp/servers_updated` is a machine-wide MCP-catalog notification
+    /// `chutes.build/mcp/servers_updated` is a machine-wide MCP-catalog notification
     /// with no sessionId (session-agnostic by design); it must broadcast to
     /// every registered client so managed connectors don't vanish from clients
     /// that weren't last-active when the post-initialize background fetch
@@ -5718,7 +5720,7 @@ mod tests {
         let (mut reader_a, _writer_a) = connect_and_register(&sock_path, "client-a").await;
         let (mut reader_b, _writer_b) = connect_and_register(&sock_path, "client-b").await;
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let update = r#"{"jsonrpc":"2.0","method":"_x.ai/mcp/servers_updated","params":{"method":"x.ai/mcp/servers_updated","params":{"mcpServers":[{"name":"grok_com_slack","source":"managed"}]}}}"#;
+        let update = r#"{"jsonrpc":"2.0","method":"_chutes.build/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[{"name":"grok_com_slack","source":"managed"}]}}}"#;
         response_tx.send(update.to_string()).unwrap();
         let got_a = next_acp_payload(&mut reader_a).await;
         let got_b = next_acp_payload(&mut reader_b).await;
@@ -5742,34 +5744,34 @@ mod tests {
     #[test]
     fn machine_wide_broadcast_classifier_matches_both_wire_forms() {
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/sessions/changed","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/sessions/changed","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/models/update","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/models/update","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/mcp/servers_updated","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/mcp/servers_updated","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/announcements/update","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/announcements/update","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"_x.ai/sessions/changed","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"_chutes.build/sessions/changed","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"_x.ai/models/update","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"_chutes.build/models/update","params":{}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"_x.ai/mcp/servers_updated","params":{"method":"x.ai/mcp/servers_updated","params":{"mcpServers":[]}}}"#
+            r#"{"jsonrpc":"2.0","method":"_chutes.build/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[]}}}"#
         )));
         assert!(is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"_x.ai/announcements/update","params":{"method":"x.ai/announcements/update","params":{"gen":2,"announcements":[]}}}"#
+            r#"{"jsonrpc":"2.0","method":"_chutes.build/announcements/update","params":{"method":"chutes.build/announcements/update","params":{"gen":2,"announcements":[]}}}"#
         )));
         assert!(!is_machine_wide_broadcast_notification(&pv(
             r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}"#
         )));
         assert!(!is_machine_wide_broadcast_notification(&pv(
-            r#"{"jsonrpc":"2.0","method":"x.ai/settings/update","params":{}}"#
+            r#"{"jsonrpc":"2.0","method":"chutes.build/settings/update","params":{}}"#
         )));
     }
     /// Verify that the leader injects `codeNavEnabled: true` into session/new
@@ -5945,7 +5947,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-123"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-123"}}}"#
                     .into(),
             )
             .unwrap();
@@ -5956,7 +5958,7 @@ mod tests {
                 .unwrap();
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"child-123","update":{"sessionUpdate":"message_delta","content":"hello"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"child-123","update":{"sessionUpdate":"message_delta","content":"hello"}}}"#
                     .into(),
             )
             .unwrap();
@@ -5991,7 +5993,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-456"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-456"}}}"#
                     .into(),
             )
             .unwrap();
@@ -6002,7 +6004,7 @@ mod tests {
                 .unwrap();
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-456"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-456"}}}"#
                     .into(),
             )
             .unwrap();
@@ -6013,7 +6015,7 @@ mod tests {
                 .unwrap();
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"child-456","update":{"sessionUpdate":"message_delta"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"child-456","update":{"sessionUpdate":"message_delta"}}}"#
                     .into(),
             )
             .unwrap();
@@ -6042,7 +6044,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-789"}}}}"#
+                r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-789"}}}}"#
                     .into(),
             )
             .unwrap();
@@ -6063,7 +6065,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         response_tx
             .send(
-                r#"{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{"sessionId":"child-789","update":{"sessionUpdate":"message_delta"}}}"#
+                r#"{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{"sessionId":"child-789","update":{"sessionUpdate":"message_delta"}}}"#
                     .into(),
             )
             .unwrap();
@@ -6117,7 +6119,7 @@ mod tests {
         response_tx
             .send(
                 format!(
-                    r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"agent_message_chunk"}},"_meta":{{"x.ai/leaderClientId":{}}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"agent_message_chunk"}},"_meta":{{"chutes.build/leaderClientId":{}}}}}}}"#,
                     id_a
                 ),
             )
@@ -6172,7 +6174,7 @@ mod tests {
         response_tx
             .send(
                 format!(
-                    r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"agent_message_chunk"}},"_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"agent_message_chunk"}},"_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}}}}}}"#,
                     id_a
                 ),
             )
@@ -6180,7 +6182,7 @@ mod tests {
         response_tx
             .send(
                 format!(
-                    r#"{{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{{"params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"hook_annotation","message":"m"}},"_meta":{{"isReplay":true,"x.ai/leaderClientId":{}}}}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","method":"_chutes.build/session/update","params":{{"params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"hook_annotation","message":"m"}},"_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}}}}}}}}"#,
                     id_a
                 ),
             )

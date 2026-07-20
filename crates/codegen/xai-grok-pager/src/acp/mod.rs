@@ -86,7 +86,7 @@ pub struct AcpConnection {
     /// resolved by the shell (remote settings / config / env; default OFF) and
     /// advertised in `InitializeResponse.meta.sessionRecap`. The client gates
     /// its automatic away-recap poll and the manual `/recap` on this so a
-    /// disabled feature produces zero `x.ai/recap` traffic. Defaults to `false`
+    /// disabled feature produces zero `chutes.build/recap` traffic. Defaults to `false`
     /// when absent (e.g. an older shell that predates the feature).
     pub session_recap_available: bool,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
@@ -461,10 +461,10 @@ fn client_capabilities_meta(flags: &ConnectFlags) -> serde_json::Value {
     let hunk_mode =
         crate::settings::canonical_hunk_tracker_mode(flags.hunk_tracker_mode.as_deref());
     serde_json::json!({
-        "x.ai/incrementalBashOutput": true,
-        "x.ai/hunkTracker": { "mode": hunk_mode },
-        "x.ai/bashOutputNoColor": true,
-        "x.ai/gitHeadChanged": true,
+        "chutes.build/incrementalBashOutput": true,
+        "chutes.build/hunkTracker": { "mode": hunk_mode },
+        "chutes.build/bashOutputNoColor": true,
+        "chutes.build/gitHeadChanged": true,
     })
 }
 
@@ -646,7 +646,7 @@ pub fn find_interactive_login_method(
 /// Attempt eager auth; on failure fall back to the interactive login screen.
 ///
 /// Errors from `authenticate` are caught so the connection still succeeds.
-/// When `xai.api_key` was advertised, non-interactive credentials were
+/// When `chutes.api_key` was advertised, non-interactive credentials were
 /// available — do not promote to interactive auto-Login (shell owns
 /// unpinned fallthrough; a failed api_key must not open a browser). Otherwise
 /// hand the interactive method for the login screen.
@@ -886,7 +886,7 @@ mod tests {
 
     /// CROSS-CRATE REGRESSION GUARD:
     ///
-    /// Enterprise/BYOK configs (e.g. an enterprise `~/.grok/config.toml` with a
+    /// Enterprise/BYOK configs (e.g. an enterprise `~/.chutes-build/config.toml` with a
     /// `[model.*]` table containing `env_key = "ANTHROPIC_AUTH_TOKEN"`) MUST
     /// NOT send the user to the login screen at startup.
     ///
@@ -894,7 +894,7 @@ mod tests {
     /// it calls the shell-side `build_auth_methods()` with the exact inputs
     /// `MvpAgent::initialize()` would compute for an enterprise user, then feeds
     /// the result into the pager's `startup_auth_metadata()`. If a future
-    /// change re-orders `build_auth_methods()` to put `xai.api_key` anywhere
+    /// change re-orders `build_auth_methods()` to put `chutes.api_key` anywhere
     /// other than first (the shape of a past regression), this test fails
     /// because `startup_auth_metadata()` returns `needs_login = true`.
     ///
@@ -927,7 +927,7 @@ mod tests {
             !needs,
             "shell built auth_methods for a BYOK user, but the pager still \
              reports needs_login = true. Either the shell stopped putting \
-             xai.api_key first or the pager stopped treating xai.api_key as \
+             chutes.api_key first or the pager stopped treating chutes.api_key as \
              a no-login method.",
         );
         assert!(label.is_none());
@@ -935,8 +935,8 @@ mod tests {
         assert_eq!(mode, AuthStartMode::Pending);
     }
 
-    /// Inverse direction: when `xai.api_key` is NOT in the list, the pager
-    /// MUST show the login screen. We assert this with `xai.api_key` present
+    /// Inverse direction: when `chutes.api_key` is NOT in the list, the pager
+    /// MUST show the login screen. We assert this with `chutes.api_key` present
     /// LATER in the list (the shape of a past regression) and confirm the
     /// pager still requires login -- because the pager only inspects
     /// `auth_methods.first()`. This locks the failure mode of the regression:
@@ -946,17 +946,19 @@ mod tests {
     /// either passes or fails on a meaningful new code path.
     #[test]
     fn startup_auth_xai_api_key_not_first_still_requires_login() {
-        use xai_grok_shell::agent::auth_method::{GROK_COM_METHOD_ID, XAI_API_KEY_METHOD_ID};
+        use xai_grok_shell::agent::auth_method::{
+            CHUTES_API_KEY_METHOD_ID, CHUTES_BUILD_COM_METHOD_ID,
+        };
 
         let methods = vec![
-            make_auth_method(GROK_COM_METHOD_ID, "Grok", None),
-            make_auth_method(XAI_API_KEY_METHOD_ID, "xai.api_key", None),
+            make_auth_method(CHUTES_BUILD_COM_METHOD_ID, "Grok", None),
+            make_auth_method(CHUTES_API_KEY_METHOD_ID, "chutes.api_key", None),
         ];
         let (needs, _, _, _) = startup_auth_metadata(&methods);
         assert!(
             needs,
             "with grok.com first, the pager must require login -- pinning \
-             the BAD-ordering failure mode (xai.api_key not first)",
+             the BAD-ordering failure mode (chutes.api_key not first)",
         );
     }
 
@@ -1059,12 +1061,12 @@ mod tests {
         // Rows 1 & 2 of the truth table: nothing set, and a set-but-blank value,
         // both advertise the `agent_only` default (never `""` → AllDirty).
         let absent = client_capabilities_meta(&ConnectFlags::default());
-        assert_eq!(absent["x.ai/hunkTracker"]["mode"], "agent_only");
+        assert_eq!(absent["chutes.build/hunkTracker"]["mode"], "agent_only");
         let blank = client_capabilities_meta(&ConnectFlags {
             hunk_tracker_mode: Some("   ".into()),
             ..Default::default()
         });
-        assert_eq!(blank["x.ai/hunkTracker"]["mode"], "agent_only");
+        assert_eq!(blank["chutes.build/hunkTracker"]["mode"], "agent_only");
     }
 
     #[test]
@@ -1076,7 +1078,7 @@ mod tests {
                 hunk_tracker_mode: Some(raw.into()),
                 ..Default::default()
             });
-            assert_eq!(meta["x.ai/hunkTracker"]["mode"], "off", "raw={raw}");
+            assert_eq!(meta["chutes.build/hunkTracker"]["mode"], "off", "raw={raw}");
         }
     }
 }

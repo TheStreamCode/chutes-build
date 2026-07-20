@@ -1,4 +1,4 @@
-//! Built-in files extracted to `~/.grok/` on startup.
+//! Built-in files extracted to `~/.chutes-build/` on startup.
 
 const BUNDLED_FILES: &[(&str, &str)] = &[("README.md", include_str!("../README.md"))];
 
@@ -14,7 +14,7 @@ pub const BEST_OF_N_SKILL_MD: &str = include_str!("../skills/best-of-n/SKILL.md"
 
 /// Legacy bundled skill names (renamed or removed).
 ///
-/// These directories under `~/.grok/skills/` will be deleted on startup
+/// These directories under `~/.chutes-build/skills/` will be deleted on startup
 /// (during bundled file extraction). This ensures that when a bundled
 /// skill is renamed (e.g. `check` → `check-work`), the old slash command
 /// does not linger on users' machines after an upgrade.
@@ -81,13 +81,13 @@ fn resolve_skill_content(name: &str, raw: &str, grok_home: &std::path::Path) -> 
         // Help skill needs path substitution so absolute paths work.
         "help" => {
             let grok_home_str = format!("{}/", grok_home.to_string_lossy());
-            raw.replace("~/.grok/", &grok_home_str)
+            raw.replace("~/.chutes-build/", &grok_home_str)
         }
         _ => raw.to_string(),
     }
 }
 
-/// Extract bundled files to `~/.grok/` on startup.
+/// Extract bundled files to `~/.chutes-build/` on startup.
 ///
 /// Full extraction runs on every version bump. On same-version startups,
 /// a lightweight check ensures all expected skill files exist on disk —
@@ -280,10 +280,11 @@ mod tests {
         extract_bundled_files(home);
 
         let workspace = tmp.path().join("workspace");
-        std::fs::create_dir_all(workspace.join(".grok").join("skills").join("help")).unwrap();
+        std::fs::create_dir_all(workspace.join(".chutes-build").join("skills").join("help"))
+            .unwrap();
         std::fs::copy(
             home.join("skills/help/SKILL.md"),
-            workspace.join(".grok/skills/help/SKILL.md"),
+            workspace.join(".chutes-build/skills/help/SKILL.md"),
         )
         .unwrap();
 

@@ -46,7 +46,7 @@ impl crate::types::tool_metadata::ToolMetadata for MemoryGetImpl {
         "Read a memory file by path. Returns the file content with line numbers, optionally \
          limited to a range of lines.\n\n\
          Use after `memory_search` returns a relevant result and you need the full context \
-         around a snippet, or to read a specific MEMORY.md file in full.\n\n\
+         around a snippet, or to read a specific memories.md file in full.\n\n\
          Line numbers are 1-based and match the line offsets accepted by the `from` parameter, \
          so targeted follow-up reads or edits can reference exact positions."
     }

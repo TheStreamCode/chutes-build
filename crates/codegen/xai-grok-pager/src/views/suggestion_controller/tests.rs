@@ -1374,7 +1374,7 @@ fn non_matching_edit_tears_down_ghostless_dropdown() {
     assert!(sc.dropdown.items.is_empty());
 }
 
-// -- always-on Tab completion (no GROK_SUGGESTIONS) ------------------------
+// -- always-on Tab completion (no CHUTES_BUILD_SUGGESTIONS) ------------------------
 
 /// Tab-triggered fetches work with the as-you-type pipeline OFF — the
 /// arming bumps the generation and the landing response still installs

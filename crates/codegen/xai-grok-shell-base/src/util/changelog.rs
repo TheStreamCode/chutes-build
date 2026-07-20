@@ -1,7 +1,4 @@
-//! Changelog fetching from CDN with local disk cache.
-//!
-//! Both markdown (`*.external.md`) and JSON (`*.external.json`) changelogs
-//! are published per-version to the CDN at `x.ai/cli/changelogs/`.
+//! Local changelog cache support. Remote changelog fetching is disabled.
 //!
 //! `ChangelogManager::fetch()` retrieves both formats in parallel and
 //! returns a `Changelog` with optional markdown + structured entries.
@@ -12,7 +9,7 @@
 use std::path::PathBuf;
 
 /// CDN base for all changelogs (proxies to GCS, cache-friendly).
-const CHANGELOG_BASE: &str = "https://x.ai/cli/changelogs";
+const CHANGELOG_BASE: &str = "http://127.0.0.1:9/changelogs";
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// A single structured changelog entry from the published JSON changelog.
@@ -63,18 +60,18 @@ impl Default for ChangelogManager {
 
 impl ChangelogManager {
     pub fn new() -> Self {
-        // Prefer live `$GROK_HOME` so harness-injected homes (PTY e2e) always
+        // Prefer live `$CHUTES_BUILD_HOME` so harness-injected homes (PTY e2e) always
         // win over a OnceLock that may have been initialised earlier with a
         // different path in the same process graph.
         Self::from_env_home()
     }
 
     /// Resolve cache paths from the live process environment (not the
-    /// `grok_home()` OnceLock). A seeded `$GROK_HOME` set on the pager
+    /// `grok_home()` OnceLock). A seeded `$CHUTES_BUILD_HOME` set on the pager
     /// process is always honoured even if some earlier init path cached a
     /// different home.
     fn from_env_home() -> Self {
-        let home = std::env::var_os("GROK_HOME")
+        let home = std::env::var_os("CHUTES_BUILD_HOME")
             .map(std::path::PathBuf::from)
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(crate::util::grok_home::grok_home);
@@ -90,10 +87,10 @@ impl ChangelogManager {
     /// to disk. On failure, falls back to the cached copy. Either field
     /// may be `None` if offline with no cache.
     ///
-    /// When `GROK_CHANGELOG_OFFLINE` is set (PTY / integration tests), skip
+    /// When `CHUTES_BUILD_CHANGELOG_OFFLINE` is set (PTY / integration tests), skip
     /// the CDN entirely and read only the disk cache so seeded fixtures win
     /// deterministically without network races. Paths are re-resolved from
-    /// `$GROK_HOME` so harness-injected env always applies.
+    /// `$CHUTES_BUILD_HOME` so harness-injected env always applies.
     ///
     /// JSON is only cached after a successful parse to avoid poisoning the
     /// disk cache with malformed content (the markdown cache is write-through
@@ -101,15 +98,15 @@ impl ChangelogManager {
     pub fn fetch(&self) -> Changelog {
         // Always re-resolve from env so a caller holding an older manager
         // (or OnceLock lag) still reads the live harness home.
-        Self::from_env_home().fetch_with(changelog_offline(), CHANGELOG_BASE)
+        Self::from_env_home().fetch_with(true, CHANGELOG_BASE)
     }
 
     /// Fetch using this manager's already-resolved cache paths, an explicit
     /// offline flag, and an explicit CDN base.
     ///
     /// Split out of [`fetch`] so unit tests can drive it against a temp home
-    /// without mutating process-global env (`GROK_HOME` /
-    /// `GROK_CHANGELOG_OFFLINE`), which races across the parallel test
+    /// without mutating process-global env (`CHUTES_BUILD_HOME` /
+    /// `CHUTES_BUILD_CHANGELOG_OFFLINE`), which races across the parallel test
     /// harness. Passing an unreachable `base` lets a test force a
     /// deterministic CDN miss instead of depending on whether the sandbox
     /// happens to block network. Production callers always go through
@@ -136,7 +133,7 @@ impl ChangelogManager {
         });
 
         // If CDN is unreachable (CI sandboxes, airplane mode), fall back to
-        // any on-disk seed under `$GROK_HOME` even when offline mode was not
+        // any on-disk seed under `$CHUTES_BUILD_HOME` even when offline mode was not
         // explicitly requested — keeps PTY/integration tests deterministic.
         if markdown.is_none() {
             markdown = read_cache(&self.md_cache);
@@ -198,12 +195,6 @@ impl ChangelogManager {
     }
 }
 
-/// When set, `ChangelogManager::fetch` skips the CDN and only reads disk cache.
-/// Used by PTY harness tests that seed `CHANGELOG.{md,json}` under a temp home.
-fn changelog_offline() -> bool {
-    std::env::var_os("GROK_CHANGELOG_OFFLINE").is_some_and(|v| !v.is_empty() && v != "0")
-}
-
 fn read_cache(path: &std::path::Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
@@ -247,7 +238,7 @@ mod tests {
     use super::*;
 
     /// Build a manager pointing at `home` directly, bypassing the global
-    /// `$GROK_HOME` env so tests never race the parallel harness.
+    /// `$CHUTES_BUILD_HOME` env so tests never race the parallel harness.
     fn manager_for(home: &std::path::Path) -> ChangelogManager {
         ChangelogManager {
             md_cache: home.join("CHANGELOG.md"),

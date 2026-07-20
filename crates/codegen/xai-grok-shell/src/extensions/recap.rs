@@ -1,4 +1,4 @@
-//! `x.ai/recap` extension handler.
+//! `chutes.build/recap` extension handler.
 //!
 //! Triggers generation of a session recap — a short "where was I" summary of
 //! the session so far — via [`SessionCommand::Recap`]. This is fire-and-forget:
@@ -31,7 +31,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     tracing::info!(auto = req.auto, "handling /recap request");
 
     // Feature gate: remote setting / `[features] session_recap`
-    // config.toml key / `GROK_SESSION_RECAP` env (default ON). Gates both the
+    // config.toml key / `CHUTES_BUILD_SESSION_RECAP` env (default ON). Gates both the
     // manual `/recap` and the automatic recap.
     if !agent.cfg.borrow().is_session_recap_enabled() {
         tracing::debug!("session recap disabled by config/feature flag; ignoring request");

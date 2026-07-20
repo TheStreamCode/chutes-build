@@ -26,8 +26,8 @@ fn fail_closed_flag(requirements: &toml::Value) -> bool {
 }
 
 /// Env override for [`FAIL_CLOSED_KEY`]. Named for prefix-alignment
-/// with `GROK_MANAGED_CONFIG_URL`; only applies to `requirements.toml`.
-pub(crate) const FAIL_CLOSED_ENV: &str = "GROK_MANAGED_CONFIG_FAIL_CLOSED";
+/// with `CHUTES_BUILD_MANAGED_CONFIG_URL`; only applies to `requirements.toml`.
+pub(crate) const FAIL_CLOSED_ENV: &str = "CHUTES_BUILD_MANAGED_CONFIG_FAIL_CLOSED";
 
 /// Where a requirements layer came from: a file on disk, or the macOS MDM
 /// managed-preferences layer (admin-forced, no file). The typed split keeps a
@@ -40,7 +40,7 @@ pub enum RequirementsSource {
 
 impl RequirementsSource {
     /// Display/provenance label — a file path string, or the synthetic MDM source
-    /// id (`ai.x.grok:…`). For diagnostics and matching only; the MDM layer has no
+    /// id (`ai.x.chutes-build:…`). For diagnostics and matching only; the MDM layer has no
     /// file, so this is a label (`Cow<str>`), never a `Path` to open.
     pub fn label(&self) -> std::borrow::Cow<'_, str> {
         match self {
@@ -56,7 +56,7 @@ pub struct RequirementsLayer {
     pub value: toml::Value,
     pub source: RequirementsSource,
     /// `true` = root-owned system layer. Security decisions must trust this flag,
-    /// not re-derive from the source (`GROK_HOME`-influenced, could carry `..`).
+    /// not re-derive from the source (`CHUTES_BUILD_HOME`-influenced, could carry `..`).
     pub is_system: bool,
 }
 
@@ -113,7 +113,7 @@ pub(crate) fn load_requirements() -> Option<toml::Value> {
 }
 
 /// User requirements layer from `<home>/requirements.toml`, or `None` with no
-/// resolvable user home (rather than reading a cwd-relative `.grok`).
+/// resolvable user home (rather than reading a cwd-relative `.chutes-build`).
 fn load_user_requirements(home: Option<&Path>) -> Option<toml::Value> {
     load_requirements_layer(&home?.join("requirements.toml"))
 }
@@ -230,7 +230,7 @@ pub fn validate_requirements() -> Result<(), RequirementsError> {
 }
 
 /// Validate the user requirements layer if a user home resolves; otherwise a
-/// no-op (no cwd-relative `.grok/requirements.toml` is read or enforced).
+/// no-op (no cwd-relative `.chutes-build/requirements.toml` is read or enforced).
 fn validate_user_requirements(home: Option<&Path>) -> Result<(), RequirementsError> {
     match home {
         Some(g) => validate_requirements_layer(&g.join("requirements.toml")),

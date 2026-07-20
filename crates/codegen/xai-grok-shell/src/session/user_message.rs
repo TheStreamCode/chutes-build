@@ -46,16 +46,21 @@ pub fn construct_user_message_minimal(
             )
         }
     };
-    // Local-timezone date, captured when the prefix is built. Re-stamped on
+    // Local date and time, captured when the prefix is built. Re-stamped on
     // compaction and on resume (build_user_message_prefix), so it stays current
     // across long sessions.
-    let today = chrono::Local::now().format("%Y-%m-%d");
+    let now = chrono::Local::now();
+    let today = now.format("%Y-%m-%d");
+    let local_time = now.format("%H:%M:%S");
+    let timezone = now.format("%:z (%Z)");
     format!(
         r#"<user_info>
 OS Version: {os}
 Shell: {shell}
 Workspace Path: {cwd}
 Today's date: {today}
+Local time: {local_time}
+Time zone: {timezone}
 Note: Prefer using relative paths over absolute paths as tool call args when possible.
 </user_info>"#,
     )
@@ -195,5 +200,13 @@ mod tests {
             user_info = format!("{user_info}\n<git_status>{git_status}</git_status>");
         }
         assert!(!user_info.contains("<git_status>"));
+    }
+
+    #[test]
+    fn minimal_message_includes_local_clock_context() {
+        let message = construct_user_message_minimal(Path::new("."), None);
+        assert!(message.contains("Today's date:"));
+        assert!(message.contains("Local time:"));
+        assert!(message.contains("Time zone:"));
     }
 }

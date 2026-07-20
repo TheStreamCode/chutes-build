@@ -6,7 +6,7 @@
 
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
@@ -427,20 +427,27 @@ async fn run_one_attempt(
 ) -> AttemptOutcome {
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
+            let setup_started = Instant::now();
             let (raw, metadata) = match client.conversation_stream(request).await {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };
+            let setup_elapsed = setup_started.elapsed();
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_chat_completions(teed, metadata, request_id.clone(), idle_timeout);
-            drive_l2(l2, request_id, event_tx, cancel_token, captured, None).await
+            with_stream_setup_latency(
+                drive_l2(l2, request_id, event_tx, cancel_token, captured, None).await,
+                setup_elapsed,
+            )
         }
         ApiBackend::Responses => {
+            let setup_started = Instant::now();
             let (raw, metadata, doom_loop) =
                 match client.conversation_stream_responses(request).await {
                     Ok(parts) => parts,
                     Err(e) => return AttemptOutcome::InitFailed { error: e },
                 };
+            let setup_elapsed = setup_started.elapsed();
             if doom_check.is_none()
                 && let Some(collector) = &doom_loop
             {
@@ -448,18 +455,36 @@ async fn run_one_attempt(
             }
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_responses(teed, metadata, request_id.clone(), idle_timeout, doom_loop);
-            drive_l2(l2, request_id, event_tx, cancel_token, captured, doom_check).await
+            with_stream_setup_latency(
+                drive_l2(l2, request_id, event_tx, cancel_token, captured, doom_check).await,
+                setup_elapsed,
+            )
         }
         ApiBackend::Messages => {
+            let setup_started = Instant::now();
             let (raw, metadata) = match client.conversation_stream_messages(request).await {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };
+            let setup_elapsed = setup_started.elapsed();
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_messages(teed, metadata, request_id.clone(), idle_timeout);
-            drive_l2(l2, request_id, event_tx, cancel_token, captured, None).await
+            with_stream_setup_latency(
+                drive_l2(l2, request_id, event_tx, cancel_token, captured, None).await,
+                setup_elapsed,
+            )
         }
     }
+}
+
+fn with_stream_setup_latency(
+    mut outcome: AttemptOutcome,
+    setup_elapsed: Duration,
+) -> AttemptOutcome {
+    if let AttemptOutcome::Completed { metrics, .. } = &mut outcome {
+        metrics.include_stream_setup_latency(setup_elapsed);
+    }
+    outcome
 }
 
 /// Captured-error cell shared between the tee adapter and the

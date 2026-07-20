@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{AuthManager, GrokAuth};
 
-const GROK_WEB_URL: &str = "https://grok.com";
+const CHUTES_BUILD_WEB_URL: &str = "http://127.0.0.1:9";
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,15 +92,15 @@ pub struct ConversationsClient {
 
 impl ConversationsClient {
     pub fn new(auth: Arc<AuthManager>) -> Self {
-        let base_url = std::env::var("GROK_CONVERSATIONS_BASE_URL")
+        let base_url = std::env::var("CHUTES_BUILD_CONVERSATIONS_BASE_URL")
             .ok()
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                std::env::var("GROK_CODE_WEB_URL")
+                std::env::var("CHUTES_BUILD_CODE_WEB_URL")
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .unwrap_or_else(|| GROK_WEB_URL.to_string());
+            .unwrap_or_else(|| CHUTES_BUILD_WEB_URL.to_string());
         Self {
             http: crate::http::shared_client(),
             base_url,

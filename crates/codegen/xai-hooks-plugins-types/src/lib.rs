@@ -1,6 +1,6 @@
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!
-//! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`
+//! This crate defines the wire format for `chutes.build/hooks/*` and `chutes.build/plugins/*`
 //! ACP extension methods. It is dependency-free (only `serde`) so both
 //! `xai-grok-shell` and `xai-grok-pager` can depend on it without pulling
 //! in domain logic.
@@ -37,11 +37,11 @@ pub enum PluginScope {
 pub enum PluginOrigin {
     /// CLI `--plugin-dir`.
     CliOverride,
-    /// Project `.grok/plugins/`.
+    /// Project `.chutes-build/plugins/`.
     ProjectGrok,
     /// Project `.claude/plugins/`.
     ProjectClaude,
-    /// `$GROK_HOME/plugins/`.
+    /// `$CHUTES_BUILD_HOME/plugins/`.
     UserGrok,
     /// `~/.claude/plugins/`.
     UserClaude,
@@ -202,12 +202,12 @@ pub struct HookInfo {
     pub timeout_ms: u64,
     /// Source directory of the hook definition file.
     pub source_dir: String,
-    /// Whether this hook is disabled via ~/.grok/disabled-hooks.
+    /// Whether this hook is disabled via ~/.chutes-build/disabled-hooks.
     #[serde(default)]
     pub disabled: bool,
 }
 
-/// Response for `x.ai/hooks/list`.
+/// Response for `chutes.build/hooks/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksListResponse {
@@ -274,7 +274,7 @@ pub struct PluginInfo {
     pub conflict: Option<String>,
 }
 
-/// Response for `x.ai/plugins/list`.
+/// Response for `chutes.build/plugins/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsListResponse {
@@ -332,7 +332,7 @@ pub struct McpServerInfo {
     pub config_source: Option<String>,
 }
 
-/// Response for `x.ai/mcp/list` as consumed by the pager.
+/// Response for `chutes.build/mcp/list` as consumed by the pager.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServersListResponse {
@@ -513,7 +513,7 @@ impl PluginComponents {
 // Action types
 // ---------------------------------------------------------------------------
 
-/// Request wrapper for `x.ai/hooks/action`.
+/// Request wrapper for `chutes.build/hooks/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksActionRequest {
@@ -552,7 +552,7 @@ pub enum HooksAction {
     },
 }
 
-/// Request wrapper for `x.ai/plugins/action`.
+/// Request wrapper for `chutes.build/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsActionRequest {
@@ -593,7 +593,7 @@ pub enum PluginsAction {
     },
 }
 
-/// Shared action response for both `x.ai/hooks/action` and `x.ai/plugins/action`.
+/// Shared action response for both `chutes.build/hooks/action` and `chutes.build/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionOutcome {
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn hooks_action_serde_roundtrip() {
         let action = HooksAction::Add {
-            path: "/home/user/.grok/hooks".into(),
+            path: "/home/user/.chutes-build/hooks".into(),
         };
         let json = serde_json::to_string(&action).unwrap();
         let parsed: HooksAction = serde_json::from_str(&json).unwrap();
@@ -707,7 +707,7 @@ mod tests {
             command: Some("check.sh".into()),
             url: None,
             timeout_ms: 5000,
-            source_dir: "/home/user/.grok/hooks".into(),
+            source_dir: "/home/user/.chutes-build/hooks".into(),
             disabled: false,
         };
         let json = serde_json::to_string(&hook).unwrap();
@@ -724,7 +724,7 @@ mod tests {
         let plugin = PluginInfo {
             name: "test-plugin".into(),
             id: "user/abc12345/test-plugin".into(),
-            root: "/home/user/.grok/plugins/test-plugin".into(),
+            root: "/home/user/.chutes-build/plugins/test-plugin".into(),
             scope: PluginScope::User,
             trusted: true,
             enabled: true,
@@ -1094,10 +1094,10 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Marketplace types (wire format for x.ai/marketplace/* ACP endpoints)
+// Marketplace types (wire format for chutes.build/marketplace/* ACP endpoints)
 // ---------------------------------------------------------------------------
 
-/// Response for `x.ai/marketplace/list`.
+/// Response for `chutes.build/marketplace/list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceListResponse {
@@ -1170,7 +1170,7 @@ pub struct MarketplacePluginEntry {
     pub remote_subdir: Option<String>,
 }
 
-/// Request wrapper for `x.ai/marketplace/action`.
+/// Request wrapper for `chutes.build/marketplace/action`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceActionRequest {

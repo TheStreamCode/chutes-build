@@ -1,7 +1,7 @@
 name: plan-nudge-opt-out-no-show
 description: >
   Explicit opt-out: contextual hints now ship default-ON, so this scenario pins
-  the master env `GROK_CONTEXTUAL_HINTS=0` (global kill switch) before typing a
+  the master env `CHUTES_BUILD_CONTEXTUAL_HINTS=0` (global kill switch) before typing a
   planning keyword — the "Planning? Check out plan mode via shift+tab" banner
   must NOT appear. Mirrors plan_nudge_shows (which pins `=1`), exercising the
   disabled path explicitly.
@@ -10,7 +10,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "0"
 mock:
   response: "unused"

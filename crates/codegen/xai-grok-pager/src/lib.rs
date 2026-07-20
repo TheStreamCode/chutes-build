@@ -1,4 +1,4 @@
-//! xai-grok-pager — Grok Build TUI.
+//! Terminal user interface for Chutes Build.
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
 

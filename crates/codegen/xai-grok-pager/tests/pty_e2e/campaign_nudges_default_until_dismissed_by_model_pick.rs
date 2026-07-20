@@ -28,8 +28,8 @@ async fn campaign_nudges_default_until_dismissed_by_model_pick() {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} ok."));
 
     // Seed config.toml with the user's own default model.
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create GROK_HOME");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create CHUTES_BUILD_HOME");
     std::fs::write(
         grok_home.join("config.toml"),
         format!("[models]\ndefault = \"{CONFIG_MODEL}\"\n"),
@@ -38,7 +38,7 @@ async fn campaign_nudges_default_until_dismissed_by_model_pick() {
 
     // The campaign (remote-equivalent) nudges new sessions to CAMPAIGN_MODEL.
     let campaign_env = (
-        "GROK_CAMPAIGNS_OVERRIDE".to_string(),
+        "CHUTES_BUILD_CAMPAIGNS_OVERRIDE".to_string(),
         format!(r#"[{{"id":"{CAMPAIGN_ID}","models":{{"default":"{CAMPAIGN_MODEL}"}}}}]"#),
     );
     let binary = pager_binary().expect("resolve pager binary");

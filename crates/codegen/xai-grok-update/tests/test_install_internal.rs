@@ -1,13 +1,13 @@
 //! End-to-end tests for `install_internal` — the GCS-bucket installer used
 //! when `installer = "internal"` is configured.
 //!
-//! Wires together a wiremock-mocked GCS bucket + an isolated `GROK_HOME`
+//! Wires together a wiremock-mocked GCS bucket + an isolated `CHUTES_BUILD_HOME`
 //! tempdir so we can verify the full install pipeline:
 //!   fetch version → download grok binary → chmod → atomic symlink →
 //!   cleanup_old_downloads → persist installer config.
 //!
 //! The function reads `grok_home()` (a process-wide `OnceLock`), so all
-//! tests in this binary share a single `GROK_HOME` and run serially via
+//! tests in this binary share a single `CHUTES_BUILD_HOME` and run serially via
 //! `#[serial]`.
 
 #![cfg(unix)]
@@ -104,7 +104,7 @@ async fn install_internal_pinned_version_writes_binary_and_symlink() {
         format!("grok-0.1.181-{platform}").as_str()
     );
 
-    // `grok` and `agent` move together — see `swap_managed_bin_links`.
+    // `chutes-build` and `agent` move together — see `swap_managed_bin_links`.
     let agent_link = home.join("bin").join("agent");
     assert!(agent_link.is_symlink(), "agent symlink created");
     let agent_target = std::fs::read_link(&agent_link).unwrap();
@@ -149,8 +149,8 @@ async fn install_internal_updates_stale_agent_symlink_to_new_version() {
     );
 }
 
-/// Rollback regression: if `agent` swap fails after `grok` succeeded,
-/// `grok` must roll back to its prior target (all-or-nothing).
+/// Rollback regression: if `agent` swap fails after `chutes-build` succeeded,
+/// `chutes-build` must roll back to its prior target (all-or-nothing).
 #[tokio::test]
 #[serial]
 async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
@@ -191,8 +191,8 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
     );
 }
 
-/// Absent-prior rollback regression: fresh install (no prior `grok` /
-/// `agent`), sabotaged `agent` swap must *remove* the just-created `grok`
+/// Absent-prior rollback regression: fresh install (no prior `chutes-build` /
+/// `agent`), sabotaged `agent` swap must *remove* the just-created `chutes-build`
 /// link so we don't leave it on the new binary while `agent` is absent.
 #[tokio::test]
 #[serial]
@@ -207,7 +207,7 @@ async fn install_internal_rollback_removes_absent_prior_grok_link() {
     let bin_dir = home.join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
 
-    // No prior `grok`. Sabotage `agent` swap: non-empty directory → EISDIR.
+    // No prior `chutes-build`. Sabotage `agent` swap: non-empty directory → EISDIR.
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -254,7 +254,7 @@ async fn install_internal_chmods_binary_executable() {
 #[serial]
 async fn install_internal_cleans_up_stale_pager_symlink() {
     // Old installations shipped a separate grok-pager binary. Verify the
-    // update removes the stale symlink from ~/.grok/bin/.
+    // update removes the stale symlink from ~/.chutes-build/bin/.
     let _ = test_home();
     reset_home();
     let platform = host_platform();

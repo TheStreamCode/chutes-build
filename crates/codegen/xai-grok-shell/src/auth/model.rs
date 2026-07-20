@@ -8,10 +8,10 @@ pub(crate) const TOKEN_TTL: Duration = Duration::days(30);
 const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes
 
 /// Legacy auth.json scope key. Fallback for old devbox auth files.
-pub(super) const LEGACY_SCOPE: &str = "https://accounts.x.ai/sign-in";
+pub(super) const LEGACY_SCOPE: &str = "disabled::legacy-auth";
 
-/// auth.json scope key for plain API key auth (desktop login, `grok login --api-key`).
-pub const API_KEY_SCOPE: &str = "xai::api_key";
+/// auth.json scope key for plain API key auth (desktop login, `chutes-build login --api-key`).
+pub const API_KEY_SCOPE: &str = "chutes::api_key";
 
 const BLOCKED_REASON_NO_LOGS: &str = "BLOCKED_REASON_NO_LOGS";
 const BLOCKED_REASON_NO_LOGS_MODERATED: &str = "BLOCKED_REASON_NO_LOGS_MODERATED";
@@ -28,7 +28,7 @@ pub enum AuthMode {
     Oidc,
     /// External auth provider binary
     External,
-    /// Plain API key (e.g. from grok-desktop login or `grok login --api-key`)
+    /// Plain API key (e.g. from grok-desktop login or `chutes-build login --api-key`)
     ApiKey,
 }
 
@@ -124,7 +124,7 @@ impl GrokAuth {
     }
 
     /// `true` when the token comes from a first-party xAI account —
-    /// either an OIDC login against https://auth.x.ai (or the local-dev
+    /// either an OIDC login against https://auth.example.com (or the local-dev
     /// equivalent), or an external auth provider that declared an xAI
     /// issuer for its token.
     ///
@@ -299,7 +299,7 @@ pub(crate) fn token_suffix(t: &str) -> &str {
 
 /// Look up auth from the store by scope key.
 ///
-/// Legacy `WebLogin` tokens (from the pre-OIDC `grok login --legacy`
+/// Legacy `WebLogin` tokens (from the pre-OIDC `chutes-build login --legacy`
 /// flow) are skipped — they are validated via a per-request DB lookup
 /// server-side which fails at high volume.  Skipping them here forces
 /// affected users to re-authenticate via OIDC on next launch.
@@ -318,10 +318,10 @@ pub fn lookup_auth(map: &AuthStore, scope: &str) -> Option<GrokAuth> {
     Some(auth)
 }
 
-/// Early-invalidation buffer. Override with `GROK_AUTH_EARLY_INVALIDATION_SECS`
+/// Early-invalidation buffer. Override with `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS`
 /// for testing (e.g. `=5` to shrink the buffer to 5 seconds).
 pub(super) fn early_invalidation() -> Duration {
-    std::env::var("GROK_AUTH_EARLY_INVALIDATION_SECS")
+    std::env::var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|s| Duration::seconds(s as i64))

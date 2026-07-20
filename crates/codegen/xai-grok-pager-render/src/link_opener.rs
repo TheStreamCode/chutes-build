@@ -66,7 +66,7 @@ pub fn browser_unavailable_message(url: &str) -> String {
 pub fn open_url(url: &str) -> bool {
     // Test seam: PTY e2e must observe the open without launching a real
     // browser. When set, append the URL to the file and skip the OS opener.
-    if let Ok(path) = std::env::var("GROK_TEST_OPEN_URL_FILE") {
+    if let Ok(path) = std::env::var("CHUTES_BUILD_TEST_OPEN_URL_FILE") {
         use std::io::Write;
         // Surface misconfiguration: a swallowed write leaves the PTY test
         // failing with a generic timeout and no clue why.
@@ -76,7 +76,7 @@ pub fn open_url(url: &str) -> bool {
             .open(&path)
             .and_then(|mut f| writeln!(f, "{url}"))
         {
-            tracing::warn!(error = %e, path, "GROK_TEST_OPEN_URL_FILE write failed");
+            tracing::warn!(error = %e, path, "CHUTES_BUILD_TEST_OPEN_URL_FILE write failed");
             return false;
         }
         return true;
@@ -292,7 +292,7 @@ pub fn try_open_url(url: &str, filter: SchemeFilter) -> OpenUrlResult {
 /// to opener input from untrusted sources.
 ///
 /// Used by the SuperGrok upsell flow to attribute clicks to `referrer=grok-build`,
-/// matching the OAuth consent screen and x.ai/cli marketing links regardless of
+/// matching the OAuth consent screen and chutes.build/cli marketing links regardless of
 /// what the remote settings `gate_url` value happens to be.
 pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(url) else {
@@ -310,6 +310,7 @@ pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn open_path_command_passes_path_as_a_single_arg() {
         // Path with spaces must be one argument, never shell-interpolated.
@@ -459,39 +460,43 @@ mod tests {
 
     #[test]
     fn ensure_query_param_appends_when_missing() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "grok-build");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=grok-build");
+        let out = ensure_query_param("https://chutes.ai/pricing", "referrer", "chutes-build");
+        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes-build");
     }
 
     #[test]
     fn ensure_query_param_preserves_existing_value() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?referrer=other",
+            "https://chutes.ai/pricing?referrer=other",
             "referrer",
             "grok-build",
         );
-        assert_eq!(out, "https://grok.com/supergrok?referrer=other");
+        assert_eq!(out, "https://chutes.ai/pricing?referrer=other");
     }
 
     #[test]
     fn ensure_query_param_keeps_other_query_pairs() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?heavy=1",
+            "https://chutes.ai/pricing?plan=pro",
             "referrer",
             "grok-build",
         );
         assert_eq!(
             out,
-            "https://grok.com/supergrok?heavy=1&referrer=grok-build"
+            "https://chutes.ai/pricing?plan=pro&referrer=chutes-build"
         );
     }
 
     #[test]
     fn ensure_query_param_preserves_fragment() {
         // The current remote settings value uses a hash fragment for client-side
-        // routing (`grok.com/#supergrok`); we still want the referrer attached.
-        let out = ensure_query_param("https://grok.com/#supergrok", "referrer", "grok-build");
-        assert_eq!(out, "https://grok.com/?referrer=grok-build#supergrok");
+        // A fragment must remain intact while the query parameter is added.
+        let out = ensure_query_param(
+            "https://chutes.ai/pricing#plans",
+            "referrer",
+            "chutes-build",
+        );
+        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes-build#plans");
     }
 
     #[test]
@@ -502,8 +507,8 @@ mod tests {
 
     #[test]
     fn ensure_query_param_url_encodes_value() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "grok build");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=grok+build");
+        let out = ensure_query_param("https://chutes.ai/pricing", "referrer", "chutes build");
+        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes+build");
     }
 
     #[test]
@@ -568,7 +573,7 @@ mod tests {
 
     #[test]
     fn browser_unavailable_message_includes_full_url() {
-        let url = "https://grok.com/supergrok?referrer=grok-build";
+        let url = "https://chutes.ai/pricing?referrer=chutes-build";
         let msg = browser_unavailable_message(url);
         assert!(msg.contains("Could not open a browser"));
         assert!(msg.contains(url));

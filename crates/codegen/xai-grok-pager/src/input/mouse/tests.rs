@@ -1415,7 +1415,7 @@ fn debug_snapshot_tracks_stream_lifecycle_without_mutating() {
 
 #[test]
 fn scroll_log_records_flood_flushes_and_capped_finalize_drop() {
-    // GROK_SCROLL_LOG flight recorder: a trackpad flood on the synthetic
+    // CHUTES_BUILD_SCROLL_LOG flight recorder: a trackpad flood on the synthetic
     // clock must produce parseable JSONL ordered stream_start → flushes →
     // finalize, with ts_ms on the state machine's own timeline and the
     // finalize's flushed/dropped/backlog_after mutually consistent — the

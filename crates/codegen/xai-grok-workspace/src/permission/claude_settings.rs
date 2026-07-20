@@ -514,7 +514,7 @@ pub fn is_claude_import_marked() -> bool {
     // lives in xai-grok-shell (inaccessible from here at runtime). They also
     // set this env var so the workspace-resident gate honours the override
     // without a cross-crate dependency.
-    if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
+    if std::env::var("_CHUTES_BUILD_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }
     let Some(config_path) = xai_grok_config::user_grok_home().map(|g| g.join("config.toml")) else {

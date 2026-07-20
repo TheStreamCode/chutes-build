@@ -1,6 +1,6 @@
 //! Runtime-tunable timing/threshold config for the workspace tool server.
 //!
-//! All values are read once at startup from `GROK_WORKSPACE_*` environment
+//! All values are read once at startup from `CHUTES_BUILD_WORKSPACE_*` environment
 //! variables via [`StatusConfig::from_env`]. Unset or unparseable variables
 //! fall back to the documented defaults (with a `warn!` on parse failure), so
 //! construction never fails.
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 // ── Default timing/threshold values ──────────────────────────────────────
 // Single source of truth for the `StatusConfig::default()` values and the
-// documented fallbacks for each `GROK_WORKSPACE_*` env var.
+// documented fallbacks for each `CHUTES_BUILD_WORKSPACE_*` env var.
 
 /// Default interval between status/heartbeat emissions.
 const DEFAULT_HEARTBEAT_SECS: u64 = 30;
@@ -60,28 +60,28 @@ pub struct StatusConfig {
     pub hub_backoff_base: Duration,
     /// Idle duration after which an inactive session is pruned.
     pub session_idle_prune: Duration,
-    /// Legacy single-phase drain timeout (`GROK_WORKSPACE_DRAIN_TIMEOUT_SECS`),
+    /// Legacy single-phase drain timeout (`CHUTES_BUILD_WORKSPACE_DRAIN_TIMEOUT_SECS`),
     /// retained for compatibility; the SIGTERM and server-evict paths now use the
-    /// two-phase drain bounded by `GROK_WORKSPACE_TERMINATION_GRACE_MS`.
+    /// two-phase drain bounded by `CHUTES_BUILD_WORKSPACE_TERMINATION_GRACE_MS`.
     pub drain_timeout: Duration,
     /// Per-call timeout for agent RPCs.
     pub agent_rpc_timeout: Duration,
     /// Timeout for establishing an agent connection.
     pub agent_connect_timeout: Duration,
-    /// Opt-in foreground-only idle (`GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS`);
+    /// Opt-in foreground-only idle (`CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS`);
     /// requires the literal `"true"` — other spellings fall back to this default.
     pub idle_ignores_background: bool,
     /// Recent preview-proxy traffic withholds idle for this window
-    /// (`GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS`).
+    /// (`CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS`).
     pub preview_activity_window: Duration,
     /// Cadence at which the preview-activity scraper polls the proxy
-    /// (`GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS`); kept strictly
+    /// (`CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS`); kept strictly
     /// below `preview_activity_window` by [`validate`](Self::validate).
     pub preview_activity_scrape_interval: Duration,
     /// True when this container booted via the sandbox restore path, which
-    /// injects `GROK_SESSION_RESTORED=true`; a first boot never does.
+    /// injects `CHUTES_BUILD_SESSION_RESTORED=true`; a first boot never does.
     pub session_restored: bool,
-    /// True when restore injects `GROK_REVIVE_SCRIPT_CONFIGURED=true` (launchable
+    /// True when restore injects `CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED=true` (launchable
     /// revive configured); unset on first boot and non-launchable restores.
     pub revive_script_configured: bool,
 }
@@ -111,47 +111,52 @@ impl Default for StatusConfig {
 }
 
 impl StatusConfig {
-    /// Populate from `GROK_WORKSPACE_*`. Unset or unparseable vars fall
+    /// Populate from `CHUTES_BUILD_WORKSPACE_*`. Unset or unparseable vars fall
     /// back to the default with a `warn!`. Never fails.
     pub fn from_env() -> Self {
         let defaults = Self::default();
         let (agent_rpc, agent_connect) = Self::agent_timeouts_from_env();
         let mut cfg = Self {
-            heartbeat: secs_or("GROK_WORKSPACE_HEARTBEAT_SECS", defaults.heartbeat),
-            keepalive: secs_or("GROK_WORKSPACE_KEEPALIVE_SECS", defaults.keepalive),
-            ws_ping: secs_or("GROK_WORKSPACE_WS_PING_SECS", defaults.ws_ping),
+            heartbeat: secs_or("CHUTES_BUILD_WORKSPACE_HEARTBEAT_SECS", defaults.heartbeat),
+            keepalive: secs_or("CHUTES_BUILD_WORKSPACE_KEEPALIVE_SECS", defaults.keepalive),
+            ws_ping: secs_or("CHUTES_BUILD_WORKSPACE_WS_PING_SECS", defaults.ws_ping),
             ws_reconnect_backoff: backoff_schedule_from_env(
-                "GROK_WORKSPACE_WS_RECONNECT_BACKOFF_MS",
+                "CHUTES_BUILD_WORKSPACE_WS_RECONNECT_BACKOFF_MS",
             ),
             hub_warn_threshold: parse_or(
-                "GROK_WORKSPACE_HUB_WARN_THRESHOLD",
+                "CHUTES_BUILD_WORKSPACE_HUB_WARN_THRESHOLD",
                 defaults.hub_warn_threshold,
             ),
             hub_backoff_base: ms_or(
-                "GROK_WORKSPACE_HUB_BACKOFF_BASE_MS",
+                "CHUTES_BUILD_WORKSPACE_HUB_BACKOFF_BASE_MS",
                 defaults.hub_backoff_base,
             ),
             session_idle_prune: secs_or(
-                "GROK_WORKSPACE_SESSION_IDLE_PRUNE_SECS",
+                "CHUTES_BUILD_WORKSPACE_SESSION_IDLE_PRUNE_SECS",
                 defaults.session_idle_prune,
             ),
-            drain_timeout: secs_or("GROK_WORKSPACE_DRAIN_TIMEOUT_SECS", defaults.drain_timeout),
+            drain_timeout: secs_or(
+                "CHUTES_BUILD_WORKSPACE_DRAIN_TIMEOUT_SECS",
+                defaults.drain_timeout,
+            ),
             agent_rpc_timeout: agent_rpc,
             agent_connect_timeout: agent_connect,
             idle_ignores_background: parse_or(
-                "GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
+                "CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
                 defaults.idle_ignores_background,
             ),
             preview_activity_window: ms_or(
-                "GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
                 defaults.preview_activity_window,
             ),
             preview_activity_scrape_interval: ms_or(
-                "GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
                 defaults.preview_activity_scrape_interval,
             ),
-            session_restored: std::env::var("GROK_SESSION_RESTORED").as_deref() == Ok("true"),
-            revive_script_configured: std::env::var("GROK_REVIVE_SCRIPT_CONFIGURED").as_deref()
+            session_restored: std::env::var("CHUTES_BUILD_SESSION_RESTORED").as_deref()
+                == Ok("true"),
+            revive_script_configured: std::env::var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED")
+                .as_deref()
                 == Ok("true"),
         };
         cfg.validate();
@@ -166,8 +171,8 @@ impl StatusConfig {
     /// [`validate`](Self::validate) (and its possible duplicate `warn!`).
     pub fn agent_timeouts_from_env() -> (Duration, Duration) {
         let defaults = Self::default();
-        const RPC_VAR: &str = "GROK_WORKSPACE_AGENT_RPC_TIMEOUT_SECS";
-        const CONNECT_VAR: &str = "GROK_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS";
+        const RPC_VAR: &str = "CHUTES_BUILD_WORKSPACE_AGENT_RPC_TIMEOUT_SECS";
+        const CONNECT_VAR: &str = "CHUTES_BUILD_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS";
         (
             nonzero_secs_or(
                 RPC_VAR,
@@ -194,7 +199,7 @@ impl StatusConfig {
             tracing::warn!(
                 keepalive = ?self.keepalive,
                 heartbeat = ?self.heartbeat,
-                "GROK_WORKSPACE keepalive <= heartbeat; transport may time out between heartbeats"
+                "CHUTES_BUILD_WORKSPACE keepalive <= heartbeat; transport may time out between heartbeats"
             );
         }
         let min_scrape = Duration::from_millis(MIN_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS);
@@ -211,7 +216,7 @@ impl StatusConfig {
                 window = ?self.preview_activity_window,
                 clamped_scrape = ?scrape,
                 clamped_window = ?window,
-                "GROK_WORKSPACE preview scrape interval/window out of range; clamped to 1ms <= scrape < window"
+                "CHUTES_BUILD_WORKSPACE preview scrape interval/window out of range; clamped to 1ms <= scrape < window"
             );
             self.preview_activity_window = window;
             self.preview_activity_scrape_interval = scrape;
@@ -227,7 +232,7 @@ fn parse_or<T: FromStr>(var: &str, default: T) -> T {
         Ok(raw) => match raw.parse::<T>() {
             Ok(value) => value,
             Err(_) => {
-                tracing::warn!(var, value = %raw, "Unparseable GROK_WORKSPACE value; using default");
+                tracing::warn!(var, value = %raw, "Unparseable CHUTES_BUILD_WORKSPACE value; using default");
                 default
             }
         },
@@ -252,7 +257,7 @@ fn nonzero_secs_or(var: &str, secs: u64, default: Duration) -> Duration {
         tracing::warn!(
             var,
             default = ?default,
-            "GROK_WORKSPACE agent timeout of 0s is invalid; using default"
+            "CHUTES_BUILD_WORKSPACE agent timeout of 0s is invalid; using default"
         );
         return default;
     }
@@ -273,7 +278,7 @@ fn backoff_schedule_from_env(var: &str) -> Option<Vec<Duration>> {
                 tracing::warn!(
                     var,
                     value = %raw,
-                    "Unparseable GROK_WORKSPACE backoff schedule; using SDK default"
+                    "Unparseable CHUTES_BUILD_WORKSPACE backoff schedule; using SDK default"
                 );
                 return None;
             }
@@ -320,7 +325,7 @@ mod tests {
     #[test]
     fn parse_or_unset_returns_default() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_PARSE_OR_UNSET";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_PARSE_OR_UNSET";
         unsafe { std::env::remove_var(var) };
         assert_eq!(parse_or::<u32>(var, 5), 5);
     }
@@ -328,7 +333,7 @@ mod tests {
     #[test]
     fn parse_or_valid_parses() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_PARSE_OR_VALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_PARSE_OR_VALID";
         unsafe { std::env::set_var(var, "42") };
         assert_eq!(parse_or::<u32>(var, 5), 42);
         unsafe { std::env::remove_var(var) };
@@ -337,7 +342,7 @@ mod tests {
     #[test]
     fn parse_or_invalid_falls_back_without_panic() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_PARSE_OR_INVALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_PARSE_OR_INVALID";
         unsafe { std::env::set_var(var, "not-a-number") };
         assert_eq!(parse_or::<u32>(var, 5), 5);
         unsafe { std::env::remove_var(var) };
@@ -346,7 +351,7 @@ mod tests {
     #[test]
     fn secs_or_parses_into_duration() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_SECS_OR_VALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_SECS_OR_VALID";
         unsafe { std::env::set_var(var, "120") };
         assert_eq!(
             secs_or(var, Duration::from_secs(30)),
@@ -358,7 +363,7 @@ mod tests {
     #[test]
     fn secs_or_unset_returns_default() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_SECS_OR_UNSET";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_SECS_OR_UNSET";
         unsafe { std::env::remove_var(var) };
         assert_eq!(
             secs_or(var, Duration::from_secs(30)),
@@ -369,7 +374,7 @@ mod tests {
     #[test]
     fn secs_or_invalid_falls_back_without_panic() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_SECS_OR_INVALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_SECS_OR_INVALID";
         unsafe { std::env::set_var(var, "12.5") };
         assert_eq!(
             secs_or(var, Duration::from_secs(30)),
@@ -381,7 +386,7 @@ mod tests {
     #[test]
     fn ms_or_parses_into_duration() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_MS_OR_VALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_MS_OR_VALID";
         unsafe { std::env::set_var(var, "250") };
         assert_eq!(
             ms_or(var, Duration::from_millis(100)),
@@ -393,7 +398,7 @@ mod tests {
     #[test]
     fn ms_or_invalid_falls_back_without_panic() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_MS_OR_INVALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_MS_OR_INVALID";
         unsafe { std::env::set_var(var, "abc") };
         assert_eq!(
             ms_or(var, Duration::from_millis(100)),
@@ -402,7 +407,7 @@ mod tests {
         unsafe { std::env::remove_var(var) };
     }
 
-    /// With none of the `GROK_WORKSPACE_*` vars set, `from_env` reproduces
+    /// With none of the `CHUTES_BUILD_WORKSPACE_*` vars set, `from_env` reproduces
     /// `StatusConfig::default()` field-for-field.
     ///
     /// This is the one test that touches the real (non-`_TEST_`-prefixed)
@@ -412,21 +417,21 @@ mod tests {
     fn from_env_clean_matches_default() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         for var in [
-            "GROK_WORKSPACE_HEARTBEAT_SECS",
-            "GROK_WORKSPACE_KEEPALIVE_SECS",
-            "GROK_WORKSPACE_WS_PING_SECS",
-            "GROK_WORKSPACE_WS_RECONNECT_BACKOFF_MS",
-            "GROK_WORKSPACE_HUB_WARN_THRESHOLD",
-            "GROK_WORKSPACE_HUB_BACKOFF_BASE_MS",
-            "GROK_WORKSPACE_SESSION_IDLE_PRUNE_SECS",
-            "GROK_WORKSPACE_DRAIN_TIMEOUT_SECS",
-            "GROK_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
-            "GROK_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS",
-            "GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
-            "GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
-            "GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
-            "GROK_SESSION_RESTORED",
-            "GROK_REVIVE_SCRIPT_CONFIGURED",
+            "CHUTES_BUILD_WORKSPACE_HEARTBEAT_SECS",
+            "CHUTES_BUILD_WORKSPACE_KEEPALIVE_SECS",
+            "CHUTES_BUILD_WORKSPACE_WS_PING_SECS",
+            "CHUTES_BUILD_WORKSPACE_WS_RECONNECT_BACKOFF_MS",
+            "CHUTES_BUILD_WORKSPACE_HUB_WARN_THRESHOLD",
+            "CHUTES_BUILD_WORKSPACE_HUB_BACKOFF_BASE_MS",
+            "CHUTES_BUILD_WORKSPACE_SESSION_IDLE_PRUNE_SECS",
+            "CHUTES_BUILD_WORKSPACE_DRAIN_TIMEOUT_SECS",
+            "CHUTES_BUILD_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
+            "CHUTES_BUILD_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS",
+            "CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
+            "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
+            "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
+            "CHUTES_BUILD_SESSION_RESTORED",
+            "CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED",
         ] {
             unsafe { std::env::remove_var(var) };
         }
@@ -458,11 +463,11 @@ mod tests {
     #[test]
     fn from_env_reads_session_restored_true_only() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_SESSION_RESTORED", "true") };
+        unsafe { std::env::set_var("CHUTES_BUILD_SESSION_RESTORED", "true") };
         let restored = StatusConfig::from_env().session_restored;
-        unsafe { std::env::set_var("GROK_SESSION_RESTORED", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_SESSION_RESTORED", "1") };
         let non_canonical = StatusConfig::from_env().session_restored;
-        unsafe { std::env::remove_var("GROK_SESSION_RESTORED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_SESSION_RESTORED") };
         assert!(restored);
         assert!(!non_canonical);
     }
@@ -470,11 +475,11 @@ mod tests {
     #[test]
     fn from_env_reads_revive_script_configured_true_only() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_REVIVE_SCRIPT_CONFIGURED", "true") };
+        unsafe { std::env::set_var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED", "true") };
         let configured = StatusConfig::from_env().revive_script_configured;
-        unsafe { std::env::set_var("GROK_REVIVE_SCRIPT_CONFIGURED", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED", "1") };
         let non_canonical = StatusConfig::from_env().revive_script_configured;
-        unsafe { std::env::remove_var("GROK_REVIVE_SCRIPT_CONFIGURED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED") };
         assert!(configured);
         assert!(!non_canonical);
     }
@@ -482,27 +487,44 @@ mod tests {
     #[test]
     fn from_env_reads_idle_ignore_background_true() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS", "true") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
+                "true",
+            )
+        };
         let cfg = StatusConfig::from_env();
-        unsafe { std::env::remove_var("GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS") };
         assert!(cfg.idle_ignores_background);
     }
 
     #[test]
     fn from_env_reads_preview_activity_window() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS", "120000") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
+                "120000",
+            )
+        };
         let cfg = StatusConfig::from_env();
-        unsafe { std::env::remove_var("GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS") };
         assert_eq!(cfg.preview_activity_window, Duration::from_millis(120_000));
     }
 
     #[test]
     fn from_env_reads_preview_activity_scrape_interval() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS", "5000") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
+                "5000",
+            )
+        };
         let cfg = StatusConfig::from_env();
-        unsafe { std::env::remove_var("GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS") };
+        unsafe {
+            std::env::remove_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS")
+        };
         assert_eq!(
             cfg.preview_activity_scrape_interval,
             Duration::from_millis(5_000)
@@ -557,7 +579,7 @@ mod tests {
     fn nonzero_secs_or_zero_falls_back_to_default() {
         assert_eq!(
             nonzero_secs_or(
-                "GROK_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
+                "CHUTES_BUILD_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
                 0,
                 Duration::from_secs(30)
             ),
@@ -565,7 +587,7 @@ mod tests {
         );
         assert_eq!(
             nonzero_secs_or(
-                "GROK_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS",
+                "CHUTES_BUILD_WORKSPACE_AGENT_CONNECT_TIMEOUT_SECS",
                 0,
                 Duration::from_secs(5)
             ),
@@ -578,7 +600,7 @@ mod tests {
     fn nonzero_secs_or_positive_is_passed_through() {
         assert_eq!(
             nonzero_secs_or(
-                "GROK_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
+                "CHUTES_BUILD_WORKSPACE_AGENT_RPC_TIMEOUT_SECS",
                 12,
                 Duration::from_secs(30)
             ),
@@ -591,7 +613,7 @@ mod tests {
     #[test]
     fn backoff_schedule_unset_returns_none() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_BACKOFF_UNSET";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_BACKOFF_UNSET";
         unsafe { std::env::remove_var(var) };
         assert_eq!(backoff_schedule_from_env(var), None);
     }
@@ -601,7 +623,7 @@ mod tests {
     #[test]
     fn backoff_schedule_valid_list_parses_in_order() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_BACKOFF_VALID";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_BACKOFF_VALID";
         unsafe { std::env::set_var(var, "100, 200,500,1000") };
         assert_eq!(
             backoff_schedule_from_env(var),
@@ -620,7 +642,7 @@ mod tests {
     #[test]
     fn backoff_schedule_malformed_returns_none() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let var = "GROK_WORKSPACE_TEST_BACKOFF_MALFORMED";
+        let var = "CHUTES_BUILD_WORKSPACE_TEST_BACKOFF_MALFORMED";
         unsafe { std::env::set_var(var, "100,not-a-number,500") };
         assert_eq!(backoff_schedule_from_env(var), None);
         unsafe { std::env::remove_var(var) };

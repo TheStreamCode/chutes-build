@@ -18,7 +18,7 @@ fn external_stream_end_to_end() {
     // Resolve through the real config path (double opt-in, gates off).
     let mut cfg = xai_grok_telemetry::external::ExternalOtelConfig::resolve_with(
         |name| match name {
-            "GROK_EXTERNAL_OTEL" => Some("1".into()),
+            "CHUTES_BUILD_EXTERNAL_OTEL" => Some("1".into()),
             "OTEL_LOGS_EXPORTER" | "OTEL_METRICS_EXPORTER" => Some("otlp".into()),
             "OTEL_EXPORTER_OTLP_ENDPOINT" => Some(endpoint.clone()),
             // Keep intervals short so the test is fast; flush() forces anyway.

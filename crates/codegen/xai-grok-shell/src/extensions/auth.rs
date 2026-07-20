@@ -1,4 +1,4 @@
-//! `x.ai/auth/*` and legacy `x.ai/{get,set}ApiKey` extension handlers.
+//! `chutes.build/auth/*` and legacy `chutes.build/{get,set}ApiKey` extension handlers.
 //!
 //! These methods let the client read/write the API key via the agent and
 //! drive the OAuth login flow. The agent is the single source of truth for
@@ -14,15 +14,15 @@ use crate::session::ExtMethodResult;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/auth/getBearerToken" => handle_get_bearer_token(agent).await,
-        "x.ai/getApiKey" => handle_get_api_key(),
-        "x.ai/setApiKey" => handle_set_api_key(args),
-        "x.ai/auth/submit_code" => handle_submit_code(agent, args),
-        "x.ai/auth/get_url" => handle_get_url(agent).await,
-        "x.ai/auth/cancel" => handle_cancel(agent, args),
-        "x.ai/auth/logout" => handle_logout(agent, args).await,
-        "x.ai/auth/info" => handle_info(agent),
-        "x.ai/auth/check_subscription" => handle_check_subscription(agent).await,
+        "chutes.build/auth/getBearerToken" => handle_get_bearer_token(agent).await,
+        "chutes.build/getApiKey" => handle_get_api_key(),
+        "chutes.build/setApiKey" => handle_set_api_key(args),
+        "chutes.build/auth/submit_code" => handle_submit_code(agent, args),
+        "chutes.build/auth/get_url" => handle_get_url(agent).await,
+        "chutes.build/auth/cancel" => handle_cancel(agent, args),
+        "chutes.build/auth/logout" => handle_logout(agent, args).await,
+        "chutes.build/auth/info" => handle_info(agent),
+        "chutes.build/auth/check_subscription" => handle_check_subscription(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -78,18 +78,18 @@ fn handle_set_api_key(args: &acp::ExtRequest) -> ExtResult {
             crate::auth::clear_api_key(&grok_home)
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // SAFETY: ext_method is single-threaded per agent
-            unsafe { std::env::remove_var("XAI_API_KEY") };
+            unsafe { std::env::remove_var("CHUTES_API_KEY") };
         } else {
             crate::auth::store_api_key(&grok_home, k)
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // SAFETY: ext_method is single-threaded per agent
-            unsafe { std::env::set_var("XAI_API_KEY", k) };
+            unsafe { std::env::set_var("CHUTES_API_KEY", k) };
         }
     } else {
         crate::auth::clear_api_key(&grok_home)
             .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
         // SAFETY: ext_method is single-threaded per agent
-        unsafe { std::env::remove_var("XAI_API_KEY") };
+        unsafe { std::env::remove_var("CHUTES_API_KEY") };
     }
     ExtMethodResult::success(serde_json::json!({ "ok": true }))
         .to_ext_response()

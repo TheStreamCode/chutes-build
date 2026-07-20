@@ -253,7 +253,7 @@ mod bind_metadata_tests {
             preset: Some("explore".to_owned()),
             capability_mode: Some("read_only".to_owned()),
             tools: vec![xai_grok_tools_api::ToolConfigEntry {
-                id: "GrokBuild:grep".to_owned(),
+                id: "ChutesBuild:grep".to_owned(),
                 ..Default::default()
             }],
             viewer_ctx: Some(super::WorkspaceViewerContext {

@@ -11,7 +11,7 @@
   },
   {
     "category": "features",
-    "description": "**Added option** to fully disable the hunk tracker via --hunk-tracker-mode, GROK_HUNK_TRACKER, or config.",
+    "description": "**Added option** to fully disable the hunk tracker via --hunk-tracker-mode, CHUTES_BUILD_HUNK_TRACKER, or config.",
     "breaking_change": false
   },
   {

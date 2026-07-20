@@ -2,7 +2,7 @@ use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
 /// Env override for the full crash-handler install gate.
-pub(crate) const ENV_CRASH_HANDLER: &str = "GROK_CRASH_HANDLER";
+pub(crate) const ENV_CRASH_HANDLER: &str = "CHUTES_BUILD_CRASH_HANDLER";
 
 /// Extract `[diagnostics] crash_handler` from one TOML layer.
 fn crash_handler_from_toml(v: Option<&TomlValue>) -> Option<bool> {
@@ -27,7 +27,7 @@ fn resolve_crash_handler_enabled_layers(
 }
 
 /// Resolve whether the full crash handler should be installed.
-/// Precedence: requirements > env (`GROK_CRASH_HANDLER`) >
+/// Precedence: requirements > env (`CHUTES_BUILD_CRASH_HANDLER`) >
 /// user `[diagnostics] crash_handler` > managed > remote settings
 /// `crash_handler_enabled` > default `false`.
 pub fn resolve_crash_handler_enabled(
@@ -98,7 +98,7 @@ mod crash_handler_gate_tests {
     use super::*;
     use crate::agent::config::ConfigSource;
 
-    // `GROK_CRASH_HANDLER` is process-global; serialize and force it unset at
+    // `CHUTES_BUILD_CRASH_HANDLER` is process-global; serialize and force it unset at
     // the top of each test so a developer's shell value can't make these flaky.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn guard() -> std::sync::MutexGuard<'static, ()> {

@@ -429,11 +429,11 @@ mod bind_config_tests {
     #[test]
     fn tools_entries_resolve_to_tool_server_config() {
         let v = serde_json::json!(
-            { "preset" : "explore", "tools" : [{ "id" : "GrokBuild:grep", "params_json" :
+            { "preset" : "explore", "tools" : [{ "id" : "ChutesBuild:grep", "params_json" :
             "{\"max_results\":50}", "name_override" : "search", "params_name_overrides" :
             { "pattern" : "query" }, "behavior_version" : "legacy-0.4.10",
             "description_override" : "Search the codebase", }, { "id" :
-            "GrokBuild:read_file" },], }
+            "ChutesBuild:read_file" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
         let ResolvedToolset::Toolset(resolved) = cfg.resolve(&all_known, false) else {
@@ -447,7 +447,7 @@ mod bind_config_tests {
         );
         assert_eq!(toolset.tools.len(), 2);
         let grep = &toolset.tools[0];
-        assert_eq!(grep.id, "GrokBuild:grep");
+        assert_eq!(grep.id, "ChutesBuild:grep");
         assert_eq!(
             grep.params,
             serde_json::json!({ "max_results" : 50 })
@@ -465,7 +465,7 @@ mod bind_config_tests {
             Some("Search the codebase")
         );
         assert_eq!(grep.kind, None);
-        assert_eq!(toolset.tools[1].id, "GrokBuild:read_file");
+        assert_eq!(toolset.tools[1].id, "ChutesBuild:read_file");
     }
     #[test]
     fn explicit_tool_config_wins_over_tools_entries() {
@@ -713,9 +713,9 @@ pub struct WorkspaceConfig {
     pub event_buffer_capacity: usize,
     /// Pluggable [`SessionContext`] / [`ToolRegistryBuilder`] producer.
     pub session_factory: Arc<dyn SessionContextFactory>,
-    /// Global hook sources (e.g. `~/.claude/settings.json`, `~/.grok/hooks/`).
+    /// Global hook sources (e.g. `~/.claude/settings.json`, `~/.chutes-build/hooks/`).
     pub hook_global_sources: Vec<HookSourceConfig>,
-    /// Project-scoped hook sources (e.g. `<project>/.grok/hooks/`).
+    /// Project-scoped hook sources (e.g. `<project>/.chutes-build/hooks/`).
     pub hook_project_sources: Vec<HookSourceConfig>,
     /// Skill discovery configuration: additional skill paths and
     /// path-prefix ignore list. Stored on `WorkspaceShared` for
@@ -741,7 +741,7 @@ pub struct WorkspaceConfig {
     /// Runtime-tunable timing/threshold config for the tool server.
     pub status_config: crate::status_config::StatusConfig,
     /// Folder-trust verdict for repo-local (project-scoped) LSP servers from
-    /// `<cwd>/.grok/lsp.json`: `false` drops them at load, `true` keeps them. The
+    /// `<cwd>/.chutes-build/lsp.json`: `false` drops them at load, `true` keeps them. The
     /// shell caller resolves the verdict and threads it in; callers without a
     /// folder-trust decision pass `true`.
     pub project_lsp_trusted: bool,
@@ -749,7 +749,7 @@ pub struct WorkspaceConfig {
     /// widening to `default_tool_config`. Set by sandbox-launched standalone
     /// servers; local/CLI embedders keep the default-catalog fallback.
     pub require_explicit_toolset: bool,
-    /// Confine `x.ai/fs/*` / `workspace.fs_*` resolution to the workspace root
+    /// Confine `chutes.build/fs/*` / `workspace.fs_*` resolution to the workspace root
     /// (reject `..`, absolute-outside-root, symlink escapes). Default `false`
     /// (unconfined) — set to `true` only by the workspace server on a remote
     /// sandbox, where the root is a real tenant boundary.
@@ -763,7 +763,7 @@ pub struct WorkspaceServerMetadata {
     /// Sandbox that provisioned this server. Absent for local servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_id: Option<String>,
-    /// Logical sandbox-service session UUID, from the `GROK_SESSION_ID` env
+    /// Logical sandbox-service session UUID, from the `CHUTES_BUILD_SESSION_ID` env
     /// var. Present whenever that var is set (every sandbox container, start
     /// and restore), absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -782,7 +782,7 @@ impl WorkspaceServerMetadata {
     /// Merge an env-sourced logical session id into caller-supplied
     /// tool-server metadata (`None` on the restore/local path).
     ///
-    /// `env_session_id` is the raw `GROK_SESSION_ID`; empty is normalized to
+    /// `env_session_id` is the raw `CHUTES_BUILD_SESSION_ID`; empty is normalized to
     /// absent. An explicit `session_id` already in `metadata` is never
     /// clobbered. A non-object `metadata` value is returned unchanged (a
     /// defensive no-op — the sole caller always sends an object).
@@ -914,7 +914,7 @@ impl std::fmt::Debug for AgentSessionConfig {
 pub enum HookSourceConfig {
     /// A single JSON settings file (e.g. `~/.claude/settings.json`).
     SettingsFile(PathBuf),
-    /// A directory of `*.json` hook files (e.g. `~/.grok/hooks/`).
+    /// A directory of `*.json` hook files (e.g. `~/.chutes-build/hooks/`).
     Directory(PathBuf),
 }
 /// Filesystem isolation strategy for a forked session.

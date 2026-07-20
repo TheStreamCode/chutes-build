@@ -3861,7 +3861,7 @@ async fn subagent_progress_advances_goal_tokens_live_without_double_count() {
                         let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                             continue;
                         };
-                        if args.request.method.as_ref() != "x.ai/session_notification" {
+                        if args.request.method.as_ref() != "chutes.build/session_notification" {
                             continue;
                         }
                         let Ok(v) =

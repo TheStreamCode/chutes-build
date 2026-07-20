@@ -12,7 +12,7 @@
 //! Dictation works on the agent screen (into the prompt) and on the dashboard
 //! (into the dispatch / new-agent input).
 //!
-//! **Scope.** On for the rest of the process; re-open `grok` for a clean slate.
+//! **Scope.** On for the rest of the process; re-open `chutes-build` for a clean slate.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};

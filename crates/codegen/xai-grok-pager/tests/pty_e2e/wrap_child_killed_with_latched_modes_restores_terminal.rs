@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// Dirty-death e2e: when the wrapped child dies with DEC private modes still
-/// latched, `grok wrap` must emit the matching resets so the outer terminal is
+/// latched, `chutes-build wrap` must emit the matching resets so the outer terminal is
 /// not left broken.
 ///
 /// The child SIGKILLs itself after enabling alt screen, all-motion mouse

@@ -93,7 +93,7 @@ impl Iterator for UpdatesIterator {
 const ACP_SESSION_UPDATE_METHOD: &str = "session/update";
 
 /// Method name for xAI extension session/update notifications.
-pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_chutes.build/session/update";
 
 /// A unified session update that can be either an ACP notification or an xAI extension notification.
 /// This allows storing all session updates in chronological order.
@@ -153,7 +153,7 @@ pub(crate) struct SessionUpdateEnvelope {
     #[serde(default)]
     pub timestamp: u64,
     /// The method name identifying the update type.
-    /// Either "session/update" for ACP or "_x.ai/session/update" for xAI extensions.
+    /// Either "session/update" for ACP or "_chutes.build/session/update" for xAI extensions.
     pub method: String,
     /// The actual notification payload.
     pub params: serde_json::Value,
@@ -1783,7 +1783,7 @@ mod tests {
     /// Wrap a xAI notification as the envelope stored in updates.jsonl.
     fn xai_envelope(session_update_json: &str) -> String {
         format!(
-            r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
+            r#"{{"timestamp":1,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
         )
     }
 
@@ -2523,7 +2523,7 @@ mod tests {
             r#"{"eventId":"ev1"}"#,
         );
         // xAI-style line persisted by an older binary: no _meta at all.
-        let old_xai = r#"{"timestamp":2,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"hook_annotation","message":"trailing"}}}"#;
+        let old_xai = r#"{"timestamp":2,"method":"_chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"hook_annotation","message":"trailing"}}}"#;
         let raw = format!("{a1}\n{old_xai}\n");
 
         let prepared = prepare_replay_lines(&raw, Some("ev1"));
@@ -2534,7 +2534,7 @@ mod tests {
         assert_eq!(prepared.lines.len(), 2, "full history is replayed");
 
         // Same history with the trailing line stamped resolves incrementally.
-        let new_xai = r#"{"timestamp":2,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"hook_annotation","message":"trailing"},"_meta":{"eventId":"ev2"}}}"#;
+        let new_xai = r#"{"timestamp":2,"method":"_chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"hook_annotation","message":"trailing"},"_meta":{"eventId":"ev2"}}}"#;
         let raw = format!("{a1}\n{new_xai}\n");
         let prepared = prepare_replay_lines(&raw, Some("ev1"));
         assert!(!prepared.mark_replay);
@@ -3005,12 +3005,12 @@ mod tests {
     fn prepare_replay_reports_spawn_without_finish() {
         let spawn = |id: &str, child: &str| {
             format!(
-                r#"{{"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"subagent_spawned","subagent_id":"{id}","parent_session_id":"s","child_session_id":"{child}","subagent_type":"general-purpose","description":"task"}},"_meta":{{"eventId":"s-1"}}}}}}"#
+                r#"{{"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"subagent_spawned","subagent_id":"{id}","parent_session_id":"s","child_session_id":"{child}","subagent_type":"general-purpose","description":"task"}},"_meta":{{"eventId":"s-1"}}}}}}"#
             )
         };
         let finish = |id: &str| {
             format!(
-                r#"{{"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"subagent_finished","subagent_id":"{id}","child_session_id":"c{id}","status":"completed","tool_calls":0,"turns":0,"duration_ms":0}},"_meta":{{"eventId":"s-2"}}}}}}"#
+                r#"{{"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"subagent_finished","subagent_id":"{id}","child_session_id":"c{id}","status":"completed","tool_calls":0,"turns":0,"duration_ms":0}},"_meta":{{"eventId":"s-2"}}}}}}"#
             )
         };
         // `a` spawns and finishes (paired); `b` only spawns (orphan).

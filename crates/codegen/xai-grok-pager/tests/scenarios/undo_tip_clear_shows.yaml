@@ -1,7 +1,7 @@
 name: undo-tip-clear-shows
 description: >
   Undo tip end-to-end with the contextual-hints master pinned on
-  (`GROK_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
+  (`CHUTES_BUILD_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
   default-ON): wiping a substantial prompt draft with Ctrl+U shows the "… to
   undo" banner. The seen cap is in-memory only, so a fresh run starts uncapped;
   the banner clears on its own ~3s TTL (no early retire on undo).
@@ -10,7 +10,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "1"
 mock:
   response: "unused"

@@ -18,7 +18,7 @@ fn ambient_ctx_injects_session_turn_and_prompt_id() {
 
     let mut cfg = external::ExternalOtelConfig::resolve_with(
         |name| match name {
-            "GROK_EXTERNAL_OTEL" => Some("1".into()),
+            "CHUTES_BUILD_EXTERNAL_OTEL" => Some("1".into()),
             "OTEL_LOGS_EXPORTER" | "OTEL_METRICS_EXPORTER" => Some("otlp".into()),
             "OTEL_EXPORTER_OTLP_ENDPOINT" => Some(endpoint.clone()),
             "OTEL_METRIC_EXPORT_INTERVAL" => Some("150".into()),

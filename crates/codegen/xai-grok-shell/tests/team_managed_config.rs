@@ -3,7 +3,7 @@
 //! the cli-chat-proxy deployment-config route.
 //!
 //! Every test here MUST be `#[serial]`: they share one process-global
-//! `GROK_HOME` (the `grok_home` `OnceLock` allows a single value per process)
+//! `CHUTES_BUILD_HOME` (the `grok_home` `OnceLock` allows a single value per process)
 //! and mutate that directory + process env, so concurrent tests would race.
 
 use std::io::{BufRead, BufReader, Write};
@@ -20,7 +20,7 @@ fn team_identity(id: &str) -> ServingIdentity {
     ServingIdentity::Team(id.to_owned())
 }
 
-/// Shared temp dir used as GROK_HOME for the whole test binary (the grok_home
+/// Shared temp dir used as CHUTES_BUILD_HOME for the whole test binary (the grok_home
 /// `OnceLock` only allows one value per process). Also scrubs/installs the env
 /// this suite depends on, before any test thread reads it.
 fn test_home() -> &'static PathBuf {
@@ -29,15 +29,15 @@ fn test_home() -> &'static PathBuf {
         let path = tempfile::TempDir::new().unwrap().keep();
         // SAFETY: set once at init before other threads read the vars.
         unsafe {
-            std::env::set_var("GROK_HOME", &path);
+            std::env::set_var("CHUTES_BUILD_HOME", &path);
             // Ambient env must not shadow the scenarios under test: a real
             // deployment key, a managed-config opt-out, or a proxy that would
             // intercept the 127.0.0.1 mocks.
             for var in [
-                "GROK_DEPLOYMENT_KEY",
-                "GROK_MANAGED_CONFIG",
-                "GROK_DEPLOYMENT_CONFIG_REFRESH_INTERVAL_SECS",
-                "GROK_DEPLOYMENT_CONFIG_CACHE_TTL_SECS",
+                "CHUTES_BUILD_DEPLOYMENT_KEY",
+                "CHUTES_BUILD_MANAGED_CONFIG",
+                "CHUTES_BUILD_DEPLOYMENT_CONFIG_REFRESH_INTERVAL_SECS",
+                "CHUTES_BUILD_DEPLOYMENT_CONFIG_CACHE_TTL_SECS",
                 "HTTP_PROXY",
                 "HTTPS_PROXY",
                 "ALL_PROXY",
@@ -48,7 +48,7 @@ fn test_home() -> &'static PathBuf {
                 std::env::remove_var(var);
             }
             // Real exponential backoff would add seconds per retry test.
-            std::env::set_var("GROK_DEPLOYMENT_CONFIG_BACKOFF_MS", "10");
+            std::env::set_var("CHUTES_BUILD_DEPLOYMENT_CONFIG_BACKOFF_MS", "10");
         }
         path
     })
@@ -877,7 +877,7 @@ async fn bootstrap_fails_closed_when_managed_policy_compromised() {
     );
 }
 
-/// Live wiring guard: an offline `GROK_DEPLOYMENT_KEY` switch on a fail_closed install must FAIL CLOSED, else a
+/// Live wiring guard: an offline `CHUTES_BUILD_DEPLOYMENT_KEY` switch on a fail_closed install must FAIL CLOSED, else a
 /// regression returning `None` silently disables deploy-key-switch detection. Same-key ALLOW checks the lib's own `blake3(KEY-AAA)` exactly.
 #[tokio::test]
 #[serial]
@@ -896,7 +896,7 @@ async fn managed_policy_gate_fails_closed_on_deployment_key_switch_offline() {
     write_config(&home, &url);
 
     // SAFETY: #[serial] test; the env is restored before any assertion below.
-    unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "KEY-AAA") };
+    unsafe { std::env::set_var("CHUTES_BUILD_DEPLOYMENT_KEY", "KEY-AAA") };
     xai_grok_shell::managed_config::sync()
         .await
         .expect("deployment-key sync should record the fail_closed marker");
@@ -910,22 +910,22 @@ async fn managed_policy_gate_fails_closed_on_deployment_key_switch_offline() {
         .to_string();
     let fail_closed_recorded = v["fail_closed"].as_bool().unwrap_or(false);
 
-    // GROK_MANAGED_CONFIG=0 disables any incidental background fetch (the gate is sync anyway).
+    // CHUTES_BUILD_MANAGED_CONFIG=0 disables any incidental background fetch (the gate is sync anyway).
     // SAFETY: #[serial] test; restored before any assertion below.
-    unsafe { std::env::set_var("GROK_MANAGED_CONFIG", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_CONFIG", "0") };
 
     // Same key A → matching fingerprint → ALLOW (exact-equality vs recorded blake3).
     let gate_same_key = xai_grok_shell::managed_config::managed_policy_gate();
 
     // Switch to a different key B → REFUSE: exercises the full offline wiring.
     // SAFETY: #[serial] test; restored immediately below.
-    unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "KEY-BBB") };
+    unsafe { std::env::set_var("CHUTES_BUILD_DEPLOYMENT_KEY", "KEY-BBB") };
     let gate_switched_key = xai_grok_shell::managed_config::managed_policy_gate();
 
     // SAFETY: #[serial] test; restore env BEFORE asserting so a failed assert can't leak it to later tests.
     unsafe {
-        std::env::remove_var("GROK_DEPLOYMENT_KEY");
-        std::env::remove_var("GROK_MANAGED_CONFIG");
+        std::env::remove_var("CHUTES_BUILD_DEPLOYMENT_KEY");
+        std::env::remove_var("CHUTES_BUILD_MANAGED_CONFIG");
     }
 
     // blake3-256 hex is exactly 64 hex chars — pins the recorded format.
@@ -1273,7 +1273,7 @@ async fn blank_team_id_neither_fails_closed_nor_purges() {
     );
 }
 
-/// The session-start gate reads no env: `GROK_MANAGED_CONFIG_FAIL_CLOSED=0` must NOT disarm a fail_closed
+/// The session-start gate reads no env: `CHUTES_BUILD_MANAGED_CONFIG_FAIL_CLOSED=0` must NOT disarm a fail_closed
 /// refusal (unlike the requirements-layer version check, which the env can only tighten). No local bypass.
 #[tokio::test]
 #[serial]
@@ -1302,18 +1302,18 @@ async fn fail_closed_env_cannot_disarm_the_gate() {
 
     // SAFETY: #[serial] test; both vars restored before the assertion below.
     unsafe {
-        std::env::set_var("GROK_MANAGED_CONFIG", "0"); // offline (the gate is sync anyway)
-        std::env::set_var("GROK_MANAGED_CONFIG_FAIL_CLOSED", "0"); // attempt a local disarm
+        std::env::set_var("CHUTES_BUILD_MANAGED_CONFIG", "0"); // offline (the gate is sync anyway)
+        std::env::set_var("CHUTES_BUILD_MANAGED_CONFIG_FAIL_CLOSED", "0"); // attempt a local disarm
     }
     let gate = xai_grok_shell::managed_config::managed_policy_gate();
     unsafe {
-        std::env::remove_var("GROK_MANAGED_CONFIG");
-        std::env::remove_var("GROK_MANAGED_CONFIG_FAIL_CLOSED");
+        std::env::remove_var("CHUTES_BUILD_MANAGED_CONFIG");
+        std::env::remove_var("CHUTES_BUILD_MANAGED_CONFIG_FAIL_CLOSED");
     }
 
     assert!(
         gate.is_err(),
-        "GROK_MANAGED_CONFIG_FAIL_CLOSED=0 must not disarm the session-start gate (no local bypass)"
+        "CHUTES_BUILD_MANAGED_CONFIG_FAIL_CLOSED=0 must not disarm the session-start gate (no local bypass)"
     );
 }
 
@@ -1570,7 +1570,7 @@ async fn lock_contention_does_not_fall_through_to_team() {
     assert_eq!(*count.lock().unwrap(), 1);
 }
 
-/// `grok setup` with config served but the lock held by another writer reports the
+/// `chutes-build setup` with config served but the lock held by another writer reports the
 /// skip: not Installed (THIS run persisted nothing) and not NothingConfigured (the
 /// server does have config).
 #[tokio::test]
@@ -1881,7 +1881,7 @@ async fn empty_content_deployment_row_does_not_fall_through_to_team() {
     assert!(!home.join("managed_config.toml").exists());
 }
 
-/// `GROK_MANAGED_CONFIG=0` is an explicit opt-out: the post-login sync must
+/// `CHUTES_BUILD_MANAGED_CONFIG=0` is an explicit opt-out: the post-login sync must
 /// make zero requests.
 #[tokio::test]
 #[serial]
@@ -1894,9 +1894,9 @@ async fn managed_config_opt_out_makes_no_requests() {
     write_team_auth(&home, "team-007");
 
     // SAFETY: #[serial] test; restored before returning.
-    unsafe { std::env::set_var("GROK_MANAGED_CONFIG", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_CONFIG", "0") };
     let outcome = xai_grok_shell::managed_config::post_login_sync(None).await;
-    unsafe { std::env::remove_var("GROK_MANAGED_CONFIG") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_MANAGED_CONFIG") };
 
     assert_eq!(
         outcome,

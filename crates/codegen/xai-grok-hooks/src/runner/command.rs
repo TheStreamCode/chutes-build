@@ -57,7 +57,7 @@ pub async fn run_command_hook(
     };
 
     // Check opt-in debug logging.
-    let debug_payloads = std::env::var("GROK_HOOK_DEBUG").is_ok_and(|v| v == "1");
+    let debug_payloads = std::env::var("CHUTES_BUILD_HOOK_DEBUG").is_ok_and(|v| v == "1");
     if debug_payloads {
         tracing::trace!(
             hook_name = %spec.name,
@@ -155,8 +155,8 @@ pub async fn run_command_hook(
     // AFTER any preceding `.env(...)` calls and silently overrides them, so
     // the order matters: we MUST apply user/plugin `extra_env` FIRST and
     // the runner-injected vars LAST. Otherwise a user JSON hook (or a
-    // plugin) can spoof `GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`,
-    // `GROK_WORKSPACE_ROOT`, or `CLAUDE_PROJECT_DIR` -- which are the
+    // plugin) can spoof `CHUTES_BUILD_HOOK_EVENT`, `CHUTES_BUILD_HOOK_NAME`, `CHUTES_BUILD_SESSION_ID`,
+    // `CHUTES_BUILD_WORKSPACE_ROOT`, or `CLAUDE_PROJECT_DIR` -- which are the
     // identity/event signals a hook script consumes for policy and audit.
     // See the `runner_injected_vars_override_extra_env_at_spawn`
     // regression test in `tests/integration.rs` and the rustdoc on
@@ -169,13 +169,16 @@ pub async fn run_command_hook(
         // 1. user/plugin extra_env first (lowest precedence).
         .envs(&spec.extra_env)
         // 2. runner-injected vars last (highest precedence -- always win).
-        .env("GROK_HOOK_EVENT", envelope.hook_event_name.to_string())
-        .env("GROK_HOOK_NAME", &spec.name)
-        .env("GROK_SESSION_ID", ctx.session_id)
-        .env("GROK_WORKSPACE_ROOT", ctx.workspace_root)
+        .env(
+            "CHUTES_BUILD_HOOK_EVENT",
+            envelope.hook_event_name.to_string(),
+        )
+        .env("CHUTES_BUILD_HOOK_NAME", &spec.name)
+        .env("CHUTES_BUILD_SESSION_ID", ctx.session_id)
+        .env("CHUTES_BUILD_WORKSPACE_ROOT", ctx.workspace_root)
         // Compatibility alias for external hooks that read this env name.
-        // Same value as `GROK_WORKSPACE_ROOT`; native `.grok` hooks should use
-        // `GROK_WORKSPACE_ROOT`.
+        // Same value as `CHUTES_BUILD_WORKSPACE_ROOT`; native `.chutes-build` hooks should use
+        // `CHUTES_BUILD_WORKSPACE_ROOT`.
         .env("CLAUDE_PROJECT_DIR", ctx.workspace_root)
         .kill_on_drop(true)
         .spawn()
@@ -274,10 +277,10 @@ pub async fn run_command_hook(
 ///   precedence ordering anyway, but stripping them at load time gives
 ///   users a clear "ignored, reserved key" warning).
 pub(crate) const RUNNER_ALWAYS_SET_ENV: &[&str] = &[
-    "GROK_HOOK_EVENT",
-    "GROK_HOOK_NAME",
-    "GROK_SESSION_ID",
-    "GROK_WORKSPACE_ROOT",
+    "CHUTES_BUILD_HOOK_EVENT",
+    "CHUTES_BUILD_HOOK_NAME",
+    "CHUTES_BUILD_SESSION_ID",
+    "CHUTES_BUILD_WORKSPACE_ROOT",
     "CLAUDE_PROJECT_DIR",
 ];
 
@@ -689,13 +692,13 @@ mod tests {
             url: None,
             url_raw: None,
             timeout_ms: 5000,
-            source_dir: std::path::PathBuf::from("/project/.grok/hooks"),
+            source_dir: std::path::PathBuf::from("/project/.chutes-build/hooks"),
             extra_env: std::collections::HashMap::new(),
         };
         assert_eq!(
             resolve_command_path(&spec),
             Some(std::path::PathBuf::from(
-                "/project/.grok/hooks/bin/check.sh"
+                "/project/.chutes-build/hooks/bin/check.sh"
             ))
         );
     }
@@ -994,7 +997,7 @@ mod tests {
     fn find_unresolved_skips_runner_vars() {
         let env = std::collections::HashMap::new();
         let v = find_unresolved_env_vars(
-            "${GROK_HOOK_EVENT}/${CLAUDE_PROJECT_DIR}/${GROK_SESSION_ID}/foo",
+            "${CHUTES_BUILD_HOOK_EVENT}/${CLAUDE_PROJECT_DIR}/${CHUTES_BUILD_SESSION_ID}/foo",
             &env,
         );
         assert!(
@@ -1159,8 +1162,8 @@ mod tests {
     #[cfg(unix)]
     async fn test_tilde_expansion_runs_via_shell() {
         let tmp = tempfile::tempdir().unwrap();
-        // Create the script at <tmp>/.grok-test-hooks-gb856/tilde-test.sh
-        let hook_dir = tmp.path().join(".grok-test-hooks-gb856");
+        // Create the script at <tmp>/.chutes-build-test-hooks-gb856/tilde-test.sh
+        let hook_dir = tmp.path().join(".chutes-build-test-hooks-gb856");
         std::fs::create_dir_all(&hook_dir).unwrap();
         let script = hook_dir.join("tilde-test.sh");
         std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
@@ -1171,7 +1174,7 @@ mod tests {
             std::fs::set_permissions(&script, perms).unwrap();
         }
 
-        // Inject HOME via extra_env so `sh -c "~/.grok-test-hooks-gb856/..."`
+        // Inject HOME via extra_env so `sh -c "~/.chutes-build-test-hooks-gb856/..."`
         // expands `~` to the temp dir. This avoids depending on the system
         // HOME, which is absent in hermetic sandboxed test runners.
         let mut extra_env = std::collections::HashMap::new();
@@ -1188,9 +1191,9 @@ mod tests {
             matcher: None,
             enabled: true,
             command: Some(std::path::PathBuf::from(
-                "~/.grok-test-hooks-gb856/tilde-test.sh",
+                "~/.chutes-build-test-hooks-gb856/tilde-test.sh",
             )),
-            command_raw: Some("~/.grok-test-hooks-gb856/tilde-test.sh".to_string()),
+            command_raw: Some("~/.chutes-build-test-hooks-gb856/tilde-test.sh".to_string()),
             url: None,
             url_raw: None,
             timeout_ms: 5000,

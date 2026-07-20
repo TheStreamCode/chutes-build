@@ -1976,24 +1976,24 @@ fn reverify(config: Option<u32>) -> u32 {
 #[test]
 #[serial_test::serial]
 fn resolve_goal_reverify_after_env() {
-    unsafe { std::env::remove_var("GROK_GOAL_REVERIFY_AFTER") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER") };
     assert_eq!(reverify(None), GOAL_REVERIFY_AFTER_DEFAULT);
-    unsafe { std::env::set_var("GROK_GOAL_REVERIFY_AFTER", "3") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER", "3") };
     assert_eq!(reverify(Some(9)), 3, "env beats config");
-    unsafe { std::env::set_var("GROK_GOAL_REVERIFY_AFTER", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER", "0") };
     assert_eq!(reverify(None), 1, "0 floors to 1");
-    unsafe { std::env::set_var("GROK_GOAL_REVERIFY_AFTER", "garbage") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER", "garbage") };
     assert_eq!(
         reverify(None),
         GOAL_REVERIFY_AFTER_DEFAULT,
         "invalid falls through"
     );
-    unsafe { std::env::remove_var("GROK_GOAL_REVERIFY_AFTER") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER") };
 }
 #[test]
 #[serial_test::serial]
 fn resolve_goal_reverify_after_config_beats_default_and_floors() {
-    unsafe { std::env::remove_var("GROK_GOAL_REVERIFY_AFTER") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER") };
     assert_eq!(reverify(Some(6)), 6);
     assert_eq!(reverify(Some(0)), 1, "config 0 floors to 1");
 }

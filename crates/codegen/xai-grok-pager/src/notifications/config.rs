@@ -95,6 +95,7 @@ pub enum TitleItem {
     Cwd,
     Model,
     TurnTimer,
+    #[serde(rename = "chutes", alias = "grok")]
     Grok,
     ActionRequired,
 }
@@ -166,7 +167,7 @@ sleep_prevention = true
 progress_bar = true
 # Show an automatic \"where was I\" session recap when you return after being away.
 # Shell session_recap is on by default; disable via [features] session_recap or
-# GROK_SESSION_RECAP=0. Manual /recap uses only the shell flag.
+# CHUTES_BUILD_SESSION_RECAP=0. Manual /recap uses only the shell flag.
 session_recap = true
 # Minimum seconds unfocused (\"stepped away\") before requesting a recap; a
 # debounce against quick tab blips. The \"3 min since the last turn\" timing is
@@ -177,11 +178,11 @@ session_recap_threshold_secs = 30
 # Set the terminal/tab title to reflect agent state.
 enabled = true
 # Items shown in the title. Options: action-required, spinner, activity,
-# session-name, cwd, model, turn-timer, grok
-items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"grok\"]
+# session-name, cwd, model, turn-timer, chutes
+items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"chutes\"]
 
 # [[ui.notifications.hooks]]
-# command = \"terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'\"
+# command = \"terminal-notifier -title 'Chutes Build' -message '$CHUTES_BUILD_MESSAGE'\"
 # events = [\"turn_complete\", \"approval_required\"]
 # only_unfocused = true
 # timeout_secs = 10
@@ -316,7 +317,7 @@ mod tests {
         let toml_str = r#"
             [title]
             enabled = true
-            items = ["action-required", "turn-timer", "session-name"]
+            items = ["action-required", "turn-timer", "session-name", "chutes"]
         "#;
         let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
         assert_eq!(
@@ -325,8 +326,19 @@ mod tests {
                 TitleItem::ActionRequired,
                 TitleItem::TurnTimer,
                 TitleItem::SessionName,
+                TitleItem::Grok,
             ]
         );
+    }
+
+    #[test]
+    fn legacy_grok_title_item_alias_still_deserializes() {
+        let toml_str = r#"
+            [title]
+            items = ["grok"]
+        "#;
+        let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
+        assert_eq!(parsed.title.items, vec![TitleItem::Grok]);
     }
 
     #[test]

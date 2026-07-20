@@ -1,6 +1,6 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
-use xai_grok_shell::extensions::billing::{BillingConfig, Cent, UsagePeriod};
+use xai_grok_shell::extensions::billing::{BillingConfig, Cent, UsagePeriod, UsageWindow};
 /// The invalid-params server detail survives `attach_prompt_usage`
 /// wrapping `error.data` as `{message, promptUsage}`.
 #[test]
@@ -82,7 +82,7 @@ fn prompt_request_meta_omits_screen_mode_when_unset() {
     assert_eq!(meta, serde_json::json!({ "promptId" : "p-2" }));
 }
 /// Text-only interjections must omit the `content` key entirely — the
-/// legacy `x.ai/interject` wire shape stays byte-identical.
+/// legacy `chutes.build/interject` wire shape stays byte-identical.
 #[test]
 fn interject_params_omit_content_when_no_blocks() {
     let sid = acp::SessionId::new("s1");
@@ -98,7 +98,7 @@ fn interject_params_omit_content_when_no_blocks() {
 fn picker_keeps_conversation_with_empty_cwd_and_missing_updated_at() {
     let payload = serde_json::json!(
         { "sessions" : [{ "sessionId" : "conv_abc", "cwd" : "", "summary" :
-        "Compare GPU vendors", "source" : "conversation", "_meta" : { "x.ai/session" : {
+        "Compare GPU vendors", "source" : "conversation", "_meta" : { "chutes.build/session" : {
         "kind" : "chat" } } }] }
     );
     let entries = parse_session_picker_entries(&payload);
@@ -112,7 +112,7 @@ fn picker_keeps_old_conversation_past_cutoff() {
     let payload = serde_json::json!(
         { "sessions" : [{ "sessionId" : "conv_old", "cwd" : "", "summary" :
         "Ancient chat", "source" : "conversation", "updatedAt" : "2020-01-01T00:00:00Z",
-        "_meta" : { "x.ai/session" : { "kind" : "chat" } } }] }
+        "_meta" : { "chutes.build/session" : { "kind" : "chat" } } }] }
     );
     let entries = parse_session_picker_entries(&payload);
     assert_eq!(entries.len(), 1, "old conversation must still render");
@@ -133,7 +133,7 @@ fn picker_keeps_untitled_conversation_as_untitled() {
     let payload = serde_json::json!(
         { "sessions" : [{ "sessionId" : "conv_untitled", "cwd" : "", "summary" : "",
         "source" : "conversation", "updatedAt" : "2026-07-01T00:00:00Z", "_meta" : {
-        "x.ai/session" : { "kind" : "chat" } } }] }
+        "chutes.build/session" : { "kind" : "chat" } } }] }
     );
     let entries = parse_session_picker_entries(&payload);
     assert_eq!(entries.len(), 1, "untitled conversation must not vanish");
@@ -155,7 +155,7 @@ fn picker_still_drops_build_row_with_empty_summary() {
 fn session_list_partial_parses_reasons() {
     let payload = |reason: &str| {
         serde_json::json!(
-            { "sessions" : [], "_meta" : { "x.ai/partial" : { "conversations" : true,
+            { "sessions" : [], "_meta" : { "chutes.build/partial" : { "conversations" : true,
             "reason" : reason } } }
         )
     };
@@ -178,7 +178,7 @@ fn session_list_partial_parses_reasons() {
 #[test]
 fn session_list_partial_absent_for_healthy_or_meta_less_responses() {
     let healthy = serde_json::json!(
-        { "sessions" : [], "_meta" : { "x.ai/partial" : { "conversations" : false } } }
+        { "sessions" : [], "_meta" : { "chutes.build/partial" : { "conversations" : false } } }
     );
     assert_eq!(parse_session_list_partial(& healthy), None);
     let legacy = serde_json::json!({ "sessions" : [] });
@@ -335,6 +335,7 @@ fn empty_billing_config() -> BillingConfig {
     BillingConfig {
         credit_usage_percent: None,
         current_period: None,
+        usage_windows: vec![],
         monthly_limit: None,
         used: None,
         on_demand_cap: None,
@@ -375,6 +376,43 @@ fn credit_balance_falls_back_to_limit_used_when_percent_absent() {
         ..empty_billing_config()
     };
     assert_eq!(credit_balance_from_config(c).usage_pct, 25.0);
+}
+#[test]
+fn credit_balance_preserves_all_chutes_usage_windows() {
+    let four_hour_reset = "2026-07-19T16:00:00Z";
+    let c = BillingConfig {
+        credit_usage_percent: Some(90.0),
+        current_period: Some(UsagePeriod {
+            period_type: Some("CHUTES_USAGE_PERIOD_FOUR_HOUR".into()),
+            start: None,
+            end: Some(four_hour_reset.into()),
+        }),
+        usage_windows: vec![
+            UsageWindow {
+                period_type: "CHUTES_USAGE_PERIOD_MONTHLY".into(),
+                usage_percent: 25.0,
+                reset_at: Some("2026-08-01T00:00:00Z".into()),
+            },
+            UsageWindow {
+                period_type: "CHUTES_USAGE_PERIOD_FOUR_HOUR".into(),
+                usage_percent: 90.0,
+                reset_at: Some(four_hour_reset.into()),
+            },
+        ],
+        ..empty_billing_config()
+    };
+    let balance = credit_balance_from_config(c);
+    assert_eq!(balance.usage_pct, 90.0);
+    assert_eq!(balance.usage_windows.len(), 2);
+    assert_eq!(balance.usage_windows[0].usage_pct, 25.0);
+    assert_eq!(
+        balance.usage_windows[1].period_type,
+        "CHUTES_USAGE_PERIOD_FOUR_HOUR"
+    );
+    assert_eq!(
+        balance.usage_windows[1].period_end_display.as_deref(),
+        Some(expected_period_end_display(four_hour_reset).as_str())
+    );
 }
 /// Match production: RFC 3339 → user's local wall-clock (no zone label).
 fn expected_period_end_display(rfc3339: &str) -> String {
@@ -714,7 +752,7 @@ async fn persist_setting_type_mismatch_errors_simple_mode() {
 }
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-/// Spawn a fake ACP agent that counts `x.ai/yolo_mode_changed`
+/// Spawn a fake ACP agent that counts `chutes.build/yolo_mode_changed`
 /// notifications. Exits when the channel closes.
 fn spawn_fake_acp_agent(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpAgentMessage>,
@@ -724,7 +762,7 @@ fn spawn_fake_acp_agent(
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpAgentMessage::ExtNotification(args) = msg {
-                if args.request.method.as_ref() == "x.ai/yolo_mode_changed" {
+                if args.request.method.as_ref() == "chutes.build/yolo_mode_changed" {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                 }
                 let _ = args.response_tx.send(Ok(()));
@@ -733,11 +771,11 @@ fn spawn_fake_acp_agent(
     });
     counter
 }
-/// Redirect `GROK_HOME` to a tempdir for test isolation.
+/// Redirect `CHUTES_BUILD_HOME` to a tempdir for test isolation.
 fn setup_grok_home_in_tempdir() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir creation");
     unsafe {
-        std::env::set_var("GROK_HOME", tmp.path());
+        std::env::set_var("CHUTES_BUILD_HOME", tmp.path());
     }
     tmp
 }
@@ -831,7 +869,7 @@ async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(
         counter.load(Ordering::SeqCst), 1,
-        "ACP `x.ai/yolo_mode_changed` notification must fire exactly once \
+        "ACP `chutes.build/yolo_mode_changed` notification must fire exactly once \
              on BestEffort path (regardless of disk outcome)",
     );
     assert!(
@@ -1149,7 +1187,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 match args.request.method.as_ref() {
-                    "x.ai/marketplace/list" => {
+                    "chutes.build/marketplace/list" => {
                         let response = serde_json::json!(
                             { "result" : { "sources" : [{ "sourceName" : "test-source",
                             "sourceKind" : "git", "sourceUrlOrPath" :
@@ -1169,7 +1207,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "x.ai/marketplace/action" => {
+                    "chutes.build/marketplace/action" => {
                         action_calls_for_task.fetch_add(1, Ordering::SeqCst);
                         let req: xai_hooks_plugins_types::MarketplaceActionRequest = serde_json::from_str(
                                 args.request.params.get(),
@@ -1202,7 +1240,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "x.ai/plugins/notify-updates" => {
+                    "chutes.build/plugins/notify-updates" => {
                         saw_success_notification_for_task.store(true, Ordering::SeqCst);
                         let raw = serde_json::value::RawValue::from_string("{}".into())
                             .expect("serialize notify response");
@@ -1352,7 +1390,7 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
-                assert_eq!(args.request.method.as_ref(), "x.ai/session/list");
+                assert_eq!(args.request.method.as_ref(), "chutes.build/session/list");
                 let params: serde_json::Value = serde_json::from_str(
                         args.request.params.get(),
                     )
@@ -1553,18 +1591,18 @@ fn subagents_without_plan_produces_no_profile() {
     };
     assert_eq!(flags.agent_profile(), None);
 }
-/// Neutralize `GROK_AGENT` for the profile-matrix tests below: agent-driven
+/// Neutralize `CHUTES_BUILD_AGENT` for the profile-matrix tests below: agent-driven
 /// dev shells export it, which flips `to_meta` into the defer-to-shell
 /// escape hatch and drops `agentProfile` — the tests would then assert the
 /// wrong branch. Empty string counts as unset (`!s.trim().is_empty()`).
-/// Callers must be `#[serial_test::serial(GROK_AGENT)]` (process-global env).
+/// Callers must be `#[serial_test::serial(CHUTES_BUILD_AGENT)]` (process-global env).
 fn without_grok_agent() -> crate::test_util::EnvVarGuard {
-    crate::test_util::EnvVarGuard::set("GROK_AGENT", "")
+    crate::test_util::EnvVarGuard::set("CHUTES_BUILD_AGENT", "")
 }
 /// At the runtime defaults (every `--no-*` flag false → every
 /// `SessionFlags` bool true via `!args.no_*`), `to_meta()` reflects the
 /// full plan profile and no separate `askUserQuestion` toggle.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn runtime_default_flags_produce_plan_meta() {
     let _env = without_grok_agent();
@@ -1581,7 +1619,7 @@ fn runtime_default_flags_produce_plan_meta() {
 }
 /// --plan alone produces meta with `agentProfile` only and a
 /// `askUserQuestion: false` since `ask_user` is off here.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn plan_only_meta() {
     let _env = without_grok_agent();
@@ -1597,7 +1635,7 @@ fn plan_only_meta() {
     assert_eq!(meta["yoloMode"], false);
 }
 /// --plan --subagents selects the full plan profile.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn plan_with_subagents_meta() {
     let _env = without_grok_agent();
@@ -1613,7 +1651,7 @@ fn plan_with_subagents_meta() {
     assert_eq!(meta["yoloMode"], false);
 }
 /// --ask-user alone selects the grok-build-ask-user profile.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn ask_user_alone_meta() {
     let _env = without_grok_agent();
@@ -1629,7 +1667,7 @@ fn ask_user_alone_meta() {
     assert_eq!(meta["yoloMode"], false);
 }
 /// --plan --ask-user: plan already includes ask-user; profile is plan.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn plan_with_ask_user_uses_plan_profile() {
     let _env = without_grok_agent();
@@ -1662,7 +1700,7 @@ fn subagents_alone_emits_only_ask_user_question_disable() {
 }
 /// All three flags on at the runtime default produce grok-build-plan
 /// and no `askUserQuestion` field.
-#[serial_test::serial(GROK_AGENT)]
+#[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn all_flags_meta() {
     let _env = without_grok_agent();
@@ -1768,7 +1806,7 @@ fn to_meta_chat_mode_stamps_kind_and_omits_agent_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("chat_mode must emit meta");
-    assert_eq!(meta["x.ai/session"] ["kind"], "chat");
+    assert_eq!(meta["chutes.build/session"] ["kind"], "chat");
     assert!(
         meta.get("agentProfile").is_none(), "K12: chat mode must omit Build agentProfile"
     );
@@ -1794,7 +1832,7 @@ fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
         scrub_chat_workspace_bind_meta(&mut meta);
     }
     let meta = meta.expect("chat_kind must produce meta");
-    assert_eq!(meta["x.ai/session"] ["kind"], "chat");
+    assert_eq!(meta["chutes.build/session"] ["kind"], "chat");
     assert!(
         meta.get("agentProfile").is_none(),
         "entry chat_kind must strip Build agentProfile"
@@ -1824,7 +1862,7 @@ fn chat_create_meta_never_includes_workspace_bind_keys_when_cloud_fields_set() {
     apply_chat_kind_meta(&mut meta);
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat create must emit meta");
-    assert_eq!(meta["x.ai/session"] ["kind"], "chat");
+    assert_eq!(meta["chutes.build/session"] ["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );
@@ -1837,15 +1875,15 @@ fn chat_load_meta_never_includes_workspace_bind_keys() {
     {
         let obj = meta.get_or_insert_with(acp::Meta::new);
         obj.insert("envId".into(), serde_json::json!("env-poison"));
-        obj.insert("x.ai/cloud_server_id".into(), serde_json::json!("srv-poison"));
+        obj.insert("chutes.build/cloud_server_id".into(), serde_json::json!("srv-poison"));
         obj.insert(
-            "x.ai/cloud_existing_workspace".into(),
+            "chutes.build/cloud_existing_workspace".into(),
             serde_json::json!({ "server_id" : "srv-poison", "cwd" : "/ws", }),
         );
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat load must emit meta");
-    assert_eq!(meta["x.ai/session"] ["kind"], "chat");
+    assert_eq!(meta["chutes.build/session"] ["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );

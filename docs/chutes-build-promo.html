@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>Chutes Build — Motion Intro</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #121212;
+        --surface: #171a18;
+        --white: #f4f6f5;
+        --muted: #8b9490;
+        --accent: #63d297;
+        --accent-soft: #9ae5bc;
+        --line: rgba(255, 255, 255, 0.13);
+        --timeline: 22s;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #0c0c0c;
+        color: var(--white);
+        font-family: var(--sans);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .stage {
+        position: relative;
+        width: min(100vw, calc(100vh * 16 / 9));
+        height: min(100vh, calc(100vw * 9 / 16));
+        isolation: isolate;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(99, 210, 151, 0.065), transparent 36%),
+          var(--background);
+      }
+
+      .stage::before,
+      .stage::after {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        content: "";
+        pointer-events: none;
+      }
+
+      .stage::before {
+        opacity: 0.18;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 100% 4px;
+        mix-blend-mode: screen;
+      }
+
+      .stage::after {
+        background: radial-gradient(circle, transparent 48%, rgba(0, 0, 0, 0.66) 116%);
+      }
+
+      .noise {
+        position: absolute;
+        inset: -60%;
+        z-index: 19;
+        opacity: 0.026;
+        pointer-events: none;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.8'/%3E%3C/svg%3E");
+        animation: noise 180ms steps(2) infinite;
+      }
+
+      .frame {
+        position: absolute;
+        inset: clamp(16px, 2vw, 34px);
+        z-index: 30;
+        pointer-events: none;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .frame::before,
+      .frame::after {
+        position: absolute;
+        width: 48px;
+        height: 1px;
+        content: "";
+        background: var(--accent);
+        box-shadow: 0 0 18px rgba(99, 210, 151, 0.5);
+      }
+
+      .frame::before {
+        top: -1px;
+        left: -1px;
+      }
+
+      .frame::after {
+        right: -1px;
+        bottom: -1px;
+      }
+
+      .hud {
+        position: absolute;
+        z-index: 40;
+        top: clamp(28px, 3vw, 48px);
+        right: clamp(30px, 4vw, 64px);
+        left: clamp(30px, 4vw, 64px);
+        display: flex;
+        justify-content: space-between;
+        color: rgba(244, 244, 245, 0.58);
+        font: 600 clamp(7px, 0.72vw, 11px) / 1 var(--mono);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .hud-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .hud-status i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 12px var(--accent);
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        display: grid;
+        place-items: center;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .intro-inner {
+        width: min(84%, 1180px);
+        display: grid;
+        justify-items: center;
+        gap: clamp(15px, 2vw, 30px);
+      }
+
+      .kicker {
+        margin: 0;
+        color: var(--accent);
+        font: 650 clamp(8px, 0.8vw, 13px) / 1 var(--mono);
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      .logo-shell {
+        position: relative;
+        width: 100%;
+        display: grid;
+        place-items: center;
+        filter: drop-shadow(0 0 24px rgba(99, 210, 151, 0.11));
+      }
+
+      .logo {
+        position: relative;
+        width: max-content;
+        max-width: 100%;
+        margin: 0;
+        overflow: hidden;
+        color: transparent;
+        background: linear-gradient(105deg, #737a76 3%, #f7f8f7 41%, var(--accent) 57%, var(--accent-soft) 69%, #f7f8f7 92%);
+        background-size: 240% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        font: 700 clamp(7px, 1.08vw, 17px) / 1.18 var(--mono);
+        letter-spacing: 0;
+        white-space: pre;
+      }
+
+      .logo::after {
+        position: absolute;
+        inset: 0;
+        content: attr(data-logo);
+        overflow: hidden;
+        color: var(--accent);
+        opacity: 0;
+        white-space: pre;
+        text-shadow: -5px 0 var(--accent), 5px 0 #fff;
+      }
+
+      .intro-line {
+        width: min(84%, 780px);
+        height: 1px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .intro-line::after {
+        display: block;
+        width: 34%;
+        height: 100%;
+        content: "";
+        background: linear-gradient(90deg, transparent, var(--accent), var(--accent-soft), transparent);
+        box-shadow: 0 0 16px rgba(99, 210, 151, 0.55);
+      }
+
+      .tagline {
+        margin: 0;
+        color: rgba(244, 244, 245, 0.67);
+        font: 550 clamp(8px, 0.85vw, 14px) / 1.4 var(--mono);
+        letter-spacing: 0.15em;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      .beat {
+        padding: 8%;
+      }
+
+      .beat-route {
+        --scene-delay: 4.84s;
+      }
+
+      .beat-agents {
+        --scene-delay: 9.02s;
+      }
+
+      .beat-vision {
+        --scene-delay: 13.2s;
+      }
+
+      .beat::before {
+        position: absolute;
+        inset: -16%;
+        z-index: 0;
+        content: "";
+        pointer-events: none;
+        opacity: 0;
+        background: linear-gradient(106deg, transparent 30%, rgba(99, 210, 151, 0.052) 49%, transparent 67%);
+        transform: translateX(-70%);
+      }
+
+      .beat-inner {
+        position: relative;
+        z-index: 1;
+        width: min(86%, 1280px);
+      }
+
+      .beat-index {
+        display: block;
+        margin-bottom: clamp(12px, 2vw, 26px);
+        color: var(--accent);
+        font: 650 clamp(8px, 0.82vw, 13px) / 1 var(--mono);
+        letter-spacing: 0.22em;
+      }
+
+      .beat h2 {
+        max-width: 10ch;
+        margin: 0;
+        padding-bottom: 0.1em;
+        font-size: clamp(48px, 9.5vw, 156px);
+        font-weight: 650;
+        letter-spacing: -0.075em;
+        line-height: 0.78;
+        text-transform: uppercase;
+        will-change: clip-path, transform;
+      }
+
+      .beat h2 span {
+        display: block;
+        color: transparent;
+        -webkit-text-stroke: 1px rgba(244, 244, 245, 0.43);
+        will-change: opacity, transform;
+      }
+
+      .beat-copy {
+        position: absolute;
+        right: 0;
+        bottom: 3%;
+        max-width: 30ch;
+        margin: 0;
+        color: rgba(244, 244, 245, 0.7);
+        font: 540 clamp(10px, 0.96vw, 16px) / 1.62 var(--mono);
+        letter-spacing: 0.04em;
+        will-change: opacity, transform;
+      }
+
+      .route-map,
+      .agent-map,
+      .vision-map {
+        position: absolute;
+        top: 5%;
+        right: -4%;
+        width: 44%;
+        height: 78%;
+        z-index: -1;
+        opacity: 0.64;
+      }
+
+      .motion-map {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .map-line,
+      .map-node,
+      .map-ring {
+        fill: none;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .map-line {
+        stroke: rgba(244, 246, 245, 0.26);
+        stroke-width: 1;
+        stroke-dasharray: 1;
+        stroke-dashoffset: 1;
+      }
+
+      .map-line.is-active {
+        stroke: var(--accent);
+        stroke-width: 1.5;
+        filter: drop-shadow(0 0 5px rgba(99, 210, 151, 0.55));
+      }
+
+      .map-node {
+        stroke: rgba(244, 246, 245, 0.42);
+        stroke-width: 1;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .map-node.is-active {
+        stroke: var(--accent);
+        fill: rgba(99, 210, 151, 0.08);
+        filter: drop-shadow(0 0 6px rgba(99, 210, 151, 0.4));
+      }
+
+      .map-label {
+        fill: rgba(244, 246, 245, 0.58);
+        font: 600 10px var(--mono);
+        letter-spacing: 0.13em;
+      }
+
+      .map-label.is-active {
+        fill: var(--accent-soft);
+      }
+
+      .route-packet {
+        fill: var(--accent);
+        filter: drop-shadow(0 0 7px var(--accent));
+        opacity: 0;
+        offset-path: path("M48 150 H470");
+        offset-rotate: 0deg;
+      }
+
+      .worker-core {
+        fill: rgba(99, 210, 151, 0.11);
+        stroke: var(--accent);
+        stroke-width: 1;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .map-ring {
+        stroke: rgba(99, 210, 151, 0.22);
+        stroke-width: 1;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .vision-sweep {
+        stroke: var(--accent);
+        stroke-width: 1.5;
+        filter: drop-shadow(0 0 7px rgba(99, 210, 151, 0.65));
+        transform-origin: 260px 150px;
+        opacity: 0;
+      }
+
+      .capability {
+        opacity: 0;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .running .route-map .map-line {
+        animation: route-draw var(--timeline) ease-in-out infinite;
+      }
+
+      .running .route-map .route-packet {
+        animation: route-packet var(--timeline) ease-in-out infinite;
+      }
+
+      .running .agent-map .map-line {
+        animation: agent-fanout var(--timeline) ease-in-out infinite;
+      }
+
+      .running .agent-map .map-node,
+      .running .agent-map .worker-core {
+        animation: worker-online var(--timeline) cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+      }
+
+      .running .agent-map .worker-two {
+        animation-delay: 140ms;
+      }
+
+      .running .agent-map .worker-three {
+        animation-delay: 280ms;
+      }
+
+      .running .vision-map .map-ring {
+        animation: vision-lock var(--timeline) ease-out infinite;
+      }
+
+      .running .vision-map .vision-sweep {
+        animation: vision-sweep var(--timeline) linear infinite;
+      }
+
+      .running .vision-map .capability {
+        animation: capability-lock var(--timeline) ease-out infinite;
+      }
+
+      .running .vision-map .capability-two {
+        animation-delay: 140ms;
+      }
+
+      .running .vision-map .capability-three {
+        animation-delay: 280ms;
+      }
+
+      .final-inner {
+        width: min(82%, 1100px);
+        display: grid;
+        justify-items: center;
+        gap: clamp(18px, 2.5vw, 38px);
+        text-align: center;
+      }
+
+      .final-mark {
+        color: var(--accent);
+        font: 700 clamp(9px, 0.95vw, 15px) / 1 var(--mono);
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+      }
+
+      .final h2 {
+        margin: 0;
+        font-size: clamp(54px, 10vw, 166px);
+        font-weight: 650;
+        letter-spacing: -0.08em;
+        line-height: 0.82;
+      }
+
+      .final h2 span {
+        display: block;
+        color: transparent;
+        -webkit-text-stroke: 1px rgba(244, 244, 245, 0.43);
+      }
+
+      .command {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: min(100%, 430px);
+        padding: clamp(11px, 1.2vw, 18px) clamp(15px, 1.6vw, 24px);
+        color: rgba(244, 244, 245, 0.78);
+        border: 1px solid rgba(99, 210, 151, 0.24);
+        background: rgba(99, 210, 151, 0.025);
+        box-shadow: inset 0 0 24px rgba(99, 210, 151, 0.025);
+        font: 540 clamp(8px, 0.9vw, 14px) / 1 var(--mono);
+        text-align: left;
+      }
+
+      .command b {
+        color: var(--accent);
+        font-weight: 650;
+      }
+
+      .command small {
+        margin-left: auto;
+        color: var(--accent-soft);
+        font: 700 clamp(7px, 0.65vw, 10px) / 1 var(--mono);
+        letter-spacing: 0.18em;
+      }
+
+      .cursor {
+        width: 0.62em;
+        height: 1.05em;
+        margin-left: -5px;
+        background: var(--accent);
+        box-shadow: 0 0 10px rgba(99, 210, 151, 0.5);
+        animation: cursor 800ms steps(1) infinite;
+      }
+
+      .footer-hud {
+        position: absolute;
+        z-index: 45;
+        right: clamp(30px, 4vw, 64px);
+        bottom: clamp(27px, 3vw, 46px);
+        left: clamp(30px, 4vw, 64px);
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .progress {
+        position: relative;
+        flex: 1;
+        height: 1px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.13);
+      }
+
+      .progress::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+        box-shadow: 0 0 12px rgba(99, 210, 151, 0.45);
+        transform: scaleX(0);
+        transform-origin: left;
+      }
+
+      .timecode {
+        width: 48px;
+        color: rgba(244, 244, 245, 0.42);
+        font: 600 clamp(7px, 0.66vw, 10px) / 1 var(--mono);
+        letter-spacing: 0.08em;
+      }
+
+      .controls {
+        position: absolute;
+        z-index: 60;
+        right: clamp(29px, 3.9vw, 63px);
+        bottom: clamp(49px, 5.2vw, 82px);
+        display: flex;
+        gap: 7px;
+        opacity: 0;
+        transition: opacity 180ms ease;
+      }
+
+      .stage:hover .controls,
+      .controls:focus-within {
+        opacity: 1;
+      }
+
+      .controls button {
+        min-width: 38px;
+        height: 32px;
+        padding: 0 10px;
+        color: rgba(244, 244, 245, 0.7);
+        border: 1px solid var(--line);
+        background: rgba(18, 18, 18, 0.9);
+        cursor: pointer;
+        font: 650 10px / 1 var(--mono);
+        transition: color 150ms ease, border-color 150ms ease;
+      }
+
+      .controls button:hover,
+      .controls button:focus-visible {
+        color: var(--white);
+        border-color: var(--accent);
+        outline: none;
+      }
+
+      .running .intro {
+        animation: intro-scene var(--timeline) linear infinite;
+      }
+
+      .running .logo {
+        animation: logo-reveal var(--timeline) cubic-bezier(0.2, 0.78, 0.2, 1) infinite;
+      }
+
+      .running .logo::after {
+        animation: glitch var(--timeline) steps(1) infinite;
+      }
+
+      .running .intro-line::after {
+        animation: line-scan var(--timeline) ease-in-out infinite;
+      }
+
+      .running .beat-route {
+        animation: beat-one var(--timeline) linear infinite;
+      }
+
+      .running .beat-agents {
+        animation: beat-two var(--timeline) linear infinite;
+      }
+
+      .running .beat-vision {
+        animation: beat-three var(--timeline) linear infinite;
+      }
+
+      .running .beat-inner {
+        animation: content-motion var(--timeline) cubic-bezier(0.2, 0.78, 0.2, 1) infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .beat::before {
+        animation: scene-sweep var(--timeline) ease-in-out infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .beat-index {
+        animation: index-reveal var(--timeline) ease-out infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .beat h2 {
+        animation: headline-reveal var(--timeline) cubic-bezier(0.2, 0.78, 0.2, 1) infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .beat h2 span {
+        animation: outline-reveal var(--timeline) cubic-bezier(0.2, 0.78, 0.2, 1) infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .beat-copy {
+        animation: copy-reveal var(--timeline) ease-out infinite;
+        animation-delay: var(--scene-delay);
+      }
+
+      .running .final {
+        animation: final-scene var(--timeline) linear infinite;
+      }
+
+      .running .final-inner {
+        animation: final-motion var(--timeline) cubic-bezier(0.2, 0.78, 0.2, 1) infinite;
+      }
+
+      .running .progress::after {
+        animation: progress var(--timeline) linear infinite;
+      }
+
+      .paused *,
+      .paused *::before,
+      .paused *::after {
+        animation-play-state: paused !important;
+      }
+
+      @keyframes intro-scene {
+        0%, 2% { opacity: 0; }
+        4%, 21% { opacity: 1; }
+        24%, 100% { opacity: 0; }
+      }
+
+      @keyframes logo-reveal {
+        0%, 3% { clip-path: inset(0 100% 0 0); transform: translateY(12px); background-position: 100% 0; }
+        9% { clip-path: inset(0); transform: translateY(0); }
+        19% { background-position: -80% 0; }
+        100% { clip-path: inset(0); background-position: -80% 0; }
+      }
+
+      @keyframes glitch {
+        0%, 10.8%, 12.2%, 17.3%, 18.1%, 100% { opacity: 0; clip-path: inset(0); transform: none; }
+        11% { opacity: 0.55; clip-path: inset(14% 0 63% 0); transform: translateX(8px); }
+        11.5% { opacity: 0.38; clip-path: inset(68% 0 8% 0); transform: translateX(-6px); }
+        17.5% { opacity: 0.42; clip-path: inset(42% 0 35% 0); transform: translateX(5px); }
+      }
+
+      @keyframes line-scan {
+        0%, 4% { transform: translateX(-120%); }
+        16%, 100% { transform: translateX(310%); }
+      }
+
+      @keyframes beat-one {
+        0%, 22% { opacity: 0; }
+        25%, 40% { opacity: 1; }
+        43%, 100% { opacity: 0; }
+      }
+
+      @keyframes beat-two {
+        0%, 41% { opacity: 0; }
+        44%, 59% { opacity: 1; }
+        62%, 100% { opacity: 0; }
+      }
+
+      @keyframes beat-three {
+        0%, 60% { opacity: 0; }
+        63%, 78% { opacity: 1; }
+        81%, 100% { opacity: 0; }
+      }
+
+      @keyframes content-motion {
+        0% { transform: translateY(30px) scale(0.988); filter: blur(2.4px); }
+        3%, 18% { transform: none; filter: none; }
+        21% { transform: translateY(-18px) scale(1.006); filter: blur(1.8px); }
+        22%, 100% { transform: translateY(-18px) scale(1.006); filter: blur(1.8px); }
+      }
+
+      @keyframes scene-sweep {
+        0% { opacity: 0; transform: translateX(-70%); }
+        7% { opacity: 1; transform: translateX(0); }
+        18% { opacity: 0; transform: translateX(65%); }
+        21%, 100% { opacity: 0; transform: translateX(70%); }
+      }
+
+      @keyframes index-reveal {
+        0% { opacity: 0; transform: translateX(-12px); letter-spacing: 0.34em; }
+        2%, 19% { opacity: 1; transform: none; letter-spacing: 0.22em; }
+        21%, 100% { opacity: 0; transform: translateX(8px); letter-spacing: 0.25em; }
+      }
+
+      @keyframes headline-reveal {
+        0% { clip-path: inset(0 0 100% 0); transform: translateY(18px); }
+        3%, 20% { clip-path: inset(0); transform: none; }
+        21%, 100% { clip-path: inset(100% 0 0 0); transform: translateY(-8px); }
+      }
+
+      @keyframes outline-reveal {
+        0%, 2% { opacity: 0; transform: translateY(14px); }
+        5%, 20% { opacity: 1; transform: none; }
+        21%, 100% { opacity: 0; transform: translateY(-6px); }
+      }
+
+      @keyframes copy-reveal {
+        0%, 4% { opacity: 0; transform: translateY(10px); }
+        7%, 20% { opacity: 1; transform: none; }
+        21%, 100% { opacity: 0; transform: translateY(-5px); }
+      }
+
+      @keyframes route-draw {
+        0%, 22% { stroke-dashoffset: 1; opacity: 0; }
+        24% { opacity: 0.45; }
+        29%, 40% { stroke-dashoffset: 0; opacity: 1; }
+        43%, 100% { stroke-dashoffset: 0; opacity: 0; }
+      }
+
+      @keyframes route-packet {
+        0%, 24% { offset-distance: 0%; opacity: 0; }
+        25% { opacity: 1; }
+        31% { offset-distance: 100%; opacity: 1; }
+        33%, 100% { offset-distance: 100%; opacity: 0; }
+      }
+
+      @keyframes agent-fanout {
+        0%, 41% { stroke-dashoffset: 1; opacity: 0; }
+        43% { opacity: 0.5; }
+        49%, 59% { stroke-dashoffset: 0; opacity: 1; }
+        62%, 100% { stroke-dashoffset: 0; opacity: 0; }
+      }
+
+      @keyframes worker-online {
+        0%, 43% { opacity: 0; transform: scale(0.35); }
+        47% { opacity: 1; transform: scale(1.08); }
+        49%, 59% { opacity: 1; transform: scale(1); }
+        60% { opacity: 0.55; transform: scale(1.1); }
+        62%, 100% { opacity: 0; transform: scale(0.8); }
+      }
+
+      @keyframes vision-lock {
+        0%, 60% { opacity: 0; transform: scale(0.62); }
+        64% { opacity: 0.75; transform: scale(1.08); }
+        67%, 78% { opacity: 1; transform: scale(1); }
+        81%, 100% { opacity: 0; transform: scale(1.12); }
+      }
+
+      @keyframes vision-sweep {
+        0%, 61% { opacity: 0; transform: rotate(-75deg); }
+        63% { opacity: 0.9; }
+        76% { opacity: 0.9; transform: rotate(285deg); }
+        79%, 100% { opacity: 0; transform: rotate(285deg); }
+      }
+
+      @keyframes capability-lock {
+        0%, 64% { opacity: 0; transform: translateY(8px) scale(0.8); }
+        67%, 78% { opacity: 1; transform: none; }
+        81%, 100% { opacity: 0; transform: translateY(-5px) scale(1.04); }
+      }
+
+      @keyframes final-scene {
+        0%, 79% { opacity: 0; }
+        82%, 98% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+
+      @keyframes final-motion {
+        0%, 79% { transform: scale(0.97); filter: blur(3.2px); }
+        84%, 98% { transform: none; filter: none; }
+        100% { transform: scale(1.008); filter: blur(1px); }
+      }
+
+      @keyframes progress {
+        to { transform: scaleX(1); }
+      }
+
+      @keyframes noise {
+        0% { transform: translate3d(0, 0, 0); }
+        25% { transform: translate3d(3%, -2%, 0); }
+        50% { transform: translate3d(-2%, 3%, 0); }
+        75% { transform: translate3d(2%, 2%, 0); }
+        100% { transform: translate3d(-3%, -3%, 0); }
+      }
+
+      @keyframes pulse {
+        50% { opacity: 0.4; transform: scale(0.7); }
+      }
+
+      @keyframes cursor {
+        50% { opacity: 0; }
+      }
+
+      @media (max-aspect-ratio: 4 / 3) {
+        .beat-copy {
+          position: static;
+          margin-top: 28px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .scene,
+        .intro,
+        .beat {
+          display: none;
+        }
+
+        .final {
+          display: grid;
+          opacity: 1;
+        }
+
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+        }
+
+        .progress::after {
+          transform: scaleX(1);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="stage running" id="stage" aria-label="Chutes Build animated presentation">
+      <div class="noise" aria-hidden="true"></div>
+      <div class="frame" aria-hidden="true"></div>
+
+      <header class="hud" aria-hidden="true">
+        <span>CHUTES BUILD / MOTION 01</span>
+        <span class="hud-status"><i></i>CHUTES NETWORK ONLINE</span>
+      </header>
+
+      <section class="scene intro" aria-label="Chutes Build">
+        <div class="intro-inner">
+          <p class="kicker">Chutes Build</p>
+          <div class="logo-shell" aria-label="Chutes Build">
+            <pre class="logo" aria-hidden="true" data-logo=" ██████╗██╗  ██╗██╗   ██╗████████╗███████╗███████╗&#10;██╔════╝██║  ██║██║   ██║╚══██╔══╝██╔════╝██╔════╝&#10;██║     ███████║██║   ██║   ██║   █████╗  ███████╗&#10;██║     ██╔══██║██║   ██║   ██║   ██╔══╝  ╚════██║&#10;╚██████╗██║  ██║╚██████╔╝   ██║   ███████╗███████║&#10; ╚═════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚══════╝&#10;                                  B U I L D  ▸"> ██████╗██╗  ██╗██╗   ██╗████████╗███████╗███████╗
+██╔════╝██║  ██║██║   ██║╚══██╔══╝██╔════╝██╔════╝
+██║     ███████║██║   ██║   ██║   █████╗  ███████╗
+██║     ██╔══██║██║   ██║   ██║   ██╔══╝  ╚════██║
+╚██████╗██║  ██║╚██████╔╝   ██║   ███████╗███████║
+ ╚═════╝╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚══════╝
+                                  B U I L D  ▸</pre>
+          </div>
+          <div class="intro-line" aria-hidden="true"></div>
+          <p class="tagline">The coding agent built for Chutes</p>
+        </div>
+      </section>
+
+      <section class="scene beat beat-route">
+        <div class="beat-inner">
+          <span class="beat-index">01 / AUTOMATIC ROUTING</span>
+          <h2>RIGHT MODEL.<span>ZERO FRICTION.</span></h2>
+          <p class="beat-copy">Fast by default. Automatic fallback when a model or capability goes offline.</p>
+          <div class="route-map" aria-hidden="true">
+            <svg class="motion-map" viewBox="0 0 520 300" role="presentation">
+              <path class="map-line" pathLength="1" d="M48 150 C130 150 145 62 235 62 H470" />
+              <path class="map-line is-active" pathLength="1" d="M48 150 H470" />
+              <path class="map-line" pathLength="1" d="M48 150 C130 150 145 238 235 238 H470" />
+              <circle class="map-node is-active" cx="48" cy="150" r="12" />
+              <circle class="map-node" cx="470" cy="62" r="9" />
+              <circle class="map-node is-active" cx="470" cy="150" r="12" />
+              <circle class="map-node" cx="470" cy="238" r="9" />
+              <circle class="route-packet" cx="0" cy="0" r="4" />
+              <text class="map-label is-active" x="28" y="181">TASK</text>
+              <text class="map-label" x="398" y="44">VISION</text>
+              <text class="map-label is-active" x="388" y="181">FAST PATH</text>
+              <text class="map-label" x="376" y="269">REASONING</text>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene beat beat-agents">
+        <div class="beat-inner">
+          <span class="beat-index">02 / MULTI-AGENT ORCHESTRATION</span>
+          <h2>THINK TOGETHER.<span>BUILD IN PARALLEL.</span></h2>
+          <p class="beat-copy">One lead. Focused subagents. Parallel workstreams, one shared outcome.</p>
+          <div class="agent-map" aria-hidden="true">
+            <svg class="motion-map" viewBox="0 0 520 300" role="presentation">
+              <path class="map-line is-active" pathLength="1" d="M78 150 C180 150 232 55 360 55" />
+              <path class="map-line is-active" pathLength="1" d="M78 150 H360" />
+              <path class="map-line is-active" pathLength="1" d="M78 150 C180 150 232 245 360 245" />
+              <circle class="worker-core" cx="78" cy="150" r="20" />
+              <circle class="map-node is-active worker-one" cx="360" cy="55" r="15" />
+              <circle class="map-node is-active worker-two" cx="360" cy="150" r="15" />
+              <circle class="map-node is-active worker-three" cx="360" cy="245" r="15" />
+              <text class="map-label is-active" x="42" y="188">LEAD</text>
+              <text class="map-label" x="392" y="60">WORKER 01</text>
+              <text class="map-label" x="392" y="155">WORKER 02</text>
+              <text class="map-label" x="392" y="250">WORKER 03</text>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene beat beat-vision">
+        <div class="beat-inner">
+          <span class="beat-index">03 / CAPABILITY DELEGATION</span>
+          <h2>SEE MORE.<span>MISS LESS.</span></h2>
+          <p class="beat-copy">Images, video and documents route automatically to a capable Chutes model.</p>
+          <div class="vision-map" aria-hidden="true">
+            <svg class="motion-map" viewBox="0 0 520 300" role="presentation">
+              <circle class="map-ring" cx="260" cy="150" r="112" />
+              <circle class="map-ring" cx="260" cy="150" r="76" />
+              <circle class="map-ring" cx="260" cy="150" r="39" />
+              <path class="map-line" pathLength="1" d="M260 22 V278 M132 150 H388" />
+              <path class="vision-sweep" d="M260 150 L260 38" />
+              <g class="capability capability-one">
+                <rect class="map-node is-active" x="34" y="54" width="92" height="34" rx="4" />
+                <text class="map-label is-active" x="52" y="76">IMAGE</text>
+              </g>
+              <g class="capability capability-two">
+                <rect class="map-node is-active" x="394" y="133" width="92" height="34" rx="4" />
+                <text class="map-label is-active" x="416" y="155">VIDEO</text>
+              </g>
+              <g class="capability capability-three">
+                <rect class="map-node is-active" x="60" y="223" width="92" height="34" rx="4" />
+                <text class="map-label is-active" x="84" y="245">DOCS</text>
+              </g>
+              <circle class="worker-core" cx="260" cy="150" r="7" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="scene final">
+        <div class="final-inner">
+          <span class="final-mark">Open source / privacy first / zero telemetry</span>
+          <h2>AI COMPUTE<span>FOR EVERYONE.</span></h2>
+          <div class="command"><b>›</b><span>chutes-build</span><i class="cursor" aria-hidden="true"></i><small>Start building</small></div>
+        </div>
+      </section>
+
+      <div class="footer-hud" aria-hidden="true">
+        <div class="progress"></div>
+        <span class="timecode" id="timecode">00:00</span>
+      </div>
+
+      <div class="controls" aria-label="Presentation controls">
+        <button id="toggle" type="button" aria-label="Pause presentation">Ⅱ</button>
+        <button id="replay" type="button" aria-label="Replay presentation">↻</button>
+      </div>
+    </main>
+
+    <script>
+      const DURATION_MS = 22000;
+      const stage = document.querySelector("#stage");
+      const toggle = document.querySelector("#toggle");
+      const replay = document.querySelector("#replay");
+      const timecode = document.querySelector("#timecode");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      let paused = false;
+      let startedAt = performance.now();
+      let pausedAt = 0;
+
+      function setPaused(next) {
+        paused = next;
+        stage.classList.toggle("paused", paused);
+        toggle.textContent = paused ? "▶" : "Ⅱ";
+        toggle.setAttribute("aria-label", paused ? "Play presentation" : "Pause presentation");
+        if (paused) {
+          pausedAt = performance.now();
+        } else {
+          startedAt += performance.now() - pausedAt;
+        }
+      }
+
+      function restart() {
+        stage.classList.remove("running");
+        void stage.offsetWidth;
+        stage.classList.add("running");
+        startedAt = performance.now();
+        if (paused) setPaused(false);
+      }
+
+      function updateTimecode(now) {
+        if (!reducedMotion) {
+          const elapsed = paused ? pausedAt - startedAt : now - startedAt;
+          const seconds = Math.floor((elapsed % DURATION_MS) / 1000);
+          timecode.textContent = `00:${String(seconds).padStart(2, "0")}`;
+        } else {
+          timecode.textContent = "00:22";
+        }
+        requestAnimationFrame(updateTimecode);
+      }
+
+      toggle.addEventListener("click", () => setPaused(!paused));
+      replay.addEventListener("click", restart);
+      document.addEventListener("keydown", (event) => {
+        if (event.code === "Space") {
+          event.preventDefault();
+          setPaused(!paused);
+        }
+        if (event.key.toLowerCase() === "r") restart();
+      });
+
+      requestAnimationFrame(updateTimecode);
+    </script>
+  </body>
+</html>

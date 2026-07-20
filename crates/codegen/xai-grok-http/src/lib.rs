@@ -18,9 +18,9 @@
 //! Sampling traffic uses process-wide shared clients owned by
 //! `xai_grok_sampler::shared_http` (one HTTP/2 pooled client plus
 //! a pool-less HTTP/1.1 fallback shared across every
-//! `SamplingClient`). The sampler reads `GROK_POOL_*` /
-//! `GROK_CONNECT_TIMEOUT_SECS` once, when its shared client is
-//! first built, and `GROK_SAMPLER_SHARED_CLIENT=0` falls back to
+//! `SamplingClient`). The sampler reads `CHUTES_BUILD_POOL_*` /
+//! `CHUTES_BUILD_CONNECT_TIMEOUT_SECS` once, when its shared client is
+//! first built, and `CHUTES_BUILD_SAMPLER_SHARED_CLIENT=0` falls back to
 //! a fresh client per `SamplingClient`.
 //!
 //! TLS root certificates are warmed at process start via
@@ -64,15 +64,15 @@ static CLIENT_TYPE: OnceLock<ClientType> = OnceLock::new();
 // functions below.
 pub use xai_grok_sampler::OriginClientInfo;
 
-/// Construct an [`OriginClientInfo`] from `GROK_CLIENT_NAME` /
-/// `GROK_CLIENT_VERSION` env vars. Returns `None` when
-/// `GROK_CLIENT_NAME` is unset.
+/// Construct an [`OriginClientInfo`] from `CHUTES_BUILD_CLIENT_NAME` /
+/// `CHUTES_BUILD_CLIENT_VERSION` env vars. Returns `None` when
+/// `CHUTES_BUILD_CLIENT_NAME` is unset.
 pub fn origin_client_info_from_env() -> Option<OriginClientInfo> {
-    std::env::var("GROK_CLIENT_NAME")
+    std::env::var("CHUTES_BUILD_CLIENT_NAME")
         .ok()
         .map(|product| OriginClientInfo {
             product,
-            version: std::env::var("GROK_CLIENT_VERSION").ok(),
+            version: std::env::var("CHUTES_BUILD_CLIENT_VERSION").ok(),
         })
 }
 
@@ -236,19 +236,19 @@ pub fn client_type_from_origin(origin: Option<&OriginClientInfo>) -> ClientType 
     ClientType::from_client_identifier(origin.map(|o| o.product.as_str()))
 }
 
-/// Process-level client identifier (`GROK_CLIENT_NAME` env var, default `"grok-shell"`).
+/// Process-level client identifier (`CHUTES_BUILD_CLIENT_NAME` env var, default `"grok-shell"`).
 pub fn process_client_identifier() -> String {
-    std::env::var("GROK_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string())
+    std::env::var("CHUTES_BUILD_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string())
 }
 
 /// Header telling cli-chat-proxy whether this process is a single-prompt
-/// (`grok -p`) run or an interactive session; feeds the `client_mode`
+/// (`chutes-build -p`) run or an interactive session; feeds the `client_mode`
 /// metric label.
 pub const CLIENT_MODE_HEADER: &str = "x-grok-client-mode";
 
 /// One-way latch: set to `"headless"` at startup by the non-TUI entry points
-/// (`run_single_turn` for `grok -p`, `run_headless_inner` for
-/// `grok agent [headless]`), `"interactive"` otherwise.
+/// (`run_single_turn` for `chutes-build -p`, `run_headless_inner` for
+/// `chutes-build agent [headless]`), `"interactive"` otherwise.
 static CLIENT_MODE: OnceLock<&'static str> = OnceLock::new();
 
 /// Mark this process as headless (single-prompt). No-op if already set.

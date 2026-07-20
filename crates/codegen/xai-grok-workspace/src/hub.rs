@@ -509,7 +509,7 @@ impl ToolServerHandler for SessionRoutedToolHandler {
                 None => {
                     tracing::warn!(
                         tool = % self.name(), session = % session_id,
-                        "GROK_HITL_PERMISSION_LIVE set but no hub ToolServer; rejecting guarded tool"
+                        "CHUTES_BUILD_HITL_PERMISSION_LIVE set but no hub ToolServer; rejecting guarded tool"
                     );
                     return terminal_only(Err(ToolError::new(
                         ToolErrorKind::PermissionDenied,
@@ -944,13 +944,13 @@ mod tests {
     fn bg_config() -> ToolServerConfig {
         ToolServerConfig {
             tools: vec![
-                tc("GrokBuild:run_terminal_cmd", Some(ToolKind::Execute)),
+                tc("ChutesBuild:run_terminal_cmd", Some(ToolKind::Execute)),
                 tc(
-                    "GrokBuild:get_task_output",
+                    "ChutesBuild:get_task_output",
                     Some(ToolKind::BackgroundTaskAction),
                 ),
-                tc("GrokBuild:kill_task", Some(ToolKind::KillTaskAction)),
-                tc("GrokBuild:monitor", Some(ToolKind::Monitor)),
+                tc("ChutesBuild:kill_task", Some(ToolKind::KillTaskAction)),
+                tc("ChutesBuild:monitor", Some(ToolKind::Monitor)),
             ],
             behavior_preset: None,
         }

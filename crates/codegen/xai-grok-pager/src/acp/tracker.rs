@@ -255,7 +255,7 @@ pub struct AcpUpdateTracker {
     /// Tool call IDs marked as background (`is_background=true`).
     ///
     /// First-detection (no scrollback entry yet): defers entry creation until
-    /// `x.ai/task_backgrounded` creates a `BgTask` block.
+    /// `chutes.build/task_backgrounded` creates a `BgTask` block.
     /// Late-detection (Execute block already exists): suppresses further output
     /// streaming; the existing block is demoted by `handle_task_backgrounded`.
     ///
@@ -1901,9 +1901,9 @@ fn tool_call_to_block(tc: &acp::ToolCall, session_cwd: Option<&Path>) -> RenderB
         _ if matches!(
             extract_raw_field(tc, "variant").as_deref(),
             Some("ImageGen") | Some("ImageToVideo") | Some("ReferenceToVideo") | Some("ImageEdit")
-        ) =>
+        ) || raw_output_type(tc) == Some("MediaArtifact") =>
         {
-            media_gen_block(tc, success)
+            media_gen_block(tc, success, session_cwd)
         }
         _ if tc.title.starts_with("Memory search:") => {
             let query = tc
@@ -2009,17 +2009,46 @@ fn tool_call_title(tc: &acp::ToolCall) -> Cow<'_, str> {
     }
 }
 /// Build the media block from the typed `raw_output` path.
-fn media_gen_block(tc: &acp::ToolCall, success: bool) -> RenderBlock {
+fn media_gen_block(
+    tc: &acp::ToolCall,
+    success: bool,
+    session_cwd: Option<&std::path::Path>,
+) -> RenderBlock {
     let mut block = OtherToolCallBlock::new(tool_call_title(tc), String::new());
     if !success {
         let err = content_text(tc);
         block.error = Some(if err.is_empty() { "Failed".into() } else { err });
+    } else if let Some(artifact) = media_artifact(tc, session_cwd) {
+        block = block.with_media_artifact(artifact);
     } else if let Some((path, is_video)) = media_gen_ref(tc) {
         block = block.with_media_ref(path, is_video);
     } else if let Some(text) = media_gen_text(tc) {
         block.set_output_text(text);
     }
     RenderBlock::ToolCall(ToolCallBlock::Other(block))
+}
+
+fn raw_output_type(tc: &acp::ToolCall) -> Option<&str> {
+    tc.raw_output.as_ref()?.get("type")?.as_str()
+}
+
+fn media_artifact(
+    tc: &acp::ToolCall,
+    session_cwd: Option<&std::path::Path>,
+) -> Option<xai_grok_tools::types::output::MediaArtifact> {
+    let ToolOutput::MediaArtifact(artifact) =
+        serde_json::from_value::<ToolOutput>(tc.raw_output.clone()?).ok()?
+    else {
+        return None;
+    };
+    let artifact_path = std::fs::canonicalize(&artifact.path).ok()?;
+    if let Some(cwd) = session_cwd {
+        let cwd = std::fs::canonicalize(cwd).ok()?;
+        if !artifact_path.starts_with(cwd) {
+            return None;
+        }
+    }
+    Some(artifact)
 }
 /// Plain-text body of a media-variant tool that returned `ToolOutput::Text`
 /// rather than a media file (the free / X Basic SuperGrok-upsell short-circuit).
@@ -2176,7 +2205,7 @@ fn task_ids_from_raw_input(raw: &serde_json::Value) -> Vec<String> {
 }
 /// Check if a tool call is a background execute (`is_background=true`).
 ///
-/// These are deferred from scrollback — the `x.ai/task_backgrounded`
+/// These are deferred from scrollback — the `chutes.build/task_backgrounded`
 /// notification creates a `BgTask` block instead of an `Execute` block.
 ///
 /// Eager ACP messages often use `kind=Other` with `title=run_terminal_command`
@@ -6459,8 +6488,12 @@ mod tests {
             let block = tool_call_to_block(&tc, None);
             let open_path = block
                 .inline_open_button()
-                .map(|(p, is_video)| {
-                    assert!(is_video, "{variant}: expected video open button");
+                .map(|(p, kind)| {
+                    assert_eq!(
+                        kind,
+                        crate::scrollback::block::MediaButtonKind::Video,
+                        "{variant}: expected video open button"
+                    );
                     p
                 })
                 .or_else(|| block.video_references().first().map(|r| r.path.clone()))
@@ -6492,6 +6525,41 @@ mod tests {
             "uploaded_url-only media must not claim a local open path"
         );
     }
+    #[test]
+    fn typed_audio_artifact_routes_to_playable_media_card() {
+        use crate::scrollback::block::{BlockContent, MediaButtonKind};
+        use xai_grok_tools::types::output::{MediaArtifact, MediaArtifactKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        let audio_path = dir.path().join("track.mp3");
+        std::fs::write(&audio_path, b"fake-audio").unwrap();
+        let output = ToolOutput::MediaArtifact(MediaArtifact {
+            schema_version: MediaArtifact::SCHEMA_VERSION,
+            kind: MediaArtifactKind::Music,
+            path: audio_path.clone(),
+            mime_type: "audio/mpeg".into(),
+            byte_len: 10,
+            provenance_path: None,
+            provider: "chutes".into(),
+            model: "music-model".into(),
+            cost: None,
+        });
+        let tc = acp::ToolCall::new(
+            acp::ToolCallId::new(Arc::from("typed-audio")),
+            "generate_media",
+        )
+        .kind(acp::ToolKind::Other)
+        .status(acp::ToolCallStatus::Completed)
+        .content(vec![])
+        .raw_input(Some(serde_json::json!({ "kind": "music" })))
+        .raw_output(serde_json::to_value(output).ok())
+        .locations(vec![]);
+
+        let block = tool_call_to_block(&tc, None);
+        let (path, kind) = block.inline_open_button().expect("audio button");
+        assert_eq!(path, audio_path);
+        assert_eq!(kind, MediaButtonKind::Audio);
+    }
     /// A tier-restricted (free / X Basic) imagine call short-circuits with the
     /// SuperGrok upsell as `ToolOutput::Text` on a `Completed` status. The media
     /// renderer has no file to open, so it must surface the upsell text in the
@@ -6499,7 +6567,7 @@ mod tests {
     #[test]
     fn tier_restricted_media_shows_upsell_text_not_error() {
         let upsell = "Image generation is a SuperGrok feature. Upgrade at \
-             https://grok.com/supergrok?referrer=grok-build";
+             https://chutes.ai/pricing";
         let output = ToolOutput::Text(xai_grok_tools::types::output::TextOutput::from(upsell));
         let tc = acp::ToolCall::new(
             acp::ToolCallId::new(Arc::from("tier-restricted-img")),

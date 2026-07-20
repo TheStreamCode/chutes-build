@@ -5,7 +5,7 @@ use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 
-/// Process-wide write lock for `~/.grok/config.toml`.
+/// Process-wide write lock for `~/.chutes-build/config.toml`.
 ///
 /// Serializes the read-modify-write in `save_config` so two rapid
 /// settings toggles can't interleave and clobber each other.
@@ -1117,7 +1117,7 @@ auto_update = true
         const TEST_MODEL: &str = "grok-4.5";
         const OTHER_MODEL: &str = "grok-4.3";
 
-        /// Serialize tests that mutate `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`.
+        /// Serialize tests that mutate `CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT`.
         static ENV_LOCK: Mutex<()> = Mutex::new(());
 
         /// Build a `Config` populated with optional per-source values for the

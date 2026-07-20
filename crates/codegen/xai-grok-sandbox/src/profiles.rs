@@ -1,5 +1,5 @@
 //! Sandbox profiles. Built-in: `workspace`, `devbox`, `read-only`, `strict`,
-//! `off`. Custom profiles via `~/.grok/sandbox.toml` or `.grok/sandbox.toml`.
+//! `off`. Custom profiles via `~/.chutes-build/sandbox.toml` or `.chutes-build/sandbox.toml`.
 //! A custom profile's `deny` list is kernel-enforced (read + write/rename) on
 //! both platforms.
 
@@ -102,7 +102,7 @@ impl std::str::FromStr for ProfileName {
     }
 }
 
-/// Load sandbox config from `~/.grok/sandbox.toml` and `.grok/sandbox.toml`.
+/// Load sandbox config from `~/.chutes-build/sandbox.toml` and `.chutes-build/sandbox.toml`.
 ///
 /// Project config may **add** new profile names only. It cannot redefine a
 /// name already present in the global config — last-write-wins would let a
@@ -111,14 +111,14 @@ impl std::str::FromStr for ProfileName {
 pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
     let mut config = SandboxConfig::default();
 
-    // Global config: ~/.grok/sandbox.toml
+    // Global config: ~/.chutes-build/sandbox.toml
     let global_path = grok_home().join("sandbox.toml");
     if let Some(global) = load_config_file(&global_path) {
         config = global;
     }
 
-    // Project config: <workspace>/.grok/sandbox.toml (additive only)
-    let project_path = workspace.join(".grok").join("sandbox.toml");
+    // Project config: <workspace>/.chutes-build/sandbox.toml (additive only)
+    let project_path = workspace.join(".chutes-build").join("sandbox.toml");
     if let Some(project) = load_config_file(&project_path) {
         merge_project_profiles(&mut config, project);
     }
@@ -129,7 +129,7 @@ pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
 pub fn sandbox_profile_conflicts(workspace: &Path) -> Vec<String> {
     let global = load_config_file(&grok_home().join("sandbox.toml")).unwrap_or_default();
     let project =
-        load_config_file(&workspace.join(".grok").join("sandbox.toml")).unwrap_or_default();
+        load_config_file(&workspace.join(".chutes-build").join("sandbox.toml")).unwrap_or_default();
     mismatched_profile_names(&global, &project)
 }
 
@@ -222,7 +222,7 @@ impl ProfileName {
         // Read-write paths. nono/Landlock need the directory to exist at
         // apply time (it opens an O_PATH fd), but new files within it can
         // be created freely after the sandbox is applied. Pre-create
-        // directories like ~/.grok/ that may not exist on first run.
+        // directories like ~/.chutes-build/ that may not exist on first run.
         for path in &profile.read_write {
             if !path.exists() && std::fs::create_dir_all(path).is_err() {
                 tracing::warn!(path = ?path, "read_write path does not exist and could not be created, skipping");
@@ -387,7 +387,7 @@ impl ProfileName {
                 let profile_config = config.profiles.get(name).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Custom sandbox profile '{name}' not found. \
-                         Define it in ~/.grok/sandbox.toml or .grok/sandbox.toml:\n\n\
+                         Define it in ~/.chutes-build/sandbox.toml or .chutes-build/sandbox.toml:\n\n\
                          [profiles.{name}]\n\
                          extends = \"workspace\"\n\
                          read_only = [\"/data\"]\n"

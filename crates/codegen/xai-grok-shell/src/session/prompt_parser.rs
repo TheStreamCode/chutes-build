@@ -1,7 +1,8 @@
 use crate::session::user_message::user_query;
 use agent_client_protocol::{self as acp, ImageContent};
+use base64::Engine as _;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use xai_grok_workspace::file_system::{
     FileReference, render_embedded_resource, render_file_reference,
 };
@@ -118,8 +119,30 @@ pub async fn parse_prompt_with_skills(
             acp::ContentBlock::Text(text) => message_parts.push(text.text.clone()),
             acp::ContentBlock::Image(image_content) => image_parts.push(image_content.clone()),
             acp::ContentBlock::ResourceLink(link) => {
+                let video_resource = is_video_resource(link);
+                if video_resource {
+                    let path =
+                        resolve_local_resource_path(link, &working_directory).map_err(|e| {
+                            acp::Error::invalid_params().data(format!(
+                                "video attachment `{}` could not be resolved: {e}",
+                                link.name
+                            ))
+                        })?;
+                    let frames = extract_video_frames(&path).await.map_err(|e| {
+                        acp::Error::invalid_params().data(format!(
+                            "video attachment `{}` could not be inspected: {e}",
+                            link.name
+                        ))
+                    })?;
+                    message_parts.push(format!(
+                        "[Video attachment: {}. {} representative frames were extracted locally for visual analysis.]",
+                        link.name,
+                        frames.len()
+                    ));
+                    image_parts.extend(frames);
+                }
                 resource_links.push(link.clone());
-                if link.meta.is_none() {
+                if link.meta.is_none() && !video_resource {
                     let path = extract_path_from_uri(link);
                     message_parts.push(format!("@{path}"));
                 }
@@ -167,6 +190,172 @@ pub async fn parse_prompt_with_skills(
         images: image_parts,
         is_cursor,
     })
+}
+
+fn is_video_resource(link: &acp::ResourceLink) -> bool {
+    link.mime_type
+        .as_deref()
+        .is_some_and(|mime| mime.to_ascii_lowercase().starts_with("video/"))
+        || Path::new(&link.name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "mp4" | "mov" | "mkv" | "webm" | "m4v" | "avi"
+                )
+            })
+}
+
+fn resolve_local_resource_path(
+    link: &acp::ResourceLink,
+    working_directory: &Path,
+) -> Result<PathBuf, String> {
+    let path = if link.uri.starts_with("file:") {
+        url::Url::parse(&link.uri)
+            .map_err(|error| error.to_string())?
+            .to_file_path()
+            .map_err(|_| "invalid local file URI".to_owned())?
+    } else {
+        let named = PathBuf::from(&link.name);
+        if named.is_absolute() {
+            named
+        } else {
+            working_directory.join(named)
+        }
+    };
+    let canonical_root = dunce::canonicalize(working_directory).map_err(|e| e.to_string())?;
+    let canonical_path = dunce::canonicalize(&path).map_err(|e| e.to_string())?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err("video attachments must stay inside the active workspace".to_owned());
+    }
+    if !canonical_path.is_file() {
+        return Err("video attachment is not a file".to_owned());
+    }
+    Ok(canonical_path)
+}
+
+async fn extract_video_frames(path: &Path) -> Result<Vec<ImageContent>, String> {
+    const MAX_FRAMES: usize = 8;
+    let temp_dir = std::env::temp_dir().join(format!(
+        "chutes-build-video-frames-{}",
+        uuid::Uuid::new_v4()
+    ));
+    tokio::fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let ffmpeg = std::env::var_os("CHUTES_FFMPEG_EXECUTABLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("ffmpeg"));
+    let duration = probe_video_duration(path, &ffmpeg).await.unwrap_or(80.0);
+    let interval = (duration / (MAX_FRAMES as f64 + 1.0)).max(0.5);
+    let output_pattern = temp_dir.join("frame-%03d.jpg");
+    let filter = format!("fps=1/{interval:.3},scale=1280:-2:force_original_aspect_ratio=decrease");
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        tokio::process::Command::new(&ffmpeg)
+            .arg("-hide_banner")
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-i")
+            .arg(path)
+            .arg("-vf")
+            .arg(filter)
+            .arg("-frames:v")
+            .arg(MAX_FRAMES.to_string())
+            .arg("-q:v")
+            .arg("3")
+            .arg("-y")
+            .arg(&output_pattern)
+            .output(),
+    )
+    .await;
+
+    let result = match output {
+        Ok(Ok(output)) if output.status.success() => {
+            let mut paths = Vec::new();
+            let mut entries = tokio::fs::read_dir(&temp_dir)
+                .await
+                .map_err(|error| error.to_string())?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|error| error.to_string())?
+            {
+                if entry.path().extension().and_then(|ext| ext.to_str()) == Some("jpg") {
+                    paths.push(entry.path());
+                }
+            }
+            paths.sort();
+            let mut frames = Vec::with_capacity(paths.len());
+            for frame in paths {
+                let bytes = tokio::fs::read(frame)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                frames.push(ImageContent::new(
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                    "image/jpeg",
+                ));
+            }
+            if frames.is_empty() {
+                Err("FFmpeg produced no readable video frames".to_owned())
+            } else {
+                Ok(frames)
+            }
+        }
+        Ok(Ok(output)) => Err(format!(
+            "FFmpeg failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+                .trim()
+                .chars()
+                .take(1000)
+                .collect::<String>()
+        )),
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err("FFmpeg was not found; install it or set CHUTES_FFMPEG_EXECUTABLE".to_owned())
+        }
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(_) => Err("FFmpeg timed out after 120 seconds".to_owned()),
+    };
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    result
+}
+
+async fn probe_video_duration(path: &Path, ffmpeg: &Path) -> Option<f64> {
+    let ffprobe = if ffmpeg.is_absolute() {
+        ffmpeg.with_file_name(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        })
+    } else {
+        PathBuf::from("ffprobe")
+    };
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        tokio::process::Command::new(ffprobe)
+            .arg("-v")
+            .arg("error")
+            .arg("-show_entries")
+            .arg("format=duration")
+            .arg("-of")
+            .arg("default=noprint_wrappers=1:nokey=1")
+            .arg(path)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
 }
 /// Returns `(context, query)` — the two halves of the prompt kept separate
 /// so the caller can truncate context without searching for the query boundary.
@@ -424,6 +613,40 @@ mod tests {
             link = link.meta(m);
         }
         link
+    }
+    #[test]
+    fn detects_video_resources_by_mime_or_extension() {
+        let mime = acp::ResourceLink::new("clip.bin", "file:///clip.bin")
+            .mime_type(Some("video/mp4".to_owned()));
+        let extension = acp::ResourceLink::new("clip.webm", "file:///clip.webm");
+        let image = acp::ResourceLink::new("still.png", "file:///still.png")
+            .mime_type(Some("image/png".to_owned()));
+        assert!(is_video_resource(&mime));
+        assert!(is_video_resource(&extension));
+        assert!(!is_video_resource(&image));
+    }
+    #[tokio::test]
+    async fn extracts_representative_video_frames_when_ffmpeg_is_available() {
+        let temp = tempfile::tempdir().unwrap();
+        let video = temp.path().join("sample.mp4");
+        let status = tokio::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("color=c=blue:s=320x240:d=2")
+            .args(["-pix_fmt", "yuv420p", "-y"])
+            .arg(&video)
+            .status()
+            .await;
+        let status = match status {
+            Ok(status) => status,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => panic!("failed to start FFmpeg: {error}"),
+        };
+        assert!(status.success());
+
+        let frames = extract_video_frames(&video).await.unwrap();
+        assert!(!frames.is_empty());
+        assert!(frames.len() <= 8);
+        assert!(frames.iter().all(|frame| frame.mime_type == "image/jpeg"));
     }
     #[test]
     fn test_parse_editor_meta_focused_with_cursor() {

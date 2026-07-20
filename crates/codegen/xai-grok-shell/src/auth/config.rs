@@ -1,4 +1,4 @@
-use super::model::TEAM_PRINCIPAL_TYPE;
+use super::model::{API_KEY_SCOPE, TEAM_PRINCIPAL_TYPE};
 use crate::env::{PROD_RELAY_WS_URL, PROD_WS_ORIGIN};
 use serde::{Deserialize, Serialize};
 fn default_oidc_scopes() -> Vec<String> {
@@ -10,15 +10,13 @@ fn default_oidc_scopes() -> Vec<String> {
         "api:access".into(),
     ]
 }
-/// Default scopes for the xAI OAuth2 provider. Includes `grok-cli:access`
-/// which authorizes the token for API proxy requests.
+/// Default scopes for explicitly configured enterprise OAuth providers.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
         "profile".into(),
         "email".into(),
         "offline_access".into(),
-        "grok-cli:access".into(),
         "api:access".into(),
         "conversations:read".into(),
         "conversations:write".into(),
@@ -30,7 +28,6 @@ fn default_team_oauth2_scopes() -> Vec<String> {
     vec![
         "profile".into(),
         "offline_access".into(),
-        "grok-cli:access".into(),
         "api:access".into(),
         "team:read".into(),
         "conversations:read".into(),
@@ -48,7 +45,7 @@ fn default_team_oauth2_scopes() -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreferredAuthMethod {
-    /// `XAI_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`xai.api_key`).
+    /// `CHUTES_API_KEY` / auth.json `chutes::api_key` / per-model BYOK (`chutes.api_key`).
     ApiKey,
     /// OIDC / OAuth2 session (`cached_token`, interactive `grok.com` / `oidc`,
     /// including devbox-minted OIDC).
@@ -69,17 +66,17 @@ pub struct GrokComConfig {
     /// External auth provider command (stdout = token, stderr = user UX, exit 0 = success).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_provider_command: Option<String>,
-    /// Login button label (env: `GROK_AUTH_PROVIDER_LABEL`).
+    /// Login button label (env: `CHUTES_BUILD_AUTH_PROVIDER_LABEL`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_provider_label: Option<String>,
     /// Token TTL in seconds for external auth providers that output bare
     /// tokens without `expires_in`. Synthesizes `expires_at` so proactive
-    /// refresh works. Env: `GROK_AUTH_TOKEN_TTL`.
+    /// refresh works. Env: `CHUTES_BUILD_AUTH_TOKEN_TTL`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_token_ttl: Option<u64>,
-    /// Admin kill switch: when `Some(true)`, the `xai.api_key` auth method is
-    /// neither advertised nor accepted, so `XAI_API_KEY`/per-model credentials
-    /// can't bypass the deployment's IdP login. Env: `GROK_DISABLE_API_KEY_AUTH`.
+    /// Admin kill switch: when `Some(true)`, the `chutes.api_key` auth method is
+    /// neither advertised nor accepted, so `CHUTES_API_KEY`/per-model credentials
+    /// can't bypass the deployment's IdP login. Env: `CHUTES_BUILD_DISABLE_API_KEY_AUTH`.
     /// Parity with common force-login-method admin knobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_api_key_auth: Option<bool>,
@@ -112,7 +109,7 @@ pub struct OidcAuthConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<String>,
 }
-/// OAuth2 provider configuration (`GROK_OAUTH2_ISSUER` / `GROK_OAUTH2_CLIENT_ID`).
+/// OAuth2 provider configuration (`CHUTES_BUILD_OAUTH2_ISSUER` / `CHUTES_BUILD_OAUTH2_CLIENT_ID`).
 ///
 /// Uses the standard OAuth 2.1 Auth Code + PKCE flow via [`OidcAuthConfig`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,12 +126,12 @@ pub struct OAuth2ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
 }
-pub const XAI_OAUTH2_ISSUER: &str = "https://auth.x.ai";
+pub const XAI_OAUTH2_ISSUER: &str = "http://127.0.0.1:9/chutes-build-oauth-disabled";
 /// Production accounts-app origin allowlist — the only origins builds without
 /// non-production builds accept. Lives in its own const, referenced by both
 /// profiles below, so the frozen-contract test (monorepo CI compiles with
 /// that feature enabled) still pins this production-origin const.
-const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://accounts.x.ai"];
+const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &[];
 /// See the opt-in non-production feature variant above — builds without
 /// the feature accept only the production accounts app.
 pub fn allowed_accounts_app_origins() -> Vec<String> {
@@ -166,15 +163,15 @@ pub fn accounts_app_cors_layer(method: axum::http::Method) -> tower_http::cors::
 /// Local-dev OAuth2 issuer (accounts-app running on localhost).
 const XAI_OAUTH2_LOCAL_ISSUER: &str = "http://localhost:22255";
 const DEFAULT_OAUTH2_REFERRER: &str = "grok-build";
-/// Returns `true` when `GROK_LOCAL_AUTH=1` is set,
+/// Returns `true` when `CHUTES_BUILD_LOCAL_AUTH=1` is set,
 /// indicating the local accounts-app should be used as the OAuth2 issuer.
 pub fn use_local_auth() -> bool {
-    std::env::var("GROK_LOCAL_AUTH")
+    std::env::var("CHUTES_BUILD_LOCAL_AUTH")
         .map(|v| !v.is_empty() && v != "0")
         .unwrap_or(false)
 }
 /// Returns the active xAI OAuth2 issuer — the local-dev issuer when
-/// `GROK_LOCAL_AUTH=1` is set, otherwise the production issuer.
+/// `CHUTES_BUILD_LOCAL_AUTH=1` is set, otherwise the production issuer.
 pub fn xai_oauth2_issuer() -> &'static str {
     if use_local_auth() {
         XAI_OAUTH2_LOCAL_ISSUER
@@ -189,14 +186,14 @@ pub fn xai_oauth2_issuer() -> &'static str {
 pub fn is_xai_oauth2_issuer(issuer: &str) -> bool {
     issuer == XAI_OAUTH2_ISSUER || issuer == XAI_OAUTH2_LOCAL_ISSUER
 }
-/// auth.json scope key used by the pre-OIDC `grok login --legacy` flow.
+/// auth.json scope key used by the pre-OIDC `chutes-build login --legacy` flow.
 /// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
+pub const LEGACY_AUTH_SCOPE: &str = "disabled::legacy-auth";
 impl GrokComConfig {
-    /// Whether `xai.api_key` auth is disabled. Pinning a team
+    /// Whether `chutes.api_key` auth is disabled. Pinning a team
     /// (`force_login_team_uuid`) implies this — team membership can't be verified
     /// from a bare API key, so it must go through IdP login. The
-    /// `GROK_DISABLE_API_KEY_AUTH` env lockdown is sticky: because the env value
+    /// `CHUTES_BUILD_DISABLE_API_KEY_AUTH` env lockdown is sticky: because the env value
     /// seeds `default()` (the merge base), a lower-trust user `config.toml` could
     /// otherwise set `disable_api_key_auth = false` and override it — so the env
     /// is OR-ed in here and cannot be turned back off by a user layer. Trusted
@@ -208,7 +205,7 @@ impl GrokComConfig {
     }
     /// When `preferred_method = api_key`, automatic OIDC paths (devbox mint,
     /// interactive browser login, external auth provider) must not run — the
-    /// pin is fail-closed. Explicit `grok login --devbox` / `--api-key` bypass
+    /// pin is fail-closed. Explicit `chutes-build login --devbox` / `--api-key` bypass
     /// this by not consulting automatic flow helpers.
     pub fn blocks_automatic_oidc(&self) -> bool {
         matches!(self.preferred_method, Some(PreferredAuthMethod::ApiKey))
@@ -220,7 +217,7 @@ impl GrokComConfig {
         } else if let Some(ref oauth2) = self.oauth2 {
             oauth2.auth_scope()
         } else {
-            unreachable!("oauth2 config is always present (xAI default or env override)")
+            API_KEY_SCOPE.to_owned()
         }
     }
 }
@@ -229,10 +226,10 @@ impl OAuth2ProviderConfig {
         self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE)
     }
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("GROK_OAUTH2_ISSUER").ok()?;
-        let client_id = std::env::var("GROK_OAUTH2_CLIENT_ID").ok()?;
-        let principal_type = std::env::var("GROK_OAUTH2_PRINCIPAL_TYPE").ok();
-        let principal_id = std::env::var("GROK_OAUTH2_PRINCIPAL_ID").ok();
+        let issuer = std::env::var("CHUTES_BUILD_OAUTH2_ISSUER").ok()?;
+        let client_id = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_ID").ok()?;
+        let principal_type = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE").ok();
+        let principal_id = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_ID").ok();
         let default_scopes = match principal_type.as_deref() {
             Some(TEAM_PRINCIPAL_TYPE) => default_team_oauth2_scopes(),
             _ => default_oauth2_scopes(),
@@ -240,13 +237,13 @@ impl OAuth2ProviderConfig {
         Some(Self {
             issuer,
             client_id,
-            scopes: std::env::var("GROK_OAUTH2_SCOPES")
+            scopes: std::env::var("CHUTES_BUILD_OAUTH2_SCOPES")
                 .map(|s| s.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or(default_scopes),
             principal_type,
             principal_id,
             referrer: Some(
-                std::env::var("GROK_OAUTH2_REFERRER")
+                std::env::var("CHUTES_BUILD_OAUTH2_REFERRER")
                     .unwrap_or_else(|_| DEFAULT_OAUTH2_REFERRER.to_owned()),
             ),
         })
@@ -270,44 +267,34 @@ impl OAuth2ProviderConfig {
 impl Default for GrokComConfig {
     fn default() -> Self {
         let oidc = OidcAuthConfig::from_env();
-        let oauth2 = if oidc.is_some() {
-            None
-        } else {
-            Some(
-                OAuth2ProviderConfig::from_env().unwrap_or_else(|| OAuth2ProviderConfig {
-                    issuer: xai_oauth2_issuer().to_owned(),
-                    client_id: obfstr::obfstr!("b1a00492-073a-47ea-816f-4c329264a828").to_owned(),
-                    scopes: default_oauth2_scopes(),
-                    principal_type: None,
-                    principal_id: None,
-                    referrer: Some(DEFAULT_OAUTH2_REFERRER.to_owned()),
-                }),
-            )
-        };
+        let oauth2 = oidc
+            .is_none()
+            .then(OAuth2ProviderConfig::from_env)
+            .flatten();
         Self {
-            grok_ws_origin: std::env::var("GROK_WS_ORIGIN")
+            grok_ws_origin: std::env::var("CHUTES_BUILD_WS_ORIGIN")
                 .unwrap_or_else(|_| PROD_WS_ORIGIN.to_owned()),
-            grok_ws_url: std::env::var("GROK_WS_URL")
+            grok_ws_url: std::env::var("CHUTES_BUILD_WS_URL")
                 .unwrap_or_else(|_| PROD_RELAY_WS_URL.to_owned()),
-            token_header: "xai-grok-cli".to_owned(),
+            token_header: "authorization".to_owned(),
             oidc,
             oauth2,
-            auth_provider_command: std::env::var("GROK_AUTH_PROVIDER_COMMAND").ok(),
-            auth_provider_label: std::env::var("GROK_AUTH_PROVIDER_LABEL").ok(),
-            auth_token_ttl: std::env::var("GROK_AUTH_TOKEN_TTL")
+            auth_provider_command: std::env::var("CHUTES_BUILD_AUTH_PROVIDER_COMMAND").ok(),
+            auth_provider_label: std::env::var("CHUTES_BUILD_AUTH_PROVIDER_LABEL").ok(),
+            auth_token_ttl: std::env::var("CHUTES_BUILD_AUTH_TOKEN_TTL")
                 .ok()
                 .and_then(|v| v.parse().ok()),
-            disable_api_key_auth: std::env::var("GROK_DISABLE_API_KEY_AUTH")
+            disable_api_key_auth: std::env::var("CHUTES_BUILD_DISABLE_API_KEY_AUTH")
                 .ok()
                 .map(|v| env_flag_enabled(&v)),
             force_login_team_uuid: None,
-            preferred_method: None,
+            preferred_method: Some(PreferredAuthMethod::ApiKey),
         }
     }
 }
 /// Parse a boolean env-var value for grok's on/off flags. A bare presence
 /// enables the flag, but the common falsy spellings (`0`, `false`, `off`,
-/// `no`, empty) count as disabled — so e.g. `GROK_DISABLE_API_KEY_AUTH=false`
+/// `no`, empty) count as disabled — so e.g. `CHUTES_BUILD_DISABLE_API_KEY_AUTH=false`
 /// does NOT turn the kill switch on.
 fn env_flag_enabled(value: &str) -> bool {
     !matches!(
@@ -315,26 +302,26 @@ fn env_flag_enabled(value: &str) -> bool {
         "" | "0" | "false" | "off" | "no"
     )
 }
-/// True when the admin has set `GROK_DISABLE_API_KEY_AUTH` to a truthy value in
+/// True when the admin has set `CHUTES_BUILD_DISABLE_API_KEY_AUTH` to a truthy value in
 /// the process environment. Read live (call-time) and OR-ed into
 /// `api_key_auth_disabled()` so the env lockdown is non-overridable by a
 /// user-layer `config.toml`.
 fn env_lockdown_forced() -> bool {
-    std::env::var("GROK_DISABLE_API_KEY_AUTH")
+    std::env::var("CHUTES_BUILD_DISABLE_API_KEY_AUTH")
         .ok()
         .is_some_and(|v| env_flag_enabled(&v))
 }
 impl OidcAuthConfig {
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("GROK_OIDC_ISSUER").ok()?;
-        let client_id = std::env::var("GROK_OIDC_CLIENT_ID").ok()?;
+        let issuer = std::env::var("CHUTES_BUILD_OIDC_ISSUER").ok()?;
+        let client_id = std::env::var("CHUTES_BUILD_OIDC_CLIENT_ID").ok()?;
         Some(Self {
             issuer,
             client_id,
-            scopes: std::env::var("GROK_OIDC_SCOPES")
+            scopes: std::env::var("CHUTES_BUILD_OIDC_SCOPES")
                 .map(|s| s.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_else(|_| default_oidc_scopes()),
-            audience: std::env::var("GROK_OIDC_AUDIENCE").ok(),
+            audience: std::env::var("CHUTES_BUILD_OIDC_AUDIENCE").ok(),
         })
     }
 }
@@ -344,14 +331,14 @@ mod tests {
     #[test]
     fn team_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: "client-123".into(),
             scopes: default_team_oauth2_scopes(),
             principal_type: Some("Team".into()),
             principal_id: Some("team-abc".into()),
             referrer: Some("grok-build".into()),
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");
     }
     #[test]
     fn env_flag_enabled_treats_falsy_spellings_as_off() {
@@ -365,14 +352,14 @@ mod tests {
     #[test]
     fn personal_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: "client-123".into(),
             scopes: default_oauth2_scopes(),
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-build".into()),
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");
     }
     /// FROZEN loopback contract: the accounts-app origins the CLI's loopback
     /// callback server accepts cross-origin requests from. The consent page
@@ -382,7 +369,7 @@ mod tests {
     /// Non-production / local-dev origins are opt-in only.
     #[test]
     fn allowed_accounts_app_origins_are_frozen() {
-        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://accounts.x.ai"]);
+        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://chutes.ai"]);
         assert_eq!(allowed_accounts_app_origins(), PROD_ACCOUNTS_APP_ORIGINS);
     }
     /// FROZEN client contract: the 10 scopes the xAI OAuth2 client requests.

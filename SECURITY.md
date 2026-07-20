@@ -1,7 +1,51 @@
 # Security Policy
 
-Please report security vulnerabilities via our HackerOne program:
+## Supported versions
 
-https://hackerone.com/x
+Chutes Build is currently a development preview. Security fixes are applied to
+the latest revision of the default branch; older source snapshots are not
+supported.
 
-Do not open public GitHub issues for security reports.
+## Reporting a vulnerability
+
+Use the repository's private GitHub Security Advisory reporting flow. Do not
+open a public issue and do not include live credentials, private source code,
+session archives, or personal data in a report.
+
+Include:
+
+- the affected revision and platform;
+- a concise description of the impact and trust boundary;
+- minimal reproduction steps using synthetic data;
+- whether exploitation requires user approval, repository control, browser
+  access, or a malicious model/tool response;
+- any proposed mitigation.
+
+You should receive an acknowledgement when the report is reviewed. Disclosure
+and remediation timing will be coordinated according to severity and the
+availability of a safe fix.
+
+## Security boundaries
+
+Chutes Build can execute commands, modify files, invoke models, start subagents,
+and control an isolated browser. Model output, repository contents, web pages,
+MCP servers, tool responses, and downloaded documents are untrusted input. Keep
+permission prompts enabled, use trusted repositories, and never expose secrets
+in prompts or committed files.
+
+The project intentionally disables telemetry, remote trace uploads, automatic
+updates, upstream session sharing, and upstream managed configuration. Any
+change to those guarantees requires an explicit security and privacy review.
+
+## Automated release checks
+
+CI scans the complete Git history for known secret patterns and evaluates the
+resolved Rust dependency graph for advisories, licenses, duplicate versions,
+and unapproved sources. Release packaging additionally executes every native
+binary, creates SHA-256 sidecars for native npm archives, verifies those
+sidecars after artifact download, and runs the assembled launcher with its
+native Linux package before publication can begin.
+
+Documented advisory exceptions must include a bounded rationale in `deny.toml`.
+New advisories or source-policy violations fail CI by default. The current
+review record is maintained in [docs/security-review.md](docs/security-review.md).

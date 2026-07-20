@@ -10,7 +10,7 @@ environment:
   args:
     - dashboard
   env:
-    - key: GROK_AGENT_DASHBOARD
+    - key: CHUTES_BUILD_AGENT_DASHBOARD
       value: "1"
 mock:
   response: "UNUSED_DASHBOARD_MODEL_CLICK"

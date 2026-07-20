@@ -3,7 +3,7 @@
 """
 Memory System Integration Tests — Full Suite.
 
-Launches grok agent stdio in isolated environments ($HOME override)
+Launches chutes-build agent stdio in isolated environments ($HOME override)
 with pre-populated memory files. Tests the entire memory lifecycle:
 indexing, search, embeddings, flush, session-end, compaction, pruning.
 
@@ -21,7 +21,7 @@ Usage:
     python3 crates/codegen/xai-grok-shell/tests/memory_integration/run_tests.py test_fts_search_quality
 
     # Skip build (use pre-built binary):
-    GROK_BINARY=/path/to/xai-grok-pager python3 run_tests.py --fast
+    CHUTES_BUILD_BINARY=/path/to/xai-grok-pager python3 run_tests.py --fast
 """
 
 import json
@@ -67,7 +67,7 @@ def section(t):
 
 
 class AcpClient:
-    """Talks ACP (JSON-RPC over NDJSON) to a grok agent stdio subprocess."""
+    """Talks ACP (JSON-RPC over NDJSON) to a chutes-build agent stdio subprocess."""
 
     def __init__(self, proc, cwd=None):
         self.proc = proc
@@ -166,9 +166,9 @@ class IsolatedEnv:
     """Creates a fully isolated grok environment with custom $HOME.
 
     The agent subprocess gets a fake $HOME with:
-      ~/.grok/auth.json   (copied from real home)
-      ~/.grok/memory/     (pre-populated by tests)
-      ~/.grok/logs/       (memory.log appears here)
+      ~/.chutes-build/auth.json   (copied from real home)
+      ~/.chutes-build/memory/     (pre-populated by tests)
+      ~/.chutes-build/logs/       (memory.log appears here)
 
     And a workspace directory used as cwd when spawning the agent.
     """
@@ -180,26 +180,26 @@ class IsolatedEnv:
         os.makedirs(self.fake_home)
         os.makedirs(self.workspace)
 
-        # Create .grok dirs in fake home
-        self.grok_home = os.path.join(self.fake_home, ".grok")
+        # Create .chutes-build dirs in fake home
+        self.grok_home = os.path.join(self.fake_home, ".chutes-build")
         self.memory_dir = os.path.join(self.grok_home, "memory")
         self.logs_dir = os.path.join(self.grok_home, "logs")
         os.makedirs(self.memory_dir)
         os.makedirs(self.logs_dir)
 
         # Copy auth from real home
-        real_auth = os.path.expanduser("~/.grok/auth.json")
+        real_auth = os.path.expanduser("~/.chutes-build/auth.json")
         if os.path.isfile(real_auth):
             shutil.copy2(real_auth, os.path.join(self.grok_home, "auth.json"))
 
     def write_config(self, toml_str):
-        """Write global ~/.grok/config.toml (where the agent reads config)."""
+        """Write global ~/.chutes-build/config.toml (where the agent reads config)."""
         with open(os.path.join(self.grok_home, "config.toml"), "w") as f:
             f.write(toml_str)
 
     def write_global_memory(self, content):
-        """Write global MEMORY.md."""
-        path = os.path.join(self.memory_dir, "MEMORY.md")
+        """Write global memories.md."""
+        path = os.path.join(self.memory_dir, "memories.md")
         with open(path, "w") as f:
             f.write(content)
         return path
@@ -213,11 +213,11 @@ class IsolatedEnv:
         return None
 
     def write_workspace_memory(self, content):
-        """Write workspace MEMORY.md (must call after agent has created the dir)."""
+        """Write workspace memories.md (must call after agent has created the dir)."""
         ws_dir = self.find_workspace_dir()
         if not ws_dir:
             return None
-        path = os.path.join(ws_dir, "MEMORY.md")
+        path = os.path.join(ws_dir, "memories.md")
         with open(path, "w") as f:
             f.write(content)
         return path
@@ -266,16 +266,16 @@ class IsolatedEnv:
         return sorted(files)
 
     def spawn_agent(self, extra_env=None):
-        binary = os.environ.get("GROK_BINARY", "grok")
+        binary = os.environ.get("CHUTES_BUILD_BINARY", "grok")
         if not shutil.which(binary) and not os.path.isfile(binary):
             print(f"{R}grok binary not found: {binary}{N}")
             sys.exit(1)
         env = os.environ.copy()
         env["HOME"] = self.fake_home
-        env["GROK_MEMORY"] = "1"
+        env["CHUTES_BUILD_MEMORY"] = "1"
         env["RUST_LOG"] = "warn"
         # Disable leader mode
-        env["GROK_NO_LEADER"] = "1"
+        env["CHUTES_BUILD_NO_LEADER"] = "1"
         if extra_env:
             env.update(extra_env)
         proc = subprocess.Popen(
@@ -293,7 +293,7 @@ class IsolatedEnv:
 
 
 def _default_config() -> str:
-    embed_model = os.environ.get("GROK_MEMORY_EMBEDDING_MODEL", "").strip()
+    embed_model = os.environ.get("CHUTES_BUILD_MEMORY_EMBEDDING_MODEL", "").strip()
     embed_model_line = f'model = "{embed_model}"\n' if embed_model else ""
     return f"""
 [memory]
@@ -369,7 +369,7 @@ def init_session(client):
 
 
 def test_global_memory_indexing():
-    """Global MEMORY.md is indexed into chunks + FTS on session start."""
+    """Global memories.md is indexed into chunks + FTS on session start."""
     section("1. Global Memory Indexing + Embeddings")
     env = IsolatedEnv()
     try:
@@ -381,7 +381,7 @@ def test_global_memory_indexing():
 * Use blake3 for content hashing
 * Follow Rust 2024 edition conventions
 """)
-        ok(f"wrote global MEMORY.md (marker={marker})")
+        ok(f"wrote global memories.md (marker={marker})")
 
         client = env.spawn_agent()
         resp = init_session(client)
@@ -429,7 +429,7 @@ def test_global_memory_indexing():
 
 
 def test_workspace_vs_global_memory():
-    """Both global and workspace MEMORY.md are indexed with correct source labels."""
+    """Both global and workspace memories.md are indexed with correct source labels."""
     section("2. Workspace vs Global Memory (source classification)")
     env = IsolatedEnv()
     try:
@@ -447,7 +447,7 @@ def test_workspace_vs_global_memory():
         # Now write workspace memory
         ws_path = env.write_workspace_memory("# Workspace\n* Workspace rule: use cargo fmt\n")
         if ws_path:
-            ok("wrote workspace MEMORY.md")
+            ok("wrote workspace memories.md")
         else:
             fail("couldn't find workspace dir")
             client.close()
@@ -812,8 +812,8 @@ def test_reindex_idempotency():
 
 
 def test_content_update_detection():
-    """Modified MEMORY.md is re-indexed with new content."""
-    section("9. Content Update — Modified MEMORY.md re-indexed")
+    """Modified memories.md is re-indexed with new content."""
+    section("9. Content Update — Modified memories.md re-indexed")
     env = IsolatedEnv()
     try:
         env.write_config(INDEXING_ONLY_CONFIG)
@@ -859,7 +859,7 @@ def test_content_update_detection():
 
 
 def test_large_file_chunking():
-    """A large MEMORY.md is split into multiple reasonably-sized chunks."""
+    """A large memories.md is split into multiple reasonably-sized chunks."""
     section("10. Large File — Proper Chunking")
     env = IsolatedEnv()
     try:
@@ -919,7 +919,7 @@ def test_memory_disabled():
 enabled = false
 """)
         env.write_global_memory("# Should not be indexed\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "0"})
+        client = env.spawn_agent(extra_env={"CHUTES_BUILD_MEMORY": "0"})
         init_session(client)
         time.sleep(2)
 
@@ -949,7 +949,7 @@ def test_memory_disabled_no_config():
         # Config with no memory section at all
         env.write_config("")
         env.write_global_memory("# Should not be indexed\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "0"})
+        client = env.spawn_agent(extra_env={"CHUTES_BUILD_MEMORY": "0"})
         init_session(client)
         time.sleep(2)
 
@@ -965,22 +965,22 @@ def test_memory_disabled_no_config():
 
 
 def test_memory_enabled_env_override():
-    """GROK_MEMORY=1 env var enables memory even without config."""
-    section("13. GROK_MEMORY Env Var Override")
+    """CHUTES_BUILD_MEMORY=1 env var enables memory even without config."""
+    section("13. CHUTES_BUILD_MEMORY Env Var Override")
     env = IsolatedEnv()
     try:
         # Config enables memory
         env.write_config(INDEXING_ONLY_CONFIG)
         env.write_global_memory("# Env test content\n* Key value here\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "1"})
+        client = env.spawn_agent(extra_env={"CHUTES_BUILD_MEMORY": "1"})
         init_session(client)
         time.sleep(3)
 
         db = env.get_db_path()
         if db:
-            ok("index created with GROK_MEMORY=1")
+            ok("index created with CHUTES_BUILD_MEMORY=1")
         else:
-            fail("no index despite GROK_MEMORY=1 and config enabled")
+            fail("no index despite CHUTES_BUILD_MEMORY=1 and config enabled")
 
         client.close()
     finally:
@@ -1234,8 +1234,8 @@ def test_session_log_indexed_next_session():
 
 
 def test_empty_memory_file():
-    """Empty MEMORY.md doesn't crash the indexer."""
-    section("20. Empty MEMORY.md — No Crash")
+    """Empty memories.md doesn't crash the indexer."""
+    section("20. Empty memories.md — No Crash")
     env = IsolatedEnv()
     try:
         env.write_config(INDEXING_ONLY_CONFIG)
@@ -1244,9 +1244,9 @@ def test_empty_memory_file():
         client = env.spawn_agent()
         resp = init_session(client)
         if "error" in resp:
-            fail(f"agent crashed with empty MEMORY.md: {resp}")
+            fail(f"agent crashed with empty memories.md: {resp}")
         else:
-            ok("agent started with empty MEMORY.md")
+            ok("agent started with empty memories.md")
 
         time.sleep(2)
         chunks = env.query_db("SELECT count(*) FROM chunks")
@@ -1261,7 +1261,7 @@ def test_empty_memory_file():
 
 
 def test_unicode_memory_content():
-    """MEMORY.md with unicode (emoji, CJK, etc.) is indexed correctly."""
+    """memories.md with unicode (emoji, CJK, etc.) is indexed correctly."""
     section("21. Unicode Memory Content")
     env = IsolatedEnv()
     try:
@@ -1296,7 +1296,7 @@ def test_unicode_memory_content():
 
 
 def test_binary_content_resilience():
-    """MEMORY.md with binary-ish content doesn't crash the indexer."""
+    """memories.md with binary-ish content doesn't crash the indexer."""
     section("22. Binary-ish Content Resilience")
     env = IsolatedEnv()
     try:
@@ -1344,15 +1344,15 @@ def test_multiple_workspace_isolation():
         beta_workspace = os.path.join(env1.root, "workspace", "project-beta")
         os.makedirs(beta_workspace, exist_ok=True)
 
-        # Config is already in global ~/.grok/config.toml from env1.write_config
+        # Config is already in global ~/.chutes-build/config.toml from env1.write_config
 
         # Start agent in workspace beta (reuse env1's fake home)
-        binary = os.environ.get("GROK_BINARY", "grok")
+        binary = os.environ.get("CHUTES_BUILD_BINARY", "grok")
         env_vars = os.environ.copy()
         env_vars["HOME"] = env1.fake_home
-        env_vars["GROK_MEMORY"] = "1"
+        env_vars["CHUTES_BUILD_MEMORY"] = "1"
         env_vars["RUST_LOG"] = "warn"
-        env_vars["GROK_NO_LEADER"] = "1"
+        env_vars["CHUTES_BUILD_NO_LEADER"] = "1"
         proc2 = subprocess.Popen(
             [binary, "agent", "--no-leader", "stdio"],
             stdin=subprocess.PIPE,
@@ -1947,7 +1947,7 @@ def test_roundtrip_flush_artifact_searchable():
 
 
 def test_roundtrip_global_memory_searchable_across_sessions():
-    """Global MEMORY.md content remains searchable across multiple sessions."""
+    """Global memories.md content remains searchable across multiple sessions."""
     section("35. Round-trip: global memory persists and is searchable across 3 sessions")
     env = IsolatedEnv()
     try:
@@ -1987,7 +1987,7 @@ def test_roundtrip_global_memory_searchable_across_sessions():
 
 
 def test_roundtrip_workspace_memory_searchable():
-    """Workspace MEMORY.md content is searchable with workspace-specific queries."""
+    """Workspace memories.md content is searchable with workspace-specific queries."""
     section("36. Round-trip: workspace memory searchable by project-specific terms")
     env = IsolatedEnv()
     try:
@@ -2012,7 +2012,7 @@ def test_roundtrip_workspace_memory_searchable():
             fail("couldn't find workspace dir")
             c1.close()
             return
-        ok("wrote workspace MEMORY.md with project-specific terms")
+        ok("wrote workspace memories.md with project-specific terms")
         c1.close()
         time.sleep(1)
 
@@ -2583,14 +2583,14 @@ def build_binary():
 
     binary = os.path.join(repo, "target", "release", "xai-grok-pager")
 
-    # Find rg for GROK_SHELL_BUNDLE_RG_PATH
+    # Find rg for CHUTES_BUILD_SHELL_BUNDLE_RG_PATH
     rg = shutil.which("rg")
     if not rg:
         print(f"{R}rg (ripgrep) not found — required for build{N}")
         sys.exit(1)
 
     env = os.environ.copy()
-    env["GROK_SHELL_BUNDLE_RG_PATH"] = rg
+    env["CHUTES_BUILD_SHELL_BUNDLE_RG_PATH"] = rg
 
     print(f"{B}Building xai-grok-pager (release + dev)...{N}")
     result = subprocess.run(
@@ -2611,12 +2611,12 @@ def main():
     print(f"{'=' * 60}{N}\n")
 
     # Build or locate binary
-    if "GROK_BINARY" in os.environ:
-        binary = os.environ["GROK_BINARY"]
-        print(f"Binary: {binary} (from $GROK_BINARY, skipping build)")
+    if "CHUTES_BUILD_BINARY" in os.environ:
+        binary = os.environ["CHUTES_BUILD_BINARY"]
+        print(f"Binary: {binary} (from $CHUTES_BUILD_BINARY, skipping build)")
     else:
         binary = build_binary()
-        os.environ["GROK_BINARY"] = binary
+        os.environ["CHUTES_BUILD_BINARY"] = binary
 
     if not os.path.isfile(binary):
         print(f"{R}Binary not found: {binary}{N}")

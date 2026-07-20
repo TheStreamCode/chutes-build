@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "**grok models** banner now correctly reports per-model API keys and deployment keys.",
+    "description": "**chutes-build models** banner now correctly reports per-model API keys and deployment keys.",
     "breaking_change": false
   },
   {
@@ -81,7 +81,7 @@
   },
   {
     "category": "features",
-    "description": "You can now add a local directory as a plugin marketplace source with `grok plugin marketplace add`.",
+    "description": "You can now add a local directory as a plugin marketplace source with `chutes-build plugin marketplace add`.",
     "breaking_change": false
   },
   {

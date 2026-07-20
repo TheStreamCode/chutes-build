@@ -1,10 +1,10 @@
 //! Interactive folder-trust prompt: a dormant agent→GUI-client ACP round-trip
-//! (`x.ai/folder_trust/request`) that asks a GUI client (grok-desktop) to decide
+//! (`chutes.build/folder_trust/request`) that asks a GUI client (grok-desktop) to decide
 //! trust for an untrusted-with-configs workspace, then grants + reloads the
 //! now-trusted project servers without a restart.
 //!
 //! DORMANT in production: it only fires when the connected client advertised
-//! `x.ai/folderTrust.interactive` AND the folder-trust feature flag is on AND the
+//! `chutes.build/folderTrust.interactive` AND the folder-trust feature flag is on AND the
 //! verdict is [`xai_grok_workspace::folder_trust::TrustOutcome::Prompt`]. No
 //! client advertises the capability until the desktop UI ships — so this is
 //! inert by default even with the feature flag on. The TUI/headless clients never
@@ -16,7 +16,7 @@
 //! (same `workspace_key`), each reloaded against its OWN cwd. Project LSP is NOT
 //! hot-reloaded — the LSP backend is baked into the agent's tool bridge at build
 //! time (one-shot startup coordinator, no in-place reconfigure API), so repo-local
-//! `.grok/lsp.json` servers start on the NEXT session open (the durable grant
+//! `.chutes-build/lsp.json` servers start on the NEXT session open (the durable grant
 //! makes the re-spawn trusted). `lsp` is still REPORTED in the prompt's
 //! `configKinds` (it is a real reason the folder is gated) — only the post-grant
 //! hot-reload skips it.
@@ -29,7 +29,7 @@ use super::*;
 /// the whole connection lifetime.
 const TRUST_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// ACP `x.ai/folder_trust/request` payload (agent → GUI client). Serialized as
+/// ACP `chutes.build/folder_trust/request` payload (agent → GUI client). Serialized as
 /// `camelCase` for the ACP JSON-RPC wire format.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,21 +62,21 @@ pub(crate) enum FolderTrustOutcome {
     Reject,
 }
 
-/// ACP `x.ai/folder_trust/request` response (GUI client → agent).
+/// ACP `chutes.build/folder_trust/request` response (GUI client → agent).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(crate) struct FolderTrustResponse {
     pub outcome: FolderTrustOutcome,
 }
 
 impl MvpAgent {
-    /// Parse the `x.ai/folderTrust.interactive` capability from an initialize
+    /// Parse the `chutes.build/folderTrust.interactive` capability from an initialize
     /// request. Returns `false` if absent or not `true`. Mirrors
     /// [`Self::parse_code_nav_capability`].
     pub(crate) fn parse_interactive_trust_capability(init: &acp::InitializeRequest) -> bool {
         init.client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/folderTrust"))
+            .and_then(|m| m.get("chutes.build/folderTrust"))
             .and_then(|v| v.get("interactive"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
@@ -84,7 +84,7 @@ impl MvpAgent {
 
     /// Ask a GUI client to decide trust for `session_id`'s workspace, then grant
     /// + reload on accept. DORMANT no-op unless the client advertised
-    /// `x.ai/folderTrust.interactive` AND [`folder_trust::prompt_warranted`]
+    /// `chutes.build/folderTrust.interactive` AND [`folder_trust::prompt_warranted`]
     /// (feature on + untrusted + repo configs present).
     ///
     /// Non-blocking: the session was already created with project servers GATED
@@ -185,7 +185,7 @@ impl MvpAgent {
                     return;
                 }
             };
-            let ext_request = acp::ExtRequest::new("x.ai/folder_trust/request", raw_params.into());
+            let ext_request = acp::ExtRequest::new("chutes.build/folder_trust/request", raw_params.into());
 
             use agent_client_protocol::Client as _;
             let outcome = match tokio::time::timeout(
@@ -361,7 +361,7 @@ async fn reload_project_servers_after_grant(ctx: ReloadAfterGrant<'_>) {
         let _ = target
             .cmd_tx
             .send(crate::session::SessionCommand::ReloadPlugins { registry });
-        // The session's OWN project hooks (`.grok/hooks`, `.cursor/hooks.json`),
+        // The session's OWN project hooks (`.chutes-build/hooks`, `.cursor/hooks.json`),
         // which `ReloadPlugins` does NOT touch — re-discovered against the actor's
         // own `session_info.cwd` on the now-trusted verdict by `reload_hooks_impl`.
         let _ = target
@@ -399,7 +399,7 @@ mod tests {
     fn parse_interactive_trust_capability_present_and_true() {
         let mut meta = serde_json::Map::new();
         meta.insert(
-            "x.ai/folderTrust".to_string(),
+            "chutes.build/folderTrust".to_string(),
             serde_json::json!({ "interactive": true }),
         );
         let init = init_with_meta(Some(serde_json::Value::Object(meta)));
@@ -416,7 +416,7 @@ mod tests {
     fn parse_interactive_trust_capability_false_returns_false() {
         let mut meta = serde_json::Map::new();
         meta.insert(
-            "x.ai/folderTrust".to_string(),
+            "chutes.build/folderTrust".to_string(),
             serde_json::json!({ "interactive": false }),
         );
         let init = init_with_meta(Some(serde_json::Value::Object(meta)));

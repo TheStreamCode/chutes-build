@@ -21,7 +21,7 @@ use super::scroll::*;
 // promote at the 3rd event; the harness default `TerminalName::Unknown` is
 // ept=3, where auto streams stay Unknown until finalize and flush uncapped).
 // So this test presents `TERM_PROGRAM=iTerm.app` (ept=1) and floods wheel-up
-// reports with `GROK_SCROLL_SPEED=100` (6x multiplier — an existing user
+// reports with `CHUTES_BUILD_SCROLL_SPEED=100` (6x multiplier — an existing user
 // setting, used here as a deterministic demand amplifier). Total viewport
 // travel is then classification- and jitter-robust:
 //
@@ -94,7 +94,10 @@ const COMPRESSED_BURST_FRAMES_MAX: u64 = 12;
 async fn trackpad_flood_does_not_under_travel() {
     let (mut harness, _content, top_before) = spawn_bottom_pinned_marker_scrollback_with_env(
         MARKER_COUNT,
-        &[("TERM_PROGRAM", "iTerm.app"), ("GROK_SCROLL_SPEED", "100")],
+        &[
+            ("TERM_PROGRAM", "iTerm.app"),
+            ("CHUTES_BUILD_SCROLL_SPEED", "100"),
+        ],
     )
     .await;
 

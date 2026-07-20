@@ -6,7 +6,7 @@
   },
   {
     "category": "fixes",
-    "description": "**--minimal** flag now shows in `grok --help`.",
+    "description": "**--minimal** flag now shows in `chutes-build --help`.",
     "breaking_change": false
   },
   {

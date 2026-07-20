@@ -1,7 +1,7 @@
 name: folder-trust-prompt
 description: >
   Full session e2e for the client-side folder-trust prompt. With the feature on
-  (`GROK_FOLDER_TRUST=1`) and the pager running in a git repo that ships a
+  (`CHUTES_BUILD_FOLDER_TRUST=1`) and the pager running in a git repo that ships a
   repo-local `.mcp.json`, `decide` returns `Prompt` so the trust question renders
   BEFORE any session starts. Accepting it (`y`) persists the grant, lets the
   session proceed, and a submitted prompt streams the mock assistant response —
@@ -11,11 +11,11 @@ terminal:
   cols: 120
 environment:
   env:
-    - key: GROK_FOLDER_TRUST
+    - key: CHUTES_BUILD_FOLDER_TRUST
       value: "1"
     # A self-built (unstamped) grok auto-trusts and never prompts; simulate a
     # release build so the folder-trust prompt is actually evaluated.
-    - key: GROK_TEST_VERSION
+    - key: CHUTES_BUILD_TEST_VERSION
       value: "0.0.0-sim"
 workspace:
   git_init: true

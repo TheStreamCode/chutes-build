@@ -15,9 +15,10 @@ arc-swap = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
+chutes-build-core = { path = "../../chutes-build-core" }
 dunce = { workspace = true }
 flate2 = { workspace = true }
-git2 = { version = "0.20", default-features = false, features = [
+git2 = { version = "0.21", default-features = false, features = [
     "vendored-libgit2",
 ] }
 notify = { workspace = true }
@@ -36,6 +37,7 @@ xai-grok-config-types = { workspace = true }
 xai-grok-http = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-tools = { workspace = true }
+xai-grok-shell-base = { workspace = true }
 xai-grok-version = { workspace = true }
 xai-sqlite-journal = { workspace = true }
 

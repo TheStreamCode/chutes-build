@@ -32,7 +32,7 @@ pub(crate) fn base_template() -> Zeroizing<String> {
     decrypt(BASE_PROMPT_ENC, PROMPT_SEEDS[0])
 }
 
-/// The base prompt template source, exposed for `grok prompt --section template`.
+/// The base prompt template source, exposed for `chutes-build prompt --section template`.
 pub fn base_template_source() -> Zeroizing<String> {
     base_template()
 }
@@ -41,7 +41,7 @@ pub(crate) fn apply_patch_template() -> Zeroizing<String> {
     decrypt(CODEX_PROMPT_ENC, PROMPT_SEEDS[1])
 }
 
-/// Apply-patch prompt template source, exposed for `grok prompt --section apply-patch-template`.
+/// Apply-patch prompt template source, exposed for `chutes-build prompt --section apply-patch-template`.
 pub fn apply_patch_template_source() -> Zeroizing<String> {
     apply_patch_template()
 }
@@ -53,7 +53,8 @@ pub(crate) fn subagent_template() -> Zeroizing<String> {
 
 /// The compact system prompt used after conversation compaction.
 pub const COMPACT_SYSTEM_PROMPT: &str = "You are an AI coding agent. You operate in a workspace with a provided codebase.\n\n\
-     Your main goal is to complete the user's request, denoted within the <user_query> tag.";
+     Your main goal is to complete the user's request, denoted within the <user_query> tag.\n\n\
+     For every Chutes-related question or factual claim, consult both https://chutes.ai/docs and https://chutes.ai/news before answering. Treat relevant official Chutes pages as primary authority. If they do not cover the claim or cannot be reached, say that it was not verified. Never send credentials, private code, prompts, or repository contents to external retrieval services.";
 
 #[cfg(test)]
 mod tests {
@@ -372,11 +373,48 @@ mod tests {
     }
 
     #[test]
+    fn chutes_questions_require_official_docs_and_news() {
+        for (label, prompt) in [
+            (
+                "base",
+                render_base(&default_renderer(), &default_placeholders()),
+            ),
+            (
+                "subagent",
+                render_subagent(&default_renderer(), &default_placeholders()),
+            ),
+            (
+                "apply-patch",
+                render_apply_patch(&default_renderer(), &default_placeholders()),
+            ),
+            ("compact", COMPACT_SYSTEM_PROMPT.to_owned()),
+        ] {
+            assert!(
+                prompt.contains("https://chutes.ai/docs"),
+                "{label} prompt must require official Chutes docs"
+            );
+            assert!(
+                prompt.contains("https://chutes.ai/news"),
+                "{label} prompt must require official Chutes news"
+            );
+            assert!(
+                prompt.contains("primary authority"),
+                "{label} prompt must define official-source precedence"
+            );
+            assert!(
+                prompt.contains("not verified"),
+                "{label} prompt must disclose unverifiable claims"
+            );
+        }
+    }
+
+    #[test]
     fn test_compact_prompt_matches_expected() {
         assert_eq!(
             COMPACT_SYSTEM_PROMPT,
             "You are an AI coding agent. You operate in a workspace with a provided codebase.\n\n\
-             Your main goal is to complete the user's request, denoted within the <user_query> tag.",
+             Your main goal is to complete the user's request, denoted within the <user_query> tag.\n\n\
+             For every Chutes-related question or factual claim, consult both https://chutes.ai/docs and https://chutes.ai/news before answering. Treat relevant official Chutes pages as primary authority. If they do not cover the claim or cannot be reached, say that it was not verified. Never send credentials, private code, prompts, or repository contents to external retrieval services.",
         );
     }
 

@@ -51,7 +51,7 @@ pub enum WarningCategory {
     /// Below truecolor: truecolor themes hidden. `/terminal-setup` only.
     LimitedColorSupport,
     SandboxProfileConflict,
-    /// The session runs over SSH without `grok wrap` on the local end, so
+    /// The session runs over SSH without `chutes-build wrap` on the local end, so
     /// clipboard forwarding and terminal-mode restore on dropped connections
     /// are not guaranteed. Informational recommendation, not a breakage.
     SshWithoutWrap,
@@ -352,7 +352,7 @@ fn sandbox_profile_conflict_warning_from(conflicts: Vec<String>) -> Option<Termi
     Some(TerminalWarning {
         category: WarningCategory::SandboxProfileConflict,
         message: format!(
-            "Your project sandbox profile conflicts with user config.\nProfile: {profiles}\nProject config: .grok/sandbox.toml\nUser config: ~/.grok/sandbox.toml"
+            "Your project sandbox profile conflicts with user config.\nProfile: {profiles}\nProject config: .chutes-build/sandbox.toml\nUser config: ~/.chutes-build/sandbox.toml"
         ),
         fix: Some("Using the user profile instead.".to_string()),
         config_path: None,
@@ -360,14 +360,14 @@ fn sandbox_profile_conflict_warning_from(conflicts: Vec<String>) -> Option<Termi
     })
 }
 
-/// Pure SSH `grok wrap` recommendation — suggests launching the session
-/// through `grok wrap ssh <host>` on the user's local machine, which gives a
+/// Pure SSH `chutes-build wrap` recommendation — suggests launching the session
+/// through `chutes-build wrap ssh <host>` on the user's local machine, which gives a
 /// remote session reliable clipboard forwarding plus terminal-mode restore
 /// when the connection drops.
 ///
 /// Gates (all must hold):
 /// - `is_ssh` — the session runs over SSH ([`TerminalContext::is_ssh`]);
-/// - `!osc52_sink_active` — no wrap is already capturing our output. `grok
+/// - `!osc52_sink_active` — no wrap is already capturing our output. `chutes-build
 ///   wrap` advertises its OSC 52 sink through the SSH hop via an env var
 ///   (see `clipboard::osc52_sink_active`), so once a user adopts wrap the
 ///   hint silences itself with no further bookkeeping. Env-based, so stale
@@ -394,10 +394,10 @@ pub fn ssh_wrap_hint(
     }
     let mut warning = TerminalWarning::new(
         WarningCategory::SshWithoutWrap,
-        "Running over SSH without `grok wrap` -- clipboard copies depend on the \
+        "Running over SSH without `chutes-build wrap` -- clipboard copies depend on the \
          terminal's escape-sequence support, and a dropped connection can leave \
          your local terminal in a bad state",
-        Some("grok wrap ssh <host>"),
+        Some("chutes-build wrap ssh <host>"),
         None,
     );
     warning.note = Some(
@@ -751,15 +751,17 @@ pub fn format_clipboard_diagnostics(input: ClipboardDiagnosticsInput<'_>) -> Cli
     let fix = match delivery {
         ClipboardDelivery::Confirmed => None,
         ClipboardDelivery::Unverified if input.is_ssh => {
-            Some("grok wrap <ssh command> or /minimal")
+            Some("chutes-build wrap <ssh command> or /minimal")
         }
         ClipboardDelivery::Unverified if input.container_no_display => {
-            Some("grok wrap <command> or /minimal")
+            Some("chutes-build wrap <command> or /minimal")
         }
-        ClipboardDelivery::Unverified => Some("grok wrap or /minimal"),
-        ClipboardDelivery::Failed if input.is_ssh => Some("grok wrap <ssh command> or /minimal"),
+        ClipboardDelivery::Unverified => Some("chutes-build wrap or /minimal"),
+        ClipboardDelivery::Failed if input.is_ssh => {
+            Some("chutes-build wrap <ssh command> or /minimal")
+        }
         ClipboardDelivery::Failed if input.container_no_display => {
-            Some("grok wrap <command> or /minimal")
+            Some("chutes-build wrap <command> or /minimal")
         }
         ClipboardDelivery::Failed => Some("/minimal"),
     };
@@ -1049,7 +1051,7 @@ mod tests {
             "osc 52       unknown",
             "wrap         off",
             "status       unverified",
-            "fix          grok wrap <ssh command> or /minimal",
+            "fix          chutes-build wrap <ssh command> or /minimal",
         ] {
             assert!(
                 diagnostics.text.contains(expected),
@@ -1073,7 +1075,7 @@ mod tests {
         assert!(
             unsupported
                 .text
-                .contains("fix          grok wrap <ssh command> or /minimal")
+                .contains("fix          chutes-build wrap <ssh command> or /minimal")
         );
         assert!(unsupported.has_issue);
     }
@@ -1131,7 +1133,7 @@ mod tests {
         assert!(
             container
                 .text
-                .contains("fix          grok wrap <command> or /minimal")
+                .contains("fix          chutes-build wrap <command> or /minimal")
         );
     }
 
@@ -1877,14 +1879,14 @@ mod tests {
         assert!(out[1].message.contains("sandbox profile"));
     }
 
-    // -- ssh_wrap_hint: `grok wrap ssh` recommendation --------------------------
+    // -- ssh_wrap_hint: `chutes-build wrap ssh` recommendation --------------------------
 
     #[test]
     fn ssh_wrap_hint_fires_over_plain_ssh() {
         // is_ssh, no sink, not VS Code remote → recommend wrap.
         let w = ssh_wrap_hint(true, false, false).expect("hint must fire");
         assert_eq!(w.category, WarningCategory::SshWithoutWrap);
-        assert_eq!(w.fix.as_deref(), Some("grok wrap ssh <host>"));
+        assert_eq!(w.fix.as_deref(), Some("chutes-build wrap ssh <host>"));
         assert!(
             w.config_path.is_none(),
             "fix is a command, not a config line"
@@ -1906,7 +1908,7 @@ mod tests {
     #[test]
     fn ssh_wrap_hint_suppressed_when_sink_active() {
         // An active OSC 52 sink means the session already runs under
-        // `grok wrap` — adoption silences the hint by itself.
+        // `chutes-build wrap` — adoption silences the hint by itself.
         assert!(ssh_wrap_hint(true, true, false).is_none());
     }
 
@@ -2479,7 +2481,7 @@ mod tests {
                 line.starts_with(&format!("  themes       {n}/{total}: ")),
                 "level {level:?}: {line}"
             );
-            assert!(line.contains("groknight") && line.contains("grokday"));
+            assert!(line.contains("chutesnight") && line.contains("chutesday"));
             assert!(!line.contains("tokyonight"));
         }
     }

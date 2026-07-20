@@ -1,8 +1,7 @@
 //! Bridge the shell's `AuthManager` onto the voice crate's bearer provider.
 //!
-//! voice-api accepts both API keys and OAuth2 tokens directly at `api.x.ai`
-//! and attributes per-user billing for OAuth, so the voice channel just reuses
-//! the same bearer the agent uses for chat — no separate env var.
+//! The voice channel reuses the same bearer provider as chat; no separate
+//! credential is stored. Voice remains disabled unless explicitly configured.
 //!
 //! Resolved per request: the agent's refreshing manager in direct-spawn mode,
 //! or a non-refreshing one that adopts the agent's rotated `auth.json` token
@@ -36,8 +35,7 @@ impl VoiceAuthProvider for AuthManagerVoiceAuth {
 
 /// Build the voice bearer provider from the connection's `AuthManager`.
 ///
-/// Works for every auth method: OAuth / grok.com / OIDC session tokens and
-/// `XAI_API_KEY` / per-model BYOK keys.
+/// Works with `CHUTES_API_KEY` and per-model BYOK keys.
 pub fn build_voice_auth(auth_manager: Arc<xai_grok_shell::auth::AuthManager>) -> SharedVoiceAuth {
     Arc::new(AuthManagerVoiceAuth(
         xai_grok_shell::auth::shared_api_key_provider(auth_manager),

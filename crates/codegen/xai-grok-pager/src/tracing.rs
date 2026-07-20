@@ -277,7 +277,7 @@ impl TracingModel {
 /// retention in the log channel was the 50-60GB OOM class. Payload fields on
 /// this target must be wrapped in [`LazyJson`] so serialization only happens
 /// inside a recording subscriber: the dev pane filter (dev builds) or the
-/// firehose (`GROK_DEBUG_LOG` / `GROK_LOG_FILE`).
+/// firehose (`CHUTES_BUILD_DEBUG_LOG` / `CHUTES_BUILD_LOG_FILE`).
 pub use xai_grok_telemetry::debug_log::ACP_UPDATE_PAYLOAD_TARGET;
 /// Target for the always-on compact ACP update summary line (kind, ids,
 /// status, payload sizes). Cheap to format at streaming rate.
@@ -423,15 +423,6 @@ pub fn init_tracing() -> TracingHandle {
         .with_target(true)
         .with_ansi(true)
         .with_writer(make_writer);
-    let otel_layer = xai_grok_telemetry::otel_layer::build_otel_layer(
-        xai_grok_telemetry::otel_layer::OtelClientInfo {
-            client_name: "grok-pager",
-            client_version: xai_grok_version::VERSION,
-            service_version: env!("VERSION_WITH_COMMIT"),
-            app_entrypoint: "tui",
-        },
-        xai_grok_shell::auth::credential_provider::build_default_otel_layer_config(),
-    );
     let instrumentation_layer = xai_grok_telemetry::instrumentation::layer();
     let sampling_log_layer = xai_grok_telemetry::sampling_log::layer();
     let hooks_log_layer = xai_grok_telemetry::hooks_log::layer();
@@ -439,18 +430,8 @@ pub fn init_tracing() -> TracingHandle {
         .with(fmt_layer.with_filter(env_filter))
         .with(instrumentation_layer)
         .with(sampling_log_layer)
-        .with(hooks_log_layer)
-        .with(otel_layer);
+        .with(hooks_log_layer);
     xai_grok_telemetry::debug_log::install_firehose(registry, "tui");
-    xai_grok_telemetry::external::init(
-        xai_grok_shell::agent::config::resolve_external_otel_config(
-            xai_grok_telemetry::external::config::ExternalClientInfo {
-                service_version: env!("VERSION_WITH_COMMIT").to_owned(),
-                client_version: xai_grok_version::VERSION.to_owned(),
-                app_entrypoint: "tui".to_owned(),
-            },
-        ),
-    );
     TracingHandle { rx }
 }
 #[cfg(test)]

@@ -73,7 +73,7 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
     let builder = crate::tools::bridge::ToolBridge::get_builder();
     let config = ToolServerConfig {
         tools: vec![ToolConfig {
-            id: "GrokBuild:web_search".into(),
+            id: "ChutesBuild:web_search".into(),
             params: None,
             name_override: None,
             params_name_overrides: None,
@@ -152,7 +152,7 @@ async fn web_search_errors_when_configured_model_cannot_be_resolved() {
     let builder = crate::tools::bridge::ToolBridge::get_builder();
     let config = ToolServerConfig {
         tools: vec![ToolConfig {
-            id: "GrokBuild:web_search".into(),
+            id: "ChutesBuild:web_search".into(),
             params: None,
             name_override: None,
             params_name_overrides: None,

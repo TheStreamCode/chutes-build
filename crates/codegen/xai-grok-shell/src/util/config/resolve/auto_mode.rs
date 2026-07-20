@@ -2,10 +2,10 @@ use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
 /// Env override for the **auto** permission-mode feature gate.
-pub(crate) const ENV_AUTO_PERMISSION_MODE: &str = "GROK_AUTO_PERMISSION_MODE";
+pub(crate) const ENV_AUTO_PERMISSION_MODE: &str = "CHUTES_BUILD_AUTO_PERMISSION_MODE";
 
 /// Crate-wide serialization lock for tests that mutate
-/// `GROK_AUTO_PERMISSION_MODE`. Every test reading the gate (here and in
+/// `CHUTES_BUILD_AUTO_PERMISSION_MODE`. Every test reading the gate (here and in
 /// `permissions.rs`, compiled into the same test binary) locks this so a
 /// concurrent setter can't make them flaky.
 #[cfg(test)]
@@ -48,7 +48,7 @@ pub fn remote_auto_mode_enabled(remote: Option<&RemoteSettings>) -> Option<bool>
 
 /// Pure precedence core for the auto-permission-mode gate, shared by the
 /// `RemoteSettings`-typed resolver and the free-function disk reader so the
-/// two can't drift. Precedence: requirement > env (`GROK_AUTO_PERMISSION_MODE`)
+/// two can't drift. Precedence: requirement > env (`CHUTES_BUILD_AUTO_PERMISSION_MODE`)
 /// > config > managed > remote feature-flag > default (`true`).
 fn resolve_auto_permission_mode_layers(
     requirement: Option<bool>,
@@ -70,7 +70,7 @@ fn resolve_auto_permission_mode_layers(
 /// the LLM/heuristic classifier) is enabled. Full chain mirroring
 /// [`resolve_zdr_access_enabled`](super::resolve_zdr_access_enabled):
 ///
-/// requirements > env (`GROK_AUTO_PERMISSION_MODE`) > `[auto_mode] enabled` in
+/// requirements > env (`CHUTES_BUILD_AUTO_PERMISSION_MODE`) > `[auto_mode] enabled` in
 /// `config.toml` > managed > remote settings (`auto_mode.enabled`, coerced
 /// from the raw JSON) > default (`true`).
 ///
@@ -213,7 +213,7 @@ mod auto_permission_mode_gate_tests {
     use super::*;
     use crate::agent::config::ConfigSource;
 
-    // `GROK_AUTO_PERMISSION_MODE` is process-global; serialize every test that
+    // `CHUTES_BUILD_AUTO_PERMISSION_MODE` is process-global; serialize every test that
     // reads it (all of them, via `BoolFlag::env`) and force it unset at the top
     // of each so a developer's shell value can't make these flaky.
     fn guard() -> std::sync::MutexGuard<'static, ()> {

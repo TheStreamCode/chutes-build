@@ -3567,7 +3567,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
 
     // Initial config: 500k context, Responses backend (matches grok-4.5)
     let config = SamplingConfig {
-        base_url: "https://api.x.ai/v1".to_string(),
+        base_url: "https://llm.chutes.ai/v1".to_string(),
         model: "grok-4.5".to_string(),
         max_completion_tokens: None,
         temperature: Some(0.7),
@@ -4320,7 +4320,7 @@ async fn prefix_stable_after_session_resume() {
 }
 
 // ============================================================================
-// Out-of-band history repair (x.ai/session/repair)
+// Out-of-band history repair (chutes.build/session/repair)
 // ============================================================================
 
 /// Bricked-session shape: an orphaned tool result survives load (the eager

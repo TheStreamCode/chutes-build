@@ -70,7 +70,7 @@ async fn minimal_slash_switches_to_fullscreen() {
 
     // Slash-command mode switches are session-scoped: `/fullscreen` relaunch
     // must not write `[ui] screen_mode` (manual config only).
-    let config_path = content.home().join(".grok").join("config.toml");
+    let config_path = content.home().join(".chutes-build").join("config.toml");
     // Brief settle so a fire-and-forget write would have landed if still present.
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {

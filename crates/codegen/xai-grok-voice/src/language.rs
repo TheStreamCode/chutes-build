@@ -1,15 +1,6 @@
-//! Grok Speech-to-Text language codes.
+//! Speech-to-Text language codes used by the optional compatible transport.
 //!
-//! Source of truth for the `language` query/form parameter on
-//! `https://api.x.ai/v1/stt` and `wss://api.x.ai/v1/stt`.
-//!
-//! Official catalog (25 languages):
-//! <https://docs.x.ai/developers/model-capabilities/audio/speech-to-text#supported-languages>
-//!
-//! Per the docs, the model can transcribe these languages regardless of the
-//! parameter; setting `language` enables Inverse Text Normalization (numbers,
-//! currencies, units → written form) for that language. The STT API does **not**
-//! accept `auto` (unlike TTS) — clients must send a concrete code. Use
+//! The transport sends a concrete language code. Use
 //! [`language_for_api`] to resolve a stored preference (including the client-only
 //! `auto` sentinel) before connecting.
 
@@ -29,10 +20,7 @@ pub const STT_LANGUAGE_AUTO: &str = "auto";
 /// Default STT language when unset or unrecognized.
 pub const STT_LANGUAGE_DEFAULT: &str = "en";
 
-/// Official Grok STT languages (docs.x.ai), sorted by English name.
-///
-/// Keep this list in lockstep with the public docs. Adding a code that the API
-/// does not list will not break transcription, but ITN formatting may not apply.
+/// Compatibility language list, sorted by English name.
 pub const STT_LANGUAGES: &[SttLanguage] = &[
     SttLanguage {
         code: "ar",
@@ -235,10 +223,7 @@ mod tests {
     fn catalog_matches_public_docs_exactly() {
         let ours: HashSet<&str> = STT_LANGUAGES.iter().map(|l| l.code).collect();
         let docs: HashSet<&str> = DOCS_CODES.iter().copied().collect();
-        assert_eq!(
-            ours, docs,
-            "STT_LANGUAGES drifted from docs.x.ai supported languages"
-        );
+        assert_eq!(ours, docs, "STT_LANGUAGES must remain sorted and unique");
     }
 
     #[test]

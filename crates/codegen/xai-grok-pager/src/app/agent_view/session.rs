@@ -94,6 +94,7 @@ impl AgentView {
             chat_kind: false,
             app_chat_mode: false,
             credit_balance: None,
+            account_plan: None,
             auto_topup: None,
             goal_state: None,
             parked_wait_marker_for: None,
@@ -187,11 +188,14 @@ impl AgentView {
             video_viewer: None,
             gboom: None,
             inline_media_cache: std::collections::HashMap::new(),
+            inline_media_loads: std::collections::HashMap::new(),
+            inline_media_load_failures: HashSet::new(),
             inline_media_ids: std::collections::HashMap::new(),
             inline_media_iterm_emitted: std::collections::HashMap::new(),
             next_inline_media_id: 2,
             inline_video: None,
             video_load_rx: None,
+            inline_audio: None,
             mermaid: None,
             edit_hl: None,
             inline_media_active: false,
@@ -409,7 +413,7 @@ impl AgentView {
         self.session.start_turn(&mut self.scrollback);
     }
     /// Adopt the in-flight turn another client is driving, conveyed by the
-    /// `session/load` response meta (`x.ai/runningPromptId`): enter
+    /// `session/load` response meta (`chutes.build/runningPromptId`): enter
     /// TurnRunning and match subsequent live deltas. No user-prompt block is
     /// pushed — the turn's prompt and prior chunks arrived via the replay.
     pub(crate) fn adopt_running_prompt(&mut self, prompt_id: String) {
@@ -854,6 +858,7 @@ impl AgentView {
         &mut self,
         sharing_enabled: bool,
         usage_visible: bool,
+        account_plan: Option<&str>,
         chat_mode: bool,
         screen_mode: crate::app::ScreenMode,
         announcements: &[xai_grok_announcements::RemoteAnnouncement],
@@ -861,6 +866,7 @@ impl AgentView {
     ) {
         self.set_sharing_enabled(sharing_enabled);
         self.set_usage_visible(usage_visible);
+        self.account_plan = account_plan.map(str::to_owned);
         self.app_chat_mode = chat_mode;
         self.prompt.set_screen_mode(screen_mode);
         self.set_dashboard_visible(crate::views::dashboard::dashboard_enabled());

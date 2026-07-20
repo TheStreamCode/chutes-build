@@ -334,7 +334,7 @@ async fn scripted_inline_image_memory() {
     );
 }
 
-/// enterprise deploy report: with `GROK_GOAL=1`, `/goal` must
+/// enterprise deploy report: with `CHUTES_BUILD_GOAL=1`, `/goal` must
 /// show in the slash menu on the welcome screen *before* the first user turn.
 /// The scenario types `/goal` pre-session and asserts the dropdown carries the
 /// builtin's description (which only renders when the command is advertised),
@@ -346,7 +346,7 @@ async fn scripted_goal_slash_presession() {
 }
 
 /// Counterpart to `scripted_goal_slash_presession`: with the goal flag
-/// explicitly off (`GROK_GOAL=0`; goal mode defaults on), `/goal` must stay
+/// explicitly off (`CHUTES_BUILD_GOAL=0`; goal mode defaults on), `/goal` must stay
 /// hidden pre-session (gate fail-closed) while an
 /// AlwaysOn builtin (`/compact`) still shows — proving it's the gate, not a
 /// broken dropdown.
@@ -356,7 +356,7 @@ async fn scripted_goal_slash_presession_disabled() {
     run_scenario("goal_slash_presession_disabled.yaml").await;
 }
 
-/// Full folder-trust session: with `GROK_FOLDER_TRUST=1` and a git repo that
+/// Full folder-trust session: with `CHUTES_BUILD_FOLDER_TRUST=1` and a git repo that
 /// ships a repo-local `.mcp.json` (declared via the scenario `workspace`), the
 /// trust question renders before any session, accepting it (`y`) lets the
 /// session proceed, and a submitted prompt streams the mock response. The
@@ -433,7 +433,7 @@ async fn scripted_plan_nudge_shows() {
 }
 
 /// Plan-nudge opt-out edge: contextual hints ship default-OFF, so this scenario
-/// also pins `GROK_CONTEXTUAL_HINTS=0` (belt-and-suspenders); the same planning
+/// also pins `CHUTES_BUILD_CONTEXTUAL_HINTS=0` (belt-and-suspenders); the same planning
 /// keyword shows nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]

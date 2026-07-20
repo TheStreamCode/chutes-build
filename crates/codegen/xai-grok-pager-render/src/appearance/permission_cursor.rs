@@ -148,7 +148,7 @@ thread_local! {
 ///
 /// Precedence (mirrors `appearance::cache::load_scroll_speed`):
 ///
-/// 1. `GROK_DEFAULT_SELECTED_PERMISSION` env var (headless / agent testing —
+/// 1. `CHUTES_BUILD_DEFAULT_SELECTED_PERMISSION` env var (headless / agent testing —
 ///    overrides `config.toml` without editing it),
 /// 2. `[ui].default_selected_permission` in the layered effective config,
 /// 3. [`AlwaysAllowAllSessions`](DefaultSelectedPermission::AlwaysAllowAllSessions)
@@ -158,7 +158,7 @@ thread_local! {
 pub fn load_default_selected_permission() -> DefaultSelectedPermission {
     CONFIG_LOADED.with(|loaded| {
         if !loaded.get() {
-            let resolved = std::env::var("GROK_DEFAULT_SELECTED_PERMISSION")
+            let resolved = std::env::var("CHUTES_BUILD_DEFAULT_SELECTED_PERMISSION")
                 .ok()
                 .map(|s| DefaultSelectedPermission::from_config_value(&s))
                 .filter(|p| *p != DefaultSelectedPermission::AlwaysAllowAllSessions)

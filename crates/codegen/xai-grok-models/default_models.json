@@ -1,18 +1,18 @@
 {
-  "default": "grok-build",
-  "web_search": "grok-4.20-multi-agent",
-  "image_description": "grok-build",
-  "session_summary": "grok-build",
+  "default": "model-router",
+  "web_search": "model-router",
+  "image_description": "model-router",
+  "session_summary": "model-router",
   "models": [
     {
-      "model": "grok-build",
-      "name": "Grok Build",
-      "description": "Best for advanced coding tasks",
-      "context_window": 500000,
+      "model": "model-router",
+      "name": "Chutes Auto",
+      "description": "Automatic task-aware routing with availability fallback",
+      "context_window": 131072,
       "temperature": 0.7,
       "top_p": 0.95,
-      "api_backend": "responses",
-      "supported_in_api": false
+      "api_backend": "chat_completions",
+      "supported_in_api": true
     }
   ]
 }

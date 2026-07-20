@@ -44,17 +44,17 @@ pub fn section_key(section: &McpSectionId) -> String {
     }
 }
 
-/// Display label for a section header, e.g. `"Managed by grok.com (3)"`.
+/// Display label for a section header, e.g. `"Managed by Chutes Build (3)"`.
 pub fn section_label(section: &McpSectionId, count: usize) -> String {
     match section {
-        McpSectionId::Managed => format!("Managed by grok.com ({count})"),
+        McpSectionId::Managed => format!("Managed by Chutes Build ({count})"),
         McpSectionId::Plugin(name) => format!("Plugin: {name} ({count})"),
         McpSectionId::Local => format!("Local ({count})"),
     }
 }
 
-/// Base grok.com connectors URL (no team). Prefer [`managed_connectors_url`] when opening.
-pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://grok.com/connectors";
+/// Base Chutes account URL. Prefer [`managed_connectors_url`] when opening.
+pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://chutes.ai";
 
 /// Connectors deep link, appending percent-encoded `teamId` when the session is a team principal.
 pub fn managed_connectors_url(team_id: Option<&str>) -> String {
@@ -363,7 +363,7 @@ pub fn convert_list_response(resp: McpsListResponse) -> Vec<McpServerInfo> {
     servers
 }
 
-/// Patch a single server row in-place from an `x.ai/mcp/server_status`
+/// Patch a single server row in-place from an `chutes.build/mcp/server_status`
 /// push.
 ///
 /// Finds the row by `name` and updates its `status` (and optionally its

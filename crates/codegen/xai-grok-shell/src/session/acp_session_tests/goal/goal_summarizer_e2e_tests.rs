@@ -12,7 +12,7 @@
 //!   * a summarizer failure is fail-OPEN — the goal still completes;
 //!   * the remote kill-switch (`goal_summary_enabled = false`) suppresses it.
 //!
-//! Tests mutate `GROK_GOAL_CLASSIFIER` so they carry `serial`.
+//! Tests mutate `CHUTES_BUILD_GOAL_CLASSIFIER` so they carry `serial`.
 
 use super::support::*;
 use super::*;
@@ -26,7 +26,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 };
 use xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput;
 
-const ENV_FLAG: &str = "GROK_GOAL_CLASSIFIER";
+const ENV_FLAG: &str = "CHUTES_BUILD_GOAL_CLASSIFIER";
 
 /// How the stub answers a summarizer spawn.
 #[derive(Clone, Copy)]

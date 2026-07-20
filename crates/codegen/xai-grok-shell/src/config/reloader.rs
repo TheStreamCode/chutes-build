@@ -21,20 +21,20 @@ pub enum ConfigUpdate {
     /// A **broadcast** MCP reload — applies to every active session
     /// regardless of cwd. Fires for two cases:
     ///
-    /// 1. The global `[mcp_servers]` table in `~/.grok/config.toml`
+    /// 1. The global `[mcp_servers]` table in `~/.chutes-build/config.toml`
     ///    changed.
     /// 2. The user's home-level `~/.claude.json` changed.
     ///    `load_claude_json_mcp_servers_as_configs` reads this file
     ///    for every session, so the reload cannot be narrowed by cwd.
     ///
-    /// Project-scoped changes (`<cwd>/.grok/config.toml`,
+    /// Project-scoped changes (`<cwd>/.chutes-build/config.toml`,
     /// `<cwd>/.mcp.json`, project-level `<cwd>/.claude.json`) emit
     /// [`Self::ProjectMcpServersChanged`] instead so the reload can
     /// be narrowed to matching cwds.
     ///
     /// Deliberately kept as a unit variant.
     /// Adding a payload here would force pattern-match updates across
-    /// (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, or
+    /// (`<cwd>/.chutes-build/config.toml`, `<cwd>/.mcp.json`, or
     /// `mvp_agent`, `app`, `session/handle`, etc.
     McpServersChanged,
     /// A **project-scoped** MCP config file changed
@@ -47,7 +47,7 @@ pub enum ConfigUpdate {
     /// grok process sharing the home dir). The agent should consult the cache
     /// thrash unrelated sessions.
     ProjectMcpServersChanged {
-        /// The project root whose `.grok/`, `.mcp.json`, or
+        /// The project root whose `.chutes-build/`, `.mcp.json`, or
         /// `.claude.json` file was edited. Sessions whose cwd equals
         /// this path — or is a descendant of it — are the reload
         /// targets.
@@ -63,14 +63,14 @@ pub enum ConfigUpdate {
     /// The `[model.*]` entries in config.toml changed. Agent should re-resolve
     /// its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
-    /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another
+    /// `~/.chutes-build/models_cache.json` was rewritten on disk (possibly by another
     /// via `ModelsManager::reload_from_disk_cache`, which content-dedupes
     /// self-writes (`persist` / `renew_ttl`) before applying. No payload —
     /// validation (TTL, version, auth method) requires `ModelsManager` state
     /// drop redundant `ProjectMcpServersChanged` dispatches on
     /// the reloader doesn't have.
     ModelsCacheChanged,
-    /// Updated UI settings — agent broadcasts `x.ai/config_changed` to IPC clients.
+    /// Updated UI settings — agent broadcasts `chutes.build/config_changed` to IPC clients.
     Ui {
         theme: Option<String>,
         yolo: bool,
@@ -243,7 +243,7 @@ impl ConfigReloader {
             // `ProjectMcpServersChanged { cwd }` per affected project
             // root. The legacy unit `McpServersChanged` above stays
             // for global-config edits — both variants can fire in the
-            // same tick (e.g. `~/.grok/config.toml` AND
+            // same tick (e.g. `~/.chutes-build/config.toml` AND
             // `<cwd>/.mcp.json` edited together).
             for cwd in project_cwds {
                 // Skip the dispatch when the project config bytes are
@@ -329,8 +329,8 @@ impl ConfigReloader {
         };
 
         // MCP servers — compare [mcp_servers] table in the **global**
-        // config (`~/.grok/config.toml`) via toml::Value. Project-
-        // scoped changes (`<cwd>/.grok/config.toml`,
+        // config (`~/.chutes-build/config.toml`) via toml::Value. Project-
+        // scoped changes (`<cwd>/.chutes-build/config.toml`,
         // `<cwd>/.mcp.json`) are dispatched separately via
         // `ConfigUpdate::ProjectMcpServersChanged { cwd }` (see
         // `collect_project_cwds`) so they don't sweep
@@ -419,7 +419,7 @@ impl ConfigReloader {
 ///
 /// | `ConfigChangeEvent`        | path shape              | cwd               |
 /// |----------------------------|-------------------------|-------------------|
-/// | `ProjectConfigChanged`     | `<cwd>/.grok/config.toml` | `<cwd>`           |
+/// | `ProjectConfigChanged`     | `<cwd>/.chutes-build/config.toml` | `<cwd>`           |
 /// | `McpConfigChanged`         | `<cwd>/.mcp.json`         | `<cwd>`           |
 /// | `McpConfigChanged`         | `<cwd>/.claude.json`      | `<cwd>`           |
 ///
@@ -430,7 +430,7 @@ fn collect_project_cwds(batch: &[ConfigChangeEvent]) -> Vec<PathBuf> {
     for evt in batch {
         let cwd = match evt {
             ConfigChangeEvent::ProjectConfigChanged { path } => {
-                // <cwd>/.grok/config.toml → <cwd>
+                // <cwd>/.chutes-build/config.toml → <cwd>
                 path.parent()
                     .and_then(|p| p.parent())
                     .map(|p| p.to_path_buf())
@@ -453,11 +453,11 @@ fn collect_project_cwds(batch: &[ConfigChangeEvent]) -> Vec<PathBuf> {
 /// Content hash of the cwd-dependent MCP config files a
 /// `ProjectMcpServersChanged { cwd }` reload re-reads. Walks ancestors
 /// up to the git root exactly as the loaders do (`find_project_configs`
-/// for `.grok/config.toml`, `find_mcp_json_files` for `.mcp.json`) so
+/// for `.chutes-build/config.toml`, `find_mcp_json_files` for `.mcp.json`) so
 /// the hash can't drift from the set the merge actually reads, plus
 /// `<cwd>/.claude.json` (watched at the project root). A stable hash
 /// means the reload would be a no-op. Home-level sources
-/// (`~/.grok/config.toml`, `~/.claude.json`, `~/.cursor/mcp.json`)
+/// (`~/.chutes-build/config.toml`, `~/.claude.json`, `~/.cursor/mcp.json`)
 /// change through their own events.
 ///
 /// Returns `None` on a non-`NotFound` read error so the caller
@@ -494,7 +494,7 @@ pub(crate) fn hash_auth_key(key: &str) -> u64 {
 /// Extract the `[skills]` table from an effective config.
 ///
 /// Consumers: the reload dispatch above (change detection →
-/// `ConfigUpdate::Skills`) and `grok inspect` (via the `crate::config`
+/// `ConfigUpdate::Skills`) and `chutes-build inspect` (via the `crate::config`
 /// re-export), so both honor the same paths/ignore/disabled as a live
 /// session. Session spawn parses the same table separately through the typed
 /// `Config.skills` (agent/config.rs) — keep these in sync rather than adding
@@ -818,7 +818,7 @@ mod tests {
         assert_ne!(created, changed, "editing content changes the hash");
     }
 
-    /// The hash must reflect ancestor `.grok/config.toml` and `.mcp.json`
+    /// The hash must reflect ancestor `.chutes-build/config.toml` and `.mcp.json`
     /// under `cwd` — otherwise an ancestor edit would be wrongly
     /// must be a distinct variant from the unit `McpServersChanged`
     /// suppressed.
@@ -839,12 +839,16 @@ mod tests {
         let h2 = hash_project_mcp_config(&child).expect("readable");
         assert_ne!(h1, h2, "ancestor .mcp.json edit must change the hash");
 
-        std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
-        std::fs::write(tmp.path().join(".grok").join("config.toml"), "x = 1").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
+        std::fs::write(
+            tmp.path().join(".chutes-build").join("config.toml"),
+            "x = 1",
+        )
+        .unwrap();
         let h3 = hash_project_mcp_config(&child).expect("readable");
         assert_ne!(
             h2, h3,
-            "ancestor .grok/config.toml create must change the hash"
+            "ancestor .chutes-build/config.toml create must change the hash"
         );
     }
 
@@ -863,20 +867,23 @@ mod tests {
         let config: toml::Value = toml::from_str(
             r#"
 [skills]
-paths = ["/home/user/.grok/skills"]
+paths = ["/home/user/.chutes-build/skills"]
 ignore = ["/tmp"]
 "#,
         )
         .unwrap();
         let skills = parse_skills_config(&config);
-        assert_eq!(skills.paths, vec!["/home/user/.grok/skills".to_string()]);
+        assert_eq!(
+            skills.paths,
+            vec!["/home/user/.chutes-build/skills".to_string()]
+        );
         assert_eq!(skills.ignore, vec!["/tmp".to_string()]);
     }
 
     #[test]
     fn memory_config_diff_detects_enabled_change() {
         let empty = toml::Value::Table(toml::map::Map::new());
-        let enabled: toml::Value = toml::from_str("[memory]\nenabled = true").unwrap();
+        let enabled: toml::Value = toml::from_str("[memory]\nenabled = false").unwrap();
 
         let old = crate::config::MemoryConfig::resolve(false, false, &empty, None);
         let new = crate::config::MemoryConfig::resolve(false, false, &enabled, None);
@@ -1000,14 +1007,14 @@ command = "/bin/test"
     /// `collect_project_cwds` (otherwise sessions outside `$HOME`
     /// would be silently skipped). The reloader broadcasts it via
     /// the unit `McpServersChanged` variant; this test locks that
-    /// `ProjectConfigChanged` (`<cwd>/.grok/config.toml`) and
+    /// `ProjectConfigChanged` (`<cwd>/.chutes-build/config.toml`) and
     /// invariant at the helper layer.
     #[test]
     fn collect_project_cwds_excludes_home_claude_json() {
         let batch = vec![
             ConfigChangeEvent::HomeClaudeJsonChanged,
             ConfigChangeEvent::ProjectConfigChanged {
-                path: PathBuf::from("/repo/x/.grok/config.toml"),
+                path: PathBuf::from("/repo/x/.chutes-build/config.toml"),
             },
         ];
         let cwds = collect_project_cwds(&batch);
@@ -1025,13 +1032,13 @@ command = "/bin/test"
     fn collect_project_cwds_dedupes_and_extracts() {
         let batch = vec![
             ConfigChangeEvent::ProjectConfigChanged {
-                path: PathBuf::from("/repo/a/.grok/config.toml"),
+                path: PathBuf::from("/repo/a/.chutes-build/config.toml"),
             },
             ConfigChangeEvent::McpConfigChanged {
                 path: PathBuf::from("/repo/a/.mcp.json"),
             },
             ConfigChangeEvent::ProjectConfigChanged {
-                path: PathBuf::from("/repo/b/.grok/config.toml"),
+                path: PathBuf::from("/repo/b/.chutes-build/config.toml"),
             },
         ];
         let cwds = collect_project_cwds(&batch);

@@ -53,7 +53,7 @@ impl DeferredStartupActions {
         std::mem::take(self)
     }
 }
-/// Build `x.ai/session/fork` params shared by TUI effects and headless.
+/// Build `chutes.build/session/fork` params shared by TUI effects and headless.
 ///
 /// `new_cwd` is the write namespace for the child (parent session cwd when
 /// cross-cwd); preflight must use the same path via [`effective_fork_new_cwd`].
@@ -114,7 +114,7 @@ pub fn parent_session_is_worktree(session_id: &str, cwd: &Path) -> bool {
     }
     false
 }
-/// Parse `newSessionId` from an `x.ai/session/fork` ACP response body.
+/// Parse `newSessionId` from an `chutes.build/session/fork` ACP response body.
 pub fn fork_response_new_session_id(resp_json: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(resp_json).unwrap_or_default();
     if v.get("error").is_some_and(|e| !e.is_null()) {
@@ -1022,11 +1022,11 @@ mod tests {
     }
     /// The chat passthrough does not bypass the cwd-collision refusal that
     /// `app/mod.rs` runs on the materialized id.
-    #[serial_test::serial(GROK_HOME)]
+    #[serial_test::serial(CHUTES_BUILD_HOME)]
     #[tokio::test]
     async fn chat_resume_passthrough_keeps_cwd_collision_refusal() {
         let home = tempfile::tempdir().expect("home tempdir");
-        unsafe { std::env::set_var("GROK_HOME", home.path()) };
+        unsafe { std::env::set_var("CHUTES_BUILD_HOME", home.path()) };
         let cwd = tempfile::tempdir().expect("cwd tempdir");
         let cwd_str = cwd.path().to_string_lossy().to_string();
         let id = "aaaaaaaa-1111-2222-3333-444444444444";

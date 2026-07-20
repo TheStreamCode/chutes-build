@@ -16,7 +16,7 @@
   },
   {
     "category": "features",
-    "description": "**image_gen** can now be enabled via the harness model using [features] in config.toml or the GROK_IMAGE_GEN_HARNESS env var.",
+    "description": "**image_gen** can now be enabled via the harness model using [features] in config.toml or the CHUTES_BUILD_IMAGE_GEN_HARNESS env var.",
     "breaking_change": false
   },
   {

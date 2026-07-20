@@ -104,7 +104,7 @@ pub struct AskUserQuestionToolConfig {
 #[serde(default)]
 pub struct WebFetchToolConfig {
     /// Egress proxy endpoint. When set, all HTTP requests are routed through
-    /// this URL. Resolution: TOML > `GROK_WEB_FETCH_PROXY` env > remote settings > None.
+    /// this URL. Resolution: TOML > `CHUTES_BUILD_WEB_FETCH_PROXY` env > remote settings > None.
     pub proxy_endpoint: Option<String>,
     /// Domains the tool is allowed to fetch. When set, overrides the built-in
     /// default allowlist. An explicit empty list blocks all fetches.
@@ -130,7 +130,7 @@ impl WebFetchToolConfig {
             .proxy_endpoint
             .as_ref()
             .cloned()
-            .or_else(|| env_string("GROK_WEB_FETCH_PROXY"))
+            .or_else(|| env_string("CHUTES_BUILD_WEB_FETCH_PROXY"))
             .or_else(|| remote_proxy.map(|s| s.to_owned()));
 
         let allowed_domains = self
@@ -202,7 +202,7 @@ impl ShellToolsetConfig {
     pub fn new(base: Option<Self>, sampling_config: Option<SamplerConfig>) -> Self {
         let default_base = SamplerConfig {
             api_key: None,
-            base_url: "https://api.x.ai/v1".to_string(),
+            base_url: "https://llm.chutes.ai/v1".to_string(),
             model: String::new(),
             max_completion_tokens: None,
             temperature: None,
@@ -427,9 +427,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"GrokBuild:read_file"));
-        assert!(ids.contains(&"GrokBuild:search_replace"));
-        assert!(ids.contains(&"GrokBuild:grep"));
+        assert!(ids.contains(&"ChutesBuild:read_file"));
+        assert!(ids.contains(&"ChutesBuild:search_replace"));
+        assert!(ids.contains(&"ChutesBuild:grep"));
     }
 
     #[test]
@@ -462,7 +462,7 @@ mod tests {
                 !def.tool_config
                     .tools
                     .iter()
-                    .any(|t| t.id == "GrokBuild:search_replace"),
+                    .any(|t| t.id == "ChutesBuild:search_replace"),
                 "{name}: fixture must be read-only before the override"
             );
             def.override_file_tools(file_tools.clone());
@@ -477,7 +477,7 @@ mod tests {
                 ids.contains(&"GrokBuildHashline:hashline_read"),
                 "{name}: {ids:?}"
             );
-            assert!(!ids.contains(&"GrokBuild:read_file"), "{name}: {ids:?}");
+            assert!(!ids.contains(&"ChutesBuild:read_file"), "{name}: {ids:?}");
             // ...but never grants the edit slot.
             assert!(
                 !ids.contains(&"GrokBuildHashline:hashline_edit"),

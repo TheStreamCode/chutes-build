@@ -21,9 +21,9 @@ pub struct TaskToolInput {
     pub description: String,
 
     /// Name of the subagent type to launch. Built-in types: "general-purpose",
-    /// "explore", "plan". Additional user-defined types may also be available.
+    /// "explore", "plan", "advisor". Additional user-defined types may also be available.
     #[schemars(
-        description = "Name of the subagent type to launch. Built-in types: \"general-purpose\", \"explore\", \"plan\". Additional user-defined types may also be available."
+        description = "Name of the subagent type to launch. Built-in types: \"general-purpose\", \"explore\", \"plan\", \"advisor\". Additional user-defined types may also be available."
     )]
     #[serde(default = "default_subagent_type")]
     pub subagent_type: String,
@@ -771,6 +771,21 @@ Workspace boundary:
 - Your default analysis scope is the workspace in <user_info>. Stay within it unless asked otherwise.
 - Note explicitly if the design requires understanding external dependencies.";
 
+/// Prompt body for the on-demand, read-only advisor.
+pub const ADVISOR_PROMPT: &str = "\
+You are an on-demand senior technical advisor. Review the executor's question, inspect the relevant code and current documentation, and return concise, actionable advice.
+
+=== ADVISORY / READ-ONLY MODE ===
+You have no file editing or execution tools. Never modify files, run code, or claim implementation. Use ${{ tools.by_kind.read }} and the available search tools for repository evidence, Context7, memory, and web sources when relevant.
+
+Focus on:
+- hidden correctness, security, privacy, concurrency, and compatibility risks
+- simpler designs and existing project patterns
+- concrete trade-offs and an explicit recommendation
+- verification criteria the executor can apply
+
+Do not restate the entire task. Clearly separate confirmed evidence from assumptions. If the proposed approach is sound, say so briefly and identify the most important remaining risk.";
+
 /// The **general-purpose** built-in subagent.
 pub const GENERAL_PURPOSE_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
     name: "general-purpose",
@@ -803,9 +818,21 @@ pub const PLAN_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
     prompt_template: PLAN_PROMPT,
 };
 
+/// The on-demand read-only advisor built-in subagent.
+pub const ADVISOR_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
+    name: "advisor",
+    description: "On-demand senior reviewer for architecture, correctness, security, and trade-offs.",
+    tools_template: "Read-only — has access to repository inspection, memory, Context7, and web research tools.",
+    prompt_template: ADVISOR_PROMPT,
+};
+
 /// The built-in subagent types advertised to the model, in display order.
-pub const BUILTIN_SUBAGENTS: [BuiltinSubagent; 3] =
-    [GENERAL_PURPOSE_SUBAGENT, EXPLORE_SUBAGENT, PLAN_SUBAGENT];
+pub const BUILTIN_SUBAGENTS: [BuiltinSubagent; 4] = [
+    GENERAL_PURPOSE_SUBAGENT,
+    EXPLORE_SUBAGENT,
+    PLAN_SUBAGENT,
+    ADVISOR_SUBAGENT,
+];
 
 /// Look up a built-in subagent by its `subagent_type` name
 /// (e.g. `"explore"`), or `None` for user-defined / unknown types.
@@ -1207,7 +1234,7 @@ mod tests {
     fn builtin_subagent_catalog_names_and_descriptor_conversion() {
         assert_eq!(
             BUILTIN_SUBAGENTS.map(|b| b.name),
-            ["general-purpose", "explore", "plan"]
+            ["general-purpose", "explore", "plan", "advisor"]
         );
 
         let desc = EXPLORE_SUBAGENT.to_descriptor(&plain_tool_naming());

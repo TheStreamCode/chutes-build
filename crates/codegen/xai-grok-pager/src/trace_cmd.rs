@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use xai_grok_shell::agent::config::Config as AgentConfig;
-use xai_grok_shell::session::repo_changes::UploadMethod;
 use xai_grok_shell::util::grok_home::grok_home;
 
 #[derive(Debug, clap::Args, Clone)]
@@ -12,7 +11,7 @@ pub struct TraceArgs {
     /// Save locally only, skip remote upload
     #[arg(long)]
     pub local: bool,
-    /// Output path (default: $GROK_HOME/trace-exports/<session-id>.tar.gz)
+    /// Output path (default: $CHUTES_BUILD_HOME/trace-exports/<session-id>.tar.gz)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
     /// Emit machine-readable JSON output
@@ -33,38 +32,8 @@ struct TraceResult {
 }
 
 pub async fn run(args: TraceArgs, agent_config: &AgentConfig) -> Result<()> {
-    if args.local {
-        return run_export(
-            &args.session_id,
-            args.output.as_deref(),
-            args.json,
-            agent_config,
-        )
-        .await;
-    }
-
-    if !agent_config.is_trace_upload_enabled() {
-        tracing::warn!(
-            session_id = %args.session_id,
-            "trace_cmd: trace uploads disabled in config"
-        );
-        if !args.json {
-            eprintln!(
-                "Trace uploads disabled. Set [telemetry] trace_upload = true in {}",
-                crate::util::display_user_grok_path("config.toml")
-            );
-            eprintln!("Falling back to local export.");
-        }
-        return run_export(
-            &args.session_id,
-            args.output.as_deref(),
-            args.json,
-            agent_config,
-        )
-        .await;
-    }
-
-    run_upload(
+    let _ = args.local;
+    run_export(
         &args.session_id,
         args.output.as_deref(),
         args.json,
@@ -254,6 +223,7 @@ fn add_directory_to_tar<W: std::io::Write>(
 
 /// Show first and last `n` chars with `***` in between. Char-safe (no byte-boundary panics).
 /// Returns the full string if it's short enough that redacting would be pointless.
+#[cfg(any())]
 fn redact_middle(s: &str, n: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= n * 2 + 3 {
@@ -264,11 +234,13 @@ fn redact_middle(s: &str, n: usize) -> String {
     format!("{prefix}***{suffix}")
 }
 
+#[cfg(any())]
 pub struct UploadMethodDisplay<'a> {
     pub method: &'a UploadMethod,
     pub bucket_url: &'a str,
 }
 
+#[cfg(any())]
 impl std::fmt::Display for UploadMethodDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.method {
@@ -407,6 +379,7 @@ async fn run_export(
 // ---------------------------------------------------------------------------
 
 /// Prints upload URL to stdout on success; saves local bundle and returns Err on failure.
+#[cfg(any())]
 async fn run_upload(
     session_id: &str,
     output: Option<&Path>,
@@ -427,7 +400,7 @@ async fn run_upload(
                 "trace_cmd: no upload credentials available"
             );
             anyhow::bail!(
-                "No upload credentials. Run `grok login` or set a deployment key. \
+                "No upload credentials. Run `chutes-build login` or set a deployment key. \
                  See {} for upload overrides.",
                 crate::util::display_user_grok_path("docs/user-guide")
             );
@@ -453,8 +426,8 @@ async fn run_upload(
         )
     {
         anyhow::bail!(
-            "No trace upload bucket configured. Set `GROK_TELEMETRY_GCS_BUCKET`, \
-             `GROK_TRACE_UPLOAD_BUCKET`, or `endpoints.trace_upload_bucket` in \
+            "No trace upload bucket configured. Set `CHUTES_BUILD_TELEMETRY_GCS_BUCKET`, \
+             `CHUTES_BUILD_TRACE_UPLOAD_BUCKET`, or `endpoints.trace_upload_bucket` in \
              config for direct GCS uploads."
         );
     }
@@ -524,6 +497,7 @@ async fn run_upload(
     }
 }
 
+#[cfg(any())]
 pub struct UploadAttempt<'a> {
     pub session_id: &'a str,
     pub archive: &'a [u8],
@@ -534,6 +508,7 @@ pub struct UploadAttempt<'a> {
     pub json: bool,
 }
 
+#[cfg(any())]
 impl UploadAttempt<'_> {
     /// Saves local bundle + debug log, prints diagnostics.
     pub fn handle_failure(&self, error: &anyhow::Error) -> anyhow::Error {
@@ -606,8 +581,10 @@ impl UploadAttempt<'_> {
 // Upload with retries
 // ---------------------------------------------------------------------------
 
+#[cfg(any())]
 const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+#[cfg(any())]
 async fn upload_with_retries(
     config: &xai_grok_shell::session::repo_changes::TraceExportConfig,
     object_path: &str,
@@ -640,7 +617,10 @@ async fn upload_with_retries(
 // Upload method resolution
 // ---------------------------------------------------------------------------
 
-pub async fn resolve_upload_method(agent_config: &AgentConfig) -> Option<UploadMethod> {
+#[cfg(any())]
+pub async fn resolve_upload_method(
+    agent_config: &AgentConfig,
+) -> Option<xai_grok_shell::session::repo_changes::UploadMethod> {
     // On login failure, fall back to ambient creds rather than erroring.
     let auth_token = xai_grok_shell::auth::ensure_authenticated_or_noninteractive(
         &agent_config.grok_com_config,

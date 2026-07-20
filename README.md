@@ -1,140 +1,235 @@
-<div align="center">
+# Chutes Build
 
-<h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://media.x.ai/v1/website/spacexai-symbol-white-transparent-0c31957f.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png">
-    <img alt="SpaceXAI logo" src="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png" width="96">
-  </picture>
-  <br>
-  Grok Build (<code>grok</code>)
-</h1>
+Chutes Build is a privacy-first, open-source coding agent optimized for the
+[Chutes](https://chutes.ai) ecosystem. It combines an interactive terminal UI,
+coding tools, model routing, parallel subagents, multimodal generation, web
+research, browser automation, and local memory in one CLI.
 
-**Grok Build** is SpaceXAI's terminal-based AI coding agent. It runs as a
-full-screen TUI that understands your codebase, edits files, executes shell
-commands, searches the web, and manages long-running tasks — interactively,
-headlessly for scripting/CI, or embedded in editors via the Agent Client
-Protocol (ACP).
+> **Development preview:** the project is under active development. Build it
+> from source and review agent actions before approving changes.
 
-[Installing the released binary](#installing-the-released-binary) ·
-[Building from source](#building-from-source) ·
-[Documentation](#documentation) ·
-[Repository layout](#repository-layout) ·
-[Development](#development) ·
-[Contributing](#contributing) ·
-[License](#license)
+## What is included
 
-![Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
+- **Chutes-native inference:** API-key authentication, live model discovery,
+  `Auto (Chutes Router)` as the first model choice, configurable fallback
+  chains, and automatic retry when a selected model is temporarily unavailable.
+- **Coding agent runtime:** repository inspection, edits, shell commands,
+  planning, goals, MCP servers, skills, sessions, worktrees, and permission
+  controls inherited from the mature upstream runtime.
+- **Advisor:** a read-only, on-demand reasoning agent that reviews plans,
+  difficult decisions, blockers, and completion claims without taking over the
+  executor loop.
+- **Subagent orchestration:** foreground and background workers, concurrent
+  fan-out, multi-worker waits, bounded nesting, and isolated worktrees. The
+  `chutes-build-orchestrator` preset is tuned for parallel decomposition.
+- **Chutes account:** read-only subscription, quota, and usage access through
+  `get_chutes_usage`, a compact plan/quota indicator in the TUI, and detailed
+  `/usage` output. Per-model statistics remain disabled unless requested.
+- **Chutes media:** live discovery and invocation for image generation and
+  editing, video, music, speech, and other supported Chutes media models through
+  `list_media_models`, `describe_media_model`, and `generate_media`. This is the
+  native Rust integration of the `chutes-media-mcp` workflow, so Chutes Build
+  does not need to spawn a separate Node/MCP process for its core media tools.
+  Generated output crosses the tool/ACP/TUI boundary as a typed artifact:
+  images use bounded lazy previews, videos use a two-frame rolling decoder,
+  and music/speech expose local pause/resume, seek, volume, duration, and
+  waveform controls with native-player fallback. Media work starts only while
+  inference is idle, never autoplays, and stays off the TUI render thread.
+- **Capability routing:** image inputs stay with the selected model when it
+  supports vision and are otherwise delegated to a vision-capable Chutes route.
+- **Current coding documentation:** Context7 search and documentation tools are
+  built in and avoid sending credentials or known secrets.
+- **Official Chutes research:** before answering Chutes-specific questions, the
+  main agent and subagents consult both the official
+  [documentation](https://chutes.ai/docs) and [news](https://chutes.ai/news),
+  treating directly relevant official pages as primary authority.
+- **Research and browser tools:** native web search (DuckDuckGo by default,
+  optionally Brave) plus agentic Chrome/Edge control through a local DevTools
+  connection and an isolated temporary browser profile.
+- **Local memory:** Chutes Build maintains a secret-filtered `memories.md` file
+  and can be launched with `--no-memory` when a stateless session is preferred.
+- **Time awareness and wellness:** the agent receives the local date, time, and
+  timezone and can suggest a break after long or late sessions.
+- **Privacy by construction:** telemetry, remote error reporting, automatic
+  update checks, remote trace upload, and upstream session sharing are disabled.
 
-**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
+## Install with npm
 
-This repository contains the Rust source for the `grok` CLI/TUI and its agent
-runtime. It is synced periodically from the SpaceXAI monorepo.
+Release builds install without a Rust toolchain:
 
-A small `SOURCE_REV` file at the root records the full monorepo commit SHA
-for the version of the code present in this tree.
-
-</div>
-
----
-
-## Installing the released binary
-
-Prebuilt binaries are published for macOS, Linux, and Windows:
-
-```sh
-curl -fsSL https://x.ai/cli/install.sh | bash   # macOS / Linux / Git Bash
-irm https://x.ai/cli/install.ps1 | iex          # Windows PowerShell
-grok --version
+```powershell
+npm install -g chutes-build
+chutes-build
 ```
 
-See the [changelog](https://x.ai/build/changelog) for the latest fixes,
-features, and improvements in each release.
+For one-off use:
 
-## Building from source
-
-Requirements:
-
-- **Rust** — the toolchain is pinned by [`rust-toolchain.toml`](rust-toolchain.toml);
-  `rustup` installs it automatically on first build.
-- **[DotSlash](https://dotslash-cli.com)** — required so hermetic tools under
-  [`bin/`](bin/) (notably [`bin/protoc`](bin/protoc)) can download and run.
-  Install it and ensure `dotslash` is on your `PATH` **before** building:
-
-  ```sh
-  cargo install dotslash
-  # or: prebuilt packages — https://dotslash-cli.com/docs/installation/
-  /usr/bin/env dotslash --help   # sanity check
-  ```
-
-- **protoc** — proto codegen resolves [`bin/protoc`](bin/protoc) via DotSlash,
-  or falls back to a `protoc` on `PATH` / `$PROTOC`.
-- macOS and Linux are supported build hosts; Windows builds are best-effort
-  and not currently tested from this tree.
-
-```sh
-cargo run -p xai-grok-pager-bin              # build + launch the TUI
-cargo build -p xai-grok-pager-bin --release  # release binary: target/release/xai-grok-pager
-cargo check -p xai-grok-pager-bin            # fast validation
+```powershell
+npx chutes-build
 ```
 
-The binary artifact is named `xai-grok-pager`; official installs ship it as
-`grok`. On first launch it opens your browser to authenticate — see the
-[authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
+The npm launcher selects a native binary for Windows, macOS, or Linux. It does
+not collect telemetry and does not download executables from an install script.
+Before the first npm release, use the source build below.
 
-## Documentation
+## Build from source
 
-Full online documentation is available at
-[docs.x.ai/build/overview](https://docs.x.ai/build/overview).
+Prerequisites:
 
-The user guide ships with the pager crate:
-[`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/)
-— getting started, keyboard shortcuts, slash commands, configuration, theming,
-MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
+- Rust stable (`rustup` is recommended)
+- Git
+- a platform C/C++ build toolchain supported by Rust
 
-## Repository layout
+Protocol Buffer tooling is vendored for normal builds; a separate `protoc`
+installation is not required.
 
-| Path | Contents |
-|------|----------|
-| `crates/codegen/xai-grok-pager-bin` | Composition-root package; builds the `xai-grok-pager` binary |
-| `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
-| `crates/codegen/xai-grok-shell` | Agent runtime + leader/stdio/headless entry points |
-| `crates/codegen/xai-grok-tools` | Tool implementations (terminal, file edit, search, ...) |
-| `crates/codegen/xai-grok-workspace` | Host filesystem, VCS, execution, checkpoints |
-| `crates/codegen/...` | The rest of the CLI crate closure (config, MCP, markdown, sandbox, ...) |
-| `crates/common/`, `crates/build/`, `prod/mc/` | Small shared leaf crates pulled in by the closure |
-| `third_party/` | Vendored upstream source (Mermaid diagram stack) — see below |
-
-> [!IMPORTANT]
-> The root `Cargo.toml` (workspace members, dependency versions, lints,
-> profiles) is **generated** — treat it as read-only. Prefer editing per-crate
-> `Cargo.toml` files.
-
-## Development
-
-```sh
-cargo check -p <crate>        # always target specific crates; full-workspace builds are slow
-cargo test -p xai-grok-config # per-crate tests
-cargo clippy -p <crate>       # lint config: clippy.toml at the repo root
-cargo fmt --all               # rustfmt.toml at the repo root
+```powershell
+git clone https://github.com/TheStreamCode/chutes-build.git
+cd chutes-build
+cargo build -p chutes-build --release
 ```
+
+The Windows executable is `target\release\chutes-build.exe`; on macOS and
+Linux it is `target/release/chutes-build`.
+
+## Quick start
+
+Create an API key in Chutes, then either expose it only to the current process:
+
+```powershell
+$env:CHUTES_API_KEY = "your-api-key"
+chutes-build
+```
+
+or store it using the hidden-input login flow:
+
+```powershell
+chutes-build login
+chutes-build
+```
+
+`Auto (Chutes Router)` is the first entry in the model picker and the default
+when no preference has been saved. Select a concrete model with `/model` or
+`chutes-build --model <model-id>`. Inspect the resolved catalog with
+`chutes-build models`.
+
+## Model selection, reasoning, and routing
+
+Auto sends `model-router` requests to the Chutes router endpoint, allowing the
+service to select a model for the task and handle cold or unavailable capacity.
+A concrete model remains pinned unless a qualifying pre-stream failure advances
+the explicit fallback chain.
+
+Reasoning is model-specific. The model picker exposes only the controls
+supported by the exact deployed generation: binary `Instant`/`Thinking` modes,
+GLM-5.2's three modes, or no selector for fixed and non-reasoning models. Use
+`/effort` interactively or `--effort <option-id>` in headless invocations. The
+published model default is preserved unless the user explicitly changes it.
+
+See [Model reasoning compatibility](docs/model-reasoning-compatibility.md) for
+the current model matrix and forward-compatibility rules.
+
+```powershell
+# Ordered comma-separated fallback chain. model-router is appended as the
+# final Chutes fallback unless strict mode is enabled.
+$env:CHUTES_FALLBACK_MODELS = "model-a,model-b"
+
+# Never change the selected model automatically.
+$env:CHUTES_STRICT_MODEL = "1"
+```
+
+Fallback happens only for transient availability/capability responses and only
+before response streaming begins. Chutes Build does not redirect requests or
+credentials to a non-Chutes inference endpoint.
+
+The inference client shares pooled HTTP connections, enables TCP no-delay, and
+forwards parsed SSE events without an application-level streaming buffer. Cold
+starts and model-side generation can still dominate latency. Auto is the
+recommended default when a particular model is not required. The client does
+not apply reduced-quality generation settings; target selection and quality
+remain router decisions.
+Selecting `Instant` can reduce reasoning latency, but it intentionally changes
+the model's reasoning behavior and is never enabled silently.
+
+## Account plan and quota
+
+When authenticated, Chutes Build fetches subscription usage, plan metadata, and
+quota data concurrently. The TUI status bar shows the plan plus the rolling
+four-hour and monthly percentages when available; its color follows the most
+constrained active window and changes at 80% and 100%. Click the indicator or
+run `/usage` for every active window, percentage, and reset time. If aggregate
+quota usage is unavailable, the client falls back concurrently to the
+documented per-chute quota endpoints.
+
+## Optional web and browser configuration
+
+Web search uses DuckDuckGo without a dedicated key. For Brave Search:
+
+```powershell
+$env:BRAVE_SEARCH_API_KEY = "your-brave-key"
+$env:CHUTES_WEB_SEARCH_PROVIDER = "brave"
+```
+
+Browser automation discovers Chrome or Edge automatically. Overrides:
+
+```powershell
+$env:CHUTES_BROWSER_EXECUTABLE = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+$env:CHUTES_BROWSER_HEADFUL = "1" # optional; default is headless
+```
+
+Browser screenshots may only be written inside the active workspace. The
+automation profile is temporary, isolated from the user's normal browser
+profile, and launched with sync and background-update features disabled.
+
+Video attachments are sampled locally with FFmpeg and routed as representative
+frames through the same Chutes vision path. Set `CHUTES_FFMPEG_EXECUTABLE` when
+FFmpeg is not discoverable on `PATH`; restart Chutes Build after installing or
+changing FFmpeg so the per-process capability cache is refreshed.
+
+Media behavior can be tuned with the compatible `chutes-media-mcp` variables
+`CHUTES_OUTPUT_DIR`, `CHUTES_WARMUP`, `CHUTES_COLD_START_RETRIES`,
+`CHUTES_ALLOW_UNKNOWN_PARAMS`, and `CHUTES_PROVENANCE`. Downloaded media is
+limited to 512 MiB by default (`CHUTES_MAX_MEDIA_BYTES`, hard ceiling 2 GiB),
+while workspace inputs are limited to 64 MiB by default
+(`CHUTES_MAX_INPUT_ASSET_BYTES`, hard ceiling 512 MiB).
+
+## Local data
+
+User-level state defaults to `~/.chutes-build` or the directory set in
+`CHUTES_BUILD_HOME`. Project memory is stored in `memories.md`. Configuration,
+sessions, logs, exports, and credentials remain local unless a tool action
+explicitly calls an external service.
+
+See [PRIVACY.md](PRIVACY.md) for the exact network and data boundaries.
+
+## Security model
+
+Chutes Build is an agent capable of reading files, running commands, editing
+code, and controlling an isolated browser. Use it only in repositories you
+trust, review proposed commands, and keep the default permission checks enabled
+for sensitive work. Never place API keys in prompts, source files, or committed
+configuration. See the [security review](docs/security-review.md) for release
+controls, trust boundaries, and tracked dependency exceptions.
+
+## Project provenance
+
+Chutes Build is a substantially modified fork of
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build). The upstream
+project is licensed under Apache License 2.0; this fork retains the upstream
+license and third-party notices.
+
+See [NOTICE](NOTICE), [LICENSE](LICENSE), and
+[THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) for attribution.
+
+New upstream releases and commits are detected by a read-only scheduled check
+and reviewed through the documented [upstream synchronization
+procedure](docs/upstream-sync.md); upstream changes are never merged or released
+automatically.
 
 ## Contributing
 
-> [!NOTE]
-> External contributions are not accepted. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Issues and focused pull requests are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing.
 
-## License
-
-First-party code in this repository is licensed under the **Apache License,
-Version 2.0** — see [`LICENSE`](LICENSE).
-
-Third-party and vendored code remains under its original licenses. See:
-
-- [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) — crates.io / git dependencies,
-  bundled UI themes, and **in-tree source ports** (including openai/codex and
-  sst/opencode tool implementations)
-- [`crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md`](crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md)
-  — crate-local notice for the codex and opencode ports (license texts +
-  Apache §4(b) change notice)
-- [`third_party/NOTICE`](third_party/NOTICE) — vendored Mermaid-stack index
+Copyright 2026 Michael Gasperini (Mikesoft).

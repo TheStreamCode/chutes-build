@@ -8,7 +8,7 @@ use super::common::*;
 const INNER_SENTINEL: &str = "INNER-NOTE-SENTINEL-4173";
 
 /// Env: NO suggestion flag — Tab completion in bash mode is always on, and
-/// this test is the acceptance proof. `GROK_SUGGESTIONS=0` pins the
+/// this test is the acceptance proof. `CHUTES_BUILD_SUGGESTIONS=0` pins the
 /// as-you-type pipeline OFF hermetically (the PTY child inherits the parent
 /// env, so a dev shell exporting the flag must not turn it on here); the
 /// history tier is pinned to a nonexistent file so file completions are the
@@ -16,7 +16,7 @@ const INNER_SENTINEL: &str = "INNER-NOTE-SENTINEL-4173";
 fn suggestions_env(content: &ContentController) -> Vec<(String, String)> {
     let mut env = content.env_for_pager();
     env.push(("SHELL".into(), "/bin/bash".into()));
-    env.push(("GROK_SUGGESTIONS".into(), "0".into()));
+    env.push(("CHUTES_BUILD_SUGGESTIONS".into(), "0".into()));
     env.push((
         "HISTFILE".into(),
         content

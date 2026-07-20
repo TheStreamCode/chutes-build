@@ -232,7 +232,7 @@ pub(crate) fn execute(
             if chat_kind || session_flags.chat_mode {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert(
-                        "x.ai/session".into(),
+                        "chutes.build/session".into(),
                         serde_json::json!({ "kind" : "chat" }),
                     );
             }
@@ -270,7 +270,7 @@ pub(crate) fn execute(
                             payload["gitRef"] = serde_json::Value::String(r.clone());
                         }
                         let ext_req = acp::ExtRequest::new(
-                            "x.ai/git/worktree/resume_session",
+                            "chutes.build/git/worktree/resume_session",
                             serde_json::value::to_raw_value(&payload)
                                 .expect("serialize resume params")
                                 .into(),
@@ -374,7 +374,7 @@ pub(crate) fn execute(
                         params["gitRef"] = serde_json::Value::String(r.clone());
                     }
                     let ext_req = acp::ExtRequest::new(
-                        "x.ai/git/worktree/create_from_worktree_sync",
+                        "chutes.build/git/worktree/create_from_worktree_sync",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize worktree params")
                             .into(),
@@ -502,7 +502,7 @@ pub(crate) fn execute(
             }
             if let Some(true) = session_flags.restore_code {
                 meta.get_or_insert_with(acp::Meta::new)
-                    .insert("x.ai/restore_code".into(), serde_json::Value::Bool(true));
+                    .insert("chutes.build/restore_code".into(), serde_json::Value::Bool(true));
             }
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
             let mcp_started = std::time::Instant::now();
@@ -702,7 +702,7 @@ pub(crate) fn execute(
                         params["query"] = serde_json::Value::String(q.clone());
                     }
                     let request = acp::ExtRequest::new(
-                        "x.ai/session/list",
+                        "chutes.build/session/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize session list params")
                             .into(),
@@ -759,7 +759,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/sessions/list",
+                        "chutes.build/sessions/list",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize roster list params")
                             .into(),
@@ -777,7 +777,7 @@ pub(crate) fn execute(
                                 }
                                 None => {
                                     tracing::warn!(
-                                        "failed to parse x.ai/sessions/list response"
+                                        "failed to parse chutes.build/sessions/list response"
                                     );
                                     TaskResult::RosterFailed {
                                         error: "parse error".to_string(),
@@ -802,7 +802,7 @@ pub(crate) fn execute(
                         { "cwd" : cwd.to_string_lossy(), "limit" : 30, }
                     );
                     let request = acp::ExtRequest::new(
-                        "x.ai/session/list",
+                        "chutes.build/session/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize session list params")
                             .into(),
@@ -1255,7 +1255,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let notification = acp::ExtNotification::new(
-                        "x.ai/toggle_plan_mode",
+                        "chutes.build/toggle_plan_mode",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize toggle_plan_mode params")
                             .into(),
@@ -1277,7 +1277,7 @@ pub(crate) fn execute(
                         "expectedVersion" : expected_version, }
                     );
                     let notification = acp::ExtNotification::new(
-                        "x.ai/queue/remove",
+                        "chutes.build/queue/remove",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/remove params")
                             .into(),
@@ -1297,7 +1297,7 @@ pub(crate) fn execute(
                         ordered_ids, }
                     );
                     let notification = acp::ExtNotification::new(
-                        "x.ai/queue/reorder",
+                        "chutes.build/queue/reorder",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/reorder params")
                             .into(),
@@ -1316,7 +1316,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let notification = acp::ExtNotification::new(
-                        "x.ai/queue/clear",
+                        "chutes.build/queue/clear",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/clear params")
                             .into(),
@@ -1336,7 +1336,7 @@ pub(crate) fn execute(
                         new_text, }
                     );
                     let notification = acp::ExtNotification::new(
-                        "x.ai/queue/edit",
+                        "chutes.build/queue/edit",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/edit params")
                             .into(),
@@ -1359,7 +1359,7 @@ pub(crate) fn execute(
                         params["newText"] = serde_json::Value::String(new_text);
                     }
                     let notification = acp::ExtNotification::new(
-                        "x.ai/queue/interject",
+                        "chutes.build/queue/interject",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/interject params")
                             .into(),
@@ -1440,7 +1440,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/compact_conversation",
+                        "chutes.build/compact_conversation",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize compact params")
                             .into(),
@@ -1463,7 +1463,7 @@ pub(crate) fn execute(
                         session_id, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/prompt_history",
+                        "chutes.build/prompt_history",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize prompt_history params")
                             .into(),
@@ -1511,7 +1511,7 @@ pub(crate) fn execute(
                         task_id: task_id.clone(),
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/task/kill",
+                        "chutes.build/task/kill",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize kill params")
                             .into(),
@@ -1544,7 +1544,7 @@ pub(crate) fn execute(
                         subagent_id, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/subagent/cancel",
+                        "chutes.build/subagent/cancel",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize cancel params")
                             .into(),
@@ -1571,7 +1571,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), "taskId" : task_id, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/scheduler/delete",
+                        "chutes.build/scheduler/delete",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize scheduler delete params")
                             .into(),
@@ -1591,7 +1591,7 @@ pub(crate) fn execute(
                         tool_call_id, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/terminal/background",
+                        "chutes.build/terminal/background",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize background params")
                             .into(),
@@ -1916,7 +1916,7 @@ pub(crate) fn execute(
                         }
                         let params = serde_json::json!({});
                         let req = acp::ExtRequest::new(
-                            "x.ai/auth/get_url",
+                            "chutes.build/auth/get_url",
                             serde_json::value::to_raw_value(&params)
                                 .expect("serialize auth_url params")
                                 .into(),
@@ -1956,7 +1956,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "code" : code });
                     let req = acp::ExtRequest::new(
-                        "x.ai/auth/submit_code",
+                        "chutes.build/auth/submit_code",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize auth code params")
                             .into(),
@@ -1990,7 +1990,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), "cache" : cache, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/list",
+                        "chutes.build/mcp/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/list params")
                             .into(),
@@ -2031,7 +2031,7 @@ pub(crate) fn execute(
                         server_name, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/auth_trigger",
+                        "chutes.build/mcp/auth_trigger",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/auth_trigger params")
                             .into(),
@@ -2097,7 +2097,7 @@ pub(crate) fn execute(
                         server_name, "values" : values, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/setup",
+                        "chutes.build/mcp/setup",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/setup params")
                             .into(),
@@ -2141,7 +2141,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/hooks/list",
+                        "chutes.build/hooks/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize hooks/list params")
                             .into(),
@@ -2178,7 +2178,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/plugins/list",
+                        "chutes.build/plugins/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize plugins/list params")
                             .into(),
@@ -2216,7 +2216,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/hooks/action",
+                        "chutes.build/hooks/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize hooks/action params")
                             .into(),
@@ -2256,7 +2256,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/plugins/action",
+                        "chutes.build/plugins/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize plugins/action params")
                             .into(),
@@ -2295,7 +2295,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/marketplace/list",
+                        "chutes.build/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2334,7 +2334,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/marketplace/list",
+                        "chutes.build/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2371,7 +2371,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "cwd" : "." });
                     let req = acp::ExtRequest::new(
-                        "x.ai/skills/list",
+                        "chutes.build/skills/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/list params")
                             .into(),
@@ -2410,7 +2410,7 @@ pub(crate) fn execute(
                         { "name" : skill_name, "enabled" : enabled, "cwd" : ".", }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/skills/toggle",
+                        "chutes.build/skills/toggle",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/toggle params")
                             .into(),
@@ -2430,7 +2430,7 @@ pub(crate) fn execute(
                                 .map_err(|_| "couldn't toggle skill".to_string());
                             if parsed.is_ok() {
                                 let refresh = acp::ExtRequest::new(
-                                    "x.ai/skills/refresh-baseline",
+                                    "chutes.build/skills/refresh-baseline",
                                     serde_json::value::to_raw_value(&serde_json::json!({}))
                                         .expect("serialize empty params")
                                         .into(),
@@ -2459,7 +2459,7 @@ pub(crate) fn execute(
                         { "sessionId" : session_id.0.to_string(), }
                     );
                     let list_req = acp::ExtRequest::new(
-                        "x.ai/marketplace/list",
+                        "chutes.build/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2520,7 +2520,7 @@ pub(crate) fn execute(
                             action,
                         };
                         let update_req = acp::ExtRequest::new(
-                            "x.ai/marketplace/action",
+                            "chutes.build/marketplace/action",
                             serde_json::value::to_raw_value(&req_body)
                                 .expect("serialize marketplace/action params")
                                 .into(),
@@ -2551,7 +2551,7 @@ pub(crate) fn execute(
                             succeeded, }
                         );
                         let notify_req = acp::ExtRequest::new(
-                            "x.ai/plugins/notify-updates",
+                            "chutes.build/plugins/notify-updates",
                             serde_json::value::to_raw_value(&notify_params)
                                 .expect("serialize notify-updates params")
                                 .into(),
@@ -2573,7 +2573,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/marketplace/action",
+                        "chutes.build/marketplace/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize marketplace/action params")
                             .into(),
@@ -2632,7 +2632,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/marketplace/action",
+                        "chutes.build/marketplace/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize marketplace/action params")
                             .into(),
@@ -2678,7 +2678,7 @@ pub(crate) fn execute(
                         action: xai_hooks_plugins_types::PluginsAction::Reload,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/plugins/action",
+                        "chutes.build/plugins/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize plugins/action params")
                             .into(),
@@ -2755,7 +2755,7 @@ pub(crate) fn execute(
                         config: *config,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/upsert",
+                        "chutes.build/mcp/upsert",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize mcp/upsert params")
                             .into(),
@@ -2790,7 +2790,7 @@ pub(crate) fn execute(
                         server_name,
                     };
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/delete",
+                        "chutes.build/mcp/delete",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize mcp/delete params")
                             .into(),
@@ -2819,7 +2819,7 @@ pub(crate) fn execute(
                         server_name, "enabled" : enabled, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/toggle",
+                        "chutes.build/mcp/toggle",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/toggle params")
                             .into(),
@@ -2849,7 +2849,7 @@ pub(crate) fn execute(
                         server_name, "tool_name" : tool_name, "enabled" : enabled, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/mcp/toggle_tool",
+                        "chutes.build/mcp/toggle_tool",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/toggle_tool params")
                             .into(),
@@ -2874,7 +2874,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/share_session",
+                        "chutes.build/share_session",
                         serde_json::value::to_raw_value(
                                 &ShareSessionRequest {
                                     session_id: session_id.0.to_string(),
@@ -2988,7 +2988,7 @@ pub(crate) fn execute(
                         cwd: String,
                     }
                     let request = acp::ExtRequest::new(
-                        "x.ai/session/rename",
+                        "chutes.build/session/rename",
                         serde_json::value::to_raw_value(
                                 &RenameRequest {
                                     session_id: session_id.0.to_string(),
@@ -3045,7 +3045,7 @@ pub(crate) fn execute(
                         cwd: String,
                     }
                     let request = acp::ExtRequest::new(
-                        "x.ai/session/delete",
+                        "chutes.build/session/delete",
                         serde_json::value::to_raw_value(
                                 &DeleteRequest {
                                     session_id: session_id.clone(),
@@ -3097,7 +3097,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/privacy/setCodingDataRetention",
+                        "chutes.build/privacy/setCodingDataRetention",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "codingDataRetentionOptOut" : ! opted_in }
@@ -3209,7 +3209,7 @@ pub(crate) fn execute(
                         }
                     };
                     let request = acp::ExtRequest::new(
-                        "x.ai/feedback",
+                        "chutes.build/feedback",
                         raw_params.into(),
                     );
                     match acp_send(request, &tx).await {
@@ -3240,7 +3240,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/memory/rewrite",
+                        "chutes.build/memory/rewrite",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string(), "rawText" :
@@ -3307,7 +3307,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/btw",
+                        "chutes.build/btw",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string(), "question" :
@@ -3350,7 +3350,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/recap",
+                        "chutes.build/recap",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string(), "auto" : auto, }
@@ -3394,7 +3394,7 @@ pub(crate) fn execute(
                         blocks.as_deref(),
                     );
                     let request = acp::ExtRequest::new(
-                        "x.ai/interject",
+                        "chutes.build/interject",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize interject params")
                             .into(),
@@ -3424,7 +3424,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "kind" : kind, "name" : name });
                     let request = acp::ExtRequest::new(
-                        "x.ai/bundle/entry/get",
+                        "chutes.build/bundle/entry/get",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize bundle/entry/get params")
                             .into(),
@@ -3480,7 +3480,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/bundle/status",
+                        "chutes.build/bundle/status",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize bundle/status params")
                             .into(),
@@ -3539,7 +3539,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "cwd" : cwd });
                     let req = acp::ExtRequest::new(
-                        "x.ai/commands/list",
+                        "chutes.build/commands/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize commands/list params")
                             .into(),
@@ -3575,7 +3575,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/rewind/points",
+                        "chutes.build/rewind/points",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string() }
@@ -3634,7 +3634,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/rewind/execute",
+                        "chutes.build/rewind/execute",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string(),
@@ -3688,7 +3688,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "x.ai/rewind/execute",
+                        "chutes.build/rewind/execute",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!(
                                     { "sessionId" : session_id.0.to_string(),
@@ -3748,7 +3748,7 @@ pub(crate) fn execute(
                             { "query" : query, "limit" : 20, "includeContent" : true, }
                         );
                         let request = acp::ExtRequest::new(
-                            "x.ai/session/search",
+                            "chutes.build/session/search",
                             serde_json::value::to_raw_value(&params)
                                 .expect("serialize deep search params")
                                 .into(),
@@ -3833,7 +3833,7 @@ pub(crate) fn execute(
                         parent_is_worktree,
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/session/fork",
+                        "chutes.build/session/fork",
                         serde_json::value::to_raw_value(&payload)
                             .expect("serialize fork params")
                             .into(),
@@ -3913,7 +3913,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     use xai_grok_shell::extensions::billing::BillingConfigResponse;
                     let req = acp::ExtRequest::new(
-                        "x.ai/billing",
+                        "chutes.build/billing",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize billing params")
                             .into(),
@@ -3982,7 +3982,7 @@ pub(crate) fn execute(
                                 &scope,
                             )?;
                             let proxy_base = std::env::var(
-                                    "GROK_CLI_CHAT_PROXY_BASE_URL",
+                                    "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
                                 )
                                 .unwrap_or_else(|_| {
                                     xai_grok_shell::agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT
@@ -4008,7 +4008,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     use xai_grok_shell::extensions::billing::BillingConfigResponse;
                     let req = acp::ExtRequest::new(
-                        "x.ai/billing",
+                        "chutes.build/billing",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize billing params")
                             .into(),
@@ -4099,7 +4099,7 @@ pub(crate) fn execute(
                         token_only, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/suggest",
+                        "chutes.build/suggest",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize suggest params")
                             .into(),
@@ -4138,7 +4138,7 @@ pub(crate) fn execute(
                         session_id, }
                     );
                     let req = acp::ExtRequest::new(
-                        "x.ai/suggestPrompt",
+                        "chutes.build/suggestPrompt",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize suggestPrompt params")
                             .into(),
@@ -4165,13 +4165,13 @@ pub(crate) fn execute(
     }
     (false, meta)
 }
-/// Fetch session info from ACP via `x.ai/session/info`.
+/// Fetch session info from ACP via `chutes.build/session/info`.
 async fn fetch_session_info(
     session_id: &acp::SessionId,
     tx: &AcpAgentTx,
 ) -> Result<SessionInfoResponse, String> {
     let request = acp::ExtRequest::new(
-        "x.ai/session/info",
+        "chutes.build/session/info",
         serde_json::value::to_raw_value(
                 &serde_json::json!({ "sessionId" : session_id.0.to_string() }),
             )
@@ -4313,7 +4313,7 @@ fn prompt_request_meta(
     }
     serde_json::Value::Object(map)
 }
-/// Build the `x.ai/interject` params. The optional structured `content`
+/// Build the `chutes.build/interject` params. The optional structured `content`
 /// (text + images) is omitted ENTIRELY when `None` so the legacy wire
 /// shape stays byte-identical. Extracted from the spawn for testability.
 fn build_interject_params(

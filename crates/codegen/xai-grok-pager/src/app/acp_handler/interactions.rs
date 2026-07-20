@@ -1,6 +1,6 @@
 use super::*;
 
-/// Handle `x.ai/ask_user_question` ext-method.
+/// Handle `chutes.build/ask_user_question` ext-method.
 ///
 /// Parses the typed request, creates a `QuestionViewState` with the
 /// `response_tx` stashed, and opens the question overlay. The pager does
@@ -121,7 +121,7 @@ pub(crate) fn handle_ask_user_question(
     is_active
 }
 
-/// Handle an `x.ai/exit_plan_mode` ext_method request.
+/// Handle an `chutes.build/exit_plan_mode` ext_method request.
 ///
 /// Creates a `PlanApprovalViewState` overlay for interactive approval.
 ///

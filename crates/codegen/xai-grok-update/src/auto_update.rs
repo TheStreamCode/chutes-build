@@ -25,21 +25,21 @@ pub enum UpdateRunMode {
 
 const PROMPT_UPDATE_NOW: &str = "Update now? [Y/n/d]";
 const MSG_AUTO_UPDATE_BACKGROUND: &str = "Auto-update running in background.";
-const MSG_RUN_UPDATE_MANUAL: &str = "Run `grok update` to get the latest version.";
+const MSG_RUN_UPDATE_MANUAL: &str = "See README.md for supported update instructions.";
 /// Manual-install one-liner for this platform's bootstrap installer.
 fn manual_install_cmd() -> &'static str {
-    if cfg!(windows) {
-        "irm https://x.ai/cli/install.ps1 | iex"
-    } else {
-        "curl -fsSL https://x.ai/cli/install.sh | bash"
-    }
+    "build from source; see README.md"
 }
 
 /// Build a reinstall hint for a known installer type.
 fn reinstall_hint(installer: &str) -> String {
     match installer {
-        "npm" => "Please reinstall via npm:\n  npm i -g @xai-official/grok".to_string(),
-        "gh-release" => "Please reinstall via GitHub Releases:\n  gh release download --repo xai-org-shared/grok-build --pattern 'grok-*' --output grok && chmod +x grok".to_string(),
+        "npm" => {
+            "Please reinstall Chutes Build from its published package when available.".to_string()
+        }
+        "gh-release" => {
+            "Please reinstall Chutes Build from its published release when available.".to_string()
+        }
         _ => format!("Please reinstall via:\n  {}", manual_install_cmd()),
     }
 }
@@ -203,7 +203,7 @@ pub struct EnsureLatestOutcome {
 ///
 /// Unlike [`run_update`] this never uses the compiled-in version for the
 /// download decision — a binary already installed by another process (TUI
-/// background download, explicit `grok update`) is reused as-is. This both
+/// background download, explicit `chutes-build update`) is reused as-is. This both
 /// removes the duplicate download in leader mode and stops the pre-fix
 /// hourly re-download while a busy leader keeps deferring its relaunch.
 ///
@@ -255,7 +255,7 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
 }
 
 /// Disk-version probe gated on the installer actually maintaining the
-/// managed `~/.grok/bin/grok` symlink.
+/// managed `~/.chutes-build/bin/grok` symlink.
 ///
 /// Only the internal (install.sh / CDN) and gh-release installers write that
 /// symlink. npm manages its own global install, so for npm a symlink left
@@ -272,7 +272,7 @@ fn disk_version_for_installer(installer: &str) -> Option<String> {
 }
 
 fn env_installer() -> Option<&'static str> {
-    if let Ok(v) = std::env::var("GROK_INSTALLER") {
+    if let Ok(v) = std::env::var("CHUTES_BUILD_INSTALLER") {
         return match v.to_ascii_lowercase().as_str() {
             "npm" => Some("npm"),
             "internal" => Some("internal"),
@@ -280,10 +280,10 @@ fn env_installer() -> Option<&'static str> {
             _ => None,
         };
     }
-    if std::env::var_os("GROK_MANAGED_BY_NPM").is_some() {
+    if std::env::var_os("CHUTES_BUILD_MANAGED_BY_NPM").is_some() {
         return Some("npm");
     }
-    if std::env::var_os("GROK_MANAGED_BY_INTERNAL").is_some() {
+    if std::env::var_os("CHUTES_BUILD_MANAGED_BY_INTERNAL").is_some() {
         return Some("internal");
     }
     if std::env::var_os("npm_config_user_agent").is_some() {
@@ -361,7 +361,7 @@ pub struct BackgroundUpdateCheck {
     /// `Some` when the *running* binary is older than the channel pointer —
     /// drives the in-TUI restart hint regardless of who downloads the binary.
     pub update: Option<UpdateAvailable>,
-    /// Handle to the background `grok update` child, `Some` only when a
+    /// Handle to the background `chutes-build update` child, `Some` only when a
     /// download was actually started (the on-disk install was behind the
     /// pointer). The TUI parks this and `wait()`s on it at quit-for-update
     /// time instead of spawning a second downloader.
@@ -382,7 +382,7 @@ impl BackgroundUpdateCheck {
 /// Sets [`BackgroundUpdateCheck::update`] when the running binary is older
 /// than the channel pointer. If `auto_update` is enabled **and the on-disk
 /// install is also behind the pointer**, kicks off a non-blocking download
-/// (spawns `grok update` as a detached child process) so the new binary is
+/// (spawns `chutes-build update` as a detached child process) so the new binary is
 /// ready when the user quits and relaunches. When another process (an earlier
 /// TUI, the leader's hourly checker) already put the target version on disk,
 /// no download is started — only the restart hint is surfaced.
@@ -424,7 +424,7 @@ pub async fn check_update_background(update_config: &UpdateConfig) -> Background
 
     // Only download when the on-disk install is behind the pointer; the
     // running process being stale (checked above) just means "show the
-    // restart hint". The quit-for-update path's `grok update` child resolves
+    // restart hint". The quit-for-update path's `chutes-build update` child resolves
     // to "Already up to date" against the same disk state. Gated on the
     // installer maintaining the managed symlink — for npm a leftover symlink
     // would wrongly suppress the download (see `disk_version_for_installer`).
@@ -588,7 +588,7 @@ pub async fn run_update_if_available(
     Ok(false)
 }
 
-/// Launch "grok update" in blocking or non-blocking mode.
+/// Launch "chutes-build update" in blocking or non-blocking mode.
 ///
 /// In `NonBlocking` mode the spawned child's handle is returned so the caller
 /// can later `wait()` on the in-flight download (e.g. the TUI's
@@ -619,7 +619,7 @@ async fn run_update_subcommand(run_mode: UpdateRunMode) -> Result<Option<tokio::
             // No detach: the child must stay in the foreground process group so Ctrl+C cancels it with the parent; the atomic install protocol makes mid-download kills safe.
             let status = cmd.status().await?;
             if !status.success() {
-                anyhow::bail!("grok update failed with {}", status);
+                anyhow::bail!("chutes-build update failed with {}", status);
             }
             Ok(None)
         }
@@ -640,7 +640,7 @@ async fn run_update_subcommand(run_mode: UpdateRunMode) -> Result<Option<tokio::
 ///
 /// `current_exe()` resolves symlinks via `/proc/self/exe` (see proc(5)),
 /// so it returns the old versioned target after a symlink swap.
-/// Prefer `~/.grok/bin/grok` which always points to the latest version.
+/// Prefer `~/.chutes-build/bin/grok` which always points to the latest version.
 fn resolve_restart_exe() -> Result<std::path::PathBuf> {
     let canonical = grok_application();
     if canonical.exists() {
@@ -657,7 +657,7 @@ pub fn restart_grok() -> Result<()> {
         cmd.arg(arg);
     }
     cmd.env_clear();
-    cmd.envs(std::env::vars_os().filter(|(k, _)| k != "GROK_AUTO_UPDATE"));
+    cmd.envs(std::env::vars_os().filter(|(k, _)| k != "CHUTES_BUILD_AUTO_UPDATE"));
     eprintln!("Restarting Grok...");
 
     // Use exec on Unix to replace the current process, avoiding stdio issues
@@ -1031,7 +1031,7 @@ pub async fn download_silent(url: &str, dest: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Delete `~/.grok/models_cache.json` after a successful update.
+/// Delete `~/.chutes-build/models_cache.json` after a successful update.
 ///
 /// The cache embeds the binary version and will be treated as a miss by the
 /// new binary anyway, but removing it eagerly avoids a wasted disk read +
@@ -1045,7 +1045,7 @@ async fn remove_stale_models_cache() {
     }
 }
 
-/// Remove the stale `grok-pager` symlink/binary from `~/.grok/bin/` left by
+/// Remove the stale `grok-pager` symlink/binary from `~/.chutes-build/bin/` left by
 /// older installations that shipped a separate pager binary.
 async fn remove_stale_pager(bin_dir: &std::path::Path) {
     let name = if cfg!(windows) {
@@ -1147,8 +1147,8 @@ async fn smoke_test_binary(binary_path: &std::path::Path) -> bool {
 
 /// Test-only entry point: same as [`install_internal`] but reads from
 /// `gcs_base_url` instead of the hardcoded GCS bucket. Persists installer
-/// config and writes to `~/.grok/bin/`, so callers must isolate
-/// `GROK_HOME`.
+/// config and writes to `~/.chutes-build/bin/`, so callers must isolate
+/// `CHUTES_BUILD_HOME`.
 #[doc(hidden)]
 pub async fn install_internal_from_base(
     target: Option<&str>,
@@ -1159,8 +1159,8 @@ pub async fn install_internal_from_base(
     activate_verified_download(&download).await
 }
 
-/// A downloaded and smoke-tested binary in `~/.grok/downloads/`, not yet
-/// activated as the managed `grok`/`agent`.
+/// A downloaded and smoke-tested binary in `~/.chutes-build/downloads/`, not yet
+/// activated as the managed `chutes-build`/`agent`.
 struct VerifiedDownload {
     version: String,
     binary_path: std::path::PathBuf,
@@ -1229,7 +1229,7 @@ async fn activate_verified_download(download: &VerifiedDownload) -> Result<()> {
     let bin_dir = grok_home.join("bin");
     tokio::fs::create_dir_all(&bin_dir).await?;
 
-    // Atomic swap of ~/.grok/bin/{grok,agent} -> downloaded binary.
+    // Atomic swap of ~/.chutes-build/bin/{grok,agent} -> downloaded binary.
     let link_path = swap_managed_bin_links(&download.binary_path, &bin_dir).await?;
 
     remove_stale_pager(&bin_dir).await;
@@ -1260,7 +1260,7 @@ async fn activate_verified_download(download: &VerifiedDownload) -> Result<()> {
 /// Failures are silently ignored — completions are a nice-to-have, not a
 /// requirement for a successful update.
 async fn regenerate_completions(binary: &std::path::Path, grok_home: &std::path::Path) {
-    // Derive $HOME independently — grok_home may be overridden via GROK_HOME
+    // Derive $HOME independently — grok_home may be overridden via CHUTES_BUILD_HOME
     // env var, so grok_home.parent() isn't necessarily the user's home dir.
     #[allow(deprecated)]
     let user_home = std::env::home_dir().unwrap_or_default();
@@ -1292,13 +1292,13 @@ async fn regenerate_completions(binary: &std::path::Path, grok_home: &std::path:
 
 /// Compute a relative symlink target from `link` to `target`.
 ///
-/// When both paths share a grandparent (e.g. `~/.grok/bin/grok` and
-/// `~/.grok/downloads/grok-0.1.203-linux-x86_64`), returns a relative path
+/// When both paths share a grandparent (e.g. `~/.chutes-build/bin/grok` and
+/// `~/.chutes-build/downloads/grok-0.1.203-linux-x86_64`), returns a relative path
 /// like `../downloads/grok-0.1.203-linux-x86_64`.  When they share the same
 /// parent directory, returns just the filename.  Falls back to the absolute
 /// `target` path for any other layout.
 ///
-/// Relative symlinks survive Docker bind-mounts where `~/.grok/` is mapped
+/// Relative symlinks survive Docker bind-mounts where `~/.chutes-build/` is mapped
 /// into a container with a different `$HOME` (and thus a different absolute
 /// prefix).
 #[cfg(unix)]
@@ -1322,16 +1322,16 @@ fn relative_symlink_target(target: &std::path::Path, link: &std::path::Path) -> 
     target.to_path_buf()
 }
 
-/// Swap `~/.grok/bin/{grok,agent}` to point at `binary_path`. Returns the
-/// `grok` link path (for [`regenerate_completions`]).
+/// Swap `~/.chutes-build/bin/{grok,agent}` to point at `binary_path`. Returns the
+/// `chutes-build` link path (for [`regenerate_completions`]).
 ///
-/// `grok` and `agent` are first-class entry points that the bootstrap
+/// `chutes-build` and `agent` are first-class entry points that the bootstrap
 /// installers (`install.sh`, `install.ps1`, `install-enterprise.sh`)
-/// maintain in lockstep, and so must the updater — otherwise `grok update`
+/// maintain in lockstep, and so must the updater — otherwise `chutes-build update`
 /// leaves `agent` pinned at the previous version.
 ///
 /// Unix: atomic symlink swap with relative target (survives Docker
-/// bind-mounts of `~/.grok/`). Windows: [`windows_replace_exe`].
+/// bind-mounts of `~/.chutes-build/`). Windows: [`windows_replace_exe`].
 ///
 /// **All-or-nothing.** Each link's prior state is captured (Unix: prior
 /// symlink target; Windows: `.rollback.bak`; or `Absent` marker via
@@ -1810,7 +1810,7 @@ async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_
             continue;
         }
         // The suffix after the prefix must start with a digit to be a versioned
-        // binary (avoids `grok-latest`, `grok-pager-*` when prefix is `grok`).
+        // binary (avoids `grok-latest`, `grok-pager-*` when prefix is `chutes-build`).
         let suffix = &name[prefix.len()..];
         if !suffix.starts_with(|c: char| c.is_ascii_digit()) {
             continue;
@@ -2039,11 +2039,11 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
         tokio::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).await?;
     }
 
-    // Atomic swap of ~/.grok/bin/{grok,agent} -> downloaded binary.
+    // Atomic swap of ~/.chutes-build/bin/{grok,agent} -> downloaded binary.
     swap_managed_bin_links(&binary_path, &bin_dir).await?;
 
     // Update grok-latest -> versioned binary so any existing symlinks that route
-    // through it (e.g. /usr/local/bin/grok -> ~/.grok/downloads/grok-latest)
+    // through it (e.g. /usr/local/bin/grok -> ~/.chutes-build/downloads/grok-latest)
     // resolve to the newly installed version.
     #[cfg(unix)]
     {
@@ -2055,14 +2055,16 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
     }
 
     // Also update /usr/local/bin/{grok,agent} if either points directly into
-    // ~/.grok/downloads/ (legacy layout — skips the grok-latest indirection).
+    // ~/.chutes-build/downloads/ (legacy layout — skips the grok-latest indirection).
     // Permission errors ignored.
     #[cfg(unix)]
     for name in ["grok", "agent"] {
         let system_link = std::path::PathBuf::from(format!("/usr/local/bin/{name}"));
         if let Ok(existing_target) = tokio::fs::read_link(&system_link).await {
             let target_str = existing_target.to_string_lossy();
-            if target_str.contains(".grok/downloads/") && !target_str.ends_with("grok-latest") {
+            if target_str.contains(".chutes-build/downloads/")
+                && !target_str.ends_with("grok-latest")
+            {
                 // Try to update; ignore permission errors
                 let _ = atomic_symlink_swap(&binary_path, &system_link).await;
             }
@@ -2123,7 +2125,7 @@ fn create_temp_npmrc(npm_registry: Option<&str>) -> Result<Option<std::path::Pat
 /// the code signature of the mmap'd executable pages once the backing file
 /// inode is unlinked.
 ///
-/// While our postinstall.js now uses versioned binaries under ~/.grok/bin/
+/// While our postinstall.js now uses versioned binaries under ~/.chutes-build/bin/
 /// (so processes launched from there are safe), older installations or npx
 /// invocations may still be running the vendored binary directly.
 #[cfg(target_os = "macos")]
@@ -2248,7 +2250,7 @@ pub async fn apply_channel_switch(channel_switch: Option<&str>, update_config: &
     }
 }
 
-/// Run the `grok update` command. Returns `Ok(Some(version))` when the target
+/// Run the `chutes-build update` command. Returns `Ok(Some(version))` when the target
 /// version is present on disk afterwards — either installed by this call or
 /// found already installed (e.g. by a concurrent background download); returns
 /// `Ok(None)` when there is no installer or no applicable target. Callers use
@@ -2420,7 +2422,7 @@ pub async fn run_update(
     refresh_deployment_config().await;
     eprintln!("  ✓ grok v{} installed successfully!", target_version);
 
-    if !force && std::env::var_os("GROK_AUTO_UPDATE").is_none() {
+    if !force && std::env::var_os("CHUTES_BUILD_AUTO_UPDATE").is_none() {
         eprintln!("  Please restart Grok.");
     }
     Ok(Some(target_version.to_string()))
@@ -2445,11 +2447,11 @@ async fn refresh_deployment_config() {
     match xai_grok_shell::managed_config::sync().await {
         Ok(true) => eprintln!("  Applied managed configuration."),
         Ok(false) => tracing::debug!("no managed configuration to apply"),
-        // Auth issues aren't actionable mid-update: quiet here, loud on `grok setup`.
+        // Auth issues aren't actionable mid-update: quiet here, loud on `chutes-build setup`.
         Err(e) if e.is_auth_rejection() => tracing::debug!("managed config not applied: {e}"),
         Err(e) if e.is_retryable() => {
             tracing::debug!("managed config refresh failed: {e}");
-            eprintln!("  Couldn't apply managed configuration. Run `grok setup` to retry.");
+            eprintln!("  Couldn't apply managed configuration. Run `chutes-build setup` to retry.");
         }
         Err(e) => eprintln!("  Couldn't apply managed configuration. {e}"),
     }
@@ -2465,8 +2467,10 @@ mod tests {
         // name onto a single `grok-0.1.tmp`; the helper must keep distinct
         // versions distinct AND make repeated attempts (same process, e.g.
         // concurrent tokio tasks) unique.
-        let dest_181 = std::path::Path::new("/home/u/.grok/downloads/grok-0.1.181-linux-x86_64");
-        let dest_182 = std::path::Path::new("/home/u/.grok/downloads/grok-0.1.182-linux-x86_64");
+        let dest_181 =
+            std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.181-linux-x86_64");
+        let dest_182 =
+            std::path::Path::new("/home/u/.chutes-build/downloads/grok-0.1.182-linux-x86_64");
 
         let a = tmp_download_path(dest_181);
         let b = tmp_download_path(dest_182);
@@ -2489,7 +2493,7 @@ mod tests {
         );
         assert_eq!(
             a.parent(),
-            std::path::Path::new("/home/u/.grok/downloads").into(),
+            std::path::Path::new("/home/u/.chutes-build/downloads").into(),
             "temp file must stay in the destination directory for atomic rename"
         );
     }
@@ -2822,7 +2826,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &leftover_new).unwrap();
 
         // max_age = ZERO: every leftover is stale and removed; the active
-        // `grok` link (no `.tmp-link` suffix) is untouched.
+        // `chutes-build` link (no `.tmp-link` suffix) is untouched.
         sweep_stale_tmp_links(&link, Duration::ZERO).await;
         assert!(!leftover_old.exists() && !leftover_new.exists());
         assert!(link.is_symlink(), "active link must be preserved");
@@ -2912,8 +2916,8 @@ mod tests {
     #[test]
     fn test_relative_symlink_target_sibling_dirs() {
         // bin/grok -> ../downloads/grok-0.1.203
-        let target = std::path::Path::new("/home/alice/.grok/downloads/grok-0.1.203");
-        let link = std::path::Path::new("/home/alice/.grok/bin/grok");
+        let target = std::path::Path::new("/home/alice/.chutes-build/downloads/grok-0.1.203");
+        let link = std::path::Path::new("/home/alice/.chutes-build/bin/grok");
         let result = relative_symlink_target(target, link);
         assert_eq!(
             result,
@@ -2925,8 +2929,8 @@ mod tests {
     #[test]
     fn test_relative_symlink_target_same_dir() {
         // downloads/grok-latest -> grok-0.1.203 (same directory)
-        let target = std::path::Path::new("/home/alice/.grok/downloads/grok-0.1.203");
-        let link = std::path::Path::new("/home/alice/.grok/downloads/grok-latest");
+        let target = std::path::Path::new("/home/alice/.chutes-build/downloads/grok-0.1.203");
+        let link = std::path::Path::new("/home/alice/.chutes-build/downloads/grok-latest");
         let result = relative_symlink_target(target, link);
         assert_eq!(result, std::path::PathBuf::from("grok-0.1.203"));
     }
@@ -2934,26 +2938,26 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_relative_symlink_target_cross_tree_stays_absolute() {
-        // /usr/local/bin/grok -> /home/alice/.grok/downloads/grok-0.1.203
+        // /usr/local/bin/grok -> /home/alice/.chutes-build/downloads/grok-0.1.203
         // Different grandparents — should stay absolute.
-        let target = std::path::Path::new("/home/alice/.grok/downloads/grok-0.1.203");
+        let target = std::path::Path::new("/home/alice/.chutes-build/downloads/grok-0.1.203");
         let link = std::path::Path::new("/usr/local/bin/grok");
         let result = relative_symlink_target(target, link);
         assert_eq!(
             result,
-            std::path::PathBuf::from("/home/alice/.grok/downloads/grok-0.1.203")
+            std::path::PathBuf::from("/home/alice/.chutes-build/downloads/grok-0.1.203")
         );
     }
 
     #[cfg(unix)]
     #[tokio::test]
     async fn test_relative_symlink_survives_directory_move() {
-        // Simulates Docker bind-mount: create ~/.grok/ layout at path A,
+        // Simulates Docker bind-mount: create ~/.chutes-build/ layout at path A,
         // then move it to path B and verify the symlink still resolves.
         let dir = tempfile::tempdir().unwrap();
 
         // Create alice's layout
-        let alice = dir.path().join("alice").join(".grok");
+        let alice = dir.path().join("alice").join(".chutes-build");
         let alice_downloads = alice.join("downloads");
         let alice_bin = alice.join("bin");
         std::fs::create_dir_all(&alice_downloads).unwrap();
@@ -2968,10 +2972,10 @@ mod tests {
         // Verify it works at the original location
         assert_eq!(std::fs::read_to_string(&link).unwrap(), "binary-content");
 
-        // "Bind-mount" to bob: copy the entire .grok tree
+        // "Bind-mount" to bob: copy the entire .chutes-build tree
         let bob_home = dir.path().join("bob");
         std::fs::create_dir_all(&bob_home).unwrap();
-        let bob = bob_home.join(".grok");
+        let bob = bob_home.join(".chutes-build");
         let copy_status = std::process::Command::new("cp")
             .args(["-a", alice.to_str().unwrap(), bob.to_str().unwrap()])
             .status()
@@ -4201,7 +4205,7 @@ mod tests {
         );
         assert_eq!(
             MSG_RUN_UPDATE_MANUAL,
-            "Run `grok update` to get the latest version."
+            "Run `chutes-build update` to get the latest version."
         );
     }
 
@@ -4209,9 +4213,9 @@ mod tests {
     // env_installer — env-var based, must run serially.
     //
     // Resolution order (matches function body):
-    //   1. GROK_INSTALLER (npm | internal | gh-release | gh)
-    //   2. GROK_MANAGED_BY_NPM       → npm
-    //   3. GROK_MANAGED_BY_INTERNAL  → internal
+    //   1. CHUTES_BUILD_INSTALLER (npm | internal | gh-release | gh)
+    //   2. CHUTES_BUILD_MANAGED_BY_NPM       → npm
+    //   3. CHUTES_BUILD_MANAGED_BY_INTERNAL  → internal
     //   4. npm_config_user_agent      → npm
     //   5. None
     // ──────────────────────────────────────────────────────────────────────
@@ -4227,9 +4231,9 @@ mod tests {
     impl InstallerEnvGuard {
         fn isolate() -> Self {
             const VARS: &[&str] = &[
-                "GROK_INSTALLER",
-                "GROK_MANAGED_BY_NPM",
-                "GROK_MANAGED_BY_INTERNAL",
+                "CHUTES_BUILD_INSTALLER",
+                "CHUTES_BUILD_MANAGED_BY_NPM",
+                "CHUTES_BUILD_MANAGED_BY_INTERNAL",
                 "npm_config_user_agent",
                 "NPM_TOKEN",
             ];
@@ -4267,7 +4271,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_explicit_npm() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "npm") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "npm") };
         assert_eq!(env_installer(), Some("npm"));
     }
 
@@ -4275,7 +4279,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_explicit_internal() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "internal") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "internal") };
         assert_eq!(env_installer(), Some("internal"));
     }
 
@@ -4283,7 +4287,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_explicit_gh_release() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "gh-release") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "gh-release") };
         assert_eq!(env_installer(), Some("gh-release"));
     }
 
@@ -4292,7 +4296,7 @@ mod tests {
     fn test_env_installer_explicit_gh_alias() {
         // `gh` is shorthand for `gh-release`.
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "gh") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "gh") };
         assert_eq!(env_installer(), Some("gh-release"));
     }
 
@@ -4300,10 +4304,10 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_explicit_uppercase_normalized() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "NPM") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "NPM") };
         assert_eq!(env_installer(), Some("npm"));
 
-        unsafe { std::env::set_var("GROK_INSTALLER", "Gh-Release") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "Gh-Release") };
         assert_eq!(env_installer(), Some("gh-release"));
     }
 
@@ -4312,16 +4316,16 @@ mod tests {
     fn test_env_installer_explicit_unknown_value_returns_none() {
         // CRITICAL: when the explicit env var is set to something we don't
         // recognize, we early-return None. This means we do NOT fall through
-        // to the other env vars or to config. So `GROK_INSTALLER=brew`
+        // to the other env vars or to config. So `CHUTES_BUILD_INSTALLER=brew`
         // disables the env-installer detection entirely.
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "brew") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "brew") };
         // Even if MANAGED_BY_NPM is also set, the explicit var wins (and rejects).
-        unsafe { std::env::set_var("GROK_MANAGED_BY_NPM", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "1") };
         assert_eq!(
             env_installer(),
             None,
-            "explicit GROK_INSTALLER=brew must early-return None, not fall through"
+            "explicit CHUTES_BUILD_INSTALLER=brew must early-return None, not fall through"
         );
     }
 
@@ -4329,7 +4333,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_explicit_empty_returns_none() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_INSTALLER", "") };
+        unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "") };
         assert_eq!(env_installer(), None);
     }
 
@@ -4337,7 +4341,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_managed_by_npm() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_MANAGED_BY_NPM", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "1") };
         assert_eq!(env_installer(), Some("npm"));
     }
 
@@ -4346,7 +4350,7 @@ mod tests {
     fn test_env_installer_managed_by_npm_any_value() {
         // The check is `is_some` — any value (including empty) wins.
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_MANAGED_BY_NPM", "") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "") };
         assert_eq!(env_installer(), Some("npm"));
     }
 
@@ -4354,7 +4358,7 @@ mod tests {
     #[serial_test::serial]
     fn test_env_installer_managed_by_internal() {
         let _g = InstallerEnvGuard::isolate();
-        unsafe { std::env::set_var("GROK_MANAGED_BY_INTERNAL", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_BY_INTERNAL", "1") };
         assert_eq!(env_installer(), Some("internal"));
     }
 
@@ -4381,7 +4385,7 @@ mod tests {
         // resolution path matters for future maintainers.)
         let _g = InstallerEnvGuard::isolate();
         unsafe {
-            std::env::set_var("GROK_MANAGED_BY_NPM", "1");
+            std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "1");
             std::env::set_var("npm_config_user_agent", "npm/10");
         }
         assert_eq!(env_installer(), Some("npm"));
@@ -4390,11 +4394,11 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_env_installer_explicit_internal_wins_over_npm_managed() {
-        // GROK_INSTALLER=internal must override an inherited MANAGED_BY_NPM.
+        // CHUTES_BUILD_INSTALLER=internal must override an inherited MANAGED_BY_NPM.
         let _g = InstallerEnvGuard::isolate();
         unsafe {
-            std::env::set_var("GROK_INSTALLER", "internal");
-            std::env::set_var("GROK_MANAGED_BY_NPM", "1");
+            std::env::set_var("CHUTES_BUILD_INSTALLER", "internal");
+            std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "1");
         }
         assert_eq!(env_installer(), Some("internal"));
     }

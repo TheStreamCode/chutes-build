@@ -1645,7 +1645,7 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
     #[tokio::test]
     async fn skill_file_ignores_offset_and_limit() {
         let tmp = TempDir::new().unwrap();
-        let skill_dir = tmp.path().join(".grok/skills/commit");
+        let skill_dir = tmp.path().join(".chutes-build/skills/commit");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
@@ -1655,7 +1655,7 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
         let tool = ReadFileTool;
         let resources = test_resources(tmp.path());
         let input = ReadFileInput {
-            path: ".grok/skills/commit/SKILL.md".to_string(),
+            path: ".chutes-build/skills/commit/SKILL.md".to_string(),
             offset: Some(3),
             limit: Some(1),
             pages: None,

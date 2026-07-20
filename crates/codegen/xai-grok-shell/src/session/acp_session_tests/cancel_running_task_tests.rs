@@ -255,6 +255,8 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 deferred_prefix: TaskSlot::new(),
                 extension_registry: xai_agent_lifecycle::LocalExtensionRegistry::default(),
                 last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+                wellness_session_started_at: std::time::Instant::now(),
+                wellness_reminder_sent: std::cell::Cell::new(false),
                 last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
                 last_api_request_at: std::sync::atomic::AtomicI64::new(0),
                 hook_registry: std::cell::RefCell::new(None),
@@ -710,6 +712,8 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 deferred_prefix: TaskSlot::new(),
                 extension_registry: xai_agent_lifecycle::LocalExtensionRegistry::default(),
                 last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+                wellness_session_started_at: std::time::Instant::now(),
+                wellness_reminder_sent: std::cell::Cell::new(false),
                 last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
                 last_api_request_at: std::sync::atomic::AtomicI64::new(0),
                 hook_registry: std::cell::RefCell::new(None),
@@ -993,6 +997,8 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 last_announced_local_date: std::cell::Cell::new(
                     chrono::Local::now().date_naive(),
                 ),
+                wellness_session_started_at: std::time::Instant::now(),
+                wellness_reminder_sent: std::cell::Cell::new(false),
                 last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
                 last_api_request_at: std::sync::atomic::AtomicI64::new(0),
                 hook_registry: std::cell::RefCell::new(None),
@@ -1090,7 +1096,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
 /// the running turn and removes ONLY the running prompt (the front of
 /// `pending_inputs`). Every queued prompt is PRESERVED so the `Cancel`
 /// handler's follow-up `maybe_start_running_task` promotes the new front (the
-/// user's next queued prompt) and rebroadcasts `x.ai/queue/changed`. The
+/// user's next queued prompt) and rebroadcasts `chutes.build/queue/changed`. The
 /// cancelling client never pulls a queued prompt back into its input — the
 /// server queue is the single source of truth for what runs next.
 ///
@@ -2037,6 +2043,8 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 last_announced_local_date: std::cell::Cell::new(
                     chrono::Local::now().date_naive(),
                 ),
+                wellness_session_started_at: std::time::Instant::now(),
+                wellness_reminder_sent: std::cell::Cell::new(false),
                 last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
                 last_api_request_at: std::sync::atomic::AtomicI64::new(0),
                 hook_registry: std::cell::RefCell::new(None),

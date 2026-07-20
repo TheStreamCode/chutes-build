@@ -31,9 +31,9 @@ const CREDENTIAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_
 // ---------------------------------------------------------------------------
 // Two-layer dedup: prevents duplicate browser tabs both within one process
 // (multiple async tasks / sessions) and across separate processes (leader
-// mode disabled, multiple `grok` invocations).
+// mode disabled, multiple `chutes-build` invocations).
 //
-// Layer 1 (cross-process): filesystem lock at $GROK_HOME/mcp_auth_{safe_name}.lock
+// Layer 1 (cross-process): filesystem lock at $CHUTES_BUILD_HOME/mcp_auth_{safe_name}.lock
 // Layer 2 (in-process):    watch channel so only one task runs the flow
 // ---------------------------------------------------------------------------
 

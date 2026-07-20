@@ -163,7 +163,7 @@ async fn run_cell_inner(cell: MatrixCell, binary: &Path, log_path: &Path) -> Res
         .to_str()
         .context("setup: artifacts path is not UTF-8")?;
     let mut env: Vec<(&str, &str)> = cell.env.to_vec();
-    env.push(("GROK_SCROLL_LOG", log_value));
+    env.push(("CHUTES_BUILD_SCROLL_LOG", log_value));
 
     // Live bindings on purpose: `content` owns the mock server (and the
     // streaming completion gate) — see the session module's footgun docs.

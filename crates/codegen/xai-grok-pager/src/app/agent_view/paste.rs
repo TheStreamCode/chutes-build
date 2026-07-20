@@ -513,7 +513,7 @@ pub(super) mod paste_key_tests {
         agent.set_active_pane(ActivePane::Prompt, true);
         let registry = ActionRegistry::defaults();
         let outcome = agent.handle_input(
-            &Event::Paste("GROK_WRAP_IMG\nimage/png\n!!!".to_string()),
+            &Event::Paste("CHUTES_BUILD_WRAP_IMG\nimage/png\n!!!".to_string()),
             &registry,
         );
         assert!(matches!(outcome, InputOutcome::Unchanged));
@@ -1924,6 +1924,8 @@ pub(super) mod paste_key_tests {
             top_crop_rows: 0,
             filepath_screen_rect: None,
             open_button_screen_rect: None,
+            audio_waveform_screen_rect: None,
+            text_button_kind: None,
             has_button_row: true,
         };
         let first = agent
@@ -2081,11 +2083,7 @@ pub(super) mod paste_key_tests {
         agent.inline_media_active = true;
         agent.inline_video = Some(crate::app::agent_view::InlineVideoState {
             path: std::path::PathBuf::from("/tmp/clip.mp4"),
-            frames: vec![Vec::new()],
-            current_frame: 0,
-            last_frame_time: std::time::Instant::now(),
-            fps: 1.0,
-            finished: false,
+            viewer: crate::prompt_images::VideoViewerState::test_stub(),
         });
         let before = test_support::calls();
         draw_media_frame(&mut agent);

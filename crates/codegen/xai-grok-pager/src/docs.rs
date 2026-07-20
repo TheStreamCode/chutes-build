@@ -49,112 +49,52 @@ pub static USER_GUIDE: &[Doc] = &[
     guide!(
         "01-getting-started.md",
         "Getting Started",
-        "Installation, first launch, and basic interaction"
+        "Build, first launch, and basic interaction"
     ),
     guide!(
         "02-authentication.md",
         "Authentication",
-        "Browser login, API keys, OIDC, external auth providers"
-    ),
-    guide!(
-        "03-keyboard-shortcuts.md",
-        "Keyboard Shortcuts",
-        "Complete reference for all TUI key bindings"
-    ),
-    guide!(
-        "04-slash-commands.md",
-        "Slash Commands",
-        "All / commands for session management, models, memory, hooks"
+        "Chutes API-key authentication and credential safety"
     ),
     guide!(
         "05-configuration.md",
         "Configuration",
-        "config.toml, pager.toml, environment variables, file locations"
-    ),
-    guide!(
-        "06-theming.md",
-        "Theming and Appearance",
-        "Themes, color support, pager.toml customization"
+        "Configuration, environment variables, and file locations"
     ),
     guide!(
         "07-mcp-servers.md",
         "MCP Servers",
-        "Setting up external tool integrations via MCP"
-    ),
-    guide!(
-        "08-skills.md",
-        "Skills",
-        "Creating and using reusable prompt packages"
-    ),
-    guide!(
-        "09-plugins.md",
-        "Plugins and Marketplace",
-        "Installing, managing, and creating plugin packages"
-    ),
-    guide!(
-        "10-hooks.md",
-        "Hooks",
-        "Project lifecycle scripts for pre/post tool-use events"
-    ),
-    guide!(
-        "11-custom-models.md",
-        "Custom Models",
-        "BYOK, Ollama, OpenAI-compatible endpoints"
-    ),
-    guide!(
-        "12-project-rules.md",
-        "Project Rules (AGENTS.md)",
-        "Per-directory instructions and precedence rules"
+        "External MCP servers and the native Chutes media integration"
     ),
     guide!(
         "13-memory.md",
         "Memory",
-        "Cross-session knowledge persistence and search"
-    ),
-    guide!(
-        "14-headless-mode.md",
-        "Headless Mode and Scripting",
-        "Non-interactive CLI for automation and CI/CD"
-    ),
-    guide!(
-        "15-agent-mode.md",
-        "Agent Mode and IDE Integration",
-        "ACP stdio transport, WebSocket relay, SDK integration"
+        "Local memories.md management and stateless mode"
     ),
     guide!(
         "16-subagents.md",
         "Subagents and Personas",
-        "Spawning parallel child agents with specialized roles"
-    ),
-    guide!(
-        "17-sessions.md",
-        "Session Management",
-        "Save, load, resume, rewind, and compact sessions"
-    ),
-    guide!(
-        "18-sandbox.md",
-        "Sandbox Mode",
-        "OS-level filesystem and network isolation"
-    ),
-    guide!(
-        "19-plan-mode.md",
-        "Plan Mode",
-        "Structured planning with approval dialogs"
+        "Advisor, parallel workers, worktrees, and bounded orchestration"
     ),
     guide!(
         "20-background-tasks.md",
         "Background Tasks and Monitoring",
-        "Background commands, /loop, monitor, scheduler"
-    ),
-    guide!(
-        "21-terminal-support.md",
-        "Terminal Support and Troubleshooting",
-        "tmux, Byobu, Zellij, SSH, truecolor, clipboard, and diagnostics"
+        "Background commands, monitors, and scheduled tasks"
     ),
     guide!(
         "22-permissions-and-safety.md",
         "Permissions and Safety",
-        "Tool approval, sandbox, security"
+        "Tool approval, browser isolation, privacy, and security"
+    ),
+    guide!(
+        "23-chutes-ecosystem.md",
+        "Chutes Models and Ecosystem",
+        "Auto routing, reasoning, fallbacks, media, vision, and Context7"
+    ),
+    guide!(
+        "24-web-and-browser.md",
+        "Web and Browser",
+        "Web search providers and isolated Chrome or Edge automation"
     ),
 ];
 
@@ -162,20 +102,7 @@ pub static USER_GUIDE: &[Doc] = &[
 /// live under `docs/` (not `docs/user-guide/`), are not extracted to disk,
 /// and do not follow the NN-*.md managed naming pattern. Bundled via
 /// `include_str!` so they are available at runtime without a docs path.
-static REFERENCE_DOCS: &[Doc] = &[
-    Doc {
-        filename: "hooks-and-plugins.md",
-        title: "Hooks & Plugins Guide",
-        description: "Using hooks, plugins, and marketplace",
-        content: include_str!("../docs/hooks-and-plugins.md"),
-    },
-    Doc {
-        filename: "custom-hooks.md",
-        title: "Creating Custom Hooks",
-        description: "Writing your own hooks and matchers",
-        content: include_str!("../docs/custom-hooks.md"),
-    },
-];
+static REFERENCE_DOCS: &[Doc] = &[];
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -314,7 +241,7 @@ mod tests {
     #[test]
     fn get_howto_doc_delegates_to_find_doc() {
         assert!(get_howto_doc("Getting Started").is_some());
-        assert!(get_howto_doc("Hooks & Plugins Guide").is_some());
+        assert!(get_howto_doc("Chutes Ecosystem").is_some());
         assert!(get_howto_doc("no such doc").is_none());
     }
 

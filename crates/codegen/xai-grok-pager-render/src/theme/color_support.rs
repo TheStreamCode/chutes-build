@@ -41,7 +41,7 @@ impl ColorLevel {
     }
 
     /// Canonical lowercase spelling that round-trips through the
-    /// `GROK_FORCE_COLOR_LEVEL` parser. Use this in user-facing
+    /// `CHUTES_BUILD_FORCE_COLOR_LEVEL` parser. Use this in user-facing
     /// diagnostics (not `{:?}` Debug, which yields `Basic` / `Ansi256`
     /// / `TrueColor` / `None`).
     pub fn as_str(self) -> &'static str {

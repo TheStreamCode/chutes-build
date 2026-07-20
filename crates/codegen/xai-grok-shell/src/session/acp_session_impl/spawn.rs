@@ -244,7 +244,7 @@ pub(crate) async fn spawn_session_actor(
                 "CLI --allow catch-all ignored: always-approve disabled by managed policy"
             );
             if startup_hints.non_interactive {
-                eprintln!("grok: --allow catch-all ignored: {reason}");
+                eprintln!("chutes-build: --allow catch-all ignored: {reason}");
             }
         }
         if !cli_permission_rules.is_empty() {
@@ -359,22 +359,11 @@ pub(crate) async fn spawn_session_actor(
     let primary_model_id = sampling_config.model.clone();
     let web_search_config = if disable_web_search {
         xai_grok_tools::implementations::WebSearchConfig::Disabled
-    } else if let Some(cfg) = web_search_sampling_config {
-        if let Some(api_key) = cfg.api_key {
-            xai_grok_tools::implementations::WebSearchConfig::Enabled {
-                api_key,
-                base_url: cfg.base_url,
-                model: cfg.model,
-                extra_headers: cfg.extra_headers,
-                alpha_test_key: credentials.alpha_test_key.clone(),
-            }
-        } else {
-            tracing::warn!("web_search disabled: resolved config has no API key");
-            xai_grok_tools::implementations::WebSearchConfig::Disabled
-        }
     } else {
-        tracing::warn!("web_search disabled: configured model could not be resolved");
-        xai_grok_tools::implementations::WebSearchConfig::Disabled
+        // Native search uses its own optional provider credential and must
+        // never forward the Chutes inference key to a search engine.
+        let _ = web_search_sampling_config;
+        xai_grok_tools::implementations::WebSearchConfig::Native
     };
     let embed_base_url = sampling_config.base_url.clone();
     let embed_api_key = sampling_config.api_key.clone();
@@ -385,7 +374,7 @@ pub(crate) async fn spawn_session_actor(
         },
         |mc| mc.pruning.clone(),
     );
-    let context_window_override = std::env::var("GROK_DEBUG_CONTEXT_WINDOW")
+    let context_window_override = std::env::var("CHUTES_BUILD_DEBUG_CONTEXT_WINDOW")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .and_then(std::num::NonZeroU64::new);
@@ -398,7 +387,7 @@ pub(crate) async fn spawn_session_actor(
         tracing::warn!(
             override_context_window = cw.get(),
             original_context_window = baseline_context_window.get(),
-            "GROK_DEBUG_CONTEXT_WINDOW override active"
+            "CHUTES_BUILD_DEBUG_CONTEXT_WINDOW override active"
         );
     }
     let chat_state_sampling_config = xai_grok_sampling_types::SamplingConfig {
@@ -785,7 +774,7 @@ pub(crate) async fn spawn_session_actor(
             state.set_acp_servers(acp_mcp_servers, invoker);
             tracing::info!(
                 session_id = % session_info.id.0, acp_mcp_servers = acp_server_count,
-                "Registered in-process SDK MCP servers (x.ai/mcp/sdk_call)"
+                "Registered in-process SDK MCP servers (chutes.build/mcp/sdk_call)"
             );
         }
         Arc::new(TokioMutex::new(state))
@@ -1271,6 +1260,8 @@ pub(crate) async fn spawn_session_actor(
         deferred_prefix: TaskSlot::new(),
         extension_registry: session_extension_registry(weak.clone()),
         last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+        wellness_session_started_at: std::time::Instant::now(),
+        wellness_reminder_sent: std::cell::Cell::new(false),
         last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
         last_api_request_at: std::sync::atomic::AtomicI64::new(0),
         hook_registry: std::cell::RefCell::new(built_hook_registry),
@@ -1500,7 +1491,7 @@ pub(crate) async fn spawn_session_actor(
                     "ask_user_question reverse-request must carry a non-empty sessionId (design §5.4)"
                 );
                 let ext_request = agent_client_protocol::ExtRequest::new(
-                    "x.ai/ask_user_question",
+                    "chutes.build/ask_user_question",
                     serde_json::value::to_raw_value(&ext_req)
                         .expect("AskUserQuestionExtRequest serialization should not fail")
                         .into(),

@@ -4,25 +4,16 @@ use crate::prompt_images::InlineMediaInfo;
 
 pub const FFMPEG_HINT_TEXT: &str = "Install ffmpeg to view inline";
 
-/// Latches positives; re-probes negatives so mid-session install recovers posters.
+/// Probe FFmpeg at most once per process so scrollback layout never spawns a
+/// PATH lookup on every frame. Restarting the CLI picks up a new installation.
 pub fn ffmpeg_available() -> bool {
     #[cfg(test)]
     if let Some(v) = TEST_FFMPEG_OVERRIDE.with(|c| c.get()) {
         return v;
     }
 
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    static FOUND: AtomicBool = AtomicBool::new(false);
-    if FOUND.load(Ordering::Relaxed) {
-        return true;
-    }
-
-    let available = xai_grok_config::shell::is_command_available("ffmpeg");
-    if available {
-        FOUND.store(true, Ordering::Relaxed);
-    }
-    available
+    static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| xai_grok_config::shell::is_command_available("ffmpeg"))
 }
 
 #[cfg(test)]
@@ -69,25 +60,21 @@ fn ffmpeg_install_candidates() -> &'static [(&'static str, &'static str)] {
     }
 }
 
-/// Latches positives; re-probes negatives so mid-session PM install recovers the cmd line.
+/// Probe package managers at most once per process. This function participates
+/// in rendering and must remain an in-memory lookup after its first call.
 pub fn ffmpeg_install_cmd() -> Option<&'static str> {
     #[cfg(test)]
     if let Some(v) = TEST_FFMPEG_INSTALL_CMD_OVERRIDE.with(|c| c.get()) {
         return v;
     }
 
-    use std::sync::OnceLock;
-    static FOUND: OnceLock<&'static str> = OnceLock::new();
-    if let Some(cmd) = FOUND.get() {
-        return Some(*cmd);
-    }
-    for (manager, cmd) in ffmpeg_install_candidates() {
-        if xai_grok_config::shell::is_command_available(manager) {
-            let _ = FOUND.set(*cmd);
-            return Some(*cmd);
-        }
-    }
-    None
+    static FOUND: std::sync::OnceLock<Option<&'static str>> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        ffmpeg_install_candidates()
+            .iter()
+            .find(|(manager, _)| xai_grok_config::shell::is_command_available(manager))
+            .map(|(_, command)| *command)
+    })
 }
 
 #[cfg(test)]

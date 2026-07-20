@@ -1232,7 +1232,7 @@ fn resume_source_worktree_reuse() {
         child_session_id: "child-wt".into(),
         child_cwd: "/tmp/worktree".into(),
         worktree_path: Some(
-            PathBuf::from("/home/user/.grok/worktrees/myrepo/subagent-sub-wt"),
+            PathBuf::from("/home/user/.chutes-build/worktrees/myrepo/subagent-sub-wt"),
         ),
         snapshot_ref: None,
         subagent_type: "general-purpose".into(),
@@ -1242,7 +1242,7 @@ fn resume_source_worktree_reuse() {
     let worktree = source_with_worktree.worktree_path.clone();
     assert_eq!(
         worktree.as_deref(),
-        Some(Path::new("/home/user/.grok/worktrees/myrepo/subagent-sub-wt",)),
+        Some(Path::new("/home/user/.chutes-build/worktrees/myrepo/subagent-sub-wt",)),
         "should reuse source worktree"
     );
     let source_without_worktree = ResumeSourceData {
@@ -1317,7 +1317,7 @@ fn select_override_cwd_resume_never_falls_through_to_request_cwd() {
         child_session_id: "child-wt".into(),
         child_cwd: "/tmp/whatever".into(),
         worktree_path: Some(
-            PathBuf::from("/home/user/.grok/worktrees/repo/subagent-sub-wt"),
+            PathBuf::from("/home/user/.chutes-build/worktrees/repo/subagent-sub-wt"),
         ),
         snapshot_ref: None,
         subagent_type: "general-purpose".into(),
@@ -1537,7 +1537,7 @@ fn drain_cancelled_finish_broadcasts(
         let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
             continue;
         };
-        assert_eq!(args.request.method.as_ref(), "x.ai/session_notification");
+        assert_eq!(args.request.method.as_ref(), "chutes.build/session_notification");
         let notification: SessionNotification = serde_json::from_str(
                 args.request.params.get(),
             )

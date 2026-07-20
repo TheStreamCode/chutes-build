@@ -592,7 +592,7 @@ pub(super) async fn run_session(
             ::extensions::mcp::McpToolsChanged { session_id : session_id.to_string(),
             server_name : String::new(), tools : Vec::new(), }; if let Ok(params) =
             serde_json::value::to_raw_value(& payload) { notifications
-            .forward_fire_and_forget(acp::ExtNotification::new("x.ai/mcp/tools_changed",
+            .forward_fire_and_forget(acp::ExtNotification::new("chutes.build/mcp/tools_changed",
             params.into())); } let _ = respond_to.send(Ok(())); }); continue; } let
             qualified = format!("{}{}{}", server_name, crate
             ::session::mcp_servers::MCP_TOOL_NAME_DELIMITER, tool_name,); let mut

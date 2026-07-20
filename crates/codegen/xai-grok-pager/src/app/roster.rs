@@ -3,8 +3,8 @@
 //! The leader process hosts session actors and exposes a roster API the
 //! pager consumes in leader mode (FleetView dashboard):
 //!
-//! - Request/response `x.ai/sessions/list` → [`RosterListResponse`].
-//! - Broadcast notification `x.ai/sessions/changed` → [`RosterChanged`].
+//! - Request/response `chutes.build/sessions/list` → [`RosterListResponse`].
+//! - Broadcast notification `chutes.build/sessions/changed` → [`RosterChanged`].
 //!
 //! These structs mirror the producer-side wire format (camelCase JSON,
 //! snake_case activity enum). They are deserialize-only — the pager never
@@ -57,14 +57,14 @@ pub struct RosterEntry {
     pub origin: RosterOrigin,
 }
 
-/// Response to `x.ai/sessions/list`.
+/// Response to `chutes.build/sessions/list`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RosterListResponse {
     #[serde(default)]
     pub sessions: Vec<RosterEntry>,
 }
 
-/// Broadcast payload for `x.ai/sessions/changed`.
+/// Broadcast payload for `chutes.build/sessions/changed`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RosterChanged {
     #[serde(default)]
@@ -73,7 +73,7 @@ pub struct RosterChanged {
     pub removed: Vec<String>,
 }
 
-/// Parse an `x.ai/sessions/list` ext-response body into a [`RosterListResponse`].
+/// Parse an `chutes.build/sessions/list` ext-response body into a [`RosterListResponse`].
 ///
 /// The agent serializes the response through
 /// `ExtMethodResult::success(..).to_ext_response()` (see
@@ -89,8 +89,8 @@ pub struct RosterChanged {
 /// key). That was the original bug: the poll returned an empty roster on every
 /// tick and — because [`crate::app::actions::TaskResult::RosterLoaded`] replaces
 /// `leader_roster` wholesale — also clobbered any entry delivered by the
-/// `x.ai/sessions/changed` broadcast. Mirrors how `Effect::FetchSessionList`
-/// unwraps `result` for `x.ai/session/list`.
+/// `chutes.build/sessions/changed` broadcast. Mirrors how `Effect::FetchSessionList`
+/// unwraps `result` for `chutes.build/session/list`.
 pub fn parse_roster_list_response(body: &str) -> Option<RosterListResponse> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let payload = value.get("result").unwrap_or(&value);
@@ -141,7 +141,7 @@ mod tests {
             sessions: vec![agent_entry()],
         };
 
-        // Exact wire bytes the agent emits for `x.ai/sessions/list`.
+        // Exact wire bytes the agent emits for `chutes.build/sessions/list`.
         let ext_response = ExtMethodResult::success(agent_resp)
             .to_ext_response()
             .expect("agent serializes the roster response");
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(parsed.sessions[0].session_id, "s1");
     }
 
-    /// `x.ai/sessions/changed` round-trip: serialize the agent's `RosterChanged`
+    /// `chutes.build/sessions/changed` round-trip: serialize the agent's `RosterChanged`
     /// exactly as `emit_roster_changed` does (bare params, no `result`
     /// envelope) and confirm the pager's `RosterChanged` recovers `upserted` /
     /// `removed` and the nested entry fields (camelCase). Regression guard for

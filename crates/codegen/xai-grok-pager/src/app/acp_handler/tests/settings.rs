@@ -45,7 +45,7 @@
         // Same update can stamp API Key while remote settings sends voice false.
         let mut app = make_app_with_agent("sess-combined");
         let notif = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             std::sync::Arc::from(
                 serde_json::value::to_raw_value(&serde_json::json!({
                     "voice_mode_enabled": false,
@@ -120,7 +120,7 @@
         let mut app = make_app_with_agent("sess-1");
         app.apply_voice_mode_enabled(true);
         let omit = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             std::sync::Arc::from(
                 serde_json::value::to_raw_value(&serde_json::json!({ "sharing_enabled": true }))
                     .unwrap(),
@@ -350,7 +350,7 @@
         app.current_ui.permission_mode = Some("ask".into());
 
         let killswitch = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(
                 &serde_json::json!({ "auto_permission_mode_enabled": false }),
             )
@@ -386,7 +386,7 @@
         app.agents.get_mut(&AgentId(2)).unwrap().session.yolo_mode = true;
 
         let killswitch = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(
                 &serde_json::json!({ "auto_permission_mode_enabled": false }),
             )
@@ -405,7 +405,7 @@
         let mut leave_auto_notifs = 0;
         while let Ok(msg) = rx.try_recv() {
             if let xai_acp_lib::AcpAgentMessage::ExtNotification(args) = msg {
-                if args.request.method.as_ref() != "x.ai/yolo_mode_changed" {
+                if args.request.method.as_ref() != "chutes.build/yolo_mode_changed" {
                     continue;
                 }
                 let params: serde_json::Value =
@@ -426,7 +426,7 @@
     }
 
     /// The settings path must not touch announcements: the shell already emits
-    /// gen-ordered `x.ai/announcements/update` for every settings writer, and a
+    /// gen-ordered `chutes.build/announcements/update` for every settings writer, and a
     /// gen-less apply here could clobber a newer push.
     #[test]
     fn settings_update_ignores_announcements_payload() {
@@ -435,7 +435,7 @@
         app.announcements_last_gen = 7;
 
         let notif = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(&serde_json::json!({
                 "sharing_enabled": true,
                 "announcements": [critical_announcement("from-settings")],
@@ -464,7 +464,7 @@
         app.default_yolo = false;
 
         let apply_yolo = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(&serde_json::json!({
                 "permission_mode": "always-approve",
             }))
@@ -496,7 +496,7 @@
         app.auto_mode_gate = true;
 
         let unrelated = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(&serde_json::json!({
                 "show_resolved_model": true,
             }))
@@ -534,7 +534,7 @@
         app.current_ui.permission_mode = Some("sentinel-not-a-mode".into());
 
         let push = acp::ExtNotification::new(
-            "x.ai/settings/update",
+            "chutes.build/settings/update",
             serde_json::value::to_raw_value(&serde_json::json!({
                 "permission_mode": "always-approve",
             }))

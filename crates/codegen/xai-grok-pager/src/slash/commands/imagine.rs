@@ -60,8 +60,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_image_gen_tool() {
-        assert_eq!(ImagineCommand.required_tools(), &["image_gen"]);
+    fn requires_chutes_media_tool() {
+        assert_eq!(ImagineCommand.required_tools(), &["generate_media"]);
     }
 
     #[test]
@@ -99,7 +99,7 @@ mod tests {
                     acp::ContentBlock::Text(t) => &t.text,
                     _ => panic!("expected Text block"),
                 };
-                assert!(text.contains("image_gen"));
+                assert!(text.contains("generate_media"));
                 assert!(text.contains("a golden sunset"));
             }
             other => panic!("expected InjectSkill, got {other:?}"),

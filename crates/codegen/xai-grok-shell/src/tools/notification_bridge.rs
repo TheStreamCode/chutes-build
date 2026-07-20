@@ -39,7 +39,7 @@ pub struct NotificationBridgeConfig {
     pub persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
     /// When true, send incremental `output_delta` instead of full `output`
     /// in bash streaming updates. The client must opt in via the
-    /// `x.ai/incrementalBashOutput` capability.
+    /// `chutes.build/incrementalBashOutput` capability.
     pub incremental_bash_output: bool,
     /// Plan mode tracker shared with the session actor.
     /// Used to transition state on `PlanModeEntered` / `PlanModeExited`
@@ -259,7 +259,7 @@ async fn handle_notification(
                 "Bash execution backgrounded notification received — forwarding to TUI"
             );
 
-            // Forward as x.ai/task_backgrounded ExtNotification so the TUI can
+            // Forward as chutes.build/task_backgrounded ExtNotification so the TUI can
             // correlate tool_call_id with task_id and populate the tasks panel.
             let mut notification = crate::extensions::notification::SessionNotification {
                 session_id: config.session_id.clone(),
@@ -290,7 +290,7 @@ async fn handle_notification(
                 .ok();
             if let Some(params) = params {
                 let ext_notification =
-                    acp::ExtNotification::new("x.ai/task_backgrounded", params.into());
+                    acp::ExtNotification::new("chutes.build/task_backgrounded", params.into());
                 config.gateway.forward_fire_and_forget(ext_notification);
             }
         }
@@ -339,7 +339,7 @@ async fn handle_notification(
             // same way bash does. Relying only on the pipeline's terminal
             // `MonitorEvent` + idle-gated `InjectNotification` was easy to miss
             // when the agent was idle and the monitor produced no further
-            // stdout. The pager still receives x.ai/task_completed below for UI.
+            // stdout. The pager still receives chutes.build/task_completed below for UI.
             // Stamped on the completion notification below so the pager knows
             // whether a wake response follows the chip.
             let mut will_wake = false;
@@ -502,7 +502,7 @@ async fn handle_notification(
                 .ok();
             if let Some(params) = params {
                 let notification: acp::ExtNotification =
-                    acp::ExtNotification::new("x.ai/task_completed", params.into());
+                    acp::ExtNotification::new("chutes.build/task_completed", params.into());
                 config.gateway.forward_fire_and_forget(notification);
             }
 
@@ -624,7 +624,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/scheduled_task_inject_prompt",
+                        "chutes.build/scheduled_task_inject_prompt",
                         params.into(),
                     ));
             }
@@ -645,7 +645,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/scheduled_task_fired",
+                        "chutes.build/scheduled_task_fired",
                         params.into(),
                     ));
             }
@@ -694,7 +694,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/monitor_event",
+                        "chutes.build/monitor_event",
                         params.into(),
                     ));
             }
@@ -753,7 +753,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/scheduled_task_deleted",
+                        "chutes.build/scheduled_task_deleted",
                         params.into(),
                     ));
             }
@@ -794,7 +794,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/scheduled_task_created",
+                        "chutes.build/scheduled_task_created",
                         params.into(),
                     ));
             }
@@ -947,7 +947,7 @@ mod tests {
     /// must NOT fire the synthetic auto-wake prompt — an async "task completed"
     /// wake mid-goal derails a weak model. It must also NOT be marked
     /// auto-wake-delivered (so surface 2's `TaskCompletionReminder` is free to
-    /// drain it). The pager's `x.ai/task_completed` notification still fires.
+    /// drain it). The pager's `chutes.build/task_completed` notification still fires.
     #[tokio::test]
     async fn bash_task_completed_suppresses_auto_wake_during_goal_loop() {
         let (config, mut gateway_rx, _persistence_rx, mut cmd_rx) = make_test_config_full();
@@ -992,14 +992,14 @@ mod tests {
         let mut found_ext = false;
         while let Ok(msg) = gateway_rx.try_recv() {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                && args.request.method.as_ref() == "x.ai/task_completed"
+                && args.request.method.as_ref() == "chutes.build/task_completed"
             {
                 found_ext = true;
             }
         }
         assert!(
             found_ext,
-            "x.ai/task_completed ExtNotification must still be sent for UI"
+            "chutes.build/task_completed ExtNotification must still be sent for UI"
         );
     }
 
@@ -1045,13 +1045,13 @@ mod tests {
         );
     }
 
-    /// `will_wake` off the emitted `x.ai/task_completed` params.
+    /// `will_wake` off the emitted `chutes.build/task_completed` params.
     fn task_completed_will_wake(
         gateway_rx: &mut mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
     ) -> Option<bool> {
         while let Ok(msg) = gateway_rx.try_recv() {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                && args.request.method.as_ref() == "x.ai/task_completed"
+                && args.request.method.as_ref() == "chutes.build/task_completed"
             {
                 let v: serde_json::Value = serde_json::from_str(args.request.params.get()).ok()?;
                 return v["update"]["will_wake"].as_bool();
@@ -1612,7 +1612,7 @@ mod tests {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg {
                 assert_ne!(
                     args.request.method.as_ref(),
-                    "x.ai/monitor_event",
+                    "chutes.build/monitor_event",
                     "cross-session monitor event must not be forwarded to the pager"
                 );
             }
@@ -1690,18 +1690,18 @@ mod tests {
             "block_waited completion should not send Prompt or InjectNotification"
         );
 
-        // The x.ai/task_completed ExtNotification for UI updates must still be sent.
+        // The chutes.build/task_completed ExtNotification for UI updates must still be sent.
         let mut found_ext = false;
         while let Ok(msg) = gateway_rx.try_recv() {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                && args.request.method.as_ref() == "x.ai/task_completed"
+                && args.request.method.as_ref() == "chutes.build/task_completed"
             {
                 found_ext = true;
             }
         }
         assert!(
             found_ext,
-            "x.ai/task_completed ExtNotification must still be sent for UI"
+            "chutes.build/task_completed ExtNotification must still be sent for UI"
         );
     }
 
@@ -1731,18 +1731,18 @@ mod tests {
             "explicitly_killed completion should not send Prompt or InjectNotification"
         );
 
-        // The x.ai/task_completed ExtNotification for UI updates must still be sent.
+        // The chutes.build/task_completed ExtNotification for UI updates must still be sent.
         let mut found_ext = false;
         while let Ok(msg) = gateway_rx.try_recv() {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                && args.request.method.as_ref() == "x.ai/task_completed"
+                && args.request.method.as_ref() == "chutes.build/task_completed"
             {
                 found_ext = true;
             }
         }
         assert!(
             found_ext,
-            "x.ai/task_completed ExtNotification must still be sent for UI"
+            "chutes.build/task_completed ExtNotification must still be sent for UI"
         );
     }
 

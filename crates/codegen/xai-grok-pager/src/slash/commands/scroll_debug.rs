@@ -3,7 +3,7 @@
 //!
 //! Hidden diagnostic (the `/gboom` pattern): typeable but never listed in
 //! the dropdown, and any argument passes through like an unknown command.
-//! Pairs with `GROK_SCROLL_DEBUG=1`, which enables the HUD from startup;
+//! Pairs with `CHUTES_BUILD_SCROLL_DEBUG=1`, which enables the HUD from startup;
 //! this command flips it live mid-session.
 
 use crate::app::actions::Action;

@@ -137,7 +137,7 @@ pub struct CompactionConfig {
     /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic
     /// failure; the gates early-return unless `SUPPRESS_NONE`. Manual `/compact` ignores it.
     pub auto_compact_suppressed: AtomicU8,
-    /// Locks the context window when `GROK_DEBUG_CONTEXT_WINDOW` is set.
+    /// Locks the context window when `CHUTES_BUILD_DEBUG_CONTEXT_WINDOW` is set.
     pub context_window_override: Option<std::num::NonZeroU64>,
     pub count: AtomicU64,
     /// Set at turn end; consumed at next turn start for model-switch compaction.

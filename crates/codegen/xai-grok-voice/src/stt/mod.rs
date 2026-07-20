@@ -1,4 +1,4 @@
-//! xAI Speech-to-Text: streaming `wss://api.x.ai/v1/stt`.
+//! Optional Speech-to-Text transport for explicitly configured compatible endpoints.
 
 mod streaming;
 mod types;

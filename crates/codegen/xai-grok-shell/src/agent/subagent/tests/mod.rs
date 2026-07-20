@@ -2496,22 +2496,22 @@ fn validate_subagent_type_recognizes_cli_agent_by_name() {
 #[test]
 #[serial_test::serial]
 fn subagent_await_budget_default_and_override() {
-    unsafe { std::env::remove_var("GROK_SUBAGENT_AWAIT_BUDGET_MS") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS") };
     assert_eq!(SUBAGENT_AWAIT_BUDGET, std::time::Duration::from_secs(600));
     assert_eq!(subagent_await_budget(), SUBAGENT_AWAIT_BUDGET);
-    unsafe { std::env::set_var("GROK_SUBAGENT_AWAIT_BUDGET_MS", "1500") };
+    unsafe { std::env::set_var("CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS", "1500") };
     assert_eq!(subagent_await_budget(), std::time::Duration::from_millis(1500));
-    unsafe { std::env::set_var("GROK_SUBAGENT_AWAIT_BUDGET_MS", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS", "0") };
     assert_eq!(subagent_await_budget(), SUBAGENT_AWAIT_BUDGET);
-    unsafe { std::env::set_var("GROK_SUBAGENT_AWAIT_BUDGET_MS", "not-a-number") };
+    unsafe { std::env::set_var("CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS", "not-a-number") };
     assert_eq!(subagent_await_budget(), SUBAGENT_AWAIT_BUDGET);
-    unsafe { std::env::remove_var("GROK_SUBAGENT_AWAIT_BUDGET_MS") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS") };
 }
 #[test]
 fn summarize_tool_config_uses_name_override_and_strips_namespace() {
     use xai_grok_tools::registry::types::{ToolConfig, ToolServerConfig};
     use xai_grok_tools::types::tool::ToolKind;
-    let mut read = ToolConfig::from_id("GrokBuild:read_file");
+    let mut read = ToolConfig::from_id("ChutesBuild:read_file");
     read.kind = Some(ToolKind::Read);
     let mut read_dup = ToolConfig::from_id("Codex:read_file");
     read_dup.kind = Some(ToolKind::Read);
@@ -2848,7 +2848,7 @@ async fn background_unknown_type_emits_subagent_finished_notification() {
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg {
             let req: &acp::ExtNotification = &args.request;
-            assert_eq!(req.method.as_ref(), "x.ai/session_notification");
+            assert_eq!(req.method.as_ref(), "chutes.build/session_notification");
             let body = req.params.get();
             assert!(body.contains("subagent_finished"));
             assert!(body.contains(& subagent_id));
@@ -3265,10 +3265,10 @@ fn byok_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
 }
 #[test]
 fn subagent_auth_type_rule() {
-    use crate::agent::auth_method::{CACHED_TOKEN_AUTH_METHOD_ID, XAI_API_KEY_METHOD_ID};
+    use crate::agent::auth_method::{CACHED_TOKEN_AUTH_METHOD_ID, CHUTES_API_KEY_METHOD_ID};
     use xai_chat_state::AuthType;
     let session = acp::AuthMethodId::new(CACHED_TOKEN_AUTH_METHOD_ID);
-    let api_key = acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID);
+    let api_key = acp::AuthMethodId::new(CHUTES_API_KEY_METHOD_ID);
     let byok = byok_model_entry("grok-byok");
     let plain = test_model_entry("grok-plain");
     assert_eq!(super::subagent_auth_type(Some(& byok), & session), AuthType::ApiKey);
@@ -3361,7 +3361,7 @@ fn fresh_tool_model_rejects_unknown_and_nonavailable_entries() {
             format!("Unknown Task.model slug '{requested}'. Valid model slugs: alpha, zeta. \
                      Omit `model` to inherit the parent model.")
         );
-        assert!(! error.contains("grok models"));
+        assert!(! error.contains("chutes-build models"));
     }
     assert!(
         super::handle_request::task_model_override_error(Some("oauth-only"),

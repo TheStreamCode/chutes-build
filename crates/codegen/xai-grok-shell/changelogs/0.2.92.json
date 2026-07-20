@@ -26,7 +26,7 @@
   },
   {
     "category": "fixes",
-    "description": "**grok update** on Windows no longer fails when a previous .old executable is still running.",
+    "description": "**chutes-build update** on Windows no longer fails when a previous .old executable is still running.",
     "breaking_change": false
   },
   {

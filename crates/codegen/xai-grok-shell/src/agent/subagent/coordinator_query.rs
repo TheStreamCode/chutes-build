@@ -349,7 +349,7 @@ impl SubagentCoordinator {
     /// asynchronously after dropping the coordinator borrow.
     ///
     /// Returns an empty `Vec` if no active subagents match the given
-    /// parent session ID. Callers (e.g. the `x.ai/subagent/list_running`
+    /// parent session ID. Callers (e.g. the `chutes.build/subagent/list_running`
     /// ACP handler) should treat an empty result as a normal "no running
     /// subagents" response, not an error.
     pub(crate) fn list_running_for_parent(

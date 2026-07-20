@@ -1027,7 +1027,7 @@ pub fn parse_trace_file(path: &Path) -> Result<Vec<TurnRecord>> {
         .with_context(|| format!("parse trace {} as Vec<TurnRecord>", path.display()))
 }
 
-/// Resolve the API key from `--api-key` → `$XAI_API_KEY` →
+/// Resolve the API key from `--api-key` → `$CHUTES_API_KEY` →
 /// non-interactive `auth.json` (with silent OIDC refresh) → error.
 /// Empty or whitespace-only values at every layer fall through.
 ///
@@ -1036,7 +1036,7 @@ pub fn parse_trace_file(path: &Path) -> Result<Vec<TurnRecord>> {
 /// cached non-expired credentials return immediately; an expired
 /// OIDC token with a `refresh_token` is silently refreshed and the
 /// refreshed credential is re-persisted to disk; the external auth
-/// provider command (if `GROK_AUTH_PROVIDER_COMMAND` is set) is
+/// provider command (if `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` is set) is
 /// tried last. The replay never prompts interactively — an auth.json
 /// with a stale OIDC entry and no `refresh_token` surfaces an error
 /// the user can act on.
@@ -1044,7 +1044,7 @@ pub async fn resolve_api_key(explicit: Option<&str>, grok_home: &Path) -> Result
     if let Some(k) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(k.to_owned());
     }
-    let env_key = std::env::var("XAI_API_KEY").ok();
+    let env_key = std::env::var("CHUTES_API_KEY").ok();
     if let Some(k) = env_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         return Ok(k.to_owned());
     }
@@ -1052,7 +1052,7 @@ pub async fn resolve_api_key(explicit: Option<&str>, grok_home: &Path) -> Result
         return Ok(key);
     }
     Err(anyhow!(
-        "no API key: pass --api-key, set XAI_API_KEY, or run `grok login` to populate \
+        "no API key: pass --api-key, set CHUTES_API_KEY, or run `chutes-build login` to populate \
          <grok-home>/auth.json. An expired OIDC token is auto-refreshed when a refresh_token \
          is present; if not, re-login is required."
     ))
@@ -1096,8 +1096,8 @@ async fn non_interactive_auth_key(grok_home: &Path) -> Result<Option<String>> {
         }
         Err(AuthError::NotLoggedIn) => Ok(None),
         Err(e) => Err(anyhow!(
-            "auth.json refresh failed: {e}. Run `grok login` to re-authenticate, \
-             or pass --api-key / set $XAI_API_KEY to bypass auth.json."
+            "auth.json refresh failed: {e}. Run `chutes-build login` to re-authenticate, \
+             or pass --api-key / set $CHUTES_API_KEY to bypass auth.json."
         )),
     }
 }
@@ -2142,7 +2142,7 @@ mod tests {
     }
 
     /// Write an `auth.json` whose only entry is at the production
-    /// OIDC scope (the same scope `grok login` writes today and
+    /// OIDC scope (the same scope `chutes-build login` writes today and
     /// `AuthManager` reads). `auth_mode: api_key` skips the refresh
     /// path entirely — useful for "plain key, no refresh wanted"
     /// fixtures.
@@ -2249,7 +2249,7 @@ mod tests {
             "from-flag",
         );
 
-        unsafe { std::env::set_var("XAI_API_KEY", "from-env") };
+        unsafe { std::env::set_var("CHUTES_API_KEY", "from-env") };
         assert_eq!(
             resolve_api_key(None, grok_home).await.expect("ok"),
             "from-env"
@@ -2272,7 +2272,7 @@ mod tests {
             "whitespace-only flag falls through to env",
         );
 
-        unsafe { std::env::set_var("XAI_API_KEY", "   ") };
+        unsafe { std::env::set_var("CHUTES_API_KEY", "   ") };
         assert!(
             resolve_api_key(None, grok_home).await.is_err(),
             "whitespace-only env is treated as absent",
@@ -2325,9 +2325,9 @@ mod tests {
         let grok_home = tmp.path();
         write_auth_json(grok_home, "from-auth-json");
         let key = with_env_isolated(async {
-            unsafe { std::env::set_var("XAI_API_KEY", "from-env") };
+            unsafe { std::env::set_var("CHUTES_API_KEY", "from-env") };
             let resolved = resolve_api_key(None, grok_home).await.expect("ok");
-            unsafe { std::env::remove_var("XAI_API_KEY") };
+            unsafe { std::env::remove_var("CHUTES_API_KEY") };
             resolved
         })
         .await;
@@ -2352,8 +2352,8 @@ mod tests {
         .await;
         assert!(
             msg.contains("--api-key")
-                && msg.contains("XAI_API_KEY")
-                && msg.contains("grok login")
+                && msg.contains("CHUTES_API_KEY")
+                && msg.contains("chutes-build login")
                 && msg.contains("auth.json"),
             "error names all three sources: {msg}",
         );
@@ -2443,20 +2443,20 @@ mod tests {
     /// Env vars cleared by [`with_env_isolated`] / inline test
     /// teardown. Each can short-circuit our `AuthManager` setup
     /// against the test's tempdir if left in place:
-    /// * `XAI_API_KEY` — would return early from `resolve_api_key`.
-    /// * `GROK_AUTH` — inline-JSON credentials override that bypasses
+    /// * `CHUTES_API_KEY` — would return early from `resolve_api_key`.
+    /// * `CHUTES_BUILD_AUTH` — inline-JSON credentials override that bypasses
     ///   the on-disk read entirely (`AuthManager::new`).
-    /// * `GROK_AUTH_PATH` — overrides the auth.json path; if set to
-    ///   the operator's real `~/.grok/auth.json`, the test would read
+    /// * `CHUTES_BUILD_AUTH_PATH` — overrides the auth.json path; if set to
+    ///   the operator's real `~/.chutes-build/auth.json`, the test would read
     ///   live OIDC credentials instead of the scratch fixture.
-    /// * `GROK_AUTH_PROVIDER_COMMAND` — selects an external
+    /// * `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` — selects an external
     ///   refresher that could mint credentials independent of the
     ///   fixture.
     const ISOLATED_ENV_KEYS: &[&str] = &[
-        "XAI_API_KEY",
-        "GROK_AUTH",
-        "GROK_AUTH_PATH",
-        "GROK_AUTH_PROVIDER_COMMAND",
+        "CHUTES_API_KEY",
+        "CHUTES_BUILD_AUTH",
+        "CHUTES_BUILD_AUTH_PATH",
+        "CHUTES_BUILD_AUTH_PROVIDER_COMMAND",
     ];
 
     /// Async helper: clear every env var in [`ISOLATED_ENV_KEYS`]
@@ -2688,8 +2688,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn run_rejects_missing_trace_path() {
-        let prev = std::env::var("XAI_API_KEY").ok();
-        unsafe { std::env::remove_var("XAI_API_KEY") };
+        let prev = std::env::var("CHUTES_API_KEY").ok();
+        unsafe { std::env::remove_var("CHUTES_API_KEY") };
         let tmp = tempfile::tempdir().expect("tempdir");
         let args = RunArgs {
             trace: PathBuf::from("/definitely/does/not/exist.json"),
@@ -2712,8 +2712,8 @@ mod tests {
             "msg: {msg}"
         );
         match prev {
-            Some(v) => unsafe { std::env::set_var("XAI_API_KEY", v) },
-            None => unsafe { std::env::remove_var("XAI_API_KEY") },
+            Some(v) => unsafe { std::env::set_var("CHUTES_API_KEY", v) },
+            None => unsafe { std::env::remove_var("CHUTES_API_KEY") },
         }
     }
 
@@ -3025,8 +3025,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn run_rejects_missing_output_parent() {
-        let prev = std::env::var("XAI_API_KEY").ok();
-        unsafe { std::env::remove_var("XAI_API_KEY") };
+        let prev = std::env::var("CHUTES_API_KEY").ok();
+        unsafe { std::env::remove_var("CHUTES_API_KEY") };
         let tmp = tempfile::tempdir().expect("tempdir");
         let trace_path = tmp.path().join("trace.json");
         std::fs::write(&trace_path, "[]").expect("write");
@@ -3047,8 +3047,8 @@ mod tests {
             "msg: {msg}"
         );
         match prev {
-            Some(v) => unsafe { std::env::set_var("XAI_API_KEY", v) },
-            None => unsafe { std::env::remove_var("XAI_API_KEY") },
+            Some(v) => unsafe { std::env::set_var("CHUTES_API_KEY", v) },
+            None => unsafe { std::env::remove_var("CHUTES_API_KEY") },
         }
     }
 }

@@ -299,9 +299,9 @@ pub fn resolve_normalized_remote_urls(cwd: &Path) -> Vec<String> {
     };
     let mut urls = Vec::new();
     if let Ok(names) = repo.remotes() {
-        for name in names.iter().flatten() {
+        for name in names.iter().filter_map(|name| name.ok().flatten()) {
             if let Ok(remote) = repo.find_remote(name)
-                && let Some(raw) = remote.url()
+                && let Ok(raw) = remote.url()
                 && let Some(n) = normalize_repo_url(raw)
             {
                 urls.push(n);
@@ -343,9 +343,9 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
     };
     let mut remotes = BTreeSet::new();
     if let Ok(remote_names) = repo.remotes() {
-        for name in remote_names.iter().flatten() {
+        for name in remote_names.iter().filter_map(|name| name.ok().flatten()) {
             if let Ok(remote) = repo.find_remote(name)
-                && let Some(url) = remote.url()
+                && let Ok(url) = remote.url()
             {
                 remotes.insert(strip_url_credentials(url));
             }
@@ -358,6 +358,7 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
         .map(|c| c.id().to_string());
     let head_branch = head_ref.as_ref().and_then(|h| {
         h.shorthand()
+            .ok()
             .filter(|s| *s != "HEAD")
             .map(|s| s.to_string())
     });
@@ -540,7 +541,7 @@ async fn get_remote_url(cwd: &Path) -> Option<String> {
 fn compute_ahead_behind(repo: &Repository) -> Option<(usize, usize)> {
     let head = repo.head().ok()?;
     let local_oid = head.target()?;
-    let branch_name = head.shorthand()?;
+    let branch_name = head.shorthand().ok()?;
     let local_branch = repo
         .find_branch(branch_name, git2::BranchType::Local)
         .ok()?;
@@ -777,7 +778,7 @@ fn collect_diff_stats(
     }
     DiffStatsResult { stats, paths }
 }
-/// Payload for the `x.ai/git_head_changed` ACP extension notification.
+/// Payload for the `chutes.build/git_head_changed` ACP extension notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitHeadChanged {
@@ -799,12 +800,12 @@ pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
         let current_branch = repo
             .head()
             .ok()
-            .and_then(|h| h.shorthand().map(String::from));
+            .and_then(|h| h.shorthand().ok().map(String::from));
         let mut remotes_set = BTreeSet::new();
         if let Ok(remote_names) = repo.remotes() {
-            for name in remote_names.iter().flatten() {
+            for name in remote_names.iter().filter_map(|name| name.ok().flatten()) {
                 if let Ok(remote) = repo.find_remote(name)
-                    && let Some(url) = remote.url()
+                    && let Ok(url) = remote.url()
                 {
                     remotes_set.insert(url.to_string());
                 }
@@ -844,12 +845,14 @@ fn detect_remote_default_branch(repo: &Repository) -> Option<String> {
     let reference = repo.find_reference("refs/remotes/origin/HEAD").ok()?;
     let prefix = "refs/remotes/origin/";
     if let Ok(resolved) = reference.resolve()
-        && let Some(branch) = resolved.name().and_then(|n| n.strip_prefix(prefix))
+        && let Some(branch) = resolved.name().ok().and_then(|n| n.strip_prefix(prefix))
     {
         return Some(branch.to_string());
     }
     reference
         .symbolic_target()
+        .ok()
+        .flatten()
         .and_then(|t| t.strip_prefix(prefix))
         .map(|b| b.to_string())
 }
@@ -864,14 +867,16 @@ pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
         let current_branch = repo
             .head()
             .ok()
-            .and_then(|h| h.shorthand().map(String::from));
+            .and_then(|h| h.shorthand().ok().map(String::from));
         let mut branches = Vec::new();
         for result in repo.branches(None)? {
             let (branch, branch_type) = result?;
             let Some(name) = branch.name()?.map(String::from) else {
                 continue;
             };
-            if branch.get().symbolic_target().is_some() && branch_type == git2::BranchType::Remote {
+            if branch.get().symbolic_target().ok().flatten().is_some()
+                && branch_type == git2::BranchType::Remote
+            {
                 continue;
             }
             let is_remote = branch_type == git2::BranchType::Remote;
@@ -1903,7 +1908,7 @@ pub async fn checkout_session_commit(
 /// The restore-code path runs `git fetch origin` + `git checkout <sha>`,
 /// which *detaches HEAD*. That is only acceptable in two situations:
 ///
-/// 1. `supplied_cwd` is a grok-managed worktree (`~/.grok/worktrees/...`).
+/// 1. `supplied_cwd` is a grok-managed worktree (`~/.chutes-build/worktrees/...`).
 ///    These are disposable snapshots that exist precisely to carry a
 ///    detached session HEAD.
 /// 2. `supplied_cwd` is exactly the cwd the session was persisted with
@@ -1920,7 +1925,7 @@ pub fn restore_code_checkout_allowed(supplied_cwd: &Path, persisted_cwd: Option<
 }
 /// Pure core of [`restore_code_checkout_allowed`] with the worktrees root
 /// injected so the decision can be unit-tested without touching
-/// `~/.grok`.
+/// `~/.chutes-build`.
 fn restore_code_checkout_allowed_in(
     supplied_cwd: &Path,
     persisted_cwd: Option<&str>,
@@ -1934,7 +1939,7 @@ fn restore_code_checkout_allowed_in(
         .unwrap_or(false)
 }
 /// Env var backing the `workspace_rewind_git` flag. See [`git_rewind_enabled`].
-const REWIND_GIT_ENV: &str = "GROK_WORKSPACE_REWIND_GIT";
+const REWIND_GIT_ENV: &str = "CHUTES_BUILD_WORKSPACE_REWIND_GIT";
 /// Whether the git rewind domain (capture + soft restore) is enabled. Default
 /// OFF: git is the only domain that moves `HEAD`, so it is gated behind
 /// `workspace_rewind_git`.
@@ -2683,25 +2688,32 @@ mod tests {
     }
     #[test]
     fn test_effective_worktree_cwd_empty_offset() {
-        let result =
-            effective_worktree_cwd("/home/user/.grok/worktrees/repo/ab-123-a", Path::new(""));
-        assert_eq!(result, "/home/user/.grok/worktrees/repo/ab-123-a");
+        let result = effective_worktree_cwd(
+            "/home/user/.chutes-build/worktrees/repo/ab-123-a",
+            Path::new(""),
+        );
+        assert_eq!(result, "/home/user/.chutes-build/worktrees/repo/ab-123-a");
     }
     #[test]
     fn test_effective_worktree_cwd_single_level_offset() {
-        let result =
-            effective_worktree_cwd("/home/user/.grok/worktrees/repo/ab-123-a", Path::new("src"));
-        assert_eq!(result, "/home/user/.grok/worktrees/repo/ab-123-a/src");
+        let result = effective_worktree_cwd(
+            "/home/user/.chutes-build/worktrees/repo/ab-123-a",
+            Path::new("src"),
+        );
+        assert_eq!(
+            result,
+            "/home/user/.chutes-build/worktrees/repo/ab-123-a/src"
+        );
     }
     #[test]
     fn test_effective_worktree_cwd_nested_offset() {
         let result = effective_worktree_cwd(
-            "/home/user/.grok/worktrees/repo/ab-123-b",
+            "/home/user/.chutes-build/worktrees/repo/ab-123-b",
             Path::new("packages/frontend/src"),
         );
         assert_eq!(
             result,
-            "/home/user/.grok/worktrees/repo/ab-123-b/packages/frontend/src"
+            "/home/user/.chutes-build/worktrees/repo/ab-123-b/packages/frontend/src"
         );
     }
     #[test]
@@ -2772,7 +2784,7 @@ mod tests {
         let sub = repo_root.join("src").join("lib");
         std::fs::create_dir_all(&sub).unwrap();
         let (offset, _git_root) = compute_subdir_offset(&sub.to_string_lossy());
-        let worktree_root = "/home/user/.grok/worktrees/myrepo/ab-test-a";
+        let worktree_root = "/home/user/.chutes-build/worktrees/myrepo/ab-test-a";
         let effective = effective_worktree_cwd(worktree_root, &offset);
         assert_eq!(effective, format!("{}/src/lib", worktree_root));
     }
@@ -3588,16 +3600,16 @@ mod restore_code_tests {
     }
     #[test]
     fn restore_code_checkout_allowed_worktree_cwd_is_allowed() {
-        let worktrees = Path::new("/home/u/.grok/worktrees");
+        let worktrees = Path::new("/home/u/.chutes-build/worktrees");
         assert!(restore_code_checkout_allowed_in(
-            Path::new("/home/u/.grok/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
+            Path::new("/home/u/.chutes-build/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
             Some("/home/u/repo"),
             worktrees,
         ));
     }
     #[test]
     fn restore_code_checkout_allowed_same_cwd_is_allowed() {
-        let worktrees = Path::new("/home/u/.grok/worktrees");
+        let worktrees = Path::new("/home/u/.chutes-build/worktrees");
         assert!(restore_code_checkout_allowed_in(
             Path::new("/home/u/repo"),
             Some("/home/u/repo"),
@@ -3611,16 +3623,16 @@ mod restore_code_tests {
     }
     #[test]
     fn restore_code_checkout_allowed_source_repo_with_worktree_session_is_refused() {
-        let worktrees = Path::new("/home/u/.grok/worktrees");
+        let worktrees = Path::new("/home/u/.chutes-build/worktrees");
         assert!(!restore_code_checkout_allowed_in(
             Path::new("/home/u/repo"),
-            Some("/home/u/.grok/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
+            Some("/home/u/.chutes-build/worktrees/home-u-repo/2026-05-22-9f2e51ce"),
             worktrees,
         ));
     }
     #[test]
     fn restore_code_checkout_allowed_missing_persisted_cwd_is_refused() {
-        let worktrees = Path::new("/home/u/.grok/worktrees");
+        let worktrees = Path::new("/home/u/.chutes-build/worktrees");
         assert!(!restore_code_checkout_allowed_in(
             Path::new("/home/u/repo"),
             None,

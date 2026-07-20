@@ -32,16 +32,16 @@ pub fn merge_announcements(sources: &[&[RemoteAnnouncement]]) -> Vec<RemoteAnnou
     out
 }
 
-/// Dev/test override for announcements via `GROK_ANNOUNCEMENTS_OVERRIDE` (a JSON
+/// Dev/test override for announcements via `CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE` (a JSON
 /// array of announcements). Returns `Some` only when the env var holds valid
 /// JSON; an empty array (`[]`) suppresses all announcements. Every announcement
 /// resolution path honors this so it works for testing regardless of source.
 pub fn announcements_override() -> Option<Vec<RemoteAnnouncement>> {
-    let raw = std::env::var("GROK_ANNOUNCEMENTS_OVERRIDE").ok()?;
+    let raw = std::env::var("CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE").ok()?;
     match serde_json::from_str::<Vec<RemoteAnnouncement>>(&raw) {
         Ok(list) => Some(list),
         Err(_) => {
-            tracing::warn!("invalid GROK_ANNOUNCEMENTS_OVERRIDE JSON; ignoring");
+            tracing::warn!("invalid CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE JSON; ignoring");
             None
         }
     }
@@ -50,7 +50,7 @@ pub fn announcements_override() -> Option<Vec<RemoteAnnouncement>> {
 /// Resolve announcements from pre-loaded config layers.
 ///
 /// Priority: requirements > remote > user config > managed config.
-/// `GROK_ANNOUNCEMENTS_OVERRIDE` env var overrides everything (dev-only escape hatch).
+/// `CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE` env var overrides everything (dev-only escape hatch).
 pub fn resolve_announcements(
     requirements: Option<&TomlValue>,
     user: Option<&TomlValue>,

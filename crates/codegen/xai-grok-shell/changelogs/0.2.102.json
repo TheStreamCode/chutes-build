@@ -16,7 +16,7 @@
   },
   {
     "category": "features",
-    "description": "**grok login** now requests Grok Projects scopes so workspace listing works after consent.",
+    "description": "**chutes-build login** now requests Grok Projects scopes so workspace listing works after consent.",
     "breaking_change": false
   },
   {
@@ -46,7 +46,7 @@
   },
   {
     "category": "features",
-    "description": "**`grok plugin install`** now accepts a marketplace's registered name as a qualifier.",
+    "description": "**`chutes-build plugin install`** now accepts a marketplace's registered name as a qualifier.",
     "breaking_change": false
   },
   {

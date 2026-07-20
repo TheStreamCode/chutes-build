@@ -29,7 +29,7 @@ fn namespaced_name_derives_to_namespaced_tool_id() {
     let derived = entry("read_file", Some("GrokBuild"))
         .derive_tool_id()
         .unwrap();
-    assert_eq!(derived, ToolId::new("GrokBuild:read_file").unwrap());
+    assert_eq!(derived, ToolId::new("ChutesBuild:read_file").unwrap());
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn duplicate_derivations_in_a_batch_are_detectable() {
     }
     assert_eq!(duplicates.len(), 1, "exactly one duplicate id expected");
     let (id, indices) = &duplicates[0];
-    assert_eq!(id, &ToolId::new("GrokBuild:read_file").unwrap());
+    assert_eq!(id, &ToolId::new("ChutesBuild:read_file").unwrap());
     assert_eq!(indices, &vec![0, 2]);
 }
 

@@ -1,10 +1,10 @@
-//! Installed grok CLI version, lockstepped with shipping binaries.
+//! Installed Chutes Build CLI version, lockstepped with shipping binaries.
 
 use semver::Version;
 
-pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
+pub const TEST_VERSION_ENV: &str = "CHUTES_BUILD_TEST_VERSION";
 
-pub const VERSION: &str = match option_env!("GROK_VERSION") {
+pub const VERSION: &str = match option_env!("CHUTES_BUILD_VERSION") {
     Some(v) => v,
     None => env!("CARGO_PKG_VERSION"),
 };

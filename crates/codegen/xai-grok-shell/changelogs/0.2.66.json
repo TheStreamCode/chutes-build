@@ -41,7 +41,7 @@
   },
   {
     "category": "fixes",
-    "description": "**OIDC sessions** with XAI_API_KEY present no longer lose refresh on idle.",
+    "description": "**OIDC sessions** with CHUTES_API_KEY present no longer lose refresh on idle.",
     "breaking_change": false
   },
   {

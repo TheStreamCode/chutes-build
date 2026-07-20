@@ -2,13 +2,13 @@
 //!
 //! Measures what a live `FsEventSource` costs the OS: watch count (crate
 //! accounting + `/proc/self/fdinfo` inotify ground truth on Linux) and
-//! startup latency, under either strategy (`GROK_FSNOTIFY_PER_DIR=0|1`).
+//! startup latency, under either strategy (`CHUTES_BUILD_FSNOTIFY_PER_DIR=0|1`).
 //!
 //! ```bash
 //! # Generate a synthetic tree, then measure both strategies against it:
 //! cargo run --release -p xai-fsnotify --example watch_stats -- gen js /tmp/js-repo
-//! GROK_FSNOTIFY_PER_DIR=0 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
-//! GROK_FSNOTIFY_PER_DIR=1 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
+//! CHUTES_BUILD_FSNOTIFY_PER_DIR=0 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
+//! CHUTES_BUILD_FSNOTIFY_PER_DIR=1 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
 //! ```
 //!
 //! Tree shapes are scaled replicas of synthetic large-repo measurements:
@@ -152,7 +152,7 @@ fn main() {
                 .unwrap();
             let _guard = rt.enter();
 
-            let strategy = std::env::var("GROK_FSNOTIFY_PER_DIR").unwrap_or_default();
+            let strategy = std::env::var("CHUTES_BUILD_FSNOTIFY_PER_DIR").unwrap_or_default();
             let mut ready_ms = Vec::new();
             let mut armed_ms = Vec::new();
             let mut counts = (0usize, 0usize);

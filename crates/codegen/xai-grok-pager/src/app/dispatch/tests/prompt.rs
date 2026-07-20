@@ -1042,7 +1042,7 @@ fn prompt_response_resets_turn_state() {
     assert_eq!(app.agents[&id].scrollback.len(), 1);
 }
 
-/// Turn end with prompt suggestions enabled fires the `x.ai/suggestPrompt`
+/// Turn end with prompt suggestions enabled fires the `chutes.build/suggestPrompt`
 /// fetch (before the billing refresh), and the loaded suggestion routes back
 /// into the agent's controller by id + generation.
 #[test]
@@ -1530,7 +1530,7 @@ fn turn_complete_notification_suppressed_when_queue_non_empty() {
 /// Regression: cancelling while prompts are queued must hand the queue to
 /// the agent untouched. The FRONT queued prompt runs next (promoted
 /// server-side), the rest stay queued in order, and the authoritative
-/// `x.ai/queue/changed` rebroadcast — not client-side prediction — updates
+/// `chutes.build/queue/changed` rebroadcast — not client-side prediction — updates
 /// the mirror. Nothing resurrects or reorders.
 #[test]
 fn cancel_hands_queue_to_agent_without_reordering() {
@@ -3413,7 +3413,7 @@ fn suggestions_landing_after_bash_exit_are_dropped() {
     assert!(agent.prompt.suggestions.dropdown.items.is_empty());
 }
 
-/// The always-on pipeline end to end, with `GROK_SUGGESTIONS` semantics
+/// The always-on pipeline end to end, with `CHUTES_BUILD_SUGGESTIONS` semantics
 /// OFF: Tab fires a deterministic fetch, and the landing response runs the
 /// terminal Tab semantics — a single file candidate splices in place
 /// immediately and the drill-down refetch rides out with the dispatch.

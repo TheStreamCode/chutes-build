@@ -1,7 +1,7 @@
 //! Standalone voice debug harness: mic → streaming STT → transcript.
 //!
 //! ```bash
-//! export XAI_API_KEY=...
+//! export CHUTES_API_KEY=...
 //! cargo run -p xai-grok-voice --bin voice-probe -- --seconds 5
 //! ```
 
@@ -27,11 +27,11 @@ async fn main() -> anyhow::Result<()> {
 
     let args = parse_args(std::env::args().skip(1).collect());
 
-    let auth = std::env::var("XAI_API_KEY")
+    let auth = std::env::var("CHUTES_API_KEY")
         .ok()
         .and_then(StaticVoiceAuth::shared)
         .ok_or_else(|| {
-            anyhow::anyhow!("set XAI_API_KEY (standalone probe has no login session)")
+            anyhow::anyhow!("set CHUTES_API_KEY (standalone probe has no login session)")
         })?;
 
     let config = load_config(args.config_path.as_deref());
@@ -118,14 +118,14 @@ fn parse_args(argv: Vec<String>) -> Args {
 fn load_config(path: Option<&std::path::Path>) -> VoiceConfig {
     // The probe has no shell config stack; env is the resolved fallback
     // (config table still beats it, matching the pager's precedence).
-    let env_base = std::env::var("GROK_XAI_API_BASE_URL").ok();
+    let env_base = std::env::var("CHUTES_BUILD_XAI_API_BASE_URL").ok();
     if let Some(path) = path
         && let Ok(raw) = std::fs::read_to_string(path)
         && let Ok(table) = toml::from_str::<toml::Table>(&raw)
     {
         return VoiceConfig::from_config_table(&table, env_base.as_deref());
     }
-    if let Ok(home) = std::env::var("GROK_HOME")
+    if let Ok(home) = std::env::var("CHUTES_BUILD_HOME")
         && let Ok(raw) = std::fs::read_to_string(PathBuf::from(home).join("config.toml"))
         && let Ok(table) = toml::from_str::<toml::Table>(&raw)
     {
@@ -135,7 +135,7 @@ fn load_config(path: Option<&std::path::Path>) -> VoiceConfig {
         std::env::var("HOME")
             .map(PathBuf::from)
             .unwrap_or_default()
-            .join(".grok/config.toml"),
+            .join(".chutes-build/config.toml"),
     ) && let Ok(table) = toml::from_str::<toml::Table>(&raw)
     {
         return VoiceConfig::from_config_table(&table, env_base.as_deref());
@@ -151,10 +151,10 @@ Usage:
   voice-probe [--seconds 5] [--mic-only]
 
 Environment:
-  XAI_API_KEY     required
+  CHUTES_API_KEY     required
   RUST_LOG        optional (default info,xai_grok_voice=debug)
 
-Reads [voice] from ~/.grok/config.toml unless --config PATH is set.
+Reads [voice] from ~/.chutes-build/config.toml unless --config PATH is set.
 "#
     );
 }

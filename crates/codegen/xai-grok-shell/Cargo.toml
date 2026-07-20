@@ -1,7 +1,7 @@
 [package]
 license = "Apache-2.0"
 name = "xai-grok-shell"
-version = "0.2.102"
+version = "0.1.0"
 edition.workspace = true
 
 [features]
@@ -10,6 +10,7 @@ unstable = []
 default-bazel = []
 
 [dependencies]
+chutes-build-core = { path = "../../chutes-build-core" }
 dunce = { workspace = true }
 tonic-prost = { workspace = true, optional = true }
 agent-client-protocol = { workspace = true }
@@ -40,6 +41,7 @@ regex = { workspace = true }
 xai-grok-mcp = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "blocking"] }
 reqwest-middleware = { workspace = true }
+rpassword = { workspace = true }
 # rusqlite 0.37 + bundled = self-contained SQLite (>= 3.50.2) with FTS5.
 # Bumped from 0.32 to resolve CVE-2025-29087, CVE-2025-3277, CVE-2025-6965.
 # sqlite-vec is C ABI, not Rust-version dependent — any rusqlite with `bundled` works.
@@ -96,7 +98,7 @@ futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
 gcloud-storage = { workspace = true }
-git2 = { version = "0.20", default-features = false, features = [
+git2 = { version = "0.21", default-features = false, features = [
     "vendored-libgit2",
 ] }
 notify = { workspace = true }

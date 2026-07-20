@@ -11,7 +11,7 @@
 //! cargo build --release -p xai-grok-shared --example clipboard_probe
 //! hyperfine --warmup 2 \
 //!   -n native './target/release/examples/clipboard_probe' \
-//!   -n osascript 'GROK_CLIPBOARD_NO_NATIVE_READ=1 ./target/release/examples/clipboard_probe'
+//!   -n osascript 'CHUTES_BUILD_CLIPBOARD_NO_NATIVE_READ=1 ./target/release/examples/clipboard_probe'
 //! ```
 //!
 //! Exits non-zero when the read errors so hyperfine aborts loudly instead of

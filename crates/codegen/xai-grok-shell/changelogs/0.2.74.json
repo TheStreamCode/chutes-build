@@ -6,7 +6,7 @@
   },
   {
     "category": "features",
-    "description": "**grok wrap** now shows copy success over SSH and suggests native drag-select when paste fails.",
+    "description": "**chutes-build wrap** now shows copy success over SSH and suggests native drag-select when paste fails.",
     "breaking_change": false
   },
   {

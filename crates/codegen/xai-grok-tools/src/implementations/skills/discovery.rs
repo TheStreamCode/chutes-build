@@ -20,7 +20,7 @@ pub const MAX_SKILL_WALK_DEPTH: usize = 5;
 
 /// Subdirectory names that contain skill definitions.
 ///
-/// `skills` is the standard layout (`.grok/skills/`, `.claude/skills/`,
+/// `skills` is the standard layout (`.chutes-build/skills/`, `.claude/skills/`,
 /// `.cursor/skills/`). The product-specific `skills-cursor/` layout is no
 /// longer scanned — it pulled vendor default skills into Grok Build sessions.
 const SKILL_SUBDIRS: &[&str] = &["skills"];
@@ -56,7 +56,7 @@ const CLAUDE_DEFAULT_SKILLS: &[&str] = &["pdf", "docx", "xlsx", "pptx", "skill-c
 /// matching vendor's config dir (`/.cursor/` or `/.claude/`).
 ///
 /// The path check ensures a user's own skill that merely shares a denylisted
-/// name (e.g. `~/.grok/skills/shell`) is NOT dropped — only skills physically
+/// name (e.g. `~/.chutes-build/skills/shell`) is NOT dropped — only skills physically
 /// located under the vendor dir are treated as vendor builtins.
 fn is_vendor_default_skill(path: &str, name: &str) -> bool {
     let in_cursor = path.contains("/.cursor/") || path.contains("\\.cursor\\");
@@ -825,12 +825,12 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
 /// directories not found at startup.
 ///
 /// For each path in `file_paths`, walks from `dirname(path)` upward toward
-/// `cwd` (exclusive). At each directory, checks for `.grok/skills/`,
+/// `cwd` (exclusive). At each directory, checks for `.chutes-build/skills/`,
 /// `.agents/skills/`, and (gated on `compat.claude.skills`) `.claude/skills/`.
 /// Skips already-checked dirs.
 ///
 /// Skill/command roots are **not** filtered by `.gitignore`. Discovery only
-/// visits known config roots (`.grok`, `.agents`, `.claude`, …); those are
+/// visits known config roots (`.chutes-build`, `.agents`, `.claude`, …); those are
 /// local harness config (often intentionally gitignored), not tree content.
 /// Contrast with AGENTS.md discovery, which still respects gitignore. Use
 /// `[skills] ignore` to hide a path. Compat loaders likewise load project
@@ -849,9 +849,9 @@ pub fn discover_skills_for_paths(
     already_checked: &mut HashSet<PathBuf>,
     compat: CompatConfig,
 ) -> Vec<SkillInfo> {
-    // `.grok` and `.agents` are always scanned; `.claude` is gated on the
+    // `.chutes-build` and `.agents` are always scanned; `.claude` is gated on the
     // claude-vendor skills cell. (`.cursor` is excluded here by design — see fn docs.)
-    let mut config_dir_names: Vec<&str> = vec![".grok", ".agents"];
+    let mut config_dir_names: Vec<&str> = vec![".chutes-build", ".agents"];
     if compat.claude.skills {
         config_dir_names.push(".claude");
     }
@@ -1431,9 +1431,9 @@ model: test-model
 
     #[test]
     fn is_vendor_default_skill_spares_user_skill_outside_vendor_dir() {
-        // A user's own "shell" skill in ~/.grok is NOT a vendor builtin.
+        // A user's own "shell" skill in ~/.chutes-build is NOT a vendor builtin.
         assert!(!is_vendor_default_skill(
-            "/home/u/.grok/skills/shell/SKILL.md",
+            "/home/u/.chutes-build/skills/shell/SKILL.md",
             "shell"
         ));
     }
@@ -1466,8 +1466,12 @@ model: test-model
             "---\nname: shell\ndescription: cursor builtin\n---\n",
         )
         .unwrap();
-        // Same name under /.grok/ → kept (user content).
-        let grok_shell = tmp.path().join(".grok").join("skills").join("shell");
+        // Same name under /.chutes-build/ → kept (user content).
+        let grok_shell = tmp
+            .path()
+            .join(".chutes-build")
+            .join("skills")
+            .join("shell");
         std::fs::create_dir_all(&grok_shell).unwrap();
         std::fs::write(
             grok_shell.join("SKILL.md"),
@@ -1480,7 +1484,7 @@ model: test-model
             (grok_shell.join("SKILL.md"), SkillScope::User),
         ]);
         assert_eq!(skills.len(), 1, "cursor builtin must be dropped");
-        assert!(skills[0].path.contains("/.grok/"));
+        assert!(skills[0].path.contains("/.chutes-build/"));
     }
 
     #[test]
@@ -1515,7 +1519,7 @@ model: test-model
         let sub = repo.join("sub");
         std::fs::create_dir_all(&sub).unwrap();
 
-        // A .claude skill and a .grok skill in an intermediate dir.
+        // A .claude skill and a .chutes-build skill in an intermediate dir.
         let claude_skill = sub.join(".claude").join("skills").join("claude-dyn");
         std::fs::create_dir_all(&claude_skill).unwrap();
         std::fs::write(
@@ -1523,7 +1527,7 @@ model: test-model
             "---\nname: claude-dyn\n---\n",
         )
         .unwrap();
-        let grok_skill = sub.join(".grok").join("skills").join("grok-dyn");
+        let grok_skill = sub.join(".chutes-build").join("skills").join("grok-dyn");
         std::fs::create_dir_all(&grok_skill).unwrap();
         std::fs::write(grok_skill.join("SKILL.md"), "---\nname: grok-dyn\n---\n").unwrap();
 

@@ -12,7 +12,7 @@ environment:
   env:
     # Pin the contextual hints master OFF so no ephemeral tip can land in the
     # banner row and confuse the text assertions.
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "0"
 mock:
   # Blank-line-separated paragraphs render one row each (no soft-wrap merge),

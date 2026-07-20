@@ -74,6 +74,14 @@ pub(crate) struct InlineMediaHitAreas {
     pub video_play_areas: Vec<(ratatui::layout::Rect, std::path::PathBuf)>,
     /// `[Play]` button rects: clicking starts/replays inline video.
     pub play_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf)>,
+    /// Inline video seek buttons with signed seconds.
+    pub video_seek_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf, i32)>,
+    /// `[Play Audio]` button rects: clicking toggles ffplay-backed audio.
+    pub audio_play_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf)>,
+    /// Audio seek button rects with signed seconds.
+    pub audio_seek_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf, i32)>,
+    /// Audio volume button rects with signed percentage-point deltas.
+    pub audio_volume_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf, i8)>,
     /// `[Open]` button rects (overlay and text fallback): open the file natively.
     pub open_buttons: Vec<(ratatui::layout::Rect, std::path::PathBuf)>,
     /// `[Copy]` button rects (images only): clicking copies the image.
@@ -99,22 +107,62 @@ pub(crate) struct InlineMediaHitAreas {
 /// Inline video playback state for scrollback media entries.
 ///
 /// Created when the user clicks or presses Enter on a video poster frame.
-/// Frames are extracted via ffmpeg in a background thread. Playback
-/// advances one frame per tick, stops on the last frame (no loop).
+/// Frames are decoded via ffmpeg into a bounded background queue. Playback
+/// holds one visible frame and at most two queued frames regardless of length.
 #[derive(Debug)]
 pub(crate) struct InlineVideoState {
     /// Video file path (used to match against visible placements).
     pub path: std::path::PathBuf,
-    /// Pre-extracted frames, protocol-prepared (PNG for Kitty, JPEG for iTerm2).
-    pub frames: Vec<Vec<u8>>,
-    /// Current frame index (0-based).
-    pub current_frame: usize,
-    /// Timestamp of last frame advance (for fps pacing).
-    pub last_frame_time: std::time::Instant,
-    /// Target playback frame rate.
-    pub fps: f64,
-    /// True after the last frame has been displayed.
-    pub finished: bool,
+    pub viewer: crate::prompt_images::VideoViewerState,
+}
+
+/// Lightweight audio playback owned by the TUI. `ffplay` is deliberately
+/// process-backed so the CLI does not add a large platform audio dependency.
+#[derive(Debug)]
+pub(crate) struct InlineAudioState {
+    pub path: std::path::PathBuf,
+    pub child: Option<std::process::Child>,
+    pub position_at_start_secs: f64,
+    pub started_at: Option<std::time::Instant>,
+    pub duration_secs: Option<f64>,
+    pub volume_percent: u8,
+    pub waveform: Vec<u8>,
+    pub analysis_rx: Option<std::sync::mpsc::Receiver<AudioAnalysis>>,
+    pub analysis_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct AudioAnalysis {
+    pub duration_secs: Option<f64>,
+    pub waveform: Vec<u8>,
+}
+
+impl InlineAudioState {
+    pub(crate) fn is_playing(&self) -> bool {
+        self.child.is_some()
+    }
+
+    pub(crate) fn position_secs(&self) -> f64 {
+        let elapsed = self
+            .started_at
+            .map(|started| started.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
+        let position = self.position_at_start_secs + elapsed;
+        self.duration_secs
+            .map_or(position, |duration| position.min(duration))
+    }
+}
+
+impl Drop for InlineAudioState {
+    fn drop(&mut self) {
+        if let Some(cancel) = self.analysis_cancel.take() {
+            cancel.store(true, std::sync::atomic::Ordering::Release);
+        }
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 use super::actions::Action;
 use super::agent::AgentSession;
@@ -200,7 +248,7 @@ impl McpInitProgress {
     /// Whether the progress indicator should be visible in the UI.
     ///
     /// - `total > 0` (real servers): always visible until
-    ///   `x.ai/mcp_initialized` clears the progress.
+    ///   `chutes.build/mcp_initialized` clears the progress.
     /// - `total == 0` (seed / 0-server): visible for at most
     ///   [`SEED_EXPIRE`] seconds, then auto-expires as
     ///   defense-in-depth against the shell failing to send
@@ -649,7 +697,7 @@ pub struct PluginCtaState {
     pub dismissed: std::collections::HashSet<String>,
 }
 /// Follow-up suggestion chips for the latest assistant response
-/// (`x.ai/follow_ups`). Streaming-only: never persisted, does not survive a
+/// (`chutes.build/follow_ups`). Streaming-only: never persisted, does not survive a
 /// session reload. Keyed by the assistant `response_id` (the newest-wins key).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FollowUps {
@@ -846,6 +894,8 @@ pub struct AgentView {
     pub app_chat_mode: bool,
     /// Mocked credit balance for the status bar indicator.
     pub credit_balance: Option<crate::views::credit_bar::CreditBalance>,
+    /// Chutes subscription plan shown beside quota usage in the status bar.
+    pub account_plan: Option<String>,
     /// Auto top-up rule paired with `credit_balance` for the prompt warning.
     pub auto_topup: Option<crate::views::credit_bar::AutoTopupInfo>,
     /// Current goal orchestration state. Set by `GoalUpdated` session
@@ -897,7 +947,7 @@ pub struct AgentView {
     /// answering questions via `AskUserQuestion`). Reset when the turn ends.
     pub turn_paused_duration: std::time::Duration,
     /// IDs of interjections this client sent and already rendered locally
-    /// (optimistic echo). The shell broadcasts `x.ai/session/interjection` to
+    /// (optimistic echo). The shell broadcasts `chutes.build/session/interjection` to
     /// every attached pane; when our own broadcast echoes back carrying an id
     /// in this set, `handle_interjection` drops it (we already showed it) and
     /// removes the id. Other panes (which lack the id) render it. This is the
@@ -1102,6 +1152,12 @@ pub struct AgentView {
     /// Protocol-prepared image bytes keyed by file path. Used for dimension
     /// decoding and iTerm2 re-sends. Kitty transmits once and re-places.
     pub(crate) inline_media_cache: std::collections::HashMap<std::path::PathBuf, Vec<u8>>,
+    /// At most one lazy image/poster preparation runs at a time. Work begins
+    /// only while the model session is idle and never blocks the draw loop.
+    pub(crate) inline_media_loads:
+        std::collections::HashMap<std::path::PathBuf, std::sync::mpsc::Receiver<Option<Vec<u8>>>>,
+    /// Paths that failed lightweight preview preparation; prevents retry loops.
+    pub(crate) inline_media_load_failures: HashSet<std::path::PathBuf>,
     /// Kitty GPU image IDs per media path. Each path gets a unique ID (2+)
     /// so switching between images is a cheap re-place (~80 bytes) instead
     /// of a full re-transmit. ID 1 is reserved for modal overlays.
@@ -1117,6 +1173,8 @@ pub struct AgentView {
     pub(crate) inline_video: Option<InlineVideoState>,
     /// Receiver for background video frame extraction.
     pub(crate) video_load_rx: Option<std::sync::mpsc::Receiver<Option<InlineVideoState>>>,
+    /// Active audio playback. Dropping it stops and reaps the player process.
+    pub(crate) inline_audio: Option<InlineAudioState>,
     /// Off-thread Mermaid render runtime (worker channels + the on-click renders
     /// awaiting their result). Lazily created on the first *cache-missing*
     /// `[Open]`/`[Copy path]` click; `None` until then.
@@ -1252,7 +1310,7 @@ pub struct AgentView {
     /// (`When::DashboardOverlay`) are lit in the overlay and dimmed elsewhere.
     pub(crate) in_dashboard_overlay: bool,
     /// MCP server init progress. Set when the shell starts connecting
-    /// MCP servers, cleared when `x.ai/mcp_initialized` arrives.
+    /// MCP servers, cleared when `chutes.build/mcp_initialized` arrives.
     /// Shown in the turn status line while the agent is idle.
     pub(crate) mcp_init_progress: Option<McpInitProgress>,
     /// Last synced ACP command generation. When this differs from
@@ -1325,7 +1383,7 @@ pub struct AgentView {
     /// lands on a tick; borrowed during render so streaming redraws don't
     /// rescan/allocate the prompt every frame.
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
-    /// Running agent definition for this session (`x.ai/session/info` `agentName`).
+    /// Running agent definition for this session (`chutes.build/session/info` `agentName`).
     pub session_agent_name: Option<String>,
     /// Map of child session IDs to subagent metadata. Populated on
     /// `SubagentSpawned` notifications, used for permission routing
@@ -1407,7 +1465,7 @@ pub struct AgentView {
     /// complete. Kind-only: the payload is re-derived from the widget on
     /// reissue so the freshly attached image chip travels with it.
     pub(crate) deferred_send: Option<AgentDeferredSend>,
-    /// Armed when an `x.ai/session/prompt_complete` broadcast arrives for the
+    /// Armed when an `chutes.build/session/prompt_complete` broadcast arrives for the
     /// turn THIS client drives while it is still awaiting that turn's
     /// `session/prompt` RPC response. The RPC normally lands milliseconds
     /// later and disarms this; if it never does (lost in leader response
@@ -1438,17 +1496,17 @@ pub struct AgentView {
     pub(crate) follow_without_jump_prompt_id: Option<String>,
     /// Ids of THIS client's server-queue rows that are still optimistic
     /// echoes — the `session/prompt` RPC is in flight and no
-    /// `x.ai/queue/changed` broadcast has confirmed the row yet. Inserted by
+    /// `chutes.build/queue/changed` broadcast has confirmed the row yet. Inserted by
     /// the echo push, drained when a broadcast lists the id (queued or
     /// running) or the RPC resolves without the row landing.
     pub(crate) optimistic_queue_ids: std::collections::HashSet<String>,
     /// A queue-row send-now the user fired while the row was still an
-    /// optimistic echo. Firing `x.ai/queue/interject` then would race the
+    /// optimistic echo. Firing `chutes.build/queue/interject` then would race the
     /// row's own in-flight `session/prompt` and silently no-op shell-side
     /// (a rapid double-Enter on a queued bash command could "disappear" — the
     /// interject overtook the row, the no-op dropped the send-now, and the
     /// armed cancel expectation hid the still-queued row).
-    /// Parked here and fired from the confirming `x.ai/queue/changed`
+    /// Parked here and fired from the confirming `chutes.build/queue/changed`
     /// broadcast with the row's authoritative version.
     pub(crate) send_now_awaiting_confirm: Option<String>,
     /// User blocks painted at send-now dispatch, keyed by prompt id; the
@@ -1461,7 +1519,7 @@ pub struct AgentView {
     /// session start independently of the Extensions modal.
     pub plugin_cta: PluginCtaState,
     /// Follow-up suggestion chips for the latest assistant response
-    /// (`x.ai/follow_ups`). `None` when no chips are shown. Set by
+    /// (`chutes.build/follow_ups`). `None` when no chips are shown. Set by
     /// [`AgentView::apply_follow_ups`]; cleared at each turn start.
     pub(crate) follow_ups: Option<FollowUps>,
     /// `promptId` (turn identity) of the currently-shown `follow_ups`, when the
@@ -1495,7 +1553,7 @@ pub struct AgentView {
     /// The ordering key for newest-wins: a fresh id takes the next value (the
     /// new high-water), so every previously-seen id is strictly lower.
     pub(crate) follow_up_next_gen: u64,
-    /// Stamped `x.ai/follow_ups` that arrived for a turn that is NOT yet the
+    /// Stamped `chutes.build/follow_ups` that arrived for a turn that is NOT yet the
     /// currently-adopted one, keyed by `promptId`. Ext notifications and
     /// `session/update` travel on separate channels, so a turn's follow_ups can
     /// land BEFORE the `session/update` that adopts it. Rather than drop such a
@@ -2809,7 +2867,7 @@ pub(super) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().suggestions, vec!["a"]);
     }
-    /// FIX 4 (b): after adopting a NEW turn, a buffer-replayed `x.ai/follow_ups`
+    /// FIX 4 (b): after adopting a NEW turn, a buffer-replayed `chutes.build/follow_ups`
     /// for a PRIOR turn's response_id must NOT revive stale chips — its
     /// `promptId` is not the active turn and it is already in the seen ring.
     #[test]
@@ -2830,7 +2888,7 @@ pub(super) mod test_fixtures {
         assert!(agent.apply_follow_ups_with_prompt("resp-2".into(), Some("p2"), vec!["b".into()]));
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-2");
     }
-    /// FINDING B (stamped path): a LATE FIRST-TIME (never-seen) `x.ai/follow_ups`
+    /// FINDING B (stamped path): a LATE FIRST-TIME (never-seen) `chutes.build/follow_ups`
     /// for a PRIOR turn — arriving while a newer turn is active — must NOT
     /// render. Before the fix it slipped through the "strictly newer" branch
     /// (never recorded in `follow_up_seen`, so the seen-reject didn't catch it).
@@ -2886,7 +2944,7 @@ pub(super) mod test_fixtures {
     /// distinguished from the new turn's first follow_ups, so it follows the
     /// legacy newest-wins (renders). This path is not reachable for current
     /// shells (which always stamp `promptId`) or for buffer-replays (suppressed
-    /// upstream by the `_meta["x.ai/replayed"]` gate); it is pinned here so the
+    /// upstream by the `_meta["chutes.build/replayed"]` gate); it is pinned here so the
     /// stamped-path fix above is understood to be the deterministic guard.
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {
@@ -2898,7 +2956,7 @@ pub(super) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-x");
     }
-    /// FIX (buffer-before-adoption): a stamped `x.ai/follow_ups` for a turn that
+    /// FIX (buffer-before-adoption): a stamped `chutes.build/follow_ups` for a turn that
     /// is NOT yet current (its `session/update` adoption raced behind the ext
     /// channel) must be BUFFERED, not dropped — and then RENDER when that turn
     /// becomes current and is flushed.

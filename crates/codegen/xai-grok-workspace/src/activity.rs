@@ -19,7 +19,7 @@ const SESSION_IDLE_PRUNE_MS: u64 = 5 * 60 * 1000;
 
 /// Default cap (ms) on how long pending durability work (artifact producers /
 /// queued uploads) may withhold `idle_since_ms`. Overridable via
-/// `GROK_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`.
+/// `CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`.
 const DEFAULT_DURABILITY_IDLE_HOLD_MAX_MS: u64 = 600_000;
 
 /// How long recent preview-proxy traffic withholds `idle_since_ms` — a decaying
@@ -110,7 +110,7 @@ pub struct ActivityTracker {
     /// when the call's session has an OPEN `events.jsonl` writer — i.e. the same
     /// condition under which `ToolStarted` is emitted — so the flag-off /
     /// no-writer path inserts nothing (the per-session writer map is empty when
-    /// `GROK_WORKSPACE_EVENTS_ENABLED` is off). Consumed by
+    /// `CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED` is off). Consumed by
     /// [`tool_call_completed`](Self::tool_call_completed) to report a truthful
     /// `ToolCompleted.duration_ms`.
     ///
@@ -138,7 +138,7 @@ impl ActivityTracker {
     }
 
     /// Construct a tracker with a custom session-prune window. The durability
-    /// idle-hold cap comes from `GROK_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`
+    /// idle-hold cap comes from `CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`
     /// (default [`DEFAULT_DURABILITY_IDLE_HOLD_MAX_MS`]).
     pub fn with_prune_window(prune_window: std::time::Duration) -> Self {
         Self::with_prune_window_and_idle_hold(prune_window, durability_idle_hold_max_from_env())
@@ -797,9 +797,11 @@ struct DurabilityPayloadFields {
     drain_started_ms: Option<u64>,
 }
 
-/// The durability idle-hold cap from `GROK_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`.
+/// The durability idle-hold cap from `CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`.
 fn durability_idle_hold_max_from_env() -> u64 {
-    durability_idle_hold_from_raw(std::env::var("GROK_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS").ok())
+    durability_idle_hold_from_raw(
+        std::env::var("CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS").ok(),
+    )
 }
 
 /// Pure parse of the idle-hold env value: a non-negative integer ms wins (0

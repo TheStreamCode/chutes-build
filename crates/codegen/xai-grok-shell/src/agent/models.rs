@@ -13,6 +13,7 @@ use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_confi
 use crate::auth::{AuthManager, GrokAuth, GrokComConfig};
 use crate::remote::{FetchModelsResult, fetch_models_blocking};
 use crate::sampling::SamplerConfig as SamplingConfig;
+use chutes_build_core::reasoning::{ReasoningProfile, reasoning_profile};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 
@@ -30,7 +31,7 @@ pub(crate) enum ModelFetchAuth {
 impl ModelFetchAuth {
     /// custom_endpoint > session > deployment > API key.
     ///
-    /// A `deployment_key` outranks an ambient `XAI_API_KEY` so a stray env key
+    /// A `deployment_key` outranks an ambient `CHUTES_API_KEY` so a stray env key
     /// can't redirect model fetching from the deployment's entitlement-gated
     /// proxy to a raw `/v1/models` endpoint that lists the full model registry.
     pub(crate) fn resolve(endpoints: &config::EndpointsConfig, has_cached_session: bool) -> Self {
@@ -162,6 +163,12 @@ impl Default for ModelsManager {
     }
 }
 
+fn has_session_auth(auth_manager: &AuthManager) -> bool {
+    auth_manager
+        .current_or_expired()
+        .is_some_and(|auth| auth.is_session_auth())
+}
+
 impl ModelsManager {
     pub(crate) fn new(
         prefetched: Option<IndexMap<String, ModelEntry>>,
@@ -170,8 +177,7 @@ impl ModelsManager {
         auth_manager: Arc<AuthManager>,
         cfg: config::Config,
     ) -> Self {
-        let has_session = auth_manager.current_or_expired().is_some();
-        let fetch_auth = ModelFetchAuth::resolve(&cfg.endpoints, has_session);
+        let fetch_auth = ModelFetchAuth::resolve(&cfg.endpoints, has_session_auth(&auth_manager));
         let current_reasoning_effort = cfg.models.default_reasoning_effort;
         Self {
             inner: Arc::new(Inner {
@@ -220,11 +226,10 @@ impl ModelsManager {
         prefetched_models: Option<IndexMap<String, ModelEntry>>,
         auth_manager: Arc<AuthManager>,
     ) -> Result<Self, String> {
-        let has_session = auth_manager.current_or_expired().is_some();
         let is_session_auth = auth_manager
             .current_or_expired()
             .is_some_and(|a| a.is_session_auth());
-        let fetch_auth = ModelFetchAuth::resolve(&cfg.endpoints, has_session);
+        let fetch_auth = ModelFetchAuth::resolve(&cfg.endpoints, is_session_auth);
         let prefetched_models = prefetched_models.or_else(|| {
             let cache = ModelsCacheManager::new();
             cache
@@ -298,9 +303,10 @@ impl ModelsManager {
             )
         };
         let new_preferred = new_config.models.default.clone();
-        let has_session = self.inner.auth_manager.current_or_expired().is_some();
-        *self.inner.fetch_auth.write() =
-            ModelFetchAuth::resolve(&new_config.endpoints, has_session);
+        *self.inner.fetch_auth.write() = ModelFetchAuth::resolve(
+            &new_config.endpoints,
+            has_session_auth(&self.inner.auth_manager),
+        );
         *self.inner.cfg.write() = new_config.clone();
         // Recompute the prompt-block flag so a corrective reload unblocks.
         if has_real_catalog {
@@ -342,7 +348,7 @@ impl ModelsManager {
             self.reselect_current_model_if_missing(&new_config);
         }
 
-        // Push the new catalog to connected clients (`x.ai/models/update`).
+        // Push the new catalog to connected clients (`chutes.build/models/update`).
         // Without this, a long-running agent (leader mode) correctly swaps
         // its in-memory catalog on a config.toml `[model.*]`/`[models]` edit,
         // but already-connected clients keep rendering the stale model list
@@ -593,8 +599,10 @@ impl ModelsManager {
         let config = self.inner.cfg.read().clone();
         crate::agent::init::update_telemetry_config(&config, &self.inner.auth_manager);
         self.inner.cache.invalidate();
-        let has_session = self.inner.auth_manager.current_or_expired().is_some();
-        let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);
+        let fetch_auth = ModelFetchAuth::resolve(
+            &config.endpoints,
+            has_session_auth(&self.inner.auth_manager),
+        );
         *self.inner.fetch_auth.write() = fetch_auth;
         if self.inner.auth_manager.current_or_expired().is_none()
             && fetch_auth == ModelFetchAuth::Session
@@ -656,19 +664,19 @@ impl ModelsManager {
                 acp::SessionModelState::new(current, available.values().cloned().collect());
             if let Ok(params) = serde_json::value::to_raw_value(&model_state) {
                 gw.forward_fire_and_forget(acp::ExtNotification::new(
-                    "x.ai/models/update",
+                    "chutes.build/models/update",
                     params.into(),
                 ));
             }
         }
     }
 
-    /// Hot-reload the catalog from `~/.grok/models_cache.json` after an
+    /// Hot-reload the catalog from `~/.chutes-build/models_cache.json` after an
     /// external write (detected by the config file watcher).
     ///
     /// A long-running leader otherwise only refreshes its catalog from its
     /// *own* fetch paths (startup prefetch, auth change, response-header etag).
-    /// When another grok process sharing `~/.grok` (a `--no-leader` run, a
+    /// When another grok process sharing `~/.chutes-build` (a `--no-leader` run, a
     /// newer client, grok-desktop) fetches a fresher `/v1/models` catalog and
     /// persists it, this picks it up without a network round-trip.
     ///
@@ -853,7 +861,7 @@ impl ModelsManager {
     /// delivering events on macOS after resume from sleep. On each
     /// notification the catalog is re-fetched from the server; if the
     /// fetch succeeds and the catalog changed, clients are notified
-    /// via `x.ai/models/update`.
+    /// via `chutes.build/models/update`.
     pub fn start_auth_refresh_watcher(&self, notify: Arc<tokio::sync::Notify>) {
         let mgr = self.clone();
         let had_catalog_at_start = *self.inner.has_fetched_real_catalog.read();
@@ -1201,9 +1209,12 @@ pub enum RefreshStrategy {
 
 const MODELS_CACHE_FILE: &str = "models_cache.json";
 const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+const MODELS_CACHE_SCHEMA_VERSION: u8 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ModelsCache {
+    #[serde(default)]
+    schema_version: u8,
     fetched_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     grok_version: Option<String>,
@@ -1261,6 +1272,14 @@ impl ModelsCacheManager {
     ) -> Option<CacheResult> {
         let data = std::fs::read(&self.path).ok()?;
         let cache: ModelsCache = serde_json::from_slice(&data).ok()?;
+        if cache.schema_version != MODELS_CACHE_SCHEMA_VERSION {
+            tracing::debug!(
+                cached = cache.schema_version,
+                expected = MODELS_CACHE_SCHEMA_VERSION,
+                "models cache schema mismatch"
+            );
+            return None;
+        }
         if cache.grok_version.as_deref() != Some(xai_grok_version::VERSION) {
             tracing::debug!("models cache version mismatch");
             return None;
@@ -1297,6 +1316,7 @@ impl ModelsCacheManager {
         origin: &str,
     ) {
         let cache = ModelsCache {
+            schema_version: MODELS_CACHE_SCHEMA_VERSION,
             fetched_at: Utc::now(),
             grok_version: Some(xai_grok_version::VERSION.to_string()),
             auth_method: Some(auth_method),
@@ -1526,7 +1546,7 @@ fn resolve_prefetch_env_with_auth(auth: Option<GrokAuth>) -> Option<PrefetchEnv>
 ///
 /// `remote_fetch_enabled = false` wins over every credential shape AND over
 /// `has_custom_endpoint()` (which otherwise forces the prefetch to run): the
-/// explicit off switch must hold even when a stray login, `XAI_API_KEY`, or
+/// explicit off switch must hold even when a stray login, `CHUTES_API_KEY`, or
 /// `deployment_key` would re-arm the prefetch — and with it the `/v1/settings`
 /// fetch and the deployment-config sync on the prefetch thread.
 fn resolve_prefetch_env_from_parts(
@@ -1539,7 +1559,10 @@ fn resolve_prefetch_env_from_parts(
         return None;
     }
 
-    let model_fetch_auth = ModelFetchAuth::resolve(&endpoints, auth.is_some());
+    let model_fetch_auth = ModelFetchAuth::resolve(
+        &endpoints,
+        auth.as_ref().is_some_and(|auth| auth.is_session_auth()),
+    );
 
     if auth.is_none()
         && !endpoints.has_custom_endpoint()
@@ -1684,7 +1707,7 @@ pub(crate) fn resolve_default_model(
 
     let model_pref = config::resolve_string_flag(
         cfg.default_model_override.as_deref(),
-        "GROK_DEFAULT_MODEL",
+        "CHUTES_BUILD_DEFAULT_MODEL",
         cfg.models.default.as_deref(),
         cfg.remote_settings
             .as_ref()
@@ -1823,6 +1846,140 @@ impl ModelGlobSet {
     }
 }
 
+fn is_chutes_inference_url(url: &str) -> bool {
+    let url = url.to_ascii_lowercase();
+    url.contains("chutes.ai") || url.contains("model-router-ten.vercel.app")
+}
+
+fn normalize_chutes_model_capabilities(entry: &mut ModelEntry) {
+    let uses_chutes = is_chutes_inference_url(&entry.info.base_url)
+        || entry
+            .api_base_url
+            .as_deref()
+            .is_some_and(is_chutes_inference_url);
+    if !uses_chutes {
+        return;
+    }
+
+    // Explicit remote or user-supplied menus always win. This is the forward-
+    // compatibility path for new model generations and updated templates.
+    if !entry.info.reasoning_efforts.is_empty() {
+        entry.info.supports_reasoning_effort = true;
+        let menu_default = entry
+            .info
+            .reasoning_efforts
+            .iter()
+            .find(|option| option.default)
+            .or_else(|| entry.info.reasoning_efforts.first())
+            .map_or(ReasoningEffort::High, |option| option.value);
+        entry.info.reasoning_effort.get_or_insert(menu_default);
+        return;
+    }
+
+    match reasoning_profile(&entry.info.model) {
+        ReasoningProfile::Toggle {
+            default_enabled, ..
+        } => {
+            entry.info.supports_reasoning_effort = true;
+            entry.info.reasoning_efforts = vec![
+                ReasoningEffortOption {
+                    id: "none".to_owned(),
+                    value: ReasoningEffort::None,
+                    label: "Instant".to_owned(),
+                    description: Some("Use the model's native non-thinking mode.".to_owned()),
+                    default: !default_enabled,
+                },
+                ReasoningEffortOption {
+                    id: "high".to_owned(),
+                    value: ReasoningEffort::High,
+                    label: "Thinking".to_owned(),
+                    description: Some("Use the model's native thinking mode.".to_owned()),
+                    default: default_enabled,
+                },
+            ];
+            entry.info.reasoning_effort = Some(if default_enabled {
+                ReasoningEffort::High
+            } else {
+                ReasoningEffort::None
+            });
+        }
+        ReasoningProfile::Glm52 => {
+            entry.info.supports_reasoning_effort = true;
+            entry.info.reasoning_efforts = vec![
+                ReasoningEffortOption {
+                    id: "none".to_owned(),
+                    value: ReasoningEffort::None,
+                    label: "Instant".to_owned(),
+                    description: Some(
+                        "Disable hidden reasoning for the lowest latency.".to_owned(),
+                    ),
+                    default: false,
+                },
+                ReasoningEffortOption {
+                    id: "high".to_owned(),
+                    value: ReasoningEffort::High,
+                    label: "Fast reasoning".to_owned(),
+                    description: Some(
+                        "Use GLM-5.2's quality-oriented fast reasoning tier.".to_owned(),
+                    ),
+                    default: true,
+                },
+                ReasoningEffortOption {
+                    id: "xhigh".to_owned(),
+                    value: ReasoningEffort::Xhigh,
+                    label: "Maximum reasoning".to_owned(),
+                    description: Some("Use maximum reasoning for complex tasks.".to_owned()),
+                    default: false,
+                },
+            ];
+            entry.info.reasoning_effort = Some(ReasoningEffort::High);
+        }
+        ReasoningProfile::Fixed | ReasoningProfile::Unsupported | ReasoningProfile::Unknown => {
+            // A reasoning-capable model is not necessarily configurable. Hide
+            // the effort picker instead of sending guessed parameters.
+            entry.info.supports_reasoning_effort = false;
+            entry.info.reasoning_effort = None;
+        }
+    }
+}
+
+fn add_chutes_auto_router(catalog: &mut IndexMap<String, ModelEntry>, cfg: &config::Config) {
+    const AUTO_MODEL_ID: &str = "model-router";
+    if catalog.contains_key(AUTO_MODEL_ID)
+        || !catalog.values().any(|entry| {
+            is_chutes_inference_url(&entry.info.base_url)
+                || entry
+                    .api_base_url
+                    .as_deref()
+                    .is_some_and(is_chutes_inference_url)
+        })
+    {
+        return;
+    }
+
+    let router_url = cfg.endpoints.proxy_url();
+    let mut info = config::ModelInfo::fallback(AUTO_MODEL_ID);
+    info.id = Some(AUTO_MODEL_ID.to_owned());
+    info.name = Some("Auto (Chutes Router)".to_owned());
+    info.description =
+        Some("Native task-aware model selection with cold/unavailable fallback.".to_owned());
+    info.base_url = router_url.clone();
+    info.context_window = std::num::NonZeroU64::new(131_072).expect("non-zero context window");
+    info.max_completion_tokens = Some(32_768);
+    info.supports_reasoning_effort = false;
+
+    let auto = ModelEntry {
+        info,
+        api_key: None,
+        env_key: None,
+        api_base_url: Some(router_url),
+    };
+    let mut with_auto = IndexMap::with_capacity(catalog.len() + 1);
+    with_auto.insert(AUTO_MODEL_ID.to_owned(), auto);
+    with_auto.extend(std::mem::take(catalog));
+    *catalog = with_auto;
+}
+
 /// Single source of truth for the catalog. Applies, in order: `disabled_models`
 /// (remove), `allowed_models` (mark `user_selectable`), `hidden_models` (mark
 /// `hidden`). Special/internal models (web_search, subagents, …) resolve via
@@ -1834,6 +1991,12 @@ pub fn resolve_model_catalog(
     prefetched: Option<IndexMap<String, ModelEntry>>,
 ) -> IndexMap<String, ModelEntry> {
     let mut catalog: IndexMap<String, ModelEntry> = config::resolve_model_list(cfg, prefetched);
+
+    add_chutes_auto_router(&mut catalog, cfg);
+
+    for entry in catalog.values_mut() {
+        normalize_chutes_model_capabilities(entry);
+    }
 
     if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
         let before = catalog.len();
@@ -2066,11 +2229,11 @@ mod tests {
             allowed_models = ["keep-*"]
             [model.zzz-first]
             model = "zzz-first"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://llm.chutes.ai/v1"
             context_window = 256000
             [model.keep-one]
             model = "keep-one"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://llm.chutes.ai/v1"
             context_window = 256000
             "#,
         );
@@ -2091,13 +2254,13 @@ mod tests {
             [models]
             default = "grok-3"
             allowed_models = ["grok-4*"]
-            [model.grok-3]
+            [model.chutes-build-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://llm.chutes.ai/v1"
             context_window = 256000
-            [model.grok-4]
+            [model.chutes-build-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://llm.chutes.ai/v1"
             context_window = 256000
             "#,
         );
@@ -2113,9 +2276,9 @@ mod tests {
             r#"
             [models]
             allowed_models = ["nomatch-*"]
-            [model.grok-4]
+            [model.chutes-build-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://llm.chutes.ai/v1"
             context_window = 256000
             "#,
         );
@@ -2351,6 +2514,206 @@ mod tests {
             Some(ReasoningEffort::None),
             "models that list none should still accept the override"
         );
+    }
+
+    #[test]
+    fn chutes_glm_52_catalog_derives_fast_reasoning_capabilities() {
+        use indexmap::IndexMap;
+
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "zai-org/GLM-5.2-TEE".to_owned(),
+            ModelEntry {
+                info: config::ModelInfo::fallback("zai-org/GLM-5.2-TEE"),
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+        let info = &catalog["zai-org/GLM-5.2-TEE"].info;
+
+        assert!(info.supports_reasoning_effort);
+        assert_eq!(info.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            info.reasoning_efforts
+                .iter()
+                .map(|option| option.value)
+                .collect::<Vec<_>>(),
+            vec![
+                ReasoningEffort::None,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh
+            ]
+        );
+    }
+
+    #[test]
+    fn chutes_glm_52_accepts_cli_instant_override() {
+        use indexmap::IndexMap;
+
+        let cfg = config::Config {
+            reasoning_effort_override: Some(ReasoningEffort::None),
+            ..Default::default()
+        };
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "zai-org/GLM-5.2-TEE".to_owned(),
+            ModelEntry {
+                info: config::ModelInfo::fallback("zai-org/GLM-5.2-TEE"),
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&cfg, Some(prefetched));
+
+        assert_eq!(
+            catalog["zai-org/GLM-5.2-TEE"].info.reasoning_effort,
+            Some(ReasoningEffort::None)
+        );
+    }
+
+    #[test]
+    fn chutes_kimi_defaults_to_published_thinking_mode() {
+        use indexmap::IndexMap;
+
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "moonshotai/Kimi-K2.6-TEE".to_owned(),
+            ModelEntry {
+                info: config::ModelInfo::fallback("moonshotai/Kimi-K2.6-TEE"),
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+        let info = &catalog["moonshotai/Kimi-K2.6-TEE"].info;
+
+        assert!(info.supports_reasoning_effort);
+        assert_eq!(info.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            info.reasoning_efforts
+                .iter()
+                .map(|option| (option.value, option.default))
+                .collect::<Vec<_>>(),
+            vec![
+                (ReasoningEffort::None, false),
+                (ReasoningEffort::High, true)
+            ]
+        );
+    }
+
+    #[test]
+    fn chutes_catalog_adds_native_auto_router_first() {
+        use indexmap::IndexMap;
+
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "Qwen/Qwen3-32B-TEE".to_owned(),
+            ModelEntry {
+                info: config::ModelInfo::fallback("Qwen/Qwen3-32B-TEE"),
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+        let (key, entry) = catalog.first().expect("auto router entry");
+
+        assert_eq!(key, "model-router");
+        assert_eq!(entry.info.name.as_deref(), Some("Auto (Chutes Router)"));
+        assert_eq!(
+            entry.api_base_url.as_deref(),
+            Some("https://model-router-ten.vercel.app/v1")
+        );
+        assert!(!entry.info.supports_reasoning_effort);
+    }
+
+    #[test]
+    fn future_chutes_model_trusts_explicit_catalog_effort_menu() {
+        use indexmap::IndexMap;
+
+        let mut info = config::ModelInfo::fallback("Qwen/Qwen4-Next-TEE");
+        info.reasoning_efforts = vec![ReasoningEffortOption {
+            id: "adaptive".to_owned(),
+            value: ReasoningEffort::Medium,
+            label: "Adaptive".to_owned(),
+            description: None,
+            default: true,
+        }];
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "Qwen/Qwen4-Next-TEE".to_owned(),
+            ModelEntry {
+                info,
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+        let info = &catalog["Qwen/Qwen4-Next-TEE"].info;
+
+        assert!(info.supports_reasoning_effort);
+        assert_eq!(info.reasoning_effort, Some(ReasoningEffort::Medium));
+        assert_eq!(info.reasoning_efforts[0].id, "adaptive");
+    }
+
+    #[test]
+    fn chutes_kimi_preserves_explicit_thinking_mode() {
+        use indexmap::IndexMap;
+
+        let mut info = config::ModelInfo::fallback("moonshotai/Kimi-K2.5-TEE");
+        info.reasoning_effort = Some(ReasoningEffort::High);
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "moonshotai/Kimi-K2.5-TEE".to_owned(),
+            ModelEntry {
+                info,
+                api_key: None,
+                env_key: None,
+                api_base_url: Some("https://llm.chutes.ai/v1".to_owned()),
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+
+        assert_eq!(
+            catalog["moonshotai/Kimi-K2.5-TEE"].info.reasoning_effort,
+            Some(ReasoningEffort::High)
+        );
+    }
+
+    #[test]
+    fn non_chutes_glm_52_is_not_reclassified() {
+        use indexmap::IndexMap;
+
+        let mut info = config::ModelInfo::fallback("zai-org/GLM-5.2");
+        info.base_url = "https://example.com/v1".to_owned();
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "zai-org/GLM-5.2".to_owned(),
+            ModelEntry {
+                info,
+                api_key: None,
+                env_key: None,
+                api_base_url: None,
+            },
+        );
+
+        let catalog = resolve_model_catalog(&config::Config::default(), Some(prefetched));
+        let info = &catalog["zai-org/GLM-5.2"].info;
+
+        assert!(!info.supports_reasoning_effort);
+        assert!(info.reasoning_efforts.is_empty());
+        assert_eq!(info.reasoning_effort, None);
     }
 
     #[test]
@@ -2866,6 +3229,7 @@ mod tests {
         let cache = test_cache_manager(tmp.path());
         let auth_method = mgr.inner.fetch_auth.read().cache_auth_method();
         let stale = ModelsCache {
+            schema_version: MODELS_CACHE_SCHEMA_VERSION,
             fetched_at: Utc::now() - ChronoDuration::seconds(3600),
             grok_version: Some(xai_grok_version::VERSION.to_string()),
             auth_method: Some(auth_method),
@@ -2942,6 +3306,7 @@ mod tests {
         let cache = test_cache_manager(tmp.path());
         let auth_method = mgr.inner.fetch_auth.read().cache_auth_method();
         let legacy = ModelsCache {
+            schema_version: MODELS_CACHE_SCHEMA_VERSION,
             fetched_at: Utc::now(),
             grok_version: Some(xai_grok_version::VERSION.to_string()),
             auth_method: Some(auth_method),
@@ -2954,6 +3319,29 @@ mod tests {
         mgr.reload_from_cache_manager(&cache);
 
         assert!(!mgr.models().contains_key("grok-legacy"));
+    }
+
+    #[test]
+    fn reload_from_disk_cache_ignores_old_schema() {
+        let mgr = test_manager();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = test_cache_manager(tmp.path());
+        let auth_method = mgr.inner.fetch_auth.read().cache_auth_method();
+        let legacy = ModelsCache {
+            schema_version: MODELS_CACHE_SCHEMA_VERSION - 1,
+            fetched_at: Utc::now(),
+            grok_version: Some(xai_grok_version::VERSION.to_string()),
+            auth_method: Some(auth_method),
+            origin: Some(mgr.cache_origin()),
+            etag: Some("etag-old-schema".into()),
+            models: make_prefetched(&["grok-old-schema"]),
+        };
+        cache.atomic_write(&legacy);
+
+        mgr.reload_from_cache_manager(&cache);
+
+        assert!(!mgr.models().contains_key("grok-old-schema"));
+        assert!(mgr.inner.etag.read().is_none());
     }
 
     // ── clear() resets has_fetched_real_catalog ──────────────────────
@@ -3119,7 +3507,7 @@ mod tests {
     #[test]
     #[serial]
     fn resolve_custom_endpoint_always_wins() {
-        let _key = EnvGuard::set("XAI_API_KEY", "test-key");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
         let endpoints = config::EndpointsConfig {
             models_base_url: Some("https://custom.example.com".to_owned()),
             ..config::EndpointsConfig::default()
@@ -3137,7 +3525,7 @@ mod tests {
     #[test]
     #[serial]
     fn resolve_cached_session_wins_over_api_key() {
-        let _key = EnvGuard::set("XAI_API_KEY", "test-key");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
         let endpoints = config::EndpointsConfig::default();
         assert_eq!(
             ModelFetchAuth::resolve(&endpoints, true),
@@ -3149,7 +3537,7 @@ mod tests {
     #[test]
     #[serial]
     fn resolve_api_key_used_when_no_session() {
-        let _key = EnvGuard::set("XAI_API_KEY", "test-key");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
         let endpoints = config::EndpointsConfig::default();
         assert_eq!(
             ModelFetchAuth::resolve(&endpoints, false),
@@ -3160,9 +3548,25 @@ mod tests {
 
     #[test]
     #[serial]
+    fn prefetch_treats_loaded_api_key_as_api_key_not_session() {
+        let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
+        let auth = GrokAuth {
+            auth_mode: crate::auth::AuthMode::ApiKey,
+            ..GrokAuth::test_default()
+        };
+
+        let resolved =
+            resolve_prefetch_env_from_parts(Some(auth), config::EndpointsConfig::default(), true)
+                .expect("API-key prefetch should be enabled");
+
+        assert_eq!(resolved.model_fetch_auth, ModelFetchAuth::ApiKey);
+    }
+
+    #[test]
+    #[serial]
     fn resolve_falls_back_to_session_when_nothing_set() {
-        let _unset = EnvGuard::unset("XAI_API_KEY");
-        let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _unset = EnvGuard::unset("CHUTES_API_KEY");
+        let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
         let endpoints = config::EndpointsConfig::default();
         assert_eq!(
             ModelFetchAuth::resolve(&endpoints, false),
@@ -3174,8 +3578,8 @@ mod tests {
     #[test]
     #[serial]
     fn resolve_deployment_key_when_no_session_or_api_key() {
-        let _unset = EnvGuard::unset("XAI_API_KEY");
-        let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _unset = EnvGuard::unset("CHUTES_API_KEY");
+        let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
         let endpoints = config::EndpointsConfig {
             deployment_key: Some("deploy-key".to_owned()),
             ..config::EndpointsConfig::default()
@@ -3186,11 +3590,11 @@ mod tests {
         );
     }
 
-    /// `deployment_key` outranks a stray `XAI_API_KEY`, but session wins over both.
+    /// `deployment_key` outranks a stray `CHUTES_API_KEY`, but session wins over both.
     #[test]
     #[serial]
     fn resolve_deployment_key_outranks_ambient_api_key() {
-        let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "stray-env-key");
         let endpoints = config::EndpointsConfig {
             deployment_key: Some("deploy-key".to_owned()),
             ..config::EndpointsConfig::default()
@@ -3198,7 +3602,7 @@ mod tests {
         assert_eq!(
             ModelFetchAuth::resolve(&endpoints, false),
             ModelFetchAuth::Deployment,
-            "managed deployment_key should outrank an ambient XAI_API_KEY",
+            "managed deployment_key should outrank an ambient CHUTES_API_KEY",
         );
         assert_eq!(
             ModelFetchAuth::resolve(&endpoints, true),
@@ -3210,12 +3614,12 @@ mod tests {
     // ── remote_fetch gate: resolve_prefetch_env_from_parts ───────────
 
     /// remote_fetch=false must return `None` against every re-arming shape at
-    /// once — session auth, ambient `XAI_API_KEY`, `deployment_key`, AND a
+    /// once — session auth, ambient `CHUTES_API_KEY`, `deployment_key`, AND a
     /// custom models endpoint (which normally forces the prefetch to run).
     #[test]
     #[serial]
     fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
-        let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "stray-env-key");
         let endpoints = config::EndpointsConfig {
             deployment_key: Some("deploy-key".to_owned()),
             models_base_url: Some("https://custom.example.com".to_owned()),
@@ -3241,8 +3645,8 @@ mod tests {
     #[test]
     #[serial]
     fn prefetch_env_resolves_when_remote_fetch_enabled() {
-        let _unset = EnvGuard::unset("XAI_API_KEY");
-        let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _unset = EnvGuard::unset("CHUTES_API_KEY");
+        let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
         let endpoints = config::EndpointsConfig {
             deployment_key: Some("deploy-key".to_owned()),
             ..config::EndpointsConfig::default()

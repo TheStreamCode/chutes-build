@@ -351,25 +351,25 @@ fn restore_prior_bytes(auth_file: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// Read a single auth token from `auth.json` by scope key.
-/// Falls back to the legacy `https://accounts.x.ai/sign-in` scope key
+/// Falls back to the disabled legacy browser-login scope key
 /// when the requested scope is not found (devbox auth.json migration).
 pub fn read_token_by_scope(grok_home: &Path, scope: &str) -> anyhow::Result<String> {
     let path = grok_home.join("auth.json");
-    let store =
-        read_auth_json(&path).map_err(|_| anyhow::anyhow!("Not logged in. Run `grok login`."))?;
+    let store = read_auth_json(&path)
+        .map_err(|_| anyhow::anyhow!("Not logged in. Run `chutes-build login`."))?;
     lookup_auth(&store, scope).map(|a| a.key).ok_or_else(|| {
-        anyhow::anyhow!("Your auth token is invalid. Run `grok login` to re-authenticate.")
+        anyhow::anyhow!("Your auth token is invalid. Run `chutes-build login` to re-authenticate.")
     })
 }
 
-/// Read the API key from the `xai::api_key` scope in auth.json.
+/// Read the API key from the `chutes::api_key` scope in auth.json.
 pub fn read_api_key(grok_home: &Path) -> Option<String> {
     let path = grok_home.join("auth.json");
     let map = read_auth_json(&path).ok()?;
     map.get(API_KEY_SCOPE).map(|a| a.key.clone())
 }
 
-/// Store a plain API key in auth.json under the `xai::api_key` scope.
+/// Store a plain API key in auth.json under the `chutes::api_key` scope.
 ///
 /// Uses the corrupt-recovery reader so a malformed auth.json (e.g. from a
 /// previous crash) can be healed when the user sets an API key.
@@ -387,7 +387,7 @@ pub fn store_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
     write_auth_json(&path, &map)
 }
 
-/// Remove the `xai::api_key` scope from auth.json.
+/// Remove the `chutes::api_key` scope from auth.json.
 pub fn clear_api_key(grok_home: &Path) -> std::io::Result<()> {
     let path = grok_home.join("auth.json");
     if let Ok(mut map) = read_auth_json(&path) {

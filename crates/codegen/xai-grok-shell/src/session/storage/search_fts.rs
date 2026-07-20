@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_open_or_create_uses_wal_on_local_fs() {
         // Ambient kill-switch would override the decision; skip if set.
-        if std::env::var("GROK_SQLITE_JOURNAL_MODE").is_ok() {
+        if std::env::var("CHUTES_BUILD_SQLITE_JOURNAL_MODE").is_ok() {
             return;
         }
         let tmp = TempDir::new().unwrap();

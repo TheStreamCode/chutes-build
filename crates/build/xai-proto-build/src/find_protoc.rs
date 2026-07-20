@@ -30,6 +30,7 @@ fn is_github_actions() -> bool {
 /// 1. `$PROTOC` environment variable (set by Bazel `build_script_env` or user override)
 /// 2. `bin/protoc` walking up parent directories (dotslash wrapper for local dev)
 /// 3. `protoc` on `$PATH` (system install or other tooling)
+/// 4. the platform-specific vendored `protoc` bundled for Cargo builds
 ///
 /// When `bin/protoc` exists but fails to execute (e.g. the dotslash wrapper running
 /// in Bazel remote execution where `dotslash` is not installed), the error is not fatal —
@@ -82,7 +83,15 @@ pub fn find_protoc() -> anyhow::Result<Option<PathBuf>> {
         return Ok(Some(PathBuf::from("protoc")));
     }
 
-    // 4. Not found anywhere.
+    // 4. Use the platform-specific vendored binary. This keeps Cargo builds
+    // reproducible on Windows, where the shebang-based DotSlash wrapper cannot
+    // be executed directly by Rust build scripts.
+    if let Ok(protoc) = protoc_bin_vendored::protoc_bin_path() {
+        check_protoc_good(&protoc)?;
+        return Ok(Some(protoc));
+    }
+
+    // 5. Not found anywhere.
     if is_github_actions() {
         return Err(anyhow::anyhow!(
             "`protoc` not found (checked $PROTOC env, bin/protoc, and PATH)"

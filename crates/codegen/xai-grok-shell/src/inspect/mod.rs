@@ -1,4 +1,4 @@
-//! `grok inspect` — configuration introspection.
+//! `chutes-build inspect` — configuration introspection.
 //!
 //! Shows everything Grok discovers in the current directory: project
 //! instructions, permissions, hooks, skills, agents, plugins, MCP servers,
@@ -145,7 +145,7 @@ pub struct SkippedRule {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginPolicyReport {
-    /// Raw `disable_api_key_auth` knob (env `GROK_DISABLE_API_KEY_AUTH`).
+    /// Raw `disable_api_key_auth` knob (env `CHUTES_BUILD_DISABLE_API_KEY_AUTH`).
     pub disable_api_key_auth: Option<bool>,
     /// Configured team pin: single string, list, or null when unset.
     pub force_login_team_uuid: Option<ForceLoginTeam>,
@@ -258,14 +258,14 @@ pub struct LspServerEntry {
 pub struct ConfigSources {
     /// Config layers (system + user managed, user + system requirements, user
     /// config.toml, the macOS MDM managed-preferences layer, and project
-    /// .grok/config.toml files). Driven from the same resolvers used at runtime
+    /// .chutes-build/config.toml files). Driven from the same resolvers used at runtime
     /// (`ConfigLayers`, `requirements_layers`) so system + MDM layers and
     /// precedence are included, and emptiness reflects real contribution after
     /// stripping (version_overrides, fail_closed, etc).
     pub layers: Vec<ConfigLayer>,
 }
 
-/// A single config layer entry for `grok inspect`.
+/// A single config layer entry for `chutes-build inspect`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigLayer {
@@ -446,7 +446,7 @@ fn instruction_file_type(
     extra_rule_prefixes: &[PathBuf],
 ) -> &'static str {
     let path = Path::new(file_path);
-    if has_rules_directory(file_path, ".grok")
+    if has_rules_directory(file_path, ".chutes-build")
         || has_rules_directory(file_path, ".cursor")
         || (!claude_imported && has_rules_directory(file_path, ".claude"))
         || extra_rule_prefixes
@@ -764,7 +764,7 @@ async fn list_skills(
 /// stays non-bundled. Runtime discovery scopes/precedence are untouched.
 ///
 /// `Bundled`/`Server` sources are constructed only here, never by runtime
-/// discovery: deployed pagers parse `x.ai/skills/list` into a typed
+/// discovery: deployed pagers parse `chutes.build/skills/list` into a typed
 /// `ConfigSource` and reject unknown tags, so runtime stamping must wait
 /// until clients without these variants have aged out. Until then this
 /// mapping is the single owner of the scope→source translation.
@@ -958,7 +958,7 @@ fn list_lsp_servers(
     // Folder-trust gate (display-only): inspect never spawns servers, but mark the
     // repo-local (project-scoped) entries a session would skip in an untrusted
     // clone so the listing matches the live gate. `remote = None` mirrors
-    // `grok mcp doctor` (no loaded RemoteSettings in a standalone command).
+    // `chutes-build mcp doctor` (no loaded RemoteSettings in a standalone command).
     crate::agent::folder_trust::resolve_and_record(cwd, None, false);
     let project_allowed = crate::agent::folder_trust::project_scope_allowed(cwd);
 
@@ -982,7 +982,7 @@ fn list_lsp_servers(
 /// probing the canonical locations used by `ConfigLayers::load` and
 /// `requirements_layers`: system + user `managed_config.toml`, user
 /// `config.toml`, user + system `requirements.toml`, and project
-/// `.grok/config.toml` files (via `find_project_configs`). The macOS MDM
+/// `.chutes-build/config.toml` files (via `find_project_configs`). The macOS MDM
 /// managed-preferences layer has no file on disk, so it is sourced directly
 /// from `requirements_layers()` rather than a path probe.
 ///
@@ -1424,7 +1424,7 @@ fn print_human(r: &InspectReport) {
     if r.mcp_servers.is_empty() {
         println!();
         println!("  MCP Servers (0)");
-        println!("  {TREE} (none) \u{2014} see `grok mcp add --help`");
+        println!("  {TREE} (none) \u{2014} see `chutes-build mcp add --help`");
     } else {
         print_columns(
             "MCP Servers",
@@ -1612,7 +1612,10 @@ mod tests {
             );
         }
 
-        for path in ["/repo/.grok/rules/team.md", r"C:\repo\.grok\rules\team.md"] {
+        for path in [
+            "/repo/.chutes-build/rules/team.md",
+            r"C:\repo\.chutes-build\rules\team.md",
+        ] {
             assert_eq!(instruction_file_type(path, false, &[]), "rules");
         }
         for path in [
@@ -1687,7 +1690,7 @@ mod tests {
     fn requirements_layer_contributes_requires_non_empty_post_strip_table() {
         // A `fail_closed`-only file is kept by the loader but with an empty
         // post-strip table, so it must not count as contributing.
-        let path = "/home/u/.grok/requirements.toml";
+        let path = "/home/u/.chutes-build/requirements.toml";
         let layer = |v| crate::config::RequirementsLayer {
             value: v,
             source: crate::config::RequirementsSource::File(std::path::PathBuf::from(path)),
@@ -1795,21 +1798,33 @@ mod tests {
 
     #[test]
     fn skill_entry_source_maps_scopes() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.chutes-build");
 
-        let s = skill_fixture("a", "/repo/.grok/skills/a/SKILL.md", SkillScope::Local);
+        let s = skill_fixture(
+            "a",
+            "/repo/.chutes-build/skills/a/SKILL.md",
+            SkillScope::Local,
+        );
         assert!(matches!(
             skill_entry_source(&s, home),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("b", "/repo/.grok/skills/b/SKILL.md", SkillScope::Repo);
+        let s = skill_fixture(
+            "b",
+            "/repo/.chutes-build/skills/b/SKILL.md",
+            SkillScope::Repo,
+        );
         assert!(matches!(
             skill_entry_source(&s, home),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("c", "/home/u/.grok/skills/c/SKILL.md", SkillScope::User);
+        let s = skill_fixture(
+            "c",
+            "/home/u/.chutes-build/skills/c/SKILL.md",
+            SkillScope::User,
+        );
         assert!(matches!(
             skill_entry_source(&s, home),
             ConfigSource::User { .. }
@@ -1817,7 +1832,7 @@ mod tests {
 
         let s = skill_fixture(
             "d",
-            "/home/u/.grok/server-skills/d/SKILL.md",
+            "/home/u/.chutes-build/server-skills/d/SKILL.md",
             SkillScope::Server,
         );
         assert!(matches!(
@@ -1825,7 +1840,11 @@ mod tests {
             ConfigSource::Server { .. }
         ));
 
-        let s = skill_fixture("e", "/home/u/.grok/bundled/e/SKILL.md", SkillScope::Bundled);
+        let s = skill_fixture(
+            "e",
+            "/home/u/.chutes-build/bundled/e/SKILL.md",
+            SkillScope::Bundled,
+        );
         assert!(matches!(
             skill_entry_source(&s, home),
             ConfigSource::Bundled { .. }
@@ -1837,11 +1856,11 @@ mod tests {
     /// else keeps its real source.
     #[test]
     fn skill_entry_source_relabels_extracted_bundled_skills() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.chutes-build");
 
         let s = skill_fixture(
             "help",
-            "/home/u/.grok/skills/help/SKILL.md",
+            "/home/u/.chutes-build/skills/help/SKILL.md",
             SkillScope::User,
         );
         assert!(matches!(
@@ -1850,7 +1869,11 @@ mod tests {
         ));
 
         // Bundled name in a project dir: stays project.
-        let s = skill_fixture("help", "/repo/.grok/skills/help/SKILL.md", SkillScope::Repo);
+        let s = skill_fixture(
+            "help",
+            "/repo/.chutes-build/skills/help/SKILL.md",
+            SkillScope::Repo,
+        );
         assert!(matches!(
             skill_entry_source(&s, home),
             ConfigSource::Project { .. }
@@ -1871,7 +1894,7 @@ mod tests {
         // not the extracted copy — stays user.
         let s = skill_fixture(
             "help",
-            "/home/u/.grok/skills/my-tools/SKILL.md",
+            "/home/u/.chutes-build/skills/my-tools/SKILL.md",
             SkillScope::User,
         );
         assert!(matches!(
@@ -1882,7 +1905,7 @@ mod tests {
         // Non-bundled name under <grok_home>/skills: stays user.
         let s = skill_fixture(
             "my-skill",
-            "/home/u/.grok/skills/my-skill/SKILL.md",
+            "/home/u/.chutes-build/skills/my-skill/SKILL.md",
             SkillScope::User,
         );
         assert!(matches!(
@@ -1895,7 +1918,7 @@ mod tests {
     /// over the scope fallback.
     #[test]
     fn skill_entry_source_prefers_stamped_config_source() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.chutes-build");
         let mut s = skill_fixture("cfg", "/team/skills/cfg/SKILL.md", SkillScope::User);
         s.config_source = Some(ConfigSource::ConfigToml {
             path: PathBuf::from("/team/skills/cfg/SKILL.md"),
@@ -1919,7 +1942,7 @@ mod tests {
             )
             .unwrap();
         };
-        // Test-unique names: discovery also reads this machine's real ~/.grok dirs.
+        // Test-unique names: discovery also reads this machine's real ~/.chutes-build dirs.
         let extra = tempfile::tempdir().unwrap();
         write(&extra.path().join("inspect-cfg-extra"), "inspect-cfg-extra");
         write(

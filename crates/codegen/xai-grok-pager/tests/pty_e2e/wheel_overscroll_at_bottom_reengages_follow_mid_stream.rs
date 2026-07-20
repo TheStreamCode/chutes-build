@@ -28,8 +28,8 @@ use super::scroll::*;
 // Non-vacuous by negative control: with the engage branch compiled out,
 // this test fails (STREAMDONE never becomes visible).
 //
-// Determinism: `TERM_PROGRAM=zed` + `GROK_SCROLL_MODE=wheel` +
-// `GROK_SCROLL_LINES=1` price every SGR report at exactly one row with no
+// Determinism: `TERM_PROGRAM=zed` + `CHUTES_BUILD_SCROLL_MODE=wheel` +
+// `CHUTES_BUILD_SCROLL_LINES=1` price every SGR report at exactly one row with no
 // classification variance (see `forced_wheel_mode_env_scrolls_exact_rows`),
 // and the completion gate holds the turn's terminal SSE event so every
 // assertion below is provably mid-turn.
@@ -68,8 +68,8 @@ async fn wheel_overscroll_at_bottom_reengages_follow_mid_stream() {
         CHUNK_DELAY,
         &[
             ("TERM_PROGRAM", "zed"),
-            ("GROK_SCROLL_MODE", "wheel"),
-            ("GROK_SCROLL_LINES", "1"),
+            ("CHUTES_BUILD_SCROLL_MODE", "wheel"),
+            ("CHUTES_BUILD_SCROLL_LINES", "1"),
         ],
     )
     .await;

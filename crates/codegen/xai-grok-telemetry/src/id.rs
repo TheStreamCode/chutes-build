@@ -2,7 +2,7 @@
 //!
 //! Extracted from `xai-grok-shell::agent::unique_identifier` so the
 //! telemetry engine can stamp events without depending on shell internals.
-//! `$GROK_HOME` is resolved through `xai-grok-config::grok_home`.
+//! `$CHUTES_BUILD_HOME` is resolved through `xai-grok-config::grok_home`.
 
 use std::sync::OnceLock;
 
@@ -14,7 +14,7 @@ static AGENT_INSTANCE_ID: OnceLock<String> = OnceLock::new();
 /// Returns the agent ID, using a file-based cache to avoid expensive system calls.
 ///
 /// On macOS, `mid::get()` calls `system_profiler` which takes ~1-3 seconds.
-/// This function caches the result in `$GROK_HOME/agent_id` so subsequent calls
+/// This function caches the result in `$CHUTES_BUILD_HOME/agent_id` so subsequent calls
 /// (even across process restarts) are instant file reads.
 ///
 /// The in-memory `OnceLock` ensures we only read the file once per process.
@@ -67,7 +67,7 @@ fn load_or_compute_agent_id() -> String {
     id
 }
 
-/// Write `$GROK_HOME/agent_id` as owner-read/write only (Unix 0o600) — it is a
+/// Write `$CHUTES_BUILD_HOME/agent_id` as owner-read/write only (Unix 0o600) — it is a
 /// stable device identifier and must not be world-readable. Atomic temp+rename,
 /// so overwriting a loose-perms cache from an older build never leaves the id
 /// in a world-readable file.
@@ -146,11 +146,11 @@ pub fn has_workspace_env_markers() -> bool {
 
 /// Opt-in special-user gate for telemetry.
 ///
-/// Enabled only when `GROK_TELEMETRY_SPECIAL_USER=1` (or `true`). There is no
+/// Enabled only when `CHUTES_BUILD_TELEMETRY_SPECIAL_USER=1` (or `true`). There is no
 /// hardcoded username allowlist.
 pub fn is_special_user() -> bool {
     matches!(
-        std::env::var("GROK_TELEMETRY_SPECIAL_USER").as_deref(),
+        std::env::var("CHUTES_BUILD_TELEMETRY_SPECIAL_USER").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
     )
 }

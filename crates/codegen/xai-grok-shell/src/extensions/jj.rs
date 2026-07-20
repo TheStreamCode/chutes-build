@@ -6,7 +6,7 @@ use super::{Empty, ExtResult, to_ext_response, to_ext_response_partial};
 use xai_grok_workspace::session::git::{CommitData, StageData};
 use xai_grok_workspace::session::jj;
 
-/// Handle a `x.ai/git/*` method for a jj-colocated repo.
+/// Handle a `chutes.build/git/*` method for a jj-colocated repo.
 ///
 /// Returns `Some(result)` if handled, `None` to fall through to git.
 pub async fn try_handle(
@@ -15,18 +15,22 @@ pub async fn try_handle(
     raw_params: &serde_json::value::RawValue,
 ) -> Option<ExtResult> {
     match method {
-        "x.ai/git/status" => Some(to_ext_response(jj::status(git_root).await)),
-        "x.ai/git/info" => Some(to_ext_response(jj::info(git_root).await)),
+        "chutes.build/git/status" => Some(to_ext_response(jj::status(git_root).await)),
+        "chutes.build/git/info" => Some(to_ext_response(jj::info(git_root).await)),
         // git HEAD points at `@-` in a colocated repo; route to jj so we report
         // the working-copy commit (`@`), consistent with `status`/`info`.
-        "x.ai/git/current_commit" => Some(to_ext_response(jj::current_commit(git_root).await)),
-        "x.ai/git/branches" => Some(to_ext_response(jj::list_bookmarks(git_root).await)),
+        "chutes.build/git/current_commit" => {
+            Some(to_ext_response(jj::current_commit(git_root).await))
+        }
+        "chutes.build/git/branches" => Some(to_ext_response(jj::list_bookmarks(git_root).await)),
 
         // jj has no staging area — stage/unstage are no-ops
-        "x.ai/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
-        "x.ai/git/stage/content" | "x.ai/git/unstage" => Some(to_ext_response(Ok(Empty {}))),
+        "chutes.build/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
+        "chutes.build/git/stage/content" | "chutes.build/git/unstage" => {
+            Some(to_ext_response(Ok(Empty {})))
+        }
 
-        "x.ai/git/discard" => {
+        "chutes.build/git/discard" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct Req {
@@ -39,7 +43,7 @@ pub async fn try_handle(
             ))
         }
 
-        "x.ai/git/commit" => {
+        "chutes.build/git/commit" => {
             #[derive(serde::Deserialize)]
             struct Req {
                 message: String,
@@ -53,9 +57,9 @@ pub async fn try_handle(
         }
 
         // Operations that don't apply to jj
-        "x.ai/git/checkout" => Some(Err(acp::Error::invalid_params()
+        "chutes.build/git/checkout" => Some(Err(acp::Error::invalid_params()
             .data("checkout is not supported in jj repos; use `jj new` or `jj edit`"))),
-        "x.ai/git/stash" => Some(Err(acp::Error::invalid_params()
+        "chutes.build/git/stash" => Some(Err(acp::Error::invalid_params()
             .data("stash is not supported in jj repos; changes are always committed"))),
 
         // Everything else (diffs, files, serialize_changes) falls through to git

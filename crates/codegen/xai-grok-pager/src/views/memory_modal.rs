@@ -1158,9 +1158,12 @@ mod tests {
 
     #[test]
     fn file_label_extracts_filename() {
-        assert_eq!(file_label("/home/user/.grok/memory/MEMORY.md"), "MEMORY.md");
         assert_eq!(
-            file_label("/workspace/.grok/memory/sessions/2026-01-15-fix-bug.md"),
+            file_label("/home/user/.chutes-build/memory/memories.md"),
+            "memories.md"
+        );
+        assert_eq!(
+            file_label("/workspace/.chutes-build/memory/sessions/2026-01-15-fix-bug.md"),
             "2026-01-15-fix-bug.md"
         );
     }
@@ -1171,13 +1174,13 @@ mod tests {
 
         let files = vec![
             MemoryFileInfo {
-                path: "/global/MEMORY.md".into(),
+                path: "/global/memories.md".into(),
                 source: "global".into(),
                 size_bytes: 100,
                 modified_epoch_secs: Some(1_700_000_000),
             },
             MemoryFileInfo {
-                path: "/workspace/MEMORY.md".into(),
+                path: "/workspace/memories.md".into(),
                 source: "workspace".into(),
                 size_bytes: 200,
                 modified_epoch_secs: Some(1_700_000_000),
@@ -1221,14 +1224,14 @@ mod tests {
         let indices = state.filtered_indices();
         assert_eq!(indices.len(), 2);
         assert_eq!(indices[0], 0); // Global header
-        assert_eq!(indices[1], 1); // MEMORY.md
+        assert_eq!(indices[1], 1); // memories.md
     }
 
     #[test]
     fn delete_only_allowed_for_session_entries() {
         let entries = build_test_entries();
         let mut state = MemoryModalState::new(entries);
-        // Select the global entry (index 1 in filtered, which is "MEMORY.md" source="global")
+        // Select the global entry (index 1 in filtered, which is "memories.md" source="global")
         state.selected = 1;
         // Try to delete — should NOT enter confirming mode because source is "global".
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
@@ -1481,10 +1484,10 @@ mod tests {
                 is_header: true,
             },
             MemoryFileEntry {
-                path: PathBuf::from("/test/MEMORY.md"),
+                path: PathBuf::from("/test/memories.md"),
                 source: "global".into(),
                 meta_display: "1KB \u{00B7} 1d ago".into(),
-                label: "MEMORY.md".to_string(),
+                label: "memories.md".to_string(),
                 is_header: false,
             },
             MemoryFileEntry {

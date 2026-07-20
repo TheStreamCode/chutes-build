@@ -407,7 +407,7 @@ mod tests {
             "save_on_end=false must skip even with enough messages"
         );
 
-        // No session log file should have been written (the MEMORY.md templates
+        // No session log file should have been written (the memories.md templates
         // created by ensure_initialized are expected and are not session logs).
         let files = storage.list_memory_files().unwrap();
         let session_logs: Vec<_> = files

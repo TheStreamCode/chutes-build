@@ -205,7 +205,7 @@ mod shell_suggestion_key_tests {
         agent
     }
 
-    /// Same, with the pipeline OFF (`GROK_SUGGESTIONS` unset) — the
+    /// Same, with the pipeline OFF (`CHUTES_BUILD_SUGGESTIONS` unset) — the
     /// always-on Tab surface under test.
     fn bash_agent_always_on(text: &str) -> AgentView {
         let mut agent = super::test_fixtures::make_agent();
@@ -333,7 +333,7 @@ mod shell_suggestion_key_tests {
         );
     }
 
-    // -- always-on Tab fetch (no GROK_SUGGESTIONS) --------------------------
+    // -- always-on Tab fetch (no CHUTES_BUILD_SUGGESTIONS) --------------------------
 
     /// Tab in bash mode with no fetched candidates fires a deterministic
     /// fetch — no env flag, no AI, dropdown-scale limit.

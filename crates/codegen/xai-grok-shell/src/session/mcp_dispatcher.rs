@@ -16,7 +16,7 @@
 //!
 //! Each surviving entry is emitted as an ACP
 //! [`agent_client_protocol::ExtNotification`] with method
-//! `x.ai/mcp/server_status` and the payload schema defined by
+//! `chutes.build/mcp/server_status` and the payload schema defined by
 //! [`McpServerStatusPayload`].
 //!
 //! ## Doc-comment ↔ implementation contract
@@ -56,7 +56,7 @@ use crate::session::managed_mcp::MANAGED_MCP_PREFIX;
 pub const COALESCE_WINDOW: Duration = Duration::from_millis(50);
 
 /// Method name for the ACP push.
-pub const SERVER_STATUS_METHOD: &str = "x.ai/mcp/server_status";
+pub const SERVER_STATUS_METHOD: &str = "chutes.build/mcp/server_status";
 
 /// JSON payload pushed over ACP. Fields written in camelCase per ACP
 /// convention.
@@ -68,7 +68,7 @@ pub struct McpServerStatusPayload {
     /// MCP server name (`grok_com_linear`, `github`, ...).
     pub name: String,
     /// `managed` (sourced from cli-chat-proxy / `grok_com_` prefix)
-    /// or `local` (user `.grok/config.toml`).
+    /// or `local` (user `.chutes-build/config.toml`).
     pub source: McpServerSource,
     /// Current status — see [`McpServerStatus`].
     pub status: McpServerStatus,
@@ -466,7 +466,7 @@ pub fn build_payload(
 /// Per-flush side effects:
 /// - update `shutting_down` for `TransportClosed` /
 ///   `ConfigRemoved` keys,
-/// - emit one ACP `x.ai/mcp/server_status` push per surviving
+/// - emit one ACP `chutes.build/mcp/server_status` push per surviving
 ///   buffer entry, via the provided gateway.
 ///
 /// `gateway` is a [`xai_acp_lib::AcpAgentGatewaySender`] (forwarded
@@ -666,7 +666,7 @@ pub async fn drop_dead_clients(
 ///    gated on client identity (see [`collect_close_candidates`]).
 ///    Stale `TransportClosed` keys are stripped from the window so they
 ///    push no status, emit no disconnect span, and schedule no restart.
-/// 3. `flush_window` — emit ACP `x.ai/mcp/server_status` per
+/// 3. `flush_window` — emit ACP `chutes.build/mcp/server_status` per
 ///    surviving entry.
 /// 4. `maybe_schedule_restart` — for every
 ///    `TransportClosed` / `HandshakeFailed` key, the

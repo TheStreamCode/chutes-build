@@ -44,7 +44,7 @@ pub const DEFAULT_PIDFILE_PATH: &str = "C:\\Windows\\Temp\\workspace-server.pid"
 /// release the pidfile lock before escalating to a forceful kill.
 ///
 /// Intentionally far below the server's own SIGTERM drain budget
-/// (`GROK_WORKSPACE_TERMINATION_GRACE_MS`, default 45s): a takeover only
+/// (`CHUTES_BUILD_WORKSPACE_TERMINATION_GRACE_MS`, default 45s): a takeover only
 /// happens when the orchestrator has already declared the incumbent stale,
 /// so a bounded ready time for the replacement outranks completing the
 /// predecessor's drain.

@@ -11,7 +11,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "1"
 mock:
   response: "unused"

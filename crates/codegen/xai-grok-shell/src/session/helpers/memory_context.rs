@@ -102,7 +102,7 @@ mod tests {
     fn test_format_single_result() {
         let results = vec![MemorySearchResult {
             chunk_id: "test:0".to_string(),
-            path: "MEMORY.md".to_string(),
+            path: "memories.md".to_string(),
             start_line: 0,
             end_line: 5,
             score: 0.9,
@@ -114,7 +114,7 @@ mod tests {
         assert!(output.contains("<memory-context>"));
         assert!(output.contains("### Result 1"));
         assert!(output.contains("score: 0.90"));
-        assert!(output.contains("**File:** MEMORY.md (lines 0-5)"));
+        assert!(output.contains("**File:** memories.md (lines 0-5)"));
         assert!(output.contains("```\nUse tracing for logging"));
     }
 
@@ -122,7 +122,7 @@ mod tests {
     fn test_format_preserves_newlines() {
         let results = vec![MemorySearchResult {
             chunk_id: "test:0".to_string(),
-            path: "MEMORY.md".to_string(),
+            path: "memories.md".to_string(),
             start_line: 0,
             end_line: 3,
             score: 0.85,
@@ -160,7 +160,7 @@ mod tests {
         let results = vec![
             MemorySearchResult {
                 chunk_id: "a:0".to_string(),
-                path: "MEMORY.md".to_string(),
+                path: "memories.md".to_string(),
                 start_line: 0,
                 end_line: 5,
                 score: 0.9,
@@ -193,7 +193,7 @@ mod tests {
     fn sample_result() -> MemorySearchResult {
         MemorySearchResult {
             chunk_id: "test:0".into(),
-            path: "MEMORY.md".into(),
+            path: "memories.md".into(),
             start_line: 0,
             end_line: 5,
             score: 0.9,
@@ -272,7 +272,7 @@ mod tests {
             .as_secs() as i64;
         let results = vec![MemorySearchResult {
             chunk_id: "w:0".into(),
-            path: "MEMORY.md".into(),
+            path: "memories.md".into(),
             start_line: 0,
             end_line: 5,
             score: 0.9,
@@ -340,7 +340,7 @@ mod tests {
         use xai_grok_tools::types::memory_backend::MemorySearchResult;
         let results = vec![MemorySearchResult {
             chunk_id: "test:0".into(),
-            path: "/mem/MEMORY.md".into(),
+            path: "/mem/memories.md".into(),
             start_line: 0,
             end_line: 3,
             score: 0.85,

@@ -20,12 +20,12 @@ use crate::headless::stderr_tail;
 use crate::mock_server::MockInferenceServer;
 use crate::process::spawn_piped_with_stderr_capture;
 
-/// Spawn `grok agent stdio` with the canonical hermetic test env: the sandbox
+/// Spawn `chutes-build agent stdio` with the canonical hermetic test env: the sandbox
 /// from [`test_env_cmd_tokio`] plus the debug-logging kill-list, so the
 /// hermeticity setup exists exactly once for the typed ([`GrokStdioClient`])
 /// and raw ([`RawStdioClient`]) harnesses. `leading_args` go before the
 /// `agent stdio` subcommand (global flags); `extra_env` is applied after the
-/// kill-list so a test can still set e.g. `GROK_DEBUG_LOG=1` explicitly.
+/// kill-list so a test can still set e.g. `CHUTES_BUILD_DEBUG_LOG=1` explicitly.
 fn spawn_agent_process(
     server: &MockInferenceServer,
     cwd: &Path,
@@ -44,10 +44,10 @@ fn spawn_agent_process(
     // controls logging only via `extra_env` / `leading_args` (mirrors the
     // headless `debug_cmd`).
     for k in [
-        "GROK_DEBUG_LOG",
-        "GROK_LOG_FILE",
-        "GROK_LOG_SAMPLING",
-        "GROK_HOOKS_LOG",
+        "CHUTES_BUILD_DEBUG_LOG",
+        "CHUTES_BUILD_LOG_FILE",
+        "CHUTES_BUILD_LOG_SAMPLING",
+        "CHUTES_BUILD_HOOKS_LOG",
     ] {
         cmd.env_remove(k);
     }
@@ -107,7 +107,7 @@ impl acp::Client for TestAcpClient {
     }
 }
 
-/// Drives `grok agent stdio` via the ACP protocol over pipes.
+/// Drives `chutes-build agent stdio` via the ACP protocol over pipes.
 ///
 /// Handles the full lifecycle: spawn → initialize → authenticate → session → prompt.
 /// Child process is killed on drop.
@@ -208,11 +208,11 @@ impl GrokStdioClient {
         let api_key_method = init_resp
             .auth_methods
             .iter()
-            .find(|m| &*m.id().0 == "xai.api_key")
+            .find(|m| &*m.id().0 == "chutes.api_key")
             .unwrap_or_else(|| {
                 let ids: Vec<_> = init_resp.auth_methods.iter().map(|m| &m.id().0).collect();
                 panic!(
-                    "expected auth method 'xai.api_key' but got: {ids:?}\n\
+                    "expected auth method 'chutes.api_key' but got: {ids:?}\n\
                      If the method ID changed, update this test."
                 )
             });
@@ -396,7 +396,7 @@ impl GrokStdioClient {
     }
 }
 
-/// Drives `grok agent stdio` with verbatim newline-delimited JSON-RPC lines.
+/// Drives `chutes-build agent stdio` with verbatim newline-delimited JSON-RPC lines.
 ///
 /// Exists for wire shapes the typed [`GrokStdioClient`] (`ClientSideConnection`,
 /// integer ids) can never produce — e.g. Xcode's Swift/Foundation `JSONEncoder`

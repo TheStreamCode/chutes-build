@@ -2,10 +2,12 @@
 //!
 //! Handles reading and writing memory files (`.md`) for both global
 //! and workspace-scoped memory. All workspace-scoped memory lives under
-//! `~/.grok/memory/{project-slug}-{hash8}/` to avoid polluting the user's repo.
+//! `~/.chutes-build/memory/{project-slug}-{hash8}/` to avoid polluting the user's repo.
 
 use std::path::{Path, PathBuf};
 
+use chutes_build_core::privacy::filter_memory_markdown;
+use xai_grok_shell_base::util::secure_file::{ensure_owner_only_permissions, write_secure_file};
 use xai_grok_tools::util::grok_home::grok_home;
 
 /// Scope for a memory write operation.
@@ -21,13 +23,13 @@ pub enum MemoryScope {
 /// Handles file I/O for the memory storage layer.
 ///
 /// Memory files are human-readable/editable Markdown stored under
-/// `~/.grok/memory/`. Workspace-scoped files live under a directory
-/// named `{project-slug}-{hash8}`, e.g. `~/.grok/memory/xai-a3f7b2c9/`.
+/// `~/.chutes-build/memory/`. Workspace-scoped files live under a directory
+/// named `{project-slug}-{hash8}`, e.g. `~/.chutes-build/memory/xai-a3f7b2c9/`.
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
-    /// `~/.grok/memory/`
+    /// `~/.chutes-build/memory/`
     global_dir: PathBuf,
-    /// `~/.grok/memory/{project-slug}-{hash8}/`
+    /// `~/.chutes-build/memory/{project-slug}-{hash8}/`
     workspace_dir: PathBuf,
     /// The original workspace path (for logging / diagnostics).
     workspace_path: PathBuf,
@@ -36,7 +38,7 @@ pub struct MemoryStorage {
 }
 
 impl MemoryStorage {
-    /// Create a new `MemoryStorage` rooted at `~/.grok/memory/`.
+    /// Create a new `MemoryStorage` rooted at `~/.chutes-build/memory/`.
     ///
     /// The workspace directory name is `{slug}-{hash8}` where `slug` is the
     /// project directory name and `hash8` is 8 hex chars from blake3.
@@ -116,14 +118,14 @@ impl MemoryStorage {
             .unwrap_or(0) as usize
     }
 
-    /// Path to the global `MEMORY.md`.
+    /// Path to the global `memories.md`.
     pub fn global_memory_file(&self) -> PathBuf {
-        self.global_dir.join("MEMORY.md")
+        self.global_dir.join("memories.md")
     }
 
-    /// Path to the workspace-scoped `MEMORY.md`.
+    /// Path to the workspace-scoped `memories.md`.
     pub fn workspace_memory_file(&self) -> PathBuf {
-        self.workspace_dir.join("MEMORY.md")
+        self.workspace_dir.join("memories.md")
     }
 
     /// Classify a file path as a memory source type.
@@ -131,7 +133,7 @@ impl MemoryStorage {
     /// Returns `"global"`, `"workspace"`, or `"session"` based on location.
     pub fn classify_source(&self, path: &Path) -> &'static str {
         if path.starts_with(&self.workspace_dir) {
-            if path.file_name().is_some_and(|f| f == "MEMORY.md") {
+            if path.file_name().is_some_and(|f| f == "memories.md") {
                 "workspace"
             } else {
                 "session"
@@ -150,7 +152,7 @@ impl MemoryStorage {
 
     /// Write a daily session log file.
     ///
-    /// File path: `~/.grok/memory/{project}-{hash8}/sessions/YYYY-MM-DD-{slug}-{sid8}.md`
+    /// File path: `~/.chutes-build/memory/{project}-{hash8}/sessions/YYYY-MM-DD-{slug}-{sid8}.md`
     ///
     /// - `date`: e.g. `"2026-02-23"`
     /// - `slug`: short slug derived from the first user message
@@ -182,17 +184,22 @@ impl MemoryStorage {
         if append && path.exists() {
             use std::io::Write;
             let timestamp = chrono::Utc::now().format("%H:%M:%S UTC");
+            ensure_owner_only_permissions(&path)?;
             let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
+            let content = filter_memory_markdown(content);
             write!(file, "\n\n---\n\n<!-- flush {timestamp} -->\n\n{content}")?;
+            drop(file);
+            ensure_owner_only_permissions(&path)?;
         } else {
-            std::fs::write(&path, content)?;
+            let content = filter_memory_markdown(content);
+            write_secure_file(&path, content.as_bytes())?;
         }
         tracing::debug!(path = %path.display(), append, "wrote daily session log");
 
         Ok(path)
     }
 
-    /// Write the curated long-term `MEMORY.md` for the given scope.
+    /// Write the curated long-term `memories.md` for the given scope.
     ///
     /// Creates parent directories as needed. Overwrites any existing content.
     pub fn write_long_term(&self, scope: MemoryScope, content: &str) -> std::io::Result<()> {
@@ -212,13 +219,14 @@ impl MemoryStorage {
             }
         };
 
-        std::fs::write(&path, content)?;
+        let content = filter_memory_markdown(content);
+        write_secure_file(&path, content.as_bytes())?;
         tracing::debug!(path = %path.display(), scope = ?scope, "wrote long-term memory");
 
         Ok(())
     }
 
-    /// Append content to the `MEMORY.md` for the given scope.
+    /// Append content to the `memories.md` for the given scope.
     ///
     /// The content is normalized to have proper Markdown heading structure
     /// (see [`normalize_memory_content`]), then appended to the file with a
@@ -231,7 +239,7 @@ impl MemoryStorage {
             return Ok(());
         }
 
-        let normalized = normalize_memory_content(content);
+        let normalized = normalize_memory_content(&filter_memory_markdown(content));
         if normalized.is_empty() {
             return Ok(());
         }
@@ -247,10 +255,12 @@ impl MemoryStorage {
             }
         };
 
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        if !path.exists() {
+            write_secure_file(&path, b"")?;
+        } else {
+            ensure_owner_only_permissions(&path)?;
+        }
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
 
         use std::io::Write;
         if file.metadata()?.len() > 0 {
@@ -258,6 +268,8 @@ impl MemoryStorage {
         } else {
             write!(file, "{normalized}")?;
         }
+        drop(file);
+        ensure_owner_only_permissions(&path)?;
 
         tracing::debug!(path = %path.display(), scope = ?scope, "appended to memory");
         Ok(())
@@ -320,13 +332,13 @@ impl MemoryStorage {
     pub fn list_memory_files(&self) -> std::io::Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
-        // Global MEMORY.md
+        // Global memories.md
         let global_file = self.global_memory_file();
         if global_file.is_file() {
             files.push(global_file);
         }
 
-        // Workspace MEMORY.md
+        // Workspace memories.md
         let workspace_file = self.workspace_memory_file();
         if workspace_file.is_file() {
             files.push(workspace_file);
@@ -355,26 +367,26 @@ impl MemoryStorage {
     }
 
     /// Ensure the global memory directory exists and create a template
-    /// `MEMORY.md` if one doesn't already exist.
+    /// `memories.md` if one doesn't already exist.
     ///
-    /// Called on first run with `--experimental-memory` to bootstrap the layout.
+    /// Called on first run to bootstrap the local-only layout.
     pub fn ensure_initialized(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.global_dir)?;
 
         let global_file = self.global_memory_file();
         if !global_file.exists() {
-            std::fs::write(
-                &global_file,
-                "# Global Memory\n\
+            let template = "# Global Memory\n\
                  \n\
-                 > This file is automatically managed by Grok's memory system.\n\
+                 > This file is automatically managed locally by Chutes Build.\n\
                  > You can also edit it manually — changes will be indexed on next session.\n\
                  \n\
                  ## Preferences\n\
                  \n\
-                 <!-- Add any cross-project preferences here -->\n",
-            )?;
-            tracing::info!(path = %global_file.display(), "created global MEMORY.md template");
+                 <!-- Add any cross-project preferences here -->\n";
+            write_secure_file(&global_file, template.as_bytes())?;
+            tracing::info!(path = %global_file.display(), "created global memories.md template");
+        } else {
+            ensure_owner_only_permissions(&global_file)?;
         }
 
         if self.ephemeral {
@@ -386,20 +398,23 @@ impl MemoryStorage {
 
         let workspace_file = self.workspace_memory_file();
         if !workspace_file.exists() {
-            std::fs::write(
+            write_secure_file(
                 &workspace_file,
                 format!(
                     "# Project Memory — {}\n\
                      \n\
                      > Auto-populated by dream consolidation. Edit freely.\n",
                     self.workspace_path.display()
-                ),
+                )
+                .as_bytes(),
             )?;
             tracing::info!(
                 path = %workspace_file.display(),
                 workspace = %self.workspace_path.display(),
-                "created workspace MEMORY.md template"
+                "created workspace memories.md template"
             );
+        } else {
+            ensure_owner_only_permissions(&workspace_file)?;
         }
 
         Ok(())
@@ -407,7 +422,7 @@ impl MemoryStorage {
 
     /// Remove the entire workspace-scoped memory directory.
     ///
-    /// Deletes MEMORY.md, sessions/, index.sqlite, and any other workspace files.
+    /// Deletes memories.md, sessions/, index.sqlite, and any other workspace files.
     /// The directory will be recreated on next session start via `ensure_initialized()`.
     /// Returns `Ok(true)` if the directory existed and was removed, `Ok(false)` if
     /// it didn't exist.
@@ -422,7 +437,7 @@ impl MemoryStorage {
         }
     }
 
-    /// Remove the global MEMORY.md file.
+    /// Remove the global memories.md file.
     ///
     /// Does not remove the global memory directory itself (other workspaces may
     /// have subdirectories there). The file will be recreated on next session
@@ -651,7 +666,7 @@ fn compute_workspace_hash(cwd: &Path) -> String {
 pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
     let repo = git2::Repository::discover(cwd).ok()?;
     let remote = repo.find_remote("origin").ok()?;
-    let url = remote.url()?;
+    let url = remote.url().ok()?;
     normalize_remote_url(url)
 }
 
@@ -888,7 +903,7 @@ mod tests {
             .write_long_term(MemoryScope::Global, "# Global\n\nSome knowledge.")
             .unwrap();
 
-        let path = global_dir.join("MEMORY.md");
+        let path = global_dir.join("memories.md");
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "# Global\n\nSome knowledge.");
@@ -905,7 +920,7 @@ mod tests {
             .write_long_term(MemoryScope::Workspace, "# Project\n\nProject info.")
             .unwrap();
 
-        let path = workspace_dir.join("MEMORY.md");
+        let path = workspace_dir.join("memories.md");
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "# Project\n\nProject info.");
@@ -936,8 +951,8 @@ mod tests {
         let files = storage.list_memory_files().unwrap();
         assert_eq!(files.len(), 3);
 
-        // Global MEMORY.md should be first
-        assert!(files[0].ends_with("MEMORY.md"));
+        // Global memories.md should be first
+        assert!(files[0].ends_with("memories.md"));
         assert!(
             files[0]
                 .parent()
@@ -959,13 +974,13 @@ mod tests {
 
         storage.ensure_initialized().unwrap();
 
-        assert!(global_dir.join("MEMORY.md").exists());
-        assert!(workspace_dir.join("MEMORY.md").exists());
+        assert!(global_dir.join("memories.md").exists());
+        assert!(workspace_dir.join("memories.md").exists());
 
         // Calling again should be idempotent (not overwrite)
-        let content_before = std::fs::read_to_string(global_dir.join("MEMORY.md")).unwrap();
+        let content_before = std::fs::read_to_string(global_dir.join("memories.md")).unwrap();
         storage.ensure_initialized().unwrap();
-        let content_after = std::fs::read_to_string(global_dir.join("MEMORY.md")).unwrap();
+        let content_after = std::fs::read_to_string(global_dir.join("memories.md")).unwrap();
         assert_eq!(content_before, content_after);
     }
 
@@ -1131,7 +1146,7 @@ mod tests {
             .append_to_memory(MemoryScope::Workspace, "prefer tabs")
             .unwrap();
 
-        let content = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let content = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert_eq!(content, "## prefer tabs");
     }
 
@@ -1146,8 +1161,27 @@ mod tests {
             .append_to_memory(MemoryScope::Global, "always use UTC")
             .unwrap();
 
-        let content = std::fs::read_to_string(global_dir.join("MEMORY.md")).unwrap();
+        let content = std::fs::read_to_string(global_dir.join("memories.md")).unwrap();
         assert_eq!(content, "## always use UTC");
+    }
+
+    #[test]
+    fn test_append_to_memory_redacts_probable_secrets() {
+        let tmp = TempDir::new().unwrap();
+        let global_dir = tmp.path().join("memory");
+        let workspace_dir = global_dir.join("abc123");
+        let storage = MemoryStorage::with_paths(global_dir, workspace_dir.clone());
+        storage
+            .append_to_memory(
+                MemoryScope::Workspace,
+                "keep this\nCHUTES_API_KEY=cpk_private_value",
+            )
+            .unwrap();
+
+        let content = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
+        assert!(content.contains("keep this"));
+        assert!(content.contains("[redacted: probable secret]"));
+        assert!(!content.contains("cpk_private_value"));
     }
 
     #[test]
@@ -1164,7 +1198,7 @@ mod tests {
             .append_to_memory(MemoryScope::Workspace, "second note")
             .unwrap();
 
-        let content = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let content = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert_eq!(content, "## first note\n\n## second note");
     }
 
@@ -1179,7 +1213,7 @@ mod tests {
             .append_to_memory(MemoryScope::Workspace, "raw text without heading")
             .unwrap();
 
-        let content = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let content = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert!(
             content.starts_with("## "),
             "should have been normalized with a heading"
@@ -1200,7 +1234,7 @@ mod tests {
             )
             .unwrap();
 
-        let content = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let content = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert_eq!(content, "## My Custom Heading\n\nDetails here.");
     }
 
@@ -1216,7 +1250,7 @@ mod tests {
             .unwrap();
 
         // File should not have been created
-        assert!(!workspace_dir.join("MEMORY.md").exists());
+        assert!(!workspace_dir.join("memories.md").exists());
     }
 
     // -----------------------------------------------------------------------
@@ -1235,7 +1269,7 @@ mod tests {
             .write_daily_log("2026-05-05", "test", "sess12345678", "log content", false)
             .unwrap();
         assert!(workspace_dir.is_dir());
-        assert!(workspace_dir.join("MEMORY.md").exists());
+        assert!(workspace_dir.join("memories.md").exists());
 
         let removed = storage.clear_workspace().unwrap();
         assert!(removed);
@@ -1261,11 +1295,11 @@ mod tests {
         let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir);
 
         storage.ensure_initialized().unwrap();
-        assert!(global_dir.join("MEMORY.md").exists());
+        assert!(global_dir.join("memories.md").exists());
 
         let removed = storage.clear_global().unwrap();
         assert!(removed);
-        assert!(!global_dir.join("MEMORY.md").exists());
+        assert!(!global_dir.join("memories.md").exists());
         assert!(global_dir.is_dir(), "global directory itself should remain");
     }
 
@@ -1292,13 +1326,13 @@ mod tests {
         storage
             .append_to_memory(MemoryScope::Workspace, "custom entry")
             .unwrap();
-        let before = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let before = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert!(before.contains("custom entry"));
 
         storage.clear_workspace().unwrap();
         storage.ensure_initialized().unwrap();
 
-        let after = std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap();
+        let after = std::fs::read_to_string(workspace_dir.join("memories.md")).unwrap();
         assert!(
             !after.contains("custom entry"),
             "reinitialized file should be a fresh template"
@@ -1503,13 +1537,13 @@ mod tests {
         storage
             .write_long_term(MemoryScope::Workspace, "should not write")
             .unwrap();
-        assert!(!workspace_dir.join("MEMORY.md").exists());
+        assert!(!workspace_dir.join("memories.md").exists());
 
         // write_long_term for global should still work
         storage
             .write_long_term(MemoryScope::Global, "global content")
             .unwrap();
-        assert!(global_dir.join("MEMORY.md").exists());
+        assert!(global_dir.join("memories.md").exists());
     }
 
     #[test]
@@ -1529,13 +1563,13 @@ mod tests {
         storage
             .append_to_memory(MemoryScope::Workspace, "should skip")
             .unwrap();
-        assert!(!workspace_dir.join("MEMORY.md").exists());
+        assert!(!workspace_dir.join("memories.md").exists());
 
         // Global append should still work
         storage
             .append_to_memory(MemoryScope::Global, "global note")
             .unwrap();
-        assert!(global_dir.join("MEMORY.md").exists());
+        assert!(global_dir.join("memories.md").exists());
     }
 
     #[test]
@@ -1553,8 +1587,8 @@ mod tests {
 
         storage.ensure_initialized().unwrap();
 
-        // Global MEMORY.md should be created
-        assert!(global_dir.join("MEMORY.md").exists());
+        // Global memories.md should be created
+        assert!(global_dir.join("memories.md").exists());
         // Workspace directory should NOT be created
         assert!(!workspace_dir.exists());
     }
@@ -1700,11 +1734,11 @@ mod tests {
 
         // Create a file (not a directory) in the memory root
         std::fs::create_dir_all(&global_dir).unwrap();
-        std::fs::write(global_dir.join("MEMORY.md"), "global").unwrap();
+        std::fs::write(global_dir.join("memories.md"), "global").unwrap();
 
         let removed = storage.gc(30).unwrap();
         assert_eq!(removed, 0);
-        assert!(global_dir.join("MEMORY.md").exists());
+        assert!(global_dir.join("memories.md").exists());
     }
 
     #[test]
@@ -1751,17 +1785,17 @@ mod tests {
         let workspace_dir = global_dir.join("current-ws");
         let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir);
 
-        // A workspace with MEMORY.md and index.sqlite but no sessions/
+        // A workspace with memories.md and index.sqlite but no sessions/
         let ws = global_dir.join("orphan-ab123456");
         std::fs::create_dir_all(&ws).unwrap();
-        std::fs::write(ws.join("MEMORY.md"), "# Project").unwrap();
+        std::fs::write(ws.join("memories.md"), "# Project").unwrap();
         std::fs::write(ws.join("index.sqlite"), "").unwrap();
         set_dir_mtime_days_ago(&ws, 31);
 
         let removed = storage.gc(30).unwrap();
         assert_eq!(
             removed, 1,
-            "workspace with MEMORY.md but no sessions is empty"
+            "workspace with memories.md but no sessions is empty"
         );
         assert!(!ws.exists());
     }
@@ -1776,7 +1810,7 @@ mod tests {
 
         // Create the current workspace: old, no sessions — would qualify for GC
         std::fs::create_dir_all(&workspace_dir).unwrap();
-        std::fs::write(workspace_dir.join("MEMORY.md"), "# My project").unwrap();
+        std::fs::write(workspace_dir.join("memories.md"), "# My project").unwrap();
         set_dir_mtime_days_ago(&workspace_dir, 60);
 
         // Create another old empty workspace that SHOULD be removed

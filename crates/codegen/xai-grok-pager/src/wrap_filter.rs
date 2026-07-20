@@ -1,4 +1,4 @@
-//! Streaming output filter for `grok wrap`: OSC 52 clipboard interception,
+//! Streaming output filter for `chutes-build wrap`: OSC 52 clipboard interception,
 //! host-image request handling, and DEC-mode observation.
 //!
 //! `Osc52Filter` sits between the wrap PTY reader and stdout (see

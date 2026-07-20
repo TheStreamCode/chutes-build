@@ -489,7 +489,7 @@ pub fn merge_rewind_points_from(
         .find(|p| p.prompt_index == target_index - 1)
     {
         // Consume `to_merge` by value — move the large file-content snapshots into
-        // `previous` instead of cloning (MEMORY.md).
+        // `previous` instead of cloning (memories.md).
         for merged in to_merge {
             for (path, snapshot) in merged.file_snapshots {
                 // or_insert: we own `snapshot`; earliest before-snapshot wins.

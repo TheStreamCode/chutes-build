@@ -30,23 +30,23 @@ fn is_container_no_display() -> bool {
 
 /// Cached result of the "an upstream OSC 52 sink is capturing our output" check.
 ///
-/// `grok wrap` runs a command inside a local PTY, scans its output for OSC 52
+/// `chutes-build wrap` runs a command inside a local PTY, scans its output for OSC 52
 /// clipboard sequences, and writes their payload to the *real* (local) system
 /// clipboard (see `xai-grok-pager`'s `pty_wrap` module). It advertises this to
 /// the wrapped program via an environment variable so the
-/// inner `grok` knows its OSC 52 writes are reliably intercepted and copied,
+/// inner `chutes-build` knows its OSC 52 writes are reliably intercepted and copied,
 /// even when the inner terminal brand is misdetected (e.g. over SSH, where only
 /// `TERM` propagates and Apple Terminal / unknown brands look OSC-52-incapable).
 ///
-/// Two names are accepted: the canonical `GROK_OSC52_SINK` (inherited by local
-/// children) and the `LC_`-prefixed `LC_GROK_OSC52_SINK`, which the default
+/// Two names are accepted: the canonical `CHUTES_BUILD_OSC52_SINK` (inherited by local
+/// children) and the `LC_`-prefixed `LC_CHUTES_BUILD_OSC52_SINK`, which the default
 /// OpenSSH client/server configs forward (`SendEnv LANG LC_*` /
-/// `AcceptEnv LANG LC_*`) so the signal survives the hop into a remote `grok`.
+/// `AcceptEnv LANG LC_*`) so the signal survives the hop into a remote `chutes-build`.
 pub fn osc52_sink_active() -> bool {
     static SINK: OnceLock<bool> = OnceLock::new();
     *SINK.get_or_init(|| {
-        std::env::var_os("GROK_OSC52_SINK").is_some()
-            || std::env::var_os("LC_GROK_OSC52_SINK").is_some()
+        std::env::var_os("CHUTES_BUILD_OSC52_SINK").is_some()
+            || std::env::var_os("LC_CHUTES_BUILD_OSC52_SINK").is_some()
     })
 }
 
@@ -127,7 +127,7 @@ pub fn resolve_clipboard_route(ctx: &TerminalContext) -> ClipboardRoute {
         // Linux: always emit OSC 52 as a safety net. This matches other
         // terminal agent CLIs which emit OSC 52 on every copy.
         // macOS/Windows: only in tmux/SSH/container contexts, or when an
-        // upstream `grok wrap` sink is capturing our output and will forward
+        // upstream `chutes-build wrap` sink is capturing our output and will forward
         // the sequence to the real clipboard.
         osc52: cfg!(target_os = "linux")
             || is_tmux
@@ -309,7 +309,7 @@ impl ClipboardFeedback {
             Self::CopiedOscContainer => "Copied via OSC 52 from the container.",
             Self::CopiedOscRemote => "Copied via OSC 52.",
             Self::UnverifiedOscRemote | Self::UnverifiedOscContainer => {
-                "Copy sent. If paste fails, use grok wrap or /minimal."
+                "Copy sent. If paste fails, use chutes-build wrap or /minimal."
             }
             Self::VsCodeSshNonAscii => {
                 "Copied. VS Code over SSH may garble non-ASCII; use /minimal if needed."
@@ -1721,14 +1721,14 @@ mod tests {
             (
                 ClipboardFeedback::UnverifiedOscRemote,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use chutes-build wrap or /minimal.",
                 "unverified_osc_remote",
                 120,
             ),
             (
                 ClipboardFeedback::UnverifiedOscContainer,
                 ClipboardDelivery::Unverified,
-                "Copy sent. If paste fails, use grok wrap or /minimal.",
+                "Copy sent. If paste fails, use chutes-build wrap or /minimal.",
                 "unverified_osc_container",
                 120,
             ),
@@ -1780,7 +1780,7 @@ mod tests {
         assert!(
             ClipboardFeedback::UnverifiedOscRemote
                 .message()
-                .contains("grok wrap")
+                .contains("chutes-build wrap")
         );
     }
 }

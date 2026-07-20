@@ -11,7 +11,7 @@
 //!    picks chain back to back, reproducing the continuous
 //!    `.git/index.lock` / HEAD-move churn of an agent-run rebase.
 //!
-//! With the fs-watch machinery on (`x.ai/hunkTracker` + `x.ai/gitHeadChanged`
+//! With the fs-watch machinery on (`chutes.build/hunkTracker` + `chutes.build/gitHeadChanged`
 //! advertised), fsnotify merges rapid lock cycles into one operation and the
 //! session defers debounce fires while an op is in flight, so one rebase
 //! costs at most a couple of `refresh_all_baselines` scans (each scoped to
@@ -22,7 +22,7 @@
 //! runs, and asserts only invariants: zero scans with the machinery off, a
 //! small bounded number per rebase with it on.
 //!
-//! Knobs: GROK_PERF_GIT_FILES (default 300), GROK_PERF_GIT_PICKS (default 6).
+//! Knobs: CHUTES_BUILD_PERF_GIT_FILES (default 300), CHUTES_BUILD_PERF_GIT_PICKS (default 6).
 //! Keep the rebase under ~15s or the terminal tool auto-backgrounds the
 //! command and the turn wall time loses meaning.
 
@@ -74,8 +74,8 @@ impl ScanCounter {
 }
 
 fn install_global_scan_counter() -> ScanCounter {
-    // GROK_E2E_LOG=<filter> tees shell logs to stderr for local debugging.
-    let filter = std::env::var("GROK_E2E_LOG").ok();
+    // CHUTES_BUILD_E2E_LOG=<filter> tees shell logs to stderr for local debugging.
+    let filter = std::env::var("CHUTES_BUILD_E2E_LOG").ok();
     ScanCounter(
         xai_test_utils::tracing_capture::install_prefix_counter_global(
             &[REFRESH_SCAN_LOG_PREFIX, REFRESH_SKIP_LOG_PREFIX],
@@ -226,8 +226,8 @@ async fn run_storm(
     counter: &ScanCounter,
     label: &str,
 ) -> RunStats {
-    let files = env_usize("GROK_PERF_GIT_FILES", 300);
-    let picks = env_usize("GROK_PERF_GIT_PICKS", 6);
+    let files = env_usize("CHUTES_BUILD_PERF_GIT_FILES", 300);
+    let picks = env_usize("CHUTES_BUILD_PERF_GIT_PICKS", 6);
     let (repo, base) = build_repo(files, picks);
     eprintln!(
         "[perf] {label}: repo ~{files} files, {picks} picks at {:?}",
@@ -349,8 +349,8 @@ async fn run_storm(
             let method = init
                 .auth_methods
                 .iter()
-                .find(|m| &*m.id().0 == "xai.api_key")
-                .unwrap_or_else(|| panic!("{label}: xai.api_key auth method not advertised"));
+                .find(|m| &*m.id().0 == "chutes.api_key")
+                .unwrap_or_else(|| panic!("{label}: chutes.api_key auth method not advertised"));
             client_conn
                 .authenticate(
                     acp::AuthenticateRequest::new(method.id().clone())
@@ -430,13 +430,13 @@ fn git_rebase_refresh_storm_e2e() {
     // SAFETY: the only live threads are the mock runtime's workers, which
     // serve HTTP and never read the process environment.
     unsafe {
-        std::env::set_var("GROK_HOME", grok_home.path());
-        std::env::set_var("GROK_CLI_CHAT_PROXY_BASE_URL", server.url());
-        std::env::set_var("GROK_XAI_API_BASE_URL", server.url());
-        std::env::set_var("XAI_API_KEY", "test-key-for-ci");
-        std::env::set_var("GROK_TELEMETRY_ENABLED", "false");
-        std::env::set_var("GROK_FEEDBACK_ENABLED", "false");
-        std::env::set_var("GROK_TRACE_UPLOAD", "false");
+        std::env::set_var("CHUTES_BUILD_HOME", grok_home.path());
+        std::env::set_var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL", server.url());
+        std::env::set_var("CHUTES_BUILD_XAI_API_BASE_URL", server.url());
+        std::env::set_var("CHUTES_API_KEY", "test-key-for-ci");
+        std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "false");
+        std::env::set_var("CHUTES_BUILD_FEEDBACK_ENABLED", "false");
+        std::env::set_var("CHUTES_BUILD_TRACE_UPLOAD", "false");
     }
 
     let agent_rt = tokio::runtime::Builder::new_current_thread()
@@ -450,8 +450,8 @@ fn git_rebase_refresh_storm_e2e() {
     let on = agent_rt.block_on(run_storm(
         &server,
         Some(json!({
-            "x.ai/hunkTracker": { "mode": "agent_only" },
-            "x.ai/gitHeadChanged": true,
+            "chutes.build/hunkTracker": { "mode": "agent_only" },
+            "chutes.build/gitHeadChanged": true,
         })),
         &counter,
         "machinery-on",

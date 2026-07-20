@@ -5,7 +5,7 @@
 //! faults land on exact frame boundaries: drop exactly the Nth frame, sever
 //! after a half-written length prefix, delay or duplicate one frame. Everything
 //! is path-addressed, so no production changes are needed — point
-//! `LeaderClient::connect` / `GROK_LEADER_SOCKET` at the proxy path.
+//! `LeaderClient::connect` / `CHUTES_BUILD_LEADER_SOCKET` at the proxy path.
 //!
 //! Frame numbering is 1-based and **per proxied connection, per direction**;
 //! reconnects restart the count. Unix-only (the leader transport on Windows is

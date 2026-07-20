@@ -1,0 +1,124 @@
+name: Upstream watch
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    name: Inspect xai-org/grok-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Compare reviewed and current upstream state
+        id: upstream
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository="$(jq -r '.repository' .github/upstream.json)"
+          branch="$(jq -r '.branch' .github/upstream.json)"
+          version_manifest="$(jq -r '.versionManifest' .github/upstream.json)"
+          reviewed_commit="$(jq -r '.lastReviewedCommit' .github/upstream.json)"
+          reviewed_version="$(jq -r '.lastReviewedVersion' .github/upstream.json)"
+          reviewed_release="$(jq -r '.lastReviewedRelease // empty' .github/upstream.json)"
+          latest_commit="$(gh api "repos/${repository}/commits/${branch}" --jq '.sha')"
+          latest_commit_url="$(gh api "repos/${repository}/commits/${branch}" --jq '.html_url')"
+          latest_version="$(
+            gh api -H 'Accept: application/vnd.github.raw' \
+              "repos/${repository}/contents/${version_manifest}?ref=${branch}" \
+              | awk -F '"' '/^version[[:space:]]*=/ { print $2; exit }'
+          )"
+
+          if [[ -z "$latest_version" ]]; then
+            echo "Could not read the upstream version manifest." >&2
+            exit 1
+          fi
+
+          latest_release=""
+          latest_release_url=""
+          if release_json="$(gh api "repos/${repository}/releases/latest" 2>/dev/null)"; then
+            latest_release="$(jq -r '.tag_name' <<<"$release_json")"
+            latest_release_url="$(jq -r '.html_url' <<<"$release_json")"
+          fi
+
+          changed=false
+          if [[ "$latest_commit" != "$reviewed_commit" ]]; then
+            changed=true
+          fi
+          if [[ "$latest_version" != "$reviewed_version" ]]; then
+            changed=true
+          fi
+          if [[ -n "$latest_release" && "$latest_release" != "$reviewed_release" ]]; then
+            changed=true
+          fi
+
+          {
+            echo "repository=$repository"
+            echo "reviewed_commit=$reviewed_commit"
+            echo "latest_commit=$latest_commit"
+            echo "latest_commit_url=$latest_commit_url"
+            echo "reviewed_version=$reviewed_version"
+            echo "latest_version=$latest_version"
+            echo "reviewed_release=$reviewed_release"
+            echo "latest_release=$latest_release"
+            echo "latest_release_url=$latest_release_url"
+            echo "changed=$changed"
+          } >>"$GITHUB_OUTPUT"
+      - name: Report current state
+        shell: bash
+        run: |
+          {
+            echo "## Upstream watch"
+            echo
+            echo "- Reviewed commit: \`${{ steps.upstream.outputs.reviewed_commit }}\`"
+            echo "- Current commit: \`${{ steps.upstream.outputs.latest_commit }}\`"
+            echo "- Reviewed upstream version: \`${{ steps.upstream.outputs.reviewed_version }}\`"
+            echo "- Current upstream version: \`${{ steps.upstream.outputs.latest_version }}\`"
+            echo "- Reviewed release: \`${{ steps.upstream.outputs.reviewed_release || 'none' }}\`"
+            echo "- Current release: \`${{ steps.upstream.outputs.latest_release || 'none' }}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Open review issue
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: "[Upstream] Review xai-org/grok-build changes"
+        run: |
+          set -euo pipefail
+          existing_issue="$(
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+              --json number,title \
+              --jq '[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty'
+          )"
+          if [[ -n "$existing_issue" ]]; then
+            echo "Review issue #${existing_issue} is already open." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file - <<EOF
+          A newer state of [\`${{ steps.upstream.outputs.repository }}\`](https://github.com/${{ steps.upstream.outputs.repository }}) is available for review.
+
+          - Last reviewed commit: \`${{ steps.upstream.outputs.reviewed_commit }}\`
+          - Current upstream commit: [\`${{ steps.upstream.outputs.latest_commit }}\`](${{ steps.upstream.outputs.latest_commit_url }})
+          - Last reviewed upstream version: \`${{ steps.upstream.outputs.reviewed_version }}\`
+          - Current upstream version: \`${{ steps.upstream.outputs.latest_version }}\`
+          - Last reviewed release: \`${{ steps.upstream.outputs.reviewed_release || 'none' }}\`
+          - Current upstream release: [\`${{ steps.upstream.outputs.latest_release || 'none' }}\`](${{ steps.upstream.outputs.latest_release_url || 'https://github.com/xai-org/grok-build/releases' }})
+
+          Review and port relevant changes according to [the upstream sync procedure](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/upstream-sync.md). Do not merge upstream wholesale or update \`.github/upstream.json\` before the selected changes pass the Chutes Build quality gates.
+          EOF

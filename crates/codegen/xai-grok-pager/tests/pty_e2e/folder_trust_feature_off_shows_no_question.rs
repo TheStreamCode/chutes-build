@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// 15. **Feature off => no trust question.**
-/// With `GROK_FOLDER_TRUST=0` (explicit opt-out) the feature is off, so the repo
+/// With `CHUTES_BUILD_FOLDER_TRUST=0` (explicit opt-out) the feature is off, so the repo
 /// boots straight to the welcome (the default is now on).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]

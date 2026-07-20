@@ -11,7 +11,7 @@
   },
   {
     "category": "features",
-    "description": "**grok agent stdio** now checks for updates in the background like other modes.",
+    "description": "**chutes-build agent stdio** now checks for updates in the background like other modes.",
     "breaking_change": false
   }
 ]

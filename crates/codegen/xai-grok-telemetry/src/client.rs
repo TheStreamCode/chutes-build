@@ -132,19 +132,13 @@ static TELEMETRY_CLIENT: OnceLock<Mutex<Option<TelemetryClient>>> = OnceLock::ne
 /// Returns `true` when telemetry mode is `Enabled`.
 /// Used by `log_event` — product analytics events only fire in `Enabled` mode.
 pub fn is_enabled() -> bool {
-    TELEMETRY_CLIENT
-        .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.is_enabled()))
+    false
 }
 
 /// Returns `true` when telemetry mode is `Enabled` or `SessionMetrics`.
 /// Used by `session_metrics` — lifecycle events fire in both modes.
 pub fn is_session_metrics_enabled() -> bool {
-    TELEMETRY_CLIENT
-        .get()
-        .and_then(|m| m.lock().ok())
-        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.session_metrics_enabled()))
+    false
 }
 
 pub struct UserContext {
@@ -318,71 +312,36 @@ pub fn sync_profile() {
 /// shell's `shared_client()`) so the shared TLS-warmed pool is reused for
 /// telemetry posts.
 pub fn init(
-    config: TelemetryConfig,
-    mode: TelemetryMode,
-    user_id: Option<String>,
-    team_id: Option<String>,
-    deployment_key: Option<String>,
-    origin_client: Option<OriginClientInfo>,
-    shell_version: String,
-    subscription_tier: Option<String>,
-    http_client: reqwest::Client,
+    _config: TelemetryConfig,
+    _mode: TelemetryMode,
+    _user_id: Option<String>,
+    _team_id: Option<String>,
+    _deployment_key: Option<String>,
+    _origin_client: Option<OriginClientInfo>,
+    _shell_version: String,
+    _subscription_tier: Option<String>,
+    _http_client: reqwest::Client,
 ) {
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
-    *guard = if mode.is_disabled() {
-        None
-    } else {
-        Some(TelemetryClient::from_config(
-            config,
-            mode,
-            user_id,
-            team_id,
-            deployment_key,
-            origin_client,
-            shell_version,
-            subscription_tier,
-            http_client,
-        ))
-    };
-    drop(guard);
-    sync_profile();
+    *guard = None;
 }
 
 /// Re-initialize the telemetry client if it was not created at startup
 /// (e.g. because auth was not yet available). No-op when the client
 /// is already set, so safe to call unconditionally after auth succeeds.
 pub fn init_if_needed(
-    config: TelemetryConfig,
-    mode: TelemetryMode,
-    user_id: Option<String>,
-    team_id: Option<String>,
-    deployment_key: Option<String>,
-    origin_client: Option<OriginClientInfo>,
-    shell_version: String,
-    subscription_tier: Option<String>,
-    http_client: reqwest::Client,
+    _config: TelemetryConfig,
+    _mode: TelemetryMode,
+    _user_id: Option<String>,
+    _team_id: Option<String>,
+    _deployment_key: Option<String>,
+    _origin_client: Option<OriginClientInfo>,
+    _shell_version: String,
+    _subscription_tier: Option<String>,
+    _http_client: reqwest::Client,
 ) {
-    if mode.is_disabled() {
-        return;
-    }
-    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
-    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
-    if guard.is_none() {
-        *guard = Some(TelemetryClient::from_config(
-            config,
-            mode,
-            user_id,
-            team_id,
-            deployment_key,
-            origin_client,
-            shell_version,
-            subscription_tier,
-            http_client,
-        ));
-        drop(guard);
-        sync_profile();
-    }
+    // Intentionally unavailable: telemetry cannot be enabled at runtime.
 }
 
 #[cfg(test)]

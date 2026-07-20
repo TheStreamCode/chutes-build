@@ -1,7 +1,7 @@
 //! Inline media: image/video viewer keys, playback state, media click
 //! handling, and mermaid diagram affordances.
 
-use super::{AgentView, InlineVideoState};
+use super::{AgentView, AudioAnalysis, InlineAudioState, InlineVideoState};
 use crate::app::app_view::InputOutcome;
 use crate::render::SafeBuf;
 use crate::terminal::overlay::{self, PostFlush};
@@ -10,6 +10,59 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
+
+const INLINE_MEDIA_SOURCE_MAX_BYTES: u64 = 32 * 1024 * 1024;
+const INLINE_MEDIA_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
+const INLINE_MEDIA_ITEM_MAX_BYTES: usize = 8 * 1024 * 1024;
+const INLINE_IMAGE_MAX_DIMENSION: u32 = 1280;
+
+fn prepare_inline_media(path: &std::path::Path, is_video: bool) -> Option<Vec<u8>> {
+    if std::fs::metadata(path).ok()?.len() > INLINE_MEDIA_SOURCE_MAX_BYTES {
+        return None;
+    }
+    if is_video {
+        let (frame, _, _) = crate::prompt_images::extract_poster_frame(path)?;
+        let prepared = crate::terminal::image::prepare_overlay_image_bytes(&frame)?;
+        return (prepared.len() <= INLINE_MEDIA_ITEM_MAX_BYTES).then_some(prepared);
+    }
+
+    use image::{ExtendedColorType, ImageEncoder};
+    let image = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    let image = image.thumbnail(INLINE_IMAGE_MAX_DIMENSION, INLINE_IMAGE_MAX_DIMENSION);
+    let mut encoded = Vec::new();
+    match crate::terminal::image::detect_graphics_protocol() {
+        crate::terminal::image::GraphicsProtocol::Kitty => {
+            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+            let rgba = image.to_rgba8();
+            PngEncoder::new_with_quality(&mut encoded, CompressionType::Fast, FilterType::Adaptive)
+                .write_image(
+                    rgba.as_raw(),
+                    rgba.width(),
+                    rgba.height(),
+                    ExtendedColorType::Rgba8,
+                )
+                .ok()?;
+        }
+        crate::terminal::image::GraphicsProtocol::ITerm2 => {
+            let rgb = image.to_rgb8();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 76)
+                .write_image(
+                    rgb.as_raw(),
+                    rgb.width(),
+                    rgb.height(),
+                    ExtendedColorType::Rgb8,
+                )
+                .ok()?;
+        }
+        crate::terminal::image::GraphicsProtocol::None => return None,
+    }
+    (encoded.len() <= INLINE_MEDIA_ITEM_MAX_BYTES).then_some(encoded)
+}
 
 impl AgentView {
     // -- Image viewer input --------------------------------------------------
@@ -59,7 +112,7 @@ impl AgentView {
         if is_video_playing {
             let vid_id = self.get_or_alloc_media_id(path);
             let video = self.inline_video.as_ref()?;
-            let frame_data = &video.frames[video.current_frame];
+            let frame_data = video.viewer.current_frame_data();
             let (w, h) = decode_image_dimensions(frame_data)
                 .unwrap_or((placement.info.width, placement.info.height));
             let transmit = crate::terminal::image::transmit_inline_image(frame_data, vid_id)?;
@@ -85,40 +138,47 @@ impl AgentView {
         let mut transmit_esc = String::new();
 
         if needs_transmit {
-            // Load bytes from disk (or use cached bytes if available).
+            // Preparation is serialized, bounded, and off-thread. It starts
+            // only after model work is idle, so generated media cannot contend
+            // with inference or block a TUI frame.
             if !self.inline_media_cache.contains_key(path) {
-                let bytes = if placement.info.is_video {
-                    let (frame_bytes, _, _) = crate::prompt_images::extract_poster_frame(path)?;
-                    crate::terminal::image::prepare_overlay_image_bytes(&frame_bytes)?
+                if self.inline_media_load_failures.contains(path) {
+                    return None;
+                }
+                if let Some(rx) = self.inline_media_loads.get(path) {
+                    match rx.try_recv() {
+                        Ok(Some(bytes)) => {
+                            self.inline_media_loads.remove(path);
+                            if !self.cache_inline_media_bytes(path.clone(), bytes) {
+                                self.inline_media_load_failures.insert(path.clone());
+                                return None;
+                            }
+                        }
+                        Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            self.inline_media_loads.remove(path);
+                            self.inline_media_load_failures.insert(path.clone());
+                            return None;
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+                    }
                 } else {
-                    let raw = std::fs::read(path).ok()?;
-                    crate::terminal::image::prepare_overlay_image_bytes(&raw)?
-                };
+                    if !self.session.state.is_idle() || !self.inline_media_loads.is_empty() {
+                        return None;
+                    }
+                    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                    self.inline_media_loads.insert(path.clone(), rx);
+                    let load_path = path.clone();
+                    let is_video = placement.info.is_video;
+                    std::thread::spawn(move || {
+                        let _ = tx.send(prepare_inline_media(&load_path, is_video));
+                    });
+                    return None;
+                }
                 // Bound the cache: a long image-heavy session must not pin
                 // every encoded image for its lifetime. Evicting drops only
                 // CPU-side bytes — Kitty placements already transmitted stay
                 // valid on the GPU (`inline_media_ids` is kept); an evicted
                 // path re-reads from disk if it needs a re-transmit.
-                const INLINE_MEDIA_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
-                let incoming = bytes.len();
-                if incoming < INLINE_MEDIA_CACHE_MAX_BYTES {
-                    let mut total: usize = self
-                        .inline_media_cache
-                        .values()
-                        .map(Vec::len)
-                        .sum::<usize>()
-                        + incoming;
-                    while total > INLINE_MEDIA_CACHE_MAX_BYTES {
-                        // HashMap iteration order is arbitrary — treat as random eviction.
-                        let Some(victim) = self.inline_media_cache.keys().next().cloned() else {
-                            break;
-                        };
-                        if let Some(evicted) = self.inline_media_cache.remove(&victim) {
-                            total -= evicted.len();
-                        }
-                    }
-                }
-                self.inline_media_cache.insert(path.clone(), bytes);
             }
             let image_id = self.get_or_alloc_media_id(path);
             let bytes = self.inline_media_cache.get(path)?;
@@ -276,6 +336,57 @@ impl AgentView {
         id
     }
 
+    fn cache_inline_media_bytes(&mut self, path: std::path::PathBuf, bytes: Vec<u8>) -> bool {
+        let incoming = bytes.len();
+        if incoming > INLINE_MEDIA_CACHE_MAX_BYTES {
+            return false;
+        }
+        let mut total = self
+            .inline_media_cache
+            .values()
+            .map(Vec::len)
+            .sum::<usize>()
+            + incoming;
+        while total > INLINE_MEDIA_CACHE_MAX_BYTES {
+            let Some(victim) = self.inline_media_cache.keys().next().cloned() else {
+                break;
+            };
+            if let Some(evicted) = self.inline_media_cache.remove(&victim) {
+                total -= evicted.len();
+            }
+        }
+        self.inline_media_cache.insert(path, bytes);
+        true
+    }
+
+    /// Drain one completed lazy preview job. This keeps invisible or
+    /// scrolled-away media from holding the slow-tick gate open indefinitely.
+    pub(crate) fn poll_inline_media_loads(&mut self) -> bool {
+        let completed = self
+            .inline_media_loads
+            .iter()
+            .find_map(|(path, rx)| match rx.try_recv() {
+                Ok(result) => Some((path.clone(), result)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((path.clone(), None)),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            });
+        let Some((path, result)) = completed else {
+            return false;
+        };
+        self.inline_media_loads.remove(&path);
+        match result {
+            Some(bytes) => {
+                if !self.cache_inline_media_bytes(path.clone(), bytes) {
+                    self.inline_media_load_failures.insert(path);
+                }
+            }
+            None => {
+                self.inline_media_load_failures.insert(path);
+            }
+        }
+        true
+    }
+
     /// Drain this agent's inline-media placement tracking and return the
     /// Kitty delete escapes for every image it has placed on the GPU.
     ///
@@ -329,8 +440,8 @@ impl AgentView {
         (!clear_esc.is_empty()).then_some(clear_esc)
     }
 
-    /// Stop inline video playback, dropping the pre-extracted frame set
-    /// (~50–300 MB), and request a post-draw purge for it. Returns whether a
+    /// Stop inline video playback, cancelling its bounded decoder and request
+    /// a post-draw allocator purge. Returns whether a
     /// video was actually playing — callers on the draw path rely on the
     /// deferred request (never a synchronous purge mid-frame), and image-only
     /// paths (`None` here) must not purge at all.
@@ -342,9 +453,8 @@ impl AgentView {
         had_video
     }
 
-    /// Install freshly-extracted inline video frames, dropping (and
-    /// requesting a post-draw purge for) any previous playback's frame set.
-    /// Called from the tick path when the background extraction completes.
+    /// Install a freshly-started bounded inline decoder, dropping (and
+    /// requesting a post-draw purge for) any previous playback state.
     pub(crate) fn replace_inline_video(&mut self, video: crate::app::agent_view::InlineVideoState) {
         if self.inline_video.replace(video).is_some() {
             // Switching videos: the previous frame set just dropped.
@@ -397,20 +507,25 @@ impl AgentView {
         }
     }
 
-    /// Start or restart inline video playback. If already playing for this
-    /// path, restarts from the beginning. Frames are extracted via ffmpeg in
-    /// a background thread so the UI never blocks.
+    /// Start, pause, or resume inline video playback. A completed clip restarts
+    /// from the beginning. Decoding stays in the bounded background pipeline.
     pub(crate) fn start_inline_video_playback(&mut self, path: &std::path::Path) {
-        // If already loaded for this path, just restart.
+        // Existing playback for this path acts as a normal play/pause toggle.
         if let Some(ref mut video) = self.inline_video
             && video.path == path
         {
-            video.current_frame = 0;
-            video.finished = false;
-            video.last_frame_time = std::time::Instant::now();
+            if video.viewer.finished {
+                video.viewer.restart();
+            } else {
+                video.viewer.toggle_play_pause();
+            }
             return;
         }
-        // Extract frames in a background thread to avoid blocking the UI.
+        if !self.session.state.is_idle() {
+            self.show_toast("Media preview is available when the response completes");
+            return;
+        }
+        // Start ffmpeg and receive the first frame in a background thread.
         let path_owned = path.to_path_buf();
         let (tx, rx) = std::sync::mpsc::channel();
         self.video_load_rx = Some(rx);
@@ -420,15 +535,170 @@ impl AgentView {
                 crate::prompt_images::VideoViewerState::open_from_path(&path_owned).map(|viewer| {
                     InlineVideoState {
                         path: path_owned,
-                        frames: viewer.frames,
-                        current_frame: 0,
-                        last_frame_time: std::time::Instant::now(),
-                        fps: viewer.fps,
-                        finished: false,
+                        viewer,
                     }
                 });
             let _ = tx.send(result);
         });
+    }
+
+    /// Toggle audio playback for a generated music or speech artifact.
+    /// `ffplay` keeps decoding outside the TUI process; when it is unavailable
+    /// the OS-native player is opened as the graceful fallback.
+    pub(crate) fn toggle_inline_audio_playback(&mut self, path: &std::path::Path) {
+        if !self.session.state.is_idle() {
+            self.show_toast("Media playback is available when the response completes");
+            return;
+        }
+
+        if let Some(audio) = self.inline_audio.as_mut()
+            && audio.path == path
+        {
+            if audio.is_playing() {
+                pause_audio(audio);
+                self.show_toast("Audio paused");
+            } else {
+                if audio
+                    .duration_secs
+                    .is_some_and(|duration| audio.position_at_start_secs >= duration - 0.1)
+                {
+                    audio.position_at_start_secs = 0.0;
+                }
+                if restart_audio(audio) {
+                    self.show_toast("Playing audio");
+                } else {
+                    self.open_media_natively(path);
+                }
+            }
+            return;
+        }
+
+        self.inline_audio = None;
+        match spawn_audio_child(path, 0.0, 80) {
+            Ok(child) => {
+                let (analysis_tx, analysis_rx) = std::sync::mpsc::sync_channel(1);
+                let analysis_cancel =
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let worker_cancel = std::sync::Arc::clone(&analysis_cancel);
+                let analysis_path = path.to_path_buf();
+                std::thread::spawn(move || {
+                    let _ = analysis_tx.send(analyze_audio(&analysis_path, &worker_cancel));
+                });
+                self.inline_audio = Some(InlineAudioState {
+                    path: path.to_path_buf(),
+                    child: Some(child),
+                    position_at_start_secs: 0.0,
+                    started_at: Some(std::time::Instant::now()),
+                    duration_secs: None,
+                    volume_percent: 80,
+                    waveform: Vec::new(),
+                    analysis_rx: Some(analysis_rx),
+                    analysis_cancel: Some(analysis_cancel),
+                });
+                self.show_toast("Playing audio");
+            }
+            Err(error) => {
+                tracing::debug!(%error, "ffplay unavailable; opening audio natively");
+                self.open_media_natively(path);
+            }
+        }
+    }
+
+    /// Reap naturally completed audio playback. Returns `true` when the card
+    /// needs repainting from Stop back to Play.
+    pub(crate) fn poll_inline_audio(&mut self) -> bool {
+        let Some(audio) = self.inline_audio.as_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        if !self.session.state.is_idle()
+            && let Some(cancel) = audio.analysis_cancel.as_ref()
+        {
+            cancel.store(true, std::sync::atomic::Ordering::Release);
+        }
+        if let Some(rx) = audio.analysis_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(analysis) => {
+                    audio.duration_secs = analysis.duration_secs;
+                    audio.waveform = analysis.waveform;
+                    audio.analysis_rx = None;
+                    audio.analysis_cancel = None;
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    audio.analysis_rx = None;
+                    audio.analysis_cancel = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        let finished = audio
+            .child
+            .as_mut()
+            .is_some_and(|child| matches!(child.try_wait(), Ok(Some(_)) | Err(_)));
+        if finished {
+            audio.child = None;
+            audio.started_at = None;
+            audio.position_at_start_secs = audio.duration_secs.unwrap_or(0.0);
+            changed = true;
+        }
+        changed
+    }
+
+    pub(crate) fn seek_inline_audio(&mut self, path: &std::path::Path, delta_secs: i32) {
+        let Some(audio) = self
+            .inline_audio
+            .as_mut()
+            .filter(|audio| audio.path == path)
+        else {
+            return;
+        };
+        let was_playing = audio.is_playing();
+        let target = (audio.position_secs() + delta_secs as f64).max(0.0);
+        pause_audio(audio);
+        audio.position_at_start_secs = audio
+            .duration_secs
+            .map_or(target, |duration| target.min(duration));
+        if was_playing {
+            let _ = restart_audio(audio);
+        }
+    }
+
+    pub(crate) fn adjust_inline_audio_volume(&mut self, path: &std::path::Path, delta: i8) {
+        let Some(audio) = self
+            .inline_audio
+            .as_mut()
+            .filter(|audio| audio.path == path)
+        else {
+            return;
+        };
+        let was_playing = audio.is_playing();
+        let position = audio.position_secs();
+        pause_audio(audio);
+        audio.position_at_start_secs = position;
+        audio.volume_percent = (audio.volume_percent as i16 + delta as i16).clamp(0, 100) as u8;
+        if was_playing {
+            let _ = restart_audio(audio);
+        }
+    }
+
+    pub(crate) fn seek_inline_video(&mut self, path: &std::path::Path, delta_secs: i32) {
+        let Some(video) = self
+            .inline_video
+            .as_mut()
+            .filter(|video| video.path == path)
+        else {
+            return;
+        };
+        if delta_secs < 0 {
+            for _ in 0..delta_secs.unsigned_abs() {
+                video.viewer.seek_backward();
+            }
+        } else {
+            for _ in 0..delta_secs as u32 {
+                video.viewer.seek_forward();
+            }
+        }
     }
 
     // -- Inline media click handling -----------------------------------------
@@ -453,6 +723,50 @@ impl AgentView {
             .map(|(_, path)| path.clone());
         if let Some(path) = open_target {
             self.open_media_natively(&path);
+            return Some(InputOutcome::Changed);
+        }
+
+        if let Some(path) = self
+            .inline_media_hits
+            .audio_play_buttons
+            .iter()
+            .find(|(rect, _)| rect.contains(pos))
+            .map(|(_, path)| path.clone())
+        {
+            self.toggle_inline_audio_playback(&path);
+            return Some(InputOutcome::Changed);
+        }
+
+        if let Some((path, delta)) = self
+            .inline_media_hits
+            .audio_seek_buttons
+            .iter()
+            .find(|(rect, _, _)| rect.contains(pos))
+            .map(|(_, path, delta)| (path.clone(), *delta))
+        {
+            self.seek_inline_audio(&path, delta);
+            return Some(InputOutcome::Changed);
+        }
+
+        if let Some((path, delta)) = self
+            .inline_media_hits
+            .video_seek_buttons
+            .iter()
+            .find(|(rect, _, _)| rect.contains(pos))
+            .map(|(_, path, delta)| (path.clone(), *delta))
+        {
+            self.seek_inline_video(&path, delta);
+            return Some(InputOutcome::Changed);
+        }
+
+        if let Some((path, delta)) = self
+            .inline_media_hits
+            .audio_volume_buttons
+            .iter()
+            .find(|(rect, _, _)| rect.contains(pos))
+            .map(|(_, path, delta)| (path.clone(), *delta))
+        {
+            self.adjust_inline_audio_volume(&path, delta);
             return Some(InputOutcome::Changed);
         }
 
@@ -626,6 +940,174 @@ impl AgentView {
     }
 }
 
+fn spawn_audio_child(
+    path: &std::path::Path,
+    position_secs: f64,
+    volume_percent: u8,
+) -> std::io::Result<std::process::Child> {
+    let mut command = std::process::Command::new("ffplay");
+    command
+        .args([
+            "-nodisp",
+            "-autoexit",
+            "-loglevel",
+            "quiet",
+            "-threads",
+            "1",
+        ])
+        .args(["-ss", &format!("{position_secs:.3}")])
+        .args(["-volume", &volume_percent.to_string()])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    command.spawn()
+}
+
+fn pause_audio(audio: &mut InlineAudioState) {
+    let position = audio.position_secs();
+    if let Some(mut child) = audio.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    audio.position_at_start_secs = position;
+    audio.started_at = None;
+}
+
+fn restart_audio(audio: &mut InlineAudioState) -> bool {
+    match spawn_audio_child(
+        &audio.path,
+        audio.position_at_start_secs,
+        audio.volume_percent,
+    ) {
+        Ok(child) => {
+            audio.child = Some(child);
+            audio.started_at = Some(std::time::Instant::now());
+            true
+        }
+        Err(error) => {
+            tracing::debug!(%error, "ffplay unavailable while resuming audio");
+            false
+        }
+    }
+}
+
+fn analyze_audio(path: &std::path::Path, cancel: &std::sync::atomic::AtomicBool) -> AudioAnalysis {
+    let duration_secs = probe_audio_duration(path);
+    let waveform = decode_audio_waveform(path, cancel);
+    AudioAnalysis {
+        duration_secs,
+        waveform,
+    }
+}
+
+fn probe_audio_duration(path: &std::path::Path) -> Option<f64> {
+    let mut command = std::process::Command::new("ffprobe");
+    command
+        .args([
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    xai_tty_utils::detach_std_command(&mut command);
+    let output = command.output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().parse().ok())
+        .flatten()
+}
+
+fn decode_audio_waveform(
+    path: &std::path::Path,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Vec<u8> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+
+    const WAVEFORM_WIDTH: usize = 64;
+    const WAVEFORM_HEIGHT: usize = 8;
+    if cancel.load(Ordering::Acquire) {
+        return Vec::new();
+    }
+    let mut command = std::process::Command::new("ffmpeg");
+    command
+        .args(["-hide_banner", "-loglevel", "error", "-threads", "1", "-i"])
+        .arg(path)
+        .args([
+            "-t",
+            "300",
+            "-filter_complex",
+            "aformat=channel_layouts=mono,showwavespic=s=64x8:colors=white",
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    xai_tty_utils::detach_std_command(&mut command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    let Ok(mut child) = command.spawn() else {
+        return Vec::new();
+    };
+    let status = loop {
+        if cancel.load(Ordering::Acquire) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Vec::new();
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(_) => return Vec::new(),
+        }
+    };
+    if !status.success() {
+        return Vec::new();
+    }
+    let mut pixels = Vec::with_capacity(WAVEFORM_WIDTH * WAVEFORM_HEIGHT);
+    if child
+        .stdout
+        .take()
+        .is_none_or(|mut stdout| stdout.read_to_end(&mut pixels).is_err())
+        || pixels.len() < WAVEFORM_WIDTH * WAVEFORM_HEIGHT
+    {
+        return Vec::new();
+    }
+    (0..WAVEFORM_WIDTH)
+        .map(|column| {
+            let lit = (0..WAVEFORM_HEIGHT)
+                .filter(|row| pixels[row * WAVEFORM_WIDTH + column] > 0)
+                .count();
+            lit.saturating_sub(1).min(7) as u8
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::memory_release::test_support;
@@ -637,11 +1119,7 @@ mod tests {
     fn stub_inline_video() -> crate::app::agent_view::InlineVideoState {
         crate::app::agent_view::InlineVideoState {
             path: std::path::PathBuf::from("/tmp/clip.mp4"),
-            frames: vec![Vec::new()],
-            current_frame: 0,
-            last_frame_time: std::time::Instant::now(),
-            fps: 1.0,
-            finished: false,
+            viewer: crate::prompt_images::VideoViewerState::test_stub(),
         }
     }
 

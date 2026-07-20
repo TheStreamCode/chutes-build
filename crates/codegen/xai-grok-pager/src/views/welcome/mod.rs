@@ -376,11 +376,11 @@ impl WelcomeLayout {
 
 /// Controls what the version badge renders.
 pub(super) enum VersionBadgeMode<'a> {
-    /// Full badge: team | tier | api_key | **Grok Build** VERSION+channel **Beta** (right-aligned).
+    /// Full badge: team | tier | api_key | **Chutes Build** VERSION+channel **Beta** (right-aligned).
     Full { subscription_tier: Option<&'a str> },
-    /// Hero footer: team | api_key | Grok Build Beta [channel] (right-aligned, gray).
+    /// Hero footer: team | api_key | Chutes Build Beta [channel] (right-aligned, gray).
     HeroFooter,
-    /// Hero inline: **Grok Build Beta**  VERSION (left-aligned).
+    /// Hero inline: **Chutes Build Beta** VERSION (left-aligned).
     HeroInline,
 }
 
@@ -436,7 +436,7 @@ pub(super) fn render_version_badge(
     match &mode {
         VersionBadgeMode::Full { .. } => {
             spans.push(Span::styled(
-                "Grok Build  ",
+                "Chutes Build  ",
                 Style::default()
                     .fg(theme.text_primary)
                     .add_modifier(Modifier::BOLD),
@@ -465,7 +465,7 @@ pub(super) fn render_version_badge(
         }
         VersionBadgeMode::HeroInline => {
             spans.push(Span::styled(
-                "Grok Build Beta  ",
+                "Chutes Build Beta  ",
                 Style::default()
                     .fg(theme.text_primary)
                     .add_modifier(Modifier::BOLD),
@@ -684,7 +684,7 @@ pub fn render_welcome(
 
     let mut result = match params.auth_state {
         AuthState::Pending { error } => {
-            let label = params.login_label.unwrap_or("grok.com");
+            let label = params.login_label.unwrap_or("Chutes API key");
             let login_text = format!("Login with {}", label);
             let menu = [("l", login_text.as_str()), ("q", "Quit")];
             let msg = error.as_deref().map(|e| (e, theme.accent_error));
@@ -760,7 +760,7 @@ pub fn render_welcome(
                 content_area,
                 buf,
                 Some((
-                    "Grok Build is not yet available for this account.",
+                    "Chutes Build is not yet available for this account.",
                     theme.gray_bright,
                 )),
                 &menu,
@@ -918,7 +918,7 @@ fn render_welcome_blocked(
 
 /// Render the folder-trust question. Mirrors [`render_welcome_blocked`]'s
 /// stacked layout (logo + message + menu + version badge), but the message is a
-/// multi-line block showing the workspace path and the warning that Grok Build
+/// multi-line block showing the workspace path and the warning that Chutes Build
 /// may run or modify contents in this directory (a security risk). The y/N
 /// answer is handled by the welcome input interceptor, so this only paints;
 /// `menu_rects` are returned for parity with the other welcome arms.
@@ -947,7 +947,7 @@ fn render_welcome_trust(
         // Two lines so the warning never clips at narrow / compact widths
         // (a single ~78-char line would truncate "...posing security risks").
         Line::from(Span::styled(
-            "Grok Build may run or modify contents in this directory,",
+            "Chutes Build may run or modify contents in this directory,",
             Style::default().fg(theme.gray),
         ))
         .alignment(Alignment::Center),
@@ -1939,7 +1939,7 @@ fn render_welcome_done(
         let gate_text = p
             .gate
             .map(|g| g.message.as_str())
-            .unwrap_or("SuperGrok subscription required");
+            .unwrap_or("The selected Chutes model is unavailable");
         let msg = Line::from(Span::styled(
             gate_text,
             Style::default().fg(theme.gray_bright),
@@ -1963,7 +1963,8 @@ fn render_welcome_done(
             let gate_link = p
                 .gate
                 .and_then(|g| g.url.as_deref())
-                .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
+                .filter(|url| url.starts_with("https://chutes.ai"))
+                .unwrap_or("https://chutes.ai");
             let url = Line::from(Span::styled(
                 gate_link,
                 Style::default()
@@ -2981,7 +2982,7 @@ mod tests {
 
     #[test]
     fn stacked_slot_sized_for_announcement_over_changelog() {
-        // Narrow terminal (80 cols < 90 → no hero box). With both present, the
+        // Narrow terminal (80 cols < hero threshold → no hero box). With both present, the
         // stacked info slot is sized for the announcement (priority), not the
         // changelog.
         let area = Rect::new(0, 0, 80, 50);
@@ -3091,14 +3092,17 @@ mod tests {
 
     #[test]
     fn hero_box_active_on_wide_tall_terminal() {
-        // 90 cols, 50 rows: meets the minimum for the hero box.
-        let area = Rect::new(0, 0, 90, 50);
+        // Threshold width, 50 rows: meets the minimum for the hero box.
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 4,
             ..Default::default()
         });
-        assert!(layout.has_hero_box(), "hero box should be active at 90x50");
+        assert!(
+            layout.has_hero_box(),
+            "hero box should be active at its minimum width"
+        );
         assert!(layout.hero_box.width > 0);
         assert!(layout.hero_box.height > 0);
         // Logo and menu slots are zero in hero box mode (content is inside the box).
@@ -3112,7 +3116,7 @@ mod tests {
 
     #[test]
     fn hero_box_inactive_on_narrow_terminal() {
-        // 80 cols is below the 90-col threshold.
+        // 80 cols is below the hero-box threshold.
         let area = Rect::new(0, 0, 80, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
@@ -3128,7 +3132,7 @@ mod tests {
 
     #[test]
     fn hero_box_boundary_at_min_width() {
-        let just_below = Rect::new(0, 0, 89, 50);
+        let just_below = Rect::new(0, 0, HERO_BOX_MIN_WIDTH - 1, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: just_below,
             menu_height: 4,
@@ -3136,10 +3140,10 @@ mod tests {
         });
         assert!(
             !layout.has_hero_box(),
-            "hero box should be inactive at 89 cols"
+            "hero box should be inactive just below its minimum width"
         );
 
-        let at_threshold = Rect::new(0, 0, 90, 50);
+        let at_threshold = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: at_threshold,
             menu_height: 4,
@@ -3147,7 +3151,7 @@ mod tests {
         });
         assert!(
             layout.has_hero_box(),
-            "hero box should be active at 90 cols"
+            "hero box should be active at its minimum width"
         );
     }
 
@@ -3173,7 +3177,7 @@ mod tests {
     fn hero_box_inactive_on_short_terminal() {
         // 16 rows is one short of the 17 the box needs (11 box + 1 flex gap +
         // 5 fixed-below), so it falls back to the stacked layout.
-        let area = Rect::new(0, 0, 90, 16);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 16);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 4,
@@ -3181,7 +3185,7 @@ mod tests {
         });
         assert!(
             !layout.has_hero_box(),
-            "hero box should be inactive at 90x16 (needs 17 rows)"
+            "hero box should be inactive when one row too short"
         );
     }
 
@@ -3191,7 +3195,7 @@ mod tests {
         // 3-item menu needs 11 box rows. A startup warning (error_height = 2)
         // pushes the total past height 19, so the gate must fall back to the
         // stacked layout instead of overflowing by a row.
-        let area = Rect::new(0, 0, 90, 19);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 19);
         let with_warning = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             error_height: 2,
@@ -3433,23 +3437,26 @@ mod tests {
     #[test]
     fn extract_user_code_parses_verification_url() {
         assert_eq!(
-            extract_user_code("https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH"),
+            extract_user_code("https://auth.example.com/oauth2/device?user_code=ABCD-EFGH"),
             Some("ABCD-EFGH"),
         );
         // Trailing params after the code are ignored.
         assert_eq!(
-            extract_user_code("https://x.ai/oauth2/device?user_code=WXYZ-1234&foo=bar"),
+            extract_user_code("https://chutes.ai/oauth2/device?user_code=WXYZ-1234&foo=bar"),
             Some("WXYZ-1234"),
         );
         // A param whose name merely ends in `user_code` must not be matched.
         assert_eq!(
-            extract_user_code("https://x.ai/d?foo_user_code=BAD&user_code=GOOD"),
+            extract_user_code("https://chutes.ai/d?foo_user_code=BAD&user_code=GOOD"),
             Some("GOOD"),
         );
         // No code param, empty code, and unexpected characters all yield None.
-        assert_eq!(extract_user_code("https://x.ai/oauth2/device"), None);
-        assert_eq!(extract_user_code("https://x.ai/d?user_code="), None);
-        assert_eq!(extract_user_code("https://x.ai/d?user_code=AB%20CD"), None);
+        assert_eq!(extract_user_code("https://chutes.ai/oauth2/device"), None);
+        assert_eq!(extract_user_code("https://chutes.ai/d?user_code="), None);
+        assert_eq!(
+            extract_user_code("https://chutes.ai/d?user_code=AB%20CD"),
+            None
+        );
     }
 
     #[test]
@@ -3457,7 +3464,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH";
+        let url = "https://auth.example.com/oauth2/device?user_code=ABCD-EFGH";
 
         let (copy_rect, fallback_rect) = render_welcome_authenticating(
             area,
@@ -3511,7 +3518,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234";
+        let url = "https://auth.example.com/oauth2/device?user_code=WXYZ-1234";
 
         render_welcome_authenticating(
             area,
@@ -3537,7 +3544,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234";
+        let url = "https://auth.example.com/oauth2/device?user_code=WXYZ-1234";
 
         render_welcome_authenticating(
             area,
@@ -3574,7 +3581,7 @@ mod tests {
         let theme = Theme::current();
         // 40-col terminal; URL longer than one row must wrap at the exact
         // screen edge with no leading spaces so copy-paste stays intact.
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234&extra=0123456789";
+        let url = "https://auth.example.com/oauth2/device?user_code=WXYZ-1234&extra=0123456789";
 
         render_welcome_authenticating(
             area,
@@ -3613,7 +3620,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/authorize?client_id=grok";
+        let url = "https://auth.example.com/oauth2/authorize?client_id=fixture-client";
 
         let (copy_rect, fallback_rect) = render_welcome_authenticating(
             area,

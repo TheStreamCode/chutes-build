@@ -12,7 +12,7 @@ use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use crate::extensions::routing::{TargetClientId, send_routed_notification};
 use crate::terminal::{TerminalExtError, TerminalInfo, TerminalStatus};
 
-const NOTIFICATION_METHOD: &str = "x.ai/terminal/pty/notification";
+const NOTIFICATION_METHOD: &str = "chutes.build/terminal/pty/notification";
 const OUTPUT_RING_BUFFER_SIZE: usize = 256 * 1024;
 const OUTPUT_BATCH_INTERVAL_MS: u64 = 16;
 const BUSY_POLL_INTERVAL_MS: u64 = 500;
@@ -462,7 +462,7 @@ pub async fn close_all() {
 /// Priority: explicit `shell` param > `$SHELL` env > platform default.
 /// On Windows falls back to the `detect_windows_shell` cascade
 /// (pwsh > powershell.exe > Git Bash > cmd.exe, overridable via
-/// `GROK_SHELL`) since `$SHELL` is absent.
+/// `CHUTES_BUILD_SHELL`) since `$SHELL` is absent.
 fn resolve_pty_shell(shell: Option<&str>) -> (String, Vec<String>) {
     if let Some(s) = shell {
         return (s.to_string(), vec![]);

@@ -144,13 +144,13 @@ pub struct PromptContext {
     /// stdio / generic-ACP).
     #[serde(default)]
     pub is_non_interactive: bool,
-    /// Identity in the primary grok-build system prompt (`You are <label>…`).
+    /// Identity in the primary Chutes Build system prompt (`You are <label>…`).
     /// Not the UI picker name. Defaults to [`DEFAULT_SYSTEM_PROMPT_LABEL`].
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
 }
-/// Default identity on trim-tool-descriptions (`You are Grok released by xAI`).
-pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Grok";
+/// Default identity used by the primary Chutes Build prompt.
+pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Chutes Build";
 fn default_system_prompt_label() -> String {
     DEFAULT_SYSTEM_PROMPT_LABEL.to_string()
 }
@@ -293,6 +293,14 @@ impl PromptContext {
                 tool_bridge.render_prompt(body, &placeholders).await?
             }
         };
+        tracing::debug!(
+            target: "chutes_build::prompt_efficiency",
+            audience = ?self.audience,
+            prompt_chars = prompt.len(),
+            estimated_prompt_tokens = xai_token_estimation::estimate_tokens(&prompt),
+            project_instruction_files = self.agents_md_files.len(),
+            "rendered local prompt metrics"
+        );
         Some(prompt)
     }
 }
@@ -1061,7 +1069,7 @@ mod tests {
     #[test]
     fn test_agents_md_paths_use_display_cwd_in_rendered_section() {
         let display_path = "/home/user/my-project";
-        let overlay_path = "/root/.grok/worktrees/my-project/ab-123-a-overlay";
+        let overlay_path = "/root/.chutes-build/worktrees/my-project/ab-123-a-overlay";
         let ctx = PromptContext {
             agents_md_files: vec![AgentConfigFile {
                 file_name: "AGENTS.md".to_string(),

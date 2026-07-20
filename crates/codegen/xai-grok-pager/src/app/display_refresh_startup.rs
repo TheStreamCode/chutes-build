@@ -12,8 +12,8 @@ use xai_grok_shell::util::config::{
     resolve_motion_cadence,
 };
 
-/// Inclusive bounds for motion cadence env knobs (`GROK_MIN_DRAW_MS`,
-/// `GROK_SCROLL_CADENCE_MS`).
+/// Inclusive bounds for motion cadence env knobs (`CHUTES_BUILD_MIN_DRAW_MS`,
+/// `CHUTES_BUILD_SCROLL_CADENCE_MS`).
 const CADENCE_ENV_MIN_MS: u64 = 1;
 const CADENCE_ENV_MAX_MS: u64 = 100;
 
@@ -74,9 +74,9 @@ pub fn start(
     let policy = resolve_display_refresh(requirements, user, managed, remote);
     let default_cadence_ms = DISPLAY_REFRESH_DEFAULT_CADENCE_MS;
     let (min_draw_env_set, min_draw_env_ms) =
-        cadence_ms_from_env("GROK_MIN_DRAW_MS", default_cadence_ms);
+        cadence_ms_from_env("CHUTES_BUILD_MIN_DRAW_MS", default_cadence_ms);
     let (scroll_env_set, scroll_env_ms) =
-        cadence_ms_from_env("GROK_SCROLL_CADENCE_MS", default_cadence_ms);
+        cadence_ms_from_env("CHUTES_BUILD_SCROLL_CADENCE_MS", default_cadence_ms);
     let both_env_cadence = min_draw_env_set && scroll_env_set;
     let need_probe_for_cadence =
         policy.probe_enabled && policy.auto_cadence_enabled && !both_env_cadence;

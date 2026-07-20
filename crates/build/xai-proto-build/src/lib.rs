@@ -114,10 +114,23 @@ impl XaiProtoBuilder {
 
         // Can only process one input file when using --dependency_out=FILE.
         for proto in protos {
+            let output_dir = tempfile::TempDir::new()?;
+            let dependency_path = output_dir.path().join("dependencies.d");
+            let descriptor_path = output_dir.path().join("descriptor.pb");
             let mut command = Command::new(protoc.unwrap_or(Path::new("protoc")));
             command
-                .arg("--dependency_out=/dev/stdout")
-                .arg("--descriptor_set_out=/dev/null");
+                .arg(format!(
+                    "--dependency_out={}",
+                    dependency_path
+                        .to_str()
+                        .context("dependency path not UTF-8")?
+                ))
+                .arg(format!(
+                    "--descriptor_set_out={}",
+                    descriptor_path
+                        .to_str()
+                        .context("descriptor path not UTF-8")?
+                ));
 
             // Add protoc's well-known types include directory first (if found).
             // This is needed for Bazel sandboxed builds where protoc and its
@@ -143,15 +156,17 @@ impl XaiProtoBuilder {
                 return Err(anyhow::anyhow!("protoc command failed"));
             }
 
-            let output =
-                String::from_utf8(output.stdout).context("protoc command output not UTF-8")?;
+            let output = fs::read_to_string(&dependency_path)
+                .context("protoc dependency output not UTF-8")?;
 
             let mut lines = output.lines();
             let first_line = lines.next().context("protoc command output is empty")?;
-            let prefix = "/dev/null:";
-            let rem = first_line.strip_prefix(prefix).with_context(|| {
-                format!("protoc command output must start with /dev/null: {output:?}")
-            })?;
+            // Make dependency output starts with `<descriptor path>: `. Split
+            // on colon-space instead of a bare colon so Windows drive letters
+            // are not mistaken for the target separator.
+            let (_, rem) = first_line
+                .split_once(": ")
+                .with_context(|| format!("invalid protoc dependency output: {output:?}"))?;
             for line in iter::once(rem).chain(lines) {
                 let line = line.trim();
                 let line = line.strip_suffix("\\").unwrap_or(line);

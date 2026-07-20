@@ -301,7 +301,7 @@ thread_local! {
 }
 
 /// Read cached `prompt_suggestions`, seeding from `[ui]` on first call.
-/// Default ON when unset. The `GROK_PROMPT_SUGGESTIONS` env var overrides
+/// Default ON when unset. The `CHUTES_BUILD_PROMPT_SUGGESTIONS` env var overrides
 /// this at the feature gate (see the pager's `prompt_suggestion` module).
 pub fn load_prompt_suggestions() -> bool {
     PROMPT_SUGGESTIONS_LOADED.with(|loaded| {
@@ -358,12 +358,12 @@ thread_local! {
 }
 
 /// Read cached scroll speed (1..=100), seeding from disk + env var on
-/// first call. `GROK_SCROLL_SPEED` overrides config.toml — matches the
+/// first call. `CHUTES_BUILD_SCROLL_SPEED` overrides config.toml — matches the
 /// legacy `appearance::persist::load_scroll_speed` behaviour.
 pub fn load_scroll_speed() -> u8 {
     SCROLL_SPEED_LOADED.with(|loaded| {
         if !loaded.get() {
-            let from_env = std::env::var("GROK_SCROLL_SPEED")
+            let from_env = std::env::var("CHUTES_BUILD_SCROLL_SPEED")
                 .ok()
                 .and_then(|v| v.parse::<u8>().ok());
             let raw = from_env.unwrap_or_else(|| {
@@ -391,12 +391,12 @@ thread_local! {
 }
 
 /// Read cached `scroll_mode`, seeding from disk + env var on first call.
-/// `GROK_SCROLL_MODE` overrides `[ui].scroll_mode` (the `GROK_SCROLL_SPEED`
+/// `CHUTES_BUILD_SCROLL_MODE` overrides `[ui].scroll_mode` (the `CHUTES_BUILD_SCROLL_SPEED`
 /// contract); unrecognized values from either source fall back to `auto`.
 pub fn load_scroll_mode() -> ScrollMode {
     SCROLL_MODE_LOADED.with(|loaded| {
         if !loaded.get() {
-            let from_env = std::env::var("GROK_SCROLL_MODE")
+            let from_env = std::env::var("CHUTES_BUILD_SCROLL_MODE")
                 .ok()
                 .and_then(|v| ScrollMode::from_canonical(v.trim()));
             let value = from_env.unwrap_or_else(|| {
@@ -426,11 +426,11 @@ thread_local! {
 }
 
 /// Read cached `invert_scroll`, seeding from disk + env var on first call.
-/// `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`) overrides `[ui].invert_scroll`.
+/// `CHUTES_BUILD_INVERT_SCROLL` (`1`/`true`/`0`/`false`) overrides `[ui].invert_scroll`.
 pub fn load_invert_scroll() -> bool {
     INVERT_SCROLL_LOADED.with(|loaded| {
         if !loaded.get() {
-            let from_env = std::env::var("GROK_INVERT_SCROLL")
+            let from_env = std::env::var("CHUTES_BUILD_INVERT_SCROLL")
                 .ok()
                 .and_then(|v| match v.trim() {
                     "1" | "true" => Some(true),
@@ -462,11 +462,11 @@ thread_local! {
 
 /// Read cached `scroll_lines` (1..=10), seeding from disk + env var on first
 /// call. `None` = never configured, so the per-terminal scroll profile keeps
-/// its own lines-per-tick. `GROK_SCROLL_LINES` overrides `[ui].scroll_lines`.
+/// its own lines-per-tick. `CHUTES_BUILD_SCROLL_LINES` overrides `[ui].scroll_lines`.
 pub fn load_scroll_lines() -> Option<u8> {
     SCROLL_LINES_LOADED.with(|loaded| {
         if !loaded.get() {
-            let from_env = std::env::var("GROK_SCROLL_LINES")
+            let from_env = std::env::var("CHUTES_BUILD_SCROLL_LINES")
                 .ok()
                 .and_then(|v| v.trim().parse::<u8>().ok());
             let raw = from_env.unwrap_or_else(|| {

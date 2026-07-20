@@ -1,4 +1,4 @@
-//! Build a `memory.tar.gz` archive containing session logs and MEMORY.md files.
+//! Build a `memory.tar.gz` archive containing session logs and memories.md files.
 //!
 //! The archive is uploaded to GCS at session finalize time. The reconstruct
 //! pipeline injects these into the Docker image for full replay fidelity.
@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use super::MemoryStorage;
 
-/// Build a `memory.tar.gz` archive with session logs and MEMORY.md files.
+/// Build a `memory.tar.gz` archive with session logs and memories.md files.
 pub fn build_memory_archive(storage: &MemoryStorage) -> Result<Vec<u8>> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -32,11 +32,11 @@ pub fn build_memory_archive(storage: &MemoryStorage) -> Result<Vec<u8>> {
         }
     }
 
-    // MEMORY.md files
+    // memories.md files
     let global_mem = storage.global_memory_file();
     if global_mem.is_file() {
-        ar.append_path_with_name(&global_mem, "global/MEMORY.md")
-            .context("archive global MEMORY.md")?;
+        ar.append_path_with_name(&global_mem, "global/memories.md")
+            .context("archive global memories.md")?;
     }
 
     let workspace_mem = storage.workspace_memory_file();
@@ -46,9 +46,9 @@ pub fn build_memory_archive(storage: &MemoryStorage) -> Result<Vec<u8>> {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("workspace");
-        let archive_path = format!("{ws_dir_name}/MEMORY.md");
+        let archive_path = format!("{ws_dir_name}/memories.md");
         ar.append_path_with_name(&workspace_mem, &archive_path)
-            .context("archive workspace MEMORY.md")?;
+            .context("archive workspace memories.md")?;
     }
 
     let enc = ar.into_inner().context("finalize tar")?;
@@ -98,8 +98,8 @@ mod tests {
 
         let archive = build_memory_archive(&storage).unwrap();
         let entries = tar_entry_names(&archive);
-        assert!(entries.contains(&"global/MEMORY.md".to_string()));
-        assert!(entries.contains(&"test_ws/MEMORY.md".to_string()));
+        assert!(entries.contains(&"global/memories.md".to_string()));
+        assert!(entries.contains(&"test_ws/memories.md".to_string()));
     }
 
     fn tar_entry_names(gz_bytes: &[u8]) -> Vec<String> {

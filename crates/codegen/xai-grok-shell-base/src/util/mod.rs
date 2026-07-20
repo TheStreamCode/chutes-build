@@ -69,10 +69,9 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     }
     false
 }
-/// True for xAI-operated endpoints (`*.x.ai`, cli-chat-proxy, and optional
-/// non-production xAI hosts when that feature is enabled).
+/// True for Chutes-operated endpoints and the exact Chutes model-router host.
 /// `disable_api_key_auth` refuses keys only for these; other hosts are BYOK and
-/// exempt. Safe against invalid URLs and suffix attacks (`evil-x.ai.example`).
+/// exempt. Safe against invalid URLs and suffix attacks.
 ///
 /// Scheme-agnostic so credential *refusal* fails closed. To decide where to
 /// *attach* a credential, use [`is_xai_api_bearer_url`].
@@ -102,8 +101,12 @@ fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
     }
     reqwest::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(str::to_owned))
-        .is_some_and(|host| host == "x.ai" || host.ends_with(".x.ai"))
+        .and_then(|u| u.host_str().map(|host| host.to_ascii_lowercase()))
+        .is_some_and(|host| {
+            host == "chutes.ai"
+                || host.ends_with(".chutes.ai")
+                || host == "model-router-ten.vercel.app"
+        })
 }
 fn is_loopback_host(parsed: &reqwest::Url) -> bool {
     match parsed.host() {
@@ -248,59 +251,59 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
         assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://model-router-ten.vercel.app/v1/chat/completions"
         ));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_public_api() {
-        assert!(!is_cli_chat_proxy_url("https://api.x.ai/v1"));
+        assert!(!is_cli_chat_proxy_url("https://llm.chutes.ai/v1"));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_spoofed_hostname() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com.evil.example/v1"
+            "https://model-router-ten.vercel.app.evil.example/v1"
         ));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_v11_prefix_confusion() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v11/chat/completions"
+            "https://model-router-ten.vercel.app/v11/chat/completions"
         ));
     }
     #[test]
     fn test_is_xai_api_url() {
-        assert!(is_xai_api_url("https://api.x.ai/v1"));
-        assert!(is_xai_api_url("https://api.x.ai/v1/chat/completions"));
-        assert!(is_xai_api_url("https://x.ai"));
+        assert!(is_xai_api_url("https://llm.chutes.ai/v1"));
+        assert!(is_xai_api_url("https://api.chutes.ai/chutes/"));
+        assert!(is_xai_api_url("https://chutes.ai"));
         assert!(is_xai_api_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://model-router-ten.vercel.app/v1/chat/completions"
         ));
         assert!(!is_xai_api_url("https://api.openai.com/v1"));
         assert!(!is_xai_api_url("https://api.anthropic.com/v1"));
         assert!(!is_xai_api_url("https://generativelanguage.googleapis.com"));
-        assert!(!is_xai_api_url("https://api.x.ai.evil.example/v1"));
-        assert!(!is_xai_api_url("https://evil-x.ai.attacker.com/v1"));
-        assert!(!is_xai_api_url("https://prefixx.ai/v1"));
+        assert!(!is_xai_api_url("https://api.chutes.ai.evil.example/v1"));
+        assert!(!is_xai_api_url("https://evil-chutes.ai.attacker.com/v1"));
+        assert!(!is_xai_api_url("https://prefixchutes.ai/v1"));
         assert!(!is_xai_api_url("not-a-url"));
         assert!(!is_xai_api_url(""));
-        assert!(is_xai_api_url("http://api.x.ai/v1"));
+        assert!(is_xai_api_url("http://api.chutes.ai/v1"));
         assert!(is_xai_api_url("http://localhost:11434/v1"));
     }
     #[test]
     fn test_is_xai_api_bearer_url() {
-        assert!(is_xai_api_bearer_url("https://api.x.ai/v1"));
-        assert!(!is_xai_api_bearer_url("http://api.x.ai/v1"));
+        assert!(is_xai_api_bearer_url("https://api.chutes.ai/v1"));
+        assert!(!is_xai_api_bearer_url("http://api.chutes.ai/v1"));
         assert!(!is_xai_api_bearer_url("http://localhost:11434/v1"));
         {
             assert!(!is_xai_api_bearer_url("https://localhost:11434/v1"));
             assert!(!is_xai_api_bearer_url("https://127.0.0.2:11434/v1"));
             assert!(!is_xai_api_bearer_url("https://[::1]:11434/v1"));
         }
-        assert!(is_xai_api_bearer_url("https://API.X.AI/v1"));
+        assert!(is_xai_api_bearer_url("https://API.CHUTES.AI/v1"));
         assert!(!is_xai_api_bearer_url(
-            "https://api.x.ai@attacker.example/v1"
+            "https://api.chutes.ai@attacker.example/v1"
         ));
-        assert!(!is_xai_api_bearer_url("https://х.ai/v1"));
+        assert!(!is_xai_api_bearer_url("https://chutеs.ai/v1"));
     }
     #[test]
     fn test_truncate() {

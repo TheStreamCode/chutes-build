@@ -39,10 +39,10 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     }));
 
     // Seed config.toml with the user's own default model; a fixed leader
-    // socket under the shared GROK_HOME so every spawn elects/attaches to the
+    // socket under the shared CHUTES_BUILD_HOME so every spawn elects/attaches to the
     // same leader (mirrors `LeaderCluster`).
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create GROK_HOME");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create CHUTES_BUILD_HOME");
     std::fs::write(
         grok_home.join("config.toml"),
         format!("[models]\ndefault = \"{CONFIG_MODEL}\"\n"),
@@ -51,7 +51,7 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     let socket = grok_home.join("leader-e2e.sock");
     let socket = socket.to_str().expect("socket path is utf-8").to_owned();
 
-    // Session (OAuth) auth, not the harness's default XAI_API_KEY: the
+    // Session (OAuth) auth, not the harness's default CHUTES_API_KEY: the
     // settings fetch requires `auth_manager.auth()` — in ApiKey/BYOK mode the
     // pager never requests `/v1/settings`, so a remote campaign would be
     // structurally unreachable (see `spawn_polling_session`'s doc).

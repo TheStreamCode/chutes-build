@@ -35,11 +35,11 @@ pub(crate) const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// `timeout_ms` / `wait_commands_or_subagents`) may hold the turn, regardless of
 /// the requested `timeout_ms`. Safe to cap because completed tasks ping the
 /// model (`send_task_complete` → auto-wake). 10m matches the external
-/// `TaskOutput` cap. Env override: `GROK_MAX_WAIT_BLOCK_MS`.
+/// `TaskOutput` cap. Env override: `CHUTES_BUILD_MAX_WAIT_BLOCK_MS`.
 const MAX_WAIT_BLOCK: Duration = Duration::from_secs(600);
 
 fn max_wait_block() -> Duration {
-    std::env::var("GROK_MAX_WAIT_BLOCK_MS")
+    std::env::var("CHUTES_BUILD_MAX_WAIT_BLOCK_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_millis)

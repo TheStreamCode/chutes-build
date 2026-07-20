@@ -161,7 +161,7 @@ pub(crate) async fn spawn_bottom_pinned_marker_scrollback(
 }
 
 /// [`spawn_bottom_pinned_marker_scrollback`] with extra pager env vars
-/// (e.g. `GROK_SCROLL_SPEED`) appended to the controller's env.
+/// (e.g. `CHUTES_BUILD_SCROLL_SPEED`) appended to the controller's env.
 pub(crate) async fn spawn_bottom_pinned_marker_scrollback_with_env(
     marker_count: usize,
     extra_env: &[(&str, &str)],

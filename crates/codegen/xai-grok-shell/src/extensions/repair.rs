@@ -1,4 +1,4 @@
-//! `x.ai/session/repair` — out-of-band recovery for sessions bricked by
+//! `chutes.build/session/repair` — out-of-band recovery for sessions bricked by
 //! corrupted tool-pairing history.
 //!
 //! A `ToolResult` whose owning assistant `tool_call` is missing (e.g. a
@@ -32,7 +32,7 @@ struct RepairSessionRequest {
     dry_run: bool,
 }
 
-/// Response payload for `x.ai/session/repair`.
+/// Response payload for `chutes.build/session/repair`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepairSessionResponse {
@@ -67,7 +67,7 @@ impl RepairSessionResponse {
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/session/repair" => handle_session_repair(agent, args).await,
+        "chutes.build/session/repair" => handle_session_repair(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

@@ -1,4 +1,4 @@
-//! `x.ai/hooks/*` extension handlers.
+//! `chutes.build/hooks/*` extension handlers.
 //!
 //! The file-hook list/action endpoints for the pager's hooks modal, plus the
 //! client-registered hook wire types and `parse_client_hooks`.
@@ -76,7 +76,7 @@ pub fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> HookInfo {
     }
 }
 
-// Wire types for client-registered hooks (`x.ai/hooks/run`); the gate that uses
+// Wire types for client-registered hooks (`chutes.build/hooks/run`); the gate that uses
 // them lives in `session::acp_session::hooks`.
 
 /// A matcher group from the client's registration: `{ matcher, hookCallbackIds, timeout }`.
@@ -97,7 +97,7 @@ pub type ClientHooks = HashMap<HookEventName, Vec<ClientHookGroup>>;
 
 /// One hook dispatched to a client callback: the shared [`HookEventEnvelope`]
 /// (flattened, camelCase) plus the `hookCallbackId` it targets. The same shape is sent
-/// for both the `x.ai/hooks/run` request (gate) and the `x.ai/hooks/event` notification
+/// for both the `chutes.build/hooks/run` request (gate) and the `chutes.build/hooks/event` notification
 /// (observe-only), so the client decodes one payload for every hook.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,7 +118,7 @@ pub(crate) enum ClientHookDecision {
     Other,
 }
 
-/// Response payload for `x.ai/hooks/run` (client to agent). `Default` (used on
+/// Response payload for `chutes.build/hooks/run` (client to agent). `Default` (used on
 /// timeout, transport error, or a malformed reply) proceeds.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,7 +130,7 @@ pub(crate) struct ClientHookResponse {
     pub system_message: Option<String>,
 }
 
-/// Parse client hooks from `session/new` `_meta["x.ai/hooks"]`, shaped
+/// Parse client hooks from `session/new` `_meta["chutes.build/hooks"]`, shaped
 /// `{ "<Event>": [{ matcher, hookCallbackIds }] }` (PascalCase or snake_case
 /// events). Each `matcher` is compiled with the agent's [`HookMatcher`] so client
 /// and file hooks match identically. Unknown events, malformed groups, invalid
@@ -138,7 +138,7 @@ pub(crate) struct ClientHookResponse {
 pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     let mut hooks = ClientHooks::new();
     let Some(map) = meta
-        .and_then(|m| m.get("x.ai/hooks"))
+        .and_then(|m| m.get("chutes.build/hooks"))
         .and_then(|h| h.as_object())
     else {
         return hooks;
@@ -146,11 +146,11 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     for (event_name, value) in map {
         let de = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(event_name);
         let Ok(event) = HookEventName::deserialize(de) else {
-            tracing::warn!(event = %event_name, "ignoring unknown x.ai/hooks event");
+            tracing::warn!(event = %event_name, "ignoring unknown chutes.build/hooks event");
             continue;
         };
         let Some(array) = value.as_array() else {
-            tracing::warn!(event = %event_name, "x.ai/hooks event value is not an array; skipping");
+            tracing::warn!(event = %event_name, "chutes.build/hooks event value is not an array; skipping");
             continue;
         };
         let groups: Vec<ClientHookGroup> = array
@@ -167,10 +167,10 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
 }
 
 /// Hooks to apply on a `load_session` reconnect: `Some` (possibly empty, an explicit
-/// clear) when the request meta carries `x.ai/hooks`, else `None` so a reconnect that
+/// clear) when the request meta carries `chutes.build/hooks`, else `None` so a reconnect that
 /// omits the key leaves the live registrations from `session/new` untouched.
 pub(crate) fn reconnect_client_hooks(meta: Option<&acp::Meta>) -> Option<ClientHooks> {
-    meta.and_then(|m| m.get("x.ai/hooks"))
+    meta.and_then(|m| m.get("chutes.build/hooks"))
         .map(|_| parse_client_hooks(meta))
 }
 
@@ -191,10 +191,12 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
     }
 
     let group = WireGroup::deserialize(value)
-        .inspect_err(|err| tracing::warn!(%event, %err, "ignoring malformed x.ai/hooks group"))
+        .inspect_err(
+            |err| tracing::warn!(%event, %err, "ignoring malformed chutes.build/hooks group"),
+        )
         .ok()?;
     if group.hook_callback_ids.is_empty() {
-        tracing::warn!(%event, "ignoring x.ai/hooks group with no hookCallbackIds");
+        tracing::warn!(%event, "ignoring chutes.build/hooks group with no hookCallbackIds");
         return None;
     }
     // Drop a non-finite/non-positive timeout (fall back to the default gate timeout) and
@@ -211,7 +213,7 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
         Some(pattern) => match HookMatcher::new(pattern) {
             Ok(matcher) => Some(matcher),
             Err(err) => {
-                tracing::warn!(%event, pattern, %err, "ignoring x.ai/hooks group with invalid matcher");
+                tracing::warn!(%event, pattern, %err, "ignoring chutes.build/hooks group with invalid matcher");
                 return None;
             }
         },
@@ -225,7 +227,7 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/hooks/list" => {
+        "chutes.build/hooks/list" => {
             let req: ListRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -235,7 +237,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .ok_or_else(|| anyhow::anyhow!("session not found"));
             super::to_ext_response(result)
         }
-        "x.ai/hooks/action" => {
+        "chutes.build/hooks/action" => {
             let req: xai_hooks_plugins_types::HooksActionRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -317,7 +319,7 @@ mod tests {
     #[test]
     fn parse_client_hooks_parses_valid_groups() {
         let meta = serde_json::json!({
-            "x.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "matcher": "run_terminal_command", "hookCallbackIds": ["cb_0"] },
                     { "matcher": null, "hookCallbackIds": ["cb_1"] },
@@ -349,7 +351,7 @@ mod tests {
 
         let meta = serde_json::json!({
             "NotARealEvent": [{ "hookCallbackIds": ["x"] }],
-            "x.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "matcher": "[invalid", "hookCallbackIds": ["bad_regex"] },
                     { "matcher": "run_terminal_command", "hookCallbackIds": [] },
@@ -367,7 +369,7 @@ mod tests {
     #[test]
     fn parse_client_hooks_reads_group_timeout() {
         let meta = serde_json::json!({
-            "x.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "hookCallbackIds": ["a"], "timeout": 5.0 },
                     { "hookCallbackIds": ["b"], "timeout": 0 },
@@ -388,14 +390,14 @@ mod tests {
     #[test]
     fn parse_client_hooks_canonicalizes_subagent_alias() {
         let meta = serde_json::json!({
-            "x.ai/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
+            "chutes.build/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
         });
         let hooks = parse_client_hooks(meta.as_object());
         assert!(hooks.contains_key(&HookEventName::SubagentStop));
         assert!(!hooks.contains_key(&HookEventName::SubagentEnd));
     }
 
-    /// Reconnect refresh applies hooks only when the load meta carries `x.ai/hooks`:
+    /// Reconnect refresh applies hooks only when the load meta carries `chutes.build/hooks`:
     /// an absent key returns `None` (don't wipe `session/new` registrations); a present
     /// key returns `Some` (an empty object is an explicit clear).
     #[test]
@@ -403,12 +405,13 @@ mod tests {
         assert!(reconnect_client_hooks(None).is_none());
         assert!(reconnect_client_hooks(serde_json::json!({ "other": true }).as_object()).is_none());
 
-        let cleared = reconnect_client_hooks(serde_json::json!({ "x.ai/hooks": {} }).as_object());
+        let cleared =
+            reconnect_client_hooks(serde_json::json!({ "chutes.build/hooks": {} }).as_object());
         assert!(cleared.is_some_and(|h| h.is_empty()));
 
         let set = reconnect_client_hooks(
             serde_json::json!({
-                "x.ai/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
+                "chutes.build/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
             })
             .as_object(),
         );

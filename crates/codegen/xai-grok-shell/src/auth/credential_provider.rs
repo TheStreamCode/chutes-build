@@ -400,8 +400,8 @@ pub fn build_default_otel_layer_config() -> xai_grok_telemetry::otel_layer::Otel
         extra_headers: endpoints.resolve_otlp_headers(),
         export_interval: endpoints.resolve_otlp_export_interval(),
         timeout: endpoints.resolve_otlp_timeout(),
-        enabled: endpoints.resolve_traces_export_enabled()
-            && !crate::agent::config::is_telemetry_explicitly_disabled_sync(),
+        // Privacy invariant: Chutes Build never exports diagnostic spans.
+        enabled: false,
     };
     let token_header_value = grok_com_config.token_header.clone();
     let grok_home = crate::util::grok_home::grok_home();
@@ -424,10 +424,10 @@ mod tests {
     use chrono::{Duration as ChronoDuration, Utc};
     use std::sync::Mutex;
     use xai_grok_auth::AuthCredentialProvider;
-    /// Serializes tests that pin `GROK_AUTH_EARLY_INVALIDATION_SECS`, since
+    /// Serializes tests that pin `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS`, since
     /// env vars are process-global and parallel tests would race.
     static EARLY_INVALIDATION_LOCK: Mutex<()> = Mutex::new(());
-    /// RAII guard: pins `GROK_AUTH_EARLY_INVALIDATION_SECS` to the production
+    /// RAII guard: pins `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` to the production
     /// default (300s) while held, restoring the previous value on drop.
     /// Acquires `EARLY_INVALIDATION_LOCK` so concurrent test runners can't
     /// observe a half-mutated env.
@@ -440,8 +440,8 @@ mod tests {
             let lock = EARLY_INVALIDATION_LOCK
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            let previous = std::env::var("GROK_AUTH_EARLY_INVALIDATION_SECS").ok();
-            unsafe { std::env::set_var("GROK_AUTH_EARLY_INVALIDATION_SECS", "300") };
+            let previous = std::env::var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS").ok();
+            unsafe { std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", "300") };
             Self {
                 _lock: lock,
                 previous,
@@ -452,8 +452,10 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 match self.previous.take() {
-                    Some(prev) => std::env::set_var("GROK_AUTH_EARLY_INVALIDATION_SECS", prev),
-                    None => std::env::remove_var("GROK_AUTH_EARLY_INVALIDATION_SECS"),
+                    Some(prev) => {
+                        std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", prev)
+                    }
+                    None => std::env::remove_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS"),
                 }
             }
         }
@@ -596,7 +598,10 @@ mod tests {
         );
         let api_key_provider: xai_grok_tools::types::SharedApiKeyProvider =
             Arc::new(crate::auth::manager::SharedAuthKeyProvider(mgr.clone()));
-        for denied in ["https://byok.attacker.example/v1", "http://api.x.ai/v1"] {
+        for denied in [
+            "https://byok.attacker.example/v1",
+            "http://llm.chutes.ai/v1",
+        ] {
             let resolved =
                 embedding_session_credentials(denied, Some(&mgr), Some(api_key_provider.clone()));
             assert!(
@@ -605,7 +610,7 @@ mod tests {
             );
         }
         let resolved = embedding_session_credentials(
-            "https://api.x.ai/v1",
+            "https://llm.chutes.ai/v1",
             Some(&mgr),
             Some(api_key_provider),
         );

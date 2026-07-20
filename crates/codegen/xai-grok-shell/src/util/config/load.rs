@@ -23,7 +23,7 @@ fn toml_bool_sync(env_var: Option<&str>, section: &str, key: &str) -> bool {
     }
 }
 pub fn load_relay_sync_enabled_sync() -> bool {
-    toml_bool_sync(Some("GROK_RELAY_SYNC_ENABLED"), "relay", "enabled")
+    toml_bool_sync(Some("CHUTES_BUILD_RELAY_SYNC_ENABLED"), "relay", "enabled")
 }
 /// `[harness]` blocking-upload settings from ONE effective-config parse:
 /// `block_for_upload` (default false — prompt handling waits for turn-end
@@ -110,8 +110,8 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
 /// Resolve permission config with project override semantics.
 ///
 /// Priority (per approved plan):
-/// 1. Nearest project `.grok/config.toml` with `[permission]` section (from cwd upward)
-/// 2. Global `~/.grok/config.toml` `[permission]` section
+/// 1. Nearest project `.chutes-build/config.toml` with `[permission]` section (from cwd upward)
+/// 2. Global `~/.chutes-build/config.toml` `[permission]` section
 ///
 /// Project `[permission]` overrides global wholesale (no deep merge).
 ///

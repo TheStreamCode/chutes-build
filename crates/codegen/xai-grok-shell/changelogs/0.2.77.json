@@ -1,7 +1,7 @@
 [
   {
     "category": "features",
-    "description": "**Pasting images** from the local clipboard now works when running commands through `grok wrap`.",
+    "description": "**Pasting images** from the local clipboard now works when running commands through `chutes-build wrap`.",
     "breaking_change": false
   },
   {

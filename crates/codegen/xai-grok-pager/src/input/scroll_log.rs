@@ -1,4 +1,4 @@
-//! Scroll flight recorder — `GROK_SCROLL_LOG` JSONL log of scroll-stream
+//! Scroll flight recorder — `CHUTES_BUILD_SCROLL_LOG` JSONL log of scroll-stream
 //! transitions, for offline analysis of real gestures.
 //!
 //! The scroll-debug HUD ([`crate::views::scroll_debug_hud`]) samples state
@@ -14,9 +14,9 @@
 //! with `flushed: 0`, where `dropped` counts only coast-budget write-offs
 //! (see [`super::mouse`]).
 //!
-//! Enablement: `GROK_SCROLL_LOG=1` (or set-but-empty) logs to
-//! `~/.grok/logs/scroll-log-<timestamp>.jsonl`; any other non-`0` value is
-//! used as the target path. Unset (or `0`, matching `GROK_SCROLL_DEBUG`)
+//! Enablement: `CHUTES_BUILD_SCROLL_LOG=1` (or set-but-empty) logs to
+//! `~/.chutes-build/logs/scroll-log-<timestamp>.jsonl`; any other non-`0` value is
+//! used as the target path. Unset (or `0`, matching `CHUTES_BUILD_SCROLL_DEBUG`)
 //! disables: [`super::mouse::MouseScrollState`] then holds `None` and every
 //! emission point costs one branch.
 //!
@@ -155,7 +155,7 @@ enum Sink {
     Disabled,
 }
 
-/// Appends [`ScrollLogRecord`]s to the `GROK_SCROLL_LOG` file. Owned as
+/// Appends [`ScrollLogRecord`]s to the `CHUTES_BUILD_SCROLL_LOG` file. Owned as
 /// `Option<Self>` by [`super::mouse::MouseScrollState`]; construction reads
 /// the env once, the file opens on the first record so an enabled-but-idle
 /// session creates nothing.
@@ -173,10 +173,10 @@ pub(crate) struct ScrollLogRecorder {
 }
 
 impl ScrollLogRecorder {
-    /// Build from `GROK_SCROLL_LOG` (see module docs for value semantics);
+    /// Build from `CHUTES_BUILD_SCROLL_LOG` (see module docs for value semantics);
     /// `None` when unset or `0`.
     pub(crate) fn from_env_at(base: Instant) -> Option<Self> {
-        let raw = std::env::var("GROK_SCROLL_LOG").ok()?;
+        let raw = std::env::var("CHUTES_BUILD_SCROLL_LOG").ok()?;
         let value = raw.trim();
         if value == "0" {
             return None;
@@ -276,7 +276,7 @@ fn open_writer(path: &Path) -> std::io::Result<BufWriter<File>> {
     Ok(BufWriter::new(File::create(path)?))
 }
 
-/// `~/.grok/logs/scroll-log-<utc-ts>.jsonl` — the input-debug dump's dir
+/// `~/.chutes-build/logs/scroll-log-<utc-ts>.jsonl` — the input-debug dump's dir
 /// and timestamp conventions ([`crate::input_log`]). Also the target of the
 /// `/debug log` runtime toggle ([`super::mouse::MouseScrollState`]).
 pub(crate) fn default_log_path() -> PathBuf {

@@ -386,7 +386,7 @@ mod tests {
     fn redacts_additional_provider_prefixes() {
         let cases = [
             (
-                fixture(&["token ghp_", "0123456789abcdefghijABCDEFGHIJ012345"]),
+                fixture(&["token ghp_", "0123456789abcdefghijABCDEFGHIJ012345"]), // gitleaks:allow
                 "github classic pat",
             ),
             (
@@ -454,21 +454,22 @@ mod tests {
     #[test]
     fn redacts_bare_jwt_leaving_no_token() {
         let out = redact_secrets(
-            "deployment key eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f",
+            "deployment key eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f", // gitleaks:allow
         );
         assert!(!out.contains("eyJ"), "bare JWT survived redaction: {out}");
     }
 
     #[test]
     fn redacts_sensitive_url_query_params() {
-        let out = redact_secrets("callback https://x.ai/cb?code=ABC123XYZ&state=xyz789 failed");
+        let out =
+            redact_secrets("callback https://chutes.ai/cb?code=ABC123XYZ&state=xyz789 failed");
         assert!(!out.contains("ABC123XYZ"), "OAuth code leaked: {out}");
         assert!(!out.contains("xyz789"), "state leaked: {out}");
     }
 
     #[test]
     fn url_regex_excludes_trailing_punctuation() {
-        let out = redact_secrets("see `https://x.ai/cb?code=ABCD12345`");
+        let out = redact_secrets("see `https://chutes.ai/cb?code=ABCD12345`");
         assert!(out.ends_with('`'), "trailing backtick lost: {out}");
     }
 

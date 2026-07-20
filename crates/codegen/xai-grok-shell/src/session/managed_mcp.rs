@@ -797,9 +797,9 @@ mod tests {
     #[test]
     fn lower_precedence_http_servers_are_blocked_by_toml_name_claims() {
         let cwd = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
+        std::fs::create_dir_all(cwd.path().join(".chutes-build")).unwrap();
         std::fs::write(
-            cwd.path().join(".grok").join("config.toml"),
+            cwd.path().join(".chutes-build").join("config.toml"),
             r#"
 [mcp_servers.github]
 url = "https://config.example.com/mcp"
@@ -884,7 +884,7 @@ enabled = false
             "mcpServers": {
                 "echo-mcp": {
                     "command": "python3",
-                    "args": ["${GROK_PLUGIN_ROOT}/mcp-echo-server.py"]
+                    "args": ["${CHUTES_BUILD_PLUGIN_ROOT}/mcp-echo-server.py"]
                 }
             }
         }))
@@ -893,8 +893,8 @@ enabled = false
         let (servers, _) = load_plugin_mcp_servers_from_config(
             &config,
             "team-tool",
-            "/home/user/.grok/plugins/team-tool",
-            "/home/user/.grok/plugin-data/team-tool",
+            "/home/user/.chutes-build/plugins/team-tool",
+            "/home/user/.chutes-build/plugin-data/team-tool",
         );
 
         assert_eq!(servers.len(), 1, "should create one server");
@@ -909,7 +909,7 @@ enabled = false
                 assert_eq!(command.display().to_string(), "python3");
                 assert_eq!(
                     args.as_slice(),
-                    &["/home/user/.grok/plugins/team-tool/mcp-echo-server.py"]
+                    &["/home/user/.chutes-build/plugins/team-tool/mcp-echo-server.py"]
                 );
             }
             other => panic!("expected Stdio server, got {:?}", other),

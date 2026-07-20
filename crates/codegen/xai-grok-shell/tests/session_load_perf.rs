@@ -18,7 +18,7 @@
 //! Session data (both tests): a synthetic session mirroring the pathological real
 //! one (redundant `available_commands_update` + big rewind snapshots; size knobs
 //! via env, see [`GenOpts::from_env`]), or a real session dir via
-//! `GROK_PERF_SESSION_SRC=/path/to/<session-dir>`.
+//! `CHUTES_BUILD_PERF_SESSION_SRC=/path/to/<session-dir>`.
 //!
 //! Run:
 //!   cargo test -p xai-grok-shell --test session_load_perf -- --nocapture
@@ -66,17 +66,17 @@ impl GenOpts {
                 .unwrap_or(default)
         }
         // A single multiplier for quick scaling of the dominant contributors.
-        let scale = g("GROK_PERF_SCALE", 1).max(1);
+        let scale = g("CHUTES_BUILD_PERF_SCALE", 1).max(1);
         Self {
-            turns: g("GROK_PERF_TURNS", 80) * scale,
-            acu_per_turn: g("GROK_PERF_ACU_PER_TURN", 15),
-            catalog_commands: g("GROK_PERF_CATALOG_COMMANDS", 64),
-            catalog_desc_len: g("GROK_PERF_CATALOG_DESC_LEN", 320),
-            agent_chunks_per_turn: g("GROK_PERF_AGENT_CHUNKS_PER_TURN", 8),
-            agent_chunk_len: g("GROK_PERF_AGENT_CHUNK_LEN", 2000),
-            rewind_points: g("GROK_PERF_REWIND_POINTS", 60) * scale,
-            files_per_rewind: g("GROK_PERF_FILES_PER_REWIND", 40),
-            file_content_len: g("GROK_PERF_FILE_CONTENT_LEN", 8000),
+            turns: g("CHUTES_BUILD_PERF_TURNS", 80) * scale,
+            acu_per_turn: g("CHUTES_BUILD_PERF_ACU_PER_TURN", 15),
+            catalog_commands: g("CHUTES_BUILD_PERF_CATALOG_COMMANDS", 64),
+            catalog_desc_len: g("CHUTES_BUILD_PERF_CATALOG_DESC_LEN", 320),
+            agent_chunks_per_turn: g("CHUTES_BUILD_PERF_AGENT_CHUNKS_PER_TURN", 8),
+            agent_chunk_len: g("CHUTES_BUILD_PERF_AGENT_CHUNK_LEN", 2000),
+            rewind_points: g("CHUTES_BUILD_PERF_REWIND_POINTS", 60) * scale,
+            files_per_rewind: g("CHUTES_BUILD_PERF_FILES_PER_REWIND", 40),
+            file_content_len: g("CHUTES_BUILD_PERF_FILE_CONTENT_LEN", 8000),
         }
     }
 }
@@ -238,13 +238,13 @@ fn copy_tree(src: &Path, dst: &Path) {
 }
 
 /// Prepare a session on disk under `root` for working dir `cwd`. Returns the
-/// `Info` and the session directory path. Uses `GROK_PERF_SESSION_SRC` if set
+/// `Info` and the session directory path. Uses `CHUTES_BUILD_PERF_SESSION_SRC` if set
 /// (copies a real session), otherwise synthesizes one via the production
 /// storage adapter (summary) + raw envelope writes (updates/rewind).
 async fn prepare_session(root: &Path, cwd: &Path, opts: &GenOpts) -> (Info, PathBuf) {
     let adapter = JsonlStorageAdapter::with_root(root.to_path_buf());
 
-    if let Ok(src) = std::env::var("GROK_PERF_SESSION_SRC") {
+    if let Ok(src) = std::env::var("CHUTES_BUILD_PERF_SESSION_SRC") {
         // Real session: create a registered session shell to get the encoded
         // cwd dir + a valid summary, then overlay the real files on top.
         let id = uuid::Uuid::new_v4().to_string();
@@ -376,7 +376,7 @@ fn print_kind_breakdown(label: &str, stats: &KindStats) {
 ///
 /// `#[ignore]`: this is a measurement tool (generates tens of MB, ~3 s), and its
 /// only correctness assertion is covered by the unit tests. Run explicitly with
-/// `--ignored` (optionally `GROK_PERF_SESSION_SRC=...`) to get the numbers.
+/// `--ignored` (optionally `CHUTES_BUILD_PERF_SESSION_SRC=...`) to get the numbers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "perf measurement tool; run with --ignored"]
 async fn phase_breakdown_real_functions() {
@@ -498,7 +498,7 @@ async fn phase_breakdown_real_functions() {
 /// Re-create the rewind file after the isolation step deletes it (synthetic
 /// case). For a real session copy we cannot regenerate; leave it absent.
 fn generate_or_restore_rewind(path: &Path, opts: &GenOpts) {
-    if std::env::var("GROK_PERF_SESSION_SRC").is_ok() {
+    if std::env::var("CHUTES_BUILD_PERF_SESSION_SRC").is_ok() {
         return;
     }
     generate_rewind_jsonl(path, opts);
@@ -622,15 +622,15 @@ async fn full_session_load_e2e() {
     // SAFETY: single-threaded current-thread runtime; set before any agent code
     // reads these process-globals (grok_home()/instrumentation mode are OnceLock).
     unsafe {
-        std::env::set_var("GROK_HOME", grok_home.path());
-        std::env::set_var("GROK_INSTRUMENTATION", "log");
-        std::env::set_var("GROK_INSTRUMENTATION_LOG", &instr_log);
-        std::env::set_var("GROK_CLI_CHAT_PROXY_BASE_URL", server.url());
-        std::env::set_var("GROK_XAI_API_BASE_URL", server.url());
-        std::env::set_var("XAI_API_KEY", "test-key-for-ci");
-        std::env::set_var("GROK_TELEMETRY_ENABLED", "false");
-        std::env::set_var("GROK_FEEDBACK_ENABLED", "false");
-        std::env::set_var("GROK_TRACE_UPLOAD", "false");
+        std::env::set_var("CHUTES_BUILD_HOME", grok_home.path());
+        std::env::set_var("CHUTES_BUILD_INSTRUMENTATION", "log");
+        std::env::set_var("CHUTES_BUILD_INSTRUMENTATION_LOG", &instr_log);
+        std::env::set_var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL", server.url());
+        std::env::set_var("CHUTES_BUILD_XAI_API_BASE_URL", server.url());
+        std::env::set_var("CHUTES_API_KEY", "test-key-for-ci");
+        std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "false");
+        std::env::set_var("CHUTES_BUILD_FEEDBACK_ENABLED", "false");
+        std::env::set_var("CHUTES_BUILD_TRACE_UPLOAD", "false");
     }
 
     // Install the production instrumentation layer so `instrumentation_timer!`
@@ -710,7 +710,7 @@ async fn full_session_load_e2e() {
             .expect("initialize timed out")
             .expect("initialize failed");
 
-            if let Some(method) = init.auth_methods.iter().find(|m| &*m.id().0 == "xai.api_key") {
+            if let Some(method) = init.auth_methods.iter().find(|m| &*m.id().0 == "chutes.api_key") {
                 let _ = client_conn
                     .authenticate(acp::AuthenticateRequest::new(method.id().clone()).meta(serde_json::json!({ "headless": true }).as_object().cloned()))
                     .await;

@@ -7,7 +7,7 @@
 //! (e.g. MSBuild `/t:Build`, cl.exe `/nologo`). This breaks native Windows
 //! C++/C#/.NET builds.
 //!
-//! Set `GROK_SHELL` to override auto-detection: `pwsh`, `powershell`,
+//! Set `CHUTES_BUILD_SHELL` to override auto-detection: `pwsh`, `powershell`,
 //! `bash`, or `cmd`. Result is cached for the process lifetime.
 
 /// Detected Windows shell and how to invoke it.
@@ -22,7 +22,7 @@ pub enum WindowsShell {
 
 /// Detect the best available shell on Windows.
 ///
-/// If `GROK_SHELL` is set, it takes precedence over auto-detection.
+/// If `CHUTES_BUILD_SHELL` is set, it takes precedence over auto-detection.
 /// Otherwise the cascade is: pwsh → powershell.exe → Git Bash → cmd.exe.
 ///
 /// Result is cached for the process lifetime.
@@ -32,36 +32,36 @@ pub fn detect_windows_shell() -> &'static WindowsShell {
     static CACHED: OnceLock<WindowsShell> = OnceLock::new();
 
     CACHED.get_or_init(|| {
-        // Explicit override via GROK_SHELL.
-        if let Ok(val) = std::env::var("GROK_SHELL") {
+        // Explicit override via CHUTES_BUILD_SHELL.
+        if let Ok(val) = std::env::var("CHUTES_BUILD_SHELL") {
             match val.trim().to_ascii_lowercase().as_str() {
                 "pwsh" => {
-                    tracing::info!("Windows shell (GROK_SHELL override): pwsh");
+                    tracing::info!("Windows shell (CHUTES_BUILD_SHELL override): pwsh");
                     return WindowsShell::Pwsh;
                 }
                 "powershell" => {
-                    tracing::info!("Windows shell (GROK_SHELL override): powershell.exe");
+                    tracing::info!("Windows shell (CHUTES_BUILD_SHELL override): powershell.exe");
                     return WindowsShell::PowerShell;
                 }
                 "bash" | "gitbash" | "git-bash" => {
                     if let Some(path) = find_git_bash() {
                         tracing::info!(
                             shell = path,
-                            "Windows shell (GROK_SHELL override): Git Bash"
+                            "Windows shell (CHUTES_BUILD_SHELL override): Git Bash"
                         );
                         return WindowsShell::GitBash(path);
                     }
                     tracing::warn!(
-                        "GROK_SHELL={val} but Git Bash not found; falling through to auto-detect"
+                        "CHUTES_BUILD_SHELL={val} but Git Bash not found; falling through to auto-detect"
                     );
                 }
                 "cmd" | "cmd.exe" => {
-                    tracing::info!("Windows shell (GROK_SHELL override): cmd.exe");
+                    tracing::info!("Windows shell (CHUTES_BUILD_SHELL override): cmd.exe");
                     return WindowsShell::Cmd;
                 }
                 other => {
                     tracing::warn!(
-                        "GROK_SHELL={other} is not recognized \
+                        "CHUTES_BUILD_SHELL={other} is not recognized \
                          (expected pwsh|powershell|bash|cmd); falling through to auto-detect"
                     );
                 }
@@ -348,7 +348,7 @@ fn invocation_for(shell: &WindowsShell, command: &str) -> ShellInvocation {
 //
 // Locates an absolute path to a bash/zsh binary on Unix:
 //
-//   1. `$GROK_SHELL` override, if it names the requested kind and is runnable.
+//   1. `$CHUTES_BUILD_SHELL` override, if it names the requested kind and is runnable.
 //   2. `$SHELL`, if it names the requested kind and is runnable.
 //      Covers most NixOS / Homebrew / `nix-darwin` setups where the user's
 //      login shell already lives at the resolved path (e.g.
@@ -426,8 +426,8 @@ fn resolve_unix_shell_path(kind: UnixShellKind) -> String {
     let name = kind.name();
     let matches_kind = |p: &std::path::Path| p.file_name().and_then(|n| n.to_str()) == Some(name);
 
-    // 1) Explicit override via $GROK_SHELL.
-    if let Ok(s) = std::env::var("GROK_SHELL") {
+    // 1) Explicit override via $CHUTES_BUILD_SHELL.
+    if let Ok(s) = std::env::var("CHUTES_BUILD_SHELL") {
         let p = std::path::PathBuf::from(&s);
         if matches_kind(&p) && is_executable(&p) {
             return s;

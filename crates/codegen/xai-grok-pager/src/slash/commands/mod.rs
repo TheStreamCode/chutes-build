@@ -79,7 +79,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(docs::DocsCommand),
         Arc::new(home::HomeCommand),
         Arc::new(new::NewCommand),
-        
         Arc::new(fork::ForkCommand),
         Arc::new(compact::CompactCommand),
         Arc::new(copy::CopyCommand),
@@ -117,7 +116,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(mcps::McpsCommand),
         Arc::new(btw::BtwCommand),
         Arc::new(recap::RecapCommand),
-        
         Arc::new(terminal_setup::TerminalSetupCommand),
         Arc::new(voice::VoiceCommand),
         Arc::new(loop_cmd::LoopCommand),
@@ -481,7 +479,7 @@ mod tests {
     fn usage_manage_returns_open_url() {
         match run_usage("manage") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://grok.com/?_s=usage");
+                assert_eq!(url, "https://chutes.ai/?_s=usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }
@@ -513,7 +511,7 @@ mod tests {
     fn usage_manage_with_leading_whitespace() {
         match run_usage("  manage  ") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://grok.com/?_s=usage");
+                assert_eq!(url, "https://chutes.ai/?_s=usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }

@@ -44,7 +44,7 @@ pub struct AgentBuilder {
     /// Model-facing working directory for the system prompt `<user_info>` block.
     ///
     /// In forked sessions, the real `working_directory` is an overlay/worktree
-    /// path (e.g., `~/.grok/worktrees/project/fork-...-overlay`) that must stay
+    /// path (e.g., `~/.chutes-build/worktrees/project/fork-...-overlay`) that must stay
     /// hidden from the model. When set, `PromptContext.working_directory` uses
     /// this value instead of `self.working_directory`, so the system prompt
     /// shows the original project path. Tool execution (`ToolContext.cwd`,
@@ -140,9 +140,9 @@ fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::Too
     use xai_grok_tools::implementations::grok_build;
     let existing: std::collections::HashSet<&str> =
         tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
-    let missing_enter = !existing.contains("GrokBuild:enter_plan_mode");
-    let missing_exit = !existing.contains("GrokBuild:exit_plan_mode");
-    let missing_ask = !existing.contains("GrokBuild:ask_user_question");
+    let missing_enter = !existing.contains("ChutesBuild:enter_plan_mode");
+    let missing_exit = !existing.contains("ChutesBuild:exit_plan_mode");
+    let missing_ask = !existing.contains("ChutesBuild:ask_user_question");
     drop(existing);
     if missing_enter {
         tool_config
@@ -159,6 +159,206 @@ fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::Too
             .tools
             .push((&grok_build::AskUserQuestionTool).into());
     }
+}
+/// Ensure the Chutes-native ecosystem tools are available to default agents.
+fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
+    use xai_grok_tools::implementations::chutes;
+    use xai_grok_tools::registry::types::ToolConfig;
+
+    let supports_lazy_discovery = tool_config
+        .tools
+        .iter()
+        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool | ToolKind::UseTool)));
+    if !supports_lazy_discovery {
+        return;
+    }
+
+    let defaults: [ToolConfig; 7] = [
+        (&chutes::Context7SearchTool).into(),
+        (&chutes::Context7DocsTool).into(),
+        (&chutes::GetChutesUsageTool).into(),
+        (&chutes::ListMediaModelsTool).into(),
+        (&chutes::DescribeMediaModelTool).into(),
+        (&chutes::GenerateMediaTool).into(),
+        (&chutes::BrowserTool).into(),
+    ];
+    for tool in defaults {
+        if !tool_config
+            .tools
+            .iter()
+            .any(|existing| existing.id == tool.id)
+        {
+            tool_config.tools.push(tool);
+        }
+    }
+}
+
+/// Remove Chutes ecosystem tools from the per-turn schema list when the agent
+/// can discover and invoke them through `search_tool` / `use_tool` instead.
+fn take_lazy_chutes_tools(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+) -> Vec<String> {
+    let supports_lazy_discovery = tool_config
+        .tools
+        .iter()
+        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool)))
+        && tool_config
+            .tools
+            .iter()
+            .any(|tool| matches!(tool.kind, Some(ToolKind::UseTool)));
+    if !supports_lazy_discovery {
+        return Vec::new();
+    }
+
+    const LAZY_CHUTES_IDS: [&str; 7] = [
+        "ChutesBuild:context7_search",
+        "ChutesBuild:context7_docs",
+        "ChutesBuild:get_chutes_usage",
+        "ChutesBuild:list_media_models",
+        "ChutesBuild:describe_media_model",
+        "ChutesBuild:generate_media",
+        "ChutesBuild:browser",
+    ];
+    let mut lazy = Vec::new();
+    tool_config.tools.retain(|tool| {
+        if LAZY_CHUTES_IDS.contains(&tool.id.as_str()) {
+            lazy.push(tool.id.clone());
+            false
+        } else {
+            true
+        }
+    });
+    lazy
+}
+
+/// Keep low-frequency runtime controls available without paying their schema
+/// cost on every coding turn.
+fn take_lazy_support_tools(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+) -> Vec<String> {
+    let supports_lazy_discovery = tool_config
+        .tools
+        .iter()
+        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool)))
+        && tool_config
+            .tools
+            .iter()
+            .any(|tool| matches!(tool.kind, Some(ToolKind::UseTool)));
+    if !supports_lazy_discovery {
+        return Vec::new();
+    }
+
+    const LAZY_SUPPORT_IDS: [&str; 5] = [
+        "ChutesBuild:scheduler_create",
+        "ChutesBuild:scheduler_delete",
+        "ChutesBuild:scheduler_list",
+        "ChutesBuild:monitor",
+        "ChutesBuild:update_goal",
+    ];
+    let mut lazy = Vec::new();
+    tool_config.tools.retain(|tool| {
+        if LAZY_SUPPORT_IDS.contains(&tool.id.as_str()) {
+            lazy.push(tool.id.clone());
+            false
+        } else {
+            true
+        }
+    });
+    lazy
+}
+
+async fn register_lazy_chutes_tools(
+    tool_bridge: &ToolBridge,
+    tool_ids: &[String],
+) -> Result<(), AgentBuildError> {
+    use xai_grok_tools::implementations::chutes;
+
+    macro_rules! register {
+        ($name:literal, $tool:expr) => {
+            tool_bridge
+                .register_mcp_tools($name.into(), $tool, None)
+                .await
+                .map_err(|error| AgentBuildError::ToolError(error.to_string()))?;
+        };
+    }
+
+    for tool_id in tool_ids {
+        match tool_id.as_str() {
+            "ChutesBuild:context7_search" => {
+                register!("chutes__context7_search", chutes::Context7SearchTool);
+            }
+            "ChutesBuild:context7_docs" => {
+                register!("chutes__context7_docs", chutes::Context7DocsTool);
+            }
+            "ChutesBuild:get_chutes_usage" => {
+                register!("chutes__get_chutes_usage", chutes::GetChutesUsageTool);
+            }
+            "ChutesBuild:list_media_models" => {
+                register!("chutes__list_media_models", chutes::ListMediaModelsTool);
+            }
+            "ChutesBuild:describe_media_model" => {
+                register!(
+                    "chutes__describe_media_model",
+                    chutes::DescribeMediaModelTool
+                );
+            }
+            "ChutesBuild:generate_media" => {
+                register!("chutes__generate_media", chutes::GenerateMediaTool);
+            }
+            "ChutesBuild:browser" => {
+                register!("chutes__browser", chutes::BrowserTool);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+async fn register_lazy_support_tools(
+    tool_bridge: &ToolBridge,
+    tool_ids: &[String],
+) -> Result<(), AgentBuildError> {
+    use xai_grok_tools::implementations::grok_build;
+
+    macro_rules! register {
+        ($name:literal, $tool:expr) => {
+            tool_bridge
+                .register_mcp_tools($name.into(), $tool, None)
+                .await
+                .map_err(|error| AgentBuildError::ToolError(error.to_string()))?;
+        };
+    }
+
+    for tool_id in tool_ids {
+        match tool_id.as_str() {
+            "ChutesBuild:scheduler_create" => {
+                register!(
+                    "chutes_build__scheduler_create",
+                    grok_build::SchedulerCreateTool
+                );
+            }
+            "ChutesBuild:scheduler_delete" => {
+                register!(
+                    "chutes_build__scheduler_delete",
+                    grok_build::SchedulerDeleteTool
+                );
+            }
+            "ChutesBuild:scheduler_list" => {
+                register!(
+                    "chutes_build__scheduler_list",
+                    grok_build::SchedulerListTool
+                );
+            }
+            "ChutesBuild:monitor" => {
+                register!("chutes_build__monitor", grok_build::MonitorTool);
+            }
+            "ChutesBuild:update_goal" => {
+                register!("chutes_build__update_goal", grok_build::UpdateGoalTool);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 /// Merge a shell-resolved params map into every matching tool's
 /// `ToolConfig.params` (single copy of the loop the per-tool injections share).
@@ -436,7 +636,7 @@ impl AgentBuilder {
     /// When `Enabled`, the `web_fetch` tool is registered and a `WebFetchClient`
     /// is injected into `Resources`. When `Disabled` (default), the tool is not
     /// registered. Feature-flagged via remote settings `web_fetch_enabled` and
-    /// `GROK_WEB_FETCH` env var.
+    /// `CHUTES_BUILD_WEB_FETCH` env var.
     pub fn with_web_fetch_config(
         mut self,
         config: xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig,
@@ -540,7 +740,7 @@ impl AgentBuilder {
     }
     /// Enable or disable the `ask_user_question` tool.
     ///
-    /// When disabled, `GrokBuild:ask_user_question` is stripped from the
+    /// When disabled, `ChutesBuild:ask_user_question` is stripped from the
     /// agent's tool config after `ensure_plan_mode_tools` injection, so
     /// the model cannot ask the user structured questions regardless of
     /// which built-in profile is in use. Driven by the shell's resolved gate
@@ -571,8 +771,8 @@ impl AgentBuilder {
         self
     }
     /// Set the skills config (custom paths, ignore globs) from config.toml.
-    /// Without this, only auto-discovered skills (cwd/.grok/skills, ~/.grok/skills)
-    /// are included — custom paths added via `x.ai/skills/add` would be ignored.
+    /// Without this, only auto-discovered skills (cwd/.chutes-build/skills, ~/.chutes-build/skills)
+    /// are included — custom paths added via `chutes.build/skills/add` would be ignored.
     pub fn with_skills_config(mut self, config: crate::prompt::skills::SkillsConfig) -> Self {
         self.skills_config = config;
         self
@@ -715,24 +915,6 @@ impl AgentBuilder {
                     .tools
                     .push((&xai_grok_tools::implementations::grok_build::LspTool).into());
             }
-            if self.image_gen_config.image_gen_enabled() {
-                tool_config
-                    .tools
-                    .push((&xai_grok_tools::implementations::grok_build::ImageGenTool).into());
-            }
-            if self.image_gen_config.image_edit_enabled() {
-                tool_config
-                    .tools
-                    .push((&xai_grok_tools::implementations::grok_build::ImageEditTool).into());
-            }
-            if self.video_gen_config.is_enabled() {
-                tool_config
-                    .tools
-                    .push((&xai_grok_tools::implementations::grok_build::ImageToVideoTool).into());
-                tool_config.tools.push(
-                    (&xai_grok_tools::implementations::grok_build::ReferenceToVideoTool).into(),
-                );
-            }
             let has_write_tool = tool_config
                 .tools
                 .iter()
@@ -742,6 +924,7 @@ impl AgentBuilder {
                     .tools
                     .push((&xai_grok_tools::implementations::opencode::OpenCodeWriteTool).into());
             }
+            ensure_chutes_tools(&mut tool_config);
             ensure_plan_mode_tools(&mut tool_config);
         }
         if self.memory_backend.is_none() {
@@ -831,13 +1014,13 @@ impl AgentBuilder {
             && let Ok(params_value) = serde_json::to_value(params)
             && let Some(obj) = params_value.as_object()
         {
-            merge_tool_params(&mut tool_config, &["GrokBuild:web_fetch"], obj);
+            merge_tool_params(&mut tool_config, &["ChutesBuild:web_fetch"], obj);
         }
         if let Some(ref bash_params) = self.bash_params_json {
             merge_tool_params(
                 &mut tool_config,
                 &[
-                    "GrokBuild:run_terminal_cmd",
+                    "ChutesBuild:run_terminal_cmd",
                     "GrokBuildConcise:run_terminal_cmd",
                 ],
                 bash_params,
@@ -846,7 +1029,7 @@ impl AgentBuilder {
         if let Some(ref ask_params) = self.ask_user_question_params_json {
             merge_tool_params(
                 &mut tool_config,
-                &["GrokBuild:ask_user_question"],
+                &["ChutesBuild:ask_user_question"],
                 ask_params,
             );
         }
@@ -1004,6 +1187,8 @@ impl AgentBuilder {
                 }
             }
         }
+        let lazy_chutes_tools = take_lazy_chutes_tools(&mut tool_config);
+        let lazy_support_tools = take_lazy_support_tools(&mut tool_config);
         let use_backend_search = self.backend_search;
         let web_search_enabled = self.web_search_config.is_enabled();
         let tool_bridge = ToolBridge::finalize_builder(
@@ -1038,6 +1223,8 @@ impl AgentBuilder {
         )
         .await
         .map_err(|e| AgentBuildError::ToolError(e.to_string()))?;
+        register_lazy_chutes_tools(&tool_bridge, &lazy_chutes_tools).await?;
+        register_lazy_support_tools(&tool_bridge, &lazy_support_tools).await?;
         if let Some(bytes) = self.mcp_max_output_bytes {
             tool_bridge.toolset().resources.lock().await.insert(
                 xai_grok_tools::types::resources::TruncationCfg(
@@ -1243,6 +1430,7 @@ fn builtin_tools_fragment(name: BuiltinAgentName) -> String {
         BuiltinAgentName::GeneralPurpose => xai_tool_types::GENERAL_PURPOSE_SUBAGENT,
         BuiltinAgentName::Explore => xai_tool_types::EXPLORE_SUBAGENT,
         BuiltinAgentName::Plan => xai_tool_types::PLAN_SUBAGENT,
+        BuiltinAgentName::Advisor => xai_tool_types::ADVISOR_SUBAGENT,
         _ => return String::new(),
     };
     subagent.render_tools(&SUBAGENT_TOOL_NAMING)
@@ -1678,6 +1866,39 @@ mod tests {
                 names.contains(&"exit_plan_mode"),
                 "[{label}] exit_plan_mode must always be present (TUI plan-mode keybind needs it); got tools: {names:?}"
             );
+            for native_tool in [
+                "chutes__context7_search",
+                "chutes__context7_docs",
+                "chutes__get_chutes_usage",
+                "chutes__list_media_models",
+                "chutes__describe_media_model",
+                "chutes__generate_media",
+                "chutes__browser",
+            ] {
+                assert!(
+                    names.contains(&native_tool),
+                    "[{label}] missing Chutes-native tool {native_tool}; got tools: {names:?}"
+                );
+            }
+            for support_tool in [
+                "chutes_build__scheduler_create",
+                "chutes_build__scheduler_delete",
+                "chutes_build__scheduler_list",
+                "chutes_build__monitor",
+                "chutes_build__update_goal",
+            ] {
+                assert!(
+                    names.contains(&support_tool),
+                    "[{label}] missing lazy support tool {support_tool}; got tools: {names:?}"
+                );
+            }
+            let builtins = agent.tool_definitions_builtins_only().await;
+            assert!(
+                builtins
+                    .iter()
+                    .all(|definition| !definition.function.name.contains("__")),
+                "[{label}] lazy tools must not be sent on every inference"
+            );
         }
     }
     #[tokio::test]
@@ -1721,7 +1942,7 @@ mod tests {
                 .tool_config
                 .tools
                 .iter()
-                .any(|tc| tc.id == "GrokBuild:ask_user_question"),
+                .any(|tc| tc.id == "ChutesBuild:ask_user_question"),
             "test premise: the profile must not pre-declare ask_user_question"
         );
         let mut params = serde_json::Map::new();
@@ -1846,7 +2067,7 @@ mod tests {
         let mut def = crate::config::AgentDefinition::general_purpose();
         assert!(def.session_tools_allowed("read_file"));
         def.session_tools_allowlist = Some(vec!["read_file".into()]);
-        assert!(def.session_tools_allowed("GrokBuild:read_file"));
+        assert!(def.session_tools_allowed("ChutesBuild:read_file"));
         assert!(!def.session_tools_allowed("grep"));
         def.session_tools_denylist = Some(vec!["read_file".into()]);
         assert!(!def.session_tools_allowed("read_file"));
@@ -2172,7 +2393,7 @@ mod tests {
         .from_definition(definition)
         .with_web_search_config(WebSearchConfig::Enabled {
             api_key: "test-key".into(),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://llm.chutes.ai/v1".into(),
             model: "test-web-search-model".into(),
             extra_headers: Default::default(),
             alpha_test_key: None,
@@ -2298,7 +2519,7 @@ mod tests {
         let web_search_config = if web_search_enabled {
             WebSearchConfig::Enabled {
                 api_key: "test-key".into(),
-                base_url: "https://api.x.ai/v1".into(),
+                base_url: "https://llm.chutes.ai/v1".into(),
                 model: "test-web-search-model".into(),
                 extra_headers: Default::default(),
                 alpha_test_key: None,

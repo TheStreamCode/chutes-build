@@ -6193,7 +6193,7 @@ mod tests {
     fn test_transform_cwd_transforms_tool_call_arguments() {
         // Tool call arguments containing paths are transformed alongside text content.
         // This ensures the model sees consistent paths on the next turn.
-        let worktree = "/home/user/.grok/worktrees/project/ab-uuid-a";
+        let worktree = "/home/user/.chutes-build/worktrees/project/ab-uuid-a";
         let root = "/home/user/project";
 
         let mut items = vec![ConversationItem::Assistant(AssistantItem {
@@ -6269,7 +6269,7 @@ mod tests {
         // via `transform_conversation_cwd` (see the `Reasoning(_)` arm),
         // which is a behavior improvement over the pre-refactor state
         // where it lived buried in AssistantItem.reasoning and was skipped.
-        let worktree = "/home/user/.grok/worktrees/project/ab-uuid-a";
+        let worktree = "/home/user/.chutes-build/worktrees/project/ab-uuid-a";
         let root = "/home/user/project";
 
         let mut items = vec![
@@ -6313,7 +6313,7 @@ mod tests {
         // End-to-end sync-back scenario: worktree paths -> root paths
         // This simulates what happens when a forked session's worktree
         // contents are synced back to the original root path.
-        let worktree = "/home/user/.grok/worktrees/myproject/fork-a";
+        let worktree = "/home/user/.chutes-build/worktrees/myproject/fork-a";
         let root = "/home/user/myproject";
 
         let mut items = vec![
@@ -6382,7 +6382,7 @@ mod tests {
         // Tool call arguments are transformed so the fork session's history
         // has consistent worktree paths everywhere.
         let root = "/home/user/myproject";
-        let worktree = "/home/user/.grok/worktrees/myproject/fork-a";
+        let worktree = "/home/user/.chutes-build/worktrees/myproject/fork-a";
 
         let mut items = vec![
             ConversationItem::system(format!("Working in {root}.")),
@@ -6519,7 +6519,7 @@ mod tests {
     #[test]
     fn test_transform_cwd_assistant_only_tool_calls_no_content() {
         // Assistant message with empty content but tool calls containing paths
-        let worktree = "/home/user/.grok/worktrees/proj/fork-a";
+        let worktree = "/home/user/.chutes-build/worktrees/proj/fork-a";
         let root = "/home/user/proj";
 
         let mut items = vec![ConversationItem::assistant_tool_calls(vec![

@@ -41,7 +41,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Tool result previews** no longer paint opaque panels in `grok --minimal`.",
+    "description": "**Tool result previews** no longer paint opaque panels in `chutes-build --minimal`.",
     "breaking_change": false
   },
   {
@@ -51,7 +51,7 @@
   },
   {
     "category": "fixes",
-    "description": "**grok wrap** now correctly handles quoted strings and shell aliases.",
+    "description": "**chutes-build wrap** now correctly handles quoted strings and shell aliases.",
     "breaking_change": false
   },
   {

@@ -122,6 +122,74 @@ impl MediaGenOutput {
         .to_string()
     }
 }
+
+/// Provider-neutral receipt for generated media.
+///
+/// The full typed value is kept for protocol and UI consumers while
+/// [`Self::prompt_text`] exposes only the small receipt the model needs to
+/// continue. This avoids sending provenance and billing metadata back through
+/// the context window on every subsequent turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaArtifactKind {
+    Image,
+    Video,
+    Audio,
+    Music,
+    Speech,
+    Document,
+    #[serde(other)]
+    Unknown,
+}
+
+impl MediaArtifactKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Video => "video",
+            Self::Audio => "audio",
+            Self::Music => "music",
+            Self::Speech => "speech",
+            Self::Document => "document",
+            Self::Unknown => "media",
+        }
+    }
+
+    pub fn is_audio(self) -> bool {
+        matches!(self, Self::Audio | Self::Music | Self::Speech)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MediaArtifact {
+    /// Contract version for forward-compatible protocol consumers.
+    pub schema_version: u8,
+    pub kind: MediaArtifactKind,
+    /// Absolute path to the workspace-local artifact.
+    pub path: PathBuf,
+    pub mime_type: String,
+    pub byte_len: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance_path: Option<PathBuf>,
+    pub provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+}
+
+impl MediaArtifact {
+    pub const SCHEMA_VERSION: u8 = 1;
+
+    /// Minimal model-facing receipt. Rich metadata remains in the typed output
+    /// for the TUI and ACP clients instead of consuming prompt tokens.
+    pub fn prompt_text(&self) -> String {
+        format!(
+            "Generated {} saved to {}. Do not read or re-display it unless the user asks.",
+            self.kind.as_str(),
+            self.path.display()
+        )
+    }
+}
 use crate::implementations::grok_build::todo::{TodoItem, TodoState};
 use crate::implementations::skills::skill::SkillOutput;
 use crate::util::truncate::{DEFAULT_SOFT_WRAP_WIDTH, soft_wrap_lines};
@@ -661,6 +729,8 @@ pub enum ToolOutput {
     ReferenceToVideo(MediaGenOutput),
     #[from(skip)]
     ImageEdit(MediaGenOutput),
+    #[from(skip)]
+    MediaArtifact(MediaArtifact),
 }
 impl ToolOutput {
     /// Whether this output is a logical tool failure, for `tool.execution`'s
@@ -981,6 +1051,7 @@ impl ToolOutput {
             ToolOutput::ImageToVideo(m) => m.prompt_text("Video generated"),
             ToolOutput::ReferenceToVideo(m) => m.prompt_text("Video generated"),
             ToolOutput::ImageEdit(m) => m.prompt_text("Image edited"),
+            ToolOutput::MediaArtifact(artifact) => artifact.prompt_text(),
         }
     }
 }
@@ -1403,6 +1474,37 @@ mod tests {
             panic!("unexpected variant");
         };
         assert_eq!(m, MediaGenOutput::uploaded(url.to_string()));
+    }
+    #[test]
+    fn media_artifact_round_trips_with_compact_prompt_receipt() {
+        let artifact = MediaArtifact {
+            schema_version: MediaArtifact::SCHEMA_VERSION,
+            kind: MediaArtifactKind::Music,
+            path: PathBuf::from("/tmp/media/track.mp3"),
+            mime_type: "audio/mpeg".into(),
+            byte_len: 42_000,
+            provenance_path: Some(PathBuf::from("/tmp/media/track.mp3.provenance.json")),
+            provider: "chutes".into(),
+            model: "example/music-model".into(),
+            cost: Some(0.0123),
+        };
+        let output = ToolOutput::MediaArtifact(artifact.clone());
+
+        let prompt = output.to_prompt_format();
+        assert!(prompt.contains("Generated music"));
+        assert!(prompt.contains("/tmp/media/track.mp3"));
+        assert!(!prompt.contains("example/music-model"));
+        assert!(!prompt.contains("provenance"));
+        assert!(!prompt.contains("0.0123"));
+
+        let json = to_json(output);
+        assert_eq!(json["type"], "MediaArtifact");
+        assert_eq!(json["kind"], "music");
+        assert_eq!(json["mime_type"], "audio/mpeg");
+        let ToolOutput::MediaArtifact(round_trip) = serde_json::from_value(json).unwrap() else {
+            panic!("unexpected variant");
+        };
+        assert_eq!(round_trip, artifact);
     }
     #[test]
     fn read_file_not_found_json() {

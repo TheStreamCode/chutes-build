@@ -501,7 +501,7 @@ pub struct WorkspaceShared {
     pub(crate) activity_notify_handle:
         arc_swap::ArcSwap<Option<xai_grok_tools::notification::types::ToolNotificationHandle>>,
     /// Sink for workspace-originated ext-notifications to the client (e.g.
-    /// `x.ai/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
+    /// `chutes.build/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
     /// agent gateway in local mode, and to the server in proxy mode. `None` until
     /// set via [`WorkspaceHandle::set_client_ext_sink`](crate::handle::WorkspaceHandle::set_client_ext_sink).
     pub(crate) client_ext_sink: arc_swap::ArcSwap<Option<ClientExtSink>>,
@@ -527,23 +527,23 @@ pub struct WorkspaceShared {
     pub(crate) codebase_indexes:
         std::sync::Arc<parking_lot::Mutex<crate::file_system::CodebaseIndexManager>>,
     /// Finalize the FS rewind checkpoint on non-`Completed` turn-end outcomes
-    /// (from `GROK_WORKSPACE_REWIND_ALL_OUTCOMES`, default off).
+    /// (from `CHUTES_BUILD_WORKSPACE_REWIND_ALL_OUTCOMES`, default off).
     pub(crate) workspace_rewind_all_outcomes: bool,
-    /// Resolved `$GROK_WORKSPACE_HOME` — the workspace-owned on-disk state root
+    /// Resolved `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root
     /// (`<grok_home>/workspace` by default). The upload queue spills here.
     pub(crate) workspace_home: std::path::PathBuf,
     pub(crate) upload_queue: Option<std::sync::Arc<xai_file_utils::queue::UploadQueue>>,
     /// Whether collection is disabled (opt-out, or the fail-closed default).
     pub(crate) data_collection_disabled: bool,
     /// Whether per-session `events.jsonl` recording is enabled
-    /// (`GROK_WORKSPACE_EVENTS_ENABLED=true`). When `false`, every
+    /// (`CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED=true`). When `false`, every
     /// [`session_event_writer`](Self::session_event_writer) hands back an
     /// [`EventWriter::noop()`](xai_file_utils::events::EventWriter::noop) and
     /// no session directory or `events.jsonl` is ever created — the legacy
     /// behaviour, preserved bit-for-bit.
     pub(crate) events_enabled: bool,
     /// Whether per-session `workspace_tool_definitions.json` emission is
-    /// enabled (`GROK_WORKSPACE_TOOL_DEFS_ENABLED=true`).
+    /// enabled (`CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED=true`).
     pub(crate) tool_defs_enabled: bool,
     /// `session_id` → last `ToolsChanged` re-emit `Instant`, debouncing
     /// re-emits per session. The initial bind emission does not consult this map.
@@ -583,7 +583,7 @@ impl WorkspaceShared {
     pub fn root_cwd(&self) -> &std::path::Path {
         &self.root_cwd
     }
-    /// Resolved `$GROK_WORKSPACE_HOME` — the workspace-owned on-disk state root.
+    /// Resolved `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root.
     pub fn workspace_home(&self) -> &std::path::Path {
         &self.workspace_home
     }

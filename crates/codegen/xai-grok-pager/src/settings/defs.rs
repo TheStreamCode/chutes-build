@@ -45,13 +45,13 @@ const THEME_CHOICES: &[EnumChoice] = &[
         description: "Follow system dark/light appearance.",
     },
     EnumChoice {
-        canonical: "groknight",
-        display: "Grok Night",
+        canonical: "chutesnight",
+        display: "Chutes Night",
         description: "Neutral dark with magenta accent.",
     },
     EnumChoice {
-        canonical: "grokday",
-        display: "Grok Day",
+        canonical: "chutesday",
+        display: "Chutes Day",
         description: "Light theme for bright environments.",
     },
     EnumChoice {
@@ -333,7 +333,7 @@ const VOICE_CAPTURE_MODE_CHOICES: &[EnumChoice] = &[
 // Voice STT language choices for the settings modal.
 //
 // Concrete codes must match `xai_grok_voice::STT_LANGUAGES` (official Grok STT
-// catalog — https://docs.x.ai/developers/model-capabilities/audio/speech-to-text).
+// live Chutes model catalog).
 // `auto` is client-only; the voice crate resolves it to a concrete code before
 // the STT handshake. Order: English (default), System, then remaining languages
 // A–Z by English name. A registry unit test locks this list to the voice crate.
@@ -475,13 +475,13 @@ const VOICE_STT_LANGUAGE_CHOICES: &[EnumChoice] = &[
 /// the user can pair any theme with any system-appearance bucket.
 const CONCRETE_THEME_CHOICES: &[EnumChoice] = &[
     EnumChoice {
-        canonical: "groknight",
-        display: "Grok Night",
+        canonical: "chutesnight",
+        display: "Chutes Night",
         description: "Neutral dark with magenta accent.",
     },
     EnumChoice {
-        canonical: "grokday",
-        display: "Grok Day",
+        canonical: "chutesday",
+        display: "Chutes Day",
         description: "Light theme for bright environments.",
     },
     EnumChoice {
@@ -667,8 +667,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 "light",
             ],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` resolved to "groknight".
-                default: "groknight",
+                // `Option<String>` — `None` resolved to "chutesnight".
+                default: "chutesnight",
                 choices: THEME_CHOICES,
                 supports_preview: true,
             },
@@ -683,8 +683,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "Theme to use when the system is in dark mode (only with theme=auto).",
             keywords: &["auto", "dark", "theme", "system", "appearance", "night"],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` falls back to "groknight".
-                default: "groknight",
+                // `Option<String>` — `None` falls back to "chutesnight".
+                default: "chutesnight",
                 choices: CONCRETE_THEME_CHOICES,
                 supports_preview: true,
             },
@@ -699,8 +699,8 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "Theme to use when the system is in light mode (only with theme=auto).",
             keywords: &["auto", "light", "theme", "system", "appearance", "day"],
             kind: SettingKind::Enum {
-                // `Option<String>` — `None` falls back to "grokday".
-                default: "grokday",
+                // `Option<String>` — `None` falls back to "chutesday".
+                default: "chutesday",
                 choices: CONCRETE_THEME_CHOICES,
                 supports_preview: true,
             },
@@ -874,7 +874,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             hidden_in_minimal: false,
         },
         // SHELL-owned: `[ui].prompt_suggestions` + process-wide cache. Default ON.
-        // The `GROK_PROMPT_SUGGESTIONS` env var overrides at runtime.
+        // The `CHUTES_BUILD_PROMPT_SUGGESTIONS` env var overrides at runtime.
         SettingMeta {
             key: "prompt_suggestions",
             category: SettingCategory::Editor,
@@ -1477,7 +1477,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Advanced,
             owner: SettingOwner::Shell,
             label: "SSH wrap",
-            description: "At session load over SSH, recommend `grok wrap ssh` for \
+            description: "At session load over SSH, recommend `chutes-build wrap ssh` for \
                           clipboard forwarding and terminal restore.",
             keywords: &[
                 "ssh",

@@ -387,7 +387,7 @@ fn clean_processed_sessions(sessions_dir: &Path, stems: &[String]) -> Vec<String
 /// Steps:
 /// 1. Acquire lock
 /// 2. Process response
-/// 3. Overwrite workspace MEMORY.md
+/// 3. Overwrite workspace memories.md
 /// 4. Clean up processed session files (on success only)
 /// 5. On success: leave lock mtime (records consolidation)
 /// 6. On failure: rollback lock
@@ -440,7 +440,7 @@ pub fn execute_dream(
         let _ = lock.rollback(prior);
         tracing::warn!(target: LOG, error = %e, "DREAM_EXECUTE: write failed, lock rolled back");
         return DreamResult {
-            status: DreamStatus::Failed(format!("failed to write MEMORY.md: {e}")),
+            status: DreamStatus::Failed(format!("failed to write memories.md: {e}")),
             sessions_eligible,
             cleaned_stems: Vec::new(),
         };
@@ -872,7 +872,7 @@ mod tests {
         assert_eq!(result.sessions_eligible, 5);
         assert_eq!(result.cleaned_stems.len(), 0);
 
-        let memory = fs::read_to_string(ws.join("MEMORY.md")).unwrap();
+        let memory = fs::read_to_string(ws.join("memories.md")).unwrap();
         assert!(memory.contains("We chose Rust."));
         assert!(memory.contains("Event-driven."));
     }
@@ -943,7 +943,7 @@ mod tests {
 
         match &result.status {
             DreamStatus::Failed(reason) => {
-                assert!(reason.contains("MEMORY.md"), "reason: {reason}");
+                assert!(reason.contains("memories.md"), "reason: {reason}");
             }
             other => panic!("expected Failed, got {other:?}"),
         }
@@ -963,9 +963,9 @@ mod tests {
         let (storage, ws) = test_storage(&dir);
         let sdir = empty_sessions_dir(&dir);
 
-        // Pre-populate MEMORY.md
+        // Pre-populate memories.md
         fs::create_dir_all(&ws).unwrap();
-        fs::write(ws.join("MEMORY.md"), "## Existing\n\nOld content.").unwrap();
+        fs::write(ws.join("memories.md"), "## Existing\n\nOld content.").unwrap();
 
         let lock = DreamLock::new(dir.path());
         let response = "## New Topic\n\nFresh insight.";
@@ -973,7 +973,7 @@ mod tests {
 
         assert!(matches!(result.status, DreamStatus::Completed { .. }));
 
-        let memory = fs::read_to_string(ws.join("MEMORY.md")).unwrap();
+        let memory = fs::read_to_string(ws.join("memories.md")).unwrap();
         // write_long_term overwrites: old content is replaced
         assert!(!memory.contains("Old content."));
         assert_eq!(memory.trim(), response);

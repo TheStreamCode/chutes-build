@@ -19,13 +19,18 @@ use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
 };
 use serde::Serialize;
+use std::collections::HashSet;
 
+use chutes_build_core::reasoning::{
+    ReasoningProfile, RequestedReasoning, WireReasoningEffort, reasoning_profile,
+    reasoning_wire_plan,
+};
 use xai_grok_sampling_types::error::{parse_error_bytes, try_parse_stream_error};
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DOOM_LOOP_CHECK_HEADER, MessagesRequestWrapper,
-    ResponseModelMetadata, Result, SamplingError, build_messages_request, is_check_event, messages,
-    rs,
+    ReasoningEffort, ResponseModelMetadata, Result, SamplingError, build_messages_request,
+    is_check_event, messages, rs,
 };
 
 use crate::config::{AuthScheme, OriginClientInfo, SamplerConfig};
@@ -33,14 +38,113 @@ use crate::config::{AuthScheme, OriginClientInfo, SamplerConfig};
 // Re-export ApiBackend from the shared types crate for downstream callers.
 pub use xai_grok_sampling_types::ApiBackend;
 
-/// Process-level fallback for the `x-grok-client-identifier` header.
-const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
-
 /// Product identifier baked into User-Agent strings.
-const AGENT_PRODUCT: &str = "grok-shell";
+const AGENT_PRODUCT: &str = "chutes-build";
 const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
-/// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
+fn is_chutes_backend(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    lower.contains("chutes.ai") || lower.contains("model-router-ten.vercel.app")
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
+    let mut models = vec![selected.to_owned()];
+    if !is_chutes_backend(base_url) || env_flag("CHUTES_STRICT_MODEL") {
+        return models;
+    }
+
+    if let Ok(configured) = std::env::var("CHUTES_FALLBACK_MODELS") {
+        models.extend(
+            configured
+                .split(',')
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    // The virtual model is dispatched to Chutes' native router endpoint by
+    // `chat_completions_endpoint`, so it is also the final safe fallback when
+    // a pinned model is explicitly cold or unavailable before streaming.
+    models.push("model-router".to_owned());
+    let mut seen = HashSet::new();
+    models.retain(|model| seen.insert(model.clone()));
+    models
+}
+
+fn requested_reasoning(effort: Option<ReasoningEffort>) -> RequestedReasoning {
+    match effort {
+        None => RequestedReasoning::Unspecified,
+        Some(ReasoningEffort::None) => RequestedReasoning::None,
+        Some(ReasoningEffort::Minimal) => RequestedReasoning::Minimal,
+        Some(ReasoningEffort::Low) => RequestedReasoning::Low,
+        Some(ReasoningEffort::Medium) => RequestedReasoning::Medium,
+        Some(ReasoningEffort::High) => RequestedReasoning::High,
+        Some(ReasoningEffort::Xhigh) => RequestedReasoning::Maximum,
+    }
+}
+
+/// Apply the centralized Chutes reasoning compatibility plan without changing
+/// non-Chutes BYOK requests. Unknown future models retain explicit catalog
+/// values; verified fixed-reasoning models drop incompatible overrides.
+fn chutes_chat_template_kwargs(
+    base_url: &str,
+    request: &mut ChatCompletionRequest,
+) -> Option<ChutesChatTemplateKwargs> {
+    if !is_chutes_backend(base_url) {
+        return None;
+    }
+
+    let model = request.model.as_deref().unwrap_or_default();
+    let profile = reasoning_profile(model);
+    if profile == ReasoningProfile::Unknown {
+        // A future catalog may publish an explicit server-side effort menu
+        // before this client knows the model's template. Trust that menu.
+        return None;
+    }
+
+    let plan = reasoning_wire_plan(model, requested_reasoning(request.reasoning_effort));
+    if !plan.preserve_reasoning_effort {
+        request.reasoning_effort = match plan.reasoning_effort {
+            Some(WireReasoningEffort::Medium) => Some(ReasoningEffort::Medium),
+            Some(WireReasoningEffort::High) => Some(ReasoningEffort::High),
+            None => None,
+        };
+    }
+
+    (plan.enable_thinking.is_some() || plan.thinking.is_some()).then_some(
+        ChutesChatTemplateKwargs {
+            enable_thinking: plan.enable_thinking,
+            thinking: plan.thinking,
+        },
+    )
+}
+
+/// Build one fallback attempt from the untouched logical request. Reasoning
+/// controls are normalized after changing the model so template switches from
+/// one family can never leak into the next candidate.
+fn prepare_chutes_chat_attempt(
+    base_url: &str,
+    payload: &ChatCompletionRequest,
+    model: &str,
+) -> (ChatCompletionRequest, Option<ChutesChatTemplateKwargs>) {
+    let mut attempt = payload.clone();
+    attempt.model = Some(model.to_owned());
+    let kwargs = chutes_chat_template_kwargs(base_url, &mut attempt);
+    (attempt, kwargs)
+}
+
+/// Legacy request metadata retained in the internal request type for upstream
+/// compatibility. Chutes Build deliberately does not transmit these identifiers.
+#[allow(dead_code)]
 struct GrokRequestHeaders<'a> {
     conv_id: &'a str,
     req_id: &'a str,
@@ -54,22 +158,7 @@ struct GrokRequestHeaders<'a> {
 
 impl GrokRequestHeaders<'_> {
     fn apply(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let mut b = builder
-            .header("x-grok-conv-id", self.conv_id)
-            .header("x-grok-req-id", self.req_id)
-            .header("x-grok-model-override", self.model_id)
-            .header("x-grok-session-id", self.session_id)
-            .header("x-grok-agent-id", self.agent_id);
-        if let Some(idx) = self.turn_idx {
-            b = b.header("x-grok-turn-idx", idx);
-        }
-        if let Some(id) = self.deployment_id.filter(|s| !s.is_empty()) {
-            b = b.header("x-grok-deployment-id", id);
-        }
-        if let Some(id) = self.user_id.filter(|s| !s.is_empty()) {
-            b = b.header("x-grok-user-id", id);
-        }
-        b
+        builder
     }
 }
 
@@ -119,7 +208,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
             }
             tracing::error!(
                 error = %first_err,
-                raw_data = %data,
+                data_len = data.len(),
                 "Failed to deserialize ResponseStreamEvent from stream"
             );
             return Err(SamplingError::Serialization(first_err));
@@ -260,16 +349,34 @@ fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<Respon
 /// allowing single-pass serialization instead of the previous two-pass
 /// approach (serialize to `Value`, mutate, serialize to bytes).
 #[derive(Serialize)]
+struct ChatRequestWithTemplate<'a> {
+    #[serde(flatten)]
+    inner: &'a ChatCompletionRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
+}
+
+#[derive(Serialize)]
 struct StreamingChatRequest<'a> {
     #[serde(flatten)]
     inner: &'a ChatCompletionRequest,
     stream: bool,
     stream_options: StreamOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
 }
 
 #[derive(Serialize)]
 struct StreamOptions {
     include_usage: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct ChutesChatTemplateKwargs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<bool>,
 }
 
 /// HTTP client for sampling. Cheap to clone; carries an `Arc`-backed
@@ -406,7 +513,6 @@ impl SamplingClient {
                 AuthScheme::XApiKey => {
                     let header_value = HeaderValue::from_str(api_key).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP header"
                         );
                         SamplingError::Auth(
@@ -420,7 +526,6 @@ impl SamplingClient {
                     let bearer = format!("Bearer {}", api_key);
                     let header_value = HeaderValue::from_str(&bearer).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
                         );
                         SamplingError::Auth(
@@ -444,56 +549,10 @@ impl SamplingClient {
             headers.insert(header_name, header_value);
         }
 
-        // Add x-grok-client-version header for version gating at the proxy.
-        if let Some(client_version) = config.client_version.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(client_version)
-        {
-            headers.insert(
-                HeaderName::from_static("x-grok-client-version"),
-                header_value,
-            );
-        }
-
-        if let Some(deployment_id) = config.deployment_id.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(deployment_id)
-        {
-            headers.insert(
-                HeaderName::from_static("x-grok-deployment-id"),
-                header_value,
-            );
-        }
-
-        if let Some(user_id) = config.user_id.as_ref()
-            && let Ok(header_value) = HeaderValue::from_str(user_id)
-        {
-            headers.insert(HeaderName::from_static("x-grok-user-id"), header_value);
-        }
-
-        {
-            let client_id = config
-                .client_identifier
-                .clone()
-                .unwrap_or_else(|| DEFAULT_CLIENT_IDENTIFIER.to_string());
-            if let Ok(header_value) = HeaderValue::from_str(&client_id) {
-                headers.insert(
-                    HeaderName::from_static("x-grok-client-identifier"),
-                    header_value,
-                );
-            }
-        }
-
-        // Always set User-Agent: per-session origin if available, else fallback.
-        {
-            let ua_string = match config.origin_client.as_ref() {
-                Some(origin) => user_agent_string_for(origin),
-                None => user_agent_string_for(&OriginClientInfo {
-                    product: AGENT_PRODUCT.to_string(),
-                    version: Some(agent_version()),
-                }),
-            };
-            if let Ok(v) = HeaderValue::from_str(&ua_string) {
-                headers.insert(USER_AGENT, v);
-            }
+        // A minimal product User-Agent is useful for HTTP interoperability but
+        // contains no session, user, origin-client, OS, or architecture data.
+        if let Ok(value) = HeaderValue::from_str(&format!("{AGENT_PRODUCT}/{}", agent_version())) {
+            headers.insert(USER_AGENT, value);
         }
 
         let http = if config.force_http1 {
@@ -567,29 +626,17 @@ impl SamplingClient {
                 }
             }
         }
-        {
-            let auth_prefix = headers
-                .get(AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.chars().take(20).collect::<String>());
-            let x_api_key_prefix = headers
-                .get(HeaderName::from_static("x-api-key"))
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.chars().take(12).collect::<String>());
-            tracing::info!(
-                target: crate::sampling_log::TARGET,
-                event = "client_post",
-                base_url = %self.base_url,
-                model = %self.defaults.model,
-                api_backend = ?self.defaults.api_backend,
-                auth_scheme = ?self.defaults.auth_scheme,
-                has_bearer_resolver = self.bearer_resolver.is_some(),
-                has_authorization_header = headers.get(AUTHORIZATION).is_some(),
-                has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
-                auth_header_prefix = auth_prefix.as_deref().unwrap_or("none"),
-                x_api_key_prefix = x_api_key_prefix.as_deref().unwrap_or("none"),
-            );
-        }
+        tracing::info!(
+            target: crate::sampling_log::TARGET,
+            event = "client_post",
+            base_url = %self.base_url,
+            model = %self.defaults.model,
+            api_backend = ?self.defaults.api_backend,
+            auth_scheme = ?self.defaults.auth_scheme,
+            has_bearer_resolver = self.bearer_resolver.is_some(),
+            has_authorization_header = headers.get(AUTHORIZATION).is_some(),
+            has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
+        );
         if let Some(injector) = &self.header_injector {
             injector.inject(&mut headers);
         }
@@ -656,16 +703,23 @@ impl SamplingClient {
     }
 
     pub fn auth_info(&self) -> crate::sampling_log::AuthInfo {
-        let auth_prefix = self.current_sent_bearer_prefix();
-        let auth_type = match (&self.defaults.auth_scheme, &auth_prefix) {
-            (AuthScheme::XApiKey, Some(_)) => "x-api-key",
-            (AuthScheme::Bearer, Some(_)) => "bearer",
-            (_, None) => "none",
+        let has_credentials = self
+            .bearer_resolver
+            .as_ref()
+            .and_then(|resolver| resolver.current_bearer())
+            .is_some()
+            || match self.defaults.auth_scheme {
+                AuthScheme::XApiKey => self
+                    .default_headers
+                    .contains_key(HeaderName::from_static("x-api-key")),
+                AuthScheme::Bearer => self.default_headers.contains_key(AUTHORIZATION),
+            };
+        let auth_type = match (&self.defaults.auth_scheme, has_credentials) {
+            (AuthScheme::XApiKey, true) => "x-api-key",
+            (AuthScheme::Bearer, true) => "bearer",
+            (_, false) => "none",
         };
-        crate::sampling_log::AuthInfo {
-            auth_type,
-            auth_prefix,
-        }
+        crate::sampling_log::AuthInfo { auth_type }
     }
 
     /// Check if a header name contains sensitive information that should be redacted.
@@ -691,9 +745,9 @@ impl SamplingClient {
     /// Build request headers string for error messages (redacting sensitive values).
     fn format_request_headers(
         &self,
-        x_grok_conv_id: &str,
-        x_grok_req_id: &str,
-        model_id: &str,
+        _x_grok_conv_id: &str,
+        _x_grok_req_id: &str,
+        _model_id: &str,
         include_accept: bool,
     ) -> Vec<String> {
         let mut req_headers: Vec<String> = self
@@ -704,9 +758,6 @@ impl SamplingClient {
             })
             .collect();
 
-        req_headers.push(Self::format_header("x-grok-conv-id", x_grok_conv_id));
-        req_headers.push(Self::format_header("x-grok-req-id", x_grok_req_id));
-        req_headers.push(Self::format_header("x-grok-model-override", model_id));
         if include_accept {
             req_headers.push(Self::format_header("accept", "text/event-stream"));
         }
@@ -775,6 +826,14 @@ impl SamplingClient {
         format!("{base}/{path}")
     }
 
+    fn chat_completions_endpoint(&self, model: &str) -> String {
+        if is_chutes_backend(&self.base_url) && model.eq_ignore_ascii_case("model-router") {
+            let endpoints = chutes_build_core::endpoints::ChutesEndpoints::default();
+            return format!("{}/chat/completions", endpoints.router);
+        }
+        self.endpoint("chat/completions")
+    }
+
     fn apply_defaults(&self, mut request: ChatCompletionRequest) -> Result<ChatCompletionRequest> {
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
@@ -821,10 +880,9 @@ impl SamplingClient {
         }
 
         let completion = serde_json::from_slice::<ChatCompletionResponse>(&bytes).map_err(|e| {
-            let raw_body = String::from_utf8_lossy(&bytes);
             tracing::error!(
                 error = %e,
-                raw_body = %raw_body,
+                body_len = bytes.len(),
                 "Failed to deserialize ChatCompletionResponse"
             );
             SamplingError::Serialization(e)
@@ -840,7 +898,8 @@ impl SamplingClient {
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
-        let payload = self.apply_defaults(request)?;
+        let mut payload = self.apply_defaults(request)?;
+        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -862,8 +921,11 @@ impl SamplingClient {
             user_id: payload.x_grok_user_id.as_deref(),
         };
         let http_request = grok_headers
-            .apply(self.post(self.endpoint("chat/completions")))
-            .json(&payload);
+            .apply(self.post(self.chat_completions_endpoint(&model_id)))
+            .json(&ChatRequestWithTemplate {
+                inner: &payload,
+                chat_template_kwargs: chat_template_kwargs.as_ref(),
+            });
 
         let response = http_request.send().await.map_err(|e| {
             // Log at debug level; errors are surfaced to the caller.
@@ -894,68 +956,99 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
     )> {
         let payload = self.apply_defaults(request)?;
-        let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
-        let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
-        let model_id = payload.model.clone().unwrap_or_default();
+        let selected_model = payload.model.clone().unwrap_or_default();
+        let candidates = chutes_fallback_models(&self.base_url, &selected_model);
+        let policy = chutes_build_core::routing::FallbackPolicy::default();
+        let mut successful_response = None;
 
-        // Wrap the request with streaming fields and serialize once.
-        // Previously this path serialized twice: first to serde_json::Value
-        // (to inject `stream` and `stream_options`), then to HTTP body bytes.
-        let streaming_request = StreamingChatRequest {
-            inner: &payload,
-            stream: true,
-            stream_options: StreamOptions {
-                include_usage: true,
-            },
-        };
+        for (attempt_index, candidate) in candidates.iter().enumerate() {
+            let has_fallback = attempt_index + 1 < candidates.len();
+            let (attempt_payload, chat_template_kwargs) =
+                prepare_chutes_chat_attempt(&self.base_url, &payload, candidate);
+            let x_grok_conv_id = attempt_payload.x_grok_conv_id.clone().unwrap_or_default();
+            let x_grok_req_id = attempt_payload.x_grok_req_id.clone().unwrap_or_default();
 
-        let grok_headers = GrokRequestHeaders {
-            conv_id: x_grok_conv_id,
-            req_id: x_grok_req_id,
-            model_id: &model_id,
-            session_id: payload.x_grok_session_id.as_deref().unwrap_or_default(),
-            turn_idx: payload.x_grok_turn_idx.as_deref(),
-            agent_id: payload.x_grok_agent_id.as_deref().unwrap_or_default(),
-            deployment_id: payload.x_grok_deployment_id.as_deref(),
-            user_id: payload.x_grok_user_id.as_deref(),
-        };
-        let http_request = grok_headers
-            .apply(self.post(self.endpoint("chat/completions")))
-            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
-            .json(&streaming_request);
+            // The request is rebuilt for each pre-stream candidate. Once a
+            // successful SSE response starts, the selected model is sticky.
+            let streaming_request = StreamingChatRequest {
+                inner: &attempt_payload,
+                stream: true,
+                stream_options: StreamOptions {
+                    include_usage: true,
+                },
+                chat_template_kwargs: chat_template_kwargs.as_ref(),
+            };
+            let grok_headers = GrokRequestHeaders {
+                conv_id: &x_grok_conv_id,
+                req_id: &x_grok_req_id,
+                model_id: candidate,
+                session_id: attempt_payload
+                    .x_grok_session_id
+                    .as_deref()
+                    .unwrap_or_default(),
+                turn_idx: attempt_payload.x_grok_turn_idx.as_deref(),
+                agent_id: attempt_payload
+                    .x_grok_agent_id
+                    .as_deref()
+                    .unwrap_or_default(),
+                deployment_id: attempt_payload.x_grok_deployment_id.as_deref(),
+                user_id: attempt_payload.x_grok_user_id.as_deref(),
+            };
+            let endpoint = self.chat_completions_endpoint(candidate);
+            let built_request = grok_headers
+                .apply(self.post(endpoint.clone()))
+                .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+                .json(&streaming_request)
+                .build()
+                .map_err(|error| {
+                    tracing::error!("Failed to build HTTP request: {}", error);
+                    SamplingError::Http(error)
+                })?;
 
-        let built_request = http_request.build().map_err(|e| {
-            tracing::error!("Failed to build HTTP request: {}", e);
-            SamplingError::Http(e)
-        })?;
+            tracing::debug!(
+                url = %built_request.url(),
+                method = %built_request.method(),
+                model_id = %candidate,
+                "Sending chat/completions request"
+            );
+            Self::log_request_headers(&built_request, "chat/completions");
 
-        tracing::debug!(
-            url = %built_request.url(),
-            method = %built_request.method(),
-            "Sending chat/completions request"
-        );
-        Self::log_request_headers(&built_request, "chat/completions");
+            let response = match self.http.execute(built_request).await {
+                Ok(response) => response,
+                Err(error) => {
+                    tracing::debug!("HTTP request failed: {}", error);
+                    record_stream_request_failure(&error);
+                    if has_fallback
+                        && policy.permits_model_fallback(None, &error.to_string(), false)
+                    {
+                        tracing::warn!(
+                            model_id = %candidate,
+                            fallback_model = %candidates[attempt_index + 1],
+                            "Chutes model transport failed before streaming; trying fallback"
+                        );
+                        continue;
+                    }
+                    return Err(SamplingError::Http(error));
+                }
+            };
 
-        let response = self.http.execute(built_request).await.map_err(|e| {
-            tracing::debug!("HTTP request failed: {}", e);
-            record_stream_request_failure(&e);
-            e
-        })?;
+            let status = response.status();
+            let span = tracing::Span::current();
+            span.record("status_code", status.as_u16() as i64);
+            span.record("success", status.is_success());
+            let model_metadata = extract_model_metadata(response.headers());
+            let retry_after_secs = extract_retry_after(response.headers());
+            let should_retry = extract_should_retry(response.headers());
+            if status.is_success() {
+                successful_response = Some((response, model_metadata));
+                break;
+            }
 
-        let status = response.status();
-        let span = tracing::Span::current();
-        span.record("status_code", status.as_u16() as i64);
-        span.record("success", status.is_success());
-        let model_metadata = extract_model_metadata(response.headers());
-        let retry_after_secs = extract_retry_after(response.headers());
-        let should_retry = extract_should_retry(response.headers());
-        if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 span.record("error", "unauthorized (401)");
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ChatCompletionsStream,
                 );
-                let endpoint = self.endpoint("chat/completions");
                 let server_message = response.text().await.unwrap_or_default();
                 return Err(SamplingError::Auth(format!(
                     "Unauthorized (401) from {endpoint}: {server_message}"
@@ -963,24 +1056,35 @@ impl SamplingClient {
             }
 
             let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
+                self.format_request_headers(&x_grok_conv_id, &x_grok_req_id, candidate, true);
             let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
             let server_message = parse_error_bytes(bytes.as_ref());
-
             let message = self.build_api_error_message(
                 status,
                 &server_message,
-                &self.endpoint("chat/completions"),
+                &endpoint,
                 &req_headers,
                 Some(&resp_headers),
             );
+
+            if has_fallback
+                && policy.permits_model_fallback(Some(status.as_u16()), &server_message, false)
+            {
+                tracing::warn!(
+                    status = %status,
+                    model_id = %candidate,
+                    fallback_model = %candidates[attempt_index + 1],
+                    "Chutes model unavailable before streaming; trying fallback"
+                );
+                continue;
+            }
 
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
-                model_id = %model_id,
+                model_id = %candidate,
                 "chat/completions API error"
             );
             return Err(SamplingError::Api {
@@ -991,6 +1095,9 @@ impl SamplingClient {
                 should_retry,
             });
         }
+
+        let (response, model_metadata) = successful_response
+            .expect("the selected model always provides at least one request candidate");
 
         // Strip UTF-8 BOM if present: eventsource-stream 0.2.3 incorrectly slices BOM at byte 1 instead of 3.
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -1031,7 +1138,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "chat_completions",
-                            data = %data,
+                            data_len = data.len(),
                         );
 
                         if let Some(stream_error) = try_parse_stream_error(data) {
@@ -1041,7 +1148,7 @@ impl SamplingClient {
                                 serde_json::from_str::<ChatCompletionChunk>(data).map_err(|e| {
                                     tracing::error!(
                                         error = %e,
-                                        raw_data = %data,
+                                        data_len = data.len(),
                                         "Failed to deserialize ChatCompletionChunk from stream"
                                     );
                                     SamplingError::Serialization(e)
@@ -1194,10 +1301,9 @@ impl SamplingClient {
         }
 
         let response_obj = serde_json::from_slice::<rs::Response>(&bytes).map_err(|e| {
-            let raw_body = String::from_utf8_lossy(&bytes);
             tracing::error!(
                 error = %e,
-                raw_body = %raw_body,
+                body_len = bytes.len(),
                 "Failed to deserialize rs::Response"
             );
             SamplingError::Serialization(e)
@@ -1408,7 +1514,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "responses",
-                            data = %data,
+                            data_len = data.len(),
                         );
 
                         // Intercept the non-standard doom-loop event before
@@ -1553,10 +1659,9 @@ impl SamplingClient {
 
         let response_obj =
             serde_json::from_slice::<messages::MessagesResponse>(&bytes).map_err(|e| {
-                let raw_body = String::from_utf8_lossy(&bytes);
                 tracing::error!(
                     error = %e,
-                    raw_body = %raw_body,
+                    body_len = bytes.len(),
                     "Failed to deserialize MessagesResponse"
                 );
                 SamplingError::Serialization(e)
@@ -1725,7 +1830,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "messages",
-                            data = %data,
+                            data_len = data.len(),
                         );
 
                         if let Some(stream_error) = try_parse_stream_error(data) {
@@ -1736,7 +1841,7 @@ impl SamplingClient {
                                     |e| {
                                         tracing::error!(
                                             error = %e,
-                                            raw_data = %data,
+                                            data_len = data.len(),
                                             "Failed to deserialize MessageStreamEvent from stream"
                                         );
                                         SamplingError::Serialization(e)
@@ -2080,6 +2185,7 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
+            chat_template_kwargs: None,
         };
 
         let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
@@ -2107,6 +2213,158 @@ mod tests {
 
         assert!(obj.get("max_tokens").is_none());
         assert!(obj.get("tools").is_none());
+        assert!(obj.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn chutes_glm_52_defaults_to_high_instead_of_max_reasoning() {
+        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(
+            kwargs,
+            Some(ChutesChatTemplateKwargs {
+                enable_thinking: Some(true),
+                thinking: None,
+            })
+        );
+    }
+
+    #[test]
+    fn chutes_glm_52_preserves_newer_catalog_scalar_efforts() {
+        for effort in [
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+        ] {
+            let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
+            request.reasoning_effort = Some(effort);
+
+            let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+            assert_eq!(request.reasoning_effort, Some(effort));
+            assert_eq!(kwargs, None);
+        }
+    }
+
+    #[test]
+    fn chutes_glm_52_max_uses_gateway_compatible_medium_wire_value() {
+        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::Xhigh);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::Medium));
+        assert_eq!(kwargs.unwrap().enable_thinking, Some(true));
+    }
+
+    #[test]
+    fn chutes_none_effort_disables_thinking_in_chat_template() {
+        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::None);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, None);
+        assert_eq!(
+            kwargs,
+            Some(ChutesChatTemplateKwargs {
+                enable_thinking: Some(false),
+                thinking: None,
+            })
+        );
+    }
+
+    #[test]
+    fn chutes_instant_request_omits_reasoning_effort_on_the_wire() {
+        let mut request = ChatCompletionRequest::new("moonshotai/Kimi-K2.6-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::None);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+        let json = serde_json::to_value(ChatRequestWithTemplate {
+            inner: &request,
+            chat_template_kwargs: kwargs.as_ref(),
+        })
+        .unwrap();
+
+        assert!(json.get("reasoning_effort").is_none());
+        assert_eq!(json["chat_template_kwargs"]["thinking"], false);
+        assert!(
+            json["chat_template_kwargs"]
+                .get("enable_thinking")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn chutes_qwen_thinking_uses_template_switch_not_scalar_effort() {
+        let mut request = ChatCompletionRequest::new("Qwen/Qwen3.6-27B-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::High);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, None);
+        assert_eq!(kwargs.unwrap().enable_thinking, Some(true));
+    }
+
+    #[test]
+    fn fixed_reasoning_model_drops_invalid_disable_override() {
+        let mut request = ChatCompletionRequest::new("MiniMaxAI/MiniMax-M2.5-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::None);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, None);
+        assert_eq!(kwargs, None);
+    }
+
+    #[test]
+    fn chutes_fallback_candidate_recomputes_reasoning_for_its_own_family() {
+        let mut request = ChatCompletionRequest::new("Qwen/Qwen3.6-27B-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::High);
+
+        let (qwen, qwen_kwargs) = prepare_chutes_chat_attempt(
+            "https://llm.chutes.ai/v1",
+            &request,
+            "Qwen/Qwen3.6-27B-TEE",
+        );
+        let (minimax, minimax_kwargs) = prepare_chutes_chat_attempt(
+            "https://llm.chutes.ai/v1",
+            &request,
+            "MiniMaxAI/MiniMax-M2.5-TEE",
+        );
+        let (auto, auto_kwargs) =
+            prepare_chutes_chat_attempt("https://llm.chutes.ai/v1", &request, "model-router");
+
+        assert_eq!(qwen.reasoning_effort, None);
+        assert_eq!(qwen_kwargs.unwrap().enable_thinking, Some(true));
+        assert_eq!(minimax.reasoning_effort, None);
+        assert_eq!(minimax_kwargs, None);
+        assert_eq!(auto.reasoning_effort, None);
+        assert_eq!(auto_kwargs, None);
+    }
+
+    #[test]
+    fn unknown_future_chutes_model_keeps_explicit_catalog_effort() {
+        let mut request = ChatCompletionRequest::new("Qwen/Qwen4-Next-TEE", vec![]);
+        request.reasoning_effort = Some(ReasoningEffort::High);
+
+        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(kwargs, None);
+    }
+
+    #[test]
+    fn non_chutes_requests_keep_reasoning_untouched() {
+        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2", vec![]);
+
+        let kwargs = chutes_chat_template_kwargs("https://example.com/v1", &mut request);
+
+        assert_eq!(request.reasoning_effort, None);
+        assert_eq!(kwargs, None);
     }
 
     #[test]
@@ -2184,6 +2442,27 @@ mod tests {
     fn new_with_minimal_config_succeeds() {
         let client = SamplingClient::new(minimal_config()).expect("client should construct");
         assert_eq!(client.api_backend(), ApiBackend::ChatCompletions);
+    }
+
+    #[test]
+    fn chutes_routes_only_virtual_auto_model_through_router() {
+        let client = SamplingClient::new(SamplerConfig {
+            base_url: "https://llm.chutes.ai/v1".to_owned(),
+            ..minimal_config()
+        })
+        .expect("client should construct");
+
+        assert_eq!(
+            client.chat_completions_endpoint("zai-org/GLM-5.2-TEE"),
+            "https://llm.chutes.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            client.chat_completions_endpoint("model-router"),
+            format!(
+                "{}/chat/completions",
+                chutes_build_core::endpoints::ChutesEndpoints::default().router
+            )
+        );
     }
 
     #[test]
@@ -2284,8 +2563,8 @@ mod tests {
             version: None,
         };
         let ua = user_agent_string_for(&origin);
-        // No slash between product and the grok-shell agent product.
-        assert!(ua.starts_with("my-client grok-shell/"));
+        // No slash between the origin product and the Chutes Build product.
+        assert!(ua.starts_with(&format!("my-client {AGENT_PRODUCT}/")));
     }
 
     #[test]

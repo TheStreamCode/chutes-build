@@ -11,9 +11,9 @@ use xai_hunk_tracker::{HunkTrackerActor, HunkTrackerHandle, TrackingMode};
 use xai_tool_protocol::ToolServerStatusPayload;
 use xai_tool_protocol::turn_hook::TurnHookOutcome;
 /// Default SIGTERM drain budget (ms); override via
-/// `GROK_WORKSPACE_TERMINATION_GRACE_MS`. 45s fits under the K8s grace period.
+/// `CHUTES_BUILD_WORKSPACE_TERMINATION_GRACE_MS`. 45s fits under the K8s grace period.
 const DEFAULT_TERMINATION_GRACE_MS: u64 = 45_000;
-/// preStop-hook drain marker; override via `GROK_WORKSPACE_DRAINING_FILE`.
+/// preStop-hook drain marker; override via `CHUTES_BUILD_WORKSPACE_DRAINING_FILE`.
 const DEFAULT_DRAINING_FILE: &str = "/tmp/workspace-server.draining";
 static DRAIN_STARTED_TOTAL: std::sync::LazyLock<IntCounterVec> = std::sync::LazyLock::new(|| {
     register_int_counter_vec!(
@@ -449,7 +449,7 @@ impl WorkspaceHandle {
             crate::upload::environment::WorkspaceIdentity::default(),
         )
     }
-    /// Construct a handle with an explicit `$GROK_WORKSPACE_HOME` and a
+    /// Construct a handle with an explicit `$CHUTES_BUILD_WORKSPACE_HOME` and a
     /// pre-spawned [`UploadQueue`](xai_file_utils::queue::UploadQueue).
     ///
     /// [`connect_local_workspace`] calls this so the queue is backed by the
@@ -1343,7 +1343,7 @@ impl WorkspaceHandle {
     }
     /// Spawn a fire-and-forget per-turn `tool_state.json` snapshot + upload to
     /// `{session_id}/turn_{N}/tool_state.json`. No-op when
-    /// `GROK_WORKSPACE_TOOL_STATE_ENABLED` is off, opted out,
+    /// `CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED` is off, opted out,
     /// there is no upload queue (local/test mode), or the
     /// session is unknown — legacy behavior unchanged.
     fn spawn_tool_state_upload(&self, session_id: &str, turn_number: u64) {
@@ -1415,7 +1415,7 @@ impl WorkspaceHandle {
     /// ordering, so a stale baseline-only write may rarely clobber a fresher
     /// baseline+MCP snapshot — accepted as telemetry-only.
     ///
-    /// No-op when the `GROK_WORKSPACE_TOOL_DEFS_ENABLED` flag is off, no upload
+    /// No-op when the `CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED` flag is off, no upload
     /// queue is wired, or the session is unknown.
     pub(crate) fn emit_workspace_tool_definitions(&self, session_id: &str) {
         if !self.shared.tool_defs_enabled {
@@ -2110,7 +2110,7 @@ impl WorkspaceHandle {
     }
     /// Run one poll tick for an active fuzzy search. Returns the next batch of
     /// results (paths absolutized against the search root) or a signal to keep
-    /// polling / stop. Drives the `x.ai/search/fuzzy/status` notification loop.
+    /// polling / stop. Drives the `chutes.build/search/fuzzy/status` notification loop.
     pub async fn fuzzy_poll(
         &self,
         search_id: &str,
@@ -2187,7 +2187,7 @@ impl WorkspaceHandle {
             sink(method, params);
         }
     }
-    /// Drive the `x.ai/search/fuzzy/status` stream for an active search: poll
+    /// Drive the `chutes.build/search/fuzzy/status` stream for an active search: poll
     /// until done / closed / superseded, emitting each new result batch to the
     /// client through the ext-notification sink. Co-located with the manager so
     /// it polls in-process in both local and proxy mode.
@@ -2237,7 +2237,7 @@ impl WorkspaceHandle {
                     .unwrap_or_default(), }
                 );
             }
-            self.emit_client_ext("x.ai/search/fuzzy/status".to_string(), params);
+            self.emit_client_ext("chutes.build/search/fuzzy/status".to_string(), params);
             if data.done {
                 break;
             }
@@ -2245,7 +2245,7 @@ impl WorkspaceHandle {
     }
     /// Run a content search (ripgrep) and return results.
     /// Run a streaming content (ripgrep) search rooted at `cwd`, emitting each
-    /// batch as `x.ai/search/content/status` via the client sink, and returning
+    /// batch as `chutes.build/search/content/status` via the client sink, and returning
     /// the final result. Co-located with the sink so it streams in both modes.
     pub async fn run_content_search(
         &self,
@@ -2263,7 +2263,7 @@ impl WorkspaceHandle {
                 .total_files, "done" : batch.done, "truncated" : batch.truncated,
                 }
             );
-            handle.emit_client_ext("x.ai/search/content/status".to_string(), params);
+            handle.emit_client_ext("chutes.build/search/content/status".to_string(), params);
         })
         .await
         .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -3641,11 +3641,11 @@ fn classify_drain_outcome(
         DrainOutcome::Full
     }
 }
-/// The SIGTERM drain budget from `GROK_WORKSPACE_TERMINATION_GRACE_MS`
+/// The SIGTERM drain budget from `CHUTES_BUILD_WORKSPACE_TERMINATION_GRACE_MS`
 /// (default [`DEFAULT_TERMINATION_GRACE_MS`]). The hub-evict path uses the
 /// hub-provided `grace_period_ms` instead.
 pub fn termination_grace_from_env() -> std::time::Duration {
-    grace_budget_from_raw(std::env::var("GROK_WORKSPACE_TERMINATION_GRACE_MS").ok())
+    grace_budget_from_raw(std::env::var("CHUTES_BUILD_WORKSPACE_TERMINATION_GRACE_MS").ok())
 }
 /// Pure parse of the termination-grace env value: a positive integer ms wins,
 /// anything else (absent, unparseable, zero) falls back to the default.
@@ -3656,10 +3656,10 @@ fn grace_budget_from_raw(raw: Option<String>) -> std::time::Duration {
         .unwrap_or(DEFAULT_TERMINATION_GRACE_MS);
     std::time::Duration::from_millis(ms)
 }
-/// Path of the preStop drain marker (`GROK_WORKSPACE_DRAINING_FILE` or
+/// Path of the preStop drain marker (`CHUTES_BUILD_WORKSPACE_DRAINING_FILE` or
 /// [`DEFAULT_DRAINING_FILE`]).
 fn draining_file_path() -> std::path::PathBuf {
-    std::env::var("GROK_WORKSPACE_DRAINING_FILE")
+    std::env::var("CHUTES_BUILD_WORKSPACE_DRAINING_FILE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from(DEFAULT_DRAINING_FILE))
 }
@@ -3737,9 +3737,9 @@ pub(crate) async fn stream_hash_and_range(
 /// registers its tools on the server so external clients can reach them.
 /// Sessions are bound dynamically by clients calling `bind_server`.
 ///
-/// `confine_fs_to_workspace_root` confines `x.ai/fs/*` resolution to the root.
+/// `confine_fs_to_workspace_root` confines `chutes.build/fs/*` resolution to the root.
 /// The standalone workspace server defaults it on (it always backs a remote
-/// sandbox; override via `GROK_WORKSPACE_CONFINE_FS_TO_ROOT`); the CLI leader
+/// sandbox; override via `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT`); the CLI leader
 /// passes `false`.
 ///
 /// Returns the connected handle (caller should keep it alive for the
@@ -3769,10 +3769,10 @@ pub async fn connect_local_workspace(
             workspace_home.display()
         ))
     })?;
-    let api_base_url = std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL")
-        .unwrap_or_else(|_| "https://cli-chat-proxy.grok.com/v1".to_string());
+    let api_base_url = std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL")
+        .unwrap_or_else(|_| "https://cli-chat-proxy.chutes-build.com/v1".to_string());
     let data_collection_disabled =
-        std::env::var("GROK_WORKSPACE_DATA_COLLECTION_DISABLED").as_deref() != Ok("false");
+        std::env::var("CHUTES_BUILD_WORKSPACE_DATA_COLLECTION_DISABLED").as_deref() != Ok("false");
     let mut factory = WorkspaceSessionContextFactory::with_auth(auth.clone(), api_base_url.clone());
     if crate::session::tool_config::tool_state_enabled() {
         factory = factory.with_tool_state_home(workspace_home.clone());
@@ -3799,15 +3799,15 @@ pub async fn connect_local_workspace(
     ws_config.project_lsp_trusted = project_lsp_trusted;
     ws_config.require_explicit_toolset = require_explicit_toolset;
     ws_config.confine_fs_to_workspace_root = confine_fs_to_workspace_root;
-    if let Ok(dir) = std::env::var("GROK_WORKSPACE_SERVER_SKILLS_DIR")
+    if let Ok(dir) = std::env::var("CHUTES_BUILD_WORKSPACE_SERVER_SKILLS_DIR")
         && !dir.is_empty()
     {
         ws_config.skills_config.server_skill_dirs = vec![dir];
     }
-    if let Ok(dir) = std::env::var("GROK_WORKSPACE_BUNDLED_SKILLS_DIR")
+    if let Ok(dir) = std::env::var("CHUTES_BUILD_WORKSPACE_BUNDLED_SKILLS_DIR")
         && !dir.is_empty()
     {
-        let allowlist = std::env::var("GROK_WORKSPACE_BUNDLED_SKILLS_ALLOWLIST").ok();
+        let allowlist = std::env::var("CHUTES_BUILD_WORKSPACE_BUNDLED_SKILLS_ALLOWLIST").ok();
         ws_config
             .skills_config
             .ignore
@@ -3860,14 +3860,14 @@ pub async fn connect_local_workspace(
     ws_handle.connect_hub().await?;
     Ok(ws_handle)
 }
-/// Resolve `$GROK_WORKSPACE_HOME` — the workspace-owned on-disk state root.
+/// Resolve `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root.
 ///
 /// Precedence:
-/// 1. `$GROK_WORKSPACE_HOME` (operator override).
-/// 2. `<grok_home>/workspace`, where `<grok_home>` honours `$GROK_HOME` and
-///    otherwise falls back to `~/.grok` (see [`xai_grok_config::grok_home`]).
+/// 1. `$CHUTES_BUILD_WORKSPACE_HOME` (operator override).
+/// 2. `<grok_home>/workspace`, where `<grok_home>` honours `$CHUTES_BUILD_HOME` and
+///    otherwise falls back to `~/.chutes-build` (see [`xai_grok_config::grok_home`]).
 pub fn resolve_workspace_home() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("GROK_WORKSPACE_HOME")
+    if let Ok(p) = std::env::var("CHUTES_BUILD_WORKSPACE_HOME")
         && !p.trim().is_empty()
     {
         return std::path::PathBuf::from(p);
@@ -3913,30 +3913,30 @@ fn bundled_allowlist_ignore_dirs(dir: &str, allowlist: Option<&str>) -> Vec<Stri
     dirs
 }
 /// Whether per-session `events.jsonl` recording is enabled
-/// (`GROK_WORKSPACE_EVENTS_ENABLED=true`). Any other value — including unset —
+/// (`CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED=true`). Any other value — including unset —
 /// keeps the legacy behaviour: [`WorkspaceShared::session_event_writer`] hands
 /// back [`EventWriter::noop()`](xai_file_utils::events::EventWriter::noop)
 /// and no `events.jsonl` is ever opened.
 fn events_enabled() -> bool {
-    std::env::var("GROK_WORKSPACE_EVENTS_ENABLED").as_deref() == Ok("true")
+    std::env::var("CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED").as_deref() == Ok("true")
 }
 /// Watchdog for awaiting enqueue outcomes when answering an `After` turn
 /// hook. MUST undercut the requester's 10s hook deadline or the reply (and
 /// its ack) arrives after the requester gave up. Default 8s; override via
-/// `GROK_WORKSPACE_AFTER_TURN_WATCHDOG_MS` (malformed values fall back).
+/// `CHUTES_BUILD_WORKSPACE_AFTER_TURN_WATCHDOG_MS` (malformed values fall back).
 fn after_turn_watchdog() -> std::time::Duration {
     const DEFAULT_MS: u64 = 8_000;
-    let ms = std::env::var("GROK_WORKSPACE_AFTER_TURN_WATCHDOG_MS")
+    let ms = std::env::var("CHUTES_BUILD_WORKSPACE_AFTER_TURN_WATCHDOG_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(DEFAULT_MS);
     std::time::Duration::from_millis(ms)
 }
 /// Whether per-session `workspace_tool_definitions.json` emission is enabled
-/// (`GROK_WORKSPACE_TOOL_DEFS_ENABLED=true`; any other value keeps legacy
+/// (`CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED=true`; any other value keeps legacy
 /// behaviour).
 fn tool_defs_enabled() -> bool {
-    std::env::var("GROK_WORKSPACE_TOOL_DEFS_ENABLED").as_deref() == Ok("true")
+    std::env::var("CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED").as_deref() == Ok("true")
 }
 /// Debounce window for `ToolsChanged`-driven re-emission: at most one re-emit
 /// per session per window.
@@ -4121,14 +4121,14 @@ fn reduce_enqueue_outcomes(
 }
 /// Per-process ephemeral workspace home for handles constructed without a
 /// backing upload queue (tests, local mode). Never the real grok home —
-/// only [`connect_local_workspace`] resolves `$GROK_WORKSPACE_HOME` — so the
+/// only [`connect_local_workspace`] resolves `$CHUTES_BUILD_WORKSPACE_HOME` — so the
 /// queue-less default path can never collide with a real workspace's state dir.
 fn ephemeral_workspace_home() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("grok-workspace-ephemeral-{}", std::process::id()))
 }
-/// Resolve `workspace_rewind_all_outcomes` from `GROK_WORKSPACE_REWIND_ALL_OUTCOMES` (default off).
+/// Resolve `workspace_rewind_all_outcomes` from `CHUTES_BUILD_WORKSPACE_REWIND_ALL_OUTCOMES` (default off).
 fn rewind_all_outcomes_from_env() -> bool {
-    xai_grok_config::env_bool("GROK_WORKSPACE_REWIND_ALL_OUTCOMES").unwrap_or(false)
+    xai_grok_config::env_bool("CHUTES_BUILD_WORKSPACE_REWIND_ALL_OUTCOMES").unwrap_or(false)
 }
 /// Flush the session toolset's `ResourcesPersistence` to disk (a fresh
 /// snapshot, waiting for the atomic-rename write to land), then read the bytes
@@ -4659,14 +4659,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn build_session_routed_handlers_skips_invalid_client_name_without_panic() {
         let handle = make_handle();
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("bad name!".to_owned());
         let session = handle
             .create_session_with_config(
                 "sess-invalid-name",
                 None,
                 Some(ToolServerConfig {
-                    tools: vec![renamed, tc("GrokBuild:grep", Some(ToolKind::Read))],
+                    tools: vec![renamed, tc("ChutesBuild:grep", Some(ToolKind::Read))],
                     behavior_preset: None,
                 }),
                 CapabilityMode::All,
@@ -4711,7 +4711,7 @@ pub(crate) mod tests {
             .iter()
             .map(|h| h.tool_id().as_str().to_owned())
             .collect();
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("non_catalog_tool".to_owned());
         let session = handle
             .create_session_with_config(
@@ -4790,7 +4790,7 @@ pub(crate) mod tests {
                 .all(|n| n != "renamed_read"),
             "precondition: the default toolset must not carry the override name"
         );
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg = ToolServerConfig {
             tools: vec![renamed],
@@ -4819,7 +4819,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn rebind_without_explicit_toolset_reuses_existing() {
         let handle = make_handle();
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg = ToolServerConfig {
             tools: vec![renamed],
@@ -4858,7 +4858,7 @@ pub(crate) mod tests {
         let session = handle
             .create_session_with_config("racy", None, None, CapabilityMode::All, None, false)
             .expect("create session");
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg_b = ToolServerConfig {
             tools: vec![renamed],
@@ -4871,7 +4871,7 @@ pub(crate) mod tests {
             .expect("session exists");
         assert_eq!(outcome, RebindOutcome::Reresolved);
         let fp_a = serde_json::to_value(&ToolServerConfig {
-            tools: vec![tc("GrokBuild:list_dir", Some(ToolKind::ListDir))],
+            tools: vec![tc("ChutesBuild:list_dir", Some(ToolKind::ListDir))],
             behavior_preset: None,
         })
         .ok();
@@ -5242,7 +5242,7 @@ pub(crate) mod tests {
             .get()
     }
     fn explicit_cfg(name_override: &str) -> ToolServerConfig {
-        let mut renamed = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mut renamed = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some(name_override.to_owned());
         ToolServerConfig {
             tools: vec![renamed],
@@ -5254,13 +5254,13 @@ pub(crate) mod tests {
     pub(crate) fn background_capable_cfg() -> ToolServerConfig {
         ToolServerConfig {
             tools: vec![
-                tc("GrokBuild:read_file", Some(ToolKind::Read)),
-                tc("GrokBuild:run_terminal_cmd", Some(ToolKind::Execute)),
+                tc("ChutesBuild:read_file", Some(ToolKind::Read)),
+                tc("ChutesBuild:run_terminal_cmd", Some(ToolKind::Execute)),
                 tc(
-                    "GrokBuild:get_task_output",
+                    "ChutesBuild:get_task_output",
                     Some(ToolKind::BackgroundTaskAction),
                 ),
-                tc("GrokBuild:kill_task", Some(ToolKind::KillTaskAction)),
+                tc("ChutesBuild:kill_task", Some(ToolKind::KillTaskAction)),
             ],
             behavior_preset: None,
         }
@@ -5364,7 +5364,7 @@ pub(crate) mod tests {
         let out_dir = tempfile::tempdir().expect("temp dir");
         let bg = start_background_sleep(&session, out_dir.path(), "snapshot-bg").await;
         handle.shared.mcp_tools_snapshot.store(Arc::new(vec![tc(
-            "GrokBuild:read_file",
+            "ChutesBuild:read_file",
             Some(ToolKind::Read),
         )]));
         let rebuilt = handle
@@ -5434,7 +5434,7 @@ pub(crate) mod tests {
             "precondition: the installed toolset's Terminal must be external"
         );
         handle.shared.mcp_tools_snapshot.store(Arc::new(vec![tc(
-            "GrokBuild:read_file",
+            "ChutesBuild:read_file",
             Some(ToolKind::Read),
         )]));
         handle
@@ -5974,7 +5974,7 @@ pub(crate) mod tests {
     async fn client_ext_sink_receives_emitted_notification() {
         let handle = make_handle();
         assert!(!handle.has_client_ext_sink());
-        handle.emit_client_ext("x.ai/noop".to_string(), serde_json::json!({}));
+        handle.emit_client_ext("chutes.build/noop".to_string(), serde_json::json!({}));
         let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let sink_captured = captured.clone();
         handle.set_client_ext_sink(Arc::new(move |method, params| {
@@ -5982,17 +5982,17 @@ pub(crate) mod tests {
         }));
         assert!(handle.has_client_ext_sink());
         handle.emit_client_ext(
-            "x.ai/search/fuzzy/status".to_string(),
+            "chutes.build/search/fuzzy/status".to_string(),
             serde_json::json!({ "a" : 1 }),
         );
         let got = captured.lock();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].0, "x.ai/search/fuzzy/status");
+        assert_eq!(got[0].0, "chutes.build/search/fuzzy/status");
         assert_eq!(got[0].1, serde_json::json!({ "a" : 1 }));
     }
     /// End-to-end local streaming: open + change a fuzzy search over real files,
     /// run the notification driver, and assert a correctly-shaped
-    /// `x.ai/search/fuzzy/status` is delivered through the sink with the match.
+    /// `chutes.build/search/fuzzy/status` is delivered through the sink with the match.
     #[tokio::test]
     async fn fuzzy_change_streams_status_through_sink() {
         use crate::file_system::TargetClientId;
@@ -6003,7 +6003,7 @@ pub(crate) mod tests {
         let captured = Arc::new(parking_lot::Mutex::new(Vec::<serde_json::Value>::new()));
         let sink_captured = captured.clone();
         handle.set_client_ext_sink(Arc::new(move |method, params| {
-            if method == "x.ai/search/fuzzy/status" {
+            if method == "chutes.build/search/fuzzy/status" {
                 sink_captured.lock().push(params);
             }
         }));
@@ -6529,7 +6529,7 @@ pub(crate) mod tests {
     }
     /// `WorkspaceHandle::new` (the test/default path, not `connect_local_workspace`)
     /// must use an ephemeral temp `workspace_home` — never the real
-    /// `$GROK_WORKSPACE_HOME` — must NOT configure an upload queue, and must leave
+    /// `$CHUTES_BUILD_WORKSPACE_HOME` — must NOT configure an upload queue, and must leave
     /// the legacy inline-upload path inert (no storage config). This pins the
     /// flag-off defaults so uploads never start implicitly
     /// and `new` stays runtime-light (no queue worker spawned).
@@ -6546,7 +6546,7 @@ pub(crate) mod tests {
         assert_ne!(
             home,
             resolve_workspace_home(),
-            "default construction must NOT use the real $GROK_WORKSPACE_HOME"
+            "default construction must NOT use the real $CHUTES_BUILD_WORKSPACE_HOME"
         );
         assert!(
             shared.upload_queue().is_none(),
@@ -6585,7 +6585,7 @@ pub(crate) mod tests {
         let _env = crate::session::tool_config::TOOL_STATE_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::remove_var("GROK_WORKSPACE_TOOL_STATE_ENABLED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED") };
         let factory = Arc::new(TestSessionContextFactory::new());
         let cwd = factory.temp.path().to_path_buf();
         let queue_home = tempfile::TempDir::new().unwrap();
@@ -6624,7 +6624,7 @@ pub(crate) mod tests {
         let _env = crate::session::tool_config::TOOL_STATE_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_WORKSPACE_TOOL_STATE_ENABLED", "true") };
+        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED", "true") };
         let factory = Arc::new(TestSessionContextFactory::new());
         let cwd = factory.temp.path().to_path_buf();
         let queue_home = tempfile::TempDir::new().unwrap();
@@ -6644,7 +6644,7 @@ pub(crate) mod tests {
             .enqueued
             .load(std::sync::atomic::Ordering::Relaxed);
         handle.spawn_tool_state_upload("main", 1);
-        unsafe { std::env::remove_var("GROK_WORKSPACE_TOOL_STATE_ENABLED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED") };
         drop(_env);
         tokio::task::yield_now().await;
         assert_eq!(
@@ -6859,7 +6859,7 @@ pub(crate) mod tests {
         let child_ids: Vec<String> = child_baseline.tools.iter().map(|t| t.id.clone()).collect();
         assert_eq!(child_ids, parent_ids);
         let new_parent_baseline = ToolServerConfig {
-            tools: vec![tc("GrokBuild:read_file", Some(ToolKind::Read))],
+            tools: vec![tc("ChutesBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         let factory = handle.shared.session_factory.clone();
@@ -6897,8 +6897,8 @@ pub(crate) mod tests {
         let handle = make_handle();
         let custom = ToolServerConfig {
             tools: vec![
-                tc("GrokBuild:read_file", Some(ToolKind::Read)),
-                tc("GrokBuild:list_dir", Some(ToolKind::ListDir)),
+                tc("ChutesBuild:read_file", Some(ToolKind::Read)),
+                tc("ChutesBuild:list_dir", Some(ToolKind::ListDir)),
             ],
             behavior_preset: None,
         };
@@ -6924,7 +6924,7 @@ pub(crate) mod tests {
     async fn fork_session_uses_main_session_when_parent_session_id_is_none() {
         let handle = make_handle();
         let marker_config = ToolServerConfig {
-            tools: vec![tc("GrokBuild:read_file", Some(ToolKind::Read))],
+            tools: vec![tc("ChutesBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         let main = handle.session("main").expect("main present");
@@ -6962,13 +6962,13 @@ pub(crate) mod tests {
             .iter()
             .map(|t| t.id.clone())
             .collect();
-        assert_eq!(baseline_ids, vec!["GrokBuild:read_file".to_string()]);
+        assert_eq!(baseline_ids, vec!["ChutesBuild:read_file".to_string()]);
     }
     #[tokio::test]
     async fn fork_session_uses_named_parent_when_parent_session_id_is_set() {
         let handle = make_handle();
         let custom = ToolServerConfig {
-            tools: vec![tc("GrokBuild:read_file", Some(ToolKind::Read))],
+            tools: vec![tc("ChutesBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         handle
@@ -7287,7 +7287,7 @@ pub(crate) mod tests {
             .await
             .expect("subB ok");
         let mut rx = handle.shared.events.subscribe();
-        let mcp_tool = tc("GrokBuild:read_file", Some(ToolKind::Read));
+        let mcp_tool = tc("ChutesBuild:read_file", Some(ToolKind::Read));
         let rebuilt = handle.on_mcp_snapshot_changed(vec![mcp_tool]);
         assert_eq!(rebuilt, 3, "main + 2 subagents");
         let mut got: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -8136,7 +8136,7 @@ pub(crate) mod tests {
         let resolved = resolver(
             xai_tool_protocol::SessionId::new("bind-e2e-tools").unwrap(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }] },
                 }
             )),
         )
@@ -8180,7 +8180,7 @@ pub(crate) mod tests {
         let first = resolver(
             sid.clone(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }] },
                 }
             )),
         )
@@ -8190,7 +8190,7 @@ pub(crate) mod tests {
         let second = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file",
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file",
                 "params_json" : "{not json" }] }, }
             )),
         )
@@ -8215,7 +8215,7 @@ pub(crate) mod tests {
         let first = resolver(
             sid.clone(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }] },
                 }
             )),
         )
@@ -8254,7 +8254,7 @@ pub(crate) mod tests {
         let second = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }] },
                 }
             )),
         )
@@ -8275,8 +8275,8 @@ pub(crate) mod tests {
     fn owner_full_bind_metadata() -> serde_json::Value {
         serde_json::json!(
             { "metadata" : { "capability_mode" : "all", "tools" : [{ "id" :
-            "GrokBuild:read_file" }, { "id" : "GrokBuild:search_replace" }, { "id" :
-            "GrokBuild:grep" }, { "id" : "GrokBuild:list_dir" },], }, }
+            "ChutesBuild:read_file" }, { "id" : "ChutesBuild:search_replace" }, { "id" :
+            "ChutesBuild:grep" }, { "id" : "ChutesBuild:list_dir" },], }, }
         )
     }
     const OWNER_TOOLS: [&str; 4] = ["read_file", "search_replace", "grep", "list_dir"];
@@ -8454,9 +8454,9 @@ pub(crate) mod tests {
         let resolver = bind_resolver_fixture(&handle);
         let sid = xai_tool_protocol::SessionId::new("bind-e2e-bg").unwrap();
         let bg_metadata = serde_json::json!(
-            { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }, { "id" :
-            "GrokBuild:run_terminal_cmd" }, { "id" : "GrokBuild:get_task_output" }, {
-            "id" : "GrokBuild:kill_task" },] }, }
+            { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }, { "id" :
+            "ChutesBuild:run_terminal_cmd" }, { "id" : "ChutesBuild:get_task_output" }, {
+            "id" : "ChutesBuild:kill_task" },] }, }
         );
         let first = resolver(sid.clone(), Some(bg_metadata.clone()))
             .await
@@ -8496,7 +8496,7 @@ pub(crate) mod tests {
         let swapped = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "GrokBuild:read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "ChutesBuild:read_file" }] },
                 }
             )),
         )
@@ -9089,7 +9089,7 @@ pub(crate) mod tests {
         let got = bundled_allowlist_ignore_dirs("/nonexistent/bundled-skills", Some("pdf"));
         assert_eq!(got, vec!["/nonexistent/bundled-skills".to_string()]);
     }
-    /// Unique skill names: discovery also reads the dev machine's `~/.grok`.
+    /// Unique skill names: discovery also reads the dev machine's `~/.chutes-build`.
     #[tokio::test]
     async fn bundled_allowlist_filters_discovery() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -9448,11 +9448,11 @@ pub(crate) mod tests {
         let _env = crate::session::tool_config::TOOL_STATE_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("GROK_WORKSPACE_TOOL_STATE_ENABLED", "true") };
+        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED", "true") };
         let (handle, _queue, _home) = make_handle_with_queue(false);
         assert_eq!(handle.shared.producer_tasks.len(), 0);
         handle.spawn_tool_state_upload("main", 1);
-        unsafe { std::env::remove_var("GROK_WORKSPACE_TOOL_STATE_ENABLED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED") };
         drop(_env);
         assert_eq!(
             handle.shared.producer_tasks.len(),

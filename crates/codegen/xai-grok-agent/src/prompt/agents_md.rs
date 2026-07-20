@@ -1,7 +1,7 @@
 //! AGENTS.md / Claude.md / rules directory discovery and loading.
 //!
-//! Searches from cwd to repo root, plus `~/.grok/`. Also discovers
-//! `*.md` files in `.grok/rules/` and `.claude/rules/` directories.
+//! Searches from cwd to repo root, plus `~/.chutes-build/`. Also discovers
+//! `*.md` files in `.chutes-build/rules/` and `.claude/rules/` directories.
 
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,7 @@ fn find_agent_files(dir: &Path, filenames: &[&str]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Find `*.md` files in `.grok/rules/`, `.claude/rules/`, and `.cursor/rules/`,
+/// Find `*.md` files in `.chutes-build/rules/`, `.claude/rules/`, and `.cursor/rules/`,
 /// sorted alphabetically. `rules_subdirs` is the (compat-gated) list, precomputed
 /// once by the caller so the walk doesn't re-allocate it per directory.
 fn find_rules_files(dir: &Path, rules_subdirs: &[&str]) -> Vec<PathBuf> {
@@ -63,7 +63,7 @@ fn find_rules_files(dir: &Path, rules_subdirs: &[&str]) -> Vec<PathBuf> {
     results
 }
 
-/// Read Agents.md from ~/.grok/, git repo root, and session cwd.
+/// Read Agents.md from ~/.chutes-build/, git repo root, and session cwd.
 /// Returns a list of AgentConfigFile with their file names, full paths, and contents.
 ///
 /// `compat` gates which vendor (`.claude`/`.cursor`) surfaces are scanned for
@@ -92,7 +92,7 @@ async fn read_agents_config_with_options(
 
     let gitignore = build_gitignore(git_root.as_deref());
 
-    // Always include grok_home (~/.grok/) first, then ~/.claude/ and ~/.cursor/
+    // Always include grok_home (~/.chutes-build/) first, then ~/.claude/ and ~/.cursor/
     // for compat — each gated by the resolved `agents` compat cell.
     let mut dirs = vec![global_dir];
     if let Some(home) = dirs::home_dir() {
@@ -205,20 +205,22 @@ fn render_agents_md(configs: &[AgentConfigFile]) -> Option<String> {
         " (ordered from repo root to current directory - deeper files take precedence on conflicts):\n",
     );
 
-    for config in configs {
+    // Identical instruction bodies can be discovered through compatibility
+    // paths (for example AGENTS.md plus a mirrored vendor rules file). Keep the
+    // deepest/latest occurrence so precedence and behavior stay unchanged,
+    // while avoiding repeated prompt tokens.
+    let mut seen_bodies = std::collections::HashSet::new();
+    let mut prompt_configs = Vec::with_capacity(configs.len());
+    for config in configs.iter().rev() {
+        let body = config_prompt_body(config);
+        if seen_bodies.insert(body.clone()) {
+            prompt_configs.push((config, body));
+        }
+    }
+    prompt_configs.reverse();
+
+    for (config, content) in prompt_configs {
         section.push_str(&format!("\n## From: {}\n", config.file_path));
-
-        // Strip YAML frontmatter from rules files (e.g. .claude/rules/*.md,
-        // .grok/rules/*.md) so globs/paths metadata doesn't leak into the
-        // system prompt as raw YAML.
-        let is_rules_file = config.file_path.contains("/.grok/rules/")
-            || config.file_path.contains("/.claude/rules/");
-        let content = if is_rules_file {
-            xai_grok_tools::implementations::skills::skill::extract_skill_body(&config.content)
-        } else {
-            config.content.clone()
-        };
-
         section.push_str(&content);
         section.push('\n');
     }
@@ -227,6 +229,19 @@ fn render_agents_md(configs: &[AgentConfigFile]) -> Option<String> {
     section.push_str("\n</system-reminder>");
 
     Some(section)
+}
+
+fn config_prompt_body(config: &AgentConfigFile) -> String {
+    // Normalize separators for the rules-directory check so frontmatter is
+    // stripped on Windows as well as Unix.
+    let normalized_path = config.file_path.replace('\\', "/");
+    let is_rules_file = normalized_path.contains("/.chutes-build/rules/")
+        || normalized_path.contains("/.claude/rules/");
+    if is_rules_file {
+        xai_grok_tools::implementations::skills::skill::extract_skill_body(&config.content)
+    } else {
+        config.content.clone()
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +383,40 @@ mod tests {
             !section.contains("truncated"),
             "content must not be truncated"
         );
+    }
+
+    #[test]
+    fn format_agents_md_section_deduplicates_identical_bodies_keep_deepest() {
+        let configs = vec![
+            AgentConfigFile {
+                file_name: "AGENTS.md".to_string(),
+                file_path: "/repo/AGENTS.md".to_string(),
+                content: "Use the workspace formatter.".to_string(),
+            },
+            AgentConfigFile {
+                file_name: "AGENTS.md".to_string(),
+                file_path: "/repo/crates/AGENTS.md".to_string(),
+                content: "Use the workspace formatter.".to_string(),
+            },
+        ];
+
+        let section = format_agents_md_section(&configs).unwrap();
+        assert_eq!(section.matches("Use the workspace formatter.").count(), 1);
+        assert!(!section.contains("/repo/AGENTS.md"));
+        assert!(section.contains("/repo/crates/AGENTS.md"));
+    }
+
+    #[test]
+    fn windows_rules_path_strips_frontmatter() {
+        let configs = vec![AgentConfigFile {
+            file_name: "style.md".to_string(),
+            file_path: r"C:\repo\.chutes-build\rules\style.md".to_string(),
+            content: "---\npaths: src/**\n---\nUse Rustfmt.".to_string(),
+        }];
+
+        let section = format_agents_md_section(&configs).unwrap();
+        assert!(section.contains("Use Rustfmt."));
+        assert!(!section.contains("paths: src/**"));
     }
 
     // ── Feature 2: Workspace user AGENTS.md via read_agents_config ───

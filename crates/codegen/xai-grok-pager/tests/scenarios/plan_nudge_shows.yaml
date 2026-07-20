@@ -1,7 +1,7 @@
 name: plan-nudge-shows
 description: >
   Plan-nudge end-to-end with the contextual-hints master pinned on
-  (`GROK_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
+  (`CHUTES_BUILD_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
   default-ON): typing a planning keyword into the prompt shows the "Planning?
   Check out plan mode via shift+tab" banner. The seen cap is in-memory only, so a
   fresh run starts uncapped; the banner clears on its own ~3s TTL.
@@ -10,7 +10,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "1"
 mock:
   response: "unused"

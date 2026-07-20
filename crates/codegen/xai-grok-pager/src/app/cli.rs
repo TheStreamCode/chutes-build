@@ -7,9 +7,9 @@ use std::path::PathBuf;
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    /// Run Grok without the interactive UI
+    /// Run Chutes Build without the interactive UI
     Agent(Box<AgentArgs>),
-    /// Show the configuration Grok discovers for this directory
+    /// Show the configuration Chutes Build discovers for this directory
     Inspect {
         /// Emit machine-readable JSON output.
         #[arg(long)]
@@ -19,28 +19,11 @@ pub enum Command {
     Leader(LeaderMgmtArgs),
     /// Sign out and clear cached credentials
     Logout,
-    /// Sign in to Grok
+    /// Configure Chutes authentication
     Login {
-        /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
-        #[arg(long, hide = true)]
-        legacy: bool,
-        /// Use Grok OAuth via auth.x.ai.
-        #[arg(long = "oauth", alias = "oidc", conflicts_with_all = ["device_auth"])]
-        oauth: bool,
-        /// Use device-code authentication for headless/remote environments.
-        #[arg(
-            long = "device-auth",
-            visible_alias = "device-code",
-            conflicts_with_all = ["oauth"]
-        )]
-        device_auth: bool,
-        /// Authenticate for remote development environments (hidden).
-        ///
-        /// Field is always present so match arms stay feature-unification-safe
-        /// across Bazel/cargo graphs; clap only registers `--devbox` when
-        /// `devbox-login` is enabled (`arg(skip)` otherwise → always false).
-        #[arg(skip)]
-        devbox: bool,
+        /// Read the API key from stdin instead of an interactive hidden prompt.
+        #[arg(long = "api-key-stdin")]
+        api_key_stdin: bool,
     },
     /// Manage MCP server configurations
     Mcp(crate::mcp_cmd::McpArgs),
@@ -52,10 +35,11 @@ pub enum Command {
     Models,
     /// List, search, or restore sessions
     Sessions(crate::sessions_cmd::SessionsArgs),
-    /// Fetch and install managed configuration
+    /// Inspect managed configuration (custom deployments only)
+    #[command(hide = true)]
     Setup {
         /// Print the fetched configuration as JSON instead of installing it;
-        /// writes nothing to ~/.grok.
+        /// writes nothing to ~/.chutes-build.
         #[arg(long)]
         json: bool,
     },
@@ -76,17 +60,18 @@ clipboard (containers, SSH) and your terminal does not handle OSC 52 itself
 sync with your window size.
 
 Examples:
-  grok wrap docker exec -it my-container bash
-  grok wrap kubectl exec -it my-pod -- bash
+  chutes-build wrap docker exec -it my-container bash
+  chutes-build wrap kubectl exec -it my-pod -- bash
 
-See ~/.grok/README.md for more information.
+See ~/.chutes-build/README.md for more information.
 ")]
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown
     Export(crate::export_cmd::ExportArgs),
-    /// Export or upload session trace data
+    /// Export local session trace data
     Trace(crate::trace_cmd::TraceArgs),
-    /// Check for updates or install a specific version
+    /// Self-update is unavailable in source builds
+    #[command(hide = true)]
     Update {
         /// Check for updates without installing.
         #[arg(long)]
@@ -128,14 +113,14 @@ See ~/.grok/README.md for more information.
     /// Expose this workspace to the Computer Hub (via the leader).
     ///
     /// Disabled by default and enabled server-side per account; set
-    /// `GROK_WORKSPACE_COMMAND=1` to enable it locally for testing.
+    /// `CHUTES_BUILD_WORKSPACE_COMMAND=1` to enable it locally for testing.
     #[command(hide = true)]
     Workspace(WorkspaceMgmtArgs),
     /// Open the Agent Dashboard view at startup.
     ///
     /// Centralised, agent-native overview of every session (top-level and
     /// subagents). Disabled when `[dashboard].enabled = false` in
-    /// `~/.grok/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env
+    /// `~/.chutes-build/config.toml` or when the `CHUTES_BUILD_AGENT_DASHBOARD=0` env
     /// var is set.
     Dashboard,
 }
@@ -153,10 +138,10 @@ pub struct WrapArgs {
     )]
     pub command: Vec<String>,
 }
-/// Targets a running leader process by PID (used by `grok leader` / `grok workspace`).
+/// Targets a running leader process by PID (used by `chutes-build leader` / `chutes-build workspace`).
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct LeaderTargetArgs {
-    /// Leader process ID from `grok leader list`.
+    /// Leader process ID from `chutes-build leader list`.
     #[arg(long)]
     pub pid: Option<u32>,
 }
@@ -293,8 +278,8 @@ pub struct AgentArgs {
     /// Override the CLI chat proxy base URL.
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Override the public xAI API base URL.
-    #[arg(long = "xai-api-base-url")]
+    /// Override the Chutes inference API base URL.
+    #[arg(long = "chutes-api-base-url")]
     pub xai_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
@@ -311,13 +296,13 @@ impl AgentArgs {
                 Ok(canonical) if canonical.is_dir() => Some(canonical),
                 Ok(_) => {
                     eprintln!(
-                        "grok: --plugin-dir {}: not a directory; skipping",
+                        "chutes-build: --plugin-dir {}: not a directory; skipping",
                         p.display()
                     );
                     None
                 }
                 Err(e) => {
-                    eprintln!("grok: --plugin-dir {}: {e}; skipping", p.display());
+                    eprintln!("chutes-build: --plugin-dir {}: {e}; skipping", p.display());
                     None
                 }
             })
@@ -329,7 +314,7 @@ impl AgentArgs {
 pub enum AgentCmd {
     /// Run the agent over stdio
     Stdio,
-    /// Run the agent headlessly over the Grok WebSocket relay
+    /// Run the agent headlessly over a configured WebSocket relay
     Headless(HeadlessArgs),
     /// Run the agent as a WebSocket server
     Serve(ServeArgs),
@@ -339,9 +324,9 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "grok-ws-origin")]
+    #[arg(long = "chutes-ws-origin", hide = true)]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "grok-ws-url")]
+    #[arg(long = "chutes-ws-url", hide = true)]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
@@ -351,7 +336,7 @@ pub struct ServeArgs {
     #[arg(long, default_value = "127.0.0.1:2419")]
     pub bind: SocketAddr,
     /// Secret token for client authentication (auto-generated if not provided)
-    #[arg(long, env = "GROK_AGENT_SECRET")]
+    #[arg(long, env = "CHUTES_BUILD_AGENT_SECRET")]
     pub secret: Option<String>,
     /// Remote agent URL for proxy mode
     #[arg(long)]
@@ -379,13 +364,8 @@ pub struct LeaderArgs {
     /// Keep the leader running after the last client disconnects.
     #[arg(long)]
     pub no_exit_on_disconnect: bool,
-    /// Defer the grok.com relay WebSocket until the first headless IPC client
-    /// registers. Without this flag the leader connects the relay eagerly at
-    /// startup — required for bare leaders (headless remote env / systemd) that
-    /// receive remote prompts *through* the relay. Passed by leaders auto-spawned
-    /// from interactive clients (TUI/IDE), which only need the relay if a
-    /// headless client appears.
-    #[arg(long)]
+    /// Legacy relay compatibility switch. The Chutes Build relay is disabled.
+    #[arg(long, hide = true)]
     pub relay_on_demand: bool,
     /// Disable periodic auto-update checks for the leader.
     #[arg(long)]
@@ -408,9 +388,9 @@ fn version_with_channel() -> &'static str {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "grok",
+    name = "chutes-build",
     version = version_with_channel(),
-    about = "Grok Build TUI",
+    about = "Chutes Build — privacy-first coding agent for Chutes",
     disable_version_flag = true,
     next_display_order = None,
     help_template = "\
@@ -434,7 +414,7 @@ pub struct PagerArgs {
     /// Working directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
-    /// Use a custom leader socket path instead of the default `~/.grok/leader.sock`.
+    /// Use a custom leader socket path instead of the default `~/.chutes-build/leader.sock`.
     #[arg(
         long = "leader-socket",
         value_name = "PATH",
@@ -533,12 +513,12 @@ pub struct PagerArgs {
     pub rules: Option<String>,
     /// Compaction mode [summary|transcript|segments]: `summary` (default) adds
     /// no pointer; `transcript` points at the raw transcript; `segments`
-    /// persists per-segment markdown to grep. Sets `GROK_COMPACTION_MODE`.
+    /// persists per-segment markdown to grep. Sets `CHUTES_BUILD_COMPACTION_MODE`.
     #[clap(long = "compaction-mode", value_name = "MODE", hide = true)]
     pub compaction_mode: Option<String>,
     /// Segments verbatim detail [none|minimal|balanced|verbose] (default
     /// `verbose`). Only affects `--compaction-mode segments`. Sets
-    /// `GROK_COMPACTION_DETAIL`.
+    /// `CHUTES_BUILD_COMPACTION_DETAIL`.
     #[clap(long = "compaction-detail", value_name = "DETAIL", hide = true)]
     pub compaction_detail: Option<String>,
     /// Override the agent's system prompt (compat alias: --system-prompt).
@@ -604,8 +584,12 @@ pub struct PagerArgs {
     /// Disable structured question prompts from the agent.
     #[arg(long = "no-ask-user", hide = true)]
     pub no_ask_user: bool,
-    /// Enable cross-session memory.
-    #[arg(long = "experimental-memory", conflicts_with = "no_memory")]
+    /// Enable local cross-session memory (enabled by default).
+    #[arg(
+        long = "memory",
+        alias = "experimental-memory",
+        conflicts_with = "no_memory"
+    )]
     pub experimental_memory: bool,
     /// Disable cross-session memory for this session.
     #[arg(long = "no-memory", conflicts_with = "experimental_memory")]
@@ -646,7 +630,7 @@ pub struct PagerArgs {
     pub self_verify: bool,
     /// Exit as soon as the first agent turn ends, without waiting for pending
     /// background bash/monitor tasks or background subagents (headless only).
-    /// Default for all `grok -p` runs is to wait (up to `--background-wait-timeout`)
+    /// Default for all `chutes-build -p` runs is to wait (up to `--background-wait-timeout`)
     /// so eval harnesses see full task completion. Use this for fast scripts that
     /// only need the first turn's text. Does not wait for server-side auto-wake
     /// output or persistent monitors (those hit the timeout).
@@ -671,7 +655,7 @@ pub struct PagerArgs {
     #[arg(long = "best-of-n", value_name = "N", conflicts_with = "no_subagents")]
     pub best_of_n: Option<u32>,
     /// Sandbox profile for filesystem and network access.
-    #[arg(long, env = "GROK_SANDBOX", value_name = "PROFILE")]
+    #[arg(long, env = "CHUTES_BUILD_SANDBOX", value_name = "PROFILE")]
     pub sandbox: Option<String>,
     /// Session storage mode: local or writeback.
     #[arg(long = "storage-mode", value_name = "MODE", hide = true)]
@@ -711,8 +695,8 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `grok` to
-    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.grok/config.toml.
+    /// Session-scoped only — does not write config. To default plain `chutes-build` to
+    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.chutes-build/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
     /// Open in the standard fullscreen TUI for this session, overriding a
@@ -721,14 +705,14 @@ pub struct PagerArgs {
     /// policy (--no-alt-screen, [terminal] alt_screen, terminal auto-detection).
     #[arg(long = "fullscreen", conflicts_with = "minimal")]
     pub fullscreen: bool,
-    /// Write sampling events to ~/.grok/logs/sampling.jsonl.
-    #[arg(long = "log-sampling", env = "GROK_LOG_SAMPLING", hide = true)]
+    /// Write sampling events to ~/.chutes-build/logs/sampling.jsonl.
+    #[arg(long = "log-sampling", env = "CHUTES_BUILD_LOG_SAMPLING", hide = true)]
     pub log_sampling: bool,
     /// Show the login screen even when credentials are already available.
     #[arg(long = "force-login", hide = true)]
     pub force_login: bool,
-    /// Use OAuth when the welcome screen starts authentication.
-    #[arg(long = "oauth")]
+    /// Legacy custom-deployment OAuth transport override.
+    #[arg(long = "oauth", hide = true)]
     pub oauth: bool,
     /// Connect to a shared leader process.
     #[arg(long, conflicts_with = "no_leader", hide = true)]
@@ -736,7 +720,7 @@ pub struct PagerArgs {
     /// Run standalone even when leader mode is configured.
     #[arg(long, conflicts_with = "leader", hide = true)]
     pub no_leader: bool,
-    /// Initial prompt for the interactive session, e.g. `grok "fix the bug"` or `grok --worktree=feat "create this feature"`.
+    /// Initial prompt for the interactive session, e.g. `chutes-build "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
         conflicts_with_all = &["single",
@@ -778,8 +762,8 @@ impl PagerArgs {
             .map(std::path::Path::new)
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            .filter(|n| *n == "grok" || *n == "agent")
-            .unwrap_or("grok")
+            .filter(|n| *n == "chutes-build" || *n == "chutes-build.exe" || *n == "agent")
+            .unwrap_or("chutes-build")
             .to_owned();
         let mut args = Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)));
         if let Some(socket) = args.leader_socket.take() {
@@ -845,7 +829,7 @@ impl PagerArgs {
     /// session's persisted profile (read once via [`Self::saved_resume_profile`]).
     ///
     /// A session's profile is fixed at creation. Resuming restores it; passing an
-    /// explicit `--sandbox`/`GROK_SANDBOX` that differs from the saved profile is
+    /// explicit `--sandbox`/`CHUTES_BUILD_SANDBOX` that differs from the saved profile is
     /// refused (changing a session's sandbox on resume is a safety footgun). A
     /// matching flag, or no flag, resumes with the saved profile.
     pub fn startup_sandbox_profile(&self, saved: Option<&str>) -> SandboxStartup {
@@ -892,7 +876,7 @@ impl PagerArgs {
     /// The initial interactive prompt from the positional argument, trimmed.
     ///
     /// Returns `None` when no positional prompt was given or it is only
-    /// whitespace. This is the `grok "<prompt>"` launch form; the headless
+    /// whitespace. This is the `chutes-build "<prompt>"` launch form; the headless
     /// `-p`/`--single` path is handled separately.
     pub fn initial_prompt(&self) -> Option<&str> {
         self.prompt

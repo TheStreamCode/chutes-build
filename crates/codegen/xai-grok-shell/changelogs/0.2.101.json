@@ -6,7 +6,7 @@
   },
   {
     "category": "features",
-    "description": "**grok inspect** now shows effective compatibility settings for Cursor, Claude, and Codex sessions.",
+    "description": "**chutes-build inspect** now shows effective compatibility settings for Cursor, Claude, and Codex sessions.",
     "breaking_change": false
   },
   {

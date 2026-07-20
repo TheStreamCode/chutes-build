@@ -12,7 +12,7 @@
 //! command is hidden by default in the registry and revealed when the
 //! dashboard feature is enabled (`dashboard_enabled()`), via
 //! [`crate::app::agent_view::AgentView::set_dashboard_visible`]. When
-//! `[dashboard].enabled = false` or `GROK_AGENT_DASHBOARD=0` is set, the
+//! `[dashboard].enabled = false` or `CHUTES_BUILD_AGENT_DASHBOARD=0` is set, the
 //! dispatcher prints a friendly toast and refuses to open. The dashboard is
 //! independent of leader mode.
 

@@ -15,10 +15,10 @@ pub struct MemoryArgs {
 pub enum MemoryCommand {
     /// Clear memory files (workspace by default)
     Clear {
-        /// Clear workspace-scoped memory (MEMORY.md, sessions/, index.sqlite)
+        /// Clear workspace-scoped memory (memories.md, sessions/, index.sqlite)
         #[arg(long, group = "scope")]
         workspace: bool,
-        /// Clear global MEMORY.md
+        /// Clear global memories.md
         #[arg(long, group = "scope")]
         global: bool,
         /// Clear both workspace and global memory
@@ -46,7 +46,7 @@ fn workspace_target(storage: &MemoryStorage) -> ClearTarget {
 
 fn global_target(storage: &MemoryStorage) -> ClearTarget {
     ClearTarget {
-        label: "global MEMORY.md",
+        label: "global memories.md",
         path: storage.global_memory_file(),
         clear: |s| s.clear_global(),
     }

@@ -16,7 +16,7 @@
   },
   {
     "category": "fixes",
-    "description": "**--disable-web-search** now honored in grok -p and grok agent; auxiliary model routing respects catalog overrides.",
+    "description": "**--disable-web-search** now honored in grok -p and chutes-build agent; auxiliary model routing respects catalog overrides.",
     "breaking_change": false
   },
   {

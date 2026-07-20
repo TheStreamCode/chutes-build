@@ -1,4 +1,4 @@
-//! Headless single-turn mode (`grok -p "prompt"`).
+//! Headless single-turn mode (`chutes-build -p "prompt"`).
 //!
 //! Runs the agent in-process via
 //! `spawn_grok_shell`, sends the ACP lifecycle (init → auth → session → prompt),
@@ -509,14 +509,14 @@ fn auto_respond_to_permissions(
 /// "Not signed in" error message, tailored to the session type.
 fn auth_required_message(interactive: bool) -> String {
     if interactive {
-        "Not signed in. Run `grok login` to authenticate \
-         (or `grok login --device-code` if no browser is available)."
+        "Not signed in. Run `chutes-build login` to authenticate \
+         (or `chutes-build login --device-code` if no browser is available)."
             .to_string()
     } else {
         "Not signed in. To authenticate without a browser, run:\n  \
-         grok login --device-code\n\n\
-         Alternatively, set the XAI_API_KEY environment variable \
-         or run `grok login` on a machine with a browser."
+         chutes-build login --device-code\n\n\
+         Alternatively, set the CHUTES_API_KEY environment variable \
+         or run `chutes-build login` on a machine with a browser."
             .to_string()
     }
 }
@@ -624,7 +624,10 @@ async fn open_session(
                     let mut m = acp::Meta::new();
                     m.insert("noReplay".into(), serde_json::Value::Bool(true));
                     if let Some(true) = restore_code {
-                        m.insert("x.ai/restore_code".into(), serde_json::Value::Bool(true));
+                        m.insert(
+                            "chutes.build/restore_code".into(),
+                            serde_json::Value::Bool(true),
+                        );
                     }
                     Some(m)
                 }),
@@ -700,7 +703,7 @@ async fn fork_then_open(
     let parent_is_worktree = parent_session_is_worktree(parent_id, &write_cwd);
     let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
     let req = acp::ExtRequest::new(
-        "x.ai/session/fork",
+        "chutes.build/session/fork",
         serde_json::value::to_raw_value(&payload)
             .expect("serialize fork params")
             .into(),
@@ -802,7 +805,7 @@ async fn apply_headless_model_and_effort(
     .map_err(|e| {
         if let Some(name) = model_name {
             anyhow::anyhow!(
-                "Couldn't set model '{}': {}. Run 'grok models' to see available models.",
+                "Couldn't set model '{}': {}. Run 'chutes-build models' to see available models.",
                 name,
                 e
             )
@@ -897,7 +900,7 @@ pub async fn run_single_turn(
     );
 
     // No agent-level hub client URL (gateway-only cloud; workspace provider
-    // hub_url lives on `grok workspace` / WorkspaceStartArgs only).
+    // hub_url lives on `chutes-build workspace` / WorkspaceStartArgs only).
 
     apply_agent_flag(&options.agent, &mut agent_config);
 
@@ -1059,7 +1062,7 @@ pub async fn run_single_turn(
     );
 
     // Debug: track headless sessions in active_sessions.json when env var is set.
-    let track_active = std::env::var("GROK_TRACK_HEADLESS").is_ok();
+    let track_active = std::env::var("CHUTES_BUILD_TRACK_HEADLESS").is_ok();
     if track_active {
         let _ = xai_grok_shell::active_sessions::register(
             xai_grok_shell::active_sessions::ActiveSession {
@@ -1134,9 +1137,9 @@ pub async fn run_single_turn(
     let mut ttf_logged = false;
     let mut prompt_fut = Box::pin(acp_send(request, &acp_tx));
     let mut prompt_result = None;
-    // Pending background work: bash/monitor via x.ai/task_backgrounded +
+    // Pending background work: bash/monitor via chutes.build/task_backgrounded +
     // task_completed; background subagents via SubagentSpawned + SubagentFinished
-    // on x.ai/session_notification (prefixed `subagent:{id}` in pending_bg).
+    // on chutes.build/session_notification (prefixed `subagent:{id}` in pending_bg).
     // Tracked regardless of wait_for_background so the exit reaper always
     // sees still-running work; the flag only gates waiting.
     // No idle/quiet polling and no wait for server-side auto-wake text — exit
@@ -1280,7 +1283,7 @@ pub async fn run_single_turn(
 
     // Handle result
     if track_active {
-        // Non-blocking flock so a slow/network ~/.grok can't hang exit.
+        // Non-blocking flock so a slow/network ~/.chutes-build can't hang exit.
         let _ = xai_grok_shell::active_sessions::try_unregister(&session_id);
     }
     cancel.cancel();
@@ -1349,13 +1352,13 @@ fn reap_request_for_key(
 ) -> serde_json::Result<acp::ExtRequest> {
     let (method, params) = match key.strip_prefix("subagent:") {
         Some(id) => (
-            "x.ai/subagent/cancel",
+            "chutes.build/subagent/cancel",
             serde_json::value::to_raw_value(&CancelSubagentRequest {
                 subagent_id: id.to_string(),
             })?,
         ),
         None => (
-            "x.ai/task/kill",
+            "chutes.build/task/kill",
             serde_json::value::to_raw_value(&KillTaskRequest {
                 session_id: session_id.0.to_string(),
                 task_id: key.to_string(),
@@ -1622,7 +1625,7 @@ fn handle_ext_notification(
     let method = notif.request.method.as_ref();
 
     // Background task lifecycle uses dedicated methods (not session_notification).
-    if method == "x.ai/task_backgrounded" {
+    if method == "chutes.build/task_backgrounded" {
         #[derive(serde::Deserialize)]
         struct TaskBgEnvelope {
             update: TaskBgUpdate,
@@ -1652,7 +1655,7 @@ fn handle_ext_notification(
         return ExtEvent::None;
     }
 
-    if method == "x.ai/task_completed" {
+    if method == "chutes.build/task_completed" {
         #[derive(serde::Deserialize)]
         struct TaskDoneEnvelope {
             update: TaskDoneUpdate,
@@ -1680,12 +1683,12 @@ fn handle_ext_notification(
         return ExtEvent::None;
     }
 
-    if method == "x.ai/monitor_event" {
+    if method == "chutes.build/monitor_event" {
         return ExtEvent::MonitorEvent;
     }
 
     match method {
-        "x.ai/session_notification" | "x.ai/session/update" => {}
+        "chutes.build/session_notification" | "chutes.build/session/update" => {}
         _ => return ExtEvent::None,
     }
 
@@ -1865,7 +1868,7 @@ mod tests {
     fn reap_request_for_task_kills_with_session_scope() {
         let session_id = acp::SessionId::new("sess-1");
         let request = super::reap_request_for_key("task-42", &session_id).unwrap();
-        assert_eq!(request.method.as_ref(), "x.ai/task/kill");
+        assert_eq!(request.method.as_ref(), "chutes.build/task/kill");
         let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
         assert_eq!(params["sessionId"], "sess-1");
         assert_eq!(params["taskId"], "task-42");
@@ -1875,7 +1878,7 @@ mod tests {
     fn reap_request_for_subagent_cancels_with_stripped_id() {
         let session_id = acp::SessionId::new("sess-1");
         let request = super::reap_request_for_key("subagent:sub-7", &session_id).unwrap();
-        assert_eq!(request.method.as_ref(), "x.ai/subagent/cancel");
+        assert_eq!(request.method.as_ref(), "chutes.build/subagent/cancel");
         let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
         assert_eq!(params["subagentId"], "sub-7");
     }
@@ -2074,10 +2077,10 @@ mod tests {
     #[test]
     fn headless_task_backgrounded_parses_task_id() {
         // `make_ext_notif` wraps the arg under `update`, so pass
-        // the inner update object (matching the real `x.ai/task_backgrounded`
+        // the inner update object (matching the real `chutes.build/task_backgrounded`
         // wire shape: `{ "update": { "sessionUpdate": ..., "task_id": ... } }`).
         let notif = make_ext_notif(
-            "x.ai/task_backgrounded",
+            "chutes.build/task_backgrounded",
             serde_json::json!({
                 "sessionUpdate": "task_backgrounded",
                 "task_id": "task-abc",
@@ -2092,7 +2095,7 @@ mod tests {
     #[test]
     fn headless_task_backgrounded_with_monitor_description_is_monitor() {
         let notif = make_ext_notif(
-            "x.ai/task_backgrounded",
+            "chutes.build/task_backgrounded",
             serde_json::json!({
                 "sessionUpdate": "task_backgrounded",
                 "task_id": "mon-1",
@@ -2113,7 +2116,7 @@ mod tests {
         // this test guards against a future `rename_all = "camelCase"` on
         // `TaskSnapshot` silently turning waiting into a no-op.
         let notif = make_ext_notif(
-            "x.ai/task_completed",
+            "chutes.build/task_completed",
             serde_json::json!({
                 "sessionUpdate": "task_completed",
                 "task_snapshot": { "task_id": "task-abc" }
@@ -2128,7 +2131,7 @@ mod tests {
     #[test]
     fn headless_subagent_spawned_and_finished_parse() {
         let spawned = make_ext_notif(
-            "x.ai/session_notification",
+            "chutes.build/session_notification",
             serde_json::json!({
                 "sessionUpdate": "subagent_spawned",
                 "subagent_id": "sub-1",
@@ -2143,7 +2146,7 @@ mod tests {
             ExtEvent::SubagentSpawned { subagent_id } if subagent_id == "sub-1"
         ));
         let finished = make_ext_notif(
-            "x.ai/session_notification",
+            "chutes.build/session_notification",
             serde_json::json!({
                 "sessionUpdate": "subagent_finished",
                 "subagent_id": "sub-1",
@@ -2172,7 +2175,7 @@ mod tests {
         let raw = serde_json::value::to_raw_value(&payload).unwrap();
         let (tx, _rx) = tokio::sync::oneshot::channel();
         let notif = xai_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("x.ai/other", raw.into()),
+            request: acp::ExtNotification::new("chutes.build/other", raw.into()),
             response_tx: tx,
         }
         .boxed();

@@ -3,7 +3,7 @@
 //! level (owner-scope + cooldown). Here we drive the full
 //! `invalidate_cache → get_or_fetch → refresh_managed_clients → re-handshake`
 //! loop against a real in-process HTTP MCP server and assert the wire-visible
-//! `x.ai/mcp/server_status` pushes that clients consuming only `server_status`
+//! `chutes.build/mcp/server_status` pushes that clients consuming only `server_status`
 //! (not the `mcp/list` snapshot) depend on.
 //!
 //! Unlike the unit harness, these tests KEEP `gw_rx` so the forwarded
@@ -224,7 +224,7 @@ async fn seed_managed(actor: &SessionActor, mcp_url: &str) {
     );
 }
 
-/// Drain all `x.ai/mcp/server_status` pushes currently queued on `gw_rx`.
+/// Drain all `chutes.build/mcp/server_status` pushes currently queued on `gw_rx`.
 fn drain_status_pushes(
     gw_rx: &mut tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
 ) -> Vec<McpServerStatusPayload> {

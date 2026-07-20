@@ -61,7 +61,7 @@ pub fn merge_tips(
 /// Resolve the merged tip list from pre-loaded config layers.
 ///
 /// Priority: requirements > remote > user config > managed config.
-/// `GROK_TIPS_OVERRIDE` env var overrides everything (debug builds only).
+/// `CHUTES_BUILD_TIPS_OVERRIDE` env var overrides everything (debug builds only).
 /// `[cli] show_tips = false` in requirements or user config kills all tips.
 pub fn resolve_tips(
     requirements: Option<&TomlValue>,
@@ -77,7 +77,7 @@ pub fn resolve_tips(
     }
 
     #[cfg(debug_assertions)]
-    if let Ok(raw) = std::env::var("GROK_TIPS_OVERRIDE") {
+    if let Ok(raw) = std::env::var("CHUTES_BUILD_TIPS_OVERRIDE") {
         return raw.split('|').map(str::to_string).collect();
     }
 

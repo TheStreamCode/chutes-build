@@ -2,7 +2,7 @@
 //!
 //! When `exit_plan_mode` is parked and the user quits, the shell persists
 //! `awaiting_plan_approval = true` in `plan_mode.json`. On `--continue` the
-//! shell re-issues the `x.ai/exit_plan_mode` reverse-request — a real live ACP
+//! shell re-issues the `chutes.build/exit_plan_mode` reverse-request — a real live ACP
 //! waiter — so the pager re-shows approval chrome through its normal path with
 //! no pager-side disk logic. Approving then leaves plan mode and starts the
 //! implement turn.
@@ -130,7 +130,7 @@ pub async fn assert_plan_approval_restored_after_resume() -> Result<()> {
 /// and flip `awaiting_plan_approval` to `true` in `plan_mode.json` for every
 /// session dir under the sandbox home.
 fn seed_parked_approval(home: &Path) -> Result<usize> {
-    let sessions_root = home.join(".grok").join("sessions");
+    let sessions_root = home.join(".chutes-build").join("sessions");
     if !sessions_root.is_dir() {
         bail!(
             "expected sessions under {} after first turn",

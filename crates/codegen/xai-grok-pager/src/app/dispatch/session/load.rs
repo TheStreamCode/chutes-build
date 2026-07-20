@@ -199,6 +199,7 @@ fn dispatch_load_session_ungated(
     agent_mut.apply_app_scoped_gates(
         app.sharing_enabled,
         app.usage_visible,
+        app.subscription_tier.as_deref(),
         app.chat_mode,
         app.screen_mode,
         &app.active_announcements,
@@ -618,7 +619,7 @@ pub(in crate::app::dispatch) fn dispatch_trigger_deep_search(
     }
 }
 /// Chat-mode replacement for local deep search: refetch the session list
-/// with the picker query pushed down as `x.ai/session/list` `query`.
+/// with the picker query pushed down as `chutes.build/session/list` `query`.
 /// Keystrokes are coalesced through [`Effect::DebounceSessionSearch`]; a
 /// forced search (Ctrl+/) or a cleared query fetches immediately. Every
 /// trigger bumps `session_picker_list_seq`, so stale in-flight debounces
@@ -844,6 +845,7 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
             app.usage_visible,
+            app.subscription_tier.as_deref(),
             app.chat_mode,
             app.screen_mode,
             &app.active_announcements,

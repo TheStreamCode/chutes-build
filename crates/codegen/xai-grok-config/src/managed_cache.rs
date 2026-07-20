@@ -560,9 +560,9 @@ fn managed_config_stale_at(home: Option<&Path>, identity: &ServingIdentity) -> b
     }
 }
 
-/// Override with `GROK_DEPLOYMENT_CONFIG_CACHE_TTL_SECS` for testing.
+/// Override with `CHUTES_BUILD_DEPLOYMENT_CONFIG_CACHE_TTL_SECS` for testing.
 fn managed_config_stale_threshold() -> std::time::Duration {
-    if let Ok(s) = std::env::var("GROK_DEPLOYMENT_CONFIG_CACHE_TTL_SECS")
+    if let Ok(s) = std::env::var("CHUTES_BUILD_DEPLOYMENT_CONFIG_CACHE_TTL_SECS")
         && let Ok(secs) = s.parse::<u64>()
     {
         return std::time::Duration::from_secs(secs);

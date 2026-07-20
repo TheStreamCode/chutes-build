@@ -16,7 +16,7 @@ use super::scroll::*;
 // with the excess carried into later cadence slots.
 //
 // Driver shape: 60 back-to-back wheel-up reports (`Duration::ZERO` — no
-// host sleeps) at GROK_SCROLL_SPEED=100 (6x, the existing user setting as
+// host sleeps) at CHUTES_BUILD_SCROLL_SPEED=100 (6x, the existing user setting as
 // a demand amplifier). Under the harness terminal (`TerminalName::Unknown`,
 // ept=3) the first 3 events land within microseconds, promoting the stream
 // to Wheel; desired = 60 x (3/3) x 6.0 = 360 rows. Determinism: the writer
@@ -65,7 +65,7 @@ const TRAVEL_FLOOR: usize = 20;
 async fn misclassified_wheel_flood_does_not_teleport_viewport() {
     let (mut harness, _content, top_before) = spawn_bottom_pinned_marker_scrollback_with_env(
         MARKER_COUNT,
-        &[("GROK_SCROLL_SPEED", "100")],
+        &[("CHUTES_BUILD_SCROLL_SPEED", "100")],
     )
     .await;
 

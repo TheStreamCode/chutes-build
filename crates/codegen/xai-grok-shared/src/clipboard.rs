@@ -25,7 +25,7 @@
 //! boundary where the `osascript`/`pbpaste` subprocesses read the pasteboard —
 //! and every other pasteboard shape (file URLs, text→furl coercions, AppKit
 //! unavailable, read failure) falls back to the unchanged subprocess path.
-//! `GROK_CLIPBOARD_NO_NATIVE_READ=1` disables the in-process read entirely
+//! `CHUTES_BUILD_CLIPBOARD_NO_NATIVE_READ=1` disables the in-process read entirely
 //! (kill switch if a future macOS gates `dataForType:` behind a prompt).
 //!
 //! On Linux and Windows, `arboard` is used directly (it does not link AppKit on
@@ -331,7 +331,7 @@ pub fn native_tool_name() -> &'static str {
 /// forever, while an unanswered probe (timeout, connection failure) returns
 /// `false` for the current call — fail closed — and is retried on a later
 /// call, up to a small cap. Always `false` off Linux, off Wayland, or when
-/// the `GROK_CLIPBOARD_NO_DATA_CONTROL` kill-switch env var is set. The kill
+/// the `CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL` kill-switch env var is set. The kill
 /// switch also disables the in-process arboard leg entirely on Wayland
 /// sessions (see `arboard_wayland_bypassed`) — arboard's own backend
 /// selection would otherwise still speak data-control to the compositor
@@ -551,6 +551,7 @@ mod attachments_protocol {
 // ---------------------------------------------------------------------------
 #[cfg(target_os = "macos")]
 mod platform {
+    #[cfg(target_os = "linux")]
     use std::process::{Command, Stdio};
     use std::sync::OnceLock;
 
@@ -694,7 +695,7 @@ mod platform {
     /// temp file, no AppleScript coercion. Returns `None` for every other
     /// pasteboard shape (file URLs present, no raster, AppKit unavailable,
     /// nil/empty data) so callers fall back to the unchanged `osascript`
-    /// path, and `None` when `GROK_CLIPBOARD_NO_NATIVE_READ` is set (kill
+    /// path, and `None` when `CHUTES_BUILD_CLIPBOARD_NO_NATIVE_READ` is set (kill
     /// switch if a future macOS gates `dataForType:` behind a privacy
     /// prompt; the focus/tick probes stay metadata-only either way).
     ///
@@ -703,7 +704,7 @@ mod platform {
     /// The deferred paste probe calls this from a blocking-pool thread, the
     /// same off-main pattern `clipboard_prewarm` already established.
     pub(super) fn native_image_read() -> Option<super::ImageData> {
-        if std::env::var_os("GROK_CLIPBOARD_NO_NATIVE_READ").is_some() {
+        if std::env::var_os("CHUTES_BUILD_CLIPBOARD_NO_NATIVE_READ").is_some() {
             return None;
         }
         let _guard = PASTEBOARD_LOCK.lock();
@@ -1170,6 +1171,7 @@ mod platform {
 #[cfg(not(target_os = "macos"))]
 mod platform {
     use super::ImageData;
+    #[cfg(target_os = "linux")]
     use std::process::{Command, Stdio};
 
     /// No subprocess-free pasteboard probe exists off-macOS.
@@ -1208,17 +1210,17 @@ mod platform {
         rx.recv_timeout(deadline)
     }
 
-    /// Memoized read of the `GROK_CLIPBOARD_NO_DATA_CONTROL` kill switch —
+    /// Memoized read of the `CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL` kill switch —
     /// the single env-var site that both gates (the data-control probe and
     /// the arboard bypass) consume, so they can never drift apart.
     #[cfg(target_os = "linux")]
     fn data_control_kill_switch_set() -> bool {
         static SET: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *SET.get_or_init(|| std::env::var_os("GROK_CLIPBOARD_NO_DATA_CONTROL").is_some())
+        *SET.get_or_init(|| std::env::var_os("CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL").is_some())
     }
 
     /// True when the arboard leg must be skipped entirely: on Wayland the
-    /// `GROK_CLIPBOARD_NO_DATA_CONTROL` kill switch has to stop arboard from
+    /// `CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL` kill switch has to stop arboard from
     /// speaking the data-control protocol at all (arboard picks that backend
     /// on its own whenever `WAYLAND_DISPLAY` is set — there is no way to force
     /// it back onto X11), so copies/pastes ride the CLI tools instead.
@@ -1266,7 +1268,9 @@ mod platform {
         LEASE
             .get_or_init(|| {
                 if arboard_wayland_bypassed() {
-                    tracing::debug!("arboard leg disabled (GROK_CLIPBOARD_NO_DATA_CONTROL)");
+                    tracing::debug!(
+                        "arboard leg disabled (CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL)"
+                    );
                     return None;
                 }
                 match spawn_with_deadline(
@@ -1301,7 +1305,7 @@ mod platform {
     ) -> anyhow::Result<T> {
         use std::sync::mpsc::RecvTimeoutError;
         if arboard_wayland_bypassed() {
-            anyhow::bail!("arboard leg disabled (GROK_CLIPBOARD_NO_DATA_CONTROL)");
+            anyhow::bail!("arboard leg disabled (CHUTES_BUILD_CLIPBOARD_NO_DATA_CONTROL)");
         }
         let result = spawn_with_deadline("clipboard-read", ARBOARD_READ_WAIT, move || {
             arboard::Clipboard::new()
@@ -1538,7 +1542,7 @@ mod platform {
     pub(super) fn wayland_data_control_supported() -> bool {
         static CACHE: parking_lot::Mutex<ProbeCache> = parking_lot::Mutex::new(ProbeCache::new());
         // Env gates are runtime-constant: no lock and no probe. The kill
-        // switch (precedent: GROK_CLIPBOARD_NO_NATIVE_READ) and non-Wayland
+        // switch (precedent: CHUTES_BUILD_CLIPBOARD_NO_NATIVE_READ) and non-Wayland
         // sessions are always "no data-control".
         if data_control_kill_switch_set() || !env_present("WAYLAND_DISPLAY") {
             return false;
@@ -1931,19 +1935,18 @@ mod platform {
     // -- Public API ----------------------------------------------------------
 
     pub fn get_text() -> anyhow::Result<Option<String>> {
-        let mut arboard_error = None;
-        match arboard_get_text() {
+        let arboard_error = match arboard_get_text() {
             Ok(Some(text)) => return Ok(Some(text)),
             // Wayland-only: arboard's empty answer is not authoritative,
             // fall through to wl-paste (see `wayland_tool_selected`).
             #[cfg(target_os = "linux")]
-            Ok(None) if wayland_tool_selected(linux_tool_spec()) => {}
+            Ok(None) if wayland_tool_selected(linux_tool_spec()) => None,
             Ok(None) => return Ok(None),
             Err(e) => {
                 tracing::debug!("arboard get_text failed: {e}");
-                arboard_error = Some(e);
+                Some(e)
             }
-        }
+        };
         #[cfg(target_os = "linux")]
         if let Some(spec) = linux_tool_spec() {
             let bytes = run_capture_out_checked(spec.read_text, CLI_READ_WAIT)?;
@@ -2044,19 +2047,18 @@ mod platform {
     }
 
     pub fn get_image() -> anyhow::Result<Option<ImageData>> {
-        let mut arboard_error = None;
-        match arboard_get_image() {
+        let arboard_error = match arboard_get_image() {
             Ok(Some(image)) => return Ok(Some(image)),
             // Wayland-only: arboard's empty answer is not authoritative,
             // fall through to wl-paste (see `wayland_tool_selected`).
             #[cfg(target_os = "linux")]
-            Ok(None) if wayland_tool_selected(linux_tool_spec()) => {}
+            Ok(None) if wayland_tool_selected(linux_tool_spec()) => None,
             Ok(None) => return Ok(None),
             Err(e) => {
                 tracing::debug!("arboard get_image failed: {e}");
-                arboard_error = Some(e);
+                Some(e)
             }
-        }
+        };
         #[cfg(target_os = "linux")]
         if let Some(spec) = linux_tool_spec()
             && let Some(argv) = spec.read_png

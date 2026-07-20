@@ -1,4 +1,4 @@
-//! Parse marketplace sources from `~/.grok/config.toml`.
+//! Parse marketplace sources from `~/.chutes-build/config.toml`.
 //!
 //! Expected format:
 //! ```toml
@@ -32,7 +32,7 @@ struct RawSource {
 /// Whether remote plugin installs/updates must pin a full commit sha.
 ///
 /// `[marketplace] require_sha = true` in config.toml, or
-/// `GROK_MARKETPLACE_REQUIRE_SHA=1`. Tighten-only: either source can enable,
+/// `CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA=1`. Tighten-only: either source can enable,
 /// neither can override the other off. Defaults off so existing unpinned
 /// catalogs keep installing.
 pub fn load_require_sha(config: &toml::Value) -> bool {
@@ -45,7 +45,7 @@ pub fn load_require_sha(config: &toml::Value) -> bool {
 }
 
 pub fn env_require_sha() -> bool {
-    xai_grok_config::env_bool("GROK_MARKETPLACE_REQUIRE_SHA").unwrap_or(false)
+    xai_grok_config::env_bool("CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA").unwrap_or(false)
 }
 
 /// Reads `[marketplace].sources` array. Returns empty vec if not configured.
@@ -182,7 +182,7 @@ fn extract_marketplace_entries(
     }
 }
 /// Loads additional marketplace sources from `settings.json` (`extraKnownMarketplaces`)
-/// and `known_marketplaces.json` files under `~/.grok/` and `~/.claude/`.
+/// and `known_marketplaces.json` files under `~/.chutes-build/` and `~/.claude/`.
 pub fn load_extra_sources_from_settings(existing: &[MarketplaceSource]) -> Vec<MarketplaceSource> {
     let roots: Vec<PathBuf> = [
         xai_grok_config::user_grok_home(),
@@ -195,7 +195,7 @@ pub fn load_extra_sources_from_settings(existing: &[MarketplaceSource]) -> Vec<M
 }
 
 /// Like [`load_extra_sources_from_settings`] but reads from explicit `roots`
-/// instead of `~/.grok`/`~/.claude`. Each root is checked for
+/// instead of `~/.chutes-build`/`~/.claude`. Each root is checked for
 /// `settings.local.json`, `settings.json` (`extraKnownMarketplaces` key), and
 /// `plugins/known_marketplaces.json`. Lets callers (e.g. first-run auto-register
 /// tests) stay isolated from the developer's real home dir.
@@ -341,20 +341,20 @@ mod tests {
         let enabled: toml::Value = toml::from_str("[marketplace]\nrequire_sha = true\n").unwrap();
 
         // SAFETY: single-threaded within the lock; restored before release.
-        unsafe { std::env::remove_var("GROK_MARKETPLACE_REQUIRE_SHA") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA") };
         assert!(!load_require_sha(&empty), "absent everywhere → off");
         assert!(load_require_sha(&enabled), "config alone can enable");
 
-        unsafe { std::env::set_var("GROK_MARKETPLACE_REQUIRE_SHA", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA", "1") };
         assert!(load_require_sha(&empty), "env alone can enable");
 
-        unsafe { std::env::set_var("GROK_MARKETPLACE_REQUIRE_SHA", "0") };
+        unsafe { std::env::set_var("CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA", "0") };
         assert!(
             load_require_sha(&enabled),
             "a falsy env must not relax config-set policy (tighten-only)"
         );
 
-        unsafe { std::env::remove_var("GROK_MARKETPLACE_REQUIRE_SHA") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_MARKETPLACE_REQUIRE_SHA") };
     }
 
     #[test]

@@ -76,7 +76,7 @@ pub fn release_retained_memory() {
 /// Use a short stable kebab-case tag (e.g. `"session-load-replay"`).
 pub fn release_retained_memory_with(reason: &'static str) {
     let hook = RELEASE_HOOK.get();
-    // Skip gauge sampling entirely when tracing is off (`GROK_MEMTRACE=0`
+    // Skip gauge sampling entirely when tracing is off (`CHUTES_BUILD_MEMTRACE=0`
     // or no sink): a disabled trace must add zero syscalls to purges.
     let trace = crate::memory_trace::is_active();
     let before = if trace {

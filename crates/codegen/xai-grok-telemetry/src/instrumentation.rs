@@ -15,8 +15,8 @@ use tracing_subscriber::registry::LookupSpan;
 
 use xai_grok_config::grok_home;
 
-const ENV_ENABLED: &str = "GROK_INSTRUMENTATION";
-const ENV_LOG_PATH: &str = "GROK_INSTRUMENTATION_LOG";
+const ENV_ENABLED: &str = "CHUTES_BUILD_INSTRUMENTATION";
+const ENV_LOG_PATH: &str = "CHUTES_BUILD_INSTRUMENTATION_LOG";
 const DEFAULT_LOG_DIR: &str = "logs";
 const DEFAULT_LOG_FILE: &str = "instrumentation.log";
 const DEFAULT_TRACE_FILE: &str = "instrumentation.trace.json";

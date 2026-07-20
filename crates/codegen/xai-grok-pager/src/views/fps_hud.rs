@@ -1,6 +1,6 @@
-//! Release-safe FPS readout — `/debug fps`, `GROK_FPS` on release builds.
+//! Release-safe FPS readout — `/debug fps`, `CHUTES_BUILD_FPS` on release builds.
 //!
-//! The full frame profiler (`render::frame_metrics`, `GROK_FPS`) is compiled
+//! The full frame profiler (`render::frame_metrics`, `CHUTES_BUILD_FPS`) is compiled
 //! only in debug/dev builds because it threads per-phase timings
 //! through `draw_frame`. This HUD measures the one thing that needs no
 //! pipeline change — the wall-clock duration of the whole `draw_frame` call
@@ -8,11 +8,11 @@
 //! behind a runtime toggle (the scroll-debug HUD precedent) and profiles the
 //! production render path with zero fidelity gap.
 //!
-//! `GROK_FPS` ownership: in debug/dev builds the env feeds `FrameMetrics` as
+//! `CHUTES_BUILD_FPS` ownership: in debug/dev builds the env feeds `FrameMetrics` as
 //! always and this HUD stays toggle-only (no double overlay); on release
 //! binaries — where that overlay does not exist — the same env enables this
-//! HUD from startup, so `GROK_FPS=1` is never a silent no-op
-//! ([`HONORS_GROK_FPS_ENV`]).
+//! HUD from startup, so `CHUTES_BUILD_FPS=1` is never a silent no-op
+//! ([`HONORS_CHUTES_BUILD_FPS_ENV`]).
 //!
 //! "fps" here is render throughput (1 / mean frame cost), not paint
 //! frequency: the pager draws on demand, so an idle UI paints nothing and a
@@ -31,12 +31,12 @@ const SAMPLE_CAP: usize = 120;
 const REFRESH: Duration = Duration::from_millis(250);
 /// Panel width in cells; each line is padded/truncated to this.
 const PANEL_WIDTH: u16 = 32;
-/// Whether this HUD owns the `GROK_FPS` env gate: only where the dev
+/// Whether this HUD owns the `CHUTES_BUILD_FPS` env gate: only where the dev
 /// `FrameMetrics` overlay is compiled out. In debug/dev builds the env keeps
 /// feeding that overlay alone.
-const HONORS_GROK_FPS_ENV: bool = true;
-/// Runtime state for the FPS HUD. `GROK_FPS` enables it at startup on
-/// release binaries ([`HONORS_GROK_FPS_ENV`]); `/debug fps` toggles it
+const HONORS_CHUTES_BUILD_FPS_ENV: bool = true;
+/// Runtime state for the FPS HUD. `CHUTES_BUILD_FPS` enables it at startup on
+/// release binaries ([`HONORS_CHUTES_BUILD_FPS_ENV`]); `/debug fps` toggles it
 /// live everywhere. Deliberately NOT a settings-registry entry: it is a
 /// diagnostic, not a preference to persist.
 pub struct FpsHud {
@@ -53,12 +53,12 @@ impl Default for FpsHud {
 }
 impl FpsHud {
     pub fn new() -> Self {
-        Self::with_env(std::env::var("GROK_FPS").ok())
+        Self::with_env(std::env::var("CHUTES_BUILD_FPS").ok())
     }
-    /// `env` is the raw `GROK_FPS` value; the truthiness rule (nonempty and
-    /// not `"0"`) matches `FrameMetrics` and `GROK_SCROLL_DEBUG`.
+    /// `env` is the raw `CHUTES_BUILD_FPS` value; the truthiness rule (nonempty and
+    /// not `"0"`) matches `FrameMetrics` and `CHUTES_BUILD_SCROLL_DEBUG`.
     fn with_env(env: Option<String>) -> Self {
-        let env_on = HONORS_GROK_FPS_ENV && env.is_some_and(|v| !v.is_empty() && v != "0");
+        let env_on = HONORS_CHUTES_BUILD_FPS_ENV && env.is_some_and(|v| !v.is_empty() && v != "0");
         Self {
             enabled: env_on,
             samples: VecDeque::with_capacity(SAMPLE_CAP),
@@ -141,7 +141,7 @@ fn percentile(sorted: &[f64], pct: f64) -> f64 {
 /// Owned render params for one frame (title + stats line, top-right).
 pub struct FpsOverlay {
     body: String,
-    /// Rows left free for overlays above (the dev `GROK_FPS` line).
+    /// Rows left free for overlays above (the dev `CHUTES_BUILD_FPS` line).
     pub top_offset: u16,
 }
 impl FpsOverlay {
@@ -178,7 +178,7 @@ mod tests {
     /// Default test builds compile without dev instrumentation — release-shaped
     /// for this gate — so a truthy env must construct enabled. A
     /// debug/dev test build hands the env to `FrameMetrics` instead;
-    /// asserting against [`HONORS_GROK_FPS_ENV`] keeps the test true under
+    /// asserting against [`HONORS_CHUTES_BUILD_FPS_ENV`] keeps the test true under
     /// both cfgs (the dev half is pinned by the constant's shape, the same
     /// limitation as the `/debug` visibility test).
     #[test]
@@ -186,8 +186,8 @@ mod tests {
         for truthy in ["1", "full", " "] {
             assert_eq!(
                 FpsHud::with_env(Some(truthy.into())).enabled(),
-                HONORS_GROK_FPS_ENV,
-                "GROK_FPS={truthy:?} must track the env-gate owner"
+                HONORS_CHUTES_BUILD_FPS_ENV,
+                "CHUTES_BUILD_FPS={truthy:?} must track the env-gate owner"
             );
         }
         for falsy in [None, Some(String::new()), Some("0".into())] {

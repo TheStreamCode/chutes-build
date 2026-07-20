@@ -5,13 +5,13 @@ use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
+const CHUTES_BUILD_CODE_BACKEND_URL: &str = "https://code.chutes-build.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const GROK_CODE_WEB_URL: &str = "https://grok.com";
+const CHUTES_BUILD_CODE_WEB_URL: &str = "http://127.0.0.1:9";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
-    let web_url =
-        std::env::var("GROK_CODE_WEB_URL").unwrap_or_else(|_| GROK_CODE_WEB_URL.to_string());
+    let web_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
+        .unwrap_or_else(|_| CHUTES_BUILD_CODE_WEB_URL.to_string());
     format!("{}/build/share/{}", web_url, permission_id)
 }
 fn add_cli_chat_proxy_headers_blocking(
@@ -299,8 +299,8 @@ impl BackendClient {
         Self {
             client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
             reqwest_client,
-            base_url: std::env::var("GROK_CODE_BACKEND_URL")
-                .unwrap_or_else(|_| GROK_CODE_BACKEND_URL.to_string()),
+            base_url: std::env::var("CHUTES_BUILD_CODE_BACKEND_URL")
+                .unwrap_or_else(|_| CHUTES_BUILD_CODE_BACKEND_URL.to_string()),
             auth_manager: None,
         }
     }
@@ -731,7 +731,7 @@ pub(crate) fn fetch_models_blocking(
                 })
                 .map_err(|_| {
                     BackendError::Auth(
-                        "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
+                        "No API key for custom models endpoint. Set CHUTES_API_KEY.".into(),
                     )
                 })?;
             request = request.header("Authorization", format!("Bearer {}", api_key));
@@ -1401,9 +1401,9 @@ mod tests {
             { "id" : "grok-3", "object" : "model", "owned_by" : "xai", "context_window" :
             131072 }
         );
-        let result = parse_remote_model_value(&value, "https://api.x.ai/v1").unwrap();
+        let result = parse_remote_model_value(&value, "https://llm.chutes.ai/v1").unwrap();
         assert_eq!(result.model, "grok-3");
-        assert_eq!(result.base_url, "https://api.x.ai/v1");
+        assert_eq!(result.base_url, "https://llm.chutes.ai/v1");
         assert_eq!(result.name.as_deref(), Some("grok-3"));
     }
     #[test]
@@ -1715,13 +1715,16 @@ mod tests {
     }
     #[test]
     fn inference_url_defaults_to_proxy() {
-        let ep = endpoints("https://proxy.grok.com/v1", None, None);
-        assert_eq!(ep.resolve_inference_base_url(), "https://proxy.grok.com/v1");
+        let ep = endpoints("https://proxy.chutes-build.com/v1", None, None);
+        assert_eq!(
+            ep.resolve_inference_base_url(),
+            "https://proxy.chutes-build.com/v1"
+        );
     }
     #[test]
     fn inference_url_uses_models_base_url() {
         let ep = endpoints(
-            "https://proxy.grok.com/v1",
+            "https://proxy.chutes-build.com/v1",
             Some("https://enterprise.acme.com/v1"),
             None,
         );
@@ -1733,7 +1736,7 @@ mod tests {
     #[test]
     fn inference_url_base_url_wins_over_proxy() {
         let ep = endpoints(
-            "https://proxy.grok.com/v1",
+            "https://proxy.chutes-build.com/v1",
             Some("https://inference.acme.com/v1"),
             Some("https://registry.acme.com/api/models"),
         );
@@ -1744,25 +1747,28 @@ mod tests {
     }
     #[test]
     fn list_url_defaults_to_proxy_models() {
-        let ep = endpoints("https://proxy.grok.com/v1", None, None);
+        let ep = endpoints("https://proxy.chutes-build.com/v1", None, None);
         assert_eq!(
             ep.resolve_models_list_url(),
-            "https://proxy.grok.com/v1/models"
+            "https://proxy.chutes-build.com/v1/models"
         );
     }
     #[test]
     fn list_url_derived_from_base_url() {
         let ep = endpoints(
-            "https://proxy.grok.com/v1",
-            Some("https://api.x.ai/v1"),
+            "https://proxy.chutes-build.com/v1",
+            Some("https://llm.chutes.ai/v1"),
             None,
         );
-        assert_eq!(ep.resolve_models_list_url(), "https://api.x.ai/v1/models");
+        assert_eq!(
+            ep.resolve_models_list_url(),
+            "https://llm.chutes.ai/v1/models"
+        );
     }
     #[test]
     fn list_url_explicit_overrides_derivation() {
         let ep = endpoints(
-            "https://proxy.grok.com/v1",
+            "https://proxy.chutes-build.com/v1",
             Some("https://inference.acme.com/v1"),
             Some("https://registry.acme.com/api/list-models"),
         );
@@ -1781,9 +1787,9 @@ mod tests {
         use crate::agent::config::EndpointsConfig;
         use crate::agent::models::ModelFetchAuth;
         for k in [
-            "GROK_CLI_CHAT_PROXY_BASE_URL",
-            "GROK_XAI_API_BASE_URL",
-            "GROK_MODELS_LIST_URL",
+            "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+            "CHUTES_BUILD_XAI_API_BASE_URL",
+            "CHUTES_BUILD_MODELS_LIST_URL",
         ] {
             unsafe { std::env::remove_var(k) };
         }
@@ -1795,10 +1801,16 @@ mod tests {
             .unwrap(),
         );
         let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
-        assert_eq!(session.url, "https://cli-chat-proxy.grok.com/v1/models");
+        assert_eq!(
+            session.url,
+            "https://cli-chat-proxy.chutes-build.com/v1/models"
+        );
         assert_eq!(session.auth, EndpointAuth::Session);
         let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
-        assert_eq!(deployment.url, "https://cli-chat-proxy.grok.com/v1/models");
+        assert_eq!(
+            deployment.url,
+            "https://cli-chat-proxy.chutes-build.com/v1/models"
+        );
         assert_eq!(deployment.auth, EndpointAuth::Session);
         let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
         assert_eq!(api.url, "https://inference.acme-corp.example/xai/v1/models");
@@ -1806,7 +1818,7 @@ mod tests {
         let default = EndpointsConfig::from_config_value(&toml::Value::Table(Default::default()));
         assert_eq!(
             ListModelsEndpoint::from_endpoints(&default, ModelFetchAuth::ApiKey).url,
-            "https://api.x.ai/v1/models"
+            "https://llm.chutes.ai/v1/models"
         );
         let custom = EndpointsConfig::from_config_value(
             &toml::from_str(
@@ -1819,20 +1831,20 @@ mod tests {
         assert_eq!(ep.url, "https://models.acme.com/v1/models");
         assert_eq!(ep.auth, EndpointAuth::ApiKey);
     }
-    /// REGRESSION: `grok setup` must send the deployment key to
+    /// REGRESSION: `chutes-build setup` must send the deployment key to
     /// the proxy, never the inference endpoint.
     #[test]
     #[serial_test::serial]
     fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
         use crate::agent::config::EndpointsConfig;
         for k in [
-            "GROK_CLI_CHAT_PROXY_BASE_URL",
-            "GROK_MANAGED_CONFIG_URL",
-            "GROK_XAI_API_BASE_URL",
+            "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+            "CHUTES_BUILD_MANAGED_CONFIG_URL",
+            "CHUTES_BUILD_XAI_API_BASE_URL",
         ] {
             unsafe { std::env::remove_var(k) };
         }
-        unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
+        unsafe { std::env::set_var("CHUTES_BUILD_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
         let managed: toml::Value = toml::from_str(
             r#"[endpoints]
             deployment_key = "xai-token-ENTERPRISE"
@@ -1840,7 +1852,10 @@ mod tests {
         )
         .unwrap();
         let url = EndpointsConfig::from_config_value(&managed).resolve_managed_config_url();
-        assert_eq!(url, "https://cli-chat-proxy.grok.com/v1/deployment/config");
+        assert_eq!(
+            url,
+            "https://cli-chat-proxy.chutes-build.com/v1/deployment/config"
+        );
         assert!(
             !url.contains("acme-corp"),
             "deployment key would be sent to the inference host: {url}"
@@ -1855,7 +1870,7 @@ mod tests {
             EndpointsConfig::from_config_value(&pinned).resolve_managed_config_url(),
             "https://proxy.acme-corp.example/v1/deployment/config"
         );
-        unsafe { std::env::remove_var("GROK_DEPLOYMENT_KEY") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_DEPLOYMENT_KEY") };
     }
     #[derive(Clone)]
     struct DualBundleServerState {

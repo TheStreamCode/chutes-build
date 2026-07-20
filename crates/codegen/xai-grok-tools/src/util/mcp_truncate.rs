@@ -16,7 +16,7 @@
 //!    resolves requirements > env > config > remote config > default once at
 //!    bootstrap / remote-config refresh and stores the result)
 //! 3. When host has not seeded (`0`): env
-//!    [`ENV_GROK_MAX_MCP_OUTPUT_BYTES`] / [`ENV_MAX_MCP_OUTPUT_BYTES`]
+//!    [`ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES`] / [`ENV_MAX_MCP_OUTPUT_BYTES`]
 //! 4. Built-in default
 
 use std::path::PathBuf;
@@ -38,7 +38,7 @@ pub const MCP_MAX_OUTPUT_BYTES: usize = 20_000;
 pub const ENV_MAX_MCP_OUTPUT_BYTES: &str = "MAX_MCP_OUTPUT_BYTES";
 
 /// Grok-native env override for the MCP inline output cap (bytes).
-pub const ENV_GROK_MAX_MCP_OUTPUT_BYTES: &str = "GROK_MAX_MCP_OUTPUT_BYTES";
+pub const ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES: &str = "CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES";
 
 /// Process-wide effective limit. `0` = host has not seeded; fall through to
 /// env / default. The shell writes the *fully resolved* stack here so free-
@@ -60,13 +60,13 @@ fn parse_positive_bytes_env(name: &str) -> Option<usize> {
     usize::try_from(n).ok().filter(|n| *n > 0)
 }
 
-/// Env tier: `GROK_MAX_MCP_OUTPUT_BYTES` then `MAX_MCP_OUTPUT_BYTES`.
+/// Env tier: `CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES` then `MAX_MCP_OUTPUT_BYTES`.
 ///
 /// Grok-native wins when both are set. Positive integers only. Used by the
 /// shell resolver and as the standalone fallback when the host has not called
 /// [`set_mcp_max_output_bytes`].
 pub fn mcp_max_output_bytes_from_env() -> Option<usize> {
-    parse_positive_bytes_env(ENV_GROK_MAX_MCP_OUTPUT_BYTES)
+    parse_positive_bytes_env(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES)
         .or_else(|| parse_positive_bytes_env(ENV_MAX_MCP_OUTPUT_BYTES))
 }
 
@@ -298,10 +298,10 @@ mod tests {
             // Clear host seed; with no env, effective limit is the built-in default.
             set_mcp_max_output_bytes(0);
             let prev_max = std::env::var(ENV_MAX_MCP_OUTPUT_BYTES).ok();
-            let prev_grok = std::env::var(ENV_GROK_MAX_MCP_OUTPUT_BYTES).ok();
+            let prev_grok = std::env::var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES).ok();
             unsafe {
                 std::env::remove_var(ENV_MAX_MCP_OUTPUT_BYTES);
-                std::env::remove_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES);
+                std::env::remove_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES);
             }
             assert_eq!(
                 mcp_max_output_bytes(),
@@ -325,8 +325,8 @@ mod tests {
                     None => std::env::remove_var(ENV_MAX_MCP_OUTPUT_BYTES),
                 }
                 match prev_grok {
-                    Some(v) => std::env::set_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES, v),
-                    None => std::env::remove_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES),
+                    Some(v) => std::env::set_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES, v),
+                    None => std::env::remove_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES),
                 }
             }
             set_mcp_max_output_bytes(prev);
@@ -337,10 +337,10 @@ mod tests {
     fn env_parser_rejects_zero_and_junk() {
         with_mcp_limit_lock(|| {
             let prev_max = std::env::var(ENV_MAX_MCP_OUTPUT_BYTES).ok();
-            let prev_grok = std::env::var(ENV_GROK_MAX_MCP_OUTPUT_BYTES).ok();
+            let prev_grok = std::env::var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES).ok();
             unsafe {
                 std::env::remove_var(ENV_MAX_MCP_OUTPUT_BYTES);
-                std::env::remove_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES);
+                std::env::remove_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES);
             }
             assert_eq!(mcp_max_output_bytes_from_env(), None);
 
@@ -353,11 +353,11 @@ mod tests {
             unsafe { std::env::set_var(ENV_MAX_MCP_OUTPUT_BYTES, "12345") };
             assert_eq!(mcp_max_output_bytes_from_env(), Some(12_345));
 
-            // GROK_* wins over MAX_* when both set.
-            unsafe { std::env::set_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES, "99999") };
+            // CHUTES_BUILD_* wins over MAX_* when both set.
+            unsafe { std::env::set_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES, "99999") };
             assert_eq!(mcp_max_output_bytes_from_env(), Some(99_999));
 
-            unsafe { std::env::remove_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES) };
+            unsafe { std::env::remove_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES) };
             assert_eq!(mcp_max_output_bytes_from_env(), Some(12_345));
 
             unsafe {
@@ -366,8 +366,8 @@ mod tests {
                     None => std::env::remove_var(ENV_MAX_MCP_OUTPUT_BYTES),
                 }
                 match prev_grok {
-                    Some(v) => std::env::set_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES, v),
-                    None => std::env::remove_var(ENV_GROK_MAX_MCP_OUTPUT_BYTES),
+                    Some(v) => std::env::set_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES, v),
+                    None => std::env::remove_var(ENV_CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES),
                 }
             }
         });

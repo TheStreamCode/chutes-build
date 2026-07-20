@@ -1505,7 +1505,7 @@ mod tests {
     #[test]
     fn fmt_case_insensitive_qualified_snake_snake() {
         let index = Bm25ToolSearchIndex::new(make_snapshot(mcp_format_tools()));
-        let snap = index.search_snapshot("GROK_COM_SLACK__SLACK_SEND_MESSAGE", 5);
+        let snap = index.search_snapshot("CHUTES_BUILD_COM_SLACK__SLACK_SEND_MESSAGE", 5);
         assert_eq!(snap.results.len(), 1);
         assert_eq!(
             snap.results[0].tool_name,

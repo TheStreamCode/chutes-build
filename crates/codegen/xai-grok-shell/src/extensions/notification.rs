@@ -499,7 +499,7 @@ pub enum SessionUpdate {
     },
     /// A short "where was I" recap of the session so far.
     ///
-    /// Emitted by the `x.ai/recap` ext method: on demand via the `/recap`
+    /// Emitted by the `chutes.build/recap` ext method: on demand via the `/recap`
     /// slash command (`auto = false`), or automatically when the user
     /// returns to the terminal after being away (`auto = true`). The pager
     /// renders it as an informational scrollback line; it is never added to
@@ -883,8 +883,8 @@ pub enum SessionUpdate {
     /// pending ⏳ for this `tool_call_id`.
     InteractionResolved { tool_call_id: String },
     /// The durable, replayable signal that a turn reached its terminal
-    /// outcome. Rides the persisted `_x.ai/session/update` rail (unlike the
-    /// fire-and-forget `x.ai/session/prompt_complete` notification), so a
+    /// outcome. Rides the persisted `_chutes.build/session/update` rail (unlike the
+    /// fire-and-forget `chutes.build/session/prompt_complete` notification), so a
     /// viewer that re-attaches mid-turn can finalize the turn from replay
     /// instead of staying stuck on "Waiting…".
     TurnCompleted {
@@ -982,7 +982,7 @@ pub enum RetryState {
 /// again. Drives the actionable re-auth banner.
 ///
 /// `legacy_auth` is intentionally excluded: those failures carry their own
-/// detailed migration guidance (`grok logout` / `grok login`) in the
+/// detailed migration guidance (`chutes-build logout` / `chutes-build login`) in the
 /// message, so we surface that verbatim instead of the generic prompt.
 pub fn is_reauthable_failure(error_type: Option<&str>, message: &str) -> bool {
     if error_type == Some("legacy_auth") {
@@ -1563,7 +1563,7 @@ mod tests {
     fn memory_flush_completed_with_path_roundtrips() {
         let update = SessionUpdate::MemoryFlushCompleted {
             result: "written".into(),
-            path: Some("/home/user/.grok/memory/ws/sessions/log.md".into()),
+            path: Some("/home/user/.chutes-build/memory/ws/sessions/log.md".into()),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1588,7 +1588,7 @@ mod tests {
     fn memory_dream_completed_roundtrips() {
         let update = SessionUpdate::MemoryDreamCompleted {
             result: "written (500 chars)".into(),
-            path: Some("/home/user/.grok/memory/ws/MEMORY.md".into()),
+            path: Some("/home/user/.chutes-build/memory/ws/memories.md".into()),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1598,7 +1598,8 @@ mod tests {
     #[test]
     fn memory_session_saved_roundtrips() {
         let update = SessionUpdate::MemorySessionSaved {
-            path: "/home/user/.grok/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md".into(),
+            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md"
+                .into(),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1623,13 +1624,13 @@ mod tests {
         let update = SessionUpdate::MemoryFiles {
             files: vec![
                 MemoryFileInfo {
-                    path: "/home/user/.grok/memory/MEMORY.md".into(),
+                    path: "/home/user/.chutes-build/memory/memories.md".into(),
                     source: "global".into(),
                     size_bytes: 1024,
                     modified_epoch_secs: Some(1_700_000_000),
                 },
                 MemoryFileInfo {
-                    path: "/project/.grok/memory/MEMORY.md".into(),
+                    path: "/project/.chutes-build/memory/memories.md".into(),
                     source: "workspace".into(),
                     size_bytes: 512,
                     modified_epoch_secs: None,

@@ -5,8 +5,8 @@
 //! session initialization crashes, and protocol regressions.
 //!
 //! The tests exercise:
-//! - **Smoke** (`grok --version`): binary loads without crashing
-//! - **ACP stdio** (`grok agent stdio`): full protocol lifecycle via ClientSideConnection
+//! - **Smoke** (`chutes-build --version`): binary loads without crashing
+//! - **ACP stdio** (`chutes-build agent stdio`): full protocol lifecycle via ClientSideConnection
 //!
 //! Tests are `#[ignore]`d by default — they require a pre-built binary.
 //!
@@ -15,9 +15,9 @@
 //! cargo test -p xai-grok-shell --test test_built_binary_e2e -- --ignored
 //! ```
 //!
-//! In CI, set `GROK_BINARY` to point at the release artifact:
+//! In CI, set `CHUTES_BUILD_BINARY` to point at the release artifact:
 //! ```bash
-//! GROK_BINARY=./artifacts/grok-0.1.159-linux-x86_64 \
+//! CHUTES_BUILD_BINARY=./artifacts/grok-0.1.159-linux-x86_64 \
 //!   cargo test -p xai-grok-shell --test test_built_binary_e2e -- --ignored
 //! ```
 
@@ -156,13 +156,13 @@ async fn test_version_with_crash_handler_exits_zero() {
     let binary = grok_binary();
     let output = Command::new(&binary)
         .arg("--version")
-        .env("GROK_CRASH_HANDLER", "1")
+        .env("CHUTES_BUILD_CRASH_HANDLER", "1")
         .output()
         .unwrap_or_else(|e| panic!("failed to run {}: {e}", binary.display()));
 
     assert!(
         output.status.success(),
-        "grok --version with GROK_CRASH_HANDLER=1 failed (exit {:?}):\n{}",
+        "grok --version with CHUTES_BUILD_CRASH_HANDLER=1 failed (exit {:?}):\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -231,7 +231,7 @@ async fn test_headless_tools_allowlist_keeps_enabled_web_tools() {
             "read_file,grep,list_dir,web_search,web_fetch",
         ],
         workdir.path(),
-        &[("GROK_WEB_FETCH", "1")],
+        &[("CHUTES_BUILD_WEB_FETCH", "1")],
     )
     .await;
 
@@ -292,7 +292,7 @@ async fn test_headless_tools_allowlist_does_not_fail_open_for_disabled_web_fetch
             "read_file,web_fetch",
         ],
         workdir.path(),
-        &[("GROK_WEB_FETCH", "0")],
+        &[("CHUTES_BUILD_WEB_FETCH", "0")],
     )
     .await;
 
@@ -950,9 +950,9 @@ async fn invalid_json_schema_disables_structured_output_and_surfaces_error() {
 }
 
 // ============================================================================
-// ACP stdio tests (grok agent stdio)
+// ACP stdio tests (chutes-build agent stdio)
 //
-// These test the agent as a server: spawn `grok agent stdio`, speak the full
+// These test the agent as a server: spawn `chutes-build agent stdio`, speak the full
 // ACP protocol over pipes, verify the lifecycle works end-to-end.
 // ============================================================================
 
@@ -1001,7 +1001,7 @@ async fn test_stdio_full_session_lifecycle() {
     .await;
 }
 
-/// Verify that x.ai/session/close frees the session.
+/// Verify that chutes.build/session/close frees the session.
 /// Creates a session, closes it via ext_method, then verifies session/info
 /// returns an empty response (session no longer exists).
 #[tokio::test]
@@ -1020,7 +1020,7 @@ async fn test_stdio_session_close() {
         // Session should be alive — session/info returns data with sessionId
         let info_resp = client
             .ext_method(
-                "x.ai/session/info",
+                "chutes.build/session/info",
                 serde_json::json!({ "sessionId": session_id.0.as_ref() }),
             )
             .await;
@@ -1039,7 +1039,7 @@ async fn test_stdio_session_close() {
         // Close the session
         let close_resp = client
             .ext_method(
-                "x.ai/session/close",
+                "chutes.build/session/close",
                 serde_json::json!({ "sessionId": session_id.0.as_ref() }),
             )
             .await;
@@ -1053,7 +1053,7 @@ async fn test_stdio_session_close() {
         // Session should be gone — session/info returns empty result (no sessionId)
         let info_after = client
             .ext_method(
-                "x.ai/session/info",
+                "chutes.build/session/info",
                 serde_json::json!({ "sessionId": session_id.0.as_ref() }),
             )
             .await;
@@ -1170,10 +1170,10 @@ async fn test_stdio_xcode_escaped_slash_methods_get_responses() {
         "initialize must respond with a result, got: {init_resp}"
     );
 
-    let auth_id = "3C41A7D9-6B58-4E2F-A0D3-5F8C1B7E0A02";
+    let auth_id = "3C41A7D9-6B58-4E2F-A0D3-5F8C1B7E0A02"; // gitleaks:allow
     agent
         .send_line(&format!(
-            r#"{{"jsonrpc":"2.0","id":"{auth_id}","method":"authenticate","params":{{"methodId":"xai.api_key","_meta":{{"headless":true}}}}}}"#
+            r#"{{"jsonrpc":"2.0","id":"{auth_id}","method":"authenticate","params":{{"methodId":"chutes.api_key","_meta":{{"headless":true}}}}}}"#
         ))
         .await;
     let auth_resp = agent
@@ -1251,7 +1251,7 @@ async fn test_stdio_xcode_escaped_slash_methods_get_responses() {
 
 // ── Config test harness ─────────────────────────────────────────────────────
 
-/// Isolated headless run with a custom `~/.grok/`. Clean env (no leaked
+/// Isolated headless run with a custom `~/.chutes-build/`. Clean env (no leaked
 /// host credentials). Write config files into `grok_dir()` before `run()`.
 struct ConfigTestHarness {
     home: tempfile::TempDir,
@@ -1262,23 +1262,23 @@ struct ConfigTestHarness {
 impl ConfigTestHarness {
     fn new(server: &MockInferenceServer) -> Self {
         let home = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(home.path().join(".grok")).unwrap();
+        std::fs::create_dir_all(home.path().join(".chutes-build")).unwrap();
         Self {
             home,
             workdir: git_workdir(),
             env: vec![
-                ("GROK_CLI_CHAT_PROXY_BASE_URL".into(), server.url()),
-                ("GROK_TELEMETRY_ENABLED".into(), "false".into()),
-                ("GROK_FEEDBACK_ENABLED".into(), "false".into()),
-                ("GROK_TRACE_UPLOAD".into(), "false".into()),
-                ("GROK_INSTRUMENTATION".into(), "disabled".into()),
-                ("GROK_DISABLE_AUTOUPDATER".into(), "1".into()),
+                ("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL".into(), server.url()),
+                ("CHUTES_BUILD_TELEMETRY_ENABLED".into(), "false".into()),
+                ("CHUTES_BUILD_FEEDBACK_ENABLED".into(), "false".into()),
+                ("CHUTES_BUILD_TRACE_UPLOAD".into(), "false".into()),
+                ("CHUTES_BUILD_INSTRUMENTATION".into(), "disabled".into()),
+                ("CHUTES_BUILD_DISABLE_AUTOUPDATER".into(), "1".into()),
             ],
         }
     }
 
     fn grok_dir(&self) -> std::path::PathBuf {
-        self.home.path().join(".grok")
+        self.home.path().join(".chutes-build")
     }
 
     fn env(&mut self, key: &str, value: &str) -> &mut Self {
@@ -1299,7 +1299,7 @@ impl ConfigTestHarness {
             // Windows resolves `~` via USERPROFILE, not HOME — pin the grok
             // home explicitly so the sandbox holds on all platforms (see
             // `test_env_cmd_tokio`).
-            .env("GROK_HOME", self.grok_dir())
+            .env("CHUTES_BUILD_HOME", self.grok_dir())
             .env("PATH", std::env::var("PATH").unwrap_or_default());
         for (k, v) in &self.env {
             cmd.env(k, v);
@@ -1332,11 +1332,11 @@ async fn test_headless_managed_config_byok_sends_authorized_requests() {
 deployment_key = "test-deployment-key"
 xai_api_base_url = "{url}"
 
-[model.grok-build]
+[model.chutes-build-build]
 api_backend = "responses"
 base_url = "{url}"
 context_window = 500000
-env_key = "GROK_TEST_BYOK_TOKEN"
+env_key = "CHUTES_BUILD_TEST_BYOK_TOKEN"
 model = "grok-4.5"
 
 [models]
@@ -1346,7 +1346,7 @@ default = "grok-4.5"
         ),
     )
     .unwrap();
-    h.env("GROK_TEST_BYOK_TOKEN", "test-byok-secret-token");
+    h.env("CHUTES_BUILD_TEST_BYOK_TOKEN", "test-byok-secret-token");
 
     let result = h.run().await;
     assert_headless_success(&result, "managed config BYOK", Some(&server));

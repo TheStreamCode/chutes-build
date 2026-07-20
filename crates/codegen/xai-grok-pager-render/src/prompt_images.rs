@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
@@ -232,24 +233,37 @@ pub fn load_image_data(path: &std::path::Path) -> ImageLoadResult {
 /// Target frames per second for terminal video playback.
 const VIDEO_FPS: f64 = 10.0;
 
-/// Maximum pixel width for extracted frames.
+/// Maximum pixel width for decoded terminal frames.
 const VIDEO_MAX_WIDTH: u32 = 640;
+
+/// At most this many encoded frames may wait in memory. The decoder blocks
+/// once the queue is full, applying backpressure to ffmpeg instead of decoding
+/// the rest of the file while the TUI is paused or busy.
+const VIDEO_FRAME_BUFFER: usize = 2;
 
 /// Modal video viewer state.
 ///
-/// Holds pre-extracted frames and playback position. The rendering path
-/// reuses the same `post_flush_escapes` pipeline as the image viewer.
+/// Keeps one visible frame plus a tiny bounded decode queue. Decoding is lazy,
+/// process-backed, and cancelled on pause/drop so media playback cannot grow
+/// with video duration or keep consuming CPU when it is not being viewed.
+#[derive(Debug)]
 pub struct VideoViewerState {
-    /// Pre-extracted frames (PNG for Kitty, JPEG for iTerm2).
-    pub frames: Vec<Vec<u8>>,
-    /// Current frame index.
-    current_frame: usize,
+    current_frame: Vec<u8>,
+    frame_rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    decoder_cancel: Arc<AtomicBool>,
+    source_path: PathBuf,
+    protocol: crate::terminal::image::GraphicsProtocol,
+    target_width: u32,
+    target_height: u32,
     /// Whether playback is active.
     pub playing: bool,
     /// Playback frame rate.
     pub fps: f64,
     /// Last frame advance timestamp (for pacing).
     last_frame_time: Instant,
+    position_secs: f64,
+    /// True once the decoder reaches EOF.
+    pub finished: bool,
     /// Original video pixel dimensions.
     pub video_width: u32,
     pub video_height: u32,
@@ -265,12 +279,20 @@ impl VideoViewerState {
     /// available under `cargo test`. Public so dependent crates can construct
     /// a viewer without pulling in decode/graphics.
     pub fn test_stub() -> Self {
+        let (_tx, rx) = std::sync::mpsc::sync_channel(1);
         Self {
-            frames: vec![Vec::new()],
-            current_frame: 0,
+            current_frame: Vec::new(),
+            frame_rx: rx,
+            decoder_cancel: Arc::new(AtomicBool::new(false)),
+            source_path: PathBuf::new(),
+            protocol: crate::terminal::image::GraphicsProtocol::None,
+            target_width: 1,
+            target_height: 1,
             playing: false,
             fps: 1.0,
             last_frame_time: Instant::now(),
+            position_secs: 0.0,
+            finished: false,
             video_width: 1,
             video_height: 1,
             duration_secs: 0.0,
@@ -281,8 +303,6 @@ impl VideoViewerState {
     /// Open a video file for playback. Returns `None` if ffmpeg is
     /// unavailable or the video cannot be decoded.
     ///
-    /// Extracts all frames upfront — for short videos (5–15s at 10fps)
-    /// this is 50–150 frames and takes ~1–3 seconds.
     pub fn open_from_path(path: &std::path::Path) -> Option<Self> {
         use crate::terminal::image::{GraphicsProtocol, detect_graphics_protocol};
 
@@ -292,70 +312,49 @@ impl VideoViewerState {
         }
 
         let (width, height, duration, fps) = ffprobe_metadata(path)?;
-        let target_fps = VIDEO_FPS.min(fps);
-
-        // PNG for Kitty (required), JPEG for iTerm2 (smaller).
-        let ext = match protocol {
-            GraphicsProtocol::Kitty => "png",
-            GraphicsProtocol::ITerm2 => "jpg",
-            GraphicsProtocol::None => return None,
-        };
-
-        let vf = if width > VIDEO_MAX_WIDTH {
-            format!("fps={target_fps},scale={}:-2", VIDEO_MAX_WIDTH)
+        let target_fps = VIDEO_FPS.min(fps).max(1.0);
+        let (target_width, target_height) = if width > VIDEO_MAX_WIDTH {
+            let scaled_height = ((height as u64 * VIDEO_MAX_WIDTH as u64) / width as u64) as u32;
+            (VIDEO_MAX_WIDTH, scaled_height.max(2) & !1)
         } else {
-            format!("fps={target_fps}")
+            (width.max(2) & !1, height.max(2) & !1)
         };
-
-        let tmp_dir = make_temp_dir();
-        std::fs::create_dir_all(&tmp_dir).ok()?;
-
-        let mut ffmpeg_cmd = std::process::Command::new("ffmpeg");
-        ffmpeg_cmd
-            .args(["-hide_banner", "-loglevel", "error", "-i"])
-            .arg(path)
-            .args(["-vf", &vf, "-q:v", "5"])
-            .arg(tmp_dir.join(format!("%06d.{ext}")))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        xai_tty_utils::detach_std_command(&mut ffmpeg_cmd);
-        let status = ffmpeg_cmd.status();
-
-        match &status {
-            Err(e) => tracing::debug!("ffmpeg not available: {e}"),
-            Ok(s) if !s.success() => tracing::debug!("ffmpeg exited with {s}"),
-            _ => {}
-        }
-        if !status.as_ref().is_ok_and(|s| s.success()) {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            return None;
-        }
-
-        let frames = load_frames(&tmp_dir, ext);
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-
-        if frames.is_empty() {
-            return None;
-        }
+        let (frame_rx, decoder_cancel) = spawn_video_decoder(
+            path.to_path_buf(),
+            protocol,
+            target_width,
+            target_height,
+            target_fps,
+            0.0,
+        );
+        let current_frame = frame_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .ok()?;
 
         Some(Self {
-            current_frame: 0,
+            current_frame,
+            frame_rx,
+            decoder_cancel,
+            source_path: path.to_path_buf(),
+            protocol,
+            target_width,
+            target_height,
             playing: true,
             fps: target_fps,
             last_frame_time: Instant::now(),
+            position_secs: 0.0,
+            finished: false,
             video_width: width,
             video_height: height,
             duration_secs: duration,
             title: path.file_name().map(|n| n.to_string_lossy().into_owned()),
-            frames,
         })
     }
 
     /// Advance playback based on elapsed time. Returns `true` if the
     /// frame changed (caller should redraw).
     pub fn tick(&mut self) -> bool {
-        if !self.playing || self.frames.is_empty() {
+        if !self.playing || self.finished {
             return false;
         }
 
@@ -364,53 +363,219 @@ impl VideoViewerState {
             return false;
         }
 
-        self.current_frame = (self.current_frame + 1) % self.frames.len();
-        self.last_frame_time = Instant::now();
-        true
+        match self.frame_rx.try_recv() {
+            Ok(frame) => {
+                self.current_frame = frame;
+                self.position_secs =
+                    (self.position_secs + 1.0 / self.fps).min(self.duration_secs.max(0.0));
+                self.last_frame_time = Instant::now();
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.finished = true;
+                self.playing = false;
+                true
+            }
+        }
     }
 
     /// Toggle play/pause.
     pub fn toggle_play_pause(&mut self) {
-        self.playing = !self.playing;
         if self.playing {
+            self.decoder_cancel.store(true, Ordering::Release);
+            self.playing = false;
+        } else {
+            if self.source_path.as_os_str().is_empty() {
+                self.playing = true;
+                return;
+            }
+            if self.finished
+                || (self.duration_secs > 0.0 && self.position_secs >= self.duration_secs - 0.1)
+            {
+                self.position_secs = 0.0;
+            }
+            self.restart_decoder(self.position_secs);
+            self.playing = true;
+            self.finished = false;
             self.last_frame_time = Instant::now();
         }
     }
 
     /// Seek forward by ~1 second.
     pub fn seek_forward(&mut self) {
-        let skip = self.fps.round() as usize;
-        self.current_frame = (self.current_frame + skip).min(self.frames.len().saturating_sub(1));
-        self.last_frame_time = Instant::now();
+        self.seek_to((self.position_secs + 1.0).min(self.duration_secs));
     }
 
     /// Seek backward by ~1 second.
     pub fn seek_backward(&mut self) {
-        let skip = self.fps.round() as usize;
-        self.current_frame = self.current_frame.saturating_sub(skip);
-        self.last_frame_time = Instant::now();
+        self.seek_to((self.position_secs - 1.0).max(0.0));
     }
 
     /// Current frame image data.
     pub fn current_frame_data(&self) -> &[u8] {
-        &self.frames[self.current_frame]
+        &self.current_frame
     }
 
     /// Current playback position in seconds.
     pub fn position_secs(&self) -> f64 {
-        if self.fps <= 0.0 {
-            return 0.0;
-        }
-        self.current_frame as f64 / self.fps
+        self.position_secs
     }
 
     /// Playback progress fraction (0.0–1.0).
     pub fn progress(&self) -> f64 {
-        if self.frames.len() <= 1 {
+        if self.duration_secs <= 0.0 {
             return 0.0;
         }
-        self.current_frame as f64 / (self.frames.len() - 1) as f64
+        (self.position_secs / self.duration_secs).clamp(0.0, 1.0)
     }
+
+    /// Restart playback from the beginning without retaining decoded history.
+    pub fn restart(&mut self) {
+        self.position_secs = 0.0;
+        self.restart_decoder(0.0);
+        self.playing = true;
+        self.finished = false;
+        self.last_frame_time = Instant::now();
+    }
+
+    fn seek_to(&mut self, position_secs: f64) {
+        self.position_secs = position_secs.clamp(0.0, self.duration_secs.max(0.0));
+        if self.playing {
+            self.restart_decoder(self.position_secs);
+        }
+        self.finished = false;
+        self.last_frame_time = Instant::now();
+    }
+
+    fn restart_decoder(&mut self, position_secs: f64) {
+        self.decoder_cancel.store(true, Ordering::Release);
+        let (rx, cancel) = spawn_video_decoder(
+            self.source_path.clone(),
+            self.protocol,
+            self.target_width,
+            self.target_height,
+            self.fps,
+            position_secs,
+        );
+        self.frame_rx = rx;
+        self.decoder_cancel = cancel;
+    }
+}
+
+impl Drop for VideoViewerState {
+    fn drop(&mut self) {
+        self.decoder_cancel.store(true, Ordering::Release);
+    }
+}
+
+fn spawn_video_decoder(
+    path: PathBuf,
+    protocol: crate::terminal::image::GraphicsProtocol,
+    width: u32,
+    height: u32,
+    fps: f64,
+    start_secs: f64,
+) -> (std::sync::mpsc::Receiver<Vec<u8>>, Arc<AtomicBool>) {
+    use std::io::Read;
+    use std::sync::mpsc::{TrySendError, sync_channel};
+
+    let (tx, rx) = sync_channel(VIDEO_FRAME_BUFFER);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    std::thread::spawn(move || {
+        let vf = format!("fps={fps},scale={width}:{height}");
+        let mut command = std::process::Command::new("ffmpeg");
+        command.args(["-hide_banner", "-loglevel", "error", "-threads", "1"]);
+        if start_secs > 0.0 {
+            command.args(["-ss", &format!("{start_secs:.3}")]);
+        }
+        command
+            .args(["-i"])
+            .arg(&path)
+            .args([
+                "-an", "-vf", &vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        xai_tty_utils::detach_std_command(&mut command);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+            command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
+        }
+        let Ok(mut child) = command.spawn() else {
+            return;
+        };
+        let Some(mut stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            return;
+        };
+        let frame_len = width as usize * height as usize * 3;
+        let mut raw = vec![0_u8; frame_len];
+        while !worker_cancel.load(Ordering::Acquire) {
+            if stdout.read_exact(&mut raw).is_err() {
+                break;
+            }
+            let Some(encoded) = encode_terminal_video_frame(&raw, width, height, protocol) else {
+                break;
+            };
+            let mut pending = encoded;
+            loop {
+                match tx.try_send(pending) {
+                    Ok(()) => break,
+                    Err(TrySendError::Full(frame)) => {
+                        pending = frame;
+                        if worker_cancel.load(Ordering::Acquire) {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        }
+        if worker_cancel.load(Ordering::Acquire) {
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+    });
+    (rx, cancel)
+}
+
+fn encode_terminal_video_frame(
+    raw: &[u8],
+    width: u32,
+    height: u32,
+    protocol: crate::terminal::image::GraphicsProtocol,
+) -> Option<Vec<u8>> {
+    use image::{ExtendedColorType, ImageEncoder};
+
+    let mut encoded = Vec::new();
+    match protocol {
+        crate::terminal::image::GraphicsProtocol::Kitty => {
+            use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+            PngEncoder::new_with_quality(&mut encoded, CompressionType::Fast, FilterType::Adaptive)
+                .write_image(raw, width, height, ExtendedColorType::Rgb8)
+                .ok()?;
+        }
+        crate::terminal::image::GraphicsProtocol::ITerm2 => {
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 68)
+                .write_image(raw, width, height, ExtendedColorType::Rgb8)
+                .ok()?;
+        }
+        crate::terminal::image::GraphicsProtocol::None => return None,
+    }
+    Some(encoded)
 }
 
 /// Extract a single poster frame from a video file via ffmpeg.
@@ -435,7 +600,16 @@ pub fn extract_poster_frame(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32
         }
         cmd.args(["-i"])
             .arg(path)
-            .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", ext])
+            .args([
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=640:-2:force_original_aspect_ratio=decrease",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                ext,
+            ])
             .arg("-")
             .stdin(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
@@ -450,31 +624,6 @@ pub fn extract_poster_frame(path: &std::path::Path) -> Option<(Vec<u8>, u32, u32
     let (w, h) = decode_image_dimensions(&output.stdout)?;
 
     Some((output.stdout, w, h))
-}
-
-/// Create a unique temp directory path for frame extraction.
-fn make_temp_dir() -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "grok-video-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ))
-}
-
-/// Read all frame files from `dir` with the given extension, sorted by name.
-fn load_frames(dir: &std::path::Path, ext: &str) -> Vec<Vec<u8>> {
-    let mut paths: Vec<_> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == ext))
-        .collect();
-    paths.sort();
-    paths.iter().filter_map(|p| std::fs::read(p).ok()).collect()
 }
 
 /// Probe video metadata via ffprobe. Returns `(width, height, duration, fps)`.
@@ -4096,13 +4245,13 @@ mod tests {
     fn build_blocks_uri_prefers_durable_session_path() {
         let mut img = make_real_image(100, 80);
         img.source_path = Some(PathBuf::from("/Users/test/original.png"));
-        img.session_image_path = Some(PathBuf::from("/Users/test/.grok/session/image.png"));
+        img.session_image_path = Some(PathBuf::from("/Users/test/.chutes-build/session/image.png"));
         let blocks = build_blocks_no_workspace("text".into(), vec![img]);
         assert_eq!(blocks.len(), 2);
         if let agent_client_protocol::ContentBlock::Image(ic) = &blocks[1] {
             assert_eq!(
                 ic.uri.as_deref(),
-                Some("file:///Users/test/.grok/session/image.png"),
+                Some("file:///Users/test/.chutes-build/session/image.png"),
                 "model URI must prefer the durable session path"
             );
         } else {

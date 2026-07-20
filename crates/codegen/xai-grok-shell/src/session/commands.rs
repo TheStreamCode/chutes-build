@@ -241,7 +241,7 @@ pub enum SessionCommand {
     ReloadPlugins {
         registry: Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>,
     },
-    /// Re-discover the session's own project hooks (`.grok/hooks`,
+    /// Re-discover the session's own project hooks (`.chutes-build/hooks`,
     /// `.cursor/hooks.json`, …) mid-session, re-evaluating folder trust. Used by
     /// the interactive folder-trust grant so a granted folder's repo-local hooks
     /// start without a session restart (plugin-contributed hooks are handled by
@@ -271,7 +271,7 @@ pub enum SessionCommand {
         request: RewindRequest,
         respond_to: oneshot::Sender<anyhow::Result<RewindResponse>>,
     },
-    /// Out-of-band history repair (`x.ai/session/repair`): fix tool-pairing
+    /// Out-of-band history repair (`chutes.build/session/repair`): fix tool-pairing
     /// violations (orphaned/displaced `ToolResult`s, duplicates, unanswered
     /// calls) that would otherwise 400 on every request. `dry_run` only
     /// reports. Refused while a turn is in flight.
@@ -344,7 +344,7 @@ pub enum SessionCommand {
         respond_to: oneshot::Sender<()>,
     },
     /// Update MCP servers for an existing session (used during reconnect or
-    /// mid-session via the `x.ai/session/update_mcp_servers` extension method).
+    /// mid-session via the `chutes.build/session/update_mcp_servers` extension method).
     /// This replaces the current MCP server configuration and triggers re-initialization.
     ///
     /// The caller is notified via `respond_to` once MCP re-initialization
@@ -473,7 +473,7 @@ pub enum SessionCommand {
         action: xai_hooks_plugins_types::PluginsAction,
         respond_to: oneshot::Sender<xai_hooks_plugins_types::ActionOutcome>,
     },
-    /// This session's plugin registry, as served by `x.ai/plugins/list`.
+    /// This session's plugin registry, as served by `chutes.build/plugins/list`.
     PluginsList {
         respond_to:
             oneshot::Sender<Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>>,
@@ -536,7 +536,7 @@ pub enum SessionCommand {
     },
     /// Replace the text of a queued (not-yet-running) prompt in place
     /// (server-side LWW). Last write wins via the actor's
-    /// serialized mailbox; the rebroadcast of `x.ai/queue/changed` is the
+    /// serialized mailbox; the rebroadcast of `chutes.build/queue/changed` is the
     /// truth signal for every attached client. The original `owner`
     /// attribution is preserved; `editor` is recorded as the most recent
     /// editor (for future "alice edited this" UX). A missing id, or an id
@@ -554,7 +554,7 @@ pub enum SessionCommand {
     /// like [`RemoveQueuedPrompt`]. A benign no-op (the prompt stays queued and
     /// runs normally) when no turn is running, the id names the running turn, is
     /// stale/already-drained, or `owner` doesn't match. The rebroadcast of
-    /// `x.ai/queue/changed` is the truth signal for every attached client.
+    /// `chutes.build/queue/changed` is the truth signal for every attached client.
     InterjectQueuedPrompt {
         id: String,
         expected_version: u64,
@@ -674,7 +674,7 @@ pub enum SessionCommand {
     Interject {
         text: String,
         /// Client-minted id echoed back on the broadcast
-        /// `x.ai/session/interjection` so the originating pager can dedup its
+        /// `chutes.build/session/interjection` so the originating pager can dedup its
         /// optimistic local block. `None` from older clients.
         id: Option<String>,
         /// Pasted images riding along with the interjection. Empty from

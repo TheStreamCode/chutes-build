@@ -10,23 +10,23 @@ fn main() {
         // type-level) so the required `id` field still fails deserialization
         // when missing instead of silently becoming "". See tests/wire_shape.rs.
         .field_attribute(
-            ".xai.grok.tools.v1.ToolConfigEntry.params_json",
+            ".chutes.build.tools.v1.ToolConfigEntry.params_json",
             "#[serde(default)]",
         )
         .field_attribute(
-            ".xai.grok.tools.v1.ToolConfigEntry.name_override",
+            ".chutes.build.tools.v1.ToolConfigEntry.name_override",
             "#[serde(default)]",
         )
         .field_attribute(
-            ".xai.grok.tools.v1.ToolConfigEntry.params_name_overrides",
+            ".chutes.build.tools.v1.ToolConfigEntry.params_name_overrides",
             "#[serde(default)]",
         )
         .field_attribute(
-            ".xai.grok.tools.v1.ToolConfigEntry.behavior_version",
+            ".chutes.build.tools.v1.ToolConfigEntry.behavior_version",
             "#[serde(default)]",
         )
         .field_attribute(
-            ".xai.grok.tools.v1.ToolConfigEntry.description_override",
+            ".chutes.build.tools.v1.ToolConfigEntry.description_override",
             "#[serde(default)]",
         )
         .compile_protos(&["proto/grok-tools.proto"], &["proto/"])

@@ -1,4 +1,4 @@
-//! Data APIs for `grok models`. Clients own display.
+//! Data APIs for `chutes-build models`. Clients own display.
 
 use agent_client_protocol as acp;
 use anyhow::Result;
@@ -6,7 +6,7 @@ use xai_acp_lib::{AcpAgentTx, acp_send};
 
 use crate::agent::config::Config as AgentConfig;
 
-/// Status for the `grok models` banner (display order ≠ sampling priority; see [`AuthStatus::resolve`]).
+/// Status for the `chutes-build models` banner (display order ≠ sampling priority; see [`AuthStatus::resolve`]).
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthStatus {
     ApiKey,
@@ -92,7 +92,7 @@ pub async fn list_models(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
     use crate::agent::config::Config;
     use crate::auth::{AuthMode, GrokAuth};
     use serial_test::serial;
@@ -100,19 +100,19 @@ mod tests {
 
     /// Isolate process-global auth sources that `AuthStatus::resolve` consults.
     ///
-    /// Uses `GROK_AUTH_PATH` (not `GROK_HOME`) so a OnceLock-cached real home
+    /// Uses `CHUTES_BUILD_AUTH_PATH` (not `CHUTES_BUILD_HOME`) so a OnceLock-cached real home
     /// with `auth.json` cannot leak into these tests.
     fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 7]) {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("no-auth.json");
         let guards = [
-            EnvGuard::unset(XAI_API_KEY_ENV_VAR),
-            EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR),
-            EnvGuard::unset("GROK_AUTH"),
-            EnvGuard::set("GROK_AUTH_PATH", auth_path.to_str().unwrap()),
-            EnvGuard::unset("GROK_DEPLOYMENT_KEY"),
-            EnvGuard::unset("GROK_WS_ORIGIN"),
-            EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH"),
+            EnvGuard::unset(CHUTES_API_KEY_ENV_VAR),
+            EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR),
+            EnvGuard::unset("CHUTES_BUILD_AUTH"),
+            EnvGuard::set("CHUTES_BUILD_AUTH_PATH", auth_path.to_str().unwrap()),
+            EnvGuard::unset("CHUTES_BUILD_DEPLOYMENT_KEY"),
+            EnvGuard::unset("CHUTES_BUILD_WS_ORIGIN"),
+            EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH"),
         ];
         (dir, guards)
     }
@@ -139,7 +139,7 @@ mod tests {
     #[serial]
     fn resolve_api_key_env() {
         let (_dir, _g) = isolate_auth_sources();
-        let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "xai-test-key");
+        let _key = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "xai-test-key");
         assert_eq!(AuthStatus::resolve(&Config::default()), AuthStatus::ApiKey);
     }
 
@@ -147,7 +147,7 @@ mod tests {
     #[serial]
     fn resolve_legacy_api_key_env() {
         let (_dir, _g) = isolate_auth_sources();
-        let _key = EnvGuard::set(LEGACY_XAI_API_KEY_ENV_VAR, "legacy-key");
+        let _key = EnvGuard::set(LEGACY_CHUTES_API_KEY_ENV_VAR, "legacy-key");
         assert_eq!(AuthStatus::resolve(&Config::default()), AuthStatus::ApiKey);
     }
 
@@ -161,7 +161,7 @@ mod tests {
             ..GrokAuth::test_default()
         };
         let json = serde_json::to_string(&token).unwrap();
-        let _auth = EnvGuard::set("GROK_AUTH", &json);
+        let _auth = EnvGuard::set("CHUTES_BUILD_AUTH", &json);
 
         assert_eq!(
             AuthStatus::resolve(&Config::default()),
@@ -237,7 +237,7 @@ mod tests {
     #[serial]
     fn resolve_priority_api_key_over_byok_and_deployment() {
         let (_dir, _g) = isolate_auth_sources();
-        let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "xai-test-key");
+        let _key = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "xai-test-key");
         let dm = crate::models::default_model();
         let cfg = config_from_toml(&byok_and_deployment_toml(dm));
         assert_eq!(AuthStatus::resolve(&cfg), AuthStatus::ApiKey);
@@ -253,7 +253,7 @@ mod tests {
             ..GrokAuth::test_default()
         };
         let json = serde_json::to_string(&token).unwrap();
-        let _auth = EnvGuard::set("GROK_AUTH", &json);
+        let _auth = EnvGuard::set("CHUTES_BUILD_AUTH", &json);
 
         let dm = crate::models::default_model();
         let cfg = config_from_toml(&byok_and_deployment_toml(dm));

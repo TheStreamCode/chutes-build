@@ -1,7 +1,7 @@
 //! Single-flight guard for interactive login.
 //!
 //! At most one device-code / loopback wait runs at a time: starting a new
-//! attempt (or an explicit `x.ai/auth/cancel`) cancels the previous one, so
+//! attempt (or an explicit `chutes.build/auth/cancel`) cancels the previous one, so
 //! remint/retry cannot stack device-code mints.
 //!
 //! The attempt owns **all** attempt-scoped state — the cancellation token and
@@ -9,7 +9,7 @@
 //! atomically, and a cancelled predecessor that finishes late structurally
 //! cannot touch its successor's channels. Generations guard `end()` the same
 //! way: a stale finisher must not clear a newer attempt. Client `request_seq`
-//! scopes explicit cancels so a delayed `x.ai/auth/cancel` cannot tear down a
+//! scopes explicit cancels so a delayed `chutes.build/auth/cancel` cannot tear down a
 //! successor login.
 
 use std::cell::{Cell, RefCell};
@@ -20,9 +20,9 @@ use super::flow::AuthUrlInfo;
 /// Channels wired between the ACP ext handlers and one interactive auth flow.
 /// `None` for headless attempts (no URL to show, no code to paste).
 pub(crate) struct AttemptChannels {
-    /// Forwards pasted codes from `x.ai/auth/submit_code` to the flow.
+    /// Forwards pasted codes from `chutes.build/auth/submit_code` to the flow.
     code_tx: tokio::sync::mpsc::Sender<String>,
-    /// Yields the auth URL to `x.ai/auth/get_url`. `Option` so
+    /// Yields the auth URL to `chutes.build/auth/get_url`. `Option` so
     /// [`AuthSingleFlight::take_url_rx`] can move it out while the attempt
     /// lives on (one-shot read).
     url_rx: Option<tokio::sync::oneshot::Receiver<AuthUrlInfo>>,

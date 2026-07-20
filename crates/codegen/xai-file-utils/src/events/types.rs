@@ -462,7 +462,7 @@ pub enum Event {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InterjectionSource {
-    /// Direct `x.ai/interject` while a turn was running (Ctrl+Enter).
+    /// Direct `chutes.build/interject` while a turn was running (Ctrl+Enter).
     Direct,
     /// A queued (not-yet-running) prompt promoted into the running turn via
     /// `InterjectQueuedPrompt` (queue "send now").
@@ -477,7 +477,7 @@ pub enum InterjectionSource {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RedirectKind {
-    /// Mid-turn interjection — Ctrl+O / `x.ai/interject`, or "Send now" on a
+    /// Mid-turn interjection — Ctrl+O / `chutes.build/interject`, or "Send now" on a
     /// queued row. The turn keeps running; nothing is cancelled.
     Interjection,
     /// The turn was aborted (Ctrl+C / Esc) and the user then typed and sent a

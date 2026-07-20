@@ -74,7 +74,7 @@ fn dismiss_campaign_ids_at(
     let _guard = DISMISS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let path = campaigns_state_path(home);
     // Cross-process advisory lock over the read-modify-write: in leader mode
-    // several grok processes share `$GROK_HOME`; the in-process mutex alone would
+    // several grok processes share `$CHUTES_BUILD_HOME`; the in-process mutex alone would
     // let them lose-update the set. Best-effort; a lock failure still proceeds.
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -119,12 +119,12 @@ fn dismiss_campaign_ids_at(
     })
 }
 
-/// `GROK_CAMPAIGNS_OVERRIDE` JSON array replaces all sources (`[]` = none; beats
+/// `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` JSON array replaces all sources (`[]` = none; beats
 /// kill switch). Invalid JSON also resolves to none: the var's intent is "replace
 /// campaigns with exactly this", so a typo must not silently fall back to the
 /// real sources it was meant to replace.
 pub fn campaigns_override() -> Option<Vec<CampaignEntry>> {
-    let json = std::env::var("GROK_CAMPAIGNS_OVERRIDE").ok()?;
+    let json = std::env::var("CHUTES_BUILD_CAMPAIGNS_OVERRIDE").ok()?;
     match serde_json::from_str::<Vec<CampaignOverride>>(&json) {
         Ok(list) => Some(
             list.into_iter()
@@ -132,7 +132,7 @@ pub fn campaigns_override() -> Option<Vec<CampaignEntry>> {
                 .collect(),
         ),
         Err(e) => {
-            tracing::warn!(error = %e, "invalid GROK_CAMPAIGNS_OVERRIDE JSON; suppressing all campaigns");
+            tracing::warn!(error = %e, "invalid CHUTES_BUILD_CAMPAIGNS_OVERRIDE JSON; suppressing all campaigns");
             Some(Vec::new())
         }
     }
@@ -172,7 +172,7 @@ pub fn remote_campaigns_from_settings(remote: Option<&RemoteSettings>) -> Vec<Ca
         .unwrap_or_default()
 }
 
-/// The single campaign-resolution path: `GROK_CAMPAIGNS_OVERRIDE` (replaces all
+/// The single campaign-resolution path: `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` (replaces all
 /// sources and beats the kill switch) → kill switch → layer+remote merge →
 /// dismiss. `base` is the pre-campaign effective config, used only for the
 /// kill-switch check.
@@ -229,7 +229,7 @@ pub fn load_effective_config() -> std::io::Result<toml::Value> {
 }
 
 /// Effective config with **disk campaigns only** — no remote cache, no
-/// `GROK_CAMPAIGNS_OVERRIDE`. For one-shot CLI entrypoints that never fetch
+/// `CHUTES_BUILD_CAMPAIGNS_OVERRIDE`. For one-shot CLI entrypoints that never fetch
 /// remote settings: calling [`load_effective_config`] there would silently
 /// resolve against a never-seeded cache, so the divergence is named instead
 /// of implied (mirrors `ConfigLayers::effective_config_disk_only`).
@@ -427,7 +427,7 @@ mod tests {
         t
     }
 
-    /// `GROK_CAMPAIGNS_OVERRIDE` applies despite the kill switch; without it the
+    /// `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` applies despite the kill switch; without it the
     /// kill switch (`features.campaigns = false`) wins.
     #[test]
     #[serial]
@@ -437,7 +437,7 @@ mod tests {
 
         {
             let _env = EnvGuard::set(
-                "GROK_CAMPAIGNS_OVERRIDE",
+                "CHUTES_BUILD_CAMPAIGNS_OVERRIDE",
                 r#"[{"id":"c","models":{"default":"m"}}]"#,
             );
             let active = resolve_active_campaigns_from_layers(&layers, &base, &[], &HashSet::new());
@@ -447,7 +447,7 @@ mod tests {
         }
 
         // Same disabled base, override now unset → kill switch suppresses all.
-        let _env = EnvGuard::unset("GROK_CAMPAIGNS_OVERRIDE");
+        let _env = EnvGuard::unset("CHUTES_BUILD_CAMPAIGNS_OVERRIDE");
         let active = resolve_active_campaigns_from_layers(&layers, &base, &[], &HashSet::new());
         assert!(
             active.is_empty(),
@@ -455,13 +455,13 @@ mod tests {
         );
     }
 
-    /// Invalid `GROK_CAMPAIGNS_OVERRIDE` JSON fails toward *no campaigns*: the
+    /// Invalid `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` JSON fails toward *no campaigns*: the
     /// var's intent is "replace campaigns with exactly this", so a typo must not
     /// silently re-enable the layer/remote campaigns it was meant to replace.
     #[test]
     #[serial]
     fn invalid_override_json_suppresses_all_campaigns() {
-        let _env = EnvGuard::set("GROK_CAMPAIGNS_OVERRIDE", "{ not json");
+        let _env = EnvGuard::set("CHUTES_BUILD_CAMPAIGNS_OVERRIDE", "{ not json");
 
         let mut layers = ConfigLayers::default();
         layers.campaigns.user = vec![CampaignEntry {
@@ -482,13 +482,13 @@ mod tests {
     }
 
     /// Dismiss bookkeeping deliberately ignores the kill switch: a model pick
-    /// made while `GROK_CAMPAIGNS=0` must still record the dismissal, or a
+    /// made while `CHUTES_BUILD_CAMPAIGNS=0` must still record the dismissal, or a
     /// later re-enabled campaign would override the user's explicit choice.
     #[test]
     #[serial]
     fn dismiss_resolution_ignores_kill_switch() {
-        let _over = EnvGuard::unset("GROK_CAMPAIGNS_OVERRIDE");
-        let _kill = EnvGuard::set("GROK_CAMPAIGNS", "0");
+        let _over = EnvGuard::unset("CHUTES_BUILD_CAMPAIGNS_OVERRIDE");
+        let _kill = EnvGuard::set("CHUTES_BUILD_CAMPAIGNS", "0");
 
         let mut patch = serde_json::Map::new();
         patch.insert("models".into(), serde_json::json!({ "default": "m" }));
@@ -513,12 +513,12 @@ mod tests {
         );
     }
 
-    /// `GROK_CAMPAIGNS_OVERRIDE="[]"` replaces all sources with nothing — even
+    /// `CHUTES_BUILD_CAMPAIGNS_OVERRIDE="[]"` replaces all sources with nothing — even
     /// layer + remote campaigns resolve to empty.
     #[test]
     #[serial]
     fn override_empty_means_none() {
-        let _env = EnvGuard::set("GROK_CAMPAIGNS_OVERRIDE", "[]");
+        let _env = EnvGuard::set("CHUTES_BUILD_CAMPAIGNS_OVERRIDE", "[]");
 
         let mut layers = ConfigLayers::default();
         layers.campaigns.user = vec![CampaignEntry {
@@ -599,7 +599,7 @@ mod tests {
     #[test]
     #[serial]
     fn seeded_remote_campaign_is_visible_to_dismiss() {
-        let _env = EnvGuard::unset("GROK_CAMPAIGNS_OVERRIDE");
+        let _env = EnvGuard::unset("CHUTES_BUILD_CAMPAIGNS_OVERRIDE");
         let mut patch = serde_json::Map::new();
         patch.insert("models".into(), serde_json::json!({ "default": "m" }));
         let rs = RemoteSettings {
@@ -628,7 +628,7 @@ mod tests {
     #[serial]
     fn dismissed_id_is_dropped_from_override() {
         let _env = EnvGuard::set(
-            "GROK_CAMPAIGNS_OVERRIDE",
+            "CHUTES_BUILD_CAMPAIGNS_OVERRIDE",
             r#"[{"id":"seen","models":{"default":"m"}}]"#,
         );
         let layers = ConfigLayers::default();

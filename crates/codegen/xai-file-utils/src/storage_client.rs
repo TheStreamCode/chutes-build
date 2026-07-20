@@ -420,7 +420,7 @@ pub struct StorageClient {
     /// auth middleware (direct GCS uploads via signed URLs, signed-URL
     /// downloads, etc.).
     raw_http_client: Client,
-    /// Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.com/v1")
+    /// Base URL for the proxy (e.g., "https://cli-chat-proxy.chutes-build.com/v1")
     base_url: String,
     /// Retry configuration for handling transient failures (especially 429 errors)
     retry_config: RetryConfig,
@@ -453,7 +453,7 @@ impl StorageClient {
     /// Production code with refresh-aware auth should use [`Self::with_provider`].
     ///
     /// # Arguments
-    /// * `proxy_base_url` - Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.com/v1")
+    /// * `proxy_base_url` - Base URL for the proxy (e.g., "https://cli-chat-proxy.chutes-build.com/v1")
     /// * `user_token` - User's grok.com auth token
     pub fn new(proxy_base_url: &str, user_token: &str) -> Self {
         let creds = StaticGrokAuth::new(Some(user_token.to_owned()));

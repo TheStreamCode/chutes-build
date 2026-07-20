@@ -1,11 +1,10 @@
 //! Voice input: STT pipeline integration and prompt-box dictation.
 //!
 //! Layering (pager-owned):
-//! - **Voice gate** — GA default **on**. Remote `voice_mode_enabled: false` is
+//! - **Voice gate** — default **off** until a compatible STT endpoint is configured.
+//!   Remote `voice_mode_enabled: false` is
 //!   a kill switch (every voice surface unavailable and silent — no toast).
-//!   Absent remote falls through to on. `GROK_VOICE_MODE` overrides for local
-//!   dev (env > remote > default on). Free/X Basic still get SuperGrok upsell
-//!   via tier gates (not this flag).
+//!   `CHUTES_BUILD_VOICE_MODE` overrides for local development.
 //! - **Session mode** (`voice_ui_active`) — this CLI run only; shows the mic.
 //! - **Capture chord** — `/voice` or `Ctrl+Space` start dictation (Esc/Enter
 //!   stop). `Ctrl+Space` decodes identically on every terminal, so the

@@ -3,7 +3,8 @@ pub const DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT: u8 = 85;
 
 /// Env-var override for `auto_compact_threshold_percent`. Parsed as `u8`;
 /// out-of-range or unparseable values are ignored.
-pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str = "GROK_AUTO_COMPACT_THRESHOLD_PERCENT";
+pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str =
+    "CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT";
 
 /// Resolve auto-compact threshold percent (0-100) for the given model.
 ///
@@ -12,7 +13,7 @@ pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str = "GROK_AUTO_COMPACT_T
 /// wins over global. Env var sits on top as a per-process override.
 ///
 /// Precedence (highest first):
-///   1. env `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`
+///   1. env `CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT`
 ///   2. user TOML `[model.<id>].auto_compact_threshold_percent`
 ///      (read from `cfg.config_models`; the effective merge of user +
 ///      managed `[model.<id>]` sections)
@@ -99,10 +100,10 @@ const COMPACTION_WALL_CLOCK_BUDGET_WARN_SECS: u64 = 120;
 
 /// Env override for the compaction wall-clock budget (seconds). Parsed as
 /// `u64`; unparseable values fall through.
-const ENV_COMPACTION_WALL_CLOCK_BUDGET_SECS: &str = "GROK_COMPACTION_WALL_CLOCK_SECS";
+const ENV_COMPACTION_WALL_CLOCK_BUDGET_SECS: &str = "CHUTES_BUILD_COMPACTION_WALL_CLOCK_SECS";
 
 /// Resolve the per-compaction wall-clock budget (seconds). Precedence: env
-/// `GROK_COMPACTION_WALL_CLOCK_SECS` > remote settings global
+/// `CHUTES_BUILD_COMPACTION_WALL_CLOCK_SECS` > remote settings global
 /// `RemoteSettings.compaction_wall_clock_budget_secs` >
 /// [`DEFAULT_COMPACTION_WALL_CLOCK_BUDGET_SECS`] (a per-model `ModelInfo` tier
 /// would slot in ahead of the global one).
@@ -131,7 +132,7 @@ pub fn resolve_compaction_wall_clock_budget_secs(gb_global: Option<u64>) -> u64 
 mod compaction_wall_clock_budget_tests {
     use super::resolve_compaction_wall_clock_budget_secs as resolve;
 
-    // Assumes GROK_COMPACTION_WALL_CLOCK_SECS is unset in the test env.
+    // Assumes CHUTES_BUILD_COMPACTION_WALL_CLOCK_SECS is unset in the test env.
     #[test]
     fn default_global_disable_and_no_clamp() {
         assert_eq!(resolve(None), 300); // client default

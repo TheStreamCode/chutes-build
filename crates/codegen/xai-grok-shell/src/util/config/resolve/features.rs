@@ -14,7 +14,7 @@ pub fn resolve_zdr_access_enabled(
     fn from_toml(v: Option<&TomlValue>) -> Option<bool> {
         v?.get("features")?.get("zdr_access_enabled")?.as_bool()
     }
-    BoolFlag::env("GROK_ZDR_ACCESS_ENABLED")
+    BoolFlag::env("CHUTES_BUILD_ZDR_ACCESS_ENABLED")
         .requirement(from_toml(requirements))
         .config(from_toml(user))
         .managed(from_toml(managed))

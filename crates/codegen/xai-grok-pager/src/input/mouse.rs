@@ -14,7 +14,7 @@
 //! detection is heuristic. We bias toward treating input as trackpad-like (to avoid overshoot) and
 //! "promote" to wheel-like when the first tick-worth of events arrives quickly. A user can always
 //! force wheel/trackpad behavior via config if the heuristic is wrong for their setup: the
-//! `scroll_mode` setting (or `GROK_SCROLL_MODE`) pins [`ScrollInputMode`], and `invert_scroll` /
+//! `scroll_mode` setting (or `CHUTES_BUILD_SCROLL_MODE`) pins [`ScrollInputMode`], and `invert_scroll` /
 //! `scroll_lines` / `scroll_speed` tune direction and throughput — see
 //! [`ScrollConfigOverrides::from_settings_caches`].
 
@@ -58,7 +58,7 @@ impl ScrollInputMode {
 // deliberately has no pager dependency). Its gesture tables and invariants
 // are shaped around these default values, so retune the mirrors together
 // with any change here. Runtime may override via `set_redraw_cadence`
-// (`GROK_SCROLL_CADENCE_MS` from the event loop); the harness still models
+// (`CHUTES_BUILD_SCROLL_CADENCE_MS` from the event loop); the harness still models
 // the 16ms default.
 const STREAM_GAP_MS: u64 = 80;
 const STREAM_GAP: Duration = Duration::from_millis(STREAM_GAP_MS);
@@ -553,7 +553,7 @@ pub struct ScrollDebugSnapshot {
     pub viewport_height: u16,
     /// Per-flush delta cap in effect ([`ScrollConfig::flush_cap`]).
     pub flush_cap: i32,
-    /// Effective scroll flush cadence in ms (`GROK_SCROLL_CADENCE_MS` / default 16).
+    /// Effective scroll flush cadence in ms (`CHUTES_BUILD_SCROLL_CADENCE_MS` / default 16).
     pub cadence_ms: u64,
 }
 
@@ -601,7 +601,7 @@ pub struct ScrollStreamSummary {
 ///   80ms or a direction flip closes the stream.
 /// - **Normalization**: streams are converted to line deltas using per-terminal events-per-tick.
 /// - **Coalescing**: trackpad-like streams are flushed at most every
-///   redraw cadence (default 16ms / ~60Hz; `GROK_SCROLL_CADENCE_MS`) to avoid floods.
+///   redraw cadence (default 16ms / ~60Hz; `CHUTES_BUILD_SCROLL_CADENCE_MS`) to avoid floods.
 /// - **Follow-up ticks**: callers must schedule periodic ticks while a stream is active.
 // Not Clone: the flight recorder owns a file writer.
 #[derive(Debug)]
@@ -621,7 +621,7 @@ pub struct MouseScrollState {
     /// finalized stream. Write-only for the state machine (never read back),
     /// so it cannot affect scroll behavior.
     last_finalized: Option<ScrollStreamSummary>,
-    /// `GROK_SCROLL_LOG` flight recorder ([`crate::input::scroll_log`]).
+    /// `CHUTES_BUILD_SCROLL_LOG` flight recorder ([`crate::input::scroll_log`]).
     /// Write-only like `last_finalized` — emission cannot affect scroll
     /// behavior; `None` (env unset) costs one branch per emission point.
     recorder: Option<ScrollLogRecorder>,
@@ -645,7 +645,7 @@ impl MouseScrollState {
         }
     }
 
-    /// Inject flush cadence (`GROK_SCROLL_CADENCE_MS`); Default stays 16ms.
+    /// Inject flush cadence (`CHUTES_BUILD_SCROLL_CADENCE_MS`); Default stays 16ms.
     pub(crate) fn set_redraw_cadence(&mut self, cadence: Duration) {
         self.redraw_cadence = cadence;
     }
@@ -960,7 +960,7 @@ impl MouseScrollState {
         delta
     }
 
-    /// Emit a flight-recorder line; a single branch when `GROK_SCROLL_LOG`
+    /// Emit a flight-recorder line; a single branch when `CHUTES_BUILD_SCROLL_LOG`
     /// is off. Called after the flush (if any) so `applied_total` /
     /// `backlog_after` reflect the post-flush stream; `carry` must be the
     /// value that priced `desired` for this transition. On finalize the

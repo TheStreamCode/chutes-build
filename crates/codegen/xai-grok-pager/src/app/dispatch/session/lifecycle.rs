@@ -338,6 +338,7 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
             app.usage_visible,
+            app.subscription_tier.as_deref(),
             app.chat_mode,
             app.screen_mode,
             &app.active_announcements,
@@ -393,7 +394,7 @@ pub(in crate::app::dispatch) fn dispatch_exit_session(app: &mut AppView) -> Vec<
     effects
 }
 /// Handle the user accepting the folder-trust question: persist the grant for
-/// the workspace (writes `~/.grok/trusted_folders.toml`), mark trust resolved,
+/// the workspace (writes `~/.chutes-build/trusted_folders.toml`), mark trust resolved,
 /// then replay any deferred session startup (only if auth is also done).
 pub(in crate::app::dispatch) fn dispatch_trust_folder(app: &mut AppView) -> Vec<Effect> {
     if let TrustState::Pending { workspace } = &app.trust_state {
@@ -424,7 +425,7 @@ pub(in crate::app::dispatch) fn clear_startup_actions(app: &mut AppView) {
     let _ = app.deferred_startup.take();
 }
 /// Replay the session-startup actions deferred until auth + trust both resolved
-/// (`--resume` / `--worktree` / initial-prompt / `grok dashboard`). Extracted
+/// (`--resume` / `--worktree` / initial-prompt / `chutes-build dashboard`). Extracted
 /// from the `AuthComplete` handler so the folder-trust answer can run the SAME
 /// machinery; whichever gate resolves last drains it (each call site guards on
 /// the other gate being `Done`, so it runs exactly once).
@@ -677,6 +678,7 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         agent.apply_app_scoped_gates(
             app.sharing_enabled,
             app.usage_visible,
+            app.subscription_tier.as_deref(),
             app.chat_mode,
             app.screen_mode,
             &app.active_announcements,
@@ -790,10 +792,6 @@ pub(in crate::app::dispatch) fn skip_picker_and_create_session(
         model_id: None,
         preferred_session_id,
         chat_kind,
-        
-        
-        
-        
     }]
 }
 pub(in crate::app::dispatch) fn handle_session_created(

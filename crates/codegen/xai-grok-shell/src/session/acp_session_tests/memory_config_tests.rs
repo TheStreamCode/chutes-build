@@ -267,6 +267,8 @@ async fn create_test_actor_with_memory(
         deferred_prefix: TaskSlot::new(),
         extension_registry: xai_agent_lifecycle::LocalExtensionRegistry::default(),
         last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+        wellness_session_started_at: std::time::Instant::now(),
+        wellness_reminder_sent: std::cell::Cell::new(false),
         last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
         last_api_request_at: std::sync::atomic::AtomicI64::new(0),
         hook_registry: std::cell::RefCell::new(None),
@@ -568,7 +570,7 @@ async fn test_first_turn_reminder_skips_when_block_persisted() {
                 crate::session::helpers::memory_context::format_memory_reminder(&[
                     xai_grok_tools::types::memory_backend::MemorySearchResult {
                         chunk_id: "prev:0".into(),
-                        path: "MEMORY.md".into(),
+                        path: "memories.md".into(),
                         start_line: 0,
                         end_line: 5,
                         score: 0.98,

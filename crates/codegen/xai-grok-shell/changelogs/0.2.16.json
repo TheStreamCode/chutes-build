@@ -36,12 +36,12 @@
   },
   {
     "category": "features",
-    "description": "**grok inspect** now shows the resolved on/off state and source for every Claude/Cursor compatibility toggle.",
+    "description": "**chutes-build inspect** now shows the resolved on/off state and source for every Claude/Cursor compatibility toggle.",
     "breaking_change": false
   },
   {
     "category": "features",
-    "description": "**Cursor MCP servers and hooks** are now discovered and can be disabled independently via GROK_CURSOR_MCPS_ENABLED / GROK_CURSOR_HOOKS_ENABLED.",
+    "description": "**Cursor MCP servers and hooks** are now discovered and can be disabled independently via CHUTES_BUILD_CURSOR_MCPS_ENABLED / CHUTES_BUILD_CURSOR_HOOKS_ENABLED.",
     "breaking_change": false
   },
   {

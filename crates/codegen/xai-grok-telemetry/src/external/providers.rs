@@ -521,7 +521,7 @@ mod tests {
     fn cfg_with_headers(headers: Vec<(String, String)>) -> ExternalOtelConfig {
         let mut cfg = ExternalOtelConfig::resolve_with(
             |name| match name {
-                "GROK_EXTERNAL_OTEL" => Some("1".into()),
+                "CHUTES_BUILD_EXTERNAL_OTEL" => Some("1".into()),
                 "OTEL_LOGS_EXPORTER" => Some("otlp".into()),
                 _ => None,
             },

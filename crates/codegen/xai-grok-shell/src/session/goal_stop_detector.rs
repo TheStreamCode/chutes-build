@@ -499,7 +499,7 @@ mod tests {
             "Please give me the token.",
             "Please paste the log.",
             "Please point me at the source.",
-            "Please set the GROK_API_KEY.",
+            "Please set the CHUTES_BUILD_API_KEY.",
             "Please set up the cluster.",
             "Please set the auth header.",
         ] {

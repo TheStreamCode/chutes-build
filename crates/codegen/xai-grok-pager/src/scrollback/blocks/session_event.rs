@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn memory_saved_message_formats_correctly() {
         let event = SessionEvent::MemorySaved {
-            path: "/some/absolute/path/MEMORY.md".into(),
+            path: "/some/absolute/path/memories.md".into(),
             trigger: "flush".into(),
         };
         let msg = event.message();

@@ -168,7 +168,7 @@ pub fn build_entries(
                 continue;
             }
             // The voice chord (`Ctrl+Space`) is hidden when the voice gate is
-            // off (remote kill switch / `GROK_VOICE_MODE=0`). Unlike the old
+            // off (remote kill switch / `CHUTES_BUILD_VOICE_MODE=0`). Unlike the old
             // `Ctrl+Shift+M`, `Ctrl+Space` decodes the same with or without the
             // Kitty keyboard protocol (it just toggles instead of hold-to-talk
             // without it), so it's shown on every terminal once the gate is on.

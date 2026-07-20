@@ -2273,9 +2273,9 @@ fn int_editing_value_click_on_value_text_is_noop() {
 #[test]
 fn picking_enum_esc_dispatches_preview_revert_for_each_key() {
     let cases: &[(&str, &str)] = &[
-        ("theme", "groknight"),
-        ("auto_dark_theme", "groknight"),
-        ("auto_light_theme", "grokday"),
+        ("theme", "chutesnight"),
+        ("auto_dark_theme", "chutesnight"),
+        ("auto_light_theme", "chutesday"),
     ];
     for &(key, original) in cases {
         let mut s = make_state();
@@ -2320,18 +2320,18 @@ fn picking_enum_esc_returns_to_browse() {
     s.mode = SettingsModalMode::PickingEnum {
         key: "theme",
         choices_idx: 0,
-        original_value: SettingValue::Enum("groknight"),
+        original_value: SettingValue::Enum("chutesnight"),
         supports_preview: true,
     };
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     match outcome {
         SettingsKeyOutcome::Action(Action::PreviewTheme(name)) => {
             assert_eq!(
-                name, "groknight",
+                name, "chutesnight",
                 "Esc revert must dispatch the original canonical"
             );
         }
-        other => panic!("expected Action::PreviewTheme(\"groknight\") on Esc, got {other:?}"),
+        other => panic!("expected Action::PreviewTheme(\"chutesnight\") on Esc, got {other:?}"),
     }
     assert!(matches!(s.mode, SettingsModalMode::Browse));
 }
@@ -5668,8 +5668,8 @@ fn docs_footer_tip_is_centered() {
         "width=40 must render SHORT path (contains `change a setting`): {row_short:?}",
     );
     assert!(
-        !row_short.contains("grokday"),
-        "width=40 must NOT render LONG path (no `grokday`): {row_short:?}",
+        !row_short.contains("chutesday"),
+        "width=40 must NOT render LONG path (no `chutesday`): {row_short:?}",
     );
     assert!(
         tip_start_short.abs_diff(trailing_short) <= 1,
@@ -6021,17 +6021,17 @@ fn click_settings_breadcrumb_collapses_picker_to_browse() {
     // For preview-supporting enums (theme), the breadcrumb-
     // click revert dispatches `Action::PreviewTheme(original)`.
     // The original canonical for the default theme is
-    // `"groknight"`. Tightened from the previous `Action(_) |
+    // `"chutesnight"`. Tightened from the previous `Action(_) |
     // Changed` to lock in the revert contract.
     match outcome {
         SettingsKeyOutcome::Action(Action::PreviewTheme(orig)) => {
             assert_eq!(
-                orig, "groknight",
+                orig, "chutesnight",
                 "breadcrumb-click revert must carry the original canonical",
             );
         }
         other => panic!(
-            "expected Action(PreviewTheme(\"groknight\")) — the keyboard \
+            "expected Action(PreviewTheme(\"chutesnight\")) — the keyboard \
              Esc-equivalent revert — got {other:?}",
         ),
     }
@@ -6075,7 +6075,7 @@ fn click_settings_breadcrumb_after_nav_reverts_to_original() {
         }
         other => panic!("expected PickingEnum, got {other:?}"),
     };
-    // Pick a different index. The default theme is `groknight`
+    // Pick a different index. The default theme is `chutesnight`
     // (index 1 per the registry); advance to index 0 to ensure
     // we're navigating to a different value.
     let target_idx = if advanced_idx == 0 { 1 } else { 0 };
@@ -6135,11 +6135,11 @@ fn d_key_in_picking_enum_dispatches_open_reset_confirm() {
                 key, "theme",
                 "OpenResetConfirm key must be the active picker setting",
             );
-            // Default theme is `groknight`; entering the picker
-            // captures `original_value = current value = groknight`,
+            // Default theme is `chutesnight`; entering the picker
+            // captures `original_value = current value = chutesnight`,
             // so the revert dispatches with that canonical.
             assert_eq!(
-                orig, "groknight",
+                orig, "chutesnight",
                 "PreviewTheme revert must carry the original canonical",
             );
         }
@@ -6605,9 +6605,9 @@ fn max_thoughts_width_preview_content_is_italic() {
 /// regardless of how much the bg tokens differ in luma.
 ///
 /// The previous name `_title_bg_is_darker_than_content_bg` was
-/// misleading: on dark themes (GrokNight, TokyoNight, RosePine
+/// misleading: on dark themes (ChutesNight, TokyoNight, RosePine
 /// Moon) `bg_visual` is actually *lighter* than `bg_highlight`;
-/// only on the GrokDay light theme is title darker. The
+/// only on the ChutesDay light theme is title darker. The
 /// contract that the rendering code actually relies on is "title
 /// uses the heavier / more-saturated `bg_visual` token, content
 /// uses `bg_highlight`, plus an UNDERLINED title modifier for
@@ -6663,14 +6663,14 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
     // raw theme directly so this assertion survives `NO_COLOR`
     // / 256-color quantization.
     let raw_theme = match crate::theme::Theme::current_kind() {
-        crate::theme::ThemeKind::GrokNight => crate::theme::Theme::groknight(),
+        crate::theme::ThemeKind::ChutesNight => crate::theme::Theme::chutesnight(),
         crate::theme::ThemeKind::TokyoNight => crate::theme::Theme::tokyonight(),
-        crate::theme::ThemeKind::GrokDay => crate::theme::Theme::grokday(),
+        crate::theme::ThemeKind::ChutesDay => crate::theme::Theme::chutesday(),
         crate::theme::ThemeKind::RosePineMoon => crate::theme::Theme::rosepine_moon(),
         // Resolved via `Theme::current()` rather than a constructor
         // because `theme::oscura` is a private module.
         crate::theme::ThemeKind::OscuraMidnight => crate::theme::Theme::current(),
-        crate::theme::ThemeKind::Auto => crate::theme::Theme::groknight(),
+        crate::theme::ThemeKind::Auto => crate::theme::Theme::chutesnight(),
     };
     assert_ne!(
         raw_theme.bg_visual, raw_theme.bg_highlight,

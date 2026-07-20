@@ -11,7 +11,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Fixed** `grok --resume` failing on empty image-only session folders left by cross-directory pastes.",
+    "description": "**Fixed** `chutes-build --resume` failing on empty image-only session folders left by cross-directory pastes.",
     "breaking_change": false
   },
   {

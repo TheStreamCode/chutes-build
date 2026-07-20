@@ -5,7 +5,7 @@
 //! the env vars) and passes the resolved struct to [`crate::external::init`].
 //!
 //! Activation requires a **double opt-in** (user-confirmed, RQ7):
-//! `GROK_EXTERNAL_OTEL=1` *and* at least one of `OTEL_METRICS_EXPORTER` /
+//! `CHUTES_BUILD_EXTERNAL_OTEL=1` *and* at least one of `OTEL_METRICS_EXPORTER` /
 //! `OTEL_LOGS_EXPORTER` set to a real exporter. The master switch alone
 //! enables nothing; the exporter vars alone enable nothing.
 
@@ -39,11 +39,11 @@ impl OtlpTransport {
     }
 }
 
-/// Master switch env var. Deliberately *not* `GROK_ENABLE_TELEMETRY`: that
+/// Master switch env var. Deliberately *not* `CHUTES_BUILD_ENABLE_TELEMETRY`: that
 /// would be a word-order typo away from the long-standing
-/// `GROK_TELEMETRY_ENABLED` (product events/Mixpanel mode), and the two control
+/// `CHUTES_BUILD_TELEMETRY_ENABLED` (product events/Mixpanel mode), and the two control
 /// opposite-pointing data flows (to xAI vs. to the customer's collector).
-pub const ENV_MASTER_SWITCH: &str = "GROK_EXTERNAL_OTEL";
+pub const ENV_MASTER_SWITCH: &str = "CHUTES_BUILD_EXTERNAL_OTEL";
 
 /// Exporter selection for one signal (`OTEL_METRICS_EXPORTER` /
 /// `OTEL_LOGS_EXPORTER`).
@@ -121,7 +121,7 @@ pub struct ExternalClientInfo {
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct ExternalOtelFileConfig {
-    /// `= GROK_EXTERNAL_OTEL` (env wins).
+    /// `= CHUTES_BUILD_EXTERNAL_OTEL` (env wins).
     pub enabled: Option<bool>,
     /// `otlp` | `console` | `none`.
     pub metrics_exporter: Option<String>,
@@ -429,9 +429,10 @@ mod tests {
 
     #[test]
     fn master_switch_alone_enables_nothing() {
-        // RQ7: GROK_EXTERNAL_OTEL=1 without an explicit exporter is inert.
+        // RQ7: CHUTES_BUILD_EXTERNAL_OTEL=1 without an explicit exporter is inert.
         assert!(
-            ExternalOtelConfig::resolve_with(env(&[("GROK_EXTERNAL_OTEL", "1")]), None).is_none()
+            ExternalOtelConfig::resolve_with(env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1")]), None)
+                .is_none()
         );
     }
 
@@ -447,7 +448,7 @@ mod tests {
     fn double_opt_in_activates() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
             ]),
             None,
@@ -469,7 +470,7 @@ mod tests {
     fn grpc_protocol_accepted() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
             ]),
@@ -484,7 +485,7 @@ mod tests {
     fn http_protobuf_protocol_accepted() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
             ]),
@@ -498,7 +499,7 @@ mod tests {
     fn unknown_protocol_disables() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/json"),
             ]),
@@ -511,7 +512,7 @@ mod tests {
     fn endpoint_resolution_follows_otlp_http_spec() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 (
@@ -538,7 +539,7 @@ mod tests {
     fn grpc_endpoint_resolution_uses_collector_endpoint_without_http_paths() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"),
@@ -580,7 +581,7 @@ mod tests {
     fn headers_parsed_and_signal_specific_scoped() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_HEADERS", "x-token=abc, x-org=corp"),
                 ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", "x-token=override"),
@@ -608,7 +609,7 @@ mod tests {
     fn logs_and_metrics_headers_stay_isolated() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer base"),
@@ -638,7 +639,7 @@ mod tests {
     fn content_gates_default_off_env_enables() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_LOGS_EXPORTER", "otlp"),
                 ("OTEL_LOG_USER_PROMPTS", "1"),
                 ("OTEL_LOG_TOOL_DETAILS", "true"),
@@ -654,7 +655,7 @@ mod tests {
     fn intervals_and_timeout_parsed_with_blrp_precedence() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 ("OTEL_EXPORTER_OTLP_TIMEOUT", "2500"),
                 ("OTEL_METRIC_EXPORT_INTERVAL", "30000"),
@@ -674,7 +675,7 @@ mod tests {
     fn logs_export_interval_alias_honored_when_spec_name_absent() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 ("OTEL_LOGS_EXPORT_INTERVAL", "9999"),
             ]),
@@ -719,8 +720,10 @@ mod tests {
         assert!(!cfg.gates.log_user_prompts);
 
         // Env master switch off wins over file `enabled = true`.
-        let cfg =
-            ExternalOtelConfig::resolve_with(env(&[("GROK_EXTERNAL_OTEL", "0")]), Some(&file));
+        let cfg = ExternalOtelConfig::resolve_with(
+            env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "0")]),
+            Some(&file),
+        );
         assert!(cfg.is_none());
     }
 
@@ -728,7 +731,7 @@ mod tests {
     fn cumulative_temporality_honored() {
         let cfg = ExternalOtelConfig::resolve_with(
             env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
+                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
                 (
                     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",

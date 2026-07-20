@@ -1,11 +1,11 @@
 //! Client-registered hooks for [`SessionActor`].
 //!
-//! Hooks registered at `session/new` (`_meta["x.ai/hooks"]`) come in two flavors,
+//! Hooks registered at `session/new` (`_meta["chutes.build/hooks"]`) come in two flavors,
 //! both matched by the agent ([`xai_grok_hooks::matcher::HookMatcher`], shared with
 //! file hooks):
-//! - **`PreToolUse` gate**: an awaited reverse *request* `x.ai/hooks/run`; a `deny`
+//! - **`PreToolUse` gate**: an awaited reverse *request* `chutes.build/hooks/run`; a `deny`
 //!   blocks the tool.
-//! - **All other events**: fire-and-forget *notifications* `x.ai/hooks/event`,
+//! - **All other events**: fire-and-forget *notifications* `chutes.build/hooks/event`,
 //!   observe-only (the callback's return is ignored). Sent per matching callback.
 
 use std::sync::Arc;
@@ -24,10 +24,10 @@ use crate::extensions::hooks::{
 };
 use crate::sampling::types::ToolCallResponse;
 
-const HOOK_EVENT_METHOD: &str = "x.ai/hooks/event";
-const HOOK_RUN_METHOD: &str = "x.ai/hooks/run";
+const HOOK_EVENT_METHOD: &str = "chutes.build/hooks/event";
+const HOOK_RUN_METHOD: &str = "chutes.build/hooks/run";
 
-/// Default per-callback bound for a client's `x.ai/hooks/run` reply; on timeout the gate
+/// Default per-callback bound for a client's `chutes.build/hooks/run` reply; on timeout the gate
 /// fails open (the tool proceeds).
 ///
 /// Some external hosts default to 600s per hook; we default to 30s because our gate sits
@@ -37,7 +37,7 @@ const HOOK_RUN_METHOD: &str = "x.ai/hooks/run";
 /// `extensions::hooks`).
 const CLIENT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Outcome of the `x.ai/hooks/run` reverse request, before interpreting it as a
+/// Outcome of the `chutes.build/hooks/run` reverse request, before interpreting it as a
 /// decision. Separate so [`classify`] stays pure and unit-testable.
 enum ReverseOutcome {
     Responded(Arc<RawValue>),
@@ -58,7 +58,7 @@ fn classify(outcome: ReverseOutcome) -> (ClientHookResponse, ClientHookGateOutco
                         ClientHookDecision::Deny => ClientHookGateOutcome::Denied,
                         ClientHookDecision::Other => {
                             tracing::warn!(
-                                "x.ai/hooks/run returned an unknown decision value; failing open"
+                                "chutes.build/hooks/run returned an unknown decision value; failing open"
                             );
                             ClientHookGateOutcome::UnknownDecision
                         }
@@ -67,7 +67,7 @@ fn classify(outcome: ReverseOutcome) -> (ClientHookResponse, ClientHookGateOutco
                     (resp, label)
                 }
                 Err(err) => {
-                    tracing::warn!(%err, "malformed x.ai/hooks/run response; failing open");
+                    tracing::warn!(%err, "malformed chutes.build/hooks/run response; failing open");
                     (
                         ClientHookResponse::default(),
                         ClientHookGateOutcome::Malformed,
@@ -76,14 +76,14 @@ fn classify(outcome: ReverseOutcome) -> (ClientHookResponse, ClientHookGateOutco
             }
         }
         ReverseOutcome::Transport(err) => {
-            tracing::warn!(%err, "x.ai/hooks/run transport error (no client wired?); failing open");
+            tracing::warn!(%err, "chutes.build/hooks/run transport error (no client wired?); failing open");
             (
                 ClientHookResponse::default(),
                 ClientHookGateOutcome::TransportError,
             )
         }
         ReverseOutcome::Timeout => {
-            tracing::warn!("x.ai/hooks/run timed out; failing open");
+            tracing::warn!("chutes.build/hooks/run timed out; failing open");
             (
                 ClientHookResponse::default(),
                 ClientHookGateOutcome::TimedOut,
@@ -199,7 +199,7 @@ impl SessionActor {
     }
 
     /// Run the client-registered `PreToolUse` hooks for `call`, firing
-    /// `x.ai/hooks/run` once per matching callback with the shared `envelope` (the
+    /// `chutes.build/hooks/run` once per matching callback with the shared `envelope` (the
     /// same payload file hooks and observe events receive).
     ///
     /// Returns `Some(ToolLoop::HookDenied)` on the first deny, else `None`.
@@ -286,7 +286,7 @@ impl SessionActor {
         Ok(None)
     }
 
-    /// Issue one `x.ai/hooks/run` reverse request, bounded by a per-callback `timeout`.
+    /// Issue one `chutes.build/hooks/run` reverse request, bounded by a per-callback `timeout`.
     async fn send_hook_run(
         &self,
         dispatch: &ClientHookDispatch<'_>,
@@ -306,7 +306,7 @@ impl SessionActor {
     }
 
     /// Fire observe-only client hooks for `envelope`'s event: send an
-    /// `x.ai/hooks/event` notification to each matching registered callback.
+    /// `chutes.build/hooks/event` notification to each matching registered callback.
     /// Fire-and-forget (no decision is consumed); independent of file hooks, so it
     /// runs even when no on-disk hook registry exists. No-op when nothing is registered.
     pub(super) fn notify_client_hooks(&self, envelope: &HookEventEnvelope) {

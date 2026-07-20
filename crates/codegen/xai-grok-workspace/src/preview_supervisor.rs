@@ -217,8 +217,8 @@ fn open_truncated_log(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-/// Build the unspawned proxy command. Secrets (`GROK_SERVER_KEY` /
-/// `GROK_SESSION_ID`) reach the proxy by env inheritance — never argv.
+/// Build the unspawned proxy command. Secrets (`CHUTES_BUILD_SERVER_KEY` /
+/// `CHUTES_BUILD_SESSION_ID`) reach the proxy by env inheritance — never argv.
 fn build_preview_command(cfg: &PreviewArgs) -> io::Result<tokio::process::Command> {
     use std::process::Stdio;
 
@@ -541,7 +541,7 @@ mod tests {
             control_port: Some(6015),
             visibility: Some(PreviewVisibility::Public),
             instance_suffix: Some(".inst.example".to_owned()),
-            auth_redirect: Some("https://grok.com/preview-auth".to_owned()),
+            auth_redirect: Some("https://chutes.ai/preview-auth".to_owned()),
             allow_public: true,
             workspace_server_port: Some(8470),
             workspace_dir: PathBuf::from("/workspace"),
@@ -563,7 +563,7 @@ mod tests {
                 "--instance-suffix",
                 ".inst.example",
                 "--auth-redirect",
-                "https://grok.com/preview-auth",
+                "https://chutes.ai/preview-auth",
                 "--allow-public",
                 "--workspace-server-port",
                 "8470",
@@ -1195,7 +1195,7 @@ mod tests {
     /// test below. A distinct (non-zero) success code so a filter that matched
     /// no test (libtest would exit 0) can't masquerade as a pass.
     #[cfg(target_os = "linux")]
-    const PDEATHSIG_HELPER_ENV: &str = "GROK_PDEATHSIG_HELPER";
+    const PDEATHSIG_HELPER_ENV: &str = "CHUTES_BUILD_PDEATHSIG_HELPER";
     #[cfg(target_os = "linux")]
     const PDEATHSIG_HELPER_OK: i32 = 42;
 

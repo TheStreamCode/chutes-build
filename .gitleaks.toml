@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated and version-control directories are not source inputs"
+paths = [
+  '''(^|[\\/])\.git([\\/]|$)''',
+  '''(^|[\\/])node_modules([\\/]|$)''',
+  '''(^|[\\/])output([\\/]|$)''',
+  '''(^|[\\/])target([\\/]|$)''',
+]

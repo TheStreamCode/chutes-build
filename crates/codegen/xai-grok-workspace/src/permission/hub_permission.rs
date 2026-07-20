@@ -51,7 +51,7 @@ fn is_timeout_err(msg: &str) -> bool {
 /// chat over the server) for local e2e and gradual rollout. Prefer server capability
 /// negotiation long-term; this is the interim gate so tool-permission can be
 /// exercised without waiting on that wire format.
-pub const HITL_PERMISSION_LIVE_ENV: &str = "GROK_HITL_PERMISSION_LIVE";
+pub const HITL_PERMISSION_LIVE_ENV: &str = "CHUTES_BUILD_HITL_PERMISSION_LIVE";
 /// Whether the HITL-live permission path is enabled.
 ///
 /// Intended long-term gate: the chat flag `grok_chat_enable_hitl_live_path`,
@@ -225,7 +225,7 @@ fn scope_kind_value(reply: &Value) -> Option<(&str, Option<String>)> {
 /// for tools that never need a user prompt (reads / todos / dynamic).
 pub fn access_kind_for_hub_tool(tool_name: &str, args: &Value) -> Option<AccessKind> {
     let name = tool_name.rsplit(':').next().unwrap_or(tool_name);
-    let name = name.strip_prefix("GrokBuild:").unwrap_or(name);
+    let name = name.strip_prefix("ChutesBuild:").unwrap_or(name);
     match name {
         "run_terminal_command" | "run_terminal_cmd" | "bash" | "shell" => {
             let cmd = args

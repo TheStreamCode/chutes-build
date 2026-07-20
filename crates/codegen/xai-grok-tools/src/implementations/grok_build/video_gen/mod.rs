@@ -697,7 +697,7 @@ impl VideoGenConfig {
 /// free / X Basic user calls a video tool. The model relays it to the user;
 /// the deliberate `/imagine-video` slash command shows the SuperGrok upsell
 /// modal instead.
-pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Video generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.com/supergrok?referrer=grok-build. Do not retry this tool.";
+pub(crate) const TIER_RESTRICTED_UPSELL: &str = "This legacy video tool is unavailable. Use the native generate_media tool with a capable Chutes model. Do not retry this tool.";
 
 fn default_resolution_name() -> String {
     DEFAULT_RESOLUTION.to_owned()

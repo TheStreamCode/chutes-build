@@ -16,14 +16,13 @@ use crate::types::resources::SharedResources;
 /// canonical tool `_meta` wire contract. PascalCase aliases are accepted on
 /// deserialize so legacy persisted/manifest values still parse. The
 /// `Display` impl remains PascalCase for existing qualified id strings
-/// (e.g. `"GrokBuild:read_file"`); only the serde form goes on the wire.
+/// (e.g. `"ChutesBuild:read_file"`); only the serde form goes on the wire.
 #[derive(
     Debug,
     Clone,
     Copy,
     PartialEq,
     Eq,
-    derive_more::Display,
     serde::Serialize,
     serde::Deserialize,
     schemars::JsonSchema,
@@ -31,11 +30,26 @@ use crate::types::resources::SharedResources;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ToolNamespace {
-    #[serde(alias = "GrokBuild")]
+    #[serde(
+        rename = "chutes_build",
+        alias = "grok_build",
+        alias = "GrokBuild",
+        alias = "ChutesBuild"
+    )]
     GrokBuild,
-    #[serde(alias = "GrokBuildConcise")]
+    #[serde(
+        rename = "chutes_build_concise",
+        alias = "grok_build_concise",
+        alias = "GrokBuildConcise",
+        alias = "ChutesBuildConcise"
+    )]
     GrokBuildConcise,
-    #[serde(alias = "GrokBuildHashline")]
+    #[serde(
+        rename = "chutes_build_hashline",
+        alias = "grok_build_hashline",
+        alias = "GrokBuildHashline",
+        alias = "ChutesBuildHashline"
+    )]
     GrokBuildHashline,
     #[serde(alias = "Codex")]
     Codex,
@@ -43,6 +57,19 @@ pub enum ToolNamespace {
     OpenCode,
     #[serde(rename = "mcp", alias = "MCP")]
     MCP,
+}
+
+impl std::fmt::Display for ToolNamespace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GrokBuild => "ChutesBuild",
+            Self::GrokBuildConcise => "ChutesBuildConcise",
+            Self::GrokBuildHashline => "ChutesBuildHashline",
+            Self::Codex => "Codex",
+            Self::OpenCode => "OpenCode",
+            Self::MCP => "MCP",
+        })
+    }
 }
 /// Categorizes what a tool does at a high level.
 ///

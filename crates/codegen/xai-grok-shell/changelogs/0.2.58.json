@@ -11,12 +11,12 @@
   },
   {
     "category": "fixes",
-    "description": "The legacy `agent` command is now kept in sync with `grok` after running `grok update`.",
+    "description": "The legacy `agent` command is now kept in sync with `chutes-build` after running `chutes-build update`.",
     "breaking_change": false
   },
   {
     "category": "fixes",
-    "description": "Headless (`grok -p`) runs now wait for background tasks and subagents to finish before exiting.",
+    "description": "Headless (`chutes-build -p`) runs now wait for background tasks and subagents to finish before exiting.",
     "breaking_change": false
   }
 ]

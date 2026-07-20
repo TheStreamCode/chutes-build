@@ -2,16 +2,16 @@
 //!
 //! This crate provides a markdown-based memory storage layer that allows
 //! Grok to persist important information across sessions. Memory files are
-//! stored under `~/.grok/memory/` with workspace-scoped subdirectories
+//! stored under `~/.chutes-build/memory/` with workspace-scoped subdirectories
 //! keyed by a blake3 hash of the workspace path.
 //!
 //! ## Data Layout
 //!
 //! ```text
-//! ~/.grok/memory/
-//!   ├── MEMORY.md                         # Global curated knowledge
+//! ~/.chutes-build/memory/
+//!   ├── memories.md                         # Global curated knowledge
 //!   └── {workspace_hash}/                 # Per-workspace (blake3(cwd)[..16])
-//!       ├── MEMORY.md                     # Project-level curated knowledge
+//!       ├── memories.md                     # Project-level curated knowledge
 //!       └── sessions/
 //!           └── YYYY-MM-DD-{slug}-{sid8}.md  # Session logs
 //! ```
@@ -19,7 +19,7 @@
 //! ## Feature Flag
 //!
 //! Memory is gated behind `--experimental-memory` CLI flag or
-//! `GROK_MEMORY=1` environment variable. When disabled, this crate
+//! `CHUTES_BUILD_MEMORY=1` environment variable. When disabled, this crate
 //! is not initialized by the host.
 
 pub mod archive;

@@ -20,14 +20,12 @@ use agent_client_protocol as acp;
 /// requirement to suppress detail.
 pub const RATE_LIMITED_ERROR_CODE: i32 = -32003;
 
-/// OAuth / session rate-limit copy (personal plan upgrade path).
+/// User-facing rate-limit copy for a session-backed provider.
 pub const RATE_LIMITED_USER_MESSAGE_OAUTH: &str =
-    "You\u{2019}ve hit the rate limit for your plan. Upgrade your account or try again later.";
+    "You\u{2019}ve hit the provider rate limit. Try again later or review your Chutes account.";
 
-/// API key / team rate-limit copy. Personal grok.com upgrades do not raise API
-/// team limits; admins purchase credits or a higher spend-based tier.
-/// See https://docs.x.ai/developers/rate-limits#rate-limit-tiers
-pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers";
+/// API-key rate-limit copy. Avoids making assumptions about a user's account.
+pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "The Chutes API rate or credit limit was reached. Try again later or review your account at https://chutes.ai.";
 
 /// Pick rate-limit copy from the *active* auth method.
 ///
@@ -51,7 +49,7 @@ pub const FREE_USAGE_EXHAUSTED_ERROR_CODE: &str = "subscription:free-usage-exhau
 
 /// User-facing free-usage exhaustion copy (paywall). Deliberately promises no
 /// reset duration — the quota window is backend-config-driven.
-pub const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build";
+pub const FREE_USAGE_USER_MESSAGE: &str = "The Chutes API rate or credit limit was reached. Try again later or review your account at https://chutes.ai.";
 
 /// Whether flattened server detail is free-usage-quota exhaustion (paywall),
 /// not transient throttling. Sniffs the well-known code embedded by
@@ -122,9 +120,9 @@ pub fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
                     && crate::agent::auth_method::has_xai_api_key_env()
                 {
                     format!(
-                        "{message}\n\nYou have an API key set (XAI_API_KEY). \
+                        "{message}\n\nYou have an API key set (CHUTES_API_KEY). \
                          Your cached OAuth session is being used instead. \
-                         To use your API key, run `grok logout` or type /logout in the TUI."
+                         To use your API key, run `chutes-build logout` or type /logout in the TUI."
                     )
                 } else {
                     message
@@ -383,10 +381,7 @@ mod tests {
         assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Upgrade your account"));
         assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("team"));
         assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("credits"));
-        assert!(
-            RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://docs.x.ai/developers/rate-limits#rate-limit-tiers")
-        );
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("https://chutes.ai"));
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("Upgrade your account"));
     }
 
@@ -403,7 +398,7 @@ mod tests {
         );
 
         // Team console rate-limit copy has no personal SuperGrok upsell — surface as-is.
-        let team = "resource-exhausted: Too many requests for team abc. See https://console.x.ai/team/default/rate-limits.";
+        let team = "resource-exhausted: Too many requests for team abc. See https://chutes.ai/team/default/rate-limits.";
         assert_eq!(format_rate_limited_user_message(Some(team), true), team);
         assert_eq!(
             format_rate_limited_user_message(Some("slow down"), false),
@@ -425,7 +420,7 @@ mod tests {
         );
         assert!(
             RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://docs.x.ai/developers/rate-limits#rate-limit-tiers")
+                .contains("https://chutes.ai/docs/developers/rate-limits#rate-limit-tiers")
         );
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("grok.com/supergrok"));
     }
@@ -580,29 +575,29 @@ mod tests {
         );
     }
 
-    /// Helper: run a closure with XAI_API_KEY temporarily set (or cleared).
+    /// Helper: run a closure with CHUTES_API_KEY temporarily set (or cleared).
     /// Cleans up even if the closure panics.
     fn with_api_key_env<F: FnOnce()>(key: Option<&str>, f: F) {
-        let prev = std::env::var("XAI_API_KEY").ok();
-        let prev_legacy = std::env::var("GROK_CODE_XAI_API_KEY").ok();
+        let prev = std::env::var("CHUTES_API_KEY").ok();
+        let prev_legacy = std::env::var("CHUTES_BUILD_API_KEY").ok();
         // SAFETY: serial_test ensures no concurrent env mutation.
         unsafe {
-            std::env::remove_var("XAI_API_KEY");
-            std::env::remove_var("GROK_CODE_XAI_API_KEY");
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
             if let Some(k) = key {
-                std::env::set_var("XAI_API_KEY", k);
+                std::env::set_var("CHUTES_API_KEY", k);
             }
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         // Restore original state.
         unsafe {
-            std::env::remove_var("XAI_API_KEY");
-            std::env::remove_var("GROK_CODE_XAI_API_KEY");
+            std::env::remove_var("CHUTES_API_KEY");
+            std::env::remove_var("CHUTES_BUILD_API_KEY");
             if let Some(v) = prev {
-                std::env::set_var("XAI_API_KEY", v);
+                std::env::set_var("CHUTES_API_KEY", v);
             }
             if let Some(v) = prev_legacy {
-                std::env::set_var("GROK_CODE_XAI_API_KEY", v);
+                std::env::set_var("CHUTES_BUILD_API_KEY", v);
             }
         }
         if let Err(e) = result {
@@ -625,8 +620,8 @@ mod tests {
             let data = acp_err.data.unwrap();
             let msg = data.as_str().unwrap();
             assert!(
-                msg.contains("grok logout"),
-                "should suggest grok logout when API key is available: {msg}"
+                msg.contains("chutes-build logout"),
+                "should suggest chutes-build logout when API key is available: {msg}"
             );
             assert!(
                 msg.contains("/logout"),
@@ -650,7 +645,7 @@ mod tests {
             let data = acp_err.data.unwrap();
             let msg = data.as_str().unwrap();
             assert!(
-                !msg.contains("grok logout"),
+                !msg.contains("chutes-build logout"),
                 "should NOT suggest logout when no API key is available: {msg}"
             );
         });
@@ -671,7 +666,7 @@ mod tests {
             let data = acp_err.data.unwrap();
             let msg = data.as_str().unwrap();
             assert!(
-                !msg.contains("grok logout"),
+                !msg.contains("chutes-build logout"),
                 "should NOT suggest logout for non-subscription 403: {msg}"
             );
         });

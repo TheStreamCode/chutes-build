@@ -42,7 +42,7 @@ pub(super) fn dispatch_share_session(app: &mut AppView) -> Vec<Effect> {
     }]
 }
 
-/// Show session info: fetch via x.ai/session/info and display in scrollback.
+/// Show session info: fetch via chutes.build/session/info and display in scrollback.
 ///
 /// Produces Effect::ShowSessionInfo which spawns an async ACP ext request.
 /// On completion, TaskResult::SessionInfoComplete shows the formatted info.
@@ -93,7 +93,7 @@ pub(super) fn dispatch_show_privacy_info(app: &mut AppView) -> Vec<Effect> {
     }
 
     lines.push("");
-    lines.push("  Learn more: https://x.ai/legal");
+    lines.push("  Learn more: https://chutes.ai/legal");
     let text = lines.join("\n");
     push_system_to_any_agent(app, &text);
     vec![]
@@ -105,7 +105,7 @@ pub(super) fn set_coding_data_sharing_inner(app: &mut AppView, opted_in: bool) {
 }
 
 /// Set coding-data-sharing preference. SHELL-owned, auth-metadata-backed
-/// (persists via ACP ext-request, NOT `~/.grok/config.toml`).
+/// (persists via ACP ext-request, NOT `~/.chutes-build/config.toml`).
 pub(super) fn set_coding_data_sharing(app: &mut AppView, opted_in: bool) -> Vec<Effect> {
     // ── Guard 1: Enterprise ZDR ──────────────────────────────────────
     if app.is_zdr {
@@ -223,7 +223,7 @@ fn push_system_to_any_agent(app: &mut AppView, msg: &str) {
     }
 }
 
-/// Show context info: fetch via x.ai/session/info and display rich breakdown.
+/// Show context info: fetch via chutes.build/session/info and display rich breakdown.
 ///
 /// Produces Effect::ShowContextInfo which spawns an async ACP ext request.
 /// On completion, TaskResult::ContextInfoComplete shows the formatted info.

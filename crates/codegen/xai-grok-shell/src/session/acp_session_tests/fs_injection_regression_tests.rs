@@ -18,7 +18,7 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
     let config = ToolServerConfig {
         tools: vec![
             ToolConfig {
-                id: "GrokBuild:read_file".into(),
+                id: "ChutesBuild:read_file".into(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -27,7 +27,7 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
                 kind: None,
             },
             ToolConfig {
-                id: "GrokBuild:search_replace".into(),
+                id: "ChutesBuild:search_replace".into(),
                 params: Some(
                     serde_json::from_value(serde_json::json!({
                         "skip_read_before_edit": true

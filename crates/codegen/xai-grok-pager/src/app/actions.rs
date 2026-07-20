@@ -56,9 +56,9 @@ pub enum Action {
     ExitSession,
     /// Exit session without double-press confirmation (e.g., from command palette).
     ExitSessionConfirmed,
-    /// Open grok.com in the browser for SuperGrok subscription upsell.
+    /// Open the Chutes account page in the browser.
     OpenSupergrokUrl,
-    /// Re-check subscription status via the shell's `x.ai/auth/check_subscription`.
+    /// Re-check subscription status via the shell's `chutes.build/auth/check_subscription`.
     CheckSubscription,
     /// Open an arbitrary URL in the system browser (with scheme validation).
     OpenUrl(String),
@@ -200,23 +200,23 @@ pub enum Action {
     /// Try to drain the next queued prompt (after editing completes, etc.).
     DrainQueue,
     /// Remove a server-authoritative (shared) queued prompt by its stable
-    /// `prompt_id`. Routed to the agent as `x.ai/queue/remove`;
-    /// the resulting `x.ai/queue/changed` rebroadcast is the source of truth.
+    /// `prompt_id`. Routed to the agent as `chutes.build/queue/remove`;
+    /// the resulting `chutes.build/queue/changed` rebroadcast is the source of truth.
     QueueRemoveShared {
         id: String,
         expected_version: u64,
     },
     /// Reorder the server-authoritative (shared) queued prompts to match
-    /// `ordered_ids`. Routed as `x.ai/queue/reorder`.
+    /// `ordered_ids`. Routed as `chutes.build/queue/reorder`.
     QueueReorderShared {
         ordered_ids: Vec<String>,
     },
     /// Clear the caller's server-authoritative (shared) queued prompts.
-    /// Routed as `x.ai/queue/clear`.
+    /// Routed as `chutes.build/queue/clear`.
     QueueClearShared,
     /// Replace the text of a server-authoritative (shared) queued prompt.
-    /// Routed to the agent as `x.ai/queue/edit`; the rebroadcast of
-    /// `x.ai/queue/changed` is the source of truth. Last write wins via the
+    /// Routed to the agent as `chutes.build/queue/edit`; the rebroadcast of
+    /// `chutes.build/queue/changed` is the source of truth. Last write wins via the
     /// session actor's serialized mailbox; no client-side conflict resolution.
     QueueEditShared {
         id: String,
@@ -224,8 +224,8 @@ pub enum Action {
     },
     /// Interject a server-authoritative (shared) queued prompt into the running
     /// turn: the agent atomically removes it from the queue and
-    /// merges its text into the in-flight turn. Routed as `x.ai/queue/interject`;
-    /// the `x.ai/session/interjection` + `x.ai/queue/changed` rebroadcasts are
+    /// merges its text into the in-flight turn. Routed as `chutes.build/queue/interject`;
+    /// the `chutes.build/session/interjection` + `chutes.build/queue/changed` rebroadcasts are
     /// the source of truth (no optimistic client-side block). Mirrors the local
     /// "Send now" / `Ctrl+Enter` path, which uses [`Interject`](Self::Interject)
     /// directly because the local queue is client-owned.
@@ -296,12 +296,12 @@ pub enum Action {
     /// scrollback pane is focused.
     ToggleMouseCapture,
     /// Toggle the scroll-diagnostics HUD (hidden `/scroll-debug` command,
-    /// also `/debug scroll`; `GROK_SCROLL_DEBUG=1` enables it from startup).
+    /// also `/debug scroll`; `CHUTES_BUILD_SCROLL_DEBUG=1` enables it from startup).
     ToggleScrollDebugHud,
     /// Toggle the release-safe FPS HUD (`/debug fps`).
     ToggleFpsHud,
     /// Toggle the scroll flight recorder at runtime (`/debug log`;
-    /// `GROK_SCROLL_LOG=1` enables it from startup).
+    /// `CHUTES_BUILD_SCROLL_LOG=1` enables it from startup).
     ToggleScrollLog,
     /// Print the `/debug` toggles and their on/off state to the transcript.
     ShowDebugStatus,
@@ -322,7 +322,7 @@ pub enum Action {
     /// duration. The dispatch handler renders + writes the file and arms
     /// `AppView::pending_pager_path`; the event loop does the suspend/restore.
     OpenTranscriptPager,
-    /// Minimal mode (`grok --minimal`): re-print the most-recently committed
+    /// Minimal mode (`chutes-build --minimal`): re-print the most-recently committed
     /// folded block (collapsed reasoning / truncated tool output) into native
     /// scrollback, fully expanded, below the conversation (design decision K10).
     /// Bound to `Ctrl+E` and the `/expand` command. No-op outside minimal mode
@@ -358,12 +358,12 @@ pub enum Action {
     ExecutePluginsAction(xai_hooks_plugins_types::PluginsAction),
     /// Execute a marketplace management action from the modal.
     ExecuteMarketplaceAction(xai_hooks_plugins_types::MarketplaceAction),
-    /// Add or update an MCP server via x.ai/mcp/upsert.
+    /// Add or update an MCP server via chutes.build/mcp/upsert.
     UpsertMcpServer {
         name: String,
         config: Box<xai_grok_shell::util::config::McpServerConfig>,
     },
-    /// Delete an MCP server via x.ai/mcp/delete.
+    /// Delete an MCP server via chutes.build/mcp/delete.
     DeleteMcpServer {
         server_name: String,
     },
@@ -372,7 +372,7 @@ pub enum Action {
         server_name: String,
         enabled: bool,
     },
-    /// Toggle a skill enable/disable via x.ai/skills/toggle.
+    /// Toggle a skill enable/disable via chutes.build/skills/toggle.
     ToggleSkill {
         skill_name: String,
         enabled: bool,
@@ -401,7 +401,7 @@ pub enum Action {
     CancelScheduledTask(String),
     /// Demote the currently running execute tool to a background task.
     DemoteToBackground,
-    /// Request current bundle cache status via `x.ai/bundle/status`.
+    /// Request current bundle cache status via `chutes.build/bundle/status`.
     RequestBundleStatus,
     /// View a catalog entry's raw content in the block viewer.
     ViewCatalogEntry {
@@ -527,7 +527,7 @@ pub enum Action {
     SetContextualHintSmallScreen(bool),
     SetContextualHintWordSelect(bool),
     SetContextualHintSshWrap(bool),
-    /// Commit the active theme (canonical name, e.g. `"groknight"`, `"auto"`).
+    /// Commit the active theme (canonical name, e.g. `"chutesnight"`, `"auto"`).
     SetTheme(String),
     /// Commit the theme used when the OS is in dark mode. Only updates
     /// the live display when `theme = "auto"` AND system is in dark mode.
@@ -747,7 +747,7 @@ pub enum Action {
     },
     /// Persist the memory modal fullscreen preference to config.toml.
     PersistMemoryFullscreen(bool),
-    /// Open the Agent Dashboard view (`/dashboard`, `Ctrl+\`, `grok dashboard`).
+    /// Open the Agent Dashboard view (`/dashboard`, `Ctrl+\`, `chutes-build dashboard`).
     OpenDashboard,
     /// Close the dashboard, returning to the previous `ActiveView`.
     ExitDashboard,
@@ -962,8 +962,8 @@ pub enum Action {
 }
 /// Persist-and-notify semantics for [`Effect::PersistPermissionMode`].
 ///
-/// Both variants write to `~/.grok/config.toml` and route ACP
-/// `x.ai/yolo_mode_changed` notifications. The ACP notification is
+/// Both variants write to `~/.chutes-build/config.toml` and route ACP
+/// `chutes.build/yolo_mode_changed` notifications. The ACP notification is
 /// gated on disk-write success when `WithRollback` is used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionModePersist {
@@ -1402,7 +1402,7 @@ pub enum Effect {
     },
     /// Fetch session list for the welcome screen session picker.
     FetchSessionList {
-        /// Text search pushed down to `x.ai/session/list` as `query` (chat
+        /// Text search pushed down to `chutes.build/session/list` as `query` (chat
         /// mode: forwarded to the backend conversations search). `None`
         /// fetches the unfiltered list.
         query: Option<String>,
@@ -1417,11 +1417,11 @@ pub enum Effect {
     /// against the deep-search seq; chat: server refetch against the list seq).
     DebounceSessionSearch { query: String, seq: u64 },
     /// Fetch the leader session roster (FleetView dashboard) via
-    /// `x.ai/sessions/list`. Only issued in leader mode while the
+    /// `chutes.build/sessions/list`. Only issued in leader mode while the
     /// dashboard is open.
     FetchRoster,
     /// Fetch the local on-disk session list (dormant/idle sessions) for the
-    /// dashboard via `x.ai/session/list` — the non-leader fallback for the
+    /// dashboard via `chutes.build/session/list` — the non-leader fallback for the
     /// FleetView roster. Issued while the dashboard is open and NOT in leader
     /// mode so the dashboard shows idle sessions instead of being empty.
     FetchDashboardSessions,
@@ -1490,7 +1490,7 @@ pub enum Effect {
         session_id: acp::SessionId,
         task_id: String,
     },
-    /// Cancel a subagent via `x.ai/subagent/cancel`.
+    /// Cancel a subagent via `chutes.build/subagent/cancel`.
     KillSubagent {
         session_id: acp::SessionId,
         subagent_id: String,
@@ -1528,7 +1528,7 @@ pub enum Effect {
     PersistMemoryFullscreen { fullscreen: bool },
     /// Persist the project-picker opt-out to `[hints] project_picker_disabled`.
     PersistProjectPickerDisabled { disabled: bool },
-    /// Persist the dashboard's `[dashboard]` configuration to `~/.grok/config.toml`.
+    /// Persist the dashboard's `[dashboard]` configuration to `~/.chutes-build/config.toml`.
     /// Edge case 15: multi-pager safe via `config_toml_edit::read_config_document_for_edit`,
     /// which loads → modifies → writes the whole document. Concurrent
     /// pagers may produce last-writer-wins behaviour but never corrupt
@@ -1554,7 +1554,7 @@ pub enum Effect {
         session_id: Option<acp::SessionId>,
         persist: PermissionModePersist,
     },
-    /// Persist a typed setting to `~/.grok/config.toml`. On failure,
+    /// Persist a typed setting to `~/.chutes-build/config.toml`. On failure,
     /// rolls the in-memory cache back to `rollback_value`.
     PersistSetting {
         key: crate::settings::SettingKey,
@@ -1585,31 +1585,31 @@ pub enum Effect {
     /// Toggle plan mode — fire-and-forget signal to the shell.
     TogglePlanMode { session_id: acp::SessionId },
     /// Remove a server-owned queued prompt: fire-and-forget
-    /// `x.ai/queue/remove`. The agent re-broadcasts the authoritative queue.
+    /// `chutes.build/queue/remove`. The agent re-broadcasts the authoritative queue.
     QueueRemove {
         session_id: acp::SessionId,
         id: String,
         expected_version: u64,
     },
-    /// Reorder server-owned queued prompts: fire-and-forget `x.ai/queue/reorder`.
+    /// Reorder server-owned queued prompts: fire-and-forget `chutes.build/queue/reorder`.
     QueueReorder {
         session_id: acp::SessionId,
         ordered_ids: Vec<String>,
     },
     /// Clear the caller's server-owned queued prompts: fire-and-forget
-    /// `x.ai/queue/clear`.
+    /// `chutes.build/queue/clear`.
     QueueClear { session_id: acp::SessionId },
     /// Replace the text of a server-owned queued prompt in place: fire-and-forget
-    /// `x.ai/queue/edit`. The session actor's serialized mailbox makes this
+    /// `chutes.build/queue/edit`. The session actor's serialized mailbox makes this
     /// last-writer-wins for concurrent edits; the rebroadcast of
-    /// `x.ai/queue/changed` is the truth signal.
+    /// `chutes.build/queue/changed` is the truth signal.
     QueueEdit {
         session_id: acp::SessionId,
         id: String,
         new_text: String,
     },
     /// Interject a server-owned queued prompt into the running turn:
-    /// fire-and-forget `x.ai/queue/interject`. The session actor atomically
+    /// fire-and-forget `chutes.build/queue/interject`. The session actor atomically
     /// removes it from the queue and merges its text into the in-flight turn,
     /// then broadcasts both the interjection and the authoritative queue.
     /// `new_text` (when `Some`, serialized as `newText`) replaces the stored
@@ -1649,7 +1649,7 @@ pub enum Effect {
         cwd: std::path::PathBuf,
         session_id: String,
     },
-    /// Resolve the running agent name for a session (`x.ai/session/info`).
+    /// Resolve the running agent name for a session (`chutes.build/session/info`).
     FetchSessionAgentName {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -1665,13 +1665,13 @@ pub enum Effect {
     PollAuthUrl { request_seq: u64 },
     /// Submit a manually-pasted auth code (ext request).
     SubmitAuthCode { request_seq: u64, code: String },
-    /// Fetch MCP server list from the shell (x.ai/mcp/list).
+    /// Fetch MCP server list from the shell (chutes.build/mcp/list).
     FetchMcpsList {
         agent_id: AgentId,
         session_id: acp::SessionId,
         cache: bool,
     },
-    /// Trigger MCP OAuth for a server (x.ai/mcp/auth_trigger).
+    /// Trigger MCP OAuth for a server (chutes.build/mcp/auth_trigger).
     McpAuthTrigger {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -1683,12 +1683,12 @@ pub enum Effect {
         server_name: String,
         values: std::collections::HashMap<String, String>,
     },
-    /// Fetch hooks list from the shell (x.ai/hooks/list).
+    /// Fetch hooks list from the shell (chutes.build/hooks/list).
     FetchHooksList {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Fetch plugins list from the shell (x.ai/plugins/list).
+    /// Fetch plugins list from the shell (chutes.build/plugins/list).
     FetchPluginsList {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -1721,12 +1721,12 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Fetch skills list from the shell (x.ai/skills/list).
+    /// Fetch skills list from the shell (chutes.build/skills/list).
     FetchSkillsList {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Toggle a skill via x.ai/skills/toggle (enable/disable without restart).
+    /// Toggle a skill via chutes.build/skills/toggle (enable/disable without restart).
     ToggleSkill {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -1739,7 +1739,7 @@ pub enum Effect {
         session_id: acp::SessionId,
         action: xai_hooks_plugins_types::MarketplaceAction,
     },
-    /// Install a plugin from the inline CTA via `x.ai/marketplace/action`,
+    /// Install a plugin from the inline CTA via `chutes.build/marketplace/action`,
     /// reported back via `TaskResult::CtaPluginInstallDone`.
     InstallPluginFromCta {
         agent_id: AgentId,
@@ -1747,7 +1747,7 @@ pub enum Effect {
         source_url_or_path: String,
         plugin_relative_path: String,
     },
-    /// Reload plugins after a CTA install via `x.ai/plugins/action`
+    /// Reload plugins after a CTA install via `chutes.build/plugins/action`
     /// (`PluginsAction::Reload`), reported back via
     /// `TaskResult::CtaPluginReloadDone`. Modal-independent.
     ReloadPluginsForCta {
@@ -1755,7 +1755,7 @@ pub enum Effect {
         session_id: acp::SessionId,
         plugin_name: String,
     },
-    /// Read the MCP server list after a CTA install via `x.ai/mcp/list`,
+    /// Read the MCP server list after a CTA install via `chutes.build/mcp/list`,
     /// reported back via `TaskResult::PluginCtaMcpsLoaded`. Modal-independent.
     FetchPluginCtaMcps {
         agent_id: AgentId,
@@ -1764,7 +1764,7 @@ pub enum Effect {
     },
     /// Re-probe the MCP server list after a short delay while waiting for a
     /// just-installed plugin's servers to finish initializing. Sleeps, then runs
-    /// the same `x.ai/mcp/list` fetch as `FetchPluginCtaMcps`, reported back via
+    /// the same `chutes.build/mcp/list` fetch as `FetchPluginCtaMcps`, reported back via
     /// `TaskResult::PluginCtaMcpsLoaded`.
     RetryPluginCtaMcps {
         agent_id: AgentId,
@@ -1777,27 +1777,27 @@ pub enum Effect {
         agent_id: AgentId,
         plugin_name: String,
     },
-    /// Upsert an MCP server via x.ai/mcp/upsert.
+    /// Upsert an MCP server via chutes.build/mcp/upsert.
     UpsertMcpServer {
         agent_id: AgentId,
         session_id: acp::SessionId,
         name: String,
         config: Box<xai_grok_shell::util::config::McpServerConfig>,
     },
-    /// Delete an MCP server via x.ai/mcp/delete.
+    /// Delete an MCP server via chutes.build/mcp/delete.
     DeleteMcpServer {
         agent_id: AgentId,
         session_id: acp::SessionId,
         server_name: String,
     },
-    /// Live-toggle an MCP server via x.ai/mcp/toggle (no restart needed).
+    /// Live-toggle an MCP server via chutes.build/mcp/toggle (no restart needed).
     ToggleMcpServer {
         agent_id: AgentId,
         session_id: acp::SessionId,
         server_name: String,
         enabled: bool,
     },
-    /// Toggle a single MCP tool via x.ai/mcp/toggle_tool.
+    /// Toggle a single MCP tool via chutes.build/mcp/toggle_tool.
     ToggleMcpTool {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -1810,20 +1810,20 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Fetch and display session info via x.ai/session/info.
+    /// Fetch and display session info via chutes.build/session/info.
     ShowSessionInfo {
         agent_id: AgentId,
         session_id: acp::SessionId,
         show_resolved_model: bool,
     },
-    /// Fetch and display detailed context usage via x.ai/session/info.
+    /// Fetch and display detailed context usage via chutes.build/session/info.
     ShowContextInfo {
         agent_id: AgentId,
         session_id: acp::SessionId,
     },
-    /// Fetch current bundle cache status via `x.ai/bundle/status`.
+    /// Fetch current bundle cache status via `chutes.build/bundle/status`.
     FetchBundleStatus,
-    /// Fetch a bundled entry's raw content via `x.ai/bundle/entry/get`.
+    /// Fetch a bundled entry's raw content via `chutes.build/bundle/entry/get`.
     FetchCatalogEntry { kind: String, name: String },
     /// Send feedback about the current session (fire-and-forget POST).
     SendFeedback {
@@ -1831,13 +1831,13 @@ pub enum Effect {
         session_id: acp::SessionId,
         feedback_text: String,
     },
-    /// Save a remember note to global MEMORY.md (async file write).
+    /// Save a remember note to global memories.md (async file write).
     SaveMemoryNote {
         agent_id: AgentId,
         text: String,
         cwd: std::path::PathBuf,
     },
-    /// Send raw note to x.ai/memory/rewrite for LLM-powered reformatting.
+    /// Send raw note to chutes.build/memory/rewrite for LLM-powered reformatting.
     /// On success, the rewritten text populates the prompt for inline review.
     /// On failure, falls back to showing the raw text for review.
     RewriteMemoryNote {
@@ -1858,38 +1858,38 @@ pub enum Effect {
         agent_id: AgentId,
         cwd: std::path::PathBuf,
     },
-    /// Fire a /btw side question via x.ai/btw ext method.
+    /// Fire a /btw side question via chutes.build/btw ext method.
     SendBtw {
         agent_id: AgentId,
         session_id: acp::SessionId,
         question: String,
     },
-    /// Request a session recap via the x.ai/recap ext method. Fire-and-forget:
+    /// Request a session recap via the chutes.build/recap ext method. Fire-and-forget:
     /// the recap arrives later as a `SessionRecap` notification.
     SendRecap {
         session_id: acp::SessionId,
         auto: bool,
     },
-    /// Send a mid-turn interjection via x.ai/interject ext method.
+    /// Send a mid-turn interjection via chutes.build/interject ext method.
     SendInterject {
         agent_id: AgentId,
         session_id: acp::SessionId,
         text: String,
-        /// Client-minted id echoed back on the `x.ai/session/interjection`
+        /// Client-minted id echoed back on the `chutes.build/session/interjection`
         /// broadcast so the originator can dedup its optimistic local block.
         interjection_id: String,
         /// Structured text + image content blocks. `None` for text-only
         /// interjections — the wire shape stays byte-identical to legacy.
         blocks: Option<Vec<acp::ContentBlock>>,
     },
-    /// Log out via `x.ai/auth/logout` (shell clears auth.json + in-memory state).
+    /// Log out via `chutes.build/auth/logout` (shell clears auth.json + in-memory state).
     Logout,
-    /// Cancel an in-flight interactive auth on the shell (`x.ai/auth/cancel`).
+    /// Cancel an in-flight interactive auth on the shell (`chutes.build/auth/cancel`).
     /// Used when the user abandons mid-session `/login` so the device-code
     /// poll stops instead of running until the code expires. `request_seq`
     /// scopes the cancel so a delayed RPC cannot tear down a successor login.
     CancelAuth { request_seq: u64 },
-    /// Re-check subscription status via `x.ai/auth/check_subscription`.
+    /// Re-check subscription status via `chutes.build/auth/check_subscription`.
     /// `verify` scopes the result to a deferred-gate verification (see
     /// [`crate::app::subscription`]); `None` for generic checks.
     CheckSubscription { verify: Option<u64> },
@@ -1911,7 +1911,7 @@ pub enum Effect {
     /// Clear the "copied!" feedback after a delay.
     ScheduleClearAuthCopied,
     /// Register the current session in the active-sessions crash-recovery
-    /// registry (`~/.grok/active_sessions.json`).
+    /// registry (`~/.chutes-build/active_sessions.json`).
     RegisterActiveSession {
         session_id: acp::SessionId,
         cwd: String,
@@ -1935,7 +1935,7 @@ pub enum Effect {
         cwd: std::path::PathBuf,
     },
     /// Delete a session's stored data (local + remote) via
-    /// `x.ai/session/delete`.
+    /// `chutes.build/session/delete`.
     DeleteSession {
         source: String,
         session_id: String,
@@ -1943,7 +1943,7 @@ pub enum Effect {
     },
     /// Deep-search sessions by content (FTS via ACP).
     DeepSearchSessions { query: String, seq: u64 },
-    /// Call `x.ai/session/fork` to create a peer session that resumes
+    /// Call `chutes.build/session/fork` to create a peer session that resumes
     /// from `parent_session_id` in the same cwd (no worktree). Mirror of
     /// the worktree branch of [`Effect::CreateWorktreeSession`]; the
     /// worktree-fork path reuses `CreateWorktreeSession { load_session_id }`
@@ -1983,7 +1983,7 @@ pub enum Effect {
         target_prompt_index: usize,
         mode: crate::views::rewind::RewindMode,
     },
-    /// Fetch billing/credit usage from the agent's `x.ai/billing` extension.
+    /// Fetch billing/credit usage from the agent's `chutes.build/billing` extension.
     /// When `silent` is true the result updates `credit_balance` without
     /// pushing a system message into scrollback (used for automatic refreshes
     /// on session init and after each turn).
@@ -1999,7 +1999,7 @@ pub enum Effect {
     DebounceSuggestions { agent_id: AgentId, generation: u64 },
     /// Spawn a debounce sleep task for plugin-CTA keyword matching.
     DebouncePluginCta { agent_id: AgentId, generation: u64 },
-    /// Send an ACP `x.ai/suggest` request to the shell. `agent_id` is echoed
+    /// Send an ACP `chutes.build/suggest` request to the shell. `agent_id` is echoed
     /// on the result so the response routes to the agent that fetched, not
     /// whatever view is active when it lands.
     FetchShellSuggestions {
@@ -2016,7 +2016,7 @@ pub enum Effect {
         /// (path/file); the as-you-type surface keeps all of them.
         token_only: bool,
     },
-    /// Send an ACP `x.ai/suggestPrompt` request to the shell — predict the
+    /// Send an ACP `chutes.build/suggestPrompt` request to the shell — predict the
     /// user's likely next prompt after a completed turn (tab autocomplete
     /// ghost text).
     FetchPromptSuggestion {
@@ -2043,7 +2043,7 @@ pub enum Effect {
         preparation: crate::prompt_images::PromptImagePreviewPreparation,
     },
 }
-/// Outcome of an `x.ai/subagent/cancel` request, telling dispatch whether the
+/// Outcome of an `chutes.build/subagent/cancel` request, telling dispatch whether the
 /// pager must finalize the subagent row itself.
 #[derive(Debug)]
 pub enum SubagentKillOutcome {
@@ -2115,7 +2115,7 @@ pub enum TaskResult {
         restore_summary: Option<String>,
         restore_degree: Option<xai_grok_workspace::session::git::RestoreDegree>,
         /// The session's in-flight running prompt id (from the load response
-        /// `_meta["x.ai/runningPromptId"]`), present only when the session was
+        /// `_meta["chutes.build/runningPromptId"]`), present only when the session was
         /// loaded MID-turn (another client is driving). The loader adopts it to
         /// pass the live `session/update` gate without re-rendering the user
         /// block (replay already rendered it).
@@ -2138,7 +2138,7 @@ pub enum TaskResult {
     /// Session list fetched for the welcome screen picker.
     SessionListLoaded {
         sessions: Vec<crate::app::app_view::SessionPickerEntry>,
-        /// Degraded conversations lane (`_meta["x.ai/partial"]`), surfaced
+        /// Degraded conversations lane (`_meta["chutes.build/partial"]`), surfaced
         /// as an actionable picker notice instead of a silent empty list.
         partial: Option<crate::app::effects::ConversationsPartial>,
         /// Echo of [`Effect::FetchSessionList::seq`]; stale results are dropped.
@@ -2181,7 +2181,7 @@ pub enum TaskResult {
         query: String,
         seq: u64,
     },
-    /// Leader session roster loaded via `x.ai/sessions/list`.
+    /// Leader session roster loaded via `chutes.build/sessions/list`.
     RosterLoaded {
         sessions: Vec<crate::app::roster::RosterEntry>,
     },
@@ -2252,7 +2252,7 @@ pub enum TaskResult {
     /// Cancel notification was sent (fire-and-forget).
     /// The real turn end comes via PromptResponse.
     CancelComplete,
-    /// Response to `x.ai/subagent/cancel`; see [`SubagentKillOutcome`].
+    /// Response to `chutes.build/subagent/cancel`; see [`SubagentKillOutcome`].
     KillSubagentComplete {
         session_id: acp::SessionId,
         subagent_id: String,
@@ -2326,7 +2326,7 @@ pub enum TaskResult {
         /// Deprecated: superseded by `mode` (authoritative). Kept only as a
         /// back-compat fallback for older agents that don't send `mode`.
         external: bool,
-        /// Presentation mode from `x.ai/auth/get_url`; `None` on older agents.
+        /// Presentation mode from `chutes.build/auth/get_url`; `None` on older agents.
         mode: Option<String>,
     },
     /// Auth code was submitted (fire-and-forget).
@@ -2499,7 +2499,7 @@ pub enum TaskResult {
         agent_id: AgentId,
         error: String,
     },
-    /// Memory note saved to global MEMORY.md.
+    /// Memory note saved to global memories.md.
     MemoryNoteSaved {
         agent_id: AgentId,
         result: Result<(), String>,
@@ -2543,7 +2543,7 @@ pub enum TaskResult {
         agent_id: AgentId,
         result: Result<String, String>,
     },
-    /// `x.ai/recap` request acknowledged (fire-and-forget). The recap itself
+    /// `chutes.build/recap` request acknowledged (fire-and-forget). The recap itself
     /// arrives separately as a `SessionRecap` notification; this only carries
     /// a transport error, if any, for logging.
     RecapRequested {
@@ -2576,9 +2576,9 @@ pub enum TaskResult {
     },
     /// Shell acknowledged logout (auth cleared).
     LogoutComplete,
-    /// Best-effort `x.ai/auth/cancel` finished (no UI update; state already left Authenticating).
+    /// Best-effort `chutes.build/auth/cancel` finished (no UI update; state already left Authenticating).
     AuthCancelComplete,
-    /// Shell responded to `x.ai/auth/check_subscription`. `verify` echoes
+    /// Shell responded to `chutes.build/auth/check_subscription`. `verify` echoes
     /// the generation from `Effect::CheckSubscription` for deferred-gate
     /// verifications.
     CheckSubscriptionComplete {
@@ -2603,7 +2603,7 @@ pub enum TaskResult {
         results: Vec<xai_grok_shell::extensions::session_search::SearchSessionHit>,
         seq: u64,
     },
-    /// `x.ai/session/fork` completed (no-worktree path). The pager adopts
+    /// `chutes.build/session/fork` completed (no-worktree path). The pager adopts
     /// the new session id and emits [`Effect::LoadSession`] to start the
     /// replay. Mirrors [`TaskResult::WorktreeForked`] in shape.
     ForkSessionReady {
@@ -2611,7 +2611,7 @@ pub enum TaskResult {
         new_session_id: acp::SessionId,
         cwd: std::path::PathBuf,
     },
-    /// `x.ai/session/fork` failed. The placeholder agent stays in
+    /// `chutes.build/session/fork` failed. The placeholder agent stays in
     /// `app.agents` with no `session_id` so the user can switch away.
     ForkSessionFailed {
         agent_id: AgentId,
@@ -2680,7 +2680,7 @@ pub enum TaskResult {
         agent_id: AgentId,
         generation: u64,
     },
-    /// Shell suggestions loaded from ACP `x.ai/suggest`. `request_text` /
+    /// Shell suggestions loaded from ACP `chutes.build/suggest`. `request_text` /
     /// `request_cursor` echo what the request was built from — the anchor
     /// the items' `replaceRange` offsets index into and the position Tab
     /// targets, paired atomically with them; `agent_id` routes the landing
@@ -2691,7 +2691,7 @@ pub enum TaskResult {
         request_text: String,
         request_cursor: usize,
     },
-    /// Predicted next prompt loaded from ACP `x.ai/suggestPrompt`.
+    /// Predicted next prompt loaded from ACP `chutes.build/suggestPrompt`.
     /// `suggestion` is `None` when the shell had nothing to suggest.
     PromptSuggestionLoaded {
         agent_id: AgentId,

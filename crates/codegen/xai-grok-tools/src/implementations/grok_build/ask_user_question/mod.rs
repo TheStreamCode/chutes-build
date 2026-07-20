@@ -55,9 +55,9 @@ const MIGRATION_FALLBACK: bool = true;
 ///
 /// The shell resolves `[toolset.ask_user_question]` across its config tiers
 /// and injects the result as [`AskUserQuestionParams`]; when no resolved
-/// params are injected, `GROK_ASK_USER_QUESTION_TIMEOUT_SECS` (positive
+/// params are injected, `CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_SECS` (positive
 /// integer seconds) still overrides this default directly —
-/// e.g. `GROK_ASK_USER_QUESTION_TIMEOUT_SECS=8` for tests / TUI repro.
+/// e.g. `CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_SECS=8` for tests / TUI repro.
 pub const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Default for `timeout_enabled` across every resolver tier and settings
@@ -67,7 +67,7 @@ pub const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub const DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED: bool = true;
 
 /// Env var: override [`RESPONSE_TIMEOUT`] with a duration in **seconds**.
-pub const RESPONSE_TIMEOUT_ENV: &str = "GROK_ASK_USER_QUESTION_TIMEOUT_SECS";
+pub const RESPONSE_TIMEOUT_ENV: &str = "CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_SECS";
 
 /// Parse the [`RESPONSE_TIMEOUT_ENV`] override (positive integer seconds).
 /// Invalid or non-positive values are warned and treated as unset. Single

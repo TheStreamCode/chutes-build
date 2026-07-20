@@ -1,7 +1,7 @@
 name: goal-slash-presession
 description: >
   Regression for the enterprise deploy report: with the goal
-  feature flag on (`GROK_GOAL=1`), `/goal` must appear in the slash-command menu
+  feature flag on (`CHUTES_BUILD_GOAL=1`), `/goal` must appear in the slash-command menu
   on the welcome screen *before* the first user turn creates a session. Pre-fix
   the pre-session advertise paths fail-closed and only emit AlwaysOn commands,
   so `/goal` showed up only after the first turn. Typing `/goal` on the welcome
@@ -11,7 +11,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_GOAL
+    - key: CHUTES_BUILD_GOAL
       value: "1"
 mock:
   response: "unused — this scenario never submits a prompt."
@@ -36,4 +36,4 @@ steps:
   - action: assert_running
   - action: screenshot
     name: goal-in-slash-menu-presession
-    note: "/goal advertised in the slash menu on the welcome screen (GROK_GOAL=1), before any prompt."
+    note: "/goal advertised in the slash menu on the welcome screen (CHUTES_BUILD_GOAL=1), before any prompt."

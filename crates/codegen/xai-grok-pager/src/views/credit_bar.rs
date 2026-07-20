@@ -1,12 +1,33 @@
 //! Credit balance indicator for the agent status bar.
 //!
 //! Shows the user's coding credit usage as a compact status bar item.
-//! Fetches real data from the `x.ai/billing` agent extension.
+//! Fetches real data from the `chutes.build/billing` agent extension.
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::theme::Theme;
+
+/// One independently enforced Chutes account-usage window.
+#[derive(Debug, Clone)]
+pub struct AccountUsageWindow {
+    /// Usage as a percentage of this window's allowance (0.0–100.0).
+    pub usage_pct: f64,
+    /// Normalized period type, such as `CHUTES_USAGE_PERIOD_FOUR_HOUR`.
+    pub period_type: String,
+    /// Formatted local reset time for this window.
+    pub period_end_display: Option<String>,
+}
+
+impl AccountUsageWindow {
+    fn usage_label(&self) -> &'static str {
+        usage_label_for_period(Some(&self.period_type))
+    }
+
+    fn reset_label(&self) -> &'static str {
+        reset_label_for_period(Some(&self.period_type))
+    }
+}
 
 /// Credit balance state from the billing API.
 #[derive(Debug, Clone)]
@@ -29,6 +50,9 @@ pub struct CreditBalance {
     /// Usage period type from the billing response (the proto enum name, e.g.
     /// `USAGE_PERIOD_TYPE_WEEKLY`). Drives the "Weekly/Monthly limit" label.
     pub period_type: Option<String>,
+    /// Every independently enforced Chutes usage window. The singular fields
+    /// above continue to identify the most constrained window for warnings.
+    pub usage_windows: Vec<AccountUsageWindow>,
     /// From credits config `is_unified_billing_user` (`None` if absent).
     /// `Some(true)` = unified pool / buy-credits UX; `Some(false)` = legacy
     /// on-demand / PAYG UX.
@@ -39,11 +63,27 @@ impl CreditBalance {
     /// Label for the percentage allowance, chosen from the period type:
     /// "Weekly limit" / "Monthly limit", falling back to "Usage" when unknown.
     pub fn usage_label(&self) -> &'static str {
-        match self.period_type.as_deref() {
-            Some(t) if t.contains("WEEKLY") => "Weekly limit",
-            Some(t) if t.contains("MONTHLY") => "Monthly limit",
-            _ => "Usage",
-        }
+        usage_label_for_period(self.period_type.as_deref())
+    }
+}
+
+fn usage_label_for_period(period_type: Option<&str>) -> &'static str {
+    match period_type {
+        Some(t) if t.contains("FOUR_HOUR") => "4-hour limit",
+        Some(t) if t.contains("DAILY") => "Daily quota",
+        Some(t) if t.contains("WEEKLY") => "Weekly limit",
+        Some(t) if t.contains("MONTHLY") => "Monthly limit",
+        _ => "Usage",
+    }
+}
+
+fn reset_label_for_period(period_type: Option<&str>) -> &'static str {
+    match period_type {
+        Some(t) if t.contains("FOUR_HOUR") => "4-hour reset",
+        Some(t) if t.contains("DAILY") => "Daily reset",
+        Some(t) if t.contains("WEEKLY") => "Weekly reset",
+        Some(t) if t.contains("MONTHLY") => "Monthly reset",
+        _ => "Next reset",
     }
 }
 
@@ -106,14 +146,30 @@ fn fmt_dollars(cents: i64) -> String {
 pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopupInfo>) -> String {
     // Floor to match the backend SpendingLimiter's `as u8` truncation
     // (99.994% → 99%, never 100% until truly exhausted).
-    let mut lines = vec![format!(
-        "{}: {}%",
-        balance.usage_label(),
-        balance.usage_pct.floor() as i64
-    )];
-    if let Some(reset) = &balance.period_end_display {
-        lines.push(format!("Next reset: {reset}"));
-    }
+    let mut lines = if balance.usage_windows.is_empty() {
+        let mut lines = vec![format!(
+            "{}: {}%",
+            balance.usage_label(),
+            balance.usage_pct.floor() as i64
+        )];
+        if let Some(reset) = &balance.period_end_display {
+            lines.push(format!("Next reset: {reset}"));
+        }
+        lines
+    } else {
+        let mut lines = Vec::with_capacity(balance.usage_windows.len() * 2);
+        for window in &balance.usage_windows {
+            lines.push(format!(
+                "{}: {}%",
+                window.usage_label(),
+                window.usage_pct.floor() as i64
+            ));
+            if let Some(reset) = &window.period_end_display {
+                lines.push(format!("{}: {reset}", window.reset_label()));
+            }
+        }
+        lines
+    };
 
     // Billing stores credit / top-up amounts as negative cents (accounting
     // convention); display the absolute USD value, matching the web clients.
@@ -149,6 +205,19 @@ pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopu
     }
 
     lines.join("\n")
+}
+
+/// Build the detailed Chutes account summary used by `/usage`.
+pub fn format_account_usage_summary(
+    plan: Option<&str>,
+    balance: &CreditBalance,
+    autotopup: Option<&AutoTopupInfo>,
+) -> String {
+    let usage = format_usage_summary(balance, autotopup);
+    match clean_plan_label(plan) {
+        Some(plan) => format!("Plan: {plan}\n{usage}"),
+        None => usage,
+    }
 }
 
 /// Low-balance ($10) and pay-as-you-go critical ($5) warning thresholds, in cents.
@@ -258,7 +327,26 @@ pub fn credit_bar_line(balance: &CreditBalance, hovered: bool, theme: &Theme) ->
 /// so the status bar never implies Build sampler / coding-credit usage.
 pub fn credit_bar_line_for_session(
     balance: &CreditBalance,
-    _hovered: bool,
+    hovered: bool,
+    theme: &Theme,
+    gateway_chat: bool,
+) -> Option<Line<'static>> {
+    if gateway_chat {
+        return None;
+    }
+    Some(styled_usage_line(
+        balance,
+        format!("Credits used: {:.0}%", balance.usage_pct),
+        hovered,
+        theme,
+    ))
+}
+
+/// Compact Chutes plan/quota indicator for the agent status bar.
+pub fn account_usage_line_for_session(
+    balance: &CreditBalance,
+    plan: Option<&str>,
+    hovered: bool,
     theme: &Theme,
     gateway_chat: bool,
 ) -> Option<Line<'static>> {
@@ -266,18 +354,71 @@ pub fn credit_bar_line_for_session(
         return None;
     }
     let pct = balance.usage_pct;
-    let color = if pct >= 100.0 {
+    let compact_usage =
+        compact_account_windows(balance).unwrap_or_else(|| format!("{:.0}%", pct.floor()));
+    let text = match compact_plan_label(plan) {
+        Some(plan) => format!("{plan} {compact_usage}"),
+        None => format!("Quota {compact_usage}"),
+    };
+    Some(styled_usage_line(balance, text, hovered, theme))
+}
+
+fn compact_account_windows(balance: &CreditBalance) -> Option<String> {
+    let four_hour = balance
+        .usage_windows
+        .iter()
+        .find(|window| window.period_type.contains("FOUR_HOUR"));
+    let monthly = balance
+        .usage_windows
+        .iter()
+        .find(|window| window.period_type.contains("MONTHLY"));
+    match (four_hour, monthly) {
+        (Some(four_hour), Some(monthly)) => Some(format!(
+            "4h {:.0}% · mo {:.0}%",
+            four_hour.usage_pct.floor(),
+            monthly.usage_pct.floor()
+        )),
+        (Some(four_hour), None) => Some(format!("4h {:.0}%", four_hour.usage_pct.floor())),
+        (None, Some(monthly)) => Some(format!("mo {:.0}%", monthly.usage_pct.floor())),
+        (None, None) => None,
+    }
+}
+
+fn styled_usage_line(
+    balance: &CreditBalance,
+    text: String,
+    hovered: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let color = if balance.usage_pct >= 100.0 {
         theme.accent_error
-    } else if pct >= 80.0 {
+    } else if balance.usage_pct >= 80.0 {
         theme.warning
     } else {
         theme.accent_success
     };
 
-    let text = format!("Credits used: {pct:.0}%");
+    let mut style = Style::default().fg(color).bg(theme.bg_base);
+    if hovered {
+        style = style.add_modifier(ratatui::style::Modifier::BOLD);
+    }
+    Line::from(Span::styled(text, style))
+}
 
-    let style = Style::default().fg(color).bg(theme.bg_base);
-    Some(Line::from(Span::styled(text, style)))
+fn compact_plan_label(plan: Option<&str>) -> Option<String> {
+    clean_plan_label(plan).map(|plan| plan.chars().take(16).collect())
+}
+
+fn clean_plan_label(plan: Option<&str>) -> Option<String> {
+    let without_controls: String = plan?
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
+    let clean = without_controls
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!clean.is_empty()).then_some(clean)
 }
 
 #[cfg(test)]
@@ -294,6 +435,7 @@ mod tests {
             on_demand_used_cents: None,
             prepaid_balance_cents: None,
             period_type: None,
+            usage_windows: Vec::new(),
             is_unified_billing_user: None,
         }
     }
@@ -428,6 +570,14 @@ mod tests {
     #[test]
     fn usage_label_from_period_type() {
         assert_eq!(
+            bal_period(0.0, "CHUTES_USAGE_PERIOD_FOUR_HOUR").usage_label(),
+            "4-hour limit"
+        );
+        assert_eq!(
+            bal_period(0.0, "CHUTES_USAGE_PERIOD_DAILY").usage_label(),
+            "Daily quota"
+        );
+        assert_eq!(
             bal_period(0.0, "USAGE_PERIOD_TYPE_WEEKLY").usage_label(),
             "Weekly limit"
         );
@@ -449,6 +599,38 @@ mod tests {
         assert_eq!(format_usage_summary(&weekly, None), "Weekly limit: 25%");
         let monthly = bal_period(25.0, "USAGE_PERIOD_TYPE_MONTHLY");
         assert_eq!(format_usage_summary(&monthly, None), "Monthly limit: 25%");
+    }
+
+    #[test]
+    fn account_summary_renders_monthly_and_four_hour_windows() {
+        let b = CreditBalance {
+            usage_windows: vec![
+                AccountUsageWindow {
+                    usage_pct: 25.9,
+                    period_type: "CHUTES_USAGE_PERIOD_MONTHLY".into(),
+                    period_end_display: Some("August 1, 02:00".into()),
+                },
+                AccountUsageWindow {
+                    usage_pct: 90.4,
+                    period_type: "CHUTES_USAGE_PERIOD_FOUR_HOUR".into(),
+                    period_end_display: Some("July 19, 18:00".into()),
+                },
+            ],
+            ..bal_period(90.4, "CHUTES_USAGE_PERIOD_FOUR_HOUR")
+        };
+        assert_eq!(
+            format_account_usage_summary(Some("Pro"), &b, None),
+            "Plan: Pro\nMonthly limit: 25%\nMonthly reset: August 1, 02:00\n4-hour limit: 90%\n4-hour reset: July 19, 18:00"
+        );
+        let theme = Theme::default();
+        let line = account_usage_line_for_session(&b, Some("Pro"), false, &theme, false)
+            .expect("account usage line");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(text, "Pro 4h 90% · mo 25%");
     }
 
     #[test]
@@ -722,6 +904,49 @@ mod tests {
         let line = credit_bar_line(&bal(24.0), false, &theme);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Credits used: 24%");
+    }
+
+    #[test]
+    fn account_summary_and_status_line_include_plan() {
+        let theme = Theme::default();
+        let b = bal_period(42.0, "CHUTES_USAGE_PERIOD_DAILY");
+        assert_eq!(
+            format_account_usage_summary(Some("Pro"), &b, None),
+            "Plan: Pro\nDaily quota: 42%"
+        );
+        let line = account_usage_line_for_session(&b, Some("Pro"), false, &theme, false)
+            .expect("build sessions render account usage");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(text, "Pro 42%");
+        assert!(account_usage_line_for_session(&b, Some("Pro"), false, &theme, true).is_none());
+    }
+
+    #[test]
+    fn account_status_line_sanitizes_and_bounds_plan_label() {
+        let theme = Theme::default();
+        let b = bal(5.0);
+        assert_eq!(
+            format_account_usage_summary(Some("  Enterprise\nUnlimited plan  "), &b, None),
+            "Plan: Enterprise Unlimited plan\nUsage: 5%"
+        );
+        let line = account_usage_line_for_session(
+            &b,
+            Some("  Enterprise\nUnlimited plan  "),
+            false,
+            &theme,
+            false,
+        )
+        .expect("account usage line");
+        let text: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(text, "Enterprise Unlim 5%");
     }
 
     #[test]

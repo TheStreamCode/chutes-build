@@ -99,7 +99,7 @@ async fn run() -> Result<ExitCode> {
         );
     }
 
-    // The pager child resolves GROK_SCROLL_LOG against ITS cwd (the
+    // The pager child resolves CHUTES_BUILD_SCROLL_LOG against ITS cwd (the
     // harness's temp workspace), so a relative artifacts dir — including
     // the default — would scatter captures there and starve the finalize
     // wait. Absolutize against the invoking cwd.

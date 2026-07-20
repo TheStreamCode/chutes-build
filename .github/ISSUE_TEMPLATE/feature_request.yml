@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a focused improvement to Chutes Build.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-visible behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Which existing command, configuration, or workflow did you try?
+  - type: textarea
+    id: impact
+    attributes:
+      label: Privacy, performance, and compatibility impact
+      description: Note expected network calls, local state, dependencies, latency, token use, or platform constraints.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and documentation.
+          required: true

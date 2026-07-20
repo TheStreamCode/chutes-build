@@ -100,7 +100,7 @@ pub struct TelemetryConfig {
     pub mixpanel_enabled: bool,
     /// `None` = inherit from `[features] telemetry`. `Some(false)` = disable GCS uploads only.
     pub trace_upload: Option<bool>,
-    /// External OTEL master switch (`= GROK_EXTERNAL_OTEL`, env wins).
+    /// External OTEL master switch (`= CHUTES_BUILD_EXTERNAL_OTEL`, env wins).
     pub otel_enabled: Option<bool>,
     /// External OTEL metrics exporter: `otlp` | `console` | `none`.
     pub otel_metrics_exporter: Option<String>,
@@ -128,9 +128,11 @@ fn build_env_default(value: Option<&'static str>) -> Option<String> {
 impl Default for TelemetryConfig {
     fn default() -> Self {
         let (baked_url, baked_key, baked_token, baked_enabled) = internal_defaults();
-        let build_url = build_env_default(option_env!("GROK_TELEMETRY_BUILD_EVENTS_URL"));
-        let build_key = build_env_default(option_env!("GROK_TELEMETRY_BUILD_EVENTS_API_KEY"));
-        let build_token = build_env_default(option_env!("GROK_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
+        let build_url = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_URL"));
+        let build_key =
+            build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_API_KEY"));
+        let build_token =
+            build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
         let mixpanel_enabled = baked_enabled || build_token.is_some();
         let (events_url, events_api_key, mixpanel_token) = (
             build_url.or(baked_url),
@@ -157,19 +159,19 @@ impl Default for TelemetryConfig {
 impl TelemetryConfig {
     pub fn apply_env_overrides(&mut self) {
         self.normalize();
-        if let Some(value) = Self::env_override("GROK_TELEMETRY_EVENTS_URL") {
+        if let Some(value) = Self::env_override("CHUTES_BUILD_TELEMETRY_EVENTS_URL") {
             self.events_url = value;
         }
-        if let Some(value) = Self::env_override("GROK_TELEMETRY_EVENTS_API_KEY") {
+        if let Some(value) = Self::env_override("CHUTES_BUILD_TELEMETRY_EVENTS_API_KEY") {
             self.events_api_key = value;
         }
-        if let Some(value) = Self::env_override("GROK_TELEMETRY_MIXPANEL_TOKEN") {
+        if let Some(value) = Self::env_override("CHUTES_BUILD_TELEMETRY_MIXPANEL_TOKEN") {
             self.mixpanel_token = value;
         }
-        if let Some(value) = env_bool("GROK_TELEMETRY_MIXPANEL_ENABLED") {
+        if let Some(value) = env_bool("CHUTES_BUILD_TELEMETRY_MIXPANEL_ENABLED") {
             self.mixpanel_enabled = value;
         }
-        if let Some(value) = env_bool("GROK_TELEMETRY_TRACE_UPLOAD") {
+        if let Some(value) = env_bool("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") {
             self.trace_upload = Some(value);
         }
     }
@@ -226,9 +228,9 @@ mod tests {
     #[test]
     fn default_is_build_env_layer_when_feature_off() {
         let cfg = TelemetryConfig::default();
-        let url = build_env_default(option_env!("GROK_TELEMETRY_BUILD_EVENTS_URL"));
-        let key = build_env_default(option_env!("GROK_TELEMETRY_BUILD_EVENTS_API_KEY"));
-        let token = build_env_default(option_env!("GROK_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
+        let url = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_URL"));
+        let key = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_EVENTS_API_KEY"));
+        let token = build_env_default(option_env!("CHUTES_BUILD_TELEMETRY_BUILD_MIXPANEL_TOKEN"));
         assert_eq!(cfg.mixpanel_enabled, token.is_some());
         assert_eq!(cfg.events_url, url);
         assert_eq!(cfg.events_api_key, key);

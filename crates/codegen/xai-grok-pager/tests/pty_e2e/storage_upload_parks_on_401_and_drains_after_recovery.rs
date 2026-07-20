@@ -17,7 +17,7 @@ async fn storage_upload_parks_on_401_and_drains_after_recovery() {
     content.set_storage_unauthorized(true);
 
     // Trace uploads are gated on first-party xAI OAuth (`is_xai_auth()`:
-    // AuthMode::Oidc + xAI issuer); the harness's XAI_API_KEY is ApiKey mode
+    // AuthMode::Oidc + xAI issuer); the harness's CHUTES_API_KEY is ApiKey mode
     // and never uploads. Seed a fake OAuth entry instead — the mock accepts
     // any bearer, and its failing refresh_token is exactly the parked state
     // under test.
@@ -27,10 +27,10 @@ async fn storage_upload_parks_on_401_and_drains_after_recovery() {
     let env = oauth_env_for_pager(&content);
     let mut env_refs: Vec<(&str, &str)> =
         env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    env_refs.retain(|(k, _)| *k != "GROK_TRACE_UPLOAD");
-    env_refs.push(("GROK_TRACE_UPLOAD", "true"));
-    env_refs.push(("GROK_TELEMETRY_TRACE_UPLOAD", "true"));
-    env_refs.push(("GROK_UPLOAD_QUEUE_AUTH_PROBE_SECS", "2"));
+    env_refs.retain(|(k, _)| *k != "CHUTES_BUILD_TRACE_UPLOAD");
+    env_refs.push(("CHUTES_BUILD_TRACE_UPLOAD", "true"));
+    env_refs.push(("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD", "true"));
+    env_refs.push(("CHUTES_BUILD_UPLOAD_QUEUE_AUTH_PROBE_SECS", "2"));
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness = PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &[], &env_refs)
@@ -68,7 +68,7 @@ async fn storage_upload_parks_on_401_and_drains_after_recovery() {
     // - each post-park wire attempt may do a probe + credential refresh retry
     //   → 2 storage requests per wake
     // - `AUTH_PARK_WAIT_INTERVAL` is 5s, so a single wait-slice timeout should
-    //   not fire inside this 3s window; with `GROK_UPLOAD_QUEUE_AUTH_PROBE_SECS=2`
+    //   not fire inside this 3s window; with `CHUTES_BUILD_UPLOAD_QUEUE_AUTH_PROBE_SECS=2`
     //   and `has_usable_credential()` still true for a seeded OAuth entry that
     //   storage rejects, the probe path can still wake workers early.
     //

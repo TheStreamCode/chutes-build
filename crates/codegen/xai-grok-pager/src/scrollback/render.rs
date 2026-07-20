@@ -38,18 +38,19 @@ pub(crate) const GROUP_HEADER_RANGE_ID: u16 = u16::MAX;
 
 /// Label for the inline-media native-open text button (terminals without
 /// inline graphics). Graphics terminals use a shorter overlay `[Open]` instead.
-pub fn media_open_button_label(is_video: bool) -> &'static str {
-    if is_video {
-        "[Open Video]"
-    } else {
-        "[Open Image]"
+pub fn media_open_button_label(kind: super::block::MediaButtonKind) -> &'static str {
+    match kind {
+        super::block::MediaButtonKind::Image => "[Open Image]",
+        super::block::MediaButtonKind::Video => "[Open Video]",
+        super::block::MediaButtonKind::Audio => "[Play Audio]",
+        super::block::MediaButtonKind::File => "[Open File]",
     }
 }
 
 /// Centered left column for the `[Open]` text button. Shared by the renderer
 /// and the hit-area computation so the label and click target stay aligned.
-pub fn media_open_button_col(content_width: u16, is_video: bool) -> u16 {
-    let label_w = media_open_button_label(is_video).len() as u16;
+pub fn media_open_button_col(content_width: u16, kind: super::block::MediaButtonKind) -> u16 {
+    let label_w = media_open_button_label(kind).len() as u16;
     content_width.saturating_sub(label_w) / 2
 }
 
@@ -136,6 +137,10 @@ pub struct InlineMediaPlacement {
     /// for text-button placements (media on terminals without inline-graphics
     /// support; `full_rows` is 0). Used for click-to-open-natively hit testing.
     pub open_button_screen_rect: Option<ratatui::layout::Rect>,
+    /// Reserved waveform row for text-mode audio artifacts.
+    pub audio_waveform_screen_rect: Option<ratatui::layout::Rect>,
+    /// Text-mode button semantics. `None` for inline graphics placements.
+    pub text_button_kind: Option<super::block::MediaButtonKind>,
     /// Whether this placement reserves a trailing `[Open]/[Copy]` (or play)
     /// button row beneath the image. True for an overlay/image tool-media
     /// placement; false for the text-`[Open]` placement (terminals without
@@ -773,6 +778,8 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                         top_crop_rows: top_crop,
                         filepath_screen_rect,
                         open_button_screen_rect: None,
+                        audio_waveform_screen_rect: None,
+                        text_button_kind: None,
                         has_button_row: true,
                     });
                 }
@@ -810,7 +817,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
         // Click targets for the text `[Open]` button + filepath of media blocks
         // without an inline overlay (terminals without inline-graphics support).
         if (!is_group_header || verb_expanded_slot)
-            && let Some((open_path, is_video)) = entry.block.inline_open_button()
+            && let Some((open_path, button_kind)) = entry.block.inline_open_button()
         {
             let content_lines = cached_output.lines.len();
             let viewport_bottom = viewport_start + viewport.height as usize;
@@ -838,8 +845,17 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             // Centered `[Open]` button → click-to-open. It is the second-to-last
             // content line (the last line is a blank spacer).
             let open_button_screen_rect = if content_lines >= 2 {
-                let label_w = media_open_button_label(is_video).len() as u16;
-                let col = media_open_button_col(content_width, is_video);
+                let is_audio = matches!(button_kind, super::block::MediaButtonKind::Audio);
+                let label_w = if is_audio {
+                    entry_content_area.width
+                } else {
+                    media_open_button_label(button_kind).len() as u16
+                };
+                let col = if is_audio {
+                    0
+                } else {
+                    media_open_button_col(content_width, button_kind)
+                };
                 let button_virtual_y = content_y_start + (content_lines - 2);
                 line_screen_rect(button_virtual_y, label_w).map(|mut rect| {
                     rect.x = rect.x.saturating_add(col);
@@ -848,14 +864,29 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             } else {
                 None
             };
+            let audio_waveform_screen_rect = if matches!(
+                button_kind,
+                super::block::MediaButtonKind::Audio
+            ) && content_lines >= 3
+            {
+                line_screen_rect(
+                    content_y_start + (content_lines - 3),
+                    entry_content_area.width,
+                )
+            } else {
+                None
+            };
 
-            if filepath_screen_rect.is_some() || open_button_screen_rect.is_some() {
+            if filepath_screen_rect.is_some()
+                || open_button_screen_rect.is_some()
+                || audio_waveform_screen_rect.is_some()
+            {
                 result.inline_media.push(InlineMediaPlacement {
                     info: crate::prompt_images::InlineMediaInfo {
                         path: open_path,
                         width: 0,
                         height: 0,
-                        is_video,
+                        is_video: matches!(button_kind, super::block::MediaButtonKind::Video),
                         alt_text: String::new(),
                     },
                     screen_rect: ratatui::layout::Rect {
@@ -868,6 +899,8 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                     top_crop_rows: 0,
                     filepath_screen_rect,
                     open_button_screen_rect,
+                    audio_waveform_screen_rect,
+                    text_button_kind: Some(button_kind),
                     // Text-button placement: the button is the text [Open] line
                     // (`open_button_screen_rect`), not an image-overlay row.
                     has_button_row: false,
@@ -2605,7 +2638,7 @@ mod tests {
         // across rows. The whole path must be clickable (one overlay region
         // per row, all pointing at the full file:// URL) — not just the
         // leading path fragment on the first row.
-        let path = "/Users/alice/.grok/sessions/%2FUsers%2Falice%2Fcode%2Fxai/\
+        let path = "/Users/alice/.chutes-build/sessions/%2FUsers%2Falice%2Fcode%2Fxai/\
                     019e0000-0000-7000-8000-000000000001/images/1.jpg";
         let entries = vec![make_markdown_entry(&format!(
             "Image generated and saved to {path}\n"

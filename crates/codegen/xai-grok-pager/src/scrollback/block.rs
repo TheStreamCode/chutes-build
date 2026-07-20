@@ -42,6 +42,15 @@ pub struct AnchoredMedia {
     pub rows: u16,
 }
 
+/// Action represented by a media card's text-mode button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaButtonKind {
+    Image,
+    Video,
+    Audio,
+    File,
+}
+
 /// Trait for block content description.
 ///
 /// Each block type implements this trait. The RenderBlock enum delegates to
@@ -243,9 +252,10 @@ pub trait BlockContent {
     }
 
     /// For media blocks on terminals without inline-graphics support, returns
-    /// `(path, is_video)` so the block can render a clickable text `[Open]`
-    /// line. `None` on graphics terminals (the overlay hosts its own buttons).
-    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
+    /// `(path, kind)` so the block can render a clickable text media action.
+    /// `None` on graphics terminals for image/video cards because the overlay
+    /// hosts their buttons. Audio always uses this text-mode action.
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, MediaButtonKind)> {
         None
     }
 }
@@ -556,7 +566,7 @@ impl BlockContent for RenderBlock {
         delegate_block!(self, estimate_extra_rows())
     }
 
-    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, MediaButtonKind)> {
         delegate_block!(self, inline_open_button())
     }
 }
@@ -1574,11 +1584,11 @@ mod searchable_text_tests {
         let block = RenderBlock::credit_limit_card(
             "credit limit reached",
             crate::scrollback::blocks::CreditLimitCardAction::EnablePayg,
-            "https://grok.com?_s=usage",
+            "https://chutes.ai?_s=usage",
         );
         let text = block.searchable_text().expect("credit limit text");
         assert!(text.contains("credit limit reached"), "got: {text:?}");
-        assert!(text.contains("https://grok.com?_s=usage"), "got: {text:?}");
+        assert!(text.contains("https://chutes.ai?_s=usage"), "got: {text:?}");
     }
 
     #[test]
@@ -1614,7 +1624,7 @@ mod searchable_text_tests {
         mem.results = vec![MemoryResult {
             score: 0.9,
             source: "global".into(),
-            path: "MEMORY.md".into(),
+            path: "memories.md".into(),
             start_line: 1,
             end_line: 5,
             snippet: "use graphite for PRs".into(),
@@ -1623,7 +1633,7 @@ mod searchable_text_tests {
         let text = block.searchable_text().expect("memory search text");
         assert!(text.contains("deployment process"), "got: {text:?}");
         assert!(text.contains("global"), "got: {text:?}");
-        assert!(text.contains("MEMORY.md"), "got: {text:?}");
+        assert!(text.contains("memories.md"), "got: {text:?}");
         assert!(text.contains("use graphite for PRs"), "got: {text:?}");
     }
 

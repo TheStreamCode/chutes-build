@@ -1,14 +1,14 @@
 use super::*;
 use serde::Deserialize;
 
-/// Handle `x.ai/models/update` — model list changed (etag-triggered refresh).
+/// Handle `chutes.build/models/update` — model list changed (etag-triggered refresh).
 pub(super) fn handle_models_update(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     if let Ok(model_state) = serde_json::from_str::<acp::SessionModelState>(notif.params.get()) {
         use crate::acp::model_state::ModelState;
         let new_models = ModelState::from(Some(model_state));
         tracing::info!(
             count = new_models.available.len(),
-            "models updated via x.ai/models/update"
+            "models updated via chutes.build/models/update"
         );
 
         let shell_fallback_current = new_models.current.clone();
@@ -46,15 +46,15 @@ pub(super) fn handle_models_update(notif: &acp::ExtNotification, app: &mut AppVi
         }
         true
     } else {
-        tracing::warn!("Failed to parse x.ai/models/update");
+        tracing::warn!("Failed to parse chutes.build/models/update");
         false
     }
 }
 
-/// Handle `x.ai/settings/update` — remote settings refreshed on `/new`.
+/// Handle `chutes.build/settings/update` — remote settings refreshed on `/new`.
 pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(update) = serde_json::from_str::<PagerSettingsUpdate>(notif.params.get()) else {
-        tracing::warn!("Failed to parse x.ai/settings/update");
+        tracing::warn!("Failed to parse chutes.build/settings/update");
         return false;
     };
 
@@ -153,7 +153,7 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
     // TODO: extract resolve_session_picker_grouped helper (duplicates event_loop.rs:143-160)
     // Respect env var > config > remote precedence (mirrors event_loop.rs startup).
     if let Some(remote_val) = update.session_picker_grouped {
-        let resolved = std::env::var("GROK_SESSION_PICKER_GROUPED")
+        let resolved = std::env::var("CHUTES_BUILD_SESSION_PICKER_GROUPED")
             .ok()
             .and_then(|v| match v.as_str() {
                 "1" | "true" => Some(true),
@@ -291,7 +291,7 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         }
     }
 
-    tracing::info!("settings updated via x.ai/settings/update");
+    tracing::info!("settings updated via chutes.build/settings/update");
     true
 }
 
@@ -320,7 +320,7 @@ pub(super) fn apply_soft_default_permission_mode(
 }
 
 /// Tell live sessions to leave Auto on the mid-session kill-switch: fire the
-/// `x.ai/yolo_mode_changed` notification the agent maps to
+/// `chutes.build/yolo_mode_changed` notification the agent maps to
 /// `SetAutoMode { enabled: false }`, fire-and-forget over the shared ACP channel.
 /// The notification is CLIENT-scoped (the agent applies it to every session of
 /// the sending client), so one send covers all affected sessions. `yolo_mode` is
@@ -335,7 +335,7 @@ pub(super) fn notify_sessions_leave_auto(app: &AppView, session_ids: &[acp::Sess
         "permission_mode": "ask",
     });
     let notification = acp::ExtNotification::new(
-        "x.ai/yolo_mode_changed",
+        "chutes.build/yolo_mode_changed",
         serde_json::value::to_raw_value(&params)
             .expect("serialize yolo_mode_changed params")
             .into(),
@@ -348,12 +348,12 @@ pub(super) fn notify_sessions_leave_auto(app: &AppView, session_ids: &[acp::Sess
     let _ = app.acp_tx.send(args.into());
 }
 
-/// Handle `x.ai/sessions/changed` — the leader broadcasts roster
+/// Handle `chutes.build/sessions/changed` — the leader broadcasts roster
 /// upserts/removals to all clients (FleetView dashboard).
 pub(super) fn handle_sessions_changed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(changed) = serde_json::from_str::<crate::app::roster::RosterChanged>(notif.params.get())
     else {
-        tracing::warn!("Failed to parse x.ai/sessions/changed");
+        tracing::warn!("Failed to parse chutes.build/sessions/changed");
         return false;
     };
     let mut affected = false;
@@ -400,7 +400,7 @@ pub(super) fn handle_announcements_update(notif: &acp::ExtNotification, app: &mu
 
 /// Apply half of [`handle_announcements_update`], with config layers injected
 /// so the merge/prune behavior is unit-testable without disk state.
-/// `resolve_announcements` honors `GROK_ANNOUNCEMENTS_OVERRIDE` first, so a
+/// `resolve_announcements` honors `CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE` first, so a
 /// backend push can't reintroduce announcements when the override is set.
 pub(super) fn apply_announcements_update(
     app: &mut AppView,
@@ -452,7 +452,7 @@ pub(super) fn pick_random_announcement(
     announcements.get(idx).cloned()
 }
 
-/// Deserialization type for the `x.ai/settings/update` notification payload.
+/// Deserialization type for the `chutes.build/settings/update` notification payload.
 ///
 /// This is intentionally a separate struct from `SettingsUpdateNotification` in
 /// `xai-grok-shell/src/agent/mvp_agent.rs`. The shell side derives `Serialize`
@@ -480,7 +480,7 @@ pub(super) struct PagerSettingsUpdate {
     #[serde(default)]
     tips: Option<Vec<String>>,
     // `announcements` is deliberately NOT consumed here: every shell writer of
-    // remote_settings also emits gen-ordered `x.ai/announcements/update`
+    // remote_settings also emits gen-ordered `chutes.build/announcements/update`
     // (emit_announcements_if_changed), and a gen-less apply on this path could
     // clobber a newer push. Single ingest path: handle_announcements_update.
     #[serde(default)]

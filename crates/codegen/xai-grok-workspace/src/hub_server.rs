@@ -1324,7 +1324,7 @@ mod tests {
         assert_eq!(tasks.len(), 1, "the task must survive a reused rebind");
         let read_only = ToolServerConfig {
             tools: vec![tc(
-                "GrokBuild:read_file",
+                "ChutesBuild:read_file",
                 Some(xai_grok_tools::types::tool::ToolKind::Read),
             )],
             behavior_preset: None,

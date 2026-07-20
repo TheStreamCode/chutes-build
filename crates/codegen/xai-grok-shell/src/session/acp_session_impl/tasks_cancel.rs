@@ -358,7 +358,7 @@ impl SessionActor {
             // * normal interactive cancel: remove ONLY the running turn,
             //   PRESERVING every queued prompt so the `Cancel` handler's
             //   follow-up `maybe_start_running_task` promotes the new front (the
-            //   user's next queued prompt) and rebroadcasts `x.ai/queue/changed`.
+            //   user's next queued prompt) and rebroadcasts `chutes.build/queue/changed`.
             //   The cancelling client does not pull any prompt back into its
             //   input — the server queue is the single source of truth for what
             //   runs next. Previously every cancel did `std::mem::take`,

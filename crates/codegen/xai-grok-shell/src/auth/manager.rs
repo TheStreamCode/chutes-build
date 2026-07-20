@@ -276,14 +276,14 @@ impl AuthManager {
                 "scope": &scope,
                 "grok_home": grok_home.display().to_string(),
                 "HOME": std::env::var("HOME").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_HOME": std::env::var("GROK_HOME").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH_PATH": std::env::var("GROK_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH": std::env::var("GROK_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
+                "CHUTES_BUILD_HOME": std::env::var("CHUTES_BUILD_HOME").unwrap_or_else(|_| "(unset)".into()),
+                "CHUTES_BUILD_AUTH_PATH": std::env::var("CHUTES_BUILD_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
+                "CHUTES_BUILD_AUTH": std::env::var("CHUTES_BUILD_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
             })),
         );
 
-        // GROK_AUTH: inline JSON credentials (highest priority, read-only).
-        if let Ok(inline_json) = std::env::var("GROK_AUTH") {
+        // CHUTES_BUILD_AUTH: inline JSON credentials (highest priority, read-only).
+        if let Ok(inline_json) = std::env::var("CHUTES_BUILD_AUTH") {
             if let Ok(auth) = serde_json::from_str::<GrokAuth>(&inline_json) {
                 return Self::assemble(
                     Some(auth),
@@ -294,11 +294,13 @@ impl AuthManager {
                     None,
                 );
             }
-            tracing::warn!("GROK_AUTH set but failed to parse as JSON, falling back to file");
+            tracing::warn!(
+                "CHUTES_BUILD_AUTH set but failed to parse as JSON, falling back to file"
+            );
         }
 
-        // GROK_AUTH_PATH: custom file path (overrides default $GROK_HOME/auth.json).
-        let path = std::env::var("GROK_AUTH_PATH")
+        // CHUTES_BUILD_AUTH_PATH: custom file path (overrides default $CHUTES_BUILD_HOME/auth.json).
+        let path = std::env::var("CHUTES_BUILD_AUTH_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| grok_home.join("auth.json"));
 
@@ -379,7 +381,7 @@ impl AuthManager {
     }
 
     /// Single field-assembly point for [`Self::new`]'s two construction paths
-    /// (inline `GROK_AUTH` vs. on-disk `auth.json`), which differ only in the
+    /// (inline `CHUTES_BUILD_AUTH` vs. on-disk `auth.json`), which differ only in the
     /// threaded fields. One literal means a newly added field can't be silently
     /// dropped from one branch.
     fn assemble(
@@ -1167,7 +1169,7 @@ impl AuthManager {
             "is_expired": auth.map(is_expired),
         });
         match new_state {
-            // Recovery (or first observation in GROK_AUTH mode).
+            // Recovery (or first observation in CHUTES_BUILD_AUTH mode).
             DiskAuthState::Ok => {
                 xai_grok_telemetry::unified_log::info(
                     "auth disk state: entry present",
@@ -1333,7 +1335,7 @@ impl AuthManager {
             }
             TokenType::LegacySession => {
                 // Deliberate side effect: re-read auth.json under the
-                // assumption that a sibling process (`grok login` from
+                // assumption that a sibling process (`chutes-build login` from
                 // another shell, the desktop app, etc.) may have refreshed
                 // the on-disk credentials. `pick_up_sibling_token` only
                 // mutates inner when the disk holds a *different valid*
@@ -2309,7 +2311,7 @@ fn auth_file_stamp(path: &Path) -> Option<AuthFileStamp> {
 }
 
 impl AuthManager {
-    /// `xai::api_key` from this manager's auth file, memoized on
+    /// `chutes::api_key` from this manager's auth file, memoized on
     /// [`AuthFileStamp`]: bearer resolution runs per tool call, so this
     /// costs a `stat` instead of a read+parse on the hot path.
     fn cached_disk_api_key(&self) -> Option<String> {

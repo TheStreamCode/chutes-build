@@ -1,4 +1,4 @@
-//! `x.ai/marketplace/*` extension handlers.
+//! `chutes.build/marketplace/*` extension handlers.
 //!
 //! Provides marketplace browsing and install endpoints for the pager modal.
 //! Delegates to `xai-grok-plugin-marketplace` crate for scanning and install logic.
@@ -19,8 +19,8 @@ fn load_filtered_marketplace_sources() -> Vec<xai_grok_plugin_marketplace::Marke
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/marketplace/list" => handle_list(agent, args).await,
-        "x.ai/marketplace/action" => handle_action(agent, args).await,
+        "chutes.build/marketplace/list" => handle_list(agent, args).await,
+        "chutes.build/marketplace/action" => handle_action(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -886,7 +886,7 @@ fn to_plugin_entry(
     }
 }
 
-/// Add a new git or local-path marketplace source to `~/.grok/config.toml`.
+/// Add a new git or local-path marketplace source to `~/.chutes-build/config.toml`.
 async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome {
     use crate::plugin::{self, MarketplaceAddInput};
     use xai_hooks_plugins_types::{ActionOutcome, OutcomeStatus};
@@ -1098,7 +1098,7 @@ fn add_marketplace_source(
     crate::util::config::atomic_write_string(config_path, &doc.to_string())
 }
 
-/// Remove a marketplace source from `~/.grok/config.toml` and uninstall all
+/// Remove a marketplace source from `~/.chutes-build/config.toml` and uninstall all
 /// plugins that were installed from it.
 async fn handle_remove_source(source_url_or_path: &str) -> xai_hooks_plugins_types::ActionOutcome {
     let src = source_url_or_path.to_string();

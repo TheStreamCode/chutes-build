@@ -1,7 +1,8 @@
-//! Logo component — renders the braille art logo.
+//! Chutes Build wordmark with an entrance reveal and continuous shimmer.
 //!
-//! Hidden entirely on legacy Windows consoles: the U+2800 braille block is
-//! not covered by the ConHost raster fonts and would render as tofu.
+//! The brand wordmark is intentionally invariant across terminals. Chutes
+//! Build already configures UTF-8 output on Windows, and substituting an ASCII
+//! fallback would change the approved logo rather than merely adapt UI chrome.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
@@ -17,16 +18,16 @@ const LOGO_SMALL: &str = include_str!("../../../assets/logo/logo05.txt");
 
 /// Height at or above which the small logo is shown (below it, no logo).
 const SMALL_LOGO_MIN_HEIGHT: u16 = 22;
-/// Height at or above which the full logo is shown.
-const FULL_LOGO_MIN_HEIGHT: u16 = 26;
+/// Height at or above which the full two-line wordmark is shown.
+const FULL_LOGO_MIN_HEIGHT: u16 = 30;
 
 fn pick_logo(window_height: u16) -> Option<&'static str> {
-    pick_logo_for(window_height, logo_hidden())
+    pick_logo_for(window_height)
 }
 
-/// Pure tier selection so tests can drive the legacy-console flag directly.
-fn pick_logo_for(window_height: u16, hidden: bool) -> Option<&'static str> {
-    if hidden || window_height < SMALL_LOGO_MIN_HEIGHT {
+/// Pure tier selection for the approved full and compact wordmarks.
+fn pick_logo_for(window_height: u16) -> Option<&'static str> {
+    if window_height < SMALL_LOGO_MIN_HEIGHT {
         None
     } else if window_height < FULL_LOGO_MIN_HEIGHT {
         Some(LOGO_SMALL)
@@ -35,13 +36,10 @@ fn pick_logo_for(window_height: u16, hidden: bool) -> Option<&'static str> {
     }
 }
 
-/// The braille art has no ASCII stand-in; see the module doc.
-fn logo_hidden() -> bool {
-    crate::glyphs::is_legacy_windows_console()
-}
-
 fn non_empty_lines(logo: &str) -> impl Iterator<Item = &str> {
-    logo.lines().filter(|l| !l.is_empty())
+    // `str::lines` already omits the terminal newline. Preserve intentional
+    // interior blank rows between CHUTES and BUILD.
+    logo.lines()
 }
 
 fn count_lines(logo: &str) -> u16 {
@@ -69,33 +67,37 @@ fn anim_phase_secs() -> f32 {
 /// repaints.
 const SHIMMER_FPS: f32 = 12.0;
 
+/// Duration of the one-shot startup reveal. Kept below a second so the brand
+/// moment reads clearly without delaying interaction.
+const ENTRANCE_SECS: f32 = 0.9;
+
 /// Quantized shimmer frame for the current wall-clock phase. The welcome screen
 /// redraws only when this advances, throttling the animation to ~`SHIMMER_FPS`
-/// rather than the full event-loop tick rate. Pinned to 0 when the logo is
-/// hidden.
+/// rather than the full event-loop tick rate.
 pub fn shimmer_frame() -> u64 {
-    if logo_hidden() {
-        return 0;
-    }
     (anim_phase_secs() * SHIMMER_FPS) as u64
+}
+
+/// Reveal progress in `[0, 1]`, eased so the logo arrives decisively and then
+/// settles. This is intentionally independent of terminal color support.
+fn entrance_progress(secs: f32) -> f32 {
+    let t = (secs / ENTRANCE_SECS).clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
 }
 
 /// Per-glyph shine opacity in `[0, 1]` at normalized diagonal position `diag`
 /// (0 = bottom-left .. 1 = top-right) and animation time `secs`. A raised-cosine
-/// band sweeps bottom-left → top-right and parks off-screen between sweeps; a
-/// gentle global pulse breathes underneath it. 0 keeps the resting gray, 1 is
-/// full bright.
+/// band continuously sweeps bottom-left → top-right while a gentle global
+/// pulse breathes underneath it. 0 keeps the resting green, 1 is bright white.
 fn shine_opacity(diag: f32, secs: f32) -> f32 {
-    const BAND: f32 = 0.38; // half-width of the shine band — wider = more gradual falloff
-    const CYCLE: f32 = 4.0; // seconds per sweep + rest
-    const SWEEP_FRAC: f32 = 0.32; // portion of the cycle spent sweeping (~1.3s glint, rest idles)
-    const SHINE: f32 = 0.33; // peak shine strength
-    const PULSE: f32 = 0.06; // global breathing amount
-    const PULSE_SECS: f32 = 5.0; // breathing period
+    const BAND: f32 = 0.24; // half-width of the shine band
+    const CYCLE: f32 = 3.2; // seconds per continuous sweep
+    const SHINE: f32 = 0.78; // peak green-to-white strength
+    const PULSE: f32 = 0.08; // global breathing amount
+    const PULSE_SECS: f32 = 4.8; // breathing period
 
     let p = (secs % CYCLE) / CYCLE;
-    let q = (p / SWEEP_FRAC).min(1.0); // parks the band off-screen during the rest
-    let band_pos = -BAND + q * (1.0 + 2.0 * BAND);
+    let band_pos = -BAND + p * (1.0 + 2.0 * BAND);
     let pulse = PULSE * (0.5 - 0.5 * (std::f32::consts::TAU * secs / PULSE_SECS).cos());
 
     let d = (diag - band_pos).abs();
@@ -105,6 +107,17 @@ fn shine_opacity(diag: f32, secs: f32) -> f32 {
         0.0
     };
     (pulse + SHINE * shine).clamp(0.0, 1.0)
+}
+
+/// True-color and 256-color terminals get a smooth gradient. Named ANSI
+/// colors cannot be interpolated safely, so they receive a crisp two-color
+/// glint instead of silently collapsing to the resting color.
+fn shine_color(base: Color, hilite: Color, opacity: f32) -> Color {
+    blend_color(base, hilite, opacity).unwrap_or_else(
+        || {
+            if opacity >= 0.22 { hilite } else { base }
+        },
+    )
 }
 
 fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
@@ -117,12 +130,14 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
         .unwrap_or(1)
         .max(1) as f32;
     let secs = anim_phase_secs();
+    let reveal = entrance_progress(secs);
 
-    // Blend each glyph from the resting gray toward the bright text color by its
-    // shine opacity, so a sheen sweeps across the braille art. Adjacent glyphs
+    // Blend each glyph from the Chutes green toward primary text by its shine
+    // opacity, so the sheen stays visible even when terminal color quantization
+    // collapses the two green accent shades. Adjacent glyphs
     // that land on the same blended color share one Span to hold down the
     // per-frame allocation.
-    let base = theme.gray;
+    let base = theme.accent_assistant;
     let hilite = theme.text_primary;
     let logo_lines: Vec<Line> = lines
         .iter()
@@ -135,7 +150,12 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
                 // Sweep along the bottom-left → top-right diagonal: the
                 // coordinate grows as col increases and row decreases.
                 let diag = (col as f32 + (rows - 1.0 - row as f32)) / (cols + rows);
-                let color = blend_color(base, hilite, shine_opacity(diag, secs)).unwrap_or(base);
+                // Reveal left-to-right with a small row stagger. Whitespace is
+                // retained so centered alignment never jumps between frames.
+                let reveal_pos = (col as f32 + row as f32 * 0.42) / (cols + rows * 0.42);
+                let visible = ch.is_whitespace() || reveal + 0.08 >= reveal_pos;
+                let glyph = if visible { ch } else { ' ' };
+                let color = shine_color(base, hilite, shine_opacity(diag, secs));
                 if run_color != Some(color) {
                     if let Some(prev) = run_color {
                         spans.push(Span::styled(
@@ -145,7 +165,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
                     }
                     run_color = Some(color);
                 }
-                run.push(ch);
+                run.push(glyph);
             }
             if let Some(prev) = run_color {
                 spans.push(Span::styled(run, Style::default().fg(prev)));
@@ -173,45 +193,28 @@ pub fn render_logo(area: Rect, buf: &mut Buffer, theme: &Theme, window_height: u
 /// The hero box always shows the full logo: it is laid out beside the menu, so
 /// it fits whenever the box does. These report and render that logo directly,
 /// independent of the height-based [`pick_logo`] tiers used by the stacked
-/// layout. When [`logo_hidden`], they report 0 and render nothing.
+/// layout.
 pub fn full_logo_line_count() -> u16 {
-    full_logo_line_count_for(logo_hidden())
-}
-
-fn full_logo_line_count_for(hidden: bool) -> u16 {
-    if hidden { 0 } else { count_lines(LOGO) }
+    count_lines(LOGO)
 }
 
 pub fn full_logo_visual_width() -> u16 {
-    full_logo_visual_width_for(logo_hidden())
-}
-
-fn full_logo_visual_width_for(hidden: bool) -> u16 {
-    if hidden { 0 } else { visual_width(LOGO) }
+    visual_width(LOGO)
 }
 
 pub fn render_full_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
-    if !logo_hidden() {
-        render_into(area, buf, theme, LOGO);
-    }
+    render_into(area, buf, theme, LOGO);
 }
 
 /// Line count of the small logo used in minimal's committed welcome card
-/// (0 on a legacy Windows console, where the braille art is suppressed).
+/// across all supported terminals.
 pub fn compact_logo_line_count() -> u16 {
-    if logo_hidden() {
-        0
-    } else {
-        count_lines(LOGO_SMALL)
-    }
+    count_lines(LOGO_SMALL)
 }
 
-/// Render the small braille logo (centered) into `area` for minimal's welcome
-/// card. No-op when the logo is hidden.
+/// Render the small centered logo into `area` for minimal's welcome card.
 pub fn render_compact_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
-    if !logo_hidden() {
-        render_into(area, buf, theme, LOGO_SMALL);
-    }
+    render_into(area, buf, theme, LOGO_SMALL);
 }
 
 #[cfg(test)]
@@ -220,55 +223,28 @@ mod tests {
 
     #[test]
     fn logo_sizes_by_height() {
-        assert!(pick_logo_for(SMALL_LOGO_MIN_HEIGHT - 1, false).is_none());
-        assert_eq!(
-            pick_logo_for(SMALL_LOGO_MIN_HEIGHT, false),
-            Some(LOGO_SMALL)
-        );
-        assert_eq!(
-            pick_logo_for(FULL_LOGO_MIN_HEIGHT - 1, false),
-            Some(LOGO_SMALL)
-        );
-        assert_eq!(pick_logo_for(FULL_LOGO_MIN_HEIGHT, false), Some(LOGO));
-    }
-
-    // The braille art has no legacy-safe stand-in, so every height tier must
-    // collapse to no logo when the legacy-console flag is set.
-    #[test]
-    fn logo_hidden_on_legacy_console_at_every_height() {
-        for h in [0, SMALL_LOGO_MIN_HEIGHT, FULL_LOGO_MIN_HEIGHT, u16::MAX] {
-            assert!(pick_logo_for(h, true).is_none(), "height {h}");
-        }
+        assert!(pick_logo_for(SMALL_LOGO_MIN_HEIGHT - 1).is_none());
+        assert_eq!(pick_logo_for(SMALL_LOGO_MIN_HEIGHT), Some(LOGO_SMALL));
+        assert_eq!(pick_logo_for(FULL_LOGO_MIN_HEIGHT - 1), Some(LOGO_SMALL));
+        assert_eq!(pick_logo_for(FULL_LOGO_MIN_HEIGHT), Some(LOGO));
     }
 
     #[test]
     fn hero_box_always_uses_full_logo() {
         // The box renders the full logo regardless of height (it's laid out
         // beside the menu), and it's the large variant — never the small one.
-        assert_eq!(full_logo_line_count_for(false), count_lines(LOGO));
-        assert_eq!(full_logo_visual_width_for(false), visual_width(LOGO));
-        assert!(full_logo_line_count_for(false) > count_lines(LOGO_SMALL));
-        assert!(full_logo_visual_width_for(false) > visual_width(LOGO_SMALL));
-    }
-
-    #[test]
-    fn full_logo_helpers_collapse_when_hidden() {
-        assert_eq!(full_logo_line_count_for(true), 0);
-        assert_eq!(full_logo_visual_width_for(true), 0);
+        assert_eq!(full_logo_line_count(), count_lines(LOGO));
+        assert_eq!(full_logo_visual_width(), visual_width(LOGO));
+        assert!(full_logo_line_count() > count_lines(LOGO_SMALL));
+        assert!(full_logo_visual_width() > visual_width(LOGO_SMALL));
     }
 
     #[test]
     fn compact_logo_line_count_matches_small_logo_when_visible() {
         // The minimal welcome card budgets exactly the small logo's rows. When
-        // the logo isn't hidden, the count equals the small art's line count and
-        // is strictly shorter than the full logo.
-        if !logo_hidden() {
-            assert_eq!(compact_logo_line_count(), count_lines(LOGO_SMALL));
-            assert!(compact_logo_line_count() < count_lines(LOGO));
-            assert!(compact_logo_line_count() > 0);
-        } else {
-            assert_eq!(compact_logo_line_count(), 0);
-        }
+        // visible, every terminal uses the same approved compact wordmark.
+        assert_eq!(compact_logo_line_count(), count_lines(LOGO_SMALL));
+        assert!(compact_logo_line_count() > 0);
     }
 
     #[test]
@@ -288,6 +264,12 @@ mod tests {
     }
 
     #[test]
+    fn named_ansi_colors_keep_a_visible_shine() {
+        assert_eq!(shine_color(Color::Green, Color::White, 0.1), Color::Green);
+        assert_eq!(shine_color(Color::Green, Color::White, 0.8), Color::White);
+    }
+
+    #[test]
     fn shine_band_sweeps_across() {
         // The brightest point along the diagonal advances left → right as the
         // sweep progresses through its active phase.
@@ -301,18 +283,32 @@ mod tests {
                 })
                 .unwrap()
         };
-        let early = brightest(0.1);
-        let mid = brightest(0.4);
-        let late = brightest(0.7);
+        let early = brightest(0.4);
+        let mid = brightest(1.2);
+        let late = brightest(2.0);
         assert!(early < mid, "early {early} should precede mid {mid}");
         assert!(mid < late, "mid {mid} should precede late {late}");
     }
 
     #[test]
-    fn shine_rests_dim_between_sweeps() {
-        // During the rest phase the band is parked off-screen, so an interior
-        // glyph falls back to at most the gentle pulse — never full bright.
-        let op = shine_opacity(0.5, 6.0); // secs % 4.0 = 2.0 → past SWEEP_FRAC, in the rest phase
-        assert!(op < 0.2, "resting opacity {op} should stay dim");
+    fn shine_wraps_cleanly_between_sweeps() {
+        // At the cycle boundary the band is off the logo and only the gentle
+        // global pulse remains, preventing a full-frame flash on wrap.
+        let before = shine_opacity(0.5, 3.19);
+        let after = shine_opacity(0.5, 3.21);
+        assert!(before < 0.2, "pre-wrap opacity {before} should stay dim");
+        assert!(after < 0.2, "post-wrap opacity {after} should stay dim");
+    }
+
+    #[test]
+    fn entrance_reveal_is_monotonic_and_completes() {
+        let start = entrance_progress(0.0);
+        let first = entrance_progress(0.2);
+        let second = entrance_progress(0.55);
+        let end = entrance_progress(ENTRANCE_SECS);
+        assert_eq!(start, 0.0);
+        assert!(start < first && first < second && second < end);
+        assert_eq!(end, 1.0);
+        assert_eq!(entrance_progress(ENTRANCE_SECS + 10.0), 1.0);
     }
 }

@@ -1,0 +1,75 @@
+[graph]
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+all-features = false
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "The RSA crate is used for JWT signature verification and test key generation, not RSA decryption; the Marvin attack applies to decryption operations." },
+    { id = "RUSTSEC-2024-0320", reason = "Transitive through syntect; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2024-0384", reason = "Transitive through async-openai/backoff; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2024-0436", reason = "Transitive through ratatui 0.29; migration is deferred until the TUI supports a newer ratatui release." },
+    { id = "RUSTSEC-2025-0012", reason = "Transitive through async-openai; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2025-0052", reason = "Linux-only transitive dependency of dark-light; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2025-0057", reason = "Transitive through bm25; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2025-0141", reason = "Transitive through syntect; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2026-0192", reason = "Transitive font parser used by the current PDF rendering stack; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2026-0206", reason = "Transitive text shaping dependency of the current PDF rendering stack; no maintained compatible replacement is currently available." },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
+]
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+# Workspace path dependencies intentionally omit registry versions and are
+# reported as wildcard requirements by cargo-deny.
+wildcards = "allow"
+highlight = "simplest-path"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+allow-workspace = true
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/helix-editor/nucleo.git"]
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

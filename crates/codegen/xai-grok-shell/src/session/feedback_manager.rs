@@ -71,7 +71,7 @@ pub(crate) fn new_submission(
 }
 
 /// Pipeline: persist → strip → submit → telemetry (telemetry fields captured
-/// before strip). Callers merge `GROK_USER_METADATA` and set
+/// before strip). Callers merge `CHUTES_BUILD_USER_METADATA` and set
 /// `submission.request_id`; `telemetry_enabled` must be
 /// `is_telemetry_enabled() && !is_zdr()` for all entry points.
 pub(crate) async fn submit_feedback_workflow(
@@ -188,10 +188,10 @@ pub struct FeedbackManagerConfig {
     /// Interval for syncing signals to the analytics backend (default: 30s)
     pub sync_interval: Duration,
     /// Whether user-facing feedback features are enabled (popups, `/feedback`,
-    /// ratings). Gated by `GROK_FEEDBACK_ENABLED`.
+    /// ratings). Gated by `CHUTES_BUILD_FEEDBACK_ENABLED`.
     pub feedback_enabled: bool,
     /// Whether session analytics (signal sync, turn deltas) are enabled.
-    /// Gated by `GROK_TELEMETRY_ENABLED`. These are analytics data that
+    /// Gated by `CHUTES_BUILD_TELEMETRY_ENABLED`. These are analytics data that
     /// flow continuously without user action.
     pub telemetry_enabled: bool,
     /// Client type (Agent, Tui, Web, Extension)
@@ -364,7 +364,7 @@ impl FeedbackManager {
         }
 
         if let Some(user_meta) =
-            crate::agent::mvp_agent::parse_json_object_env("GROK_USER_METADATA")
+            crate::agent::mvp_agent::parse_json_object_env("CHUTES_BUILD_USER_METADATA")
         {
             submission.merge_metadata(user_meta);
         }
@@ -495,7 +495,7 @@ impl FeedbackManager {
     /// heuristics, sampling, cooldown, and enabled checks.
     ///
     /// Engineers developing clients can call this via the
-    /// `x.ai/debug/trigger_feedback` ACP extension method to exercise
+    /// `chutes.build/debug/trigger_feedback` ACP extension method to exercise
     /// the full feedback notification ↔ response flow without needing a
     /// real session that meets tier criteria.
     ///

@@ -64,7 +64,7 @@ pub enum ContextualTipKind {
     SmallScreen,
     /// Double-click fold/nav path → tip to enable Word select in settings.
     WordSelect,
-    /// SSH session without `grok wrap` → tip to wrap the ssh command locally.
+    /// SSH session without `chutes-build wrap` → tip to wrap the ssh command locally.
     SshWrap,
 }
 
@@ -1307,7 +1307,7 @@ pub struct ClipboardCopy {
     pub osc52_ok: bool,
     /// Evidence classification: `confirmed` | `unverified` | `failed`.
     pub delivery: &'static str,
-    /// An explicit `grok wrap` OSC 52 sink was active.
+    /// An explicit `chutes-build wrap` OSC 52 sink was active.
     pub osc52_sink: bool,
     /// The process was inside a container without a display server.
     pub container_no_display: bool,

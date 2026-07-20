@@ -1,3 +1,4 @@
+pub mod chutes;
 pub mod codex;
 pub mod cursor_rules_on_read;
 pub mod editor_infra;
@@ -13,6 +14,10 @@ pub mod skills;
 pub mod task_output;
 pub mod use_tool;
 pub mod web_search;
+pub use chutes::{
+    Context7DocsTool, Context7SearchTool, DescribeMediaModelTool, GenerateMediaTool,
+    GetChutesUsageTool, ListMediaModelsTool,
+};
 pub use grok_build::bash::{BashError, BashToolInput};
 pub use grok_build::{
     AskUserQuestionTool, BashTool, EnterPlanModeTool, ExitPlanModeTool, GrepTool, KillTaskTool,

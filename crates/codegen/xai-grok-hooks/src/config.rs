@@ -84,8 +84,8 @@ pub struct RawHandler {
     /// Plugin-injected vars (set by the plugin adapter) override these for
     /// the keys the plugin owns (e.g. `CLAUDE_PLUGIN_ROOT`); see the rustdoc
     /// on [`HookSpec::extra_env`]. User attempts to set runner-reserved
-    /// keys (`GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`,
-    /// `GROK_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`) are stripped at load
+    /// keys (`CHUTES_BUILD_HOOK_EVENT`, `CHUTES_BUILD_HOOK_NAME`, `CHUTES_BUILD_SESSION_ID`,
+    /// `CHUTES_BUILD_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`) are stripped at load
     /// time and a warning is logged.
     ///
     /// `serde(default)` so that omitting `env` from the JSON gives an
@@ -195,17 +195,17 @@ pub struct HookSpec {
     ///
     /// 1. The user-declared `env` map on the JSON `RawHandler` (populated
     ///    by [`parse_hook_file`]). Runner-reserved keys
-    ///    (`GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`,
-    ///    `GROK_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`) are stripped at
+    ///    (`CHUTES_BUILD_HOOK_EVENT`, `CHUTES_BUILD_HOOK_NAME`, `CHUTES_BUILD_SESSION_ID`,
+    ///    `CHUTES_BUILD_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`) are stripped at
     ///    load time and a tracing warning is emitted.
     /// 2. Plugin-injected vars merged in by the plugin adapter
     ///    (`xai-grok-agent::plugins::hooks_adapter`). The adapter sets
-    ///    `GROK_PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, `GROK_PLUGIN_DATA`,
+    ///    `CHUTES_BUILD_PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, `CHUTES_BUILD_PLUGIN_DATA`,
     ///    and `CLAUDE_PLUGIN_DATA`; the merge overrides any user
     ///    values for those four keys so the plugin contract is intact.
     /// 3. Runner-injected vars at spawn time
-    ///    (`GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`,
-    ///    `GROK_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`). These are
+    ///    (`CHUTES_BUILD_HOOK_EVENT`, `CHUTES_BUILD_HOOK_NAME`, `CHUTES_BUILD_SESSION_ID`,
+    ///    `CHUTES_BUILD_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`). These are
     ///    applied AFTER `extra_env` in the spawn call so they always
     ///    win, even if the layered defenses above leak a reserved key
     ///    through. This is a security property: the spawned child
@@ -684,8 +684,14 @@ mod tests {
     fn source_dir_from_file_path() {
         let json =
             r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"x.sh"}]}]}}"#;
-        let (specs, _) = parse_hook_file(json, Path::new("/home/user/.grok/hooks/safety.json"));
-        assert_eq!(specs[0].source_dir, PathBuf::from("/home/user/.grok/hooks"));
+        let (specs, _) = parse_hook_file(
+            json,
+            Path::new("/home/user/.chutes-build/hooks/safety.json"),
+        );
+        assert_eq!(
+            specs[0].source_dir,
+            PathBuf::from("/home/user/.chutes-build/hooks")
+        );
     }
 
     #[test]
@@ -818,7 +824,7 @@ mod tests {
     /// for direct-exec command paths that have no other shell metachars.
     #[test]
     fn parse_hook_file_expands_env_var_in_command_from_process_env() {
-        let key = "GROK_HOOKS_PARSE_TEST_CMD_PROC_ENV";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_CMD_PROC_ENV";
         with_env_var(key, Some("/usr/local"), || {
             let json = format!(
                 r#"{{
@@ -847,7 +853,7 @@ mod tests {
     /// config-load time so SSRF validation sees the resolved host.
     #[test]
     fn parse_hook_file_expands_env_var_in_url_from_process_env() {
-        let key = "GROK_HOOKS_PARSE_TEST_URL_PROC_ENV";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_URL_PROC_ENV";
         with_env_var(key, Some("hooks.example.com"), || {
             let json = format!(
                 r#"{{
@@ -953,7 +959,7 @@ mod tests {
     /// expanded strings) so that the runtime check is never bypassed.
     #[test]
     fn parse_hook_file_preserves_unresolved_env_refs_in_command() {
-        let key = "GROK_HOOKS_PARSE_TEST_NEVER_SET_AT_LOAD_TIME";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_NEVER_SET_AT_LOAD_TIME";
         with_env_var(key, None, || {
             let json = format!(
                 r#"{{
@@ -984,7 +990,7 @@ mod tests {
     /// refs, otherwise a deferred plugin var would be silently stripped.
     #[test]
     fn parse_hook_file_preserves_unresolved_env_refs_in_url() {
-        let key = "GROK_HOOKS_PARSE_TEST_URL_NEVER_SET_AT_LOAD_TIME";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_URL_NEVER_SET_AT_LOAD_TIME";
         with_env_var(key, None, || {
             let json = format!(
                 r#"{{
@@ -1078,7 +1084,7 @@ mod tests {
     /// adding "completeness" here would break regex semantics.
     #[test]
     fn parse_hook_file_matcher_is_not_env_expanded() {
-        let key = "GROK_HOOKS_PARSE_TEST_MATCHER_VAR";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_MATCHER_VAR";
         with_env_var(key, Some("expanded_value_should_not_appear"), || {
             // Use a regex-valid matcher pattern that also embeds `$KEY`.
             // We deliberately use a pattern that's a valid regex even
@@ -1132,7 +1138,7 @@ mod tests {
         // succeeds. This lets us assert on the single
         // successful-compile path with `assert_eq!(specs.len(), 1)`
         // and a single `assert!(!stored.contains(...))`.
-        let key = "GROK_HOOKS_PARSE_TEST_MATCHER_BRACED";
+        let key = "CHUTES_BUILD_HOOKS_PARSE_TEST_MATCHER_BRACED";
         with_env_var(key, Some("expanded_should_not_appear"), || {
             let pattern = format!("[${{{key}}}]_tool");
             let json = serde_json::json!({
@@ -1212,8 +1218,8 @@ mod tests {
         );
     }
 
-    /// User attempts to set runner-reserved keys (GROK_HOOK_*,
-    /// GROK_SESSION_ID, GROK_WORKSPACE_ROOT, CLAUDE_PROJECT_DIR) via
+    /// User attempts to set runner-reserved keys (CHUTES_BUILD_HOOK_*,
+    /// CHUTES_BUILD_SESSION_ID, CHUTES_BUILD_WORKSPACE_ROOT, CLAUDE_PROJECT_DIR) via
     /// the JSON `env` map are stripped at load time. Spawn-time
     /// precedence ordering also overrides these keys, but stripping
     /// here gives users a clear "ignored" signal.
@@ -1228,10 +1234,10 @@ mod tests {
                                 "type": "command",
                                 "command": "echo hi",
                                 "env": {
-                                    "GROK_HOOK_EVENT": "spoofed",
-                                    "GROK_HOOK_NAME": "spoofed",
-                                    "GROK_SESSION_ID": "spoofed",
-                                    "GROK_WORKSPACE_ROOT": "/etc",
+                                    "CHUTES_BUILD_HOOK_EVENT": "spoofed",
+                                    "CHUTES_BUILD_HOOK_NAME": "spoofed",
+                                    "CHUTES_BUILD_SESSION_ID": "spoofed",
+                                    "CHUTES_BUILD_WORKSPACE_ROOT": "/etc",
                                     "CLAUDE_PROJECT_DIR": "/etc",
                                     "USER_KEY": "kept"
                                 }
@@ -1246,10 +1252,10 @@ mod tests {
         assert_eq!(specs.len(), 1);
         // All five reserved keys must be stripped.
         for reserved in [
-            "GROK_HOOK_EVENT",
-            "GROK_HOOK_NAME",
-            "GROK_SESSION_ID",
-            "GROK_WORKSPACE_ROOT",
+            "CHUTES_BUILD_HOOK_EVENT",
+            "CHUTES_BUILD_HOOK_NAME",
+            "CHUTES_BUILD_SESSION_ID",
+            "CHUTES_BUILD_WORKSPACE_ROOT",
             "CLAUDE_PROJECT_DIR",
         ] {
             assert!(

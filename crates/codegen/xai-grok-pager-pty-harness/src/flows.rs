@@ -68,19 +68,19 @@ pub fn inference_request_count(content: &ContentController) -> usize {
 }
 
 /// Seed a fake xAI OAuth entry into the isolated home's `auth.json` so the
-/// shell has session auth (the harness's `XAI_API_KEY` is ApiKey/BYOK mode
+/// shell has session auth (the harness's `CHUTES_API_KEY` is ApiKey/BYOK mode
 /// and never enters the auth manager). Load-bearing details: the scope key
 /// must be `<issuer>::<client_id>`, `auth_mode` must be `oidc`, and
 /// `expires_at` must be far-future so no network refresh is attempted; the
 /// mock server accepts any bearer. Pair with [`oauth_env_for_pager`].
 pub fn seed_fake_oauth(content: &ContentController, user: &str) {
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create temp .grok");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create temp .chutes-build");
     std::fs::write(
         grok_home.join("auth.json"),
         format!(
             r#"{{
-  "https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": {{
+  "https://auth.example.com::b1a00492-073a-47ea-816f-4c329264a828": {{
     "key": "pty-test-oauth-token",
     "auth_mode": "oidc",
     "create_time": "2026-01-01T00:00:00Z",
@@ -88,7 +88,7 @@ pub fn seed_fake_oauth(content: &ContentController, user: &str) {
     "email": "{user}@test.invalid",
     "expires_at": "2030-01-01T00:00:00Z",
     "refresh_token": "pty-test-refresh-token",
-    "oidc_issuer": "https://auth.x.ai",
+    "oidc_issuer": "https://auth.example.com",
     "oidc_client_id": "b1a00492-073a-47ea-816f-4c329264a828"
   }}
 }}"#
@@ -97,11 +97,11 @@ pub fn seed_fake_oauth(content: &ContentController, user: &str) {
     .expect("seed fake oauth auth.json");
 }
 
-/// [`ContentController::env_for_pager`] minus `XAI_API_KEY`, so the entry
+/// [`ContentController::env_for_pager`] minus `CHUTES_API_KEY`, so the entry
 /// written by [`seed_fake_oauth`] is the active credential.
 pub fn oauth_env_for_pager(content: &ContentController) -> Vec<(String, String)> {
     let mut env = content.env_for_pager();
-    env.retain(|(k, _)| k != "XAI_API_KEY");
+    env.retain(|(k, _)| k != "CHUTES_API_KEY");
     env
 }
 

@@ -1,4 +1,4 @@
-//! Vendor-compat resolution for `grok inspect`.
+//! Vendor-compat resolution for `chutes-build inspect`.
 //!
 //! Resolves the local env/config/default stack into a diagnostic report.
 
@@ -7,7 +7,7 @@ use xai_grok_tools::types::compat::{COMPAT_CELLS, CompatCell, CompatConfig};
 
 /// Derive the vendor origin from a file path. Returns `Some("cursor")` or
 /// `Some("claude")` when the path passes through a vendor config directory;
-/// `None` for native `.grok`/`.agents` paths.
+/// `None` for native `.chutes-build`/`.agents` paths.
 pub(super) fn derive_vendor(path: &str) -> Option<&'static str> {
     if path.contains("/.cursor/") || path.contains("\\.cursor\\") || path.ends_with("/.cursor") {
         Some("cursor")
@@ -237,7 +237,7 @@ mod tests {
         let effective_config: toml::Value =
             toml::from_str("[compat.cursor]\nskills = false\nrules = false\n").unwrap();
         let report = resolve_inspect_compat_with_env(Ok(&effective_config), |cell| {
-            (cell.env_var() == "GROK_CURSOR_SKILLS_ENABLED").then_some(true)
+            (cell.env_var() == "CHUTES_BUILD_CURSOR_SKILLS_ENABLED").then_some(true)
         });
 
         let skills = entry(&report, "cursor", "skills");
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn config_load_failure_fails_closed_unless_env_overrides() {
         let report = resolve_inspect_compat_with_env(Err(()), |cell| {
-            (cell.env_var() == "GROK_CURSOR_SKILLS_ENABLED").then_some(true)
+            (cell.env_var() == "CHUTES_BUILD_CURSOR_SKILLS_ENABLED").then_some(true)
         });
 
         let skills = entry(&report, "cursor", "skills");

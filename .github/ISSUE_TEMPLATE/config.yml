@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/TheStreamCode/chutes-build/security/advisories/new
+    about: Report vulnerabilities privately through GitHub Security Advisories.
+  - name: Chutes documentation
+    url: https://chutes.ai/docs
+    about: Check official Chutes service and API documentation.

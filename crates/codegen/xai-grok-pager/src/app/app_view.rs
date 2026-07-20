@@ -467,16 +467,16 @@ impl PendingAction {
         Instant::now() >= self.expires_at
     }
 }
-/// Cap for the `GROK_ESC_DOUBLE_PRESS_MS` override; the pty_e2e suite sets
+/// Cap for the `CHUTES_BUILD_ESC_DOUBLE_PRESS_MS` override; the pty_e2e suite sets
 /// exactly this value.
 pub const ESC_DOUBLE_PRESS_TEST_MS: u64 = 60_000;
-/// Idle-Esc double-press confirm window, `GROK_ESC_DOUBLE_PRESS_MS`-overridable
+/// Idle-Esc double-press confirm window, `CHUTES_BUILD_ESC_DOUBLE_PRESS_MS`-overridable
 /// (read once, bounded). Test seam: a loaded pty_e2e shard's render round-trip
 /// between the two presses can outlast the 800ms default and expire the arm.
 pub(crate) fn esc_double_press_ttl() -> Duration {
     use std::sync::OnceLock;
     static TTL: OnceLock<Duration> = OnceLock::new();
-    *TTL.get_or_init(|| parse_esc_ttl(std::env::var("GROK_ESC_DOUBLE_PRESS_MS").ok()))
+    *TTL.get_or_init(|| parse_esc_ttl(std::env::var("CHUTES_BUILD_ESC_DOUBLE_PRESS_MS").ok()))
 }
 /// Extracted pure (no `OnceLock`) so the bounds — zero/garbage → default,
 /// oversized → clamp — are unit-testable.
@@ -585,7 +585,7 @@ pub struct AppView {
     pub scroll_state: MouseScrollState,
     /// Scroll config derived from terminal detection.
     pub scroll_config: ScrollConfig,
-    /// Current appearance config (hot-reloadable from ~/.grok/pager.toml).
+    /// Current appearance config (hot-reloadable from ~/.chutes-build/pager.toml).
     /// Stored here so new agents inherit the current config.
     pub appearance: AppearanceConfig,
     /// Notification service (terminal bell, OSC sequences, title updates).
@@ -611,10 +611,10 @@ pub struct AppView {
     /// `init_tracing()`. Drained into `tracing_pane` each tick in debug/dev
     /// builds; otherwise drained-and-discarded.
     pub tracing_rx: Option<crate::tracing::LogRx>,
-    /// Scroll-diagnostics HUD (`GROK_SCROLL_DEBUG` env / `/scroll-debug`).
+    /// Scroll-diagnostics HUD (`CHUTES_BUILD_SCROLL_DEBUG` env / `/scroll-debug`).
     /// Release-compiled behind its runtime gate — see the module doc.
     pub scroll_debug_hud: crate::views::scroll_debug_hud::ScrollDebugHud,
-    /// Release-safe FPS HUD (`/debug fps`; `GROK_FPS` env on release
+    /// Release-safe FPS HUD (`/debug fps`; `CHUTES_BUILD_FPS` env on release
     /// builds, where the dev overlay is compiled out) — see the module doc.
     pub fps_hud: crate::views::fps_hud::FpsHud,
     pub active_announcements: Vec<xai_grok_announcements::RemoteAnnouncement>,
@@ -640,7 +640,7 @@ pub struct AppView {
     /// `RemoteSettings.sharing_enabled`; defaults to `false` when remote
     /// settings are unavailable or the field is absent.
     pub sharing_enabled: bool,
-    /// Whether the plugin marketplace CTA is enabled. Env `GROK_PLUGIN_CTA`
+    /// Whether the plugin marketplace CTA is enabled. Env `CHUTES_BUILD_PLUGIN_CTA`
     /// overrides `RemoteSettings.plugin_cta` (remote settings); defaults to `false`.
     pub plugin_cta_enabled: bool,
     /// Whether the `/usage` slash command is available. Hidden for team
@@ -653,7 +653,7 @@ pub struct AppView {
     /// dashboard); deny wins over all other visibility gates.
     pub tier_restricted_commands: Vec<String>,
     /// Whether the pager is connected via a leader (leader mode). The Agent
-    /// Dashboard entry points (`/dashboard`, `Ctrl+\`, `grok dashboard`, the
+    /// Dashboard entry points (`/dashboard`, `Ctrl+\`, `chutes-build dashboard`, the
     /// startup hook) are only meaningful when a leader is coordinating a
     /// fleet of sessions, so they are gated on this flag. Set in
     /// `event_loop::run` from `connection.leader_status_rx.is_some()`;
@@ -667,12 +667,12 @@ pub struct AppView {
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
     /// Leader-mode session roster (FleetView dashboard). Populated from
-    /// `x.ai/sessions/list` polls and `x.ai/sessions/changed` broadcasts.
+    /// `chutes.build/sessions/list` polls and `chutes.build/sessions/changed` broadcasts.
     /// Empty in non-leader mode, which naturally gates roster rendering.
     pub leader_roster: Vec<crate::app::roster::RosterEntry>,
     /// Local on-disk session list (dormant/idle sessions) surfaced on the
     /// dashboard when NOT in leader mode. There is no live leader roster to
-    /// poll outside leader mode, so we fetch the same `x.ai/session/list` the
+    /// poll outside leader mode, so we fetch the same `chutes.build/session/list` the
     /// resume picker uses and render those as idle rows. Entries are stored as
     /// [`crate::app::roster::RosterEntry`] (activity `Dormant`) so they reuse
     /// the existing roster-row rendering / attach path. Empty in leader mode.
@@ -680,14 +680,14 @@ pub struct AppView {
     /// Whether the dashboard is currently loading local sessions (non-leader mode).
     pub dashboard_sessions_loading: bool,
     /// Server-authoritative shared prompt queues, keyed by `sessionId`
-    /// Reconciled from `x.ai/queue/changed` broadcasts so
+    /// Reconciled from `chutes.build/queue/changed` broadcasts so
     /// every client renders the same ordered queue (including prompts queued
     /// by other clients). Empty in non-leader mode.
     pub shared_prompt_queues:
         std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
     /// Optimistic echo rows for prompts the pager sent server-authoritatively
     /// (plain prompt typed while a turn is running) but for which the
-    /// confirming `x.ai/queue/changed` broadcast has not yet arrived. Keyed by
+    /// confirming `chutes.build/queue/changed` broadcast has not yet arrived. Keyed by
     /// `sessionId`. Pinned into `shared_prompt_queues` on reconcile so the row
     /// doesn't flicker, and dropped once the authoritative broadcast reflects
     /// the id (or it starts running). Never persisted.
@@ -701,16 +701,16 @@ pub struct AppView {
     pub(crate) pending_running_adoptions:
         std::collections::HashMap<AgentId, crate::app::acp_handler::PendingRunningAdoption>,
     /// Whether the session picker groups entries by repo name with
-    /// non-selectable headers. Gated by `GROK_SESSION_PICKER_GROUPED` env var
+    /// non-selectable headers. Gated by `CHUTES_BUILD_SESSION_PICKER_GROUPED` env var
     /// or remote settings `session_picker_grouped`; defaults to `false`.
     pub session_picker_grouped: bool,
     /// Whether Ctrl+C before first server activity rewinds the prompt
-    /// back into the input box. Gated by `GROK_CANCEL_REWIND` env /
+    /// back into the input box. Gated by `CHUTES_BUILD_CANCEL_REWIND` env /
     /// `[features] cancel_rewind` config / remote settings flag.
     pub cancel_rewind_enabled: bool,
     /// Whether session recap (`/recap` + automatic away recap) is rolled out,
     /// resolved by the shell and advertised on ACP initialize (`sessionRecap`).
-    /// When false, the pager must not request recaps (zero `x.ai/recap` traffic).
+    /// When false, the pager must not request recaps (zero `chutes.build/recap` traffic).
     pub session_recap_available: bool,
     /// Stateful prompt widget rendered on the welcome screen (persists input across frames).
     pub welcome_prompt: PromptWidget,
@@ -884,7 +884,7 @@ pub struct AppView {
     /// Automatically enabled by `plan_mode`.
     pub ask_user: bool,
     /// Process-wide gateway light-frontend from CLI `--chat` only.
-    /// Stamps `_meta["x.ai/session"].kind = "chat"` and omits Build agent
+    /// Stamps `_meta["chutes.build/session"].kind = "chat"` and omits Build agent
     /// profiles on create/load while set. `/chat` does **not** set this
     /// (uses [`Self::deferred_startup`] one-shot state instead).
     pub chat_mode: bool,
@@ -895,7 +895,7 @@ pub struct AppView {
     pub new_worktree_dialog: Option<NewWorktreeDialogState>,
     /// Resolved per-tip gates for the contextual ephemeral hints (undo tip,
     /// plan nudge, clipboard-image tip, send-now tip). Default all ON; resolved
-    /// at startup and on settings toggles from `GROK_CONTEXTUAL_HINTS` (master)
+    /// at startup and on settings toggles from `CHUTES_BUILD_CONTEXTUAL_HINTS` (master)
     /// > `[ui.contextual_hints]` user config > remote tier > default.
     pub contextual_hints: xai_grok_shell::util::config::ResolvedContextualHints,
     /// Remote tier for the contextual hints, kept so a settings toggle can
@@ -915,7 +915,7 @@ pub struct AppView {
     /// first evaluation at a stable agent-view draw (regardless of outcome),
     /// so later resizes can never re-trigger the tip within this run.
     pub small_screen_tip_evaluated: bool,
-    /// One-shot gate for the SSH `grok wrap` tip: set after the first
+    /// One-shot gate for the SSH `chutes-build wrap` tip: set after the first
     /// evaluation at a stable agent-view draw (the environment gates are
     /// process-constant, so one evaluation decides the run).
     pub ssh_wrap_tip_evaluated: bool,
@@ -1054,7 +1054,7 @@ pub struct AppView {
     pub dashboard: Option<crate::views::dashboard::DashboardState>,
     /// Persisted dashboard configuration (pinned rows, reorderings,
     /// grouping). Loaded once on startup from
-    /// `~/.grok/config.toml`. `None` when the file/section is absent
+    /// `~/.chutes-build/config.toml`. `None` when the file/section is absent
     /// or contained malformed data — falls back to in-memory defaults.
     pub dashboard_persisted: Option<crate::views::dashboard::PersistedDashboard>,
     /// Per-platform key event normalizer.
@@ -1063,7 +1063,7 @@ pub struct AppView {
     /// will not get rescued modifiers unless also normalizing.
     pub(crate) keyboard_normalizer: KeyboardNormalizer,
     /// Voice gate (GA default on at startup resolution). When false — remote
-    /// kill switch or `GROK_VOICE_MODE=0` — the STT pipeline is not started and
+    /// kill switch or `CHUTES_BUILD_VOICE_MODE=0` — the STT pipeline is not started and
     /// session voice mode cannot turn on. Unit tests leave this false until
     /// they call [`Self::apply_voice_mode_enabled`].
     pub voice_mode_enabled: bool,
@@ -1073,7 +1073,7 @@ pub struct AppView {
     pub voice_ui_active: bool,
     /// Optional `[voice]` overrides from config (`api_base`, `language`, …).
     pub voice_config: xai_grok_voice::VoiceConfig,
-    /// Auth for STT (OAuth session via shell `AuthManager`, or `XAI_API_KEY`).
+    /// Auth for STT (OAuth session via shell `AuthManager`, or `CHUTES_API_KEY`).
     /// `None` until the pipeline is first started (lazy on `/voice`).
     pub voice_auth: Option<xai_grok_voice::SharedVoiceAuth>,
     /// Commands into the voice pipeline (start/stop capture — toggle, not hold).
@@ -1435,7 +1435,7 @@ impl AppView {
     /// lockstep. Mirrors [`Self::apply_voice_mode_enabled`].
     ///
     /// Called from [`Self::apply_auth_meta`] (startup / login) and from the
-    /// `x.ai/settings/update` handler when the subscription tier changes, so
+    /// `chutes.build/settings/update` handler when the subscription tier changes, so
     /// a mid-session upgrade lifts the restrictions without a restart.
     pub fn apply_tier_restrictions(&mut self) {
         let restricted = self.team_name.is_none()
@@ -1743,7 +1743,7 @@ impl AppView {
         }
     }
     /// Reconcile the shared prompt queue for a session from a
-    /// `x.ai/queue/changed` broadcast. The broadcast is
+    /// `chutes.build/queue/changed` broadcast. The broadcast is
     /// authoritative: it fully replaces the previously-known queue for that
     /// session. An empty list clears the entry.
     ///
@@ -1812,7 +1812,7 @@ impl AppView {
     /// Push an optimistic echo row for a server-authoritative prompt the pager
     /// just sent (a plain prompt or agent-bound kind typed while a turn is
     /// running). The row is keyed by `prompt_id` so the authoritative
-    /// `x.ai/queue/changed` broadcast replaces it (matched by `id`) rather than
+    /// `chutes.build/queue/changed` broadcast replaces it (matched by `id`) rather than
     /// duplicating it. `kind` (`"prompt"`/`"bash"`/…) drives the row's display
     /// and, on adoption, the turn-start shim's block + focus flag.
     pub fn push_optimistic_prompt_echo(
@@ -1952,7 +1952,7 @@ impl AppView {
             top_offset,
         })
     }
-    /// Rows the dev `GROK_FPS` overlay occupies (0 in non-dev builds), so
+    /// Rows the dev `CHUTES_BUILD_FPS` overlay occupies (0 in non-dev builds), so
     /// runtime debug overlays stack below instead of overpainting it.
     fn dev_fps_rows(&self) -> u16 {
         0
@@ -4450,7 +4450,7 @@ impl AppView {
         self.small_screen_tip_evaluated = true;
         super::dispatch::show_small_screen_tip(self);
     }
-    /// One-shot SSH `grok wrap` tip trigger, run at the top of every `draw`
+    /// One-shot SSH `chutes-build wrap` tip trigger, run at the top of every `draw`
     /// right after [`Self::maybe_trigger_small_screen_tip`]. The welcome
     /// screen has no ephemeral-tip row, so the first stable agent-view draw
     /// is the earliest surface that can paint a session-load tip. Reads the
@@ -4699,21 +4699,16 @@ impl AppView {
                 }
                 needs_redraw = true;
             }
+            needs_redraw |= agent.poll_inline_audio();
+            needs_redraw |= agent.poll_inline_media_loads();
             needs_redraw |= agent.mermaid_tick();
-            if let Some(ref mut video) = agent.inline_video
-                && !video.finished
-                && !video.frames.is_empty()
-            {
-                let elapsed = video.last_frame_time.elapsed();
-                let frame_dur = std::time::Duration::from_secs_f64(1.0 / video.fps);
-                if elapsed >= frame_dur {
-                    if video.current_frame + 1 >= video.frames.len() {
-                        video.finished = true;
-                    } else {
-                        video.current_frame += 1;
-                        video.last_frame_time = std::time::Instant::now();
-                    }
+            let inference_active = !agent.session.state.is_idle();
+            if let Some(ref mut video) = agent.inline_video {
+                if inference_active && video.viewer.playing {
+                    video.viewer.toggle_play_pause();
                     needs_redraw = true;
+                } else {
+                    needs_redraw |= video.viewer.tick();
                 }
             }
         }
@@ -4952,9 +4947,7 @@ impl AppView {
                     || agent.block_viewer.is_some()
                     || agent.image_viewer.as_ref().is_some_and(|v| v.loading)
                     || agent.image_load_rx.is_some()
-                    || agent.video_viewer.as_ref().is_some_and(|v| v.playing)
                     || agent.gboom.is_some()
-                    || agent.inline_video.as_ref().is_some_and(|v| !v.finished)
                     || agent.video_load_rx.is_some()
                     || agent.mermaid_needs_tick()
                     || !agent.permission_queue.is_empty()
@@ -4974,6 +4967,22 @@ impl AppView {
                     });
                 if fast {
                     return TickDemand::Fast;
+                }
+                let media_needs_slow_tick = agent
+                    .video_viewer
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.playing)
+                    || agent
+                        .inline_video
+                        .as_ref()
+                        .is_some_and(|video| video.viewer.playing)
+                    || agent.inline_media_loads.values().next().is_some()
+                    || agent
+                        .inline_audio
+                        .as_ref()
+                        .is_some_and(|audio| audio.is_playing() || audio.analysis_rx.is_some());
+                if media_needs_slow_tick {
+                    return TickDemand::Slow;
                 }
                 if cfg!(target_os = "macos")
                     && (agent.needs_link_modifier_poll()
@@ -6606,7 +6615,7 @@ pub(crate) mod tests {
         let mut app = test_app();
         app.gate = Some(xai_grok_shell::auth::GateInfo {
             message: "Subscribe to use Grok Build".into(),
-            url: Some("https://grok.com/supergrok?referrer=grok-build".into()),
+            url: Some("https://chutes.ai/pricing".into()),
             label: None,
         });
         assert!(app.is_access_blocked());

@@ -96,7 +96,7 @@ fn resolve_device_flow(
     config: Option<bool>,
     remote: Option<bool>,
 ) -> crate::agent::config::Resolved<bool> {
-    crate::agent::config::BoolFlag::env("GROK_LOGIN_DEVICE_FLOW")
+    crate::agent::config::BoolFlag::env("CHUTES_BUILD_LOGIN_DEVICE_FLOW")
         .cli(login_override.as_cli_bool())
         .config(config)
         .feature_flag(remote)
@@ -116,7 +116,7 @@ async fn cli_should_use_device(
 
 /// Whether interactive xAI OAuth2 login uses the RFC 8628 device flow (vs loopback).
 ///
-/// Precedence: CLI (`--oauth`/`--device-auth`) > `GROK_LOGIN_DEVICE_FLOW` env >
+/// Precedence: CLI (`--oauth`/`--device-auth`) > `CHUTES_BUILD_LOGIN_DEVICE_FLOW` env >
 /// `[auth] login_device_flow` config > `grok_build_login_device_flow` remote feature flag > loopback.
 async fn should_use_device_flow(login_override: LoginTransportOverride) -> bool {
     // Already resolved (and logged) upstream — honor it without re-resolving or
@@ -129,7 +129,7 @@ async fn should_use_device_flow(login_override: LoginTransportOverride) -> bool 
         resolve_device_flow(login_override, None, None)
     } else {
         // Read once to gate the fetch; resolve_device_flow reads it again for the decision.
-        let env = crate::agent::config::env_bool("GROK_LOGIN_DEVICE_FLOW");
+        let env = crate::agent::config::env_bool("CHUTES_BUILD_LOGIN_DEVICE_FLOW");
         // One config snapshot feeds both the `[auth]` tier and the proxy URL.
         let effective = crate::config::load_effective_config().ok();
         let config = config_login_device_flow(effective.as_ref());
@@ -162,7 +162,7 @@ async fn should_use_device_flow(login_override: LoginTransportOverride) -> bool 
     resolved.value
 }
 
-/// How login presents itself; surfaced to the TUI via `x.ai/auth/get_url`.
+/// How login presents itself; surfaced to the TUI via `chutes.build/auth/get_url`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthUrlMode {
     /// Loopback-callback flow — TUI shows a copyable URL + paste box.
@@ -174,7 +174,7 @@ pub enum AuthUrlMode {
 }
 
 impl AuthUrlMode {
-    /// Wire string for the `x.ai/auth/get_url` ACP response.
+    /// Wire string for the `chutes.build/auth/get_url` ACP response.
     pub fn as_wire_str(self) -> &'static str {
         match self {
             Self::Loopback => "loopback",
@@ -231,7 +231,7 @@ async fn run_external_auth_provider(
     }
 
     if is_refresh {
-        cmd.env("GROK_AUTH_EXPIRED", "1");
+        cmd.env("CHUTES_BUILD_AUTH_EXPIRED", "1");
     }
 
     xai_grok_tools::util::detach_command(&mut cmd);
@@ -583,7 +583,7 @@ async fn run_auth_flow_inner(
     // browser and won't work on headless devboxes), try minting OIDC
     // credentials via the remote devbox login helper.
     // preferred_method=api_key: never auto-mint OIDC (fail-closed). Explicit
-    // `grok login --devbox` uses run_devbox_login and is not gated here.
+    // `chutes-build login --devbox` uses run_devbox_login and is not gated here.
     if !grok_com_config.blocks_automatic_oidc()
         && crate::auth::devbox_login::is_devbox_environment()
     {
@@ -618,7 +618,7 @@ async fn run_auth_flow_inner(
     // Enterprise OIDC keeps loopback (customer IdPs may lack a device endpoint).
     // xAI OAuth2 also defaults to loopback; the device flow (robust on
     // remote/SSH where the loopback redirect can't reach the CLI) is opt-in via
-    // --device-auth / GROK_LOGIN_DEVICE_FLOW / [auth] login_device_flow.
+    // --device-auth / CHUTES_BUILD_LOGIN_DEVICE_FLOW / [auth] login_device_flow.
     if crate::auth::oidc::is_configured(grok_com_config) {
         return crate::auth::oidc::run_login_flow(grok_com_config, auth_manager, channels).await;
     }
@@ -661,7 +661,7 @@ async fn run_auth_flow_inner(
         "auth: no OAuth2 configuration available (neither enterprise OIDC nor xAI OAuth2 configured)"
     );
     anyhow::bail!(
-        "No OAuth2 configuration available. Run `grok login` to authenticate, or contact your administrator if you use enterprise SSO."
+        "No OAuth2 configuration available. Run `chutes-build login` to authenticate, or contact your administrator if you use enterprise SSO."
     )
 }
 
@@ -857,87 +857,35 @@ pub async fn ensure_authenticated_or_noninteractive(
     }
 }
 
-/// Unified `grok login` handler for CLI entry points (tui, pager).
+/// Unified `chutes-build login` handler for CLI entry points (tui, pager).
 ///
 /// Precedence: `--oauth` forces loopback, `--device-auth` forces device,
-/// otherwise `GROK_LOGIN_DEVICE_FLOW` env / `[auth] login_device_flow` config /
+/// otherwise `CHUTES_BUILD_LOGIN_DEVICE_FLOW` env / `[auth] login_device_flow` config /
 /// loopback default. Both transports run through `run_auth_flow_inner` so the
 /// external auth provider and devbox auto-migration are tried first.
 pub async fn run_cli_login(
     config: &crate::agent::config::Config,
-    oauth: bool,
-    device_auth: bool,
-    devbox: bool,
+    api_key_stdin: bool,
 ) -> anyhow::Result<()> {
-    let login_override = LoginTransportOverride::from_flags(oauth, device_auth);
+    use std::io::BufRead as _;
 
-    // Mirror `run_auth_flow_inner`'s precedence: enterprise OIDC (oidc=Some,
-    // oauth2=None) always uses the loopback flow; only the xAI OAuth2 provider
-    // supports the device flow. Without this guard, `grok login` on an
-    // enterprise-OIDC deployment would wrongly enter the device branch (which
-    // requires `oauth2`) and error.
-    let authenticated = if devbox {
-        super::devbox_login::run_devbox_login(config).await?
-    } else if cli_should_use_device(&config.grok_com_config, login_override).await {
-        if config.grok_com_config.oauth2.is_none() {
-            // No OIDC and no oauth2 here, so `--oauth` can't help.
-            anyhow::bail!("Sign-in is not available for this deployment. Set XAI_API_KEY instead.");
-        }
-        let grok_home = grok_home::grok_home();
-        let auth_manager = Arc::new(AuthManager::new(&grok_home, config.grok_com_config.clone()));
-        // Route through the shared inner flow (not `run_device_code_login`
-        // directly) so the external auth provider and devbox auto-migration run
-        // before the interactive device login. `force_interactive` skips the
-        // up-front clear, so abandoning the device prompt doesn't log the user
-        // out; on `NotEnabled` it falls back to loopback.
-        // Already resolved/logged above; pass `Preresolved(true)` so the inner flow
-        // honors device without a second fetch or a duplicate `cli`-attributed log.
-        let (auth, did_auth) = run_auth_flow_interactive(
-            &auth_manager,
-            &config.grok_com_config,
-            None,
-            None,
-            None,
-            LoginTransportOverride::Preresolved(true),
-        )
-        .await?;
-        if did_auth {
-            report_signed_in(&auth);
-        }
-        auth
+    let key = if let Ok(key) = std::env::var("CHUTES_API_KEY") {
+        key
+    } else if api_key_stdin {
+        let mut key = String::new();
+        std::io::stdin().lock().read_line(&mut key)?;
+        key
     } else {
-        // OIDC has no device endpoint, so `--device-auth` falls back here.
-        if device_auth && crate::auth::oidc::is_configured(&config.grok_com_config) {
-            eprintln!(
-                "Device-code login isn't available for your SSO provider; using browser sign-in."
-            );
-        }
-        // Loopback. `reauth=true` clears creds up front (legacy-scope hygiene),
-        // so abandoning logs you out — unlike the device branch above.
-        // Already resolved/logged above; pass `Preresolved(false)` so the inner
-        // flow honors loopback without a duplicate `cli`-attributed log.
-        ensure_authenticated_with_override(
-            &config.grok_com_config,
-            true,
-            None,
-            LoginTransportOverride::Preresolved(false),
-        )
-        .await?
+        rpassword::prompt_password("Chutes API key: ")?
     };
-
-    // Sync this principal's config now rather than waiting for the background
-    // tick. Stay quiet about absence/failure during login — confirm only when
-    // config was actually applied; `grok setup` reports the no-config case.
-    let outcome = crate::managed_config::post_login_sync(Some(authenticated)).await;
-    match outcome {
-        crate::managed_config::ManagedConfigSync::Updated { is_team: true } => {
-            eprintln!("Applied your team's managed configuration.");
-        }
-        crate::managed_config::ManagedConfigSync::Updated { is_team: false } => {
-            eprintln!("Applied your deployment's managed configuration.");
-        }
-        _ => {}
+    let key = key.trim();
+    if key.is_empty() {
+        anyhow::bail!("the Chutes API key cannot be empty");
     }
+    let _ = config;
+    super::store_api_key(&grok_home::grok_home(), key)
+        .map_err(|error| anyhow::anyhow!("failed to store the Chutes API key: {error}"))?;
+    eprintln!("Chutes API key stored in the local credential file.");
     Ok(())
 }
 
@@ -949,7 +897,7 @@ pub struct LogoutResult {
     pub was_logged_in: bool,
     /// Email of the session that was cleared (if available).
     pub email: Option<String>,
-    /// `true` if `XAI_API_KEY` / `GROK_CODE_XAI_API_KEY` env var is set.
+    /// `true` if `CHUTES_API_KEY` / `CHUTES_BUILD_API_KEY` env var is set.
     pub api_key_still_set: bool,
 }
 
@@ -1005,7 +953,7 @@ pub fn perform_logout(
     })
 }
 
-/// `grok logout` CLI handler. Calls [`perform_logout`] and formats
+/// `chutes-build logout` CLI handler. Calls [`perform_logout`] and formats
 /// the result to stderr.
 pub fn run_cli_logout(config: &crate::agent::config::Config) -> anyhow::Result<()> {
     let grok_home = grok_home::grok_home();
@@ -1015,7 +963,7 @@ pub fn run_cli_logout(config: &crate::agent::config::Config) -> anyhow::Result<(
     if !result.was_logged_in {
         eprintln!("No cached session to log out of.");
         if result.api_key_still_set {
-            eprintln!("You are authenticated via XAI_API_KEY (environment variable).");
+            eprintln!("You are authenticated via CHUTES_API_KEY (environment variable).");
         }
         return Ok(());
     }
@@ -1025,7 +973,7 @@ pub fn run_cli_logout(config: &crate::agent::config::Config) -> anyhow::Result<(
         eprintln!("Logged out");
     }
     if result.api_key_still_set {
-        eprintln!("XAI_API_KEY is still set and will be used for authentication.");
+        eprintln!("CHUTES_API_KEY is still set and will be used for authentication.");
     }
     Ok(())
 }
@@ -1038,14 +986,14 @@ mod tests {
     use crate::env::EnvVarGuard;
     use chrono::Utc;
 
-    /// Run `f` with `GROK_LOGIN_DEVICE_FLOW` set to `value` (unset for `None`).
+    /// Run `f` with `CHUTES_BUILD_LOGIN_DEVICE_FLOW` set to `value` (unset for `None`).
     /// `EnvVarGuard` serializes the process env and restores it on drop, so
     /// `resolve_device_flow` reads the env tier from a known state.
     fn with_device_flow_env<T>(value: Option<bool>, f: impl FnOnce() -> T) -> T {
         let _guard = match value {
-            Some(true) => EnvVarGuard::set("GROK_LOGIN_DEVICE_FLOW", "true"),
-            Some(false) => EnvVarGuard::set("GROK_LOGIN_DEVICE_FLOW", "false"),
-            None => EnvVarGuard::remove("GROK_LOGIN_DEVICE_FLOW"),
+            Some(true) => EnvVarGuard::set("CHUTES_BUILD_LOGIN_DEVICE_FLOW", "true"),
+            Some(false) => EnvVarGuard::set("CHUTES_BUILD_LOGIN_DEVICE_FLOW", "false"),
+            None => EnvVarGuard::remove("CHUTES_BUILD_LOGIN_DEVICE_FLOW"),
         };
         f()
     }
@@ -1328,14 +1276,14 @@ mod tests {
         // opposite env value, so a leak into the resolver would flip the result —
         // returning the carried value proves the early return (and no second log).
         {
-            let _guard = EnvVarGuard::set("GROK_LOGIN_DEVICE_FLOW", "false");
+            let _guard = EnvVarGuard::set("CHUTES_BUILD_LOGIN_DEVICE_FLOW", "false");
             assert!(
                 should_use_device_flow(LoginTransportOverride::Preresolved(true)).await,
                 "Preresolved(true) honors device without re-resolving"
             );
         }
         {
-            let _guard = EnvVarGuard::set("GROK_LOGIN_DEVICE_FLOW", "true");
+            let _guard = EnvVarGuard::set("CHUTES_BUILD_LOGIN_DEVICE_FLOW", "true");
             assert!(
                 !should_use_device_flow(LoginTransportOverride::Preresolved(false)).await,
                 "Preresolved(false) honors loopback without re-resolving"
@@ -1381,7 +1329,7 @@ mod tests {
 
     #[tokio::test]
     async fn enterprise_oidc_never_uses_device_flow() {
-        // oidc=Some, oauth2=None: `grok login` must use loopback, not device —
+        // oidc=Some, oauth2=None: `chutes-build login` must use loopback, not device —
         // even when --device-auth forces device (which would otherwise be true).
         // ForceDevice short-circuits the remote settings fetch, so this stays hermetic.
         let cfg = GrokComConfig {
@@ -1832,7 +1780,7 @@ mod tests {
         mgr.set_refresher(std::sync::Arc::new(AlwaysTransientRefresher));
 
         // Force device explicitly so the assertion doesn't depend on ambient
-        // GROK_LOGIN_DEVICE_FLOW / the real config file (the CLI override
+        // CHUTES_BUILD_LOGIN_DEVICE_FLOW / the real config file (the CLI override
         // short-circuits the config read).
         let result = run_auth_flow(
             &mgr,
@@ -1888,7 +1836,7 @@ mod tests {
         assert_eq!(extract("some opaque output"), "some opaque output");
     }
 
-    /// CLI `grok login` passes `on_stderr=None`; stderr must be inherited so
+    /// CLI `chutes-build login` passes `on_stderr=None`; stderr must be inherited so
     /// sign-in URLs appear in real time. Piped stderr with no reader deadlocks
     /// once the child writes past the pipe buffer (~64 KiB).
     #[tokio::test]

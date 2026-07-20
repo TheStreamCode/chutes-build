@@ -1,0 +1,18 @@
+Chutes Build
+Copyright 2026 Michael Gasperini (Mikesoft)
+
+This product is derived from xai-org/grok-build, originally distributed under
+the Apache License, Version 2.0, and includes substantial modifications for the
+Chutes ecosystem, including Chutes authentication and endpoints, model routing
+and fallbacks, multimodal media tools, advisor and orchestration behavior,
+Context7 integration, local memory, web/browser tools, privacy controls, and
+Chutes Build branding.
+
+The upstream copyright and attribution notices are retained in LICENSE and
+THIRD-PARTY-NOTICES. Files changed from the upstream work carry their changes
+through this repository's version-control history and this notice.
+
+The native Chutes media subsystem incorporates the workflow and project-owned
+implementation concepts from chutes-media-mcp, Copyright 2026 Michael Gasperini
+(Mikesoft), originally available under the MIT License. The applicable MIT
+license notice is preserved in this repository's third-party notices.

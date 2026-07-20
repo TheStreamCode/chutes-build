@@ -5,11 +5,11 @@ use std::sync::OnceLock;
 
 #[cfg(bundle_rg)]
 const RG_BYTES: &[u8] = include_bytes!(concat!(
-    env!("GROK_SHELL_RG_GEN_DIR"),
+    env!("CHUTES_BUILD_SHELL_RG_GEN_DIR"),
     "/rg-",
-    env!("GROK_SHELL_RG_VER"),
+    env!("CHUTES_BUILD_SHELL_RG_VER"),
     "-",
-    env!("GROK_SHELL_RG_TARGET"),
+    env!("CHUTES_BUILD_SHELL_RG_TARGET"),
     ".bin"
 ));
 
@@ -20,9 +20,9 @@ fn resolve_bundled_rg() -> std::io::Result<PathBuf> {
         .join("vendor")
         .join(concat!(
             "rg-",
-            env!("GROK_SHELL_RG_VER"),
+            env!("CHUTES_BUILD_SHELL_RG_VER"),
             "-",
-            env!("GROK_SHELL_RG_TARGET")
+            env!("CHUTES_BUILD_SHELL_RG_TARGET")
         ));
     if !p.exists() {
         fs::create_dir_all(p.parent().unwrap())?;

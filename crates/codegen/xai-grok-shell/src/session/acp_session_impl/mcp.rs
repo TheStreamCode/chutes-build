@@ -374,7 +374,7 @@ impl SessionActor {
             );
         }
     }
-    /// Emit per-server `x.ai/mcp/tools_changed` notifications.
+    /// Emit per-server `chutes.build/mcp/tools_changed` notifications.
     ///
     /// Each emission carries the owning
     /// `sessionId` so the pager can route via `find_session_match`
@@ -406,13 +406,13 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client (x.ai/mcp/auth_trigger).
+    /// Handle explicit auth trigger from the client (chutes.build/mcp/auth_trigger).
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server
     /// and registers its tools.
     pub(super) async fn handle_mcp_auth_trigger(&self, server_name: &str) -> Result<(), String> {
         if server_name.starts_with(crate::session::managed_mcp::MANAGED_MCP_PREFIX) {
-            return Err("To authenticate, visit grok.com".to_string());
+            return Err("Configure CHUTES_API_KEY or run `chutes-build login`".to_string());
         }
         let client = match self.mcp_state.lock().await.get_client(server_name).cloned() {
             Some(c) if c.has_auth() => c,
@@ -751,7 +751,7 @@ impl SessionActor {
     /// (`util::config::disabled_mcp_server_names`). Used by the
     /// auto-restart task to gate on the live configuration each
     /// backoff iteration — the user may have toggled the server off
-    /// or removed it from `~/.grok/config.toml` while we were
+    /// or removed it from `~/.chutes-build/config.toml` while we were
     /// sleeping.
     ///
     /// HTTP / HttpAuth entries always return `false` here, which is
@@ -762,8 +762,8 @@ impl SessionActor {
     ///
     /// Performs one synchronous read of the per-cwd disabled-MCP
     /// list (`crate::util::config::disabled_mcp_server_names`,
-    /// which parses `~/.grok/config.toml` + the project
-    /// `.grok/config.toml`) on every call. The auto-restart task
+    /// which parses `~/.chutes-build/config.toml` + the project
+    /// `.chutes-build/config.toml`) on every call. The auto-restart task
     /// calls this at most:
     ///   - once at schedule time (`maybe_schedule_restart`), and
     ///   - once per backoff iteration (≤3 per restart window).
@@ -1124,7 +1124,7 @@ impl SessionActor {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/mcp_initialized",
+                        "chutes.build/mcp_initialized",
                         params.into(),
                     ));
             }
@@ -1205,7 +1205,7 @@ impl SessionActor {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "x.ai/mcp_initialized",
+                        "chutes.build/mcp_initialized",
                         params.into(),
                     ));
             }
@@ -1805,7 +1805,7 @@ impl SessionActor {
                 "elapsedMs" : elapsed.as_millis() as u64, }
             )) {
                 gateway.forward_fire_and_forget(acp::ExtNotification::new(
-                    "x.ai/mcp_initialized",
+                    "chutes.build/mcp_initialized",
                     params.into(),
                 ));
             }

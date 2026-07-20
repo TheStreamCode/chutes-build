@@ -247,8 +247,8 @@ pub struct SubstitutionContext<'a> {
 /// | `$N` | | Shorthand for `$ARGUMENTS[N]` (no upper bound) |
 /// | `${SKILL_DIR}` | `${CLAUDE_SKILL_DIR}` | Directory containing the SKILL.md |
 /// | `${SESSION_ID}` | `${CLAUDE_SESSION_ID}` | Current session ID |
-/// | `${GROK_PLUGIN_ROOT}` | `${CLAUDE_PLUGIN_ROOT}` | Plugin root dir (plugin-backed skills) |
-/// | `${GROK_PLUGIN_DATA}` | `${CLAUDE_PLUGIN_DATA}` | Plugin data dir (plugin-backed skills) |
+/// | `${CHUTES_BUILD_PLUGIN_ROOT}` | `${CLAUDE_PLUGIN_ROOT}` | Plugin root dir (plugin-backed skills) |
+/// | `${CHUTES_BUILD_PLUGIN_DATA}` | `${CLAUDE_PLUGIN_DATA}` | Plugin data dir (plugin-backed skills) |
 ///
 /// The body is treated as argument-aware only when it contains an *argument*
 /// token (`$ARGUMENTS`, `$ARGUMENTS[N]`, or `$N`); in that case the args are
@@ -655,7 +655,7 @@ It has multiple lines."#;
             short_description: None,
             author: None,
             argument_hint: None,
-            path: "/home/user/.grok/skills/commit/SKILL.md".to_string(),
+            path: "/home/user/.chutes-build/skills/commit/SKILL.md".to_string(),
             scope: SkillScope::User,
             config_source: None,
             plugin_name: None,
@@ -683,7 +683,7 @@ It has multiple lines."#;
         // Assert the exact output so this breaks if any field or structural
         // detail changes (attribute order, newlines, tags).
         let expected = "\
-<skill name=\"commit\" description=\"Create a git commit\" path=\"/home/user/.grok/skills/commit/SKILL.md\">
+<skill name=\"commit\" description=\"Create a git commit\" path=\"/home/user/.chutes-build/skills/commit/SKILL.md\">
 # Git Commit Skill
 
 You are helping the user create a commit.
@@ -736,7 +736,7 @@ Deploy instructions.
         let skill = SkillInfo {
             name: "review".to_string(),
             description: "Review code".to_string(),
-            path: "/repo/.grok/skills/review/SKILL.md".to_string(),
+            path: "/repo/.chutes-build/skills/review/SKILL.md".to_string(),
             ..SkillInfo::default()
         };
 
@@ -744,7 +744,7 @@ Deploy instructions.
         let message = build_skill_message(&skill, content);
 
         let expected = "\
-<skill name=\"review\" description=\"Review code\" path=\"/repo/.grok/skills/review/SKILL.md\">
+<skill name=\"review\" description=\"Review code\" path=\"/repo/.chutes-build/skills/review/SKILL.md\">
 # Code Review
 
 Step 1: Read the diff.
@@ -799,13 +799,13 @@ Step 2: Check for bugs.
             &mut content,
             None,
             &SubstitutionContext {
-                skill_dir: Some("/home/user/.grok/skills/deploy"),
+                skill_dir: Some("/home/user/.chutes-build/skills/deploy"),
                 ..Default::default()
             },
         );
         assert_eq!(
             content,
-            "Config at /home/user/.grok/skills/deploy/config.json"
+            "Config at /home/user/.chutes-build/skills/deploy/config.json"
         );
     }
 
@@ -911,7 +911,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_grok_plugin_aliases_substitution() {
-        let mut content = "Root ${GROK_PLUGIN_ROOT}, data ${GROK_PLUGIN_DATA}".to_string();
+        let mut content =
+            "Root ${CHUTES_BUILD_PLUGIN_ROOT}, data ${CHUTES_BUILD_PLUGIN_DATA}".to_string();
         apply_substitutions(
             &mut content,
             None,
@@ -1189,17 +1190,15 @@ Review code.
         let blocks = vec![build_skill_block("commit", "fix typo", "Body here.")];
         let refs = vec![SkillRef {
             name: "commit",
-            path: "/home/user/.grok/skills/commit/SKILL.md",
+            path: "/home/user/.chutes-build/skills/commit/SKILL.md",
         }];
         let result = build_skill_information(&blocks, &refs);
         assert!(result.starts_with("<skill_information>\n"));
         assert!(result.ends_with("\n</skill_information>"));
         assert!(result.contains("<skills_referenced>\n"));
-        assert!(
-            result.contains(
-                "<skill name=\"commit\" path=\"/home/user/.grok/skills/commit/SKILL.md\"/>"
-            )
-        );
+        assert!(result.contains(
+            "<skill name=\"commit\" path=\"/home/user/.chutes-build/skills/commit/SKILL.md\"/>"
+        ));
         assert!(result.contains("<skill name=\"commit\" args=\"fix typo\">"));
     }
 
@@ -1212,11 +1211,11 @@ Review code.
         let refs = vec![
             SkillRef {
                 name: "review",
-                path: "/project/.grok/skills/review/SKILL.md",
+                path: "/project/.chutes-build/skills/review/SKILL.md",
             },
             SkillRef {
                 name: "lint",
-                path: "/project/.grok/skills/lint/SKILL.md",
+                path: "/project/.chutes-build/skills/lint/SKILL.md",
             },
         ];
         let result = build_skill_information(&blocks, &refs);

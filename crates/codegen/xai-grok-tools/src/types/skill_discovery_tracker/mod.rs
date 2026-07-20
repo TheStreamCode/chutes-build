@@ -313,8 +313,14 @@ impl SkillManager {
         skill_budget_percent: Option<f64>,
     ) {
         let percent = skill_budget_percent.unwrap_or(SKILL_BUDGET_CONTEXT_PERCENT);
-        self.listing_budget_chars =
-            context_window_tokens.map(|tokens| (tokens as f64 * 4.0 * percent) as usize);
+        self.listing_budget_chars = context_window_tokens.map(|tokens| {
+            let context_budget = (tokens as f64 * 4.0 * percent) as usize;
+            if skill_budget_percent.is_some() {
+                context_budget
+            } else {
+                context_budget.min(listing::DEFAULT_CHAR_BUDGET)
+            }
+        });
         // Store the real cwd as string for path prefix rewriting.
         if let Some(ref display) = display_cwd {
             if let Some(ref c) = cwd {
@@ -1200,7 +1206,7 @@ mod tests {
             None,
             vec![make_skill(
                 "deploy",
-                "/overlay/worktree/.grok/skills/deploy/SKILL.md",
+                "/overlay/worktree/.chutes-build/skills/deploy/SKILL.md",
             )],
             Some("/home/user/project".to_string()),
             None,
@@ -1222,7 +1228,7 @@ mod tests {
             None,
             vec![make_skill(
                 "deploy",
-                "/real/path/.grok/skills/deploy/SKILL.md",
+                "/real/path/.chutes-build/skills/deploy/SKILL.md",
             )],
             None,
             None,
@@ -1296,7 +1302,7 @@ mod tests {
                 s
             })
             .collect();
-        // 128k context window → budget = 128_000 * 4 * 0.5 = 256000 chars
+        // 128k context window → budget = 128_000 * 4 * 0.005 = 2560 chars.
         let context_window: u64 = 128_000;
         let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
         mgr.seed(None, None, skills, None, Some(context_window), None);
@@ -1319,7 +1325,7 @@ mod tests {
                 s
             })
             .collect();
-        // 300 token context window → budget = 300 * 4 * 0.5 = 600 chars.
+        // 300 token context window → budget = 300 * 4 * 0.005 = 6 chars.
         // 200 skills with 500-char descriptions can't fit.
         let context_window: u64 = 300;
         let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
@@ -1341,7 +1347,7 @@ mod tests {
             make_skill("commit", "/s/commit/SKILL.md"),
             make_skill("review", "/s/review/SKILL.md"),
         ];
-        // 200k context window → 12000 char budget, 2 skills fit easily.
+        // 200k context window reaches the 4000-character default ceiling.
         mgr.seed(None, None, skills, None, Some(200_000), None);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();

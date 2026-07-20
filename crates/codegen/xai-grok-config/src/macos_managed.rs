@@ -1,17 +1,17 @@
 //! macOS MDM managed-preferences layer.
 //!
 //! Admins push a device profile with standard-base64 (padded) TOML under
-//! preference domain `ai.x.grok` (`requirements_toml_base64`). Only admin-*forced*
+//! preference domain `ai.x.chutes-build` (`requirements_toml_base64`). Only admin-*forced*
 //! values are read, so a local user can't forge it via their own preference
 //! domain; trusted on every launch, independent of network/cache. `None` off macOS.
 
 #[cfg(target_os = "macos")]
-const MANAGED_PREFERENCES_DOMAIN: &str = "ai.x.grok";
+const MANAGED_PREFERENCES_DOMAIN: &str = "ai.x.chutes-build";
 #[cfg(target_os = "macos")]
 const REQUIREMENTS_KEY: &str = "requirements_toml_base64";
 
 /// Synthetic source label for the MDM layer (no file on disk); diagnostics only.
-pub const MDM_REQUIREMENTS_SOURCE: &str = "ai.x.grok:requirements_toml_base64";
+pub const MDM_REQUIREMENTS_SOURCE: &str = "ai.x.chutes-build:requirements_toml_base64";
 
 /// The MDM-forced requirements TOML, or `None` when none is forced (or not macOS).
 pub(crate) fn managed_preferences_requirements() -> Option<toml::Value> {
@@ -88,7 +88,7 @@ fn read_forced_requirements() -> Option<String> {
     let cf_app = CFString::new(MANAGED_PREFERENCES_DOMAIN);
 
     // Trust only admin-forced values: otherwise the lookup falls through to the
-    // per-user domain, which a local user can set (`defaults write ai.x.grok`)
+    // per-user domain, which a local user can set (`defaults write ai.x.chutes-build`)
     // to forge an `is_system`-trusted layer.
     let forced = unsafe {
         CFPreferencesAppValueIsForced(cf_key.as_concrete_TypeRef(), cf_app.as_concrete_TypeRef())
@@ -149,13 +149,15 @@ mod tests {
     #[test]
     fn forced_payload_is_not_env_expanded() {
         // SAFETY: process-global env mutation, restored before return.
-        let prior = std::env::var("GROK_MDM_NO_EXPAND_TEST").ok();
-        unsafe { std::env::set_var("GROK_MDM_NO_EXPAND_TEST", "attacker") };
-        let decoded = decode_managed_toml(&b64("base_url = \"${GROK_MDM_NO_EXPAND_TEST}/v1\"\n"));
+        let prior = std::env::var("CHUTES_BUILD_MDM_NO_EXPAND_TEST").ok();
+        unsafe { std::env::set_var("CHUTES_BUILD_MDM_NO_EXPAND_TEST", "attacker") };
+        let decoded = decode_managed_toml(&b64(
+            "base_url = \"${CHUTES_BUILD_MDM_NO_EXPAND_TEST}/v1\"\n",
+        ));
         unsafe {
             match prior {
-                Some(p) => std::env::set_var("GROK_MDM_NO_EXPAND_TEST", p),
-                None => std::env::remove_var("GROK_MDM_NO_EXPAND_TEST"),
+                Some(p) => std::env::set_var("CHUTES_BUILD_MDM_NO_EXPAND_TEST", p),
+                None => std::env::remove_var("CHUTES_BUILD_MDM_NO_EXPAND_TEST"),
             }
         }
         assert_eq!(
@@ -163,7 +165,7 @@ mod tests {
                 .as_ref()
                 .and_then(|v| v.get("base_url"))
                 .and_then(|v| v.as_str()),
-            Some("${GROK_MDM_NO_EXPAND_TEST}/v1"),
+            Some("${CHUTES_BUILD_MDM_NO_EXPAND_TEST}/v1"),
             "forced payload must keep ${{VAR}} literal, not expand from the user env",
         );
     }

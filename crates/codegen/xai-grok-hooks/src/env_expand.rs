@@ -63,7 +63,7 @@ use std::collections::HashMap;
 /// "Apple logo" PUA char) plus a long magic ASCII prefix. The full
 /// sentinel string adds 128 bits of per-call entropy as a hex suffix
 /// followed by another `U+F8FF` char.
-const SENTINEL_PREFIX: &str = "\u{f8ff}__GROK_HOOKS_MASK_";
+const SENTINEL_PREFIX: &str = "\u{f8ff}__CHUTES_BUILD_HOOKS_MASK_";
 const SENTINEL_SUFFIX: &str = "__\u{f8ff}";
 
 /// Build a per-call sentinel string used to hide modifier-form
@@ -112,7 +112,7 @@ fn make_sentinel() -> String {
 /// Unresolved references are preserved verbatim so this function is safe
 /// to call repeatedly (idempotent on already-expanded strings) and so
 /// references that are intentionally resolved at runtime (e.g. by the
-/// dispatcher's always-set `GROK_HOOK_*` vars) survive the load-time pass.
+/// dispatcher's always-set `CHUTES_BUILD_HOOK_*` vars) survive the load-time pass.
 ///
 /// Parameter-expansion-modifier forms (`${VAR:-x}`, `${VAR%pat}`, etc.)
 /// are ALSO preserved verbatim; see the module-level rustdoc for why.
@@ -353,16 +353,18 @@ mod tests {
     #[test]
     fn extra_takes_precedence_over_process_env() {
         with_env_var(
-            "GROK_HOOKS_ENV_EXPAND_TEST_PRECEDENCE",
+            "CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE",
             Some("from-process"),
             || {
                 let mut extra = HashMap::new();
                 extra.insert(
-                    "GROK_HOOKS_ENV_EXPAND_TEST_PRECEDENCE".to_string(),
+                    "CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE".to_string(),
                     "from-extra".to_string(),
                 );
-                let out =
-                    expand_env_vars_with_extra("${GROK_HOOKS_ENV_EXPAND_TEST_PRECEDENCE}", &extra);
+                let out = expand_env_vars_with_extra(
+                    "${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_PRECEDENCE}",
+                    &extra,
+                );
                 assert_eq!(out, "from-extra");
             },
         );
@@ -371,12 +373,14 @@ mod tests {
     #[test]
     fn falls_back_to_process_env() {
         with_env_var(
-            "GROK_HOOKS_ENV_EXPAND_TEST_FALLBACK",
+            "CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_FALLBACK",
             Some("/from/proc/env"),
             || {
                 let extra = HashMap::new();
-                let out =
-                    expand_env_vars_with_extra("${GROK_HOOKS_ENV_EXPAND_TEST_FALLBACK}/x", &extra);
+                let out = expand_env_vars_with_extra(
+                    "${CHUTES_BUILD_HOOKS_ENV_EXPAND_TEST_FALLBACK}/x",
+                    &extra,
+                );
                 assert_eq!(out, "/from/proc/env/x");
             },
         );
@@ -388,9 +392,9 @@ mod tests {
         // when the var is unset in both `extra` and the process env. This
         // makes load-time expansion idempotent and lets runtime-only vars
         // survive the pass to be caught by `find_unresolved_env_vars`.
-        with_env_var("GROK_HOOKS_ENV_EXPAND_NEVER_SET", None, || {
+        with_env_var("CHUTES_BUILD_HOOKS_ENV_EXPAND_NEVER_SET", None, || {
             let extra = HashMap::new();
-            let input = "${GROK_HOOKS_ENV_EXPAND_NEVER_SET}/x.sh";
+            let input = "${CHUTES_BUILD_HOOKS_ENV_EXPAND_NEVER_SET}/x.sh";
             let out = expand_env_vars_with_extra(input, &extra);
             assert_eq!(out, input);
         });
@@ -419,8 +423,8 @@ mod tests {
     #[test]
     fn preserves_default_modifier_when_var_unset() {
         let extra = HashMap::new();
-        with_env_var("GROK_HOOKS_ENV_EXPAND_MODIFIER_UNSET", None, || {
-            let input = "${GROK_HOOKS_ENV_EXPAND_MODIFIER_UNSET:-/default/path.sh}";
+        with_env_var("CHUTES_BUILD_HOOKS_ENV_EXPAND_MODIFIER_UNSET", None, || {
+            let input = "${CHUTES_BUILD_HOOKS_ENV_EXPAND_MODIFIER_UNSET:-/default/path.sh}";
             let out = expand_env_vars_with_extra(input, &extra);
             assert_eq!(out, input);
         });
@@ -434,10 +438,10 @@ mod tests {
     fn preserves_default_modifier_when_var_set() {
         let mut extra = HashMap::new();
         extra.insert(
-            "GROK_HOOKS_DEFAULT_SET".to_string(),
+            "CHUTES_BUILD_HOOKS_DEFAULT_SET".to_string(),
             "/from/extra".to_string(),
         );
-        let input = "${GROK_HOOKS_DEFAULT_SET:-/fallback}";
+        let input = "${CHUTES_BUILD_HOOKS_DEFAULT_SET:-/fallback}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -446,7 +450,7 @@ mod tests {
     #[test]
     fn preserves_no_colon_default_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_NCD-/fallback}";
+        let input = "${CHUTES_BUILD_HOOKS_NCD-/fallback}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -455,7 +459,7 @@ mod tests {
     #[test]
     fn preserves_assignment_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_ASSIGN:=/assigned/path.sh}";
+        let input = "${CHUTES_BUILD_HOOKS_ASSIGN:=/assigned/path.sh}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -464,7 +468,7 @@ mod tests {
     #[test]
     fn preserves_error_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_ERR:?error message}";
+        let input = "${CHUTES_BUILD_HOOKS_ERR:?error message}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -473,7 +477,7 @@ mod tests {
     #[test]
     fn preserves_alternate_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_ALT:+/used/if/set}";
+        let input = "${CHUTES_BUILD_HOOKS_ALT:+/used/if/set}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -482,7 +486,7 @@ mod tests {
     #[test]
     fn preserves_suffix_strip_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_SUFFIX%.sh}";
+        let input = "${CHUTES_BUILD_HOOKS_SUFFIX%.sh}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -491,7 +495,7 @@ mod tests {
     #[test]
     fn preserves_prefix_strip_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_PREFIX#prefix/}";
+        let input = "${CHUTES_BUILD_HOOKS_PREFIX#prefix/}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -500,7 +504,7 @@ mod tests {
     #[test]
     fn preserves_substitution_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_SUB/foo/bar}";
+        let input = "${CHUTES_BUILD_HOOKS_SUB/foo/bar}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -509,7 +513,7 @@ mod tests {
     #[test]
     fn preserves_substring_modifier() {
         let extra = HashMap::new();
-        let input = "${GROK_HOOKS_SUBSTR:0:5}";
+        let input = "${CHUTES_BUILD_HOOKS_SUBSTR:0:5}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -519,10 +523,13 @@ mod tests {
     #[test]
     fn mixed_plain_and_modifier_only_plain_expanded() {
         let mut extra = HashMap::new();
-        extra.insert("GROK_HOOKS_PLAIN".to_string(), "/usr/local".to_string());
-        let input = "${GROK_HOOKS_PLAIN}/${GROK_HOOKS_DEFER:-/fallback}";
+        extra.insert(
+            "CHUTES_BUILD_HOOKS_PLAIN".to_string(),
+            "/usr/local".to_string(),
+        );
+        let input = "${CHUTES_BUILD_HOOKS_PLAIN}/${CHUTES_BUILD_HOOKS_DEFER:-/fallback}";
         let out = expand_env_vars_with_extra(input, &extra);
-        assert_eq!(out, "/usr/local/${GROK_HOOKS_DEFER:-/fallback}");
+        assert_eq!(out, "/usr/local/${CHUTES_BUILD_HOOKS_DEFER:-/fallback}");
     }
 
     // ── Set-but-empty regression test ────────────────────────────
@@ -533,8 +540,8 @@ mod tests {
     #[test]
     fn empty_extra_value_resolves_to_empty_for_plain_form() {
         let mut extra = HashMap::new();
-        extra.insert("GROK_HOOKS_EMPTY".to_string(), "".to_string());
-        let out = expand_env_vars_with_extra("[${GROK_HOOKS_EMPTY}]", &extra);
+        extra.insert("CHUTES_BUILD_HOOKS_EMPTY".to_string(), "".to_string());
+        let out = expand_env_vars_with_extra("[${CHUTES_BUILD_HOOKS_EMPTY}]", &extra);
         assert_eq!(out, "[]");
     }
 
@@ -547,8 +554,8 @@ mod tests {
     #[test]
     fn empty_extra_value_does_not_trigger_default() {
         let mut extra = HashMap::new();
-        extra.insert("GROK_HOOKS_EMPTY_MOD".to_string(), "".to_string());
-        let input = "${GROK_HOOKS_EMPTY_MOD:-/fallback}";
+        extra.insert("CHUTES_BUILD_HOOKS_EMPTY_MOD".to_string(), "".to_string());
+        let input = "${CHUTES_BUILD_HOOKS_EMPTY_MOD:-/fallback}";
         let out = expand_env_vars_with_extra(input, &extra);
         assert_eq!(out, input);
     }
@@ -563,16 +570,16 @@ mod tests {
     #[test]
     fn extra_values_are_not_recursively_expanded() {
         with_env_var(
-            "GROK_HOOKS_RECURSION_BAR",
+            "CHUTES_BUILD_HOOKS_RECURSION_BAR",
             Some("should-not-appear"),
             || {
                 let mut extra = HashMap::new();
                 extra.insert(
-                    "GROK_HOOKS_RECURSION_FOO".to_string(),
-                    "$GROK_HOOKS_RECURSION_BAR".to_string(),
+                    "CHUTES_BUILD_HOOKS_RECURSION_FOO".to_string(),
+                    "$CHUTES_BUILD_HOOKS_RECURSION_BAR".to_string(),
                 );
-                let out = expand_env_vars_with_extra("${GROK_HOOKS_RECURSION_FOO}", &extra);
-                assert_eq!(out, "$GROK_HOOKS_RECURSION_BAR");
+                let out = expand_env_vars_with_extra("${CHUTES_BUILD_HOOKS_RECURSION_FOO}", &extra);
+                assert_eq!(out, "$CHUTES_BUILD_HOOKS_RECURSION_BAR");
             },
         );
     }
@@ -704,7 +711,7 @@ mod tests {
     }
 
     /// An earlier sentinel was a fixed string
-    /// `"\u{f8ff}__GROK_HOOKS_MASK__\u{f8ff}"`. A user-supplied
+    /// `"\u{f8ff}__CHUTES_BUILD_HOOKS_MASK__\u{f8ff}"`. A user-supplied
     /// `extra_env` value containing that exact byte sequence would
     /// have been silently rewritten to `${` by the unmask step. The
     /// per-call randomized sentinel removes this hazard. This
@@ -713,7 +720,7 @@ mod tests {
     /// though the input also references that variable through `${VAL}`.
     #[test]
     fn expand_preserves_pre_existing_legacy_fixed_sentinel_in_extra() {
-        let legacy_sentinel = "\u{f8ff}__GROK_HOOKS_MASK__\u{f8ff}";
+        let legacy_sentinel = "\u{f8ff}__CHUTES_BUILD_HOOKS_MASK__\u{f8ff}";
         let mut extra = HashMap::new();
         // Value embeds the legacy sentinel followed by what would
         // have been parsed as an identifier+brace if the unmask

@@ -175,7 +175,7 @@ pub fn prune_orphaned_background_task_tools(config: &mut crate::registry::types:
 
 fn is_background_capable_bash_tool(tc: &crate::registry::types::ToolConfig) -> bool {
     match tc.id.as_str() {
-        "GrokBuild:run_terminal_cmd" | "GrokBuildConcise:run_terminal_cmd" => tc
+        "ChutesBuild:run_terminal_cmd" | "GrokBuildConcise:run_terminal_cmd" => tc
             .params
             .as_ref()
             .and_then(|params| params.get("enabled_background"))
@@ -916,12 +916,15 @@ mod tests {
     fn read_only_filter_prunes_orphaned_background_task_tools() {
         let mut config = ToolServerConfig {
             tools: vec![
-                tc("GrokBuild:run_terminal_cmd", ToolKind::Execute),
-                tc("GrokBuild:read_file", ToolKind::Read),
-                tc("GrokBuild:list_dir", ToolKind::List),
-                tc("GrokBuild:grep", ToolKind::Search),
-                tc("GrokBuild:kill_task", ToolKind::KillTaskAction),
-                tc("GrokBuild:get_task_output", ToolKind::BackgroundTaskAction),
+                tc("ChutesBuild:run_terminal_cmd", ToolKind::Execute),
+                tc("ChutesBuild:read_file", ToolKind::Read),
+                tc("ChutesBuild:list_dir", ToolKind::List),
+                tc("ChutesBuild:grep", ToolKind::Search),
+                tc("ChutesBuild:kill_task", ToolKind::KillTaskAction),
+                tc(
+                    "ChutesBuild:get_task_output",
+                    ToolKind::BackgroundTaskAction,
+                ),
             ],
             behavior_preset: None,
         };
@@ -932,9 +935,9 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "GrokBuild:read_file",
-                "GrokBuild:list_dir",
-                "GrokBuild:grep",
+                "ChutesBuild:read_file",
+                "ChutesBuild:list_dir",
+                "ChutesBuild:grep",
             ]
         );
     }
@@ -943,13 +946,16 @@ mod tests {
     fn read_only_filter_keeps_background_task_tools_when_task_tool_remains() {
         let mut config = ToolServerConfig {
             tools: vec![
-                tc("GrokBuild:run_terminal_cmd", ToolKind::Execute),
-                tc("GrokBuild:read_file", ToolKind::Read),
-                tc("GrokBuild:list_dir", ToolKind::List),
-                tc("GrokBuild:grep", ToolKind::Search),
-                tc("GrokBuild:kill_task", ToolKind::KillTaskAction),
-                tc("GrokBuild:get_task_output", ToolKind::BackgroundTaskAction),
-                tc("GrokBuild:task", ToolKind::Task),
+                tc("ChutesBuild:run_terminal_cmd", ToolKind::Execute),
+                tc("ChutesBuild:read_file", ToolKind::Read),
+                tc("ChutesBuild:list_dir", ToolKind::List),
+                tc("ChutesBuild:grep", ToolKind::Search),
+                tc("ChutesBuild:kill_task", ToolKind::KillTaskAction),
+                tc(
+                    "ChutesBuild:get_task_output",
+                    ToolKind::BackgroundTaskAction,
+                ),
+                tc("ChutesBuild:task", ToolKind::Task),
             ],
             behavior_preset: None,
         };
@@ -960,12 +966,12 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "GrokBuild:read_file",
-                "GrokBuild:list_dir",
-                "GrokBuild:grep",
-                "GrokBuild:kill_task",
-                "GrokBuild:get_task_output",
-                "GrokBuild:task",
+                "ChutesBuild:read_file",
+                "ChutesBuild:list_dir",
+                "ChutesBuild:grep",
+                "ChutesBuild:kill_task",
+                "ChutesBuild:get_task_output",
+                "ChutesBuild:task",
             ]
         );
     }
@@ -989,7 +995,7 @@ mod tests {
 
     #[test]
     fn read_write_filter_keeps_background_capable_bash_when_explicitly_enabled() {
-        let mut bash = tc("GrokBuild:run_terminal_cmd", ToolKind::Execute);
+        let mut bash = tc("ChutesBuild:run_terminal_cmd", ToolKind::Execute);
         bash.params = Some(
             serde_json::json!({ "enabled_background": true })
                 .as_object()

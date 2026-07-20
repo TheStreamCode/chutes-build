@@ -529,7 +529,7 @@ fn tool_result_details_gate_exposes_verbatim_scrubbed() {
             outcome: xai_file_utils::events::types::ToolOutcome::Success,
             duration_ms: 42,
             file_path: Some(path.clone()),
-            parameters: Some(serde_json::json!({"key": "sk-CANARYabcdefghij1234567890"})),
+            parameters: Some(serde_json::json!({"key": "sk-CANARYabcdefghij1234567890"})), // gitleaks:allow
         },
     );
     let events = exported_events(&stream);

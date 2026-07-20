@@ -1,9 +1,9 @@
 //! Vendor-compatibility end-to-end tests.
 //!
 //! Each test builds a fake `$HOME` containing skills/rules/AGENTS.md under the
-//! `.grok`, `.cursor`, and `.claude` vendor dirs, spawns a real `grok agent
+//! `.chutes-build`, `.cursor`, and `.claude` vendor dirs, spawns a real `chutes-build agent
 //! stdio` process against the mock inference server (toggling the
-//! `GROK_<VENDOR>_<SURFACE>_ENABLED` env vars via `cmd.env`), sends one prompt,
+//! `CHUTES_BUILD_<VENDOR>_<SURFACE>_ENABLED` env vars via `cmd.env`), sends one prompt,
 //! and asserts on the full inference request bodies:
 //!
 //! - the Grok-native skill is always present regardless of toggles
@@ -33,7 +33,7 @@ where
 
 /// Unique markers placed in skill descriptions / file contents so assertions
 /// can't be fooled by incidental occurrences of a bare word like "shell".
-const MARKER_GROK_SKILL: &str = "ZZ_GROK_SKILL_MARKER";
+const MARKER_CHUTES_BUILD_SKILL: &str = "ZZ_CHUTES_BUILD_SKILL_MARKER";
 const MARKER_CURSOR_SKILL: &str = "ZZ_CURSOR_SKILL_MARKER";
 const MARKER_CURSOR_SHELL: &str = "ZZ_CURSOR_SHELL_DENYLISTED_MARKER";
 const MARKER_CLAUDE_SKILL: &str = "ZZ_CLAUDE_SKILL_MARKER";
@@ -63,7 +63,12 @@ fn write_skill(home: &Path, vendor_dir: &str, name: &str, marker: &str) {
 /// Populate a fake `$HOME` + repo cwd with the full vendor-compat fixture set.
 fn seed_fixtures(home: &Path, cwd: &Path) {
     // Skills (User scope, home-based).
-    write_skill(home, ".grok", "grok-skill", MARKER_GROK_SKILL);
+    write_skill(
+        home,
+        ".chutes-build",
+        "grok-skill",
+        MARKER_CHUTES_BUILD_SKILL,
+    );
     write_skill(home, ".cursor", "my-cursor-skill", MARKER_CURSOR_SKILL);
     // `shell` is a Cursor vendor-default → must be denylisted under ~/.cursor.
     write_skill(home, ".cursor", "shell", MARKER_CURSOR_SHELL);
@@ -130,7 +135,7 @@ async fn vendor_compat_defaults_include_vendor_skills_but_drop_denylisted() {
     with_local_set(|| async {
         let body = run_scenario(&[]).await;
         assert!(
-            body.contains(MARKER_GROK_SKILL),
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
             "grok-skill must always be present"
         );
         assert!(
@@ -149,14 +154,14 @@ async fn vendor_compat_defaults_include_vendor_skills_but_drop_denylisted() {
     .await;
 }
 
-/// `GROK_CURSOR_SKILLS_ENABLED=false` drops the cursor-vendor skill; grok stays.
+/// `CHUTES_BUILD_CURSOR_SKILLS_ENABLED=false` drops the cursor-vendor skill; grok stays.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_cursor_skills_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CURSOR_SKILLS_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CURSOR_SKILLS_ENABLED", "false")]).await;
         assert!(
-            body.contains(MARKER_GROK_SKILL),
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
             "grok-skill always present"
         );
         assert!(
@@ -169,14 +174,14 @@ async fn vendor_compat_cursor_skills_disabled() {
     .await;
 }
 
-/// `GROK_CLAUDE_SKILLS_ENABLED=false` drops the claude-vendor skill; grok stays.
+/// `CHUTES_BUILD_CLAUDE_SKILLS_ENABLED=false` drops the claude-vendor skill; grok stays.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_claude_skills_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CLAUDE_SKILLS_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CLAUDE_SKILLS_ENABLED", "false")]).await;
         assert!(
-            body.contains(MARKER_GROK_SKILL),
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
             "grok-skill always present"
         );
         assert!(
@@ -217,12 +222,12 @@ async fn vendor_compat_rules_and_agents_present_by_default() {
 
 // ── Per-cell toggles (rules + agents) ────────────────────────────────────────
 
-/// `GROK_CURSOR_RULES_ENABLED=false` drops cursor-vendor rules; claude-vendor rules stay.
+/// `CHUTES_BUILD_CURSOR_RULES_ENABLED=false` drops cursor-vendor rules; claude-vendor rules stay.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_cursor_rules_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CURSOR_RULES_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CURSOR_RULES_ENABLED", "false")]).await;
         assert!(
             !body.contains(MARKER_CURSOR_RULE),
             "cursor rule must be absent when cursor.rules disabled"
@@ -235,12 +240,12 @@ async fn vendor_compat_cursor_rules_disabled() {
     .await;
 }
 
-/// `GROK_CLAUDE_RULES_ENABLED=false` drops claude-vendor rules; cursor-vendor rules stay.
+/// `CHUTES_BUILD_CLAUDE_RULES_ENABLED=false` drops claude-vendor rules; cursor-vendor rules stay.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_claude_rules_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CLAUDE_RULES_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CLAUDE_RULES_ENABLED", "false")]).await;
         assert!(
             !body.contains(MARKER_CLAUDE_RULE),
             "claude rule must be absent when claude.rules disabled"
@@ -253,12 +258,12 @@ async fn vendor_compat_claude_rules_disabled() {
     .await;
 }
 
-/// `GROK_CURSOR_AGENTS_ENABLED=false` drops cursor-vendor AGENTS.md; claude-vendor stays.
+/// `CHUTES_BUILD_CURSOR_AGENTS_ENABLED=false` drops cursor-vendor AGENTS.md; claude-vendor stays.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_cursor_agents_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CURSOR_AGENTS_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CURSOR_AGENTS_ENABLED", "false")]).await;
         assert!(
             !body.contains(MARKER_CURSOR_AGENTS),
             "cursor AGENTS.md must be absent when cursor.agents disabled"
@@ -271,12 +276,12 @@ async fn vendor_compat_cursor_agents_disabled() {
     .await;
 }
 
-/// `GROK_CLAUDE_AGENTS_ENABLED=false` drops claude-vendor AGENTS.md; cursor-vendor stays.
+/// `CHUTES_BUILD_CLAUDE_AGENTS_ENABLED=false` drops claude-vendor AGENTS.md; cursor-vendor stays.
 #[tokio::test]
 #[ignore] // requires pre-built binary
 async fn vendor_compat_claude_agents_disabled() {
     with_local_set(|| async {
-        let body = run_scenario(&[("GROK_CLAUDE_AGENTS_ENABLED", "false")]).await;
+        let body = run_scenario(&[("CHUTES_BUILD_CLAUDE_AGENTS_ENABLED", "false")]).await;
         assert!(
             !body.contains(MARKER_CLAUDE_AGENTS),
             "claude AGENTS.md must be absent when claude.agents disabled"
@@ -298,16 +303,19 @@ async fn vendor_compat_claude_agents_disabled() {
 async fn vendor_compat_all_cursor_disabled() {
     with_local_set(|| async {
         let body = run_scenario(&[
-            ("GROK_CURSOR_SKILLS_ENABLED", "false"),
-            ("GROK_CURSOR_RULES_ENABLED", "false"),
-            ("GROK_CURSOR_AGENTS_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_SKILLS_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_RULES_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_AGENTS_ENABLED", "false"),
         ])
         .await;
         assert!(!body.contains(MARKER_CURSOR_SKILL));
         assert!(!body.contains(MARKER_CURSOR_SHELL));
         assert!(!body.contains(MARKER_CURSOR_RULE));
         assert!(!body.contains(MARKER_CURSOR_AGENTS));
-        assert!(body.contains(MARKER_GROK_SKILL), "grok always present");
+        assert!(
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
+            "grok always present"
+        );
         assert!(body.contains(MARKER_CLAUDE_SKILL), "claude unaffected");
         assert!(body.contains(MARKER_CLAUDE_RULE), "claude unaffected");
         assert!(body.contains(MARKER_CLAUDE_AGENTS), "claude unaffected");
@@ -322,15 +330,18 @@ async fn vendor_compat_all_cursor_disabled() {
 async fn vendor_compat_all_claude_disabled() {
     with_local_set(|| async {
         let body = run_scenario(&[
-            ("GROK_CLAUDE_SKILLS_ENABLED", "false"),
-            ("GROK_CLAUDE_RULES_ENABLED", "false"),
-            ("GROK_CLAUDE_AGENTS_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_SKILLS_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_RULES_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_AGENTS_ENABLED", "false"),
         ])
         .await;
         assert!(!body.contains(MARKER_CLAUDE_SKILL));
         assert!(!body.contains(MARKER_CLAUDE_RULE));
         assert!(!body.contains(MARKER_CLAUDE_AGENTS));
-        assert!(body.contains(MARKER_GROK_SKILL), "grok always present");
+        assert!(
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
+            "grok always present"
+        );
         assert!(body.contains(MARKER_CURSOR_SKILL), "cursor unaffected");
         assert!(body.contains(MARKER_CURSOR_RULE), "cursor unaffected");
         assert!(body.contains(MARKER_CURSOR_AGENTS), "cursor unaffected");
@@ -345,15 +356,18 @@ async fn vendor_compat_all_claude_disabled() {
 async fn vendor_compat_all_vendors_disabled() {
     with_local_set(|| async {
         let body = run_scenario(&[
-            ("GROK_CURSOR_SKILLS_ENABLED", "false"),
-            ("GROK_CURSOR_RULES_ENABLED", "false"),
-            ("GROK_CURSOR_AGENTS_ENABLED", "false"),
-            ("GROK_CLAUDE_SKILLS_ENABLED", "false"),
-            ("GROK_CLAUDE_RULES_ENABLED", "false"),
-            ("GROK_CLAUDE_AGENTS_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_SKILLS_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_RULES_ENABLED", "false"),
+            ("CHUTES_BUILD_CURSOR_AGENTS_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_SKILLS_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_RULES_ENABLED", "false"),
+            ("CHUTES_BUILD_CLAUDE_AGENTS_ENABLED", "false"),
         ])
         .await;
-        assert!(body.contains(MARKER_GROK_SKILL), "grok always present");
+        assert!(
+            body.contains(MARKER_CHUTES_BUILD_SKILL),
+            "grok always present"
+        );
         assert!(!body.contains(MARKER_CURSOR_SKILL));
         assert!(!body.contains(MARKER_CURSOR_SHELL));
         assert!(!body.contains(MARKER_CURSOR_RULE));

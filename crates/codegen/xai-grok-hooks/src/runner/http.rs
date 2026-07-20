@@ -185,7 +185,7 @@ pub async fn run_http_hook(
     let url: &str = &expanded_url;
     // For tracing/log purposes prefer the pre-expansion source so
     // resolved values from the user `env` map (which may contain
-    // secrets like API tokens) don't land in `~/.grok/logs`. Falls
+    // secrets like API tokens) don't land in `~/.chutes-build/logs`. Falls
     // back to the expanded form if the spec was constructed by a
     // legacy path that didn't populate `url_raw`. The same `log_url`
     // is also threaded into `format!("HTTP request failed for {}:
@@ -717,7 +717,7 @@ mod tests {
     /// `tests/integration.rs`).
     #[test]
     fn url_extra_env_shadows_process_env() {
-        let key = "GROK_HOOKS_HTTP_TEST_SHADOW";
+        let key = "CHUTES_BUILD_HOOKS_HTTP_TEST_SHADOW";
         with_env_var(key, Some("from-process"), || {
             let mut extra = std::collections::HashMap::new();
             extra.insert(key.to_string(), "from-extra".to_string());
@@ -990,7 +990,7 @@ mod tests {
     /// silently smuggling the literal placeholder past validation.
     #[tokio::test]
     async fn url_unresolved_var_fails_validation() {
-        let key = "GROK_HOOKS_HTTP_TEST_UNRESOLVED";
+        let key = "CHUTES_BUILD_HOOKS_HTTP_TEST_UNRESOLVED";
         // Step 1 (sync): ensure the var is unset and run the
         // expansion. `with_env_var` uses `catch_unwind` so the closure
         // is synchronous; we deliberately do the async `validate_hook_url`

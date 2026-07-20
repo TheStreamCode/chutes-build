@@ -15,7 +15,7 @@ const BODY_MARKER: &str = "EXPANDED_BODY_MARKER";
 /// keys operate on the scrollback selection, which this test does not
 /// exercise.) The flag-off/legacy default is covered end-to-end by
 /// `edit_hl_inplace_refresh_pty`, which relies on expanded-on-arrival diffs.
-/// Doubles as the demo-cast generator via `GROK_PTY_CAST_DIR`.
+/// Doubles as the demo-cast generator via `CHUTES_BUILD_PTY_CAST_DIR`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn edit_collapsed_oneliner_pty() {

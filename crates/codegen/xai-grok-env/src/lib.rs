@@ -5,10 +5,10 @@
     unreachable_code,
     dead_code
 )]
-//! Backend environment presets for the Grok CLI crate family: endpoint URL
+//! Backend environment presets for Chutes Build: endpoint URL
 //! defaults, environment selection, and env-var test support.
 //!
-//! Public builds expose production endpoints. Values resolve as a `GROK_*`
+//! Public builds expose production endpoints. Values resolve as a `CHUTES_BUILD_*`
 //! env-var override when set, else the compiled production default.
 /// The endpoint set for one backend environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,11 +20,13 @@ pub struct GrokBuildEndpoints {
     pub ws_origin: &'static str,
 }
 const PRODUCTION_ENDPOINTS: GrokBuildEndpoints = GrokBuildEndpoints {
-    cli_chat_proxy_base_url: "https://cli-chat-proxy.grok.com/v1",
-    asset_server_url: "https://assets.grok.com",
-    relay_ws_url: "wss://code.grok.com/ws/code-agent",
-    gateway_ws_url: "wss://grok.com/ws/gw/",
-    ws_origin: "https://grok.com",
+    cli_chat_proxy_base_url: "https://model-router-ten.vercel.app/v1",
+    asset_server_url: "https://api.chutes.ai",
+    // Chutes Build has no vendor relay or cloud-sandbox control plane. These
+    // loopback-only sentinels fail closed if an inherited relay path is invoked.
+    relay_ws_url: "ws://127.0.0.1:9/chutes-build-relay-disabled",
+    gateway_ws_url: "ws://127.0.0.1:9/chutes-build-gateway-disabled",
+    ws_origin: "https://chutes.ai",
 };
 pub const PROD_CLI_CHAT_PROXY_BASE_URL: &str = PRODUCTION_ENDPOINTS.cli_chat_proxy_base_url;
 pub const PROD_ASSET_SERVER_URL: &str = PRODUCTION_ENDPOINTS.asset_server_url;
@@ -51,7 +53,7 @@ impl GrokBuildEnvironment {
     }
     fn env_prefix(&self) -> &'static str {
         match self {
-            GrokBuildEnvironment::Production => "GROK_PRODUCTION",
+            GrokBuildEnvironment::Production => "CHUTES_BUILD_PRODUCTION",
         }
     }
     /// Compiled endpoint set for this environment (production by default).
@@ -84,7 +86,7 @@ impl GrokBuildEnvironment {
         self.resolve("_WS_URL", self.endpoints().relay_ws_url)
     }
     /// The gateway WebSocket URL for `/cloud new` sandboxes. The shell's
-    /// `GROK_GATEWAY_URL` opt-in takes precedence.
+    /// `CHUTES_BUILD_GATEWAY_URL` opt-in takes precedence.
     pub fn gateway_ws_url(&self) -> String {
         self.resolve("_GATEWAY_WS_URL", self.endpoints().gateway_ws_url)
     }
@@ -150,17 +152,17 @@ impl Drop for EnvVarGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// The env-var prefixes are an operator interface; do not rename.
+    /// The env-var prefix is part of the public operator interface.
     #[test]
     fn test_env_prefix() {
         assert_eq!(
             GrokBuildEnvironment::Production.env_prefix(),
-            "GROK_PRODUCTION"
+            "CHUTES_BUILD_PRODUCTION"
         );
     }
     #[test]
     fn env_var_guard_set_value_updates_then_restores_on_drop() {
-        const KEY: &str = "XAI_GROK_ENV_VAR_GUARD_SET_VALUE_PROBE";
+        const KEY: &str = "XAI_CHUTES_BUILD_ENV_VAR_GUARD_SET_VALUE_PROBE";
         let before = std::env::var(KEY).ok();
         {
             let guard = EnvVarGuard::set(KEY, "initial");
@@ -179,7 +181,7 @@ mod tests {
         );
     }
     /// Guards against conflating the relay and gateway endpoints (a relay
-    /// loop mistakenly connecting to `wss://grok.com/ws/gw/`).
+    /// loop mistakenly connecting to `wss://example.invalid/ws/`).
     #[test]
     fn relay_and_gateway_urls_are_distinct() {
         assert_ne!(

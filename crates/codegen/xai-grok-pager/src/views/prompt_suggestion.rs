@@ -18,13 +18,13 @@
 //! responses are discarded via a generation counter, mirroring
 //! `SuggestionController` (shell command suggestions).
 
-/// Env override for the whole feature: `GROK_PROMPT_SUGGESTIONS=0/1`.
+/// Env override for the whole feature: `CHUTES_BUILD_PROMPT_SUGGESTIONS=0/1`.
 /// When unset, the persisted `prompt_suggestions` setting applies.
-pub const PROMPT_SUGGESTIONS_ENV: &str = "GROK_PROMPT_SUGGESTIONS";
+pub const PROMPT_SUGGESTIONS_ENV: &str = "CHUTES_BUILD_PROMPT_SUGGESTIONS";
 
 /// Env override for the model used by the suggestion call:
-/// `GROK_PROMPT_SUGGESTIONS_MODEL=<model-id>`.
-pub const PROMPT_SUGGESTIONS_MODEL_ENV: &str = "GROK_PROMPT_SUGGESTIONS_MODEL";
+/// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL=<model-id>`.
+pub const PROMPT_SUGGESTIONS_MODEL_ENV: &str = "CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL";
 
 /// Preferred model for suggestion calls when the server catalog offers it
 /// (cheap + fast). The session model is never used: when this is absent
@@ -52,7 +52,7 @@ pub struct PromptSuggestionController {
     /// [`Self::dismiss`]/[`Self::clear`] (the suggestion is gone).
     shown_logged: bool,
     /// Whether the feature is enabled. Resolved via
-    /// `GROK_PROMPT_SUGGESTIONS` env var, falling back to the persisted
+    /// `CHUTES_BUILD_PROMPT_SUGGESTIONS` env var, falling back to the persisted
     /// `prompt_suggestions` setting.
     pub enabled: bool,
 }

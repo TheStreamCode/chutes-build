@@ -8,12 +8,13 @@ use std::collections::HashSet;
 use crate::implementations::skills::types::{SkillInfo, SkillScope};
 use crate::util::truncate_str_with_marker;
 
-/// Default fraction of the context window allocated to the skill listing (50%).
-pub(super) const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.5;
-/// Default character budget when context window is unknown.
-/// Derived from percentage to prevent drift: (200k tokens * 4 bytes/token * 50%).
-pub(super) const DEFAULT_CHAR_BUDGET: usize =
-    (200_000.0 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
+/// Default fraction of the context window allocated to skill discovery.
+/// Full skill instructions are loaded only when needed, so startup discovery
+/// should stay small enough not to dominate time-to-first-response.
+pub(super) const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.005;
+/// Maximum default character budget for the startup skill listing.
+/// Explicit caller overrides remain uncapped.
+pub(super) const DEFAULT_CHAR_BUDGET: usize = 4_000;
 /// Per-entry cap on description + when_to_use combined. Discovery only — the
 /// full skill body is loaded on invocation, so the listing stays terse. Split
 /// proportionally between the two fields (see `proportional_budgets`).
@@ -402,7 +403,7 @@ impl<'a> SkillListing<'a> {
 
 /// Extract the skill source directory from a SKILL.md display path.
 ///
-/// `"/path/.grok/skills/my-skill/SKILL.md"` -> `"/path/.grok/skills/"`
+/// `"/path/.chutes-build/skills/my-skill/SKILL.md"` -> `"/path/.chutes-build/skills/"`
 fn skill_source_dir(display_path: &str) -> Option<&str> {
     let p = std::path::Path::new(display_path);
     // SKILL.md -> skill-name dir -> skills dir

@@ -533,7 +533,7 @@ pub(crate) fn builtin_commands(availability: CommandAvailability) -> Vec<acp::Av
         .collect()
 }
 
-// ── x.ai/commands/list ext method ────────────────────────────────
+// ── chutes.build/commands/list ext method ────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub(crate) struct ListCommandsRequest {

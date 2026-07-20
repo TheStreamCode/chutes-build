@@ -41,7 +41,7 @@ pub trait ToolMetadata: Send + Sync {
 
     /// Namespace grouping (GrokBuild, Cursor, OpenCode, ...).
     /// Used to build the fully-qualified tool ID at registration time
-    /// (e.g., `"GrokBuild:grep"`).
+    /// (e.g., `"ChutesBuild:grep"`).
     fn tool_namespace(&self) -> ToolNamespace;
 
     /// Raw MiniJinja description template with `${{ tools.by_kind.X }}` and

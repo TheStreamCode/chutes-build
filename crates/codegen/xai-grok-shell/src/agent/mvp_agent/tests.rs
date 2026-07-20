@@ -653,9 +653,9 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_defaults_to_grok_build() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let def = MvpAgent::resolve_agent_definition(
@@ -667,7 +667,7 @@ fn resolve_agent_definition_defaults_to_grok_build() {
     );
     assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// When model_agent_type = Some("codex"), the codex agent is selected even
@@ -675,9 +675,9 @@ fn resolve_agent_definition_defaults_to_grok_build() {
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_model_agent_type_overrides_default() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let def = MvpAgent::resolve_agent_definition(
@@ -689,7 +689,7 @@ fn resolve_agent_definition_model_agent_type_overrides_default() {
     );
     assert_eq!(def.name, "codex");
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// When model_agent_type is None, the chain-resolved default agent is
@@ -699,9 +699,9 @@ fn resolve_agent_definition_model_agent_type_overrides_default() {
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_none_agent_type_does_not_override() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let def = MvpAgent::resolve_agent_definition(
@@ -713,7 +713,7 @@ fn resolve_agent_definition_none_agent_type_does_not_override() {
     );
     assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// Regression for the web-client devbox bug: an ACP profile must
@@ -721,9 +721,9 @@ fn resolve_agent_definition_none_agent_type_does_not_override() {
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_acp_profile_wins_when_model_agent_type_is_default() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let acp_profile = xai_grok_agent::AgentDefinition::from_json(&serde_json::json!(
@@ -744,7 +744,7 @@ fn resolve_agent_definition_acp_profile_wins_when_model_agent_type_is_default() 
         "ACP _meta.agentProfile must win when model_agent_type is the default value"
     );
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// Regression: after `DEFAULT_AGENT_TYPE` flipped to
@@ -755,9 +755,9 @@ fn resolve_agent_definition_acp_profile_wins_when_model_agent_type_is_default() 
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_acp_profile_wins_for_explicit_grok_build_family() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let acp_profile = xai_grok_agent::AgentDefinition::from_json(&serde_json::json!(
@@ -779,7 +779,7 @@ fn resolve_agent_definition_acp_profile_wins_for_explicit_grok_build_family() {
         );
     }
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// A non-strict (stock / vision-capable) model leaves the template alone, so
@@ -811,9 +811,9 @@ fn inherited_harness_template_respects_explicit_template() {
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_cli_agent_profile_wins_when_model_agent_type_is_default() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
     let profile_path = tmp.path().join("cli-profile.md");
@@ -831,19 +831,19 @@ fn resolve_agent_definition_cli_agent_profile_wins_when_model_agent_type_is_defa
     );
     assert_eq!(def.name, "cli-profile");
     if let Some(v) = prev {
-        unsafe { std::env::set_var("GROK_AGENT", v) }
+        unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
 }
 /// Agent profile with `model: Override(id)` preserves the field through resolution.
 #[test]
 #[serial_test::serial]
 fn resolve_agent_definition_agent_profile_with_model_override() {
-    let prev = std::env::var("GROK_AGENT").ok();
+    let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
-        std::env::remove_var("GROK_AGENT");
+        std::env::remove_var("CHUTES_BUILD_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
-    let agents_dir = tmp.path().join(".grok").join("agents");
+    let agents_dir = tmp.path().join(".chutes-build").join("agents");
     std::fs::create_dir_all(&agents_dir).unwrap();
     std::fs::write(
             agents_dir.join("test-architect.md"),
@@ -863,8 +863,8 @@ fn resolve_agent_definition_agent_profile_with_model_override() {
         "agent profile model override must be preserved through resolution"
     );
     match prev {
-        Some(v) => unsafe { std::env::set_var("GROK_AGENT", v) },
-        None => unsafe { std::env::remove_var("GROK_AGENT") },
+        Some(v) => unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) },
+        None => unsafe { std::env::remove_var("CHUTES_BUILD_AGENT") },
     }
 }
 #[test]
@@ -1464,7 +1464,7 @@ async fn drain_respects_deadline() {
 fn parse_code_nav_capability_present_and_true() {
     let mut meta = serde_json::Map::new();
     meta.insert(
-        "x.ai/codeNavigation".to_string(),
+        "chutes.build/codeNavigation".to_string(),
         serde_json::json!({ "enabled" : true }),
     );
     let init = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(
@@ -1488,7 +1488,7 @@ fn parse_code_nav_capability_absent_returns_false() {
 fn parse_code_nav_capability_false_returns_false() {
     let mut meta = serde_json::Map::new();
     meta.insert(
-        "x.ai/codeNavigation".to_string(),
+        "chutes.build/codeNavigation".to_string(),
         serde_json::json!({ "enabled" : false }),
     );
     let init = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(
@@ -1585,7 +1585,7 @@ async fn ext_method_routes_auth_cleared_and_refreshes_resident_sessions() {
             let params = serde_json::json!({});
             agent
                 .ext_method(acp::ExtRequest::new(
-                    "x.ai/internal/auth_cleared",
+                    "chutes.build/internal/auth_cleared",
                     std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
                 ))
                 .await
@@ -1637,7 +1637,7 @@ async fn ensure_plugin_registry_lazily_populates_snapshot() {
     use crate::auth::{AuthManager, GrokComConfig};
     use xai_grok_test_support::EnvGuard;
     let grok_home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", grok_home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", grok_home.path());
     let plugin_dir = tempfile::tempdir().unwrap();
     std::fs::write(
         plugin_dir.path().join("plugin.json"),
@@ -1805,7 +1805,7 @@ async fn resident_activity_reports_needs_input_when_pending() {
     pending.lock().unwrap().clear();
     assert_eq!(agent.resident_activity(&sid), RosterActivity::Working);
 }
-/// Drain the agent gateway, returning the first `x.ai/sessions/changed`
+/// Drain the agent gateway, returning the first `chutes.build/sessions/changed`
 /// payload that carries an upserted entry (ignoring any unrelated
 /// notifications, which parse into an empty `RosterChanged`).
 fn drain_roster_changed(
@@ -1828,7 +1828,7 @@ fn drain_roster_changed(
     found
 }
 /// A turn-boundary activity delta (`push_roster_activity_delta`) broadcasts
-/// an `x.ai/sessions/changed` upsert carrying the *overridden* activity, so
+/// an `chutes.build/sessions/changed` upsert carrying the *overridden* activity, so
 /// every attached dashboard reflects Working/Idle immediately instead of
 /// waiting for the ≤1s roster poll (turn-start/turn-end). The
 /// override matters because at turn-start the actor has not yet published
@@ -2137,12 +2137,12 @@ fn write_updates(dir: &std::path::Path, lines: &[&str]) -> PathBuf {
 }
 fn bg_line(task_id: &str) -> String {
     format!(
-        r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"{task_id}","command":"sleep 99","cwd":"/tmp"}}}}}}"#
+        r#"{{"timestamp":1,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"{task_id}","command":"sleep 99","cwd":"/tmp"}}}}}}"#
     )
 }
 fn completed_line(task_id: &str) -> String {
     format!(
-        r#"{{"timestamp":2,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_completed","task_snapshot":{{"task_id":"{task_id}","completed":true}}}}}}}}"#
+        r#"{{"timestamp":2,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_completed","task_snapshot":{{"task_id":"{task_id}","completed":true}}}}}}}}"#
     )
 }
 fn orphaned_ids(tasks: &[OrphanedTask]) -> std::collections::HashSet<&str> {
@@ -2216,7 +2216,7 @@ fn orphaned_tasks_skips_malformed_lines() {
 fn orphaned_tasks_ignores_unrelated_updates() {
     let tmp = tempfile::tempdir().unwrap();
     let bg = bg_line("t1");
-    let unrelated = r#"{"timestamp":1,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"auto_compact_started","percentage":80}}}"#;
+    let unrelated = r#"{"timestamp":1,"method":"_chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"auto_compact_started","percentage":80}}}"#;
     let path = write_updates(tmp.path(), &[&bg, unrelated]);
     let result = MvpAgent::find_orphaned_background_tasks(&Some(path));
     assert_eq!(result.len(), 1);
@@ -2226,7 +2226,7 @@ fn orphaned_tasks_filters_rewind_dead_branches() {
     let tmp = tempfile::tempdir().unwrap();
     let user_msg = r#"{"timestamp":0,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"hello"}}}}"#;
     let bg_before_rewind = bg_line("t-dead");
-    let rewind = r#"{"timestamp":3,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"rewind_marker","target_prompt_index":0,"created_at":"2025-01-01T00:00:00Z"}}}"#;
+    let rewind = r#"{"timestamp":3,"method":"_chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"rewind_marker","target_prompt_index":0,"created_at":"2025-01-01T00:00:00Z"}}}"#;
     let user_msg2 = r#"{"timestamp":4,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"retry"}}}}"#;
     let bg_after_rewind = bg_line("t-alive");
     let path = write_updates(
@@ -2281,7 +2281,7 @@ fn on_demand_enabled_from_remote_settings() {
 async fn auth_type_session_based_no_current_returns_session_token() {
     for method_id in [
         crate::agent::auth_method::CACHED_TOKEN_AUTH_METHOD_ID,
-        crate::agent::auth_method::GROK_COM_METHOD_ID,
+        crate::agent::auth_method::CHUTES_BUILD_COM_METHOD_ID,
         crate::agent::auth_method::OIDC_METHOD_ID,
     ] {
         let agent = build_minimal_agent_for_tests();
@@ -2300,7 +2300,7 @@ async fn auth_type_session_based_no_current_returns_session_token() {
         );
     }
 }
-/// BYOK guard. Users with `xai.api_key` must continue to report `ApiKey`
+/// BYOK guard. Users with `chutes.api_key` must continue to report `ApiKey`
 /// regardless of live-token state -- BYOK sessions have nothing to refresh,
 /// and reporting `SessionToken` would route through cli-chat-proxy paths
 /// (image_gen / video_gen base_url) that don't apply to BYOK keys.
@@ -2308,13 +2308,13 @@ async fn auth_type_session_based_no_current_returns_session_token() {
 async fn auth_type_xai_api_key_no_current_returns_api_key() {
     let agent = build_minimal_agent_for_tests();
     agent.set_auth_method(acp::AuthMethodId::new(
-        crate::agent::auth_method::XAI_API_KEY_METHOD_ID,
+        crate::agent::auth_method::CHUTES_API_KEY_METHOD_ID,
     ));
     assert!(agent.auth_manager.current().is_none());
     assert_eq!(
         agent.auth_type(),
         xai_chat_state::AuthType::ApiKey,
-        "xai.api_key auth must report ApiKey -- BYOK has no session-token \
+        "chutes.api_key auth must report ApiKey -- BYOK has no session-token \
              behavior to fall back to."
     );
 }
@@ -2372,46 +2372,46 @@ fn build_agent_with_api_key_auth_disabled() -> MvpAgent {
     cfg.grok_com_config.disable_api_key_auth = Some(true);
     MvpAgent::new(gateway, &cfg, auth_manager, None).expect("valid test config")
 }
-/// Deployment-key / managed-config user: `XAI_API_KEY` resolves and the kill
-/// switch is off, so a dead `cached_token` MUST fall through to `xai.api_key`
+/// Deployment-key / managed-config user: `CHUTES_API_KEY` resolves and the kill
+/// switch is off, so a dead `cached_token` MUST fall through to `chutes.api_key`
 /// (no browser). This is the exact regression the fallthrough fixes.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn cached_token_fallthrough_prefers_api_key_for_deployment_key() {
-    use crate::agent::auth_method::{XAI_API_KEY_ENV_VAR, XAI_API_KEY_METHOD_ID};
+    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_METHOD_ID};
     use xai_grok_test_support::EnvGuard;
-    let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _lockdown = EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH");
+    let _key = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "test-deployment-key");
     let agent = build_minimal_agent_for_tests();
     assert_eq!(
         agent
             .cached_token_fallthrough_method_id()
             .as_ref()
             .map(|id| id.0.as_ref()),
-        Some(XAI_API_KEY_METHOD_ID),
-        "deployment-key user (XAI_API_KEY set, no kill switch) must fall \
-         through to xai.api_key on a dead cached_token -- not interactive login",
+        Some(CHUTES_API_KEY_METHOD_ID),
+        "deployment-key user (CHUTES_API_KEY set, no kill switch) must fall \
+         through to chutes.api_key on a dead cached_token -- not interactive login",
     );
 }
-/// Forced-IdP deployment: even with `XAI_API_KEY` present, the admin kill
+/// Forced-IdP deployment: even with `CHUTES_API_KEY` present, the admin kill
 /// switch keeps the fallthrough on interactive `grok.com` (api-key auth is
 /// neither advertised nor an eligible fallthrough).
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn cached_token_fallthrough_respects_kill_switch() {
-    use crate::agent::auth_method::{GROK_COM_METHOD_ID, XAI_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{CHUTES_BUILD_COM_METHOD_ID, CHUTES_API_KEY_ENV_VAR};
     use xai_grok_test_support::EnvGuard;
-    let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _key = EnvGuard::set(XAI_API_KEY_ENV_VAR, "test-deployment-key");
+    let _lockdown = EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH");
+    let _key = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "test-deployment-key");
     let agent = build_agent_with_api_key_auth_disabled();
     assert_eq!(
         agent
             .cached_token_fallthrough_method_id()
             .as_ref()
             .map(|id| id.0.as_ref()),
-        Some(GROK_COM_METHOD_ID),
+        Some(CHUTES_BUILD_COM_METHOD_ID),
         "disable_api_key_auth must keep the cached_token fallthrough on \
-         interactive grok.com so XAI_API_KEY can't bypass forced IdP login",
+         interactive grok.com so CHUTES_API_KEY can't bypass forced IdP login",
     );
 }
 /// No advertiseable credentials at all (no env key, no kill switch): the user
@@ -2420,19 +2420,19 @@ async fn cached_token_fallthrough_respects_kill_switch() {
 #[serial_test::serial]
 async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
     use crate::agent::auth_method::{
-        GROK_COM_METHOD_ID, LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR,
+        CHUTES_BUILD_COM_METHOD_ID, LEGACY_CHUTES_API_KEY_ENV_VAR, CHUTES_API_KEY_ENV_VAR,
     };
     use xai_grok_test_support::EnvGuard;
-    let _lockdown = EnvGuard::unset("GROK_DISABLE_API_KEY_AUTH");
-    let _new = EnvGuard::unset(XAI_API_KEY_ENV_VAR);
-    let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
+    let _lockdown = EnvGuard::unset("CHUTES_BUILD_DISABLE_API_KEY_AUTH");
+    let _new = EnvGuard::unset(CHUTES_API_KEY_ENV_VAR);
+    let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
     let agent = build_minimal_agent_for_tests();
     assert_eq!(
         agent
             .cached_token_fallthrough_method_id()
             .as_ref()
             .map(|id| id.0.as_ref()),
-        Some(GROK_COM_METHOD_ID),
+        Some(CHUTES_BUILD_COM_METHOD_ID),
         "no API-key creds and no kill switch -> interactive grok.com login",
     );
 }
@@ -2774,22 +2774,22 @@ fn parse_session_kind_matrix() {
     let cases: &[(&str, serde_json::Value, SessionKind)] = &[
         (
             "chat",
-            json!({ "x.ai/session" : { "kind" : "chat" } }),
+            json!({ "chutes.build/session" : { "kind" : "chat" } }),
             SessionKind::Chat,
         ),
         (
             "build",
-            json!({ "x.ai/session" : { "kind" : "build" } }),
+            json!({ "chutes.build/session" : { "kind" : "build" } }),
             SessionKind::Build,
         ),
         (
             "chat_malformed_sibling",
-            json!({ "x.ai/session" : { "kind" : "chat", "facets" : "not-a-map" } }),
+            json!({ "chutes.build/session" : { "kind" : "chat", "facets" : "not-a-map" } }),
             SessionKind::Chat,
         ),
         (
             "unknown_kind",
-            json!({ "x.ai/session" : { "kind" : "frob" } }),
+            json!({ "chutes.build/session" : { "kind" : "frob" } }),
             SessionKind::Build,
         ),
         ("absent", json!({}), SessionKind::Build),
@@ -2961,13 +2961,13 @@ async fn remove_session_releases_workspace_binding_and_side_maps() {
 #[test]
 fn ext_method_rewind_uses_local_dispatch_without_bridge() {
     use acp::Agent as _;
-    let _env = crate::env::EnvVarGuard::remove(crate::env::GROK_DISABLE_CUSTOM_BRIDGE_ENV);
+    let _env = crate::env::EnvVarGuard::remove(crate::env::CHUTES_BUILD_DISABLE_CUSTOM_BRIDGE_ENV);
     run_local_for_bridge_test(|| async {
         let agent = build_minimal_agent_for_tests();
         let params = serde_json::json!({ "sessionId" : "sess-local" });
         let err = agent
             .ext_method(acp::ExtRequest::new(
-                "x.ai/rewind/points",
+                "chutes.build/rewind/points",
                 std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
             ))
             .await
@@ -3099,14 +3099,14 @@ fn spawn_fake_actor(
     });
     observed_rx
 }
-/// Drive `x.ai/internal/evict_sessions` through the real `ext_notification`
+/// Drive `chutes.build/internal/evict_sessions` through the real `ext_notification`
 /// handler path (not the internal helper) — matches how the leader server
 /// signals a client disconnect.
 async fn drive_disconnect(agent: &MvpAgent, sid: &acp::SessionId) {
     drive_disconnect_many(agent, &[sid]).await;
 }
 /// Like `drive_disconnect`, but evicts several sessions in a single
-/// `x.ai/internal/evict_sessions` notification — the realistic shape of a
+/// `chutes.build/internal/evict_sessions` notification — the realistic shape of a
 /// real client disconnect, and the path that exercises `handle_evict_sessions`'
 /// concurrent `join_all` check pass followed by the sequential act pass.
 async fn drive_disconnect_many(agent: &MvpAgent, sids: &[&acp::SessionId]) {
@@ -3116,13 +3116,13 @@ async fn drive_disconnect_many(agent: &MvpAgent, sids: &[&acp::SessionId]) {
     let raw = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_notification(acp::ExtNotification::new(
-            "x.ai/internal/evict_sessions",
+            "chutes.build/internal/evict_sessions",
             raw.into(),
         ))
         .await
         .expect("evict_sessions notification must be handled");
 }
-/// Drive `x.ai/session/close` through the real `ext_method` dispatch
+/// Drive `chutes.build/session/close` through the real `ext_method` dispatch
 /// (`ext_method` → `handlers::session::handle` → `handle_session_close`),
 /// exercising the exact production path that finalizes the replica.
 async fn drive_close(agent: &MvpAgent, session_id: &str) -> Result<acp::ExtResponse, acp::Error> {
@@ -3131,7 +3131,7 @@ async fn drive_close(agent: &MvpAgent, session_id: &str) -> Result<acp::ExtRespo
     let raw = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_method(acp::ExtRequest::new(
-            "x.ai/session/close",
+            "chutes.build/session/close",
             std::sync::Arc::from(raw),
         ))
         .await
@@ -3373,7 +3373,7 @@ fn disconnect_keeps_resident_when_plan_approval_parked() {
         );
     });
 }
-/// Mixed batch in a *single* `x.ai/internal/evict_sessions` notification —
+/// Mixed batch in a *single* `chutes.build/internal/evict_sessions` notification —
 /// the realistic disconnect shape and the path that exercises
 /// `handle_evict_sessions`' `join_all` two-pass (concurrent `IsBusy` checks,
 /// then sequential act). One session's actor reports busy (→ kept resident,
@@ -3462,7 +3462,7 @@ fn session_live_state_map_is_bounded_across_cycles() {
     });
 }
 /// Finalize fires on a genuine terminal close — driven through the **real**
-/// `x.ai/session/close` dispatch (`ext_method` → `handle_session_close`),
+/// `chutes.build/session/close` dispatch (`ext_method` → `handle_session_close`),
 /// not the internal helper. Proves finalize was *moved* (not removed) and
 /// guards the handler's `existed` gate. (Finalize assertion is
 /// invocation-level; see note in `finalize_session_replica`.)
@@ -3613,7 +3613,7 @@ fn reload_after_terminal_removal_starts_clean() {
 }
 /// Build an agent whose gateway is wired to a live receiver, so a test can
 /// observe (and answer) agent→client reverse-requests like the dormant
-/// `x.ai/folder_trust/request` round-trip.
+/// `chutes.build/folder_trust/request` round-trip.
 fn build_agent_with_gateway_rx() -> (
     MvpAgent,
     tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
@@ -3648,7 +3648,7 @@ fn folder_trust_on() -> crate::util::config::RemoteSettings {
         ..Default::default()
     }
 }
-/// Pull the next `x.ai/folder_trust/request` reverse-request off the gateway and
+/// Pull the next `chutes.build/folder_trust/request` reverse-request off the gateway and
 /// answer it with `outcome`. Returns the request's decoded params.
 async fn answer_folder_trust_request(
     gw_rx: &mut tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
@@ -3661,7 +3661,7 @@ async fn answer_folder_trust_request(
     let xai_acp_lib::AcpClientMessage::ExtMethod(args) = msg else {
         panic!("expected an ext_method reverse-request, got a different message");
     };
-    assert_eq!(args.request.method.as_ref(), "x.ai/folder_trust/request");
+    assert_eq!(args.request.method.as_ref(), "chutes.build/folder_trust/request");
     let params: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
     let resp: acp::ExtResponse = acp::ExtResponse::new(std::sync::Arc::from(
         serde_json::value::to_raw_value(&serde_json::json!({ "outcome" : outcome })).unwrap(),
@@ -3675,9 +3675,9 @@ fn interactive_trust_prompt_grant_reloads_project_mcp() {
     use xai_grok_test_support::EnvGuard;
     use xai_grok_workspace::trust::{TrustStore, workspace_key};
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -3754,9 +3754,9 @@ fn interactive_trust_prompt_reject_keeps_gated() {
     use xai_grok_test_support::EnvGuard;
     use xai_grok_workspace::trust::{TrustStore, workspace_key};
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -3791,9 +3791,9 @@ fn interactive_trust_prompt_reject_keeps_gated() {
 fn interactive_trust_prompt_dormant_when_feature_off() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = crate::util::config::RemoteSettings {
@@ -3821,9 +3821,9 @@ fn interactive_trust_prompt_dormant_when_feature_off() {
 fn interactive_trust_prompt_no_request_without_capability() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -3849,9 +3849,9 @@ fn interactive_trust_prompt_client_error_fails_closed() {
     use xai_grok_test_support::EnvGuard;
     use xai_grok_workspace::trust::{TrustStore, workspace_key};
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -3890,9 +3890,9 @@ fn interactive_trust_prompt_client_error_fails_closed() {
 fn interactive_trust_prompt_dedups_same_workspace() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -3965,9 +3965,9 @@ async fn drain_reload_commands(
 fn interactive_trust_prompt_reloads_all_same_workspace_sessions() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let root = repo.path().to_path_buf();
     let subdir = root.join("sub");
@@ -4030,9 +4030,9 @@ fn interactive_trust_prompt_reprompts_after_untrust() {
     use xai_grok_test_support::EnvGuard;
     use xai_hooks_plugins_types::HooksAction;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let repo = repo_with_project_mcp_server();
     let repo_path = repo.path().to_path_buf();
     let remote = folder_trust_on();
@@ -4360,7 +4360,7 @@ async fn emit_announcements_gate_emits_updates_baseline_and_bumps_gen() {
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                 panic!("expected ExtNotification, got another message kind");
             };
-            assert_eq!(args.request.method.as_ref(), "x.ai/announcements/update");
+            assert_eq!(args.request.method.as_ref(), "chutes.build/announcements/update");
             let parsed: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).expect("valid JSON payload");
             parsed
@@ -4416,7 +4416,7 @@ async fn emit_announcements_gate_keeps_baseline_on_failed_send_and_retries() {
     let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
         panic!("expected ExtNotification, got another message kind");
     };
-    assert_eq!(args.request.method.as_ref(), "x.ai/announcements/update");
+    assert_eq!(args.request.method.as_ref(), "chutes.build/announcements/update");
     assert_eq!(
         *agent.last_emitted_announcements.borrow(),
         vec![ann("a")],
@@ -4444,21 +4444,21 @@ mod direct_hub_cloud_removed {
     }
     #[test]
     fn cloud_server_id_meta_is_hard_error() {
-        let meta = serde_json::json!({ "x.ai/cloud_server_id" : "srv-123" });
+        let meta = serde_json::json!({ "chutes.build/cloud_server_id" : "srv-123" });
         let err = reject_direct_hub_cloud_meta(meta.as_object()).expect_err("must reject");
         assert_direct_hub_error(err);
     }
     #[test]
     fn cloud_server_id_null_still_present_is_hard_error() {
-        let meta = serde_json::json!({ "x.ai/cloud_server_id" : null });
+        let meta = serde_json::json!({ "chutes.build/cloud_server_id" : null });
         let err = reject_direct_hub_cloud_meta(meta.as_object()).expect_err("must reject");
         assert_direct_hub_error(err);
     }
     #[test]
     fn cloud_server_id_with_gateway_meta_still_hard_error() {
         let meta = serde_json::json!(
-            { "x.ai/cloud_server_id" : "srv-legacy", "envId" : "env-1",
-            "x.ai/cloud_existing_workspace" : { "server_id" : "ws-1", "cwd" :
+            { "chutes.build/cloud_server_id" : "srv-legacy", "envId" : "env-1",
+            "chutes.build/cloud_existing_workspace" : { "server_id" : "ws-1", "cwd" :
             "/workspace" } }
         );
         let err = reject_direct_hub_cloud_meta(meta.as_object()).expect_err("Direct stamp wins");
@@ -4475,7 +4475,7 @@ mod direct_hub_cloud_removed {
         assert!(
             reject_direct_hub_cloud_meta(
                 serde_json::json!({
-            "x.ai/cloud_existing_workspace" : { "server_id" : "ws-1", "cwd" :
+            "chutes.build/cloud_existing_workspace" : { "server_id" : "ws-1", "cwd" :
             "/workspace" } })
                 .as_object()
             )
@@ -4546,7 +4546,7 @@ mod soft_default_settings_emit {
                 let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                     panic!("expected ExtNotification, got {msg:?}");
                 };
-                assert_eq!(args.request.method.as_ref(), "x.ai/settings/update");
+                assert_eq!(args.request.method.as_ref(), "chutes.build/settings/update");
                 let params: serde_json::Value =
                     serde_json::from_str(args.request.params.get()).expect("parse params");
                 assert_eq!(

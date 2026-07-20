@@ -380,7 +380,7 @@ fn sh_split_simple(s: &str) -> Vec<String> {
 /// Given a bash *script string* like:
 ///
 /// ```bash
-/// XAI_API_KEY='xai-some-key' cargo run --bin xai-grok-pager
+/// CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager
 /// ```
 ///
 /// returns the first "important" command as a `BashCommandHighlights` where:
@@ -389,7 +389,7 @@ fn sh_split_simple(s: &str) -> Vec<String> {
 /// - `suffix` = tokens after the highlighted command.
 ///
 /// For the above example:
-///   prefix: ["XAI_API_KEY=xai-some-key"]
+///   prefix: ["CHUTES_API_KEY=xai-some-key"]
 ///   highlighted_words: ["cargo", "run", "--bin", "xai-grok-pager"]
 ///   suffix: []
 pub fn primary_command_from_script(script: &str) -> Option<BashCommandHighlights> {
@@ -758,11 +758,12 @@ mod tests {
             })
         );
 
-        let environment_key_command = "XAI_API_KEY='xai-some-key' cargo run --bin xai-grok-pager";
+        let environment_key_command =
+            "CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager";
         assert_eq!(
             primary_command_from_script(environment_key_command),
             Some(BashCommandHighlights {
-                prefix: vec!["XAI_API_KEY=xai-some-key".to_owned()],
+                prefix: vec!["CHUTES_API_KEY=xai-some-key".to_owned()],
                 highlighted_words: vec![
                     "cargo".to_owned(),
                     "run".to_owned(),

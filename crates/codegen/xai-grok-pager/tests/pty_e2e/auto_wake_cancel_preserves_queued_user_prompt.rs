@@ -12,7 +12,7 @@
 //! never reaches the model, and — since user messages are only persisted when
 //! their turn starts — it is silently gone after a `--continue` resume.
 //!
-//! Set `GROK_PTY_CAST_DIR` to also dump asciinema casts of both pager runs
+//! Set `CHUTES_BUILD_PTY_CAST_DIR` to also dump asciinema casts of both pager runs
 //! (written before the final asserts so a failing run still produces them).
 #[allow(unused_imports)]
 use super::common::*;

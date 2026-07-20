@@ -1,5 +1,5 @@
 //! End-to-end regression tests for `check_update_status` that lock in the
-//! exact JSON shape produced by `grok update --check --json` for the failure
+//! exact JSON shape produced by `chutes-build update --check --json` for the failure
 //! modes that real users have hit in the wild.
 //!
 //! Seen when a user is behind a corporate npm registry mirror:
@@ -36,7 +36,7 @@ use common::{FakeBinGuard, reset_home, set_test_version, test_home};
 use xai_grok_update::UpdateConfig;
 use xai_grok_update::auto_update::check_update_status;
 
-/// Set up a fake `npm` on PATH, set `GROK_INSTALLER=npm` so the auto-update
+/// Set up a fake `npm` on PATH, set `CHUTES_BUILD_INSTALLER=npm` so the auto-update
 /// code dispatches to npm without consulting config, and pin the installed
 /// version to `0.1.181` (matches the user's report).
 fn setup() -> FakeBinGuard {
@@ -45,7 +45,7 @@ fn setup() -> FakeBinGuard {
     set_test_version("0.1.181");
     // SAFETY: serial_test ensures no race; reset_home will clear this between
     // tests.
-    unsafe { std::env::set_var("GROK_INSTALLER", "npm") };
+    unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "npm") };
     FakeBinGuard::install_npm()
 }
 

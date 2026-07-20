@@ -61,8 +61,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_image_to_video_tool() {
-        assert_eq!(ImagineVideoCommand.required_tools(), &["image_to_video"]);
+    fn requires_chutes_media_tool() {
+        assert_eq!(ImagineVideoCommand.required_tools(), &["generate_media"]);
     }
 
     #[test]
@@ -100,14 +100,9 @@ mod tests {
                     acp::ContentBlock::Text(t) => &t.text,
                     _ => panic!("expected Text block"),
                 };
-                assert!(
-                    text.contains("image_to_video"),
-                    "skill should reference image_to_video"
-                );
-                assert!(
-                    text.contains("reference_to_video"),
-                    "skill should reference reference_to_video"
-                );
+                assert!(text.contains("list_media_models"));
+                assert!(text.contains("describe_media_model"));
+                assert!(text.contains("generate_media"));
                 assert!(text.contains("a cat playing piano"));
             }
             other => panic!("expected InjectSkill, got {other:?}"),

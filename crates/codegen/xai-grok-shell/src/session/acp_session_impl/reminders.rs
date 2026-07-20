@@ -173,6 +173,26 @@ pub(crate) fn date_rollover_reminder(
          earlier in the session and is now stale; use {today} as the current date."
     ))
 }
+
+/// Build a gentle local-only wellness suggestion. It never blocks work or
+/// changes agent permissions, and is emitted at most once per session.
+pub(crate) fn wellness_reminder(
+    session_minutes: u64,
+    local_hour: u32,
+    local_minute: u32,
+) -> Option<&'static str> {
+    use chutes_build_core::wellness::{WellnessPolicy, WellnessSuggestion};
+
+    match WellnessPolicy::default().evaluate(session_minutes, local_hour, local_minute) {
+        Some(WellnessSuggestion::TakeBreak) => Some(
+            "You have been working in this session for about two hours. Consider taking a short break before continuing. This is only a suggestion; do not interrupt active work.",
+        ),
+        Some(WellnessSuggestion::ContinueTomorrow) => Some(
+            "It is late in the user's local time and this has been a long session. When a safe stopping point is reached, gently suggest saving progress and continuing tomorrow. This is only a suggestion; do not interrupt active work.",
+        ),
+        None => None,
+    }
+}
 /// Body of the one-shot interrupt `<system-reminder>` injected on the next real
 /// user turn after a mid-stream abort that left the model with no other signal.
 /// Wrapped in grok's `<system-reminder>` shape by [`SessionActor::push_system_reminder`].
@@ -197,6 +217,21 @@ pub(super) fn todo_gate_active(
     definition.carries_task_completion_discipline(audience)
 }
 impl SessionActor {
+    pub(super) fn maybe_inject_wellness_reminder(&self) {
+        if self.wellness_reminder_sent.get() {
+            return;
+        }
+        use chrono::Timelike as _;
+        let now = chrono::Local::now();
+        let session_minutes = self.wellness_session_started_at.elapsed().as_secs() / 60;
+        let Some(reminder) = wellness_reminder(session_minutes, now.hour(), now.minute()) else {
+            return;
+        };
+        self.wellness_reminder_sent.set(true);
+        self.push_system_reminder(reminder);
+        tracing::debug!(session_minutes, "Injected local wellness suggestion");
+    }
+
     /// Date rollover for long-running sessions. When a session crosses a
     /// local-midnight boundary the `Today's date` value stamped into the cached
     /// `<user_info>` prefix goes stale (the prefix is only re-stamped on

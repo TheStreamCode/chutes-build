@@ -1,11 +1,11 @@
 //! Reusable non-blocking file-logging tracing layers for the `--debug` firehose.
 //!
 //! Two install modes, chosen by env precedence (see `resolve_debug_target_inner`):
-//! - PerSession (`GROK_DEBUG_LOG=1`): a routing layer fans each session's
-//!   firehose to `~/.grok/debug/<session_id>.txt` (one file per session), with a
+//! - PerSession (`CHUTES_BUILD_DEBUG_LOG=1`): a routing layer fans each session's
+//!   firehose to `~/.chutes-build/debug/<session_id>.txt` (one file per session), with a
 //!   `<role>-<pid>.txt` catch-all for events fired outside any session span, and
 //!   a `latest.txt` symlink pointing at the most-recently-opened session file.
-//! - SingleFile (explicit path via `GROK_LOG_FILE` or `GROK_DEBUG_LOG=<path>`):
+//! - SingleFile (explicit path via `CHUTES_BUILD_LOG_FILE` or `CHUTES_BUILD_DEBUG_LOG=<path>`):
 //!   one flat `fmt` file, routing bypassed. Disk IO stays off the tracing hot
 //!   path via `tracing_appender`'s non-blocking writer in both modes.
 
@@ -35,8 +35,8 @@ pub(crate) enum DebugSource {
 impl DebugSource {
     fn label(self) -> &'static str {
         match self {
-            Self::GrokLogFile => "GROK_LOG_FILE",
-            Self::GrokDebugLog => "GROK_DEBUG_LOG",
+            Self::GrokLogFile => "CHUTES_BUILD_LOG_FILE",
+            Self::GrokDebugLog => "CHUTES_BUILD_DEBUG_LOG",
         }
     }
 }
@@ -60,7 +60,7 @@ pub const ACP_UPDATE_PAYLOAD_TARGET: &str = "acp_update_payload";
 /// which subscribers demote to `error` to drop the flood. Re-check on rmcp bump.
 pub const RMCP_SSE_NOISE_TARGET: &str = "rmcp::transport::common::client_side_sse";
 
-// Broad firehose filter for the routing/GROK_DEBUG_LOG sources: capture our
+// Broad firehose filter for the routing/CHUTES_BUILD_DEBUG_LOG sources: capture our
 // crates at debug regardless of a narrowing RUST_LOG, with deps at info so they
 // don't flood. Curated first-party allowlist: new grok crates default to `info`
 // until added here.
@@ -73,13 +73,13 @@ fn firehose_directives() -> String {
 }
 
 // The broad firehose filter, used by both the routing layer and the
-// GROK_DEBUG_LOG single-file source (mirrors `default_file_filter`).
+// CHUTES_BUILD_DEBUG_LOG single-file source (mirrors `default_file_filter`).
 fn firehose_filter() -> EnvFilter {
     EnvFilter::new(firehose_directives())
 }
 
-// RUST_LOG-respecting filter for the GROK_LOG_FILE source: DEBUG default, honor
-// RUST_LOG, silence sampling_log (preserves GROK_LOG_FILE back-compat).
+// RUST_LOG-respecting filter for the CHUTES_BUILD_LOG_FILE source: DEBUG default, honor
+// RUST_LOG, silence sampling_log (preserves CHUTES_BUILD_LOG_FILE back-compat).
 fn default_file_filter() -> EnvFilter {
     EnvFilter::builder()
         .with_default_directive(LevelFilter::DEBUG.into())
@@ -362,7 +362,7 @@ where
 ///
 /// PerSession installs the routing layer (firehose filter, RUST_LOG-immune) and
 /// prunes old session logs; SingleFile installs a flat `fmt` file picking the
-/// filter by source (GROK_LOG_FILE respects RUST_LOG). Open failures warn AFTER
+/// filter by source (CHUTES_BUILD_LOG_FILE respects RUST_LOG). Open failures warn AFTER
 /// init in the single-file case; routing open failures are per-file at write
 /// time and degrade gracefully. `role` names the per-pid fallback file.
 pub fn install_firehose<S>(registry: S, role: &str)
@@ -405,20 +405,20 @@ pub fn flush() {
 /// Where the firehose should go, if anywhere.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum DebugTarget {
-    /// `GROK_DEBUG_LOG=1` → route per session into `<dir>` (`~/.grok/debug`).
+    /// `CHUTES_BUILD_DEBUG_LOG=1` → route per session into `<dir>` (`~/.chutes-build/debug`).
     PerSession { dir: PathBuf },
     /// An explicit path → one flat `fmt` file, routing bypassed.
     SingleFile { path: PathBuf, src: DebugSource },
 }
 
-/// Resolve the debug target, honoring precedence: explicit GROK_LOG_FILE wins
-/// (single file, RUST_LOG filter); else GROK_DEBUG_LOG — a truthy bool routes
-/// per session into `~/.grok/debug`, an explicit path writes a single file.
+/// Resolve the debug target, honoring precedence: explicit CHUTES_BUILD_LOG_FILE wins
+/// (single file, RUST_LOG filter); else CHUTES_BUILD_DEBUG_LOG — a truthy bool routes
+/// per session into `~/.chutes-build/debug`, an explicit path writes a single file.
 ///
 /// Read via `var_os` (not `var`) so a non-UTF-8 path isn't silently dropped.
 pub(crate) fn resolve_debug_target() -> Option<DebugTarget> {
-    let grok_log_file = std::env::var_os("GROK_LOG_FILE");
-    let grok_debug_log = std::env::var_os("GROK_DEBUG_LOG");
+    let grok_log_file = std::env::var_os("CHUTES_BUILD_LOG_FILE");
+    let grok_debug_log = std::env::var_os("CHUTES_BUILD_DEBUG_LOG");
     resolve_debug_target_inner(
         grok_log_file.as_deref(),
         grok_debug_log.as_deref(),
@@ -477,7 +477,7 @@ fn resolve_debug_target_inner(
 const LOG_RETENTION: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Prune `*.txt` firehose files (and orphaned `latest.txt` swap temps) under
-/// `~/.grok/debug` older than [`LOG_RETENTION`] so the dir doesn't grow
+/// `~/.chutes-build/debug` older than [`LOG_RETENTION`] so the dir doesn't grow
 /// unbounded. Age-based (not count-based) so a still-open log from a concurrent
 /// process is never unlinked mid-write; best-effort, ignore errors.
 pub(crate) fn sweep_old_logs() {
@@ -564,7 +564,7 @@ mod tests {
             assert!(
                 resolve_debug_target_inner(None, Some(OsStr::new(v)), Path::new("/debug"))
                     .is_none(),
-                "expected None for GROK_DEBUG_LOG={v:?}"
+                "expected None for CHUTES_BUILD_DEBUG_LOG={v:?}"
             );
         }
     }
@@ -579,7 +579,7 @@ mod tests {
                 DebugTarget::PerSession {
                     dir: PathBuf::from("/debug")
                 },
-                "expected PerSession for GROK_DEBUG_LOG={v:?}"
+                "expected PerSession for CHUTES_BUILD_DEBUG_LOG={v:?}"
             );
         }
     }
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn resolve_target_empty_log_file_falls_through_to_debug_log() {
-        // Empty / whitespace GROK_LOG_FILE is treated as unset (mirrors GROK_DEBUG_LOG).
+        // Empty / whitespace CHUTES_BUILD_LOG_FILE is treated as unset (mirrors CHUTES_BUILD_DEBUG_LOG).
         for blank in ["", "   "] {
             let target = resolve_debug_target_inner(
                 Some(OsStr::new(blank)),
@@ -645,7 +645,7 @@ mod tests {
     fn resolve_target_non_utf8_debug_log_path_is_single_file() {
         use std::os::unix::ffi::OsStrExt;
 
-        // A non-UTF-8 GROK_DEBUG_LOG value is a path, not a bool keyword, and its
+        // A non-UTF-8 CHUTES_BUILD_DEBUG_LOG value is a path, not a bool keyword, and its
         // bytes must round-trip (not be silently dropped).
         let raw = OsStr::from_bytes(b"/tmp/\xff/fire.txt");
         let target = resolve_debug_target_inner(None, Some(raw), Path::new("/debug")).unwrap();

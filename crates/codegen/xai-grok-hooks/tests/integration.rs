@@ -354,7 +354,7 @@ async fn hook_receives_env_vars() {
     // Inline command: check env vars and write results to a file.
     let output_file = dir.path().join("env_output.txt");
     let cmd = format!(
-        r#"echo "EVENT=$GROK_HOOK_EVENT" > {f}; echo "NAME=$GROK_HOOK_NAME" >> {f}; echo "SESSION=$GROK_SESSION_ID" >> {f}; echo '{{"decision":"allow"}}'"#,
+        r#"echo "EVENT=$CHUTES_BUILD_HOOK_EVENT" > {f}; echo "NAME=$CHUTES_BUILD_HOOK_NAME" >> {f}; echo "SESSION=$CHUTES_BUILD_SESSION_ID" >> {f}; echo '{{"decision":"allow"}}'"#,
         f = output_file.display(),
     );
     let hook_json = serde_json::json!({
@@ -567,8 +567,8 @@ async fn new_event_types_fire_and_receive_correct_envelope() {
 }
 
 /// Regression: a user JSON hook that declares `env` values for
-/// runner-reserved keys (`GROK_HOOK_EVENT`, `GROK_HOOK_NAME`,
-/// `GROK_SESSION_ID`, `GROK_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`)
+/// runner-reserved keys (`CHUTES_BUILD_HOOK_EVENT`, `CHUTES_BUILD_HOOK_NAME`,
+/// `CHUTES_BUILD_SESSION_ID`, `CHUTES_BUILD_WORKSPACE_ROOT`, `CLAUDE_PROJECT_DIR`)
 /// must NOT spoof those values inside the spawned child. The
 /// runner-injected vars always win at spawn time. This test
 /// constructs the spoof JSON, dispatches a hook that writes `printenv`
@@ -581,7 +581,7 @@ async fn runner_injected_vars_override_extra_env_at_spawn() {
 
     // The hook writes the values it sees for each reserved key.
     let cmd = format!(
-        r#"echo "EVENT=$GROK_HOOK_EVENT" > {f}; echo "NAME=$GROK_HOOK_NAME" >> {f}; echo "SESSION=$GROK_SESSION_ID" >> {f}; echo "ROOT=$GROK_WORKSPACE_ROOT" >> {f}; echo "PROJ=$CLAUDE_PROJECT_DIR" >> {f}; echo "USER_KEY=$USER_KEY" >> {f}; echo '{{"decision":"allow"}}'"#,
+        r#"echo "EVENT=$CHUTES_BUILD_HOOK_EVENT" > {f}; echo "NAME=$CHUTES_BUILD_HOOK_NAME" >> {f}; echo "SESSION=$CHUTES_BUILD_SESSION_ID" >> {f}; echo "ROOT=$CHUTES_BUILD_WORKSPACE_ROOT" >> {f}; echo "PROJ=$CLAUDE_PROJECT_DIR" >> {f}; echo "USER_KEY=$USER_KEY" >> {f}; echo '{{"decision":"allow"}}'"#,
         f = output_file.display(),
     );
 
@@ -596,10 +596,10 @@ async fn runner_injected_vars_override_extra_env_at_spawn() {
                             // Spoof every reserved key + add a non-reserved one
                             // that should be preserved.
                             "env": {
-                                "GROK_HOOK_EVENT": "spoofed_event",
-                                "GROK_HOOK_NAME": "spoofed_name",
-                                "GROK_SESSION_ID": "spoofed_session",
-                                "GROK_WORKSPACE_ROOT": "/spoofed/root",
+                                "CHUTES_BUILD_HOOK_EVENT": "spoofed_event",
+                                "CHUTES_BUILD_HOOK_NAME": "spoofed_name",
+                                "CHUTES_BUILD_SESSION_ID": "spoofed_session",
+                                "CHUTES_BUILD_WORKSPACE_ROOT": "/spoofed/root",
                                 "CLAUDE_PROJECT_DIR": "/spoofed/project",
                                 "USER_KEY": "user_value_kept"
                             }
@@ -630,27 +630,27 @@ async fn runner_injected_vars_override_extra_env_at_spawn() {
     // Reserved keys: runner values must win (NOT the spoofed values).
     assert!(
         captured.contains("EVENT=pre_tool_use"),
-        "GROK_HOOK_EVENT must reflect the real event, got:\n{captured}"
+        "CHUTES_BUILD_HOOK_EVENT must reflect the real event, got:\n{captured}"
     );
     assert!(
         !captured.contains("EVENT=spoofed_event"),
-        "spoofed GROK_HOOK_EVENT must NOT leak through, got:\n{captured}"
+        "spoofed CHUTES_BUILD_HOOK_EVENT must NOT leak through, got:\n{captured}"
     );
     assert!(
         captured.contains(&format!("SESSION={real_session}")),
-        "GROK_SESSION_ID must reflect the real session, got:\n{captured}"
+        "CHUTES_BUILD_SESSION_ID must reflect the real session, got:\n{captured}"
     );
     assert!(
         !captured.contains("SESSION=spoofed_session"),
-        "spoofed GROK_SESSION_ID must NOT leak through"
+        "spoofed CHUTES_BUILD_SESSION_ID must NOT leak through"
     );
     assert!(
         captured.contains(&format!("ROOT={real_workspace}")),
-        "GROK_WORKSPACE_ROOT must reflect the real workspace root, got:\n{captured}"
+        "CHUTES_BUILD_WORKSPACE_ROOT must reflect the real workspace root, got:\n{captured}"
     );
     assert!(
         !captured.contains("ROOT=/spoofed/root"),
-        "spoofed GROK_WORKSPACE_ROOT must NOT leak through"
+        "spoofed CHUTES_BUILD_WORKSPACE_ROOT must NOT leak through"
     );
     assert!(
         captured.contains(&format!("PROJ={real_workspace}")),

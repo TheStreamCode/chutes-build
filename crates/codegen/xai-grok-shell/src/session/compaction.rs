@@ -33,10 +33,10 @@ use xai_chat_state::compaction_utils::{
 use xai_grok_sampling_types::{ApiBackend, ConversationItem};
 /// Default percentage points below the auto-compact threshold at which prefire
 /// (background pass-1) starts, giving pass-1 runway to finish before the limit.
-/// Override with `GROK_PREFIRE_LEAD_PERCENT`.
+/// Override with `CHUTES_BUILD_PREFIRE_LEAD_PERCENT`.
 const DEFAULT_PREFIRE_LEAD_PERCENT: u64 = 10;
 fn prefire_lead_percent() -> u64 {
-    std::env::var("GROK_PREFIRE_LEAD_PERCENT")
+    std::env::var("CHUTES_BUILD_PREFIRE_LEAD_PERCENT")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_PREFIRE_LEAD_PERCENT)
@@ -151,7 +151,7 @@ mod two_pass_prefire_helper_tests {
     }
     #[test]
     fn prefire_lead_percent_defaults_to_10() {
-        unsafe { std::env::remove_var("GROK_PREFIRE_LEAD_PERCENT") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_PREFIRE_LEAD_PERCENT") };
         assert_eq!(prefire_lead_percent(), 10);
     }
 }
@@ -273,12 +273,12 @@ impl SessionActor {
         if !self.two_pass_active() {
             return PrefireOutcome::Disabled.into();
         }
-        if std::env::var("GROK_DEBUG_TWO_PASS_FAIL_PASS1")
+        if std::env::var("CHUTES_BUILD_DEBUG_TWO_PASS_FAIL_PASS1")
             .is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes" | "on"))
         {
             tracing::info!(
                 target : "two_pass",
-                "two_pass: DEBUG GROK_DEBUG_TWO_PASS_FAIL_PASS1 — prefire pass1 produces no cache"
+                "two_pass: DEBUG CHUTES_BUILD_DEBUG_TWO_PASS_FAIL_PASS1 — prefire pass1 produces no cache"
             );
             return PrefireOutcome::DebugFailPass1.into();
         }
@@ -2339,6 +2339,8 @@ mod inline_auto_compact_flow_tests {
             deferred_prefix: TaskSlot::new(),
             extension_registry: xai_agent_lifecycle::LocalExtensionRegistry::default(),
             last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+            wellness_session_started_at: std::time::Instant::now(),
+            wellness_reminder_sent: std::cell::Cell::new(false),
             last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
             last_api_request_at: std::sync::atomic::AtomicI64::new(0),
             hook_registry: std::cell::RefCell::new(None),

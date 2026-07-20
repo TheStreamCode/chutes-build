@@ -15,8 +15,8 @@ use xai_grok_sampler::SamplingClient;
 use xai_grok_test_support::spawn_counting_server;
 
 /// Pin the env these assertions depend on before any client is built, so
-/// ambient shell exports (`GROK_SAMPLER_SHARED_CLIENT=0`,
-/// `GROK_POOL_MAX_IDLE=0`) cannot flip the expected pooling behavior.
+/// ambient shell exports (`CHUTES_BUILD_SAMPLER_SHARED_CLIENT=0`,
+/// `CHUTES_BUILD_POOL_MAX_IDLE=0`) cannot flip the expected pooling behavior.
 fn pin_env() {
     static PIN: Once = Once::new();
     PIN.call_once(|| {
@@ -24,9 +24,9 @@ fn pin_env() {
         // racing tests block on the Once, and the crate latches the kill
         // switch and pool knobs only at first client construction.
         unsafe {
-            std::env::remove_var("GROK_SAMPLER_SHARED_CLIENT");
-            std::env::set_var("GROK_POOL_MAX_IDLE", "2");
-            std::env::set_var("GROK_POOL_IDLE_TIMEOUT_SECS", "90");
+            std::env::remove_var("CHUTES_BUILD_SAMPLER_SHARED_CLIENT");
+            std::env::set_var("CHUTES_BUILD_POOL_MAX_IDLE", "2");
+            std::env::set_var("CHUTES_BUILD_POOL_IDLE_TIMEOUT_SECS", "90");
         }
     });
 }

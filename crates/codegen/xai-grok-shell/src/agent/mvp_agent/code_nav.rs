@@ -4,13 +4,13 @@
 use super::*;
 
 impl MvpAgent {
-    /// Parse the `x.ai/codeNavigation.enabled` capability from an initialize
+    /// Parse the `chutes.build/codeNavigation.enabled` capability from an initialize
     /// request.  Returns `false` if the field is absent or not `true`.
     pub(crate) fn parse_code_nav_capability(init: &acp::InitializeRequest) -> bool {
         init.client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/codeNavigation"))
+            .and_then(|m| m.get("chutes.build/codeNavigation"))
             .and_then(|v| v.get("enabled"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
@@ -71,7 +71,7 @@ impl MvpAgent {
             tracing::info!(
                 gate = "capability",
                 skip_reason = "capability_not_advertised",
-                "code-nav eligibility check: skipping (x.ai/codeNavigation.enabled not advertised)"
+                "code-nav eligibility check: skipping (chutes.build/codeNavigation.enabled not advertised)"
             );
             return Err(CodeNavEligibility::CapabilityNotAdvertised);
         }
@@ -138,7 +138,7 @@ impl MvpAgent {
             Some(sid) => sid,
             // No session_id: per-client capability cannot be determined without a
             // session.  Reject with SessionRequired rather than fall back to shared
-            // global state.  Callers must provide sessionId for x.ai/code/* requests.
+            // global state.  Callers must provide sessionId for chutes.build/code/* requests.
             None => return Err(CodeNavEligibility::SessionRequired),
         };
 

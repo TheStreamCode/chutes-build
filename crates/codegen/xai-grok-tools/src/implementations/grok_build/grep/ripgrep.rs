@@ -5,9 +5,9 @@ use std::sync::OnceLock;
 const RG_BYTES: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),
     "/bundle-rg/rg-",
-    env!("GROK_TOOLS_RG_VER"),
+    env!("CHUTES_BUILD_TOOLS_RG_VER"),
     "-",
-    env!("GROK_TOOLS_RG_TARGET"),
+    env!("CHUTES_BUILD_TOOLS_RG_TARGET"),
     ".bin"
 ));
 
@@ -18,9 +18,9 @@ fn resolve_bundled_rg() -> std::io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let p = crate::util::grok_home().join("vendor").join(concat!(
         "rg-",
-        env!("GROK_TOOLS_RG_VER"),
+        env!("CHUTES_BUILD_TOOLS_RG_VER"),
         "-",
-        env!("GROK_TOOLS_RG_TARGET")
+        env!("CHUTES_BUILD_TOOLS_RG_TARGET")
     ));
     if !p.exists() {
         fs::create_dir_all(p.parent().unwrap())?;
@@ -38,7 +38,7 @@ fn resolve_bundled_rg() -> std::io::Result<PathBuf> {
 /// Get the path to the ripgrep executable.
 ///
 /// In release builds with bundling enabled, this extracts the bundled ripgrep
-/// binary to ~/.grok/vendor/ and returns that path.
+/// binary to ~/.chutes-build/vendor/ and returns that path.
 /// Otherwise, assumes `rg` is in PATH.
 pub fn rg_path() -> PathBuf {
     static RG_EXEC: OnceLock<PathBuf> = OnceLock::new();

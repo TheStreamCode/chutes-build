@@ -685,7 +685,7 @@ impl SessionActor {
             .map_err(|e| format!("failed to prepare client: {e}"))?;
 
         let system = "You are a memory note formatter. Rewrite the user's note into \
-            well-structured markdown suitable for a persistent MEMORY.md file. The note should be:\n\
+            well-structured markdown suitable for a persistent memories.md file. The note should be:\n\
             - Concise but complete\n\
             - Start with a descriptive ## heading\n\
             - Include enough context to be useful months later\n\

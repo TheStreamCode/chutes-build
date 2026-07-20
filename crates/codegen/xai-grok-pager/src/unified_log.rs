@@ -1,7 +1,7 @@
 //! Unified log forwarding for the pager.
 //!
 //! Buffers log entries in memory and flushes them to the shell via
-//! `x.ai/log` ACP notifications. Call [`init`] once at startup with
+//! `chutes.build/log` ACP notifications. Call [`init`] once at startup with
 //! the ACP sender, then use [`info`], [`warn`], [`error`], [`debug`]
 //! from anywhere.
 

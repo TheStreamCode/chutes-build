@@ -69,7 +69,7 @@ pub(super) fn dispatch_send_feedback(app: &mut AppView, text: String) -> Vec<Eff
     };
 
     agent.scrollback.push_block(RenderBlock::system(
-        "Thanks for the feedback! The Grok Build team is on it.".to_string(),
+        "Thanks for the feedback! The Chutes Build team is on it.".to_string(),
     ));
 
     vec![Effect::SendFeedback {
@@ -79,7 +79,7 @@ pub(super) fn dispatch_send_feedback(app: &mut AppView, text: String) -> Vec<Eff
     }]
 }
 
-/// Send a raw remember note for LLM-powered rewriting via `x.ai/memory/rewrite`.
+/// Send a raw remember note for LLM-powered rewriting via `chutes.build/memory/rewrite`.
 /// Clears remember mode and prompts the LLM to reformat the note with session
 /// context. Falls back to direct `SaveMemoryNote` when no session is available.
 pub(super) fn dispatch_send_remember_note(app: &mut AppView, text: String) -> Vec<Effect> {
@@ -331,7 +331,7 @@ pub(crate) fn scrollback_has_user_messages(
 }
 
 /// Request a session recap. Bypasses the prompt queue — works even while the
-/// agent is mid-turn. Fires the `x.ai/recap` ext method; the recap arrives
+/// agent is mid-turn. Fires the `chutes.build/recap` ext method; the recap arrives
 /// asynchronously as a `SessionRecap` notification (rendered in scrollback).
 ///
 /// `auto` is `false` for an explicit `/recap` and `true` for the automatic
@@ -347,7 +347,7 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
     };
 
     // Shell is authoritative (remote settings / config / env). Skip client requests
-    // entirely when the feature is off so we never hit `x.ai/recap`.
+    // entirely when the feature is off so we never hit `chutes.build/recap`.
     if !app.session_recap_available {
         if !auto {
             agent.show_toast("Session recap is not enabled");
@@ -424,7 +424,7 @@ pub(super) fn handle_memory_note_saved(
                     .scrollback
                     .push_block(crate::scrollback::block::RenderBlock::system(format!(
                         "Memory saved to {}",
-                        crate::util::display_user_grok_path("memory/MEMORY.md")
+                        crate::util::display_user_grok_path("memory/memories.md")
                     )));
             }
             Err(error) => {

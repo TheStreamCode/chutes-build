@@ -572,7 +572,7 @@ fn render_tab_bar(
             // not `theme.gray_dim`. At ANSI16 `gray_dim` collapses to the
             // softer slot (silver on White) which leaves text at ~1.2:1
             // contrast — fine for the modal frame's one-cell border line
-            // but unreadable as text glyphs on grokday.
+            // but unreadable as text glyphs on chutesday.
             let style = if is_active {
                 if state.tabs_focused && !is_embedded {
                     Style::default()

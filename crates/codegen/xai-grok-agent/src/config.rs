@@ -1,4 +1,4 @@
-//! Agent definition types — parsed from `.grok/agents/*.md` files.
+//! Agent definition types — parsed from `.chutes-build/agents/*.md` files.
 use crate::error::AgentBuildError;
 use crate::prompt::context::TemplateOverride;
 use crate::prompt::user_message::UserMessageTemplate;
@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
+use xai_grok_tools::implementations::chutes;
 use xai_grok_tools::implementations::codex;
 use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::implementations::grok_build_concise;
@@ -180,10 +181,13 @@ pub fn workspace_grok_build_toolset() -> ToolServerConfig {
     tools.push((&grok_build::ExitPlanModeTool).into());
     tools.push((&grok_build::AskUserQuestionTool).into());
     tools.push((&grok_build::WebSearchTool).into());
-    tools.push((&grok_build::ImageGenTool).into());
-    tools.push((&grok_build::ImageToVideoTool).into());
-    tools.push((&grok_build::ReferenceToVideoTool).into());
     tools.push((&grok_build::WebFetchTool).into());
+    tools.push((&chutes::Context7SearchTool).into());
+    tools.push((&chutes::Context7DocsTool).into());
+    tools.push((&chutes::ListMediaModelsTool).into());
+    tools.push((&chutes::DescribeMediaModelTool).into());
+    tools.push((&chutes::GenerateMediaTool).into());
+    tools.push((&chutes::BrowserTool).into());
     tools.push((&memory::search_tool::MemorySearchImpl).into());
     tools.push((&memory::get_tool::MemoryGetImpl).into());
     tools.push((&grok_build::LspTool).into());
@@ -192,7 +196,7 @@ pub fn workspace_grok_build_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Toolset for the `grok-computer` (workspace/sandbox) preset.
+/// Toolset for the `chutes-computer` (workspace/sandbox) preset.
 fn grok_computer_toolset() -> ToolServerConfig {
     #[allow(unused_mut)]
     let mut tools = vec![
@@ -218,13 +222,13 @@ fn grok_computer_toolset() -> ToolServerConfig {
 /// Native (in-crate) toolset presets.
 fn native_toolset_presets() -> Vec<(&'static str, ToolServerConfig)> {
     vec![
-        ("grok-build", workspace_grok_build_toolset()),
-        ("grok-build-concise", grok_build_concise_toolset()),
-        ("grok-build-plan", grok_build_plan_toolset()),
+        ("chutes-build", workspace_grok_build_toolset()),
+        ("chutes-build-concise", grok_build_concise_toolset()),
+        ("chutes-build-plan", grok_build_plan_toolset()),
         ("codex", codex_toolset()),
         ("explore", explore_toolset()),
         ("plan", plan_toolset()),
-        ("grok-computer", grok_computer_toolset()),
+        ("chutes-computer", grok_computer_toolset()),
     ]
 }
 /// Every named **public** toolset preset (native + externally registered public
@@ -280,6 +284,12 @@ fn default_grok_build_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
+            (&chutes::ListMediaModelsTool).into(),
+            (&chutes::DescribeMediaModelTool).into(),
+            (&chutes::GenerateMediaTool).into(),
+            (&chutes::BrowserTool).into(),
         ],
         behavior_preset: None,
     }
@@ -365,6 +375,8 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
         ],
         behavior_preset: None,
     }
@@ -381,13 +393,33 @@ fn plan_toolset() -> ToolServerConfig {
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
             (&grok_build::TodoWriteTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
         ],
         behavior_preset: None,
     }
 }
-/// Grok Build + plan mode toolset.
+
+/// Read-only advisor toolset: repository inspection plus current public
+/// documentation and local memory. No shell, edit, media, or nested agents.
+fn advisor_toolset() -> ToolServerConfig {
+    ToolServerConfig {
+        tools: vec![
+            (&grok_build::ReadFileTool).into(),
+            (&grok_build::ListDirTool).into(),
+            (&grok_build::GrepTool).into(),
+            (&grok_build::WebFetchTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
+            (&memory::MemorySearchImpl).into(),
+            (&memory::MemoryGetImpl).into(),
+        ],
+        behavior_preset: None,
+    }
+}
+/// Chutes Build + plan mode toolset.
 ///
-/// Extends the default `grok-build` toolset with plan mode tools:
+/// Extends the default `chutes-build` toolset with plan mode tools:
 /// `enter_plan_mode`, `exit_plan_mode`, and `ask_user_question`.
 /// This allows the agent to enter a structured planning phase before
 /// writing code, with user-approved plans.
@@ -413,6 +445,12 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
             (&grok_build::EnterPlanModeTool).into(),
             (&grok_build::ExitPlanModeTool).into(),
             (&grok_build::AskUserQuestionTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
+            (&chutes::ListMediaModelsTool).into(),
+            (&chutes::DescribeMediaModelTool).into(),
+            (&chutes::GenerateMediaTool).into(),
+            (&chutes::BrowserTool).into(),
         ],
         behavior_preset: None,
     }
@@ -447,16 +485,19 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&grok_build::MonitorTool).into(),
             (&grok_build::WebSearchTool).into(),
             (&grok_build::WebFetchTool).into(),
-            (&grok_build::ImageGenTool).into(),
-            (&grok_build::ImageToVideoTool).into(),
-            (&grok_build::ReferenceToVideoTool).into(),
+            (&chutes::Context7SearchTool).into(),
+            (&chutes::Context7DocsTool).into(),
+            (&chutes::ListMediaModelsTool).into(),
+            (&chutes::DescribeMediaModelTool).into(),
+            (&chutes::GenerateMediaTool).into(),
+            (&chutes::BrowserTool).into(),
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
         ],
         behavior_preset: None,
     }
 }
-/// Grok Build + plan mode toolset WITHOUT subagent tools.
+/// Chutes Build + plan mode toolset WITHOUT subagent tools.
 ///
 /// Same as `grok_build_plan_toolset` but excludes `TaskTool`,
 /// `TaskOutputTool`, and `KillTaskTool`. Use this when the shell
@@ -486,7 +527,7 @@ fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Default Grok Build toolset + `ask_user_question`.
+/// Default Chutes Build toolset + `ask_user_question`.
 ///
 /// Same as `default_grok_build_toolset` with the `AskUserQuestionTool` added,
 /// allowing the agent to ask structured questions without full plan mode.
@@ -647,7 +688,7 @@ where
 /// are defined in exactly one place. The enum covers all built-in
 /// agents for centralized name management and `by_name()` dispatch.
 ///
-/// `subagent_variants()` returns only the 3 that are exposed to the LLM
+/// `subagent_variants()` returns the roles exposed to the LLM
 /// via the `TaskTool` description. The remaining 6 are top-level agent
 /// profiles resolvable by name but not advertised as subagent types.
 #[derive(
@@ -655,18 +696,24 @@ where
 )]
 #[strum(serialize_all = "kebab-case")]
 pub enum BuiltinAgentName {
+    #[strum(serialize = "chutes-build")]
     GrokBuild,
+    #[strum(serialize = "chutes-build-concise")]
     GrokBuildConcise,
+    #[strum(serialize = "chutes-build-plan")]
     GrokBuildPlan,
+    #[strum(serialize = "chutes-build-plan-no-subagents")]
     GrokBuildPlanNoSubagents,
+    #[strum(serialize = "chutes-build-ask-user")]
     GrokBuildAskUser,
     Codex,
     Opencode,
     GeneralPurpose,
     Explore,
     Plan,
+    Advisor,
     BrowserUse,
-    #[strum(serialize = "grok-build-orchestrator")]
+    #[strum(serialize = "chutes-build-orchestrator")]
     GrokBuildOrchestrator,
 }
 /// Strict-harness predicate by name. Resolves via `BuiltinAgentName` and
@@ -694,16 +741,22 @@ impl BuiltinAgentName {
             Self::GeneralPurpose => AgentDefinition::general_purpose(),
             Self::Explore => AgentDefinition::explore(),
             Self::Plan => AgentDefinition::plan(),
+            Self::Advisor => AgentDefinition::advisor(),
             Self::BrowserUse => AgentDefinition::browser_use(),
             Self::GrokBuildOrchestrator => AgentDefinition::grok_build_orchestrator(),
         }
     }
     /// Built-in agents available as subagents via the Task tool.
     pub fn subagent_variants() -> &'static [Self] {
-        &[Self::GeneralPurpose, Self::Explore, Self::Plan]
+        &[
+            Self::GeneralPurpose,
+            Self::Explore,
+            Self::Plan,
+            Self::Advisor,
+        ]
     }
 }
-/// Portable agent identity — parsed from .grok/agents/*.md.
+/// Portable agent identity — parsed from .chutes-build/agents/*.md.
 /// Usable as both a top-level agent and a subagent definition.
 ///
 /// This is the stable, version-controllable contract. It does NOT
@@ -868,11 +921,11 @@ fn default_prompt_mode() -> PromptMode {
 /// Where the agent definition was discovered.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AgentScope {
-    /// .grok/agents/ (project-level, highest priority)
+    /// .chutes-build/agents/ (project-level, highest priority)
     Project,
-    /// ~/.grok/agents/ (user-level)
+    /// ~/.chutes-build/agents/ (user-level)
     User,
-    /// ~/.grok/bundled/agents/ (lowest-priority bundled cache)
+    /// ~/.chutes-build/bundled/agents/ (lowest-priority bundled cache)
     Bundled,
     /// Built-in agent (e.g., default_grok_build(), browser_use()).
     #[default]
@@ -1068,11 +1121,11 @@ const _: () = assert!(AgentColor::VALID_VALUES.len() == <AgentColor as strum::En
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum MemoryScope {
-    /// `~/.grok/agent-memory/<name>/`
+    /// `~/.chutes-build/agent-memory/<name>/`
     User,
-    /// `<project>/.grok/agent-memory/<name>/`
+    /// `<project>/.chutes-build/agent-memory/<name>/`
     Project,
-    /// `<project>/.grok/agent-memory-local/<name>/`
+    /// `<project>/.chutes-build/agent-memory-local/<name>/`
     Local,
 }
 impl MemoryScope {
@@ -1095,12 +1148,14 @@ impl MemoryScope {
                 is_project_scoped: false,
             },
             Self::Project => ResolvedMemoryDir {
-                path: project_cwd.join(".grok/agent-memory").join(agent_name),
+                path: project_cwd
+                    .join(".chutes-build/agent-memory")
+                    .join(agent_name),
                 is_project_scoped: true,
             },
             Self::Local => ResolvedMemoryDir {
                 path: project_cwd
-                    .join(".grok/agent-memory-local")
+                    .join(".chutes-build/agent-memory-local")
                     .join(agent_name),
                 is_project_scoped: true,
             },
@@ -1316,11 +1371,13 @@ impl AgentDefinition {
                 return scope;
             }
         }
-        if path_str.contains(".grok/agents/") || path_str.contains(".grok\\agents\\") {
+        if path_str.contains(".chutes-build/agents/")
+            || path_str.contains(".chutes-build\\agents\\")
+        {
             return AgentScope::Project;
         }
-        if path_str.contains(".grok/bundled/agents/")
-            || path_str.contains(".grok\\bundled\\agents\\")
+        if path_str.contains(".chutes-build/bundled/agents/")
+            || path_str.contains(".chutes-build\\bundled\\agents\\")
         {
             return AgentScope::Bundled;
         }
@@ -1377,7 +1434,7 @@ impl AgentDefinition {
     /// stock harness, so a client-supplied `_meta.agentProfile` must NOT
     /// override it. Strict iff any of: bespoke `system_prompt` template,
     /// bespoke `user_message_template`, or curated toolset
-    /// (`!inject_default_tools`). Stock `grok-build*` agents leave all
+    /// (`!inject_default_tools`). Stock `chutes-build*` agents leave all
     /// three at defaults and are non-strict.
     pub fn is_strict_harness(&self) -> bool {
         use crate::prompt::context::TemplateOverride;
@@ -1396,12 +1453,12 @@ impl AgentDefinition {
         file_tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
     ) {
         const FILE_TOOL_SLOTS: &[[&str; 2]] = &[
-            ["GrokBuild:read_file", "GrokBuildHashline:hashline_read"],
+            ["ChutesBuild:read_file", "GrokBuildHashline:hashline_read"],
             [
-                "GrokBuild:search_replace",
+                "ChutesBuild:search_replace",
                 "GrokBuildHashline:hashline_edit",
             ],
-            ["GrokBuild:grep", "GrokBuildHashline:hashline_grep"],
+            ["ChutesBuild:grep", "GrokBuildHashline:hashline_grep"],
         ];
         for tool in self.tool_config.tools.iter_mut() {
             let Some(slot) = FILE_TOOL_SLOTS
@@ -1461,47 +1518,47 @@ impl AgentDefinition {
     pub fn default_grok_build() -> Self {
         Self::base(
             BuiltinAgentName::GrokBuild,
-            "Grok Build agent for software engineering tasks.",
+            "Chutes Build agent for software engineering tasks.",
         )
     }
-    /// Grok Build Concise agent definition — concise output format for SFT/RL.
+    /// Chutes Build Concise agent definition — concise output format for SFT/RL.
     pub fn grok_build_concise() -> Self {
         Self {
             tool_config: grok_build_concise_toolset(),
             agents_md: false,
             ..Self::base(
                 BuiltinAgentName::GrokBuildConcise,
-                "Grok Build agent with concise output format.",
+                "Chutes Build agent with concise output format.",
             )
         }
     }
-    /// Grok Build agent with plan mode tools.
+    /// Chutes Build agent with plan mode tools.
     pub fn grok_build_plan() -> Self {
         Self {
             tool_config: grok_build_plan_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildPlan,
-                "Grok Build agent with plan mode support.",
+                "Chutes Build agent with plan mode support.",
             )
         }
     }
-    /// Grok Build + plan mode WITHOUT subagent tools.
+    /// Chutes Build + plan mode WITHOUT subagent tools.
     pub fn grok_build_plan_no_subagents() -> Self {
         Self {
             tool_config: grok_build_plan_no_subagents_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildPlanNoSubagents,
-                "Grok Build agent with plan mode (no subagents).",
+                "Chutes Build agent with plan mode (no subagents).",
             )
         }
     }
-    /// Default Grok Build agent with the `ask_user_question` tool.
+    /// Default Chutes Build agent with the `ask_user_question` tool.
     pub fn grok_build_ask_user() -> Self {
         Self {
             tool_config: grok_build_ask_user_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildAskUser,
-                "Grok Build agent with ask-user-question tool.",
+                "Chutes Build agent with ask-user-question tool.",
             )
         }
     }
@@ -1556,6 +1613,17 @@ impl AgentDefinition {
             ..Self::base(BuiltinAgentName::Plan, "")
         }
     }
+    /// Advisor subagent — on-demand senior review with read-only evidence.
+    pub fn advisor() -> Self {
+        Self {
+            description: xai_tool_types::ADVISOR_SUBAGENT.description.to_string(),
+            tool_config: advisor_toolset(),
+            permission_mode: PermissionMode::Plan,
+            prompt_body: Some(xai_tool_types::ADVISOR_PROMPT.to_string()),
+            inherit_skills: false,
+            ..Self::base(BuiltinAgentName::Advisor, "")
+        }
+    }
     /// Browser Use agent definition.
     pub fn browser_use() -> Self {
         Self {
@@ -1573,7 +1641,7 @@ impl AgentDefinition {
             )
         }
     }
-    /// Grok Build Orchestrator — GBL model with full GrokBuild tools
+    /// Chutes Build Orchestrator — GBL model with full GrokBuild tools
     /// (skills, MCPs, plan mode) that delegates coding/exploration to
     /// subagents.
     ///
@@ -1638,14 +1706,14 @@ mod tests {
     #[test]
     fn toolset_for_preset_resolves_known_names() {
         for name in [
-            "grok-build",
+            "chutes-build",
             "grok_build",
-            "grok-build-concise",
-            "grok-build-plan",
+            "chutes-build-concise",
+            "chutes-build-plan",
             "codex",
             "explore",
             "plan",
-            "grok-computer",
+            "chutes-computer",
             "grok_computer",
         ] {
             assert!(
@@ -1657,7 +1725,7 @@ mod tests {
     }
     #[test]
     fn presets_select_distinct_toolsets_by_size() {
-        let gb = toolset_for_preset("grok-build").unwrap();
+        let gb = toolset_for_preset("chutes-build").unwrap();
         let plan = toolset_for_preset("plan").unwrap();
         let explore = toolset_for_preset("explore").unwrap();
         assert!(explore.tools.len() < plan.tools.len());
@@ -1673,8 +1741,8 @@ mod tests {
     }
     #[test]
     fn grok_computer_preset_is_curated_grok_build_subset() {
-        let gc = toolset_for_preset("grok-computer").unwrap();
-        let gb = toolset_for_preset("grok-build").unwrap();
+        let gc = toolset_for_preset("chutes-computer").unwrap();
+        let gb = toolset_for_preset("chutes-build").unwrap();
         let gb_ids: std::collections::HashSet<&str> =
             gb.tools.iter().map(|t| t.id.as_str()).collect();
         let exclusive_ids = grok_computer_exclusive_ids();
@@ -1685,18 +1753,18 @@ mod tests {
             }
             assert!(
                 gb_ids.contains(t.id.as_str()),
-                "grok-computer tool `{}` must also ship in the grok-build preset",
+                "chutes-computer tool `{}` must also ship in the chutes-build preset",
                 t.id
             );
         }
         assert!(
             gc.tools.len() < gb.tools.len(),
-            "grok-computer should be a curated subset of grok-build"
+            "chutes-computer should be a curated subset of chutes-build"
         );
     }
     #[test]
     fn grok_computer_uses_subagent_free_background_task_tools() {
-        let gc = toolset_for_preset("grok-computer").unwrap();
+        let gc = toolset_for_preset("chutes-computer").unwrap();
         let ids: std::collections::HashSet<&str> = gc.tools.iter().map(|t| t.id.as_str()).collect();
         assert!(
             ids.contains(
@@ -1723,23 +1791,23 @@ mod tests {
             }
         }
     }
-    /// The grok-computer preset must ship a full-file write tool (legacy
-    /// `write_file` parity) — the same OpenCode `write` tool the grok-build
+    /// The chutes-computer preset must ship a full-file write tool (legacy
+    /// `write_file` parity) — the same OpenCode `write` tool the chutes-build
     /// preset uses. Guards against `search_replace` being the only
     /// file-mutation path, which has no single-tool full-rewrite when the
     /// empty-old_string overwrite guard is enabled.
     #[test]
     fn grok_computer_preset_includes_write_tool() {
-        let gc = toolset_for_preset("grok-computer").unwrap();
+        let gc = toolset_for_preset("chutes-computer").unwrap();
         let write_id = ToolConfig::from(&opencode::OpenCodeWriteTool).id;
         assert!(
             gc.tools.iter().any(|t| t.id == write_id),
-            "grok-computer preset must include the `{write_id}` tool"
+            "chutes-computer preset must include the `{write_id}` tool"
         );
     }
     #[test]
     fn grok_computer_preset_excludes_plan_and_lsp() {
-        let gc = toolset_for_preset("grok-computer").unwrap();
+        let gc = toolset_for_preset("chutes-computer").unwrap();
         let gc_ids: std::collections::HashSet<&str> =
             gc.tools.iter().map(|t| t.id.as_str()).collect();
         for excluded in [
@@ -1749,7 +1817,7 @@ mod tests {
         ] {
             assert!(
                 !gc_ids.contains(excluded.as_str()),
-                "grok-computer preset must not advertise `{excluded}`"
+                "chutes-computer preset must not advertise `{excluded}`"
             );
         }
         let full = workspace_grok_build_toolset();
@@ -1779,6 +1847,7 @@ mod tests {
             | BuiltinAgentName::GeneralPurpose
             | BuiltinAgentName::Explore
             | BuiltinAgentName::Plan
+            | BuiltinAgentName::Advisor
             | BuiltinAgentName::Opencode
             | BuiltinAgentName::BrowserUse => false,
         }
@@ -1801,22 +1870,22 @@ mod tests {
     }
     #[test]
     fn is_strict_harness_agent_type_classifies_by_name() {
-        for strict in ["codex", "grok-build-orchestrator"] {
+        for strict in ["codex", "chutes-build-orchestrator"] {
             assert!(
                 is_strict_harness_agent_type(strict),
                 "{strict} should be strict"
             );
         }
         for non_strict in [
-            "grok-build",
-            "grok-build-plan",
-            "grok-build-concise",
-            "grok-build-ask-user",
+            "chutes-build",
+            "chutes-build-plan",
+            "chutes-build-concise",
+            "chutes-build-ask-user",
             "opencode",
             "browser-use",
             "custom-user-agent",
             "",
-            "grok-build-totally-made-up",
+            "chutes-build-totally-made-up",
         ] {
             assert!(
                 !is_strict_harness_agent_type(non_strict),
@@ -2043,13 +2112,13 @@ description: Minimal agent
         let proj = MemoryScope::Project.resolve_dir("a", cwd);
         assert_eq!(
             proj.path,
-            std::path::PathBuf::from("/project/.grok/agent-memory/a")
+            std::path::PathBuf::from("/project/.chutes-build/agent-memory/a")
         );
         assert!(proj.is_project_scoped);
         let local = MemoryScope::Local.resolve_dir("a", cwd);
         assert_eq!(
             local.path,
-            std::path::PathBuf::from("/project/.grok/agent-memory-local/a")
+            std::path::PathBuf::from("/project/.chutes-build/agent-memory-local/a")
         );
         assert!(local.is_project_scoped);
     }
@@ -2231,7 +2300,7 @@ description: Test default tool config
         let bundled = tmp
             .path()
             .join("nested")
-            .join(".grok")
+            .join(".chutes-build")
             .join("bundled")
             .join("agents")
             .join("bundled-agent.md");
@@ -2262,12 +2331,12 @@ description: Test default tool config
     #[test]
     fn test_from_json_has_default_toolset_with_task_tool() {
         let json = serde_json::json!(
-            { "name" : "grok-build", "description" : "Multi-surface coding agent.",
+            { "name" : "chutes-build", "description" : "Multi-surface coding agent.",
             "promptMode" : "extend", "permissionMode" : "dontAsk", "agentsMd" : true,
             "promptBody" : "You are a coding assistant." }
         );
         let def = AgentDefinition::from_json(&json).unwrap();
-        let task_tool_id = "GrokBuild:task";
+        let task_tool_id = "ChutesBuild:task";
         assert!(
             def.tool_config.tools.iter().any(|tc| tc.id == task_tool_id),
             "from_json() without toolConfig should include TaskTool in default toolset, \
@@ -2416,9 +2485,9 @@ description: Test default tool config
     fn test_builtin_agent_name_strum_round_trip() {
         use std::str::FromStr;
         for (s, expected) in [
-            ("grok-build", BuiltinAgentName::GrokBuild),
-            ("grok-build-concise", BuiltinAgentName::GrokBuildConcise),
-            ("grok-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
+            ("chutes-build", BuiltinAgentName::GrokBuild),
+            ("chutes-build-concise", BuiltinAgentName::GrokBuildConcise),
+            ("chutes-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
             ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),
@@ -2453,10 +2522,11 @@ description: Test default tool config
     #[test]
     fn test_builtin_agent_name_subagent_variants() {
         let variants = BuiltinAgentName::subagent_variants();
-        assert_eq!(variants.len(), 3);
+        assert_eq!(variants.len(), 4);
         assert!(variants.contains(&BuiltinAgentName::GeneralPurpose));
         assert!(variants.contains(&BuiltinAgentName::Explore));
         assert!(variants.contains(&BuiltinAgentName::Plan));
+        assert!(variants.contains(&BuiltinAgentName::Advisor));
     }
     #[test]
     fn test_all_builtins_have_inherit_model() {

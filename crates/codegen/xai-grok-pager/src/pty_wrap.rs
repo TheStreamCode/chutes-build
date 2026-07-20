@@ -1,4 +1,4 @@
-//! Local PTY wrapper: the engine behind `grok wrap` (see [`crate::wrap_cmd`]).
+//! Local PTY wrapper: the engine behind `chutes-build wrap` (see [`crate::wrap_cmd`]).
 //!
 //! Spawns a command inside a local pseudo-terminal and pipes its output
 //! through `crate::wrap_filter::Osc52Filter`, which intercepts OSC 52
@@ -22,7 +22,7 @@ use crate::wrap_restore::ModeTracker;
 
 /// Run an arbitrary command inside a local PTY with OSC 52 output filtering.
 ///
-/// This is the engine behind `grok wrap`: it spawns
+/// This is the engine behind `chutes-build wrap`: it spawns
 /// `program` (with `args`) attached to a local pseudo-terminal, forwards the
 /// outer terminal's size changes to it, and filters its output through
 /// `Osc52Filter`, which intercepts OSC 52 clipboard sequences and writes
@@ -51,7 +51,7 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
     args.iter().for_each(|arg| cmd.arg(arg));
 
     // Advertise to the wrapped program — and anything it spawns, e.g. a remote
-    // `grok` reached over SSH — that its OSC 52 clipboard writes are being
+    // `chutes-build` reached over SSH — that its OSC 52 clipboard writes are being
     // intercepted here and copied to the real local clipboard. The inner grok
     // reads this (see `xai_grok_pager_render::clipboard::osc52_sink_active`) to
     // *trust* OSC 52 even when it can't detect an OSC-52-capable terminal,
@@ -59,12 +59,12 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
     // cannot otherwise verify that the local clipboard received the write).
     //
     // `CommandBuilder::new` inherits the full parent environment; `env` overlays
-    // these two without clearing it. The canonical `GROK_OSC52_SINK` is
+    // these two without clearing it. The canonical `CHUTES_BUILD_OSC52_SINK` is
     // inherited by local children; the `LC_`-prefixed alias rides the default
     // OpenSSH env forwarding (`SendEnv LANG LC_*` on the client,
     // `AcceptEnv LANG LC_*` on the server) so the signal survives the SSH hop.
-    cmd.env("GROK_OSC52_SINK", "1");
-    cmd.env("LC_GROK_OSC52_SINK", "1");
+    cmd.env("CHUTES_BUILD_OSC52_SINK", "1");
+    cmd.env("LC_CHUTES_BUILD_OSC52_SINK", "1");
 
     // Spawn child in the PTY slave.
     let mut child = pair.slave.spawn_command(cmd)?;
@@ -76,7 +76,7 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
     // channel. Cross-thread use of portable-pty's `Write` impl observed EIO
     // (errno 5) on macOS even for small inject payloads; confining `write_all`
     // to a single owner thread avoids that. Handles are intentionally
-    // detached — `grok wrap` is short-lived and exits with the child.
+    // detached — `chutes-build wrap` is short-lived and exits with the child.
     let mut pty_reader = pair.master.try_clone_reader()?;
 
     // NOTE: we intentionally do NOT block SIGWINCH here. The resize handler

@@ -35,13 +35,13 @@ pub fn compute_ws_url_suffix(ws_url: &str) -> String {
 /// Env var that overrides the leader socket path (and, by extension, the lock
 /// path — the sibling `.lock`). Set by the `--leader-socket` flag, or exported
 /// directly. Lets a developer sandbox a leader instance away from the default
-/// `~/.grok/leader.sock` — e.g. run a local branch build's leader without
+/// `~/.chutes-build/leader.sock` — e.g. run a local branch build's leader without
 /// colliding with an installed stable leader on the same machine. Honored by
 /// BOTH the client (`connect_or_spawn`) and the leader (`run_leader`), and
 /// inherited by the spawned leader subprocess, so all parties bind the same
 /// path. When set, the WS-URL-derived suffix (`compute_ws_url_suffix`) is
 /// bypassed entirely.
-pub const LEADER_SOCKET_ENV: &str = "GROK_LEADER_SOCKET";
+pub const LEADER_SOCKET_ENV: &str = "CHUTES_BUILD_LEADER_SOCKET";
 
 /// The explicit socket-path override, if [`LEADER_SOCKET_ENV`] is set and
 /// non-empty.
@@ -340,8 +340,8 @@ mod tests {
 
     #[test]
     fn override_socket_path_wins_over_ws_url_derivation() {
-        let root = Path::new("/home/u/.grok");
-        let override_sock = PathBuf::from("/home/u/.grok/leader-branch.sock");
+        let root = Path::new("/home/u/.chutes-build");
+        let override_sock = PathBuf::from("/home/u/.chutes-build/leader-branch.sock");
 
         // With an override, the path is taken verbatim and the WS-URL suffix is
         // ignored (a non-default ws_url would otherwise add a hash suffix).
@@ -352,13 +352,13 @@ mod tests {
         // The lock is the sibling `.lock`, NOT a ws-url-derived name.
         assert_eq!(
             resolve_lock_path(Some(override_sock), root, "wss://custom.example/ws"),
-            PathBuf::from("/home/u/.grok/leader-branch.lock")
+            PathBuf::from("/home/u/.chutes-build/leader-branch.lock")
         );
     }
 
     #[test]
     fn no_override_falls_back_to_ws_url_derivation() {
-        let root = Path::new("/home/u/.grok");
+        let root = Path::new("/home/u/.chutes-build");
         // Default (empty) ws_url → bare leader.sock / leader.lock under root.
         assert_eq!(
             resolve_socket_path(None, root, ""),

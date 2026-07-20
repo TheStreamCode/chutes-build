@@ -216,10 +216,10 @@ fn spawn_agent_local(
 }
 
 /// Build a newline-terminated JSON-RPC request line for an internal
-/// `x.ai/...` extension method, for injection into the agent's inbound ACP
+/// `chutes.build/...` extension method, for injection into the agent's inbound ACP
 /// stream by the leader's own watcher tasks (config hot-reload, skills).
 ///
-/// The wire method is written **`_`-prefixed** (`_x.ai/internal/...`):
+/// The wire method is written **`_`-prefixed** (`_chutes.build/internal/...`):
 /// `agent-client-protocol`'s inbound decoder routes a non-built-in method to
 /// `ext_method` only when it carries the `_` extension prefix and rejects
 /// bare custom methods with `-32601 method_not_found`. These injections were
@@ -238,7 +238,7 @@ fn internal_reload_request_line(id: &str, method: &str, params: serde_json::Valu
     format!("{}\n", msg)
 }
 
-/// Start a skills file watcher and wire it to inject `x.ai/internal/reload_skills`
+/// Start a skills file watcher and wire it to inject `chutes.build/internal/reload_skills`
 /// messages into the shared ACP incoming stream when SKILL.md files change on disk.
 ///
 /// Returns the watcher guard (must be kept alive for the lifetime of the session)
@@ -263,7 +263,7 @@ where
             info!("Skill directory changed on disk, reloading skills for all sessions");
             let line = internal_reload_request_line(
                 "skills-reload",
-                "x.ai/internal/reload_skills",
+                "chutes.build/internal/reload_skills",
                 serde_json::json!({}),
             );
             let mut tx = skills_tx.lock().await;
@@ -303,11 +303,11 @@ pub async fn run_stdio_agent(
         xai_file_utils::queue::DEFAULT_MAX_AGE,
     );
 
-    // Log the client that launched us (set by grok-desktop when spawning `grok agent stdio`).
+    // Log the client that launched us (set by grok-desktop when spawning `chutes-build agent stdio`).
     // This appears early in unified.jsonl and is extremely useful for auth diagnostics.
-    if let Ok(version) = std::env::var("GROK_CLIENT_VERSION") {
+    if let Ok(version) = std::env::var("CHUTES_BUILD_CLIENT_VERSION") {
         crate::unified_log::info(
-            "GROK_CLIENT_VERSION",
+            "CHUTES_BUILD_CLIENT_VERSION",
             None,
             Some(serde_json::json!({ "version": version })),
         );
@@ -375,7 +375,7 @@ pub async fn run_stdio_agent(
             auth_manager.start_proactive_refresh(tokio_util::sync::CancellationToken::new());
             // Pause refreshes across system sleep so an OIDC refresh can't straddle a
             // suspend (which can revoke the refresh token and force re-login).
-            // `grok agent stdio` is a local/interactive entrypoint (spawned by
+            // `chutes-build agent stdio` is a local/interactive entrypoint (spawned by
             // grok-desktop), so it needs the gate like the leader and pager paths;
             // no-op where the OS listener is unavailable.
             auth_manager.start_system_power_listener();
@@ -431,8 +431,8 @@ async fn run_headless_inner(
 ) -> anyhow::Result<()> {
     register_fs_watch_runtime();
     xai_grok_telemetry::unified_log::set_version(xai_grok_version::VERSION);
-    // `grok agent [headless]` serves non-TUI automation; stamp proxy requests
-    // as headless. IDE-facing `grok agent stdio` stays interactive.
+    // `chutes-build agent [headless]` serves non-TUI automation; stamp proxy requests
+    // as headless. IDE-facing `chutes-build agent stdio` stays interactive.
     crate::http::set_process_client_mode_headless();
 
     use crate::agent::relay::spawn_relay_connection_with_callback;
@@ -440,7 +440,7 @@ async fn run_headless_inner(
 
     // Headless's only transport is the relay (no IPC fallback), so a session is required.
     const HEADLESS_NO_SESSION: &str = "Headless mode requires a grok.com session. \
-        Run `grok login` to sign in, or use `grok agent stdio` for API-key access.";
+        Run `chutes-build login` to sign in, or use `chutes-build agent stdio` for API-key access.";
 
     // Clean up orphaned upload queue temp files from previous sessions (best-effort).
     // Uses DEFAULT_MAX_AGE to stay in sync with the upload queue's retry policy.
@@ -459,9 +459,11 @@ async fn run_headless_inner(
         match auth_manager.current() {
             Some(auth) => (auth, false),
             None if auth_manager.is_expired() => {
-                anyhow::bail!("Session expired. Please run 'grok login' to re-authenticate.")
+                anyhow::bail!(
+                    "Session expired. Please run 'chutes-build login' to re-authenticate."
+                )
             }
-            None => anyhow::bail!("No cached credentials found. Run `grok login`."),
+            None => anyhow::bail!("No cached credentials found. Run `chutes-build login`."),
         }
     } else if reauthenticate {
         let auth_manager = Arc::new(AuthManager::new(&grok_home::grok_home(), ctx.clone()));
@@ -553,7 +555,7 @@ async fn run_headless_inner(
             // Print to stderr (not logger) so user sees it
             eprintln!();
             eprintln!(
-                "Open Grok Build: {} (press Enter to open in browser)",
+                "Open Chutes Build: {} (press Enter to open in browser)",
                 grok_code_url
             );
             eprintln!();
@@ -815,7 +817,7 @@ fn relay_config_for_session(
 /// returning the slot where the [`RelayHandle`](crate::agent::relay::RelayHandle)
 /// is parked once the connection task is running.
 ///
-/// * `relay_on_demand == false` (default — explicit `grok agent leader`
+/// * `relay_on_demand == false` (default — explicit `chutes-build agent leader`
 ///   invocation: devbox / systemd / nohup): connect **eagerly**, right now.
 ///   A bare leader has no local IPC clients; remote prompts arrive *through*
 ///   the relay, so it must be up before any demand signal could ever exist.
@@ -1355,7 +1357,7 @@ pub async fn run_leader(
             });
 
             // Start (or arm) the grok.com relay. Eager by default — a bare
-            // `grok agent leader` (devbox / systemd) has no local IPC clients
+            // `chutes-build agent leader` (devbox / systemd) has no local IPC clients
             // and receives remote prompts *through* the relay, so it must
             // connect unconditionally. Leaders auto-spawned by interactive
             // clients pass `relay_on_demand` and defer the WebSocket until the
@@ -1399,7 +1401,7 @@ pub async fn run_leader(
                 watch_paths.push(home.join(".claude.json"));
             }
             let auth_scope = agent_config.grok_com_config.auth_scope();
-            // Gated on user_grok_home() so a cwd-relative .grok/auth.json is never
+            // Gated on user_grok_home() so a cwd-relative .chutes-build/auth.json is never
             // read as the user auth store when no home resolves.
             let initial_auth_key_hash = xai_grok_config::user_grok_home()
                 .map(|g| g.join("auth.json"))
@@ -1503,7 +1505,7 @@ pub async fn run_leader(
                             models_manager_for_config.on_auth_changed().await;
                             let line = internal_reload_request_line(
                                 "config-auth-reloaded",
-                                "x.ai/internal/reload_all_mcp_servers",
+                                "chutes.build/internal/reload_all_mcp_servers",
                                 serde_json::json!({}),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1515,7 +1517,7 @@ pub async fn run_leader(
                             auth_manager_for_config.clear_in_memory();
                             let line = internal_reload_request_line(
                                 "config-auth-cleared",
-                                "x.ai/internal/auth_cleared",
+                                "chutes.build/internal/auth_cleared",
                                 serde_json::json!({}),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1534,7 +1536,7 @@ pub async fn run_leader(
                             info!("MCP server config change detected — reloading active sessions");
                             let line = internal_reload_request_line(
                                 "config-reload-mcp",
-                                "x.ai/internal/reload_all_mcp_servers",
+                                "chutes.build/internal/reload_all_mcp_servers",
                                 serde_json::json!({}),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1557,7 +1559,7 @@ pub async fn run_leader(
                             );
                             let line = internal_reload_request_line(
                                 "config-reload-project-mcp",
-                                "x.ai/internal/reload_project_mcp_servers",
+                                "chutes.build/internal/reload_project_mcp_servers",
                                 serde_json::json!({ "cwd": cwd.to_string_lossy() }),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1572,7 +1574,7 @@ pub async fn run_leader(
                             info!("Model config change detected — reloading agent model list");
                             let line = internal_reload_request_line(
                                 "config-reload-models",
-                                "x.ai/internal/reload_models",
+                                "chutes.build/internal/reload_models",
                                 serde_json::json!({}),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1581,7 +1583,7 @@ pub async fn run_leader(
                             }
                         }
                         ConfigUpdate::ModelsCacheChanged => {
-                            // External write to ~/.grok/models_cache.json
+                            // External write to ~/.chutes-build/models_cache.json
                             // (another grok process fetched a fresher /v1/models
                             // catalog). Injected into the agent's ACP stream —
                             // NOT applied directly on the manager — so it is
@@ -1598,7 +1600,7 @@ pub async fn run_leader(
                             info!("Models cache change detected — reloading agent model catalog");
                             let line = internal_reload_request_line(
                                 "config-reload-models-cache",
-                                "x.ai/internal/reload_models_cache",
+                                "chutes.build/internal/reload_models_cache",
                                 serde_json::json!({}),
                             );
                             let mut tx = acp_tx_for_config.lock().await;
@@ -1635,7 +1637,7 @@ pub async fn run_leader(
                             info!("UI config change detected by watcher");
                             let notification = serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "method": "x.ai/config_changed",
+                                "method": "chutes.build/config_changed",
                                 "params": {
                                     "section": "ui",
                                     "changes": {
@@ -1822,7 +1824,7 @@ mod tests {
     }
 
     /// Regression test for the bare-leader relay gating bug: a bare
-    /// `grok agent leader` (devbox/systemd — no local IPC clients,
+    /// `chutes-build agent leader` (devbox/systemd — no local IPC clients,
     /// `relay_on_demand == false`) must connect the grok.com relay eagerly.
     /// Remote prompts arrive *through* the relay, so on such a leader no
     /// headless-registration demand signal can ever fire; gating the relay on
@@ -1845,7 +1847,7 @@ mod tests {
             .run_until(async {
                 let slot = spawn_leader_relay(
                     config,
-                    false, // eager: explicit `grok agent leader` invocation
+                    false, // eager: explicit `chutes-build agent leader` invocation
                     demand_rx,
                     ws_to_agent_tx,
                     agent_to_ws_tx.clone(),
@@ -1917,13 +1919,13 @@ mod tests {
     fn internal_reload_request_line_uses_wire_ext_prefix() {
         let line = internal_reload_request_line(
             "config-reload-models",
-            "x.ai/internal/reload_models",
+            "chutes.build/internal/reload_models",
             serde_json::json!({}),
         );
         assert!(line.ends_with('\n'), "must be a newline-terminated line");
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
-            msg["method"], "_x.ai/internal/reload_models",
+            msg["method"], "_chutes.build/internal/reload_models",
             "wire method must carry the `_` ext prefix or the ACP decoder \
              rejects it with method_not_found"
         );
@@ -1933,7 +1935,7 @@ mod tests {
         // Params must pass through verbatim (project-MCP reload carries cwd).
         let line = internal_reload_request_line(
             "config-reload-project-mcp",
-            "x.ai/internal/reload_project_mcp_servers",
+            "chutes.build/internal/reload_project_mcp_servers",
             serde_json::json!({ "cwd": "/repo/x" }),
         );
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
@@ -1941,11 +1943,11 @@ mod tests {
 
         let line = internal_reload_request_line(
             "config-auth-cleared",
-            "x.ai/internal/auth_cleared",
+            "chutes.build/internal/auth_cleared",
             serde_json::json!({}),
         );
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        assert_eq!(msg["method"], "_x.ai/internal/auth_cleared");
+        assert_eq!(msg["method"], "_chutes.build/internal/auth_cleared");
     }
 
     #[tokio::test]

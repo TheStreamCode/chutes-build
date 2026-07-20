@@ -202,7 +202,7 @@ pub fn spawn_writer_thread() -> (mpsc::Sender<Vec<u8>>, WriterSync, WriterThread
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     let sync = WriterSync::new();
     let thread_sync = sync.clone();
-    let test_delay = std::env::var("GROK_TEST_FRAME_WRITE_DELAY_MS")
+    let test_delay = std::env::var("CHUTES_BUILD_TEST_FRAME_WRITE_DELAY_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(Duration::from_millis);

@@ -6,7 +6,7 @@
 //! settings re-fetch, then returns an `UnblockResult` so the agent can
 //! lift the gate.
 //!
-//! The pager drives the polling via `x.ai/auth/check_subscription`: the 5s
+//! The pager drives the polling via `chutes.build/auth/check_subscription`: the 5s
 //! paywall chain, the free-tier watch, the refocus check, and
 //! verify-before-paywall gate deferral (see the pager's `app::subscription`
 //! module).
@@ -65,7 +65,7 @@ async fn fetch_user_info(
     }
 }
 /// Single-shot subscription check. Called by the pager every 5s while
-/// the paywall is shown (`x.ai/auth/check_subscription`).
+/// the paywall is shown (`chutes.build/auth/check_subscription`).
 ///
 /// Queries `/user?include=subscription` for the live tier. If a qualifying
 /// tier is found, does a best-effort JWT refresh + settings re-fetch and

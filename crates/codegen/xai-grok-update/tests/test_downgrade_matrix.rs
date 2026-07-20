@@ -281,7 +281,7 @@ fn setup_npm(current_version: &str) -> FakeBinGuard {
     reset_home();
     set_test_version(current_version);
     // SAFETY: serial_test ensures no race; reset_home clears this between tests.
-    unsafe { std::env::set_var("GROK_INSTALLER", "npm") };
+    unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "npm") };
     FakeBinGuard::install_npm()
 }
 
@@ -290,7 +290,7 @@ fn setup_gh(current_version: &str) -> FakeBinGuard {
     reset_home();
     set_test_version(current_version);
     // SAFETY: serial_test ensures no race; reset_home clears this between tests.
-    unsafe { std::env::set_var("GROK_INSTALLER", "gh-release") };
+    unsafe { std::env::set_var("CHUTES_BUILD_INSTALLER", "gh-release") };
     FakeBinGuard::install_gh()
 }
 
@@ -445,13 +445,13 @@ async fn auto_update_target_npm_rollback_returns_none() {
 // Disk-aware convergence: ensure_latest_on_disk + installed_on_disk_version
 //
 // Concurrent updaters (TUI background download, leader hourly checker,
-// explicit `grok update`) must decide staleness from the on-disk install, not
+// explicit `chutes-build update`) must decide staleness from the on-disk install, not
 // their own compiled-in version — a binary another process already installed
 // is never downloaded a second time, but a stale running process still gets
 // the relaunch signal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Lay down a managed-install layout in the test GROK_HOME:
+/// Lay down a managed-install layout in the test CHUTES_BUILD_HOME:
 /// `bin/grok -> ../downloads/grok-<version>-<platform>` (what
 /// `install_internal_from_base` produces).
 fn fake_managed_install(version: &str) {
@@ -538,7 +538,7 @@ async fn ensure_latest_relaunches_onto_rolled_back_disk() {
 #[tokio::test]
 #[serial]
 async fn npm_user_upgraded_then_stable_rolled_back_stays_on_newer() {
-    // User ran `grok update` and got 0.2.7. Then stable was rolled back to
+    // User ran `chutes-build update` and got 0.2.7. Then stable was rolled back to
     // 0.2.5. Next check_update_status sees 0.2.5 from npm. npm installer
     // must NOT report a downgrade.
     let g = setup_npm("0.2.7");

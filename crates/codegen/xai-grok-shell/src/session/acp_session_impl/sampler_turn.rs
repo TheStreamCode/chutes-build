@@ -466,7 +466,7 @@ impl SessionActor {
     }
     /// Resolve a standalone aux-model `SamplerConfig` for `slug` via the shared
     /// catalog routing (Tier-1 catalog creds / Tier-2 xAI-proxy via session token
-    /// / `XAI_API_KEY` / deployment key), gathering the session-local auth context
+    /// / `CHUTES_API_KEY` / deployment key), gathering the session-local auth context
     /// once. Shared by image-describe and the classifier so the gather can't
     /// drift. `None` ⇒ caller falls back to the session model.
     pub(super) async fn resolve_aux_sampler_config(
@@ -774,7 +774,7 @@ impl SessionActor {
                 "{detailed_message}\n\n\
                  You are using a deprecated authentication method (WebLogin).\n\
                  This auth method is no longer supported and will cause errors.\n\n\
-                 To fix: run `grok logout` then `grok login` to re-authenticate with OAuth2.\n\n\
+                 To fix: run `chutes-build logout` then `chutes-build login` to re-authenticate with OAuth2.\n\n\
                  Version: {client_version}"
             );
             self.log_terminal_failure("legacy_auth", error.status_code, &msg);

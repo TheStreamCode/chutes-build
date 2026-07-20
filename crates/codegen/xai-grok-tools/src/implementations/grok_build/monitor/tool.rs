@@ -313,7 +313,7 @@ pub(crate) async fn run_monitor_pipeline(
             // a terminal event as well produced a second NotificationDrain turn
             // with the same ended signal. Stdout lines above still stream as
             // events while the process is alive; the UI learns completion from
-            // `x.ai/task_completed`.
+            // `chutes.build/task_completed`.
 
             break;
         }

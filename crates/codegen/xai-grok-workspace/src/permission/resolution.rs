@@ -1,4 +1,4 @@
-//! Permission resolution engine: merges native `.grok/config.toml`,
+//! Permission resolution engine: merges native `.chutes-build/config.toml`,
 //! managed/enterprise settings, and (via `claude_settings`) `.claude`
 //! settings into the effective `PermissionConfig`; MCP/marketplace
 //! allowlists; always-approve policy.
@@ -71,7 +71,7 @@ fn synthetic_rules_for_default_mode(
 }
 
 /// Parse a raw defaultMode string: unknown → [`DefaultPermissionMode::Default`]
-/// (fail-safe) with a warn + skip record for `grok inspect`.
+/// (fail-safe) with a warn + skip record for `chutes-build inspect`.
 fn parse_default_mode_claiming_scope(
     raw: &str,
     path: &Path,
@@ -190,7 +190,7 @@ fn extract_toml_permissions(
 
 /// Load `[permission]` rules from requirements.toml layers. Trust keys on the
 /// `is_system` flag (set at load, never from `path`): system → `SystemRequirements`,
-/// user `~/.grok` → `Requirements`, so [`is_admin_source`] trusts only the root tier.
+/// user `~/.chutes-build` → `Requirements`, so [`is_admin_source`] trusts only the root tier.
 fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
     xai_grok_config::requirements_layers()
         .into_iter()
@@ -209,8 +209,8 @@ fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
         .collect()
 }
 
-/// Find every `<dir>/.grok/config.toml` from `cwd` upward to the git repo
-/// root (or just `<cwd>/.grok/config.toml` when there is no git repo).
+/// Find every `<dir>/.chutes-build/config.toml` from `cwd` upward to the git repo
+/// root (or just `<cwd>/.chutes-build/config.toml` when there is no git repo).
 ///
 /// Returned paths are ordered from repo root (lowest priority) to `cwd`
 /// (highest priority), matching `xai-grok-shell::config::find_project_configs`.
@@ -223,7 +223,7 @@ fn find_project_grok_configs(cwd: &Path) -> Vec<PathBuf> {
     if let Some(ref root) = git_root {
         let mut current = Some(cwd.to_path_buf());
         while let Some(dir) = current {
-            let p = dir.join(".grok").join("config.toml");
+            let p = dir.join(".chutes-build").join("config.toml");
             if p.is_file() {
                 configs.push(p);
             }
@@ -234,7 +234,7 @@ fn find_project_grok_configs(cwd: &Path) -> Vec<PathBuf> {
         }
         configs.reverse();
     } else {
-        let p = cwd.join(".grok").join("config.toml");
+        let p = cwd.join(".chutes-build").join("config.toml");
         if p.is_file() {
             configs.push(p);
         }
@@ -244,8 +244,8 @@ fn find_project_grok_configs(cwd: &Path) -> Vec<PathBuf> {
 
 /// Load `[permission]` rules from native Grok TOML config files:
 ///
-///   * `~/.grok/config.toml` (lowest priority)
-///   * Each `.grok/config.toml` from the git repo root down to `cwd`
+///   * `~/.chutes-build/config.toml` (lowest priority)
+///   * Each `.chutes-build/config.toml` from the git repo root down to `cwd`
 ///     (highest priority last)
 ///
 /// Returns the rules tagged with `RequirementSource::Config`. Empty if no
@@ -253,9 +253,9 @@ fn find_project_grok_configs(cwd: &Path) -> Vec<PathBuf> {
 fn load_config_toml_permissions(cwd: &Path) -> Vec<Sourced<PermissionRule>> {
     let mut rules = Vec::new();
 
-    // Global `~/.grok/config.toml` first (lowest priority within this layer).
-    // Gated on user_grok_home() so a project's .grok/config.toml is never read as
-    // global permissions when neither GROK_HOME nor a home dir resolves.
+    // Global `~/.chutes-build/config.toml` first (lowest priority within this layer).
+    // Gated on user_grok_home() so a project's .chutes-build/config.toml is never read as
+    // global permissions when neither CHUTES_BUILD_HOME nor a home dir resolves.
     if let Some(global_path) = xai_grok_config::user_grok_home().map(|g| g.join("config.toml"))
         && global_path.is_file()
     {
@@ -392,7 +392,7 @@ fn is_admin_source(source: &RequirementSource) -> bool {
 }
 
 /// Under the pin, drop untrusted catch-all Allow rules (they substitute for the
-/// blocked `--yolo`); keep admin-tier ones. Records each drop for `grok inspect`.
+/// blocked `--yolo`); keep admin-tier ones. Records each drop for `chutes-build inspect`.
 fn drop_untrusted_catchall_allows(
     rules: Vec<Sourced<PermissionRule>>,
     policy_block: Option<&'static str>,
@@ -542,7 +542,7 @@ async fn resolve_permissions_with_provenance_inner(
     // `--allow '*'` is filtered at its own merge site (acp_session).
     let all_rules = drop_untrusted_catchall_allows(all_rules, policy_block, &mut skipped);
 
-    // Keep skip-only resolutions alive so the drop reaches `grok inspect`; zero
+    // Keep skip-only resolutions alive so the drop reaches `chutes-build inspect`; zero
     // rules with Ask is a no-op for the evaluator, identical to the `None` arm.
     if all_rules.is_empty() && prompt_policy == PromptPolicy::Ask && skipped.is_empty() {
         return None;
@@ -629,7 +629,7 @@ fn resolve_claude_settings_inner(
                 warn!(path = %path.display(), "{}", w);
             }
             // Rules *or* skip-only parse failures still own provenance for
-            // `grok inspect` (all-invalid allow/deny/ask must not leave
+            // `chutes-build inspect` (all-invalid allow/deny/ask must not leave
             // primary_source_path unset and panic below).
             if (!cfg.rules.is_empty() || !warnings.is_empty()) && primary_source_path.is_none() {
                 primary_source_path = Some(path.clone());
@@ -667,7 +667,7 @@ fn resolve_claude_settings_inner(
 
     // A blocked bypass, a claimed defaultMode (incl. typo→default), or skip
     // records still resolve (possibly zero rules) so provenance reaches
-    // `grok inspect` via the outer resolver.
+    // `chutes-build inspect` via the outer resolver.
     if all_rules.is_empty()
         && prompt_policy == PromptPolicy::Ask
         && !bypass_blocked
@@ -991,7 +991,7 @@ fn requirements_lock_bool(ui: Option<&toml::Value>, key: &str, path: &Path) -> O
 }
 
 /// Pure form of [`yolo_disabled_by_policy`] over pre-loaded layers (testable
-/// without `~/.grok`); `path` only names the layer in a non-bool warning.
+/// without `~/.chutes-build`); `path` only names the layer in a non-bool warning.
 fn resolve_yolo_policy_block<'a>(
     requirement_layers: impl Iterator<Item = (&'a Path, &'a toml::Value)>,
 ) -> Option<&'static str> {
@@ -1398,7 +1398,7 @@ mod tests {
 
     // Crate-shared lock serializing tests that mutate the global process
     // environment so concurrent test threads can't race on shared env state.
-    // Shared so `GROK_HOME`/`HOME` mutations here also serialize against the
+    // Shared so `CHUTES_BUILD_HOME`/`HOME` mutations here also serialize against the
     // other env-mutating test modules under single-process `cargo test --lib`.
     use crate::ENV_TEST_LOCK as ENV_LOCK;
 
@@ -1933,14 +1933,14 @@ mod tests {
 
     #[test]
     fn load_claude_env_merges_with_precedence() {
-        // GROK_HOME-isolate so the claude-import marker reads clean (an imported
+        // CHUTES_BUILD_HOME-isolate so the claude-import marker reads clean (an imported
         // dev machine would otherwise early-return an empty map and fail these
         // asserts); the project tier overrides any real `~/.claude`, so the
         // per-key assertions hold without isolating HOME.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
-        let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
-        let _marker_guard = EnvVarGuard::unset("_GROK_CLAUDE_MARKER_OVERRIDE");
+        let _home_guard = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
+        let _marker_guard = EnvVarGuard::unset("_CHUTES_BUILD_CLAUDE_MARKER_OVERRIDE");
         let tmp = tempfile::tempdir().unwrap();
         let claude_dir = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
@@ -1967,14 +1967,14 @@ mod tests {
 
     #[test]
     fn load_claude_env_empty_when_no_settings() {
-        // Isolate GROK_HOME (claude-import marker) AND HOME (global `~/.claude`)
+        // Isolate CHUTES_BUILD_HOME (claude-import marker) AND HOME (global `~/.claude`)
         // so neither a dev machine's import marker nor its real `~/.claude` env
         // can trip the empty-map assertion.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
-        let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
+        let _home_guard = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
         let _real_home_guard = EnvVarGuard::set("HOME", home.path());
-        let _marker_guard = EnvVarGuard::unset("_GROK_CLAUDE_MARKER_OVERRIDE");
+        let _marker_guard = EnvVarGuard::unset("_CHUTES_BUILD_CLAUDE_MARKER_OVERRIDE");
         let tmp = tempfile::tempdir().unwrap();
         let env = load_claude_env_with_project(tmp.path(), true);
         assert!(env.is_empty());
@@ -1984,13 +1984,13 @@ mod tests {
     fn load_claude_env_with_project_drops_repo_env_when_untrusted() {
         // The repo-tree `.claude/settings.json` env is injected into every spawned
         // subprocess (BASH_ENV / GIT_SSH_COMMAND / …), so an untrusted folder must
-        // drop it. Isolate GROK_HOME so the claude-import marker reads clean (an
+        // drop it. Isolate CHUTES_BUILD_HOME so the claude-import marker reads clean (an
         // imported dev machine would otherwise early-return an empty map); the
         // unique key keeps it independent of the host's real `~/.claude`.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
-        let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
-        let _marker_guard = EnvVarGuard::unset("_GROK_CLAUDE_MARKER_OVERRIDE");
+        let _home_guard = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
+        let _marker_guard = EnvVarGuard::unset("_CHUTES_BUILD_CLAUDE_MARKER_OVERRIDE");
         let tmp = tempfile::tempdir().unwrap();
         let claude_dir = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
@@ -3281,7 +3281,7 @@ mod tests {
     #[test]
     fn admin_source_trusts_only_root_owned_tiers() {
         // Only managed-settings and the system-dir requirements layer are admin;
-        // the user-writable `~/.grok/requirements.toml` is not, despite its path.
+        // the user-writable `~/.chutes-build/requirements.toml` is not, despite its path.
         let p = std::path::PathBuf::from("x");
         assert!(is_admin_source(&RequirementSource::ManagedSettings {
             path: p.clone()
@@ -3290,7 +3290,7 @@ mod tests {
             path: "/etc/grok/requirements.toml".into(),
         }));
         assert!(!is_admin_source(&RequirementSource::Requirements {
-            path: "/home/u/.grok/requirements.toml".into(),
+            path: "/home/u/.chutes-build/requirements.toml".into(),
         }));
         assert!(!is_admin_source(&RequirementSource::ManagedConfig {
             path: "/etc/grok/managed_config.toml".into(),
@@ -3324,7 +3324,7 @@ mod tests {
             sourced(
                 allow_any(Some("**/*")),
                 RequirementSource::Requirements {
-                    path: "/home/u/.grok/requirements.toml".into(),
+                    path: "/home/u/.chutes-build/requirements.toml".into(),
                 },
             ),
             // Managed config: defaults tier, untrusted even from /etc/grok.
@@ -3403,7 +3403,7 @@ mod tests {
     fn drop_untrusted_freeform_catchalls_respects_source_and_scope() {
         let sourced = |value, source| Sourced { value, source };
         let untrusted = || RequirementSource::Requirements {
-            path: "/home/u/.grok/requirements.toml".into(),
+            path: "/home/u/.chutes-build/requirements.toml".into(),
         };
         let admin = || RequirementSource::SystemRequirements {
             path: "/etc/grok/requirements.toml".into(),
@@ -3746,7 +3746,7 @@ mod tests {
             skipped
                 .iter()
                 .any(|s| s.rule.contains("dontask") || s.rule.contains("defaultMode=")),
-            "typo should be recorded for grok inspect"
+            "typo should be recorded for chutes-build inspect"
         );
     }
 

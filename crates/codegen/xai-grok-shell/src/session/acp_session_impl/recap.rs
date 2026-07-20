@@ -571,7 +571,7 @@ impl SessionActor {
     /// [`prompt_suggest::build_transcript`]) and makes one tool-free model
     /// call. The model is resolved by
     /// [`prompt_suggest::effective_suggest_model`]: env
-    /// (`GROK_PROMPT_SUGGESTIONS_MODEL`) > `[models] prompt_suggestion`
+    /// (`CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL`) > `[models] prompt_suggestion`
     /// (config.toml) > remote `prompt_suggestion_model` (remote settings) >
     /// (config.toml) > remote `prompt_suggestion_model` (remote settings) >
     /// [`prompt_suggest::DEFAULT_SUGGEST_MODEL`] (`grok-build-0.1`). Every

@@ -8,7 +8,7 @@
 //! shares `Execute`, with no distinct tool) or names without a kind (e.g.
 //! `Agent`/`ExitPlanMode`/`Cron*` are matchable but not allowlist-resolvable).
 //!
-//! The `grok` names are test-checked against the live registry.
+//! The `chutes-build` names are test-checked against the live registry.
 
 use super::tool::ToolKind;
 use ToolKind::*;

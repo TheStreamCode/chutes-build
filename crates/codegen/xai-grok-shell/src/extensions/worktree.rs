@@ -1,4 +1,4 @@
-//! Handler for x.ai/git/worktree/* extension methods.
+//! Handler for chutes.build/git/worktree/* extension methods.
 
 use agent_client_protocol as acp;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
@@ -34,7 +34,8 @@ impl WorktreeNotificationSender for GatewayWorktreeNotifier {
                 return;
             }
         };
-        let notification = acp::ExtNotification::new("x.ai/git/worktree/status", params.into());
+        let notification =
+            acp::ExtNotification::new("chutes.build/git/worktree/status", params.into());
         if let Err(e) = self.gateway.send(notification).await {
             tracing::warn!("Failed to send worktree progress notification: {}", e);
         }
@@ -155,7 +156,7 @@ pub async fn handle(
     let restore_code_default = agent.restore_code;
 
     match args.method.as_ref() {
-        "x.ai/git/worktree/create" => {
+        "chutes.build/git/worktree/create" => {
             let mut req = serde_json::from_str::<CreateWorktreeRequest>(args.params.get())?;
             // Pre-dispatch: apply worktree_type default
             let request_worktree_type = req.worktree_type;
@@ -163,7 +164,7 @@ pub async fn handle(
                 req.worktree_type = Some(worktree_type_default.into());
             }
             log_effective_worktree_type(
-                "x.ai/git/worktree/create",
+                "chutes.build/git/worktree/create",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -187,7 +188,7 @@ pub async fn handle(
             }
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/remove" => {
+        "chutes.build/git/worktree/remove" => {
             let req = serde_json::from_str::<RemoveWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -195,7 +196,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/apply" => {
+        "chutes.build/git/worktree/apply" => {
             let req = serde_json::from_str::<ApplyWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -204,7 +205,7 @@ pub async fn handle(
             to_response(Ok(result))
         }
         // Create a worktree from an existing worktree (used during session fork)
-        "x.ai/git/worktree/create_from_worktree" => {
+        "chutes.build/git/worktree/create_from_worktree" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
             let request_worktree_type = req.worktree_type;
@@ -213,7 +214,7 @@ pub async fn handle(
                 req.worktree_type = Some(worktree_type_default.into());
             }
             log_effective_worktree_type(
-                "x.ai/git/worktree/create_from_worktree",
+                "chutes.build/git/worktree/create_from_worktree",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -255,7 +256,7 @@ pub async fn handle(
             to_response(Ok(response))
         }
         // Synchronous variant - waits for worktree creation to complete
-        "x.ai/git/worktree/create_from_worktree_sync" => {
+        "chutes.build/git/worktree/create_from_worktree_sync" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
 
@@ -293,7 +294,7 @@ pub async fn handle(
                 req.worktree_type = Some(worktree_type_default.into());
             }
             log_effective_worktree_type(
-                "x.ai/git/worktree/create_from_worktree_sync",
+                "chutes.build/git/worktree/create_from_worktree_sync",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -310,10 +311,10 @@ pub async fn handle(
             to_response(Ok(result))
         }
         // Resume a session in a fresh worktree.
-        "x.ai/git/worktree/resume_session" => {
+        "chutes.build/git/worktree/resume_session" => {
             let req = serde_json::from_str::<ResumeSessionInWorktreeRequest>(args.params.get())?;
             log_effective_worktree_type(
-                "x.ai/git/worktree/resume_session",
+                "chutes.build/git/worktree/resume_session",
                 req.worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -335,7 +336,7 @@ pub async fn handle(
             )
         }
         // ── Repo-wide session resolution ─────────────────────────────────
-        "x.ai/session/resolve_local_for_worktree_resume" => {
+        "chutes.build/session/resolve_local_for_worktree_resume" => {
             let req =
                 serde_json::from_str::<ResolveLocalForWorktreeResumeRequest>(args.params.get())?;
             let result = resolve_session_repo_wide(&req.session_id, std::path::Path::new(&req.cwd));
@@ -359,14 +360,14 @@ pub async fn handle(
             }
         }
         // ── Session rehydration (devbox recovery) ─────────────────────────
-        "x.ai/session/rehydrate" => {
+        "chutes.build/session/rehydrate" => {
             let req = serde_json::from_str::<RehydrateSessionRequest>(args.params.get())?;
             let registry_client = agent.session_registry_client();
 
             to_response(rehydrate_session_in_worktree(&req, ops, registry_client.as_ref()).await)
         }
         // ── Worktree management methods ──────────────────────────────────
-        "x.ai/git/worktree/list" => {
+        "chutes.build/git/worktree/list" => {
             let req: xai_grok_workspace::workspace_ops::WorktreeListReq =
                 serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
@@ -376,7 +377,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/show" => {
+        "chutes.build/git/worktree/show" => {
             let req = serde_json::from_str::<ShowWorktreeRequest>(args.params.get())?;
             let op = xai_grok_workspace::workspace_ops::WorktreeShowReq {
                 id_or_path: req.id_or_path,
@@ -387,7 +388,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/gc" => {
+        "chutes.build/git/worktree/gc" => {
             let req = serde_json::from_str::<GcWorktreeRequest>(args.params.get())?;
             let max_age_secs = req.max_age.as_deref().map(parse_duration).transpose()?;
             let op = xai_grok_workspace::workspace_ops::WorktreeGcReq {
@@ -401,7 +402,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/db/stats" => {
+        "chutes.build/git/worktree/db/stats" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbStatsReq {},
@@ -411,7 +412,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/db/rebuild" => {
+        "chutes.build/git/worktree/db/rebuild" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbRebuildReq {},
@@ -421,7 +422,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "x.ai/git/worktree/db/path" => {
+        "chutes.build/git/worktree/db/path" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbPathReq {},
@@ -499,10 +500,10 @@ mod tests {
     #[test]
     fn db_path_response_serializes() {
         let resp = WorktreeDbPathResponse {
-            path: "/home/user/.grok/worktrees.db".into(),
+            path: "/home/user/.chutes-build/worktrees.db".into(),
         };
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"path\":\"/home/user/.grok/worktrees.db\""));
+        assert!(json.contains("\"path\":\"/home/user/.chutes-build/worktrees.db\""));
     }
 
     #[test]

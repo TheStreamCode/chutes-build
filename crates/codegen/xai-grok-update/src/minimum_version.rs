@@ -2,9 +2,9 @@
 //!
 //! When `cli.minimum_version` is set in any config layer, Grok refuses to
 //! start below that floor. With auto-update on, we install
-//! `max(latest, minimum)`; otherwise the user is asked to run `grok update`.
+//! `max(latest, minimum)`; otherwise the user is asked to run `chutes-build update`.
 //!
-//! Set `GROK_TEST_VERSION` to manually exercise either path without producing
+//! Set `CHUTES_BUILD_TEST_VERSION` to manually exercise either path without producing
 //! a real out-of-date build.
 
 use crate::auto_update::{get_installer, run_install_script};
@@ -46,13 +46,13 @@ pub(crate) enum MinimumVersionError {
     },
     #[error(
         "This version of Grok ({current}) is no longer supported. \
-         Run `grok update` to install version {minimum} or later."
+         Run `chutes-build update` to install version {minimum} or later."
     )]
     AutoUpdateDisabled { current: String, minimum: String },
     /// `npm` / `gh` / `internal` GCS — none detected.
     #[error(
         "This version of Grok ({current}) is no longer supported. \
-         Run `grok update` to install version {minimum} or later."
+         Run `chutes-build update` to install version {minimum} or later."
     )]
     NoInstaller { current: String, minimum: String },
     /// `detail` is telemetry-only; omitted from `Display` to avoid stacking
@@ -60,7 +60,7 @@ pub(crate) enum MinimumVersionError {
     #[error(
         "This version of Grok ({current}) is no longer supported, \
          and the update to version {minimum} didn't complete.\n\n\
-         Run `grok update` to try again."
+         Run `chutes-build update` to try again."
     )]
     UpgradeFailed {
         current: String,
@@ -86,10 +86,10 @@ pub(crate) enum MinimumVersionError {
          Check your network connection, or contact your administrator."
     )]
     NoReleaseFound { current: String, minimum: String },
-    /// `grok update --version X` requested a version below the floor.
+    /// `chutes-build update --version X` requested a version below the floor.
     #[error(
         "Cannot install Grok {target}: the configured minimum is {minimum}. \
-         Run `grok update` to install the latest allowed version."
+         Run `chutes-build update` to install the latest allowed version."
     )]
     TargetBelowFloor { target: String, minimum: String },
 }
@@ -133,7 +133,7 @@ fn evaluate_minimum_version(
 }
 
 /// Refuse an explicit install target below the configured floor.
-/// Used by `grok update --version X`.
+/// Used by `chutes-build update --version X`.
 pub(crate) fn check_install_target(target: &str) -> Result<(), MinimumVersionError> {
     let floor = resolve_floor_or_error()?;
     check_install_target_inner(target, floor.as_deref())
@@ -154,7 +154,7 @@ fn check_install_target_inner(
 }
 
 /// `max(target, configured_floor)`; passthrough when no floor is set.
-/// Used by `grok update` to keep the install target at or above the pin.
+/// Used by `chutes-build update` to keep the install target at or above the pin.
 pub(crate) fn apply_floor(target: &str) -> Result<String, MinimumVersionError> {
     let floor = resolve_floor_or_error()?;
     apply_floor_inner(target, floor.as_deref())
@@ -262,7 +262,7 @@ async fn enforce_minimum_version(
 /// Single chokepoint for the pager + tui startup paths. Re-execs after a
 /// floor-driven install. Prints + exits non-zero on `Err`.
 ///
-/// `GROK_TEST_VERSION` lets devs override the running version to skip
+/// `CHUTES_BUILD_TEST_VERSION` lets devs override the running version to skip
 /// enforcement on a `cargo run` build.
 pub async fn enforce_minimum_version_or_exit(update_config: &UpdateConfig) {
     let min = match resolve_floor_or_error() {
@@ -281,7 +281,7 @@ pub async fn enforce_minimum_version_or_exit(update_config: &UpdateConfig) {
             // child process ever writes to a broken pipe. For now this
             // path is rare (only fires when the server pushes a minimum
             // version bump), so print a relaunch message instead.
-            eprintln!("Update installed. Run `grok` to start.");
+            eprintln!("Update installed. Run `chutes-build` to start.");
             std::process::exit(0);
         }
         Err(e) => {
@@ -365,10 +365,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn version_env_var_flows_through_to_decision() {
-        let saved = std::env::var("GROK_TEST_VERSION").ok();
+        let saved = std::env::var("CHUTES_BUILD_TEST_VERSION").ok();
 
         // SAFETY: #[serial] excludes other env-touching tests.
-        unsafe { std::env::set_var("GROK_TEST_VERSION", "0.1.50") };
+        unsafe { std::env::set_var("CHUTES_BUILD_TEST_VERSION", "0.1.50") };
         let decision =
             evaluate_minimum_version(&get_installed_grok_version(), Some("0.1.100")).unwrap();
         assert!(matches!(
@@ -377,8 +377,8 @@ mod tests {
         ));
 
         match saved {
-            Some(v) => unsafe { std::env::set_var("GROK_TEST_VERSION", v) },
-            None => unsafe { std::env::remove_var("GROK_TEST_VERSION") },
+            Some(v) => unsafe { std::env::set_var("CHUTES_BUILD_TEST_VERSION", v) },
+            None => unsafe { std::env::remove_var("CHUTES_BUILD_TEST_VERSION") },
         }
     }
 }

@@ -10,8 +10,10 @@ use crate::theme::Theme;
 
 use super::WelcomeLayout;
 
-/// Minimum terminal width for the side-by-side hero box layout.
-pub(super) const HERO_BOX_MIN_WIDTH: u16 = 90;
+/// Minimum terminal width for the side-by-side hero box layout. The Monolith
+/// wordmark deliberately gets enough room to remain intact beside the menu;
+/// narrower terminals use the stacked layout.
+pub(super) const HERO_BOX_MIN_WIDTH: u16 = 105;
 
 /// Vertical padding (rows) between the box border and its inner content.
 const V_PAD: u16 = 1;
@@ -28,7 +30,7 @@ const LOGO_H_PAD: u16 = 3;
 /// message never paints over the button.
 const UPGRADE_CTA_ROWS: u16 = 2;
 
-const HERO_SUBTITLE: &str = "Thanks for trying Grok Build, give feedback with /feedback!";
+const HERO_SUBTITLE: &str = "Privacy-first coding on the Chutes ecosystem";
 
 use super::{PROMPT_HEIGHT, VERSION_GAP};
 
@@ -904,7 +906,7 @@ managed devices and accounts. Report security incidents";
         pinned.dismissible = Some(false);
         pinned.cta = Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Upgrade Account".into()),
-            url: Some("https://x.ai/grok".into()),
+            url: Some("https://chutes.ai/pricing".into()),
             caption: Some("or use Ctrl+O".into()),
         });
         let mut buf = Buffer::empty(area);
@@ -954,7 +956,7 @@ managed devices and accounts. Report security incidents";
         let mut dismissible = ann(None, Some("Grok 4.5 is here. Upgrade now."));
         dismissible.cta = Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Upgrade Account".into()),
-            url: Some("https://x.ai/grok".into()),
+            url: Some("https://chutes.ai/pricing".into()),
             caption: Some("or use Ctrl+O".into()),
         });
         let mut buf = Buffer::empty(area);

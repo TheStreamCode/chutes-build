@@ -96,8 +96,8 @@ pub fn load_managed_config() -> std::io::Result<toml::Value> {
 
 /// Load a user-tier config layer from `<home>/<filename>`. With no resolvable
 /// user home, returns an empty table rather than reading a cwd-relative
-/// `.grok/<filename>` (the cwd-fallback would silently promote an untrusted
-/// project `.grok` to the user tier).
+/// `.chutes-build/<filename>` (the cwd-fallback would silently promote an untrusted
+/// project `.chutes-build` to the user tier).
 fn load_user_config_layer(home: Option<&Path>, filename: &str) -> std::io::Result<toml::Value> {
     match home {
         Some(g) => load_config_file(&g.join(filename)),
@@ -268,7 +268,7 @@ impl ConfigLayers {
 
     /// Active campaigns against `base`: kill switch → priority merge (first-id-wins)
     /// → drop dismissed. The single place disk campaign resolution lives; the shell
-    /// wraps this with the `GROK_CAMPAIGNS_OVERRIDE` env layer.
+    /// wraps this with the `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` env layer.
     pub fn resolve_campaigns(
         &self,
         base: &toml::Value,
@@ -348,9 +348,9 @@ impl ConfigLayers {
     }
 }
 
-/// `GROK_CAMPAIGNS=0` or `[features] campaigns = false` on pre-campaign base.
+/// `CHUTES_BUILD_CAMPAIGNS=0` or `[features] campaigns = false` on pre-campaign base.
 pub fn campaigns_application_disabled(base_effective: &toml::Value) -> bool {
-    if crate::env_bool("GROK_CAMPAIGNS") == Some(false) {
+    if crate::env_bool("CHUTES_BUILD_CAMPAIGNS") == Some(false) {
         return true;
     }
     base_effective
@@ -362,7 +362,7 @@ pub fn campaigns_application_disabled(base_effective: &toml::Value) -> bool {
 
 /// Disk layers only (no remote, no env override). Prefer the shell loader
 /// (`xai_grok_shell::util::config::load_effective_config`) when remote campaigns
-/// or `GROK_CAMPAIGNS_OVERRIDE` must be honored. The name mirrors the
+/// or `CHUTES_BUILD_CAMPAIGNS_OVERRIDE` must be honored. The name mirrors the
 /// [`ConfigLayers::effective_config_disk_only`] method so the divergence from the
 /// remote-aware loader is un-ignorable at every call site.
 pub fn load_effective_config_disk_only() -> std::io::Result<toml::Value> {
@@ -380,12 +380,12 @@ pub struct CampaignsState {
     pub dismissed_ids: Vec<String>,
 }
 
-/// Path to `$GROK_HOME/campaigns_state.json` under `home`.
+/// Path to `$CHUTES_BUILD_HOME/campaigns_state.json` under `home`.
 pub fn campaigns_state_path(home: &std::path::Path) -> std::path::PathBuf {
     home.join(CAMPAIGNS_STATE_FILE)
 }
 
-/// Fail-open dismissed ids from `$GROK_HOME/campaigns_state.json`.
+/// Fail-open dismissed ids from `$CHUTES_BUILD_HOME/campaigns_state.json`.
 pub fn load_dismissed_ids_from_home() -> std::collections::HashSet<String> {
     let Some(home) = crate::user_grok_home() else {
         return std::collections::HashSet::new();
@@ -400,7 +400,7 @@ pub fn load_dismissed_ids_from_home() -> std::collections::HashSet<String> {
 
 /// Applies matching `[[version_overrides]]` patches against the running
 /// CLI version; strips the section either way. If the installed version
-/// can't be parsed (broken `GROK_TEST_VERSION` in dev), silently strips
+/// can't be parsed (broken `CHUTES_BUILD_TEST_VERSION` in dev), silently strips
 /// without applying — keeps the CLI usable on a bad dev override.
 pub fn apply_version_overrides_with_registered(value: &mut toml::Value) -> std::io::Result<()> {
     match xai_grok_version::installed_semver() {
@@ -631,7 +631,7 @@ mod tests {
     #[test]
     fn load_user_config_layer_is_empty_without_user_home() {
         // No resolvable user home: no user layer, and crucially no
-        // cwd-relative .grok read.
+        // cwd-relative .chutes-build read.
         let v = load_user_config_layer(None, "config.toml").unwrap();
         assert_eq!(v.as_table().map(|t| t.is_empty()), Some(true));
     }
@@ -681,8 +681,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `GROK_CAMPAIGNS=0` disables campaign application regardless of config.
-    /// `GROK_CAMPAIGNS` is process-global, so this test serializes itself with a
+    /// `CHUTES_BUILD_CAMPAIGNS=0` disables campaign application regardless of config.
+    /// `CHUTES_BUILD_CAMPAIGNS` is process-global, so this test serializes itself with a
     /// module-local mutex and save/restores the prior value. (This crate has no
     /// `serial_test` dev-dep and no other test reads this var, so a local guard
     /// is sufficient.)
@@ -690,20 +690,20 @@ mod tests {
     fn kill_switch_env_var_disables() {
         static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _g = ENV_GUARD.lock().unwrap_or_else(|p| p.into_inner());
-        let prior = std::env::var_os("GROK_CAMPAIGNS");
+        let prior = std::env::var_os("CHUTES_BUILD_CAMPAIGNS");
         let empty = toml::Value::Table(Default::default());
 
         // SAFETY: ENV_GUARD serializes this against itself; no other test in the
-        // crate mutates or reads GROK_CAMPAIGNS concurrently.
-        unsafe { std::env::set_var("GROK_CAMPAIGNS", "0") };
+        // crate mutates or reads CHUTES_BUILD_CAMPAIGNS concurrently.
+        unsafe { std::env::set_var("CHUTES_BUILD_CAMPAIGNS", "0") };
         assert!(campaigns_application_disabled(&empty));
 
-        unsafe { std::env::remove_var("GROK_CAMPAIGNS") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_CAMPAIGNS") };
         assert!(!campaigns_application_disabled(&empty));
 
         match prior {
-            Some(v) => unsafe { std::env::set_var("GROK_CAMPAIGNS", v) },
-            None => unsafe { std::env::remove_var("GROK_CAMPAIGNS") },
+            Some(v) => unsafe { std::env::set_var("CHUTES_BUILD_CAMPAIGNS", v) },
+            None => unsafe { std::env::remove_var("CHUTES_BUILD_CAMPAIGNS") },
         }
     }
 }

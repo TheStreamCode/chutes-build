@@ -26,13 +26,13 @@ fn with_env_var<T>(name: &str, value: &str, f: impl FnOnce() -> T) -> T {
 #[test]
 fn expands_env_vars_in_toml_strings() {
     with_env_var(
-        "GROK_TEST_CONFIG_EXPAND",
+        "CHUTES_BUILD_TEST_CONFIG_EXPAND",
         "expanded",
         || {
             let toml_str = r#"
 [mcp_servers.test]
-command = "$GROK_TEST_CONFIG_EXPAND/bin/server"
-args = ["--path", "${GROK_TEST_CONFIG_EXPAND}/data"]
+command = "$CHUTES_BUILD_TEST_CONFIG_EXPAND/bin/server"
+args = ["--path", "${CHUTES_BUILD_TEST_CONFIG_EXPAND}/data"]
 "#;
             let mut value = toml::from_str::<toml::Value>(toml_str).unwrap();
             expand_env_vars_in_toml(&mut value);
@@ -56,7 +56,7 @@ args = ["--path", "${GROK_TEST_CONFIG_EXPAND}/data"]
 fn leaves_missing_env_vars_unchanged() {
     let toml_str = r#"
 [mcp_servers.test]
-command = "$GROK_TEST_CONFIG_MISSING/bin/server"
+command = "$CHUTES_BUILD_TEST_CONFIG_MISSING/bin/server"
 "#;
     let mut value = toml::from_str::<toml::Value>(toml_str).unwrap();
     expand_env_vars_in_toml(&mut value);
@@ -70,7 +70,7 @@ command = "$GROK_TEST_CONFIG_MISSING/bin/server"
         panic!("Expected test table");
     };
     let command = test.get("command").and_then(|v| v.as_str()).unwrap();
-    assert_eq!(command, "$GROK_TEST_CONFIG_MISSING/bin/server");
+    assert_eq!(command, "$CHUTES_BUILD_TEST_CONFIG_MISSING/bin/server");
 }
 #[test]
 fn preserves_literal_dollar_signs() {
@@ -92,7 +92,7 @@ command = "$$HOME"
     let command = test.get("command").and_then(|v| v.as_str()).unwrap();
     assert_eq!(command, "$HOME");
 }
-/// Mutex to serialize tests that touch the GROK_MEMORY env var.
+/// Mutex to serialize tests that touch the CHUTES_BUILD_MEMORY env var.
 /// Env vars are process-global, so parallel tests race on them.
 static MEMORY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Run `f` with `name` set to `value` (Some) or removed (None).
@@ -110,22 +110,22 @@ fn with_env_var_opt<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -
     }
     result.unwrap_or_else(|p| std::panic::resume_unwind(p))
 }
-/// Run `f` with GROK_MEMORY explicitly unset.
+/// Run `f` with CHUTES_BUILD_MEMORY explicitly unset.
 fn without_grok_memory<T>(f: impl FnOnce() -> T) -> T {
     let _guard = MEMORY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    with_env_var_opt("GROK_MEMORY", None, f)
+    with_env_var_opt("CHUTES_BUILD_MEMORY", None, f)
 }
-/// Run `f` with GROK_MEMORY set to a specific value.
+/// Run `f` with CHUTES_BUILD_MEMORY set to a specific value.
 fn with_grok_memory<T>(value: &str, f: impl FnOnce() -> T) -> T {
     let _guard = MEMORY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    with_env_var_opt("GROK_MEMORY", Some(value), f)
+    with_env_var_opt("CHUTES_BUILD_MEMORY", Some(value), f)
 }
 #[test]
-fn memory_config_default_disabled() {
+fn memory_config_default_enabled() {
     without_grok_memory(|| {
         let config = toml::Value::Table(toml::map::Map::new());
         let mem = MemoryConfig::resolve(false, false, &config, None);
-        assert!(! mem.enabled);
+        assert!(mem.enabled);
     });
 }
 #[test]
@@ -181,7 +181,7 @@ fn memory_config_env_var_zero_does_not_enable() {
         || {
             let config = toml::Value::Table(toml::map::Map::new());
             let mem = MemoryConfig::resolve(false, false, &config, None);
-            assert!(! mem.enabled, "GROK_MEMORY=0 should not enable memory");
+            assert!(! mem.enabled, "CHUTES_BUILD_MEMORY=0 should not enable memory");
         },
     );
 }
@@ -192,7 +192,7 @@ fn memory_config_env_var_false_does_not_enable() {
         || {
             let config = toml::Value::Table(toml::map::Map::new());
             let mem = MemoryConfig::resolve(false, false, &config, None);
-            assert!(! mem.enabled, "GROK_MEMORY=false should not enable memory");
+            assert!(! mem.enabled, "CHUTES_BUILD_MEMORY=false should not enable memory");
         },
     );
 }
@@ -214,7 +214,7 @@ fn memory_config_env_zero_force_disables_toml_enabled() {
             let mem = MemoryConfig::resolve(false, false, &config, None);
             assert!(
                 ! mem.enabled,
-                "GROK_MEMORY=0 should force-disable even when TOML enables memory"
+                "CHUTES_BUILD_MEMORY=0 should force-disable even when TOML enables memory"
             );
         },
     );
@@ -229,7 +229,7 @@ fn memory_config_env_false_force_disables_toml_enabled() {
             let mem = MemoryConfig::resolve(false, false, &config, None);
             assert!(
                 ! mem.enabled,
-                "GROK_MEMORY=false should force-disable even when TOML enables memory"
+                "CHUTES_BUILD_MEMORY=false should force-disable even when TOML enables memory"
             );
         },
     );
@@ -242,7 +242,7 @@ fn memory_config_cli_flag_overrides_env_disable() {
             let config = toml::Value::Table(toml::map::Map::new());
             let mem = MemoryConfig::resolve(true, false, &config, None);
             assert!(
-                mem.enabled, "CLI --experimental-memory should override GROK_MEMORY=0"
+                mem.enabled, "CLI --experimental-memory should override CHUTES_BUILD_MEMORY=0"
             );
         },
     );
@@ -257,7 +257,7 @@ fn memory_config_no_memory_overrides_all() {
             let mem = MemoryConfig::resolve(true, true, &config, None);
             assert!(
                 ! mem.enabled,
-                "--no-memory should override --experimental-memory, GROK_MEMORY=1, and TOML enabled=true"
+                "--no-memory should override --experimental-memory, CHUTES_BUILD_MEMORY=1, and TOML enabled=true"
             );
         },
     );
@@ -277,7 +277,7 @@ fn memory_config_no_memory_overrides_env_enable() {
         || {
             let config = toml::Value::Table(toml::map::Map::new());
             let mem = MemoryConfig::resolve(false, true, &config, None);
-            assert!(! mem.enabled, "--no-memory should override GROK_MEMORY=1");
+            assert!(! mem.enabled, "--no-memory should override CHUTES_BUILD_MEMORY=1");
         },
     );
 }
@@ -714,16 +714,16 @@ min_hours = 6
 #[test]
 fn expands_multiple_vars_in_one_string() {
     with_env_var(
-        "GROK_TEST_USER",
+        "CHUTES_BUILD_TEST_USER",
         "alice",
         || {
             with_env_var(
-                "GROK_TEST_ROOT",
+                "CHUTES_BUILD_TEST_ROOT",
                 "/a/b/c/d",
                 || {
                     let toml_str = r#"
 [mcp_servers.test]
-command = "$GROK_TEST_USER $GROK_TEST_ROOT"
+command = "$CHUTES_BUILD_TEST_USER $CHUTES_BUILD_TEST_ROOT"
 "#;
                     let mut value = toml::from_str::<toml::Value>(toml_str).unwrap();
                     expand_env_vars_in_toml(&mut value);
@@ -959,17 +959,17 @@ max_results = 8
         );
     });
 }
-/// Mutex to serialize tests that touch the GROK_SUBAGENTS env var.
+/// Mutex to serialize tests that touch the CHUTES_BUILD_SUBAGENTS env var.
 static SUBAGENTS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Run `f` with GROK_SUBAGENTS explicitly unset.
+/// Run `f` with CHUTES_BUILD_SUBAGENTS explicitly unset.
 fn without_grok_subagents<T>(f: impl FnOnce() -> T) -> T {
     let _guard = SUBAGENTS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    with_env_var_opt("GROK_SUBAGENTS", None, f)
+    with_env_var_opt("CHUTES_BUILD_SUBAGENTS", None, f)
 }
-/// Run `f` with GROK_SUBAGENTS set to a specific value.
+/// Run `f` with CHUTES_BUILD_SUBAGENTS set to a specific value.
 fn with_grok_subagents<T>(value: &str, f: impl FnOnce() -> T) -> T {
     let _guard = SUBAGENTS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    with_env_var_opt("GROK_SUBAGENTS", Some(value), f)
+    with_env_var_opt("CHUTES_BUILD_SUBAGENTS", Some(value), f)
 }
 #[test]
 fn subagents_config_default_enabled() {
@@ -1006,7 +1006,7 @@ fn subagents_config_env_var_disables() {
             let config: toml::Value = toml::from_str("[subagents]\nenabled = true")
                 .unwrap();
             let sa = SubagentsConfig::resolve(false, &config, None);
-            assert!(! sa.enabled, "GROK_SUBAGENTS=0 should override config file");
+            assert!(! sa.enabled, "CHUTES_BUILD_SUBAGENTS=0 should override config file");
         },
     );
 }
@@ -1035,7 +1035,7 @@ fn subagents_config_env_var_disables_default() {
             let config = toml::Value::Table(toml::map::Map::new());
             let sa = SubagentsConfig::resolve(false, &config, None);
             assert!(
-                ! sa.enabled, "GROK_SUBAGENTS=0 should override the enabled default"
+                ! sa.enabled, "CHUTES_BUILD_SUBAGENTS=0 should override the enabled default"
             );
         },
     );
@@ -1061,7 +1061,7 @@ fn subagents_config_cli_flag_overrides_env_var() {
         || {
             let config = toml::Value::Table(toml::map::Map::new());
             let sa = SubagentsConfig::resolve(true, &config, None);
-            assert!(sa.enabled, "--subagents CLI flag should override GROK_SUBAGENTS=0");
+            assert!(sa.enabled, "--subagents CLI flag should override CHUTES_BUILD_SUBAGENTS=0");
         },
     );
 }
@@ -1126,7 +1126,7 @@ fn subagents_config_models_with_env_var_enables() {
                 )
                 .unwrap();
             let sa = SubagentsConfig::resolve(false, &config, None);
-            assert!(sa.enabled, "GROK_SUBAGENTS=1 should enable");
+            assert!(sa.enabled, "CHUTES_BUILD_SUBAGENTS=1 should enable");
             assert_eq!(sa.models.get("explore").unwrap(), "grok-3-fast");
         },
     );
@@ -1209,9 +1209,9 @@ fn with_managed_mcp_env<T>(
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     with_env_var_opt(
-        "GROK_MANAGED_MCPS_ENABLED",
+        "CHUTES_BUILD_MANAGED_MCPS_ENABLED",
         managed_mcps,
-        || with_env_var_opt("GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED", gateway_tools, f),
+        || with_env_var_opt("CHUTES_BUILD_MANAGED_MCP_GATEWAY_TOOLS_ENABLED", gateway_tools, f),
     )
 }
 #[test]
@@ -1359,15 +1359,15 @@ fn with_model_overrides_env_full<T>(
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     with_env_var_opt(
-        "GROK_WEB_SEARCH_MODEL",
+        "CHUTES_BUILD_WEB_SEARCH_MODEL",
         ws,
         || with_env_var_opt(
-            "GROK_SESSION_SUMMARY_MODEL",
+            "CHUTES_BUILD_SESSION_SUMMARY_MODEL",
             ss,
             || with_env_var_opt(
-                "GROK_IMAGE_DESCRIPTION_MODEL",
+                "CHUTES_BUILD_IMAGE_DESCRIPTION_MODEL",
                 id,
-                || with_env_var_opt("GROK_PROMPT_SUGGESTIONS_MODEL", ps, f),
+                || with_env_var_opt("CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL", ps, f),
             ),
         ),
     )
@@ -1871,9 +1871,9 @@ fn with_tools_env<T>(
 ) -> T {
     let _guard = TOOLS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     with_env_var_opt(
-        "GROK_RESPECT_GITIGNORE",
+        "CHUTES_BUILD_RESPECT_GITIGNORE",
         respect_gitignore,
-        || with_env_var_opt("GROK_DISABLE_ZDR_INCOMPATIBLE_TOOLS", disable_zdr, f),
+        || with_env_var_opt("CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS", disable_zdr, f),
     )
 }
 fn without_grok_respect_gitignore<T>(f: impl FnOnce() -> T) -> T {
@@ -1934,7 +1934,7 @@ fn tools_config_env_false_overrides_toml_true() {
             let tc = ToolsConfig::resolve(&config);
             assert!(
                 ! tc.respect_gitignore,
-                "GROK_RESPECT_GITIGNORE=false should override config file"
+                "CHUTES_BUILD_RESPECT_GITIGNORE=false should override config file"
             );
         },
     );
@@ -2031,7 +2031,7 @@ fn roles_parse_from_toml() {
             [roles.implementer]
             description = "Implementation agent"
             default_capability_mode = "all"
-            prompt_file = ".grok/prompts/impl.md"
+            prompt_file = ".chutes-build/prompts/impl.md"
         "#;
     let cfg: SubagentsConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(cfg.roles.len(), 2);
@@ -2044,7 +2044,7 @@ fn roles_parse_from_toml() {
     assert_eq!(implementer.description, "Implementation agent");
     assert_eq!(implementer.default_capability_mode.as_deref(), Some("all"));
     assert!(implementer.model.is_none());
-    assert_eq!(implementer.prompt_file.as_deref(), Some(".grok/prompts/impl.md"));
+    assert_eq!(implementer.prompt_file.as_deref(), Some(".chutes-build/prompts/impl.md"));
 }
 #[test]
 fn roles_default_to_empty() {
@@ -2122,7 +2122,7 @@ fn validate_roles_accepts_valid_prompt_file() {
     let toml_str = r#"
             [roles.ok]
             description = "Valid prompt file"
-            prompt_file = ".grok/prompts/ok.md"
+            prompt_file = ".chutes-build/prompts/ok.md"
         "#;
     let cfg: SubagentsConfig = toml::from_str(toml_str).unwrap();
     assert!(cfg.validate_roles().is_empty());
@@ -2130,7 +2130,7 @@ fn validate_roles_accepts_valid_prompt_file() {
 #[test]
 fn discover_roles_loads_from_directory() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let roles_dir = tmp.path().join(".grok").join("roles");
+    let roles_dir = tmp.path().join(".chutes-build").join("roles");
     std::fs::create_dir_all(&roles_dir).unwrap();
     std::fs::write(
             roles_dir.join("reviewer.toml"),
@@ -2149,7 +2149,7 @@ fn discover_roles_loads_from_directory() {
 #[test]
 fn discover_roles_inline_takes_precedence() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let roles_dir = tmp.path().join(".grok").join("roles");
+    let roles_dir = tmp.path().join(".chutes-build").join("roles");
     std::fs::create_dir_all(&roles_dir).unwrap();
     std::fs::write(
             roles_dir.join("researcher.toml"),
@@ -2173,7 +2173,7 @@ fn discover_roles_inline_takes_precedence() {
 #[test]
 fn discover_roles_ignores_non_toml_files() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let roles_dir = tmp.path().join(".grok").join("roles");
+    let roles_dir = tmp.path().join(".chutes-build").join("roles");
     std::fs::create_dir_all(&roles_dir).unwrap();
     std::fs::write(roles_dir.join("readme.md"), "This is not a role definition")
         .unwrap();
@@ -2196,7 +2196,7 @@ fn personas_parse_from_toml() {
 
             [personas.concise]
             instructions = "Be concise."
-            instructions_file = ".grok/personas/concise.md"
+            instructions_file = ".chutes-build/personas/concise.md"
         "#;
     let cfg: SubagentsConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(cfg.personas.len(), 2);
@@ -2207,7 +2207,7 @@ fn personas_parse_from_toml() {
     assert!(researcher.instructions_file.is_none());
     let concise = cfg.get_persona("concise").unwrap();
     assert_eq!(concise.instructions.as_deref(), Some("Be concise."));
-    assert_eq!(concise.instructions_file.as_deref(), Some(".grok/personas/concise.md"));
+    assert_eq!(concise.instructions_file.as_deref(), Some(".chutes-build/personas/concise.md"));
 }
 #[test]
 fn personas_default_to_empty() {
@@ -2222,7 +2222,7 @@ fn persona_lookup_returns_none_for_unknown() {
 #[test]
 fn discover_personas_loads_from_directory() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let dir = tmp.path().join(".grok").join("personas");
+    let dir = tmp.path().join(".chutes-build").join("personas");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
             dir.join("friendly.toml"),
@@ -2237,7 +2237,7 @@ fn discover_personas_loads_from_directory() {
 #[test]
 fn discover_personas_inline_takes_precedence() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let dir = tmp.path().join(".grok").join("personas");
+    let dir = tmp.path().join(".chutes-build").join("personas");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("strict.toml"), r#"instructions = "File-based strict""#)
         .unwrap();
@@ -2259,11 +2259,11 @@ fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
     let tmp = tempfile::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     let workspace = tmp.path().join("workspace");
-    let bundled = home.join(".grok").join("bundled");
-    std::fs::create_dir_all(workspace.join(".grok").join("roles")).unwrap();
-    std::fs::create_dir_all(workspace.join(".grok").join("personas")).unwrap();
-    std::fs::create_dir_all(home.join(".grok").join("roles")).unwrap();
-    std::fs::create_dir_all(home.join(".grok").join("personas")).unwrap();
+    let bundled = home.join(".chutes-build").join("bundled");
+    std::fs::create_dir_all(workspace.join(".chutes-build").join("roles")).unwrap();
+    std::fs::create_dir_all(workspace.join(".chutes-build").join("personas")).unwrap();
+    std::fs::create_dir_all(home.join(".chutes-build").join("roles")).unwrap();
+    std::fs::create_dir_all(home.join(".chutes-build").join("personas")).unwrap();
     std::fs::create_dir_all(bundled.join("roles")).unwrap();
     std::fs::create_dir_all(bundled.join("personas")).unwrap();
     std::fs::write(
@@ -2277,22 +2277,22 @@ fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
         )
         .unwrap();
     std::fs::write(
-            home.join(".grok/roles/reviewer.toml"),
+            home.join(".chutes-build/roles/reviewer.toml"),
             r#"description = "User reviewer""#,
         )
         .unwrap();
     std::fs::write(
-            home.join(".grok/personas/reviewer.toml"),
+            home.join(".chutes-build/personas/reviewer.toml"),
             r#"instructions = "User persona""#,
         )
         .unwrap();
     std::fs::write(
-            workspace.join(".grok/roles/reviewer.toml"),
+            workspace.join(".chutes-build/roles/reviewer.toml"),
             r#"description = "Project reviewer""#,
         )
         .unwrap();
     std::fs::write(
-            workspace.join(".grok/personas/reviewer.toml"),
+            workspace.join(".chutes-build/personas/reviewer.toml"),
             r#"instructions = "Project persona""#,
         )
         .unwrap();
@@ -2325,8 +2325,8 @@ fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
             );
         },
     );
-    std::fs::remove_file(workspace.join(".grok/roles/reviewer.toml")).unwrap();
-    std::fs::remove_file(workspace.join(".grok/personas/reviewer.toml")).unwrap();
+    std::fs::remove_file(workspace.join(".chutes-build/roles/reviewer.toml")).unwrap();
+    std::fs::remove_file(workspace.join(".chutes-build/personas/reviewer.toml")).unwrap();
     with_env_var(
         "HOME",
         home.to_str().unwrap(),
@@ -2350,8 +2350,8 @@ fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
             );
         },
     );
-    std::fs::remove_file(home.join(".grok/roles/reviewer.toml")).unwrap();
-    std::fs::remove_file(home.join(".grok/personas/reviewer.toml")).unwrap();
+    std::fs::remove_file(home.join(".chutes-build/roles/reviewer.toml")).unwrap();
+    std::fs::remove_file(home.join(".chutes-build/personas/reviewer.toml")).unwrap();
     with_env_var(
         "HOME",
         home.to_str().unwrap(),
@@ -2380,7 +2380,7 @@ fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
 fn render_io_summary_shows_bundled_for_bundled_personas() {
     let persona = SubagentPersona {
         instructions: Some("Bundled instructions".to_string()),
-        source_path: Some("/tmp/home/.grok/bundled/personas/reviewer.toml".to_string()),
+        source_path: Some("/tmp/home/.chutes-build/bundled/personas/reviewer.toml".to_string()),
         ..Default::default()
     };
     let summary = persona.render_io_summary("reviewer");
@@ -2565,9 +2565,9 @@ fn config_layers_user_overrides_managed() {
 #[serial_test::serial]
 fn enterprise_two_file_merge_routes_deployment_key_to_proxy() {
     for k in [
-        "GROK_MANAGED_CONFIG_URL",
-        "GROK_CLI_CHAT_PROXY_BASE_URL",
-        "GROK_TRACE_UPLOAD_ENDPOINT_URL",
+        "CHUTES_BUILD_MANAGED_CONFIG_URL",
+        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+        "CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
@@ -2575,9 +2575,9 @@ fn enterprise_two_file_merge_routes_deployment_key_to_proxy() {
             r#"
 [endpoints]
 xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
-cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+cli_chat_proxy_base_url = "https://cli-chat-proxy.chutes-build.com/v1"
 
-[model.grok-build]
+[model.chutes-build-build]
 base_url = "https://inference.acme-corp.example/xai/v1"
 env_key = "ANTHROPIC_AUTH_TOKEN"
 model = "grok-4.5"
@@ -2616,7 +2616,7 @@ trace_upload_endpoint_url = "https://s3.acme-corp.example"
         .unwrap();
     assert_eq!(
         cfg.endpoints.resolve_managed_config_url(),
-        "https://cli-chat-proxy.grok.com/v1/deployment/config"
+        "https://cli-chat-proxy.chutes-build.com/v1/deployment/config"
     );
     assert!(! cfg.endpoints.resolve_managed_config_url().contains("acme-corp"));
     assert_eq!(
@@ -2860,8 +2860,8 @@ fn validate_hooks_path_rejects_outside_grok_home() {
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
-        msg.contains("must be under ~/.grok/"),
-        "should mention ~/.grok/ restriction, got: {msg}"
+        msg.contains("must be under ~/.chutes-build/"),
+        "should mention ~/.chutes-build/ restriction, got: {msg}"
     );
 }
 #[test]
@@ -2872,7 +2872,7 @@ fn validate_hooks_path_rejects_traversal_attack() {
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
-        msg.contains("must be under ~/.grok/"),
+        msg.contains("must be under ~/.chutes-build/"),
         "traversal should be rejected, got: {msg}"
     );
 }
@@ -2882,7 +2882,7 @@ fn validate_hooks_path_accepts_grok_hooks_subdir() {
     let valid_path = grok_home.join("hooks").join("my-hooks");
     let _ = std::fs::create_dir_all(&valid_path);
     let result = validate_hooks_path(valid_path.to_str().unwrap());
-    assert!(result.is_ok(), "path under ~/.grok/ should be accepted");
+    assert!(result.is_ok(), "path under ~/.chutes-build/ should be accepted");
 }
 #[test]
 fn managed_settings_disables_features_and_requirements_overrides() {
@@ -2957,10 +2957,10 @@ fn simulate_release_build() -> xai_grok_test_support::EnvGuard {
 /// effective config ONLY when the folder is trusted; project
 /// `[plugins].disabled` is never gated. The closing set-difference proves
 /// the gate toggles ONLY that path (user/global paths pass through both
-/// verdicts untouched). GROK_HOME-isolated + `#[serial]` for folder-trust
+/// verdicts untouched). CHUTES_BUILD_HOME-isolated + `#[serial]` for folder-trust
 /// store hygiene (empty store ⇒ deterministic untrusted;
-/// `EnvGuard` restores GROK_HOME even on panic). No user-global
-/// `$GROK_HOME/config.toml` is seeded: `grok_home()` is `OnceLock`-cached,
+/// `EnvGuard` restores CHUTES_BUILD_HOME even on panic). No user-global
+/// `$CHUTES_BUILD_HOME/config.toml` is seeded: `grok_home()` is `OnceLock`-cached,
 /// so under a shared-process harness (Bazel) such a seed is read
 /// non-deterministically — reliable only under nextest's process-per-test
 /// isolation.
@@ -2969,12 +2969,12 @@ fn simulate_release_build() -> xai_grok_test_support::EnvGuard {
 fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
     git2::Repository::init(repo.path()).unwrap();
-    let grok = repo.path().join(".grok");
+    let grok = repo.path().join(".chutes-build");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
             grok.join("config.toml"),
@@ -3023,15 +3023,15 @@ fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
 /// in `xai-grok-agent`. An ABSOLUTE plugin path is used so the merged
 /// `config_paths` entry resolves against the repo — `discover_plugins`' `is_dir()`
 /// check resolves a relative `./x` against the process cwd, not `cwd`.
-/// GROK_HOME-isolated + `#[serial]` (`EnvGuard` restores it even on panic).
+/// CHUTES_BUILD_HOME-isolated + `#[serial]` (`EnvGuard` restores it even on panic).
 #[test]
 #[serial_test::serial]
 fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     use xai_grok_agent::plugins::{TrustStore, discover_plugins};
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
     git2::Repository::init(repo.path()).unwrap();
@@ -3040,7 +3040,7 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     std::fs::create_dir_all(&plugin_dir).unwrap();
     std::fs::write(plugin_dir.join("plugin.json"), r#"{"name":"cfgpath-probe"}"#)
         .unwrap();
-    let grok = cwd.join(".grok");
+    let grok = cwd.join(".chutes-build");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
             grok.join("config.toml"),
@@ -3091,19 +3091,19 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
 /// under an org kill-switch must end up allowed — if the plugins-config read
 /// ran first, the gate's remote-less backstop would record a durable
 /// kill-switch-blind deny that `resolve_and_record_inner`'s `Some(false)`
-/// arm (store-only reconcile) could never lift. GROK_HOME-isolated (empty
-/// store); GROK_FOLDER_TRUST unset so the kill-switch is the only signal.
+/// arm (store-only reconcile) could never lift. CHUTES_BUILD_HOME-isolated (empty
+/// store); CHUTES_BUILD_FOLDER_TRUST unset so the kill-switch is the only signal.
 #[test]
 #[serial_test::serial]
 fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::set("GROK_HOME", home.path());
-    let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
+    let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+    let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
     git2::Repository::init(repo.path()).unwrap();
-    let grok = repo.path().join(".grok");
+    let grok = repo.path().join(".chutes-build");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
         .unwrap();

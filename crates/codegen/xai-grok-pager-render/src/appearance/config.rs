@@ -386,7 +386,7 @@ pub struct AnimationConfig {
     /// Lower = faster wave, higher = slower/smoother wave. Default: 32.
     pub wave_rows: u16,
     /// Show an FPS counter overlay in the top-right corner (debug/dev builds only).
-    /// Also enabled by the `GROK_FPS=1` env var. Default: false.
+    /// Also enabled by the `CHUTES_BUILD_FPS=1` env var. Default: false.
     pub show_fps: bool,
 }
 
@@ -1083,7 +1083,7 @@ pub struct RawAnimationConfig {
     /// Lower = faster wave, higher = slower/smoother wave. Default: 32.
     pub wave_rows: u16,
     /// Show an FPS counter overlay in the top-right corner.
-    /// Requires a debug build. Also enabled by GROK_FPS=1 env var. Default: false.
+    /// Requires a debug build. Also enabled by CHUTES_BUILD_FPS=1 env var. Default: false.
     pub show_fps: bool,
 }
 
@@ -1715,7 +1715,7 @@ fn parse_hex_color(hex: &str) -> Result<Color, String> {
 }
 
 fn lookup_named_color(name: &str) -> Result<Color, String> {
-    // Named colors use the GrokNight RGB palette. They are quantized via
+    // Named colors use the ChutesNight RGB palette. They are quantized via
     // `parse_color_string` → `quantize()` to match the terminal's capabilities.
     let color = match name.to_uppercase().as_str() {
         // Background colors

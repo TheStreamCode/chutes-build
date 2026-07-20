@@ -620,14 +620,14 @@ impl ToolRegistryBuilder {
         );
     }
     /// Whether this registry knows the fully-qualified tool id
-    /// (`"GrokBuild:read_file"`).
+    /// (`"ChutesBuild:read_file"`).
     pub fn has_tool_id(&self, id: &str) -> bool {
         self.tools.contains_key(id)
     }
     pub fn known_tool_ids(&self) -> std::collections::HashSet<String> {
         self.tools.keys().cloned().collect()
     }
-    /// Fully-qualified tool id (`"GrokBuild:read_file"`) → declared
+    /// Fully-qualified tool id (`"ChutesBuild:read_file"`) → declared
     /// [`ToolKind`], for every registered tool. Lets consumers that receive
     /// kind-less tool configs (e.g. hub `session.bind` wire entries) backfill
     /// the kind from the binary's own registry before capability filtering.
@@ -676,13 +676,16 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::GetTerminalCommandOutputTool>();
         b.register::<grok_build::WaitTasksTool>();
         b.register::<grok_build::TaskTool>();
+        b.register::<crate::implementations::chutes::Context7SearchTool>();
+        b.register::<crate::implementations::chutes::Context7DocsTool>();
+        b.register::<crate::implementations::chutes::GetChutesUsageTool>();
+        b.register::<crate::implementations::chutes::ListMediaModelsTool>();
+        b.register::<crate::implementations::chutes::DescribeMediaModelTool>();
+        b.register::<crate::implementations::chutes::GenerateMediaTool>();
+        b.register::<crate::implementations::chutes::BrowserTool>();
         b.register::<grok_build::WebSearchTool>();
         b.register_with_params::<grok_build::WebFetchTool, grok_build::web_fetch::WebFetchParams>();
         b.register::<grok_build::LspTool>();
-        b.register::<grok_build::ImageGenTool>();
-        b.register::<grok_build::ImageEditTool>();
-        b.register::<grok_build::ImageToVideoTool>();
-        b.register::<grok_build::ReferenceToVideoTool>();
         b.register::<grok_build::EnterPlanModeTool>();
         b.register::<grok_build::ExitPlanModeTool>();
         b.register_with_params::<
@@ -855,9 +858,9 @@ impl ToolRegistryBuilder {
         }
         {
             let standard_file_ids: &[&str] = &[
-                "GrokBuild:read_file",
-                "GrokBuild:search_replace",
-                "GrokBuild:grep",
+                "ChutesBuild:read_file",
+                "ChutesBuild:search_replace",
+                "ChutesBuild:grep",
             ];
             let hashline_file_ids: &[&str] = &[
                 "GrokBuildHashline:hashline_read",
@@ -968,6 +971,9 @@ impl ToolRegistryBuilder {
         resources.insert(crate::types::resources::FileSystem(ctx.fs));
         let cwd = ctx.cwd;
         resources.insert(crate::types::resources::Cwd(cwd.clone()));
+        resources.insert(crate::implementations::chutes::BrowserClient::new(
+            cwd.clone(),
+        ));
         resources.insert(crate::types::resources::SessionFolder(ctx.session_folder));
         resources.insert(crate::types::resources::SessionEnv(ctx.session_env));
         if let Some(owner_session_id) = ctx.owner_session_id {
@@ -1338,7 +1344,7 @@ impl FinalizedToolset {
     }
     /// Resolve canonical [`ToolIdentity`] (kind, namespace, presentation label)
     /// for a tool by its client-facing wire name. Drives the first-party
-    /// `x.ai/*` tool `_meta` contract (tool normalization). Returns `None` for
+    /// `chutes.build/*` tool `_meta` contract (tool normalization). Returns `None` for
     /// unknown tools (e.g. uninitialized MCP, backend-only tools).
     pub fn tool_identity(&self, tool_name: &str) -> Option<crate::normalization::ToolIdentity> {
         self.tools
@@ -1800,16 +1806,16 @@ fn explain_requirement_failure(
 ) -> RequirementError {
     let fq_tool_id = format!("{}:{}", entry.namespace, entry.id);
     match fq_tool_id.as_str() {
-        "GrokBuild:run_terminal_cmd" if params
+        "ChutesBuild:run_terminal_cmd" if params
             .get("enabled_background")
             .and_then(|value| value.as_bool())
             .unwrap_or(true) => {
             let mut missing = vec![];
             if !has_tool_kind(proposed, ToolKind::BackgroundTaskAction) {
-                missing.push("GrokBuild:get_task_output");
+                missing.push("ChutesBuild:get_task_output");
             }
             if !has_tool_kind(proposed, ToolKind::KillTaskAction) {
-                missing.push("GrokBuild:kill_task");
+                missing.push("ChutesBuild:kill_task");
             }
             let message = if missing.is_empty() {
                 "unsatisfied requirements".to_string()
@@ -1827,13 +1833,13 @@ fn explain_requirement_failure(
                 .with_bad_value(serde_json::Value::Bool(true))
                 .with_category("requirements")
         }
-        "GrokBuild:task" => {
+        "ChutesBuild:task" => {
             let mut missing = vec![];
             if !has_tool_kind(proposed, ToolKind::BackgroundTaskAction) {
-                missing.push("GrokBuild:get_task_output");
+                missing.push("ChutesBuild:get_task_output");
             }
             if !has_tool_kind(proposed, ToolKind::KillTaskAction) {
-                missing.push("GrokBuild:kill_task");
+                missing.push("ChutesBuild:kill_task");
             }
             RequirementError::new(
                     fq_tool_id,
@@ -1846,7 +1852,7 @@ fn explain_requirement_failure(
                 .with_expected("include get_task_output and kill_task")
                 .with_category("requirements")
         }
-        "GrokBuild:get_task_output" => {
+        "ChutesBuild:get_task_output" => {
             let has_grok_build_bash = has_tool_with_bool_param(
                 proposed,
                 "GrokBuild",
@@ -1869,7 +1875,7 @@ fn explain_requirement_failure(
             {
                 notes
                     .push(
-                        "GrokBuild:run_terminal_cmd is present but enabled_background=false",
+                        "ChutesBuild:run_terminal_cmd is present but enabled_background=false",
                     );
             }
             if has_tool(proposed, "GrokBuildConcise", "run_terminal_cmd")
@@ -1880,7 +1886,7 @@ fn explain_requirement_failure(
                         "GrokBuildConcise:run_terminal_cmd is present but enabled_background=false",
                     );
             }
-            let mut message = "get_task_output requires a background-capable bash tool (GrokBuild:run_terminal_cmd or GrokBuildConcise:run_terminal_cmd with enabled_background=true), OpenCode:bash, or GrokBuild:task"
+            let mut message = "get_task_output requires a background-capable bash tool (ChutesBuild:run_terminal_cmd or GrokBuildConcise:run_terminal_cmd with enabled_background=true), OpenCode:bash, or ChutesBuild:task"
                 .to_string();
             let has_provider = has_grok_build_bash || has_grok_build_concise_bash
                 || has_opencode_bash || has_task;
@@ -1890,11 +1896,11 @@ fn explain_requirement_failure(
             RequirementError::new(fq_tool_id, message)
                 .with_field_path("tools")
                 .with_expected(
-                    "include a background-capable bash tool, OpenCode:bash, or GrokBuild:task",
+                    "include a background-capable bash tool, OpenCode:bash, or ChutesBuild:task",
                 )
                 .with_category("requirements")
         }
-        "GrokBuild:search_replace" if !params
+        "ChutesBuild:search_replace" if !params
             .get("skip_read_before_edit")
             .and_then(|value| value.as_bool())
             .unwrap_or(false) && !has_tool_kind(proposed, ToolKind::Read) => {
@@ -1904,27 +1910,27 @@ fn explain_requirement_failure(
                 )
                 .with_field_path("params.skip_read_before_edit")
                 .with_expected(
-                    "set skip_read_before_edit=true or include a Read tool such as GrokBuild:read_file",
+                    "set skip_read_before_edit=true or include a Read tool such as ChutesBuild:read_file",
                 )
                 .with_bad_value(serde_json::Value::Bool(false))
                 .with_category("requirements")
         }
-        "GrokBuild:enter_plan_mode" => {
+        "ChutesBuild:enter_plan_mode" => {
             RequirementError::new(
                     fq_tool_id,
-                    "enter_plan_mode requires GrokBuild:exit_plan_mode so plan mode can always be exited",
+                    "enter_plan_mode requires ChutesBuild:exit_plan_mode so plan mode can always be exited",
                 )
                 .with_field_path("tools")
-                .with_expected("include GrokBuild:exit_plan_mode")
+                .with_expected("include ChutesBuild:exit_plan_mode")
                 .with_category("requirements")
         }
-        "GrokBuild:exit_plan_mode" => {
+        "ChutesBuild:exit_plan_mode" => {
             RequirementError::new(
                     fq_tool_id,
-                    "exit_plan_mode requires GrokBuild:enter_plan_mode so plan mode can be entered before exiting",
+                    "exit_plan_mode requires ChutesBuild:enter_plan_mode so plan mode can be entered before exiting",
                 )
                 .with_field_path("tools")
-                .with_expected("include GrokBuild:enter_plan_mode")
+                .with_expected("include ChutesBuild:enter_plan_mode")
                 .with_category("requirements")
         }
         _ => {
@@ -2048,7 +2054,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:search_replace".to_string(),
+                    id: "ChutesBuild:search_replace".to_string(),
                     params: Some(
                         serde_json::json!({
                 "skip_read_before_edit" : true })
@@ -2107,7 +2113,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2116,7 +2122,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:search_replace".to_string(),
+                    id: "ChutesBuild:search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2188,7 +2194,7 @@ mod tests {
                 "scheduler_list",
             ]
             .into_iter()
-            .map(|id| ToolConfig::from_id(format!("GrokBuild:{id}")))
+            .map(|id| ToolConfig::from_id(format!("ChutesBuild:{id}")))
             .chain(std::iter::empty::<ToolConfig>())
             .collect(),
             behavior_preset: None,
@@ -2238,9 +2244,9 @@ mod tests {
             .finalize(
                 ToolServerConfig {
                     tools: vec![
-                        ToolConfig::from_id("GrokBuild:run_terminal_cmd".to_string()),
-                        ToolConfig::from_id("GrokBuild:get_task_output".to_string()),
-                        ToolConfig::from_id("GrokBuild:kill_task".to_string()),
+                        ToolConfig::from_id("ChutesBuild:run_terminal_cmd".to_string()),
+                        ToolConfig::from_id("ChutesBuild:get_task_output".to_string()),
+                        ToolConfig::from_id("ChutesBuild:kill_task".to_string()),
                     ],
                     behavior_preset: None,
                 },
@@ -2252,7 +2258,7 @@ mod tests {
             Some("run_terminal_cmd")
         );
     }
-    /// `merge_tool_meta` (the harness emission path) must stamp `x.ai/tool` for a
+    /// `merge_tool_meta` (the harness emission path) must stamp `chutes.build/tool` for a
     /// known tool while preserving existing markers, and leave meta untouched for
     /// an unknown tool.
     #[tokio::test]
@@ -2262,9 +2268,9 @@ mod tests {
         use crate::types::tool_io::ToolInput;
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::from_id("GrokBuild:run_terminal_cmd".to_string()),
-                ToolConfig::from_id("GrokBuild:get_task_output".to_string()),
-                ToolConfig::from_id("GrokBuild:kill_task".to_string()),
+                ToolConfig::from_id("ChutesBuild:run_terminal_cmd".to_string()),
+                ToolConfig::from_id("ChutesBuild:get_task_output".to_string()),
+                ToolConfig::from_id("ChutesBuild:kill_task".to_string()),
             ],
             behavior_preset: None,
         };
@@ -2305,9 +2311,9 @@ mod tests {
     async fn identity_read_only_honors_per_tool_override() {
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::from_id("GrokBuild:run_terminal_cmd".to_string()),
-                ToolConfig::from_id("GrokBuild:get_task_output".to_string()),
-                ToolConfig::from_id("GrokBuild:kill_task".to_string()),
+                ToolConfig::from_id("ChutesBuild:run_terminal_cmd".to_string()),
+                ToolConfig::from_id("ChutesBuild:get_task_output".to_string()),
+                ToolConfig::from_id("ChutesBuild:kill_task".to_string()),
             ],
             behavior_preset: None,
         };
@@ -2330,11 +2336,11 @@ mod tests {
         let parse = |v: serde_json::Value| -> ToolConfig {
             serde_json::from_value(v).expect("ToolConfig deserializes")
         };
-        let known = parse(serde_json::json!({ "id" : "GrokBuild:read_file", "kind" : "read" }));
+        let known = parse(serde_json::json!({ "id" : "ChutesBuild:read_file", "kind" : "read" }));
         assert_eq!(known.kind, Some(ToolKind::Read));
-        let typo = parse(serde_json::json!({ "id" : "GrokBuild:read_file", "kind" : "raed" }));
+        let typo = parse(serde_json::json!({ "id" : "ChutesBuild:read_file", "kind" : "raed" }));
         assert_eq!(typo.kind, Some(ToolKind::Other));
-        let absent = parse(serde_json::json!({ "id" : "GrokBuild:read_file" }));
+        let absent = parse(serde_json::json!({ "id" : "ChutesBuild:read_file" }));
         assert_eq!(absent.kind, None);
     }
     /// End-to-end: a `params_name_overrides` rename of `old_string` must flow
@@ -2346,7 +2352,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2355,7 +2361,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:search_replace".to_string(),
+                    id: "ChutesBuild:search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: Some(std::collections::HashMap::from([(
@@ -2418,7 +2424,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2427,7 +2433,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:search_replace".to_string(),
+                    id: "ChutesBuild:search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2547,7 +2553,7 @@ mod tests {
                 ToolConfig::for_tool::<grok_build::KillTaskTool>(),
                 ToolConfig::for_tool::<grok_build::TaskOutputTool>(),
                 ToolConfig {
-                    id: "GrokBuild:list_dir".to_string(),
+                    id: "ChutesBuild:list_dir".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2591,13 +2597,13 @@ mod tests {
     fn has_tool_id_knows_pinned_tool_config_ids() {
         let builder = ToolRegistryBuilder::new();
         for id in [
-            "GrokBuild:run_terminal_cmd",
-            "GrokBuild:read_file",
-            "GrokBuild:search_replace",
-            "GrokBuild:list_dir",
-            "GrokBuild:grep",
-            "GrokBuild:get_terminal_command_output",
-            "GrokBuild:kill_terminal_command",
+            "ChutesBuild:run_terminal_cmd",
+            "ChutesBuild:read_file",
+            "ChutesBuild:search_replace",
+            "ChutesBuild:list_dir",
+            "ChutesBuild:grep",
+            "ChutesBuild:get_terminal_command_output",
+            "ChutesBuild:kill_terminal_command",
         ] {
             assert!(
                 builder.has_tool_id(id),
@@ -2605,7 +2611,7 @@ mod tests {
             );
         }
         assert!(
-            !builder.has_tool_id("GrokBuild:does_not_exist"),
+            !builder.has_tool_id("ChutesBuild:does_not_exist"),
             "unknown ids must not be reported as known"
         );
         assert!(
@@ -2621,11 +2627,11 @@ mod tests {
     fn known_tool_kinds_maps_pinned_tool_config_ids() {
         let kinds = ToolRegistryBuilder::new().known_tool_kinds();
         for (id, expected) in [
-            ("GrokBuild:run_terminal_cmd", ToolKind::Execute),
-            ("GrokBuild:read_file", ToolKind::Read),
-            ("GrokBuild:search_replace", ToolKind::Edit),
-            ("GrokBuild:grep", ToolKind::Search),
-            ("GrokBuild:list_dir", ToolKind::List),
+            ("ChutesBuild:run_terminal_cmd", ToolKind::Execute),
+            ("ChutesBuild:read_file", ToolKind::Read),
+            ("ChutesBuild:search_replace", ToolKind::Edit),
+            ("ChutesBuild:grep", ToolKind::Search),
+            ("ChutesBuild:list_dir", ToolKind::List),
         ] {
             assert_eq!(
                 kinds.get(id),
@@ -2634,7 +2640,7 @@ mod tests {
             );
         }
         assert!(
-            !kinds.contains_key("GrokBuild:does_not_exist"),
+            !kinds.contains_key("ChutesBuild:does_not_exist"),
             "unknown ids must be absent"
         );
     }
@@ -2642,7 +2648,7 @@ mod tests {
     /// two tools resolve to the same `client_name`.
     ///
     /// Without `name_override`, the client_name defaults to `entry.id`
-    /// (e.g. `"read_file"`). If both `GrokBuild:read_file` and
+    /// (e.g. `"read_file"`). If both `ChutesBuild:read_file` and
     /// `Codex:read_file` are in the config, both would get
     /// `client_name = "read_file"`, making the second unreachable at
     /// dispatch time.
@@ -2652,7 +2658,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2686,7 +2692,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::from_value(serde_json::json!({ "enabled_background" :
                 "yes" }))
@@ -2703,7 +2709,7 @@ mod tests {
         let errors = builder.validate_config(&config);
         assert_eq!(errors.len(), 1);
         let error = &errors[0];
-        assert_eq!(error.tool, "GrokBuild:run_terminal_cmd");
+        assert_eq!(error.tool, "ChutesBuild:run_terminal_cmd");
         assert_eq!(
             error.field_path.as_deref(),
             Some("params.enabled_background")
@@ -2744,7 +2750,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2783,7 +2789,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3193,7 +3199,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:task".to_string(),
+                id: "ChutesBuild:task".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3209,9 +3215,9 @@ mod tests {
             "task tool should be rejected without get_task_output and kill_task"
         );
         assert!(
-            errors.iter().any(|e| e.tool == "GrokBuild:task"
-                && e.message.contains("GrokBuild:get_task_output")
-                && e.message.contains("GrokBuild:kill_task")),
+            errors.iter().any(|e| e.tool == "ChutesBuild:task"
+                && e.message.contains("ChutesBuild:get_task_output")
+                && e.message.contains("ChutesBuild:kill_task")),
             "error should mention missing background task tools: {errors:?}",
         );
     }
@@ -3223,7 +3229,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:task".to_string(),
+                    id: "ChutesBuild:task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3232,7 +3238,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:get_task_output".to_string(),
+                    id: "ChutesBuild:get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3245,9 +3251,9 @@ mod tests {
         };
         let errors = builder.validate_config(&config);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.tool == "GrokBuild:task" && e.message.contains("GrokBuild:kill_task")),
+            errors.iter().any(
+                |e| e.tool == "ChutesBuild:task" && e.message.contains("ChutesBuild:kill_task")
+            ),
             "task tool should be rejected without kill_task: {errors:?}",
         );
     }
@@ -3259,7 +3265,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:task".to_string(),
+                    id: "ChutesBuild:task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3268,7 +3274,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:kill_task".to_string(),
+                    id: "ChutesBuild:kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3281,10 +3287,8 @@ mod tests {
         };
         let errors = builder.validate_config(&config);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.tool == "GrokBuild:task"
-                    && e.message.contains("GrokBuild:get_task_output")),
+            errors.iter().any(|e| e.tool == "ChutesBuild:task"
+                && e.message.contains("ChutesBuild:get_task_output")),
             "task tool should be rejected without get_task_output: {errors:?}",
         );
     }
@@ -3297,7 +3301,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:task".to_string(),
+                    id: "ChutesBuild:task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3306,7 +3310,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:get_task_output".to_string(),
+                    id: "ChutesBuild:get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3315,7 +3319,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:kill_task".to_string(),
+                    id: "ChutesBuild:kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3347,7 +3351,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false })
                         .as_object()
@@ -3398,7 +3402,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:run_terminal_cmd".to_string(),
+                    id: "ChutesBuild:run_terminal_cmd".to_string(),
                     params: Some(
                         serde_json::json!({ "enabled_background" : true })
                             .as_object()
@@ -3412,7 +3416,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:get_task_output".to_string(),
+                    id: "ChutesBuild:get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3421,7 +3425,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:kill_task".to_string(),
+                    id: "ChutesBuild:kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3484,11 +3488,11 @@ mod tests {
         };
         let config = ToolServerConfig {
             tools: vec![
-                tool("GrokBuild:run_terminal_cmd"),
-                tool("GrokBuild:task"),
-                tool("GrokBuild:get_task_output"),
-                tool("GrokBuild:wait_tasks"),
-                tool("GrokBuild:kill_task"),
+                tool("ChutesBuild:run_terminal_cmd"),
+                tool("ChutesBuild:task"),
+                tool("ChutesBuild:get_task_output"),
+                tool("ChutesBuild:wait_tasks"),
+                tool("ChutesBuild:kill_task"),
             ],
             behavior_preset: None,
         };
@@ -3538,7 +3542,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : true })
@@ -3575,7 +3579,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : false })
@@ -3621,7 +3625,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : false })
@@ -3648,7 +3652,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3665,15 +3669,15 @@ mod tests {
             "expected one bash requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "GrokBuild:run_terminal_cmd");
+        assert_eq!(error.tool, "ChutesBuild:run_terminal_cmd");
         assert_eq!(error.category.as_deref(), Some("requirements"));
         assert_eq!(
             error.field_path.as_deref(),
             Some("params.enabled_background")
         );
         assert_eq!(error.bad_value, Some(serde_json::json!(true)));
-        assert!(error.message.contains("GrokBuild:get_task_output"));
-        assert!(error.message.contains("GrokBuild:kill_task"));
+        assert!(error.message.contains("ChutesBuild:get_task_output"));
+        assert!(error.message.contains("ChutesBuild:kill_task"));
         assert!(
             error
                 .expected
@@ -3687,7 +3691,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:task".to_string(),
+                id: "ChutesBuild:task".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3704,9 +3708,9 @@ mod tests {
             "expected one task requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "GrokBuild:task");
-        assert!(error.message.contains("GrokBuild:get_task_output"));
-        assert!(error.message.contains("GrokBuild:kill_task"));
+        assert_eq!(error.tool, "ChutesBuild:task");
+        assert!(error.message.contains("ChutesBuild:get_task_output"));
+        assert!(error.message.contains("ChutesBuild:kill_task"));
         assert_eq!(error.field_path.as_deref(), Some("tools"));
     }
     #[test]
@@ -3714,7 +3718,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:get_task_output".to_string(),
+                id: "ChutesBuild:get_task_output".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3731,17 +3735,17 @@ mod tests {
             "expected one get_task_output requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "GrokBuild:get_task_output");
+        assert_eq!(error.tool, "ChutesBuild:get_task_output");
         assert!(error.message.contains("background-capable bash tool"));
         assert!(error.message.contains("OpenCode:bash"));
-        assert!(error.message.contains("GrokBuild:task"));
+        assert!(error.message.contains("ChutesBuild:task"));
     }
     #[test]
     fn search_replace_requirement_error_mentions_read_tool() {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:search_replace".to_string(),
+                id: "ChutesBuild:search_replace".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3758,7 +3762,7 @@ mod tests {
         );
         let error = errors
             .iter()
-            .find(|error| error.tool == "GrokBuild:search_replace")
+            .find(|error| error.tool == "ChutesBuild:search_replace")
             .expect("search_replace error should be present");
         assert!(error.message.contains("Read tool"));
         assert_eq!(
@@ -3773,7 +3777,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:ask_user_question".to_string(),
+                id: "ChutesBuild:ask_user_question".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3795,7 +3799,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuild:run_terminal_cmd".to_string(),
+                    id: "ChutesBuild:run_terminal_cmd".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3804,7 +3808,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:read_file".to_string(),
+                    id: "ChutesBuild:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3813,7 +3817,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:search_replace".to_string(),
+                    id: "ChutesBuild:search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3822,7 +3826,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:list_dir".to_string(),
+                    id: "ChutesBuild:list_dir".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3831,7 +3835,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:grep".to_string(),
+                    id: "ChutesBuild:grep".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3840,7 +3844,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:web_search".to_string(),
+                    id: "ChutesBuild:web_search".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3849,7 +3853,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:task".to_string(),
+                    id: "ChutesBuild:task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3858,7 +3862,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:get_task_output".to_string(),
+                    id: "ChutesBuild:get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3867,7 +3871,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuild:kill_task".to_string(),
+                    id: "ChutesBuild:kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3963,9 +3967,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let standard_config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("GrokBuild:read_file"),
-                hashline_tool_config("GrokBuild:search_replace"),
-                hashline_tool_config("GrokBuild:grep"),
+                hashline_tool_config("ChutesBuild:read_file"),
+                hashline_tool_config("ChutesBuild:search_replace"),
+                hashline_tool_config("ChutesBuild:grep"),
             ],
             behavior_preset: None,
         };
@@ -4015,9 +4019,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("GrokBuild:read_file"),
+                hashline_tool_config("ChutesBuild:read_file"),
                 hashline_tool_config("GrokBuildHashline:hashline_edit"),
-                hashline_tool_config("GrokBuild:grep"),
+                hashline_tool_config("ChutesBuild:grep"),
             ],
             behavior_preset: None,
         };
@@ -4112,7 +4116,7 @@ mod tests {
     }
     fn bash_config_with_background() -> ToolConfig {
         ToolConfig {
-            id: "GrokBuild:run_terminal_cmd".to_owned(),
+            id: "ChutesBuild:run_terminal_cmd".to_owned(),
             params: Some(
                 serde_json::json!({ "enabled_background" : true })
                     .as_object()
@@ -4383,7 +4387,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:read_file".to_string(),
+                id: "ChutesBuild:read_file".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -4454,7 +4458,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuild:run_terminal_cmd".to_string(),
+                id: "ChutesBuild:run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false })
                         .as_object()

@@ -9,7 +9,7 @@
 //! real sampler. The runner and the gate semantics are covered
 //! separately; this module ties both together.
 //!
-//! Tests that mutate `GROK_GOAL_CLASSIFIER` carry the
+//! Tests that mutate `CHUTES_BUILD_GOAL_CLASSIFIER` carry the
 //! `serial_test::serial` attribute so env-var state doesn't race
 //! between threads when `cargo test` runs the module in parallel —
 //! mirrors the precedent set by `resolve_goal_classifier_*`
@@ -26,7 +26,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{
     SubagentCancelOutcome, SubagentEvent, SubagentResult,
 };
 use xai_grok_tools::implementations::grok_build::update_goal::{RejectReason, UpdateGoalInput};
-const ENV_FLAG: &str = "GROK_GOAL_CLASSIFIER";
+const ENV_FLAG: &str = "CHUTES_BUILD_GOAL_CLASSIFIER";
 /// Canned subagent response for a single verifier-skeptic spawn.
 /// Constructors mirror the verification-stage contract: each
 /// `achieved`-flavoured `Response` writes a `refuted: false` JSON
@@ -1984,7 +1984,7 @@ async fn goal_classifier_env_override_disables_when_remote_enabled() {
     );
     assert!(
         !resolved.value,
-        "GROK_GOAL_CLASSIFIER=0 must disable even with remote=true",
+        "CHUTES_BUILD_GOAL_CLASSIFIER=0 must disable even with remote=true",
     );
     let local = tokio::task::LocalSet::new();
     local

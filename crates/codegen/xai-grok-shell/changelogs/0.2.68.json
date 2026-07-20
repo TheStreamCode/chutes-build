@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "**Agent-run terminal commands** now set `GROK_AGENT=1` so host tools can tell them apart from interactive shells.",
+    "description": "**Agent-run terminal commands** now set `CHUTES_BUILD_AGENT=1` so host tools can tell them apart from interactive shells.",
     "breaking_change": false
   }
 ]

@@ -1,7 +1,7 @@
 name: undo-tip-ctrl-c-clear-shows
 description: >
   Ctrl+C variant of the undo tip with the contextual-hints master pinned on
-  (`GROK_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
+  (`CHUTES_BUILD_CONTEXTUAL_HINTS=1` for deterministic env control; the feature now ships
   default-ON): with a substantial draft present, Ctrl+C clears the textarea (the
   cancel-with-draft fall-through) — a recoverable wipe that shows the "… to undo"
   banner.
@@ -10,7 +10,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_CONTEXTUAL_HINTS
+    - key: CHUTES_BUILD_CONTEXTUAL_HINTS
       value: "1"
 mock:
   response: "unused"

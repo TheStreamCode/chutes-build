@@ -228,7 +228,7 @@ impl Drop for PtyController {
     }
 }
 
-const CLIPBOARD_SINK_ENV_VARS: &[&str] = &["GROK_OSC52_SINK", "LC_GROK_OSC52_SINK"];
+const CLIPBOARD_SINK_ENV_VARS: &[&str] = &["CHUTES_BUILD_OSC52_SINK", "LC_CHUTES_BUILD_OSC52_SINK"];
 
 /// Host terminal identity markers stripped from the child environment.
 ///
@@ -307,7 +307,7 @@ fn apply_child_env(cmd: &mut CommandBuilder, env: &[(&str, &str)]) {
     for ssh_var in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "SSH_AUTH_SOCK"] {
         cmd.env_remove(ssh_var);
     }
-    // A harness launched under `grok wrap` must not silently confirm clipboard
+    // A harness launched under `chutes-build wrap` must not silently confirm clipboard
     // delivery for no-sink scenarios. Explicit sink tests re-inject a marker
     // through `env` after this hygiene pass.
     for sink_var in CLIPBOARD_SINK_ENV_VARS {
@@ -374,7 +374,7 @@ mod tests {
             cmd.env(sink_var, "polluted");
         }
         // Unrelated vars must survive the hygiene pass untouched.
-        cmd.env("GROK_SCROLL_LOG", "/tmp/scroll.jsonl");
+        cmd.env("CHUTES_BUILD_SCROLL_LOG", "/tmp/scroll.jsonl");
 
         apply_child_env(&mut cmd, &[]);
 
@@ -407,7 +407,8 @@ mod tests {
             Some("xterm-256color")
         );
         assert_eq!(
-            cmd.get_env("GROK_SCROLL_LOG").and_then(|v| v.to_str()),
+            cmd.get_env("CHUTES_BUILD_SCROLL_LOG")
+                .and_then(|v| v.to_str()),
             Some("/tmp/scroll.jsonl"),
             "hygiene must not touch unrelated vars"
         );
@@ -428,7 +429,7 @@ mod tests {
                 ("TERM_PROGRAM", "vscode"),
                 ("NVIM", "/tmp/fake-nvim.sock"),
                 ("TERM", "xterm-kitty"),
-                ("GROK_OSC52_SINK", "1"),
+                ("CHUTES_BUILD_OSC52_SINK", "1"),
             ],
         );
 
@@ -450,7 +451,8 @@ mod tests {
             Some("xterm-kitty")
         );
         assert_eq!(
-            cmd.get_env("GROK_OSC52_SINK").and_then(|v| v.to_str()),
+            cmd.get_env("CHUTES_BUILD_OSC52_SINK")
+                .and_then(|v| v.to_str()),
             Some("1"),
             "explicit sink scenarios must be able to re-inject the marker"
         );

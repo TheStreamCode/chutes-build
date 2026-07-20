@@ -1702,7 +1702,7 @@ impl PromptWidget {
         // arrive. Ghostty users can unbind it with a one-line config
         // (`keybind = cmd+a=unbind`) — after that, this handler fires
         // and selects the prompt buffer instead of the entire terminal
-        // window. See `docs/user-guide/03-keyboard-shortcuts.md`.
+        // window.
         //
         // The gate is read from a struct field initialised from
         // `terminal_context().brand` at construction (see

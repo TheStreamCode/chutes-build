@@ -25,7 +25,7 @@ const MIN_DEVICE_CODE_EXPIRY_FALLBACK_SECS: i64 = 10 * 60;
 pub enum DeviceCodeError {
     #[error(
         "Device-code login is not available for this deployment. \
-         Try `grok login` or set XAI_API_KEY instead."
+         Try `chutes-build login` or set CHUTES_API_KEY instead."
     )]
     NotEnabled,
     #[error(transparent)]
@@ -204,7 +204,7 @@ pub async fn request_device_code(
 
 /// Poll the token endpoint until the user approves (or denies / expires).
 ///
-/// On success, persists credentials to `~/.grok/auth.json` and returns
+/// On success, persists credentials to `~/.chutes-build/auth.json` and returns
 /// the authenticated `GrokAuth`.
 ///
 /// Callers should have already displayed `device_code.verification_uri`
@@ -232,7 +232,7 @@ pub async fn complete_device_code_login(
         tokio::time::sleep(poll_interval).await;
 
         if tokio::time::Instant::now() > deadline {
-            anyhow::bail!("Device code expired. Run `grok login --device-auth` again.");
+            anyhow::bail!("Device code expired. Run `chutes-build login --device-auth` again.");
         }
 
         let resp = with_alpha_test_key(
@@ -273,7 +273,7 @@ pub async fn complete_device_code_login(
             }
             "expired_token" => {
                 tracing::warn!(description = detail, "device auth token expired");
-                anyhow::bail!("Device code expired. Run `grok login --device-auth` again.");
+                anyhow::bail!("Device code expired. Run `chutes-build login --device-auth` again.");
             }
             other => {
                 tracing::warn!(
@@ -322,7 +322,7 @@ pub async fn run_device_code_login_channels(
     };
 
     // TUI: push the URL through the channel BEFORE opening the browser, so
-    // `x.ai/auth/get_url` isn't blocked on a slow/hanging browser launch
+    // `chutes.build/auth/get_url` isn't blocked on a slow/hanging browser launch
     // (e.g. SSH/headless). When the issuer omits `verification_uri_complete`,
     // embed the code so the welcome screen can still show it (anti-phishing).
     let display_uri = match device_code.verification_uri_complete.as_deref() {
@@ -561,7 +561,7 @@ pub(crate) mod tests {
     #[test]
     fn build_auth_persists_credentials_without_proxy_fetch() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let grok_home = temp_dir.path().join(".grok");
+        let grok_home = temp_dir.path().join(".chutes-build");
         std::fs::create_dir_all(&grok_home).unwrap();
         let auth_manager = auth_manager_with_grok_home(&grok_home, "http://127.0.0.1:9");
         let tokens = super::TokenOk {
@@ -604,13 +604,13 @@ pub(crate) mod tests {
     fn build_auth_seeds_team_metadata_from_access_token() {
         ensure_crypto_provider();
         let temp_dir = tempfile::tempdir().unwrap();
-        let grok_home = temp_dir.path().join(".grok");
+        let grok_home = temp_dir.path().join(".chutes-build");
         std::fs::create_dir_all(&grok_home).unwrap();
         let auth_manager = auth_manager_with_grok_home(&grok_home, "http://127.0.0.1:9");
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
         let claims = serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.x.ai",
+            "iss": "https://auth.example.com",
             "aud": "client-id",
             "exp": 9999999999u64,
             "iat": 1000000000u64,
@@ -680,7 +680,7 @@ pub(crate) mod tests {
     fn assert_build_auth_rejected(cfg: GrokComConfig, token_principal: &str, expected_err: &str) {
         ensure_crypto_provider();
         let temp_dir = tempfile::tempdir().unwrap();
-        let grok_home = temp_dir.path().join(".grok");
+        let grok_home = temp_dir.path().join(".chutes-build");
         std::fs::create_dir_all(&grok_home).unwrap();
         let auth_manager =
             Arc::new(AuthManager::new(&grok_home, cfg).with_proxy_base_url("http://127.0.0.1:9"));
@@ -724,7 +724,7 @@ pub(crate) mod tests {
             ..GrokComConfig::default()
         };
         let temp_dir = tempfile::tempdir().unwrap();
-        let grok_home = temp_dir.path().join(".grok");
+        let grok_home = temp_dir.path().join(".chutes-build");
         std::fs::create_dir_all(&grok_home).unwrap();
         let auth_manager =
             Arc::new(AuthManager::new(&grok_home, cfg).with_proxy_base_url("http://127.0.0.1:9"));

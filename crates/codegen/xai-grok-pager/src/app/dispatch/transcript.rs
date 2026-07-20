@@ -232,6 +232,13 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
             return;
         };
 
+        if let Some((path, crate::scrollback::block::MediaButtonKind::Audio)) =
+            entry.block.inline_open_button()
+        {
+            agent.toggle_inline_audio_playback(&path);
+            return;
+        }
+
         // Block has images/media but terminal can't render pixels — toast and bail.
         let has_media =
             !entry.block.image_references().is_empty() || entry.block.inline_media().is_some();
@@ -720,7 +727,7 @@ pub(super) fn handle_skills_toggle_done(
             }
         }
     }
-    // The toggle effect already called x.ai/skills/refresh-baseline
+    // The toggle effect already called chutes.build/skills/refresh-baseline
     // which triggers the session to reload skills and push an
     // AvailableCommandsUpdate notification with the updated list.
     vec![]

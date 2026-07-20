@@ -3,10 +3,10 @@
 //! A compact top-right overlay painting a per-frame snapshot of the scroll
 //! state machine ([`MouseScrollState::debug_snapshot`]) plus the active
 //! scrollback's viewport facts, inside a REAL session with the REAL event
-//! loop. Recipe: `GROK_FPS=1 GROK_SCROLL_DEBUG=1 grok --resume <session>`,
+//! loop. Recipe: `CHUTES_BUILD_FPS=1 CHUTES_BUILD_SCROLL_DEBUG=1 grok --resume <session>`,
 //! then flip `scroll_mode` / `scroll_lines` / `invert_scroll` /
 //! `scroll_speed` in `/settings` to compare variants live. For event-exact
-//! capture beyond this per-frame sampling, add `GROK_SCROLL_LOG=1` — the
+//! capture beyond this per-frame sampling, add `CHUTES_BUILD_SCROLL_LOG=1` — the
 //! JSONL flight recorder ([`crate::input::scroll_log`]).
 //!
 //! Invariant: the HUD must never affect scroll behavior. The snapshot is
@@ -30,7 +30,7 @@ use crate::input::mouse::ScrollDebugSnapshot;
 const PANEL_WIDTH: u16 = 46;
 
 /// Runtime enablement for the HUD. Mirrors `FrameMetrics`' env machinery:
-/// `GROK_SCROLL_DEBUG` (nonempty and not `"0"`) enables at startup, and the
+/// `CHUTES_BUILD_SCROLL_DEBUG` (nonempty and not `"0"`) enables at startup, and the
 /// hidden `/scroll-debug` command toggles it live. Deliberately NOT a
 /// settings-registry entry: it is a diagnostic, not a preference to persist.
 pub struct ScrollDebugHud {
@@ -45,7 +45,8 @@ impl Default for ScrollDebugHud {
 
 impl ScrollDebugHud {
     pub fn new() -> Self {
-        let env_on = std::env::var("GROK_SCROLL_DEBUG").is_ok_and(|v| !v.is_empty() && v != "0");
+        let env_on =
+            std::env::var("CHUTES_BUILD_SCROLL_DEBUG").is_ok_and(|v| !v.is_empty() && v != "0");
         Self { enabled: env_on }
     }
 
@@ -76,7 +77,7 @@ pub struct ViewportDebug {
 pub struct ScrollDebugPanel {
     pub snapshot: ScrollDebugSnapshot,
     pub view: Option<ViewportDebug>,
-    /// Rows left free for FPS overlays stacked above (the dev `GROK_FPS`
+    /// Rows left free for FPS overlays stacked above (the dev `CHUTES_BUILD_FPS`
     /// line and/or the release-safe `/debug fps` HUD).
     pub top_offset: u16,
 }

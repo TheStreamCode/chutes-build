@@ -1,0 +1,63 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Chutes Build.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Chutes Build. Remove credentials, prompts,
+        private source code, and personal data from logs before attaching them.
+  - type: input
+    id: version
+    attributes:
+      label: Chutes Build version
+      description: Run `chutes-build --version` or provide the source revision.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest safe sequence that reproduces the issue.
+      placeholder: |
+        1. Start Chutes Build with ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste only reviewed output with credentials and private data removed.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed credentials, private code, and personal data.
+          required: true

@@ -1,8 +1,6 @@
-//! `x.ai/billing` extension handler.
+//! `chutes.build/billing` extension handler.
 //!
-//! Fetches the authenticated user's Grok Build billing configuration
-//! (credit limit, usage, on-demand cap, billing period, history) from
-//! the backend. Used by the pager/desktop to display credits and usage.
+//! Adapts Chutes account usage to the pager's compact usage surface.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -43,6 +41,22 @@ pub struct UsagePeriod {
     pub end: Option<String>,
 }
 
+/// One independently enforced Chutes usage window.
+///
+/// Chutes subscriptions can expose several simultaneous limits (notably the
+/// rolling four-hour window and the monthly billing-cycle cap). Keeping every
+/// window on the wire lets detailed clients render the complete account state,
+/// while `credit_usage_percent`/`current_period` remain the most constrained
+/// window for compact indicators and warnings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindow {
+    pub period_type: String,
+    pub usage_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at: Option<String>,
+}
+
 /// Usage summary for one past billing period.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +90,10 @@ pub struct BillingConfig {
     /// `billing_period_start`/`billing_period_end`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_period: Option<UsagePeriod>,
+    /// All independently enforced active windows. The compact UI continues to
+    /// use `current_period`; `/usage` renders this collection in full.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_windows: Vec<UsageWindow>,
     /// Deprecated: included monthly credit budget. Use `credit_usage_percent`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monthly_limit: Option<Cent>,
@@ -148,11 +166,11 @@ pub struct GetAutoTopupRuleResponse {
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/billing" => {
+        "chutes.build/billing" => {
             tracing::info!("handling billing config request");
             handle_get_billing(agent).await
         }
-        "x.ai/auto-topup-rule" => {
+        "chutes.build/auto-topup-rule" => {
             tracing::info!("handling auto top-up rule request");
             handle_get_auto_topup_rule(agent).await
         }
@@ -162,8 +180,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 
 /// Structured context for unified-log entries from a successful billing fetch.
 ///
-/// Keeps history to a count + the most recent period so `~/.grok/logs/unified.jsonl`
+/// Keeps history to a count + the most recent period so `~/.chutes-build/logs/unified.jsonl`
 /// stays useful without dumping unbounded period arrays.
+#[cfg(test)]
 fn billing_unified_log_ctx(billing: &BillingConfigResponse) -> serde_json::Value {
     let history_len = billing
         .config
@@ -197,157 +216,456 @@ fn billing_unified_log_ctx(billing: &BillingConfigResponse) -> serde_json::Value
     })
 }
 
-async fn handle_get_billing(agent: &MvpAgent) -> ExtResult {
-    let auth = super::auth_gate::require_xai_auth(
-        &agent.auth_manager,
-        "Authentication required to fetch billing data",
-        "Billing data requires auth with grok.com. Run `grok login` to authenticate.",
-    )?;
-
-    let proxy_base = agent.cli_chat_proxy_base_url();
-    let base = proxy_base.trim_end_matches('/');
-
-    // Credits balance / usage (new billing system) via the CLI proxy, which
-    // forwards to the backend `GetGrokCreditsConfig`.
-    let credits_url = format!("{}/billing?format=credits", base);
-    let credits_resp = crate::http::shared_client()
-        .get(&credits_url)
-        .header("Authorization", format!("Bearer {}", &auth.key))
-        .header(
-            "X-XAI-Token-Auth",
-            crate::auth::GrokComConfig::default().token_header,
-        )
-        .header("x-userid", &auth.user_id)
-        .header("x-grok-client-version", xai_grok_version::VERSION)
-        .header(
-            crate::http::CLIENT_MODE_HEADER,
-            crate::http::process_client_mode(),
-        )
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
+async fn handle_get_billing(_agent: &MvpAgent) -> ExtResult {
+    let snapshot = chutes_build_core::account::ChutesAccountClient::from_env()
+        .map_err(|error| {
+            tracing::warn!(%error, "Chutes usage client is unavailable");
+            acp::Error::invalid_request()
+                .data("Chutes usage requires CHUTES_API_KEY or `chutes-build login`.")
+        })?
+        .usage_snapshot(false)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "billing: upstream request failed");
-            xai_grok_telemetry::unified_log::warn(
-                "billing: upstream request failed",
-                None,
-                Some(serde_json::json!({ "error": e.to_string() })),
-            );
-            acp::Error::internal_error().data(format!("Failed to fetch billing data: {e}"))
+        .map_err(|error| {
+            tracing::warn!(%error, "Chutes usage request failed");
+            acp::Error::internal_error().data("Unable to fetch Chutes usage data.")
         })?;
-
-    if !credits_resp.status().is_success() {
-        let status = credits_resp.status().as_u16();
-        let body = credits_resp.text().await.unwrap_or_default();
-        tracing::warn!(status, url = %credits_url, "billing: upstream error");
-
-        let detail = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-            .unwrap_or_else(|| format!("HTTP {status}"));
-
-        xai_grok_telemetry::unified_log::warn(
-            "billing: upstream error",
-            None,
-            Some(serde_json::json!({
-                "status": status,
-                "detail": detail,
-            })),
-        );
-
-        return Err(acp::Error::internal_error().data(format!("Billing service error: {detail}")));
-    }
-
-    let mut billing: BillingConfigResponse = credits_resp.json().await.map_err(|e| {
-        tracing::error!(error = %e, "billing: failed to parse response");
-        xai_grok_telemetry::unified_log::warn(
-            "billing: failed to parse response",
-            None,
-            Some(serde_json::json!({ "error": e.to_string() })),
-        );
-        acp::Error::internal_error().data(format!("Failed to parse billing data: {e}"))
-    })?;
-
-    // Enrich with fields from remote settings.
-    let rs = agent.cfg.borrow().remote_settings.clone();
-    billing.on_demand_enabled = rs.as_ref().and_then(|rs| rs.on_demand_enabled);
-    billing.subscription_tier = rs.as_ref().and_then(|rs| {
-        rs.subscription_tier_display
-            .clone()
-            .or_else(|| rs.subscription_tier.clone())
-    });
-
-    // Every prompt / /usage / poll path hits `x.ai/billing`; log the fetched
-    // credits snapshot so support can correlate limit UX with real balances.
-    xai_grok_telemetry::unified_log::info(
-        "billing: fetched credits config",
-        None,
-        Some(billing_unified_log_ctx(&billing)),
-    );
-
-    to_raw_response(&billing)
+    to_raw_response(&billing_from_chutes_snapshot(&snapshot))
 }
 
-async fn handle_get_auto_topup_rule(agent: &MvpAgent) -> ExtResult {
-    let auth = super::auth_gate::require_xai_auth(
-        &agent.auth_manager,
-        "Authentication required to fetch auto top-up rule",
-        "Auto top-up data requires auth with grok.com. Run `grok login` to authenticate.",
-    )?;
+async fn handle_get_auto_topup_rule(_agent: &MvpAgent) -> ExtResult {
+    to_raw_response(&GetAutoTopupRuleResponse { rule: None })
+}
 
-    let proxy_base = agent.cli_chat_proxy_base_url();
-    let base = proxy_base.trim_end_matches('/');
-
-    // Auto top-up rule via the CLI proxy, which forwards to the backend
-    // `GetAutoTopupRule`.
-    let url = format!("{}/auto-topup-rule", base);
-    let response = crate::http::shared_client()
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", &auth.key))
-        .header(
-            "X-XAI-Token-Auth",
-            crate::auth::GrokComConfig::default().token_header,
-        )
-        .header("x-userid", &auth.user_id)
-        .header("x-grok-client-version", xai_grok_version::VERSION)
-        .header(
-            crate::http::CLIENT_MODE_HEADER,
-            crate::http::process_client_mode(),
-        )
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "auto-topup: upstream request failed");
-            acp::Error::internal_error().data(format!("Failed to fetch auto top-up rule: {e}"))
-        })?;
-
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        tracing::warn!(status, url = %url, "auto-topup: upstream error");
-
-        let detail = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-            .unwrap_or_else(|| format!("HTTP {status}"));
-
-        return Err(
-            acp::Error::internal_error().data(format!("Auto top-up service error: {detail}"))
-        );
+fn billing_from_chutes_snapshot(snapshot: &serde_json::Value) -> BillingConfigResponse {
+    let raw_subscription = &snapshot["subscription_usage"];
+    let subscription = find_best_usage_object(raw_subscription, 0)
+        .map(|(value, _)| value)
+        .unwrap_or(raw_subscription);
+    let candidates = [
+        usage_sample(
+            subscription,
+            &[
+                "billing_cycle_cap",
+                "monthly_cap",
+                "monthly_window",
+                "billing_cycle",
+                "monthly",
+            ],
+            &["billing_cycle_used", "monthly_used"],
+            &["billing_cycle_limit", "monthly_limit", "monthly_cap_usd"],
+            "CHUTES_USAGE_PERIOD_MONTHLY",
+        ),
+        usage_sample(
+            subscription,
+            &[
+                "four_hour_window",
+                "rolling_4h_window",
+                "four_hour_cap",
+                "rolling_window",
+                "four_hour",
+            ],
+            &["four_hour_used", "rolling_4h_used"],
+            &["four_hour_limit", "rolling_4h_limit", "four_hour_cap_usd"],
+            "CHUTES_USAGE_PERIOD_FOUR_HOUR",
+        ),
+        usage_sample(
+            subscription,
+            &["weekly_window", "weekly_cap"],
+            &["weekly_used"],
+            &["weekly_limit"],
+            "CHUTES_USAGE_PERIOD_WEEKLY",
+        ),
+        usage_sample(
+            subscription,
+            &[
+                "daily_quota_usage",
+                "daily_quota",
+                "daily_window",
+                "daily_requests",
+            ],
+            &["daily_used", "daily_quota_used"],
+            &["daily_limit", "daily_request_limit", "daily_quota_limit"],
+            "CHUTES_USAGE_PERIOD_DAILY",
+        ),
+        quota_usage_sample(&snapshot["quota_usage"], &snapshot["quotas"]),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    // A direct daily window and the documented quota endpoints can both
+    // describe the same enforcement period. Keep one entry per type, choosing
+    // the more constrained sample so the UI never duplicates a window.
+    let mut samples: Vec<UsageSample> = Vec::new();
+    for candidate in candidates {
+        if let Some(existing) = samples
+            .iter_mut()
+            .find(|sample| sample.period_type == candidate.period_type)
+        {
+            if candidate.percent > existing.percent {
+                *existing = candidate;
+            }
+        } else {
+            samples.push(candidate);
+        }
     }
+    let active = samples
+        .iter()
+        .max_by(|left, right| left.percent.total_cmp(&right.percent));
+    let credit_usage_percent = active.map(|sample| sample.percent);
+    let current_period = active.map(|sample| UsagePeriod {
+        period_type: Some(sample.period_type.to_owned()),
+        start: None,
+        end: sample.reset.clone(),
+    });
+    let usage_windows = samples
+        .iter()
+        .map(|sample| UsageWindow {
+            period_type: sample.period_type.to_owned(),
+            usage_percent: sample.percent,
+            reset_at: sample.reset.clone(),
+        })
+        .collect();
+    let subscription_tier = plan_name(subscription);
 
-    // Return the upstream response body verbatim (as a JSON value) so /usage
-    // can print the exact data from this request unformatted.
-    let body_text = response.text().await.unwrap_or_default();
-    let value: serde_json::Value =
-        serde_json::from_str(&body_text).unwrap_or(serde_json::json!({"raw": body_text}));
-    to_raw_response(&value)
+    BillingConfigResponse {
+        config: Some(BillingConfig {
+            credit_usage_percent,
+            current_period,
+            usage_windows,
+            monthly_limit: None,
+            used: None,
+            on_demand_cap: None,
+            on_demand_used: None,
+            prepaid_balance: None,
+            is_unified_billing_user: None,
+            billing_period_start: None,
+            billing_period_end: None,
+            history: Vec::new(),
+        }),
+        on_demand_enabled: None,
+        subscription_tier,
+    }
+}
+
+#[derive(Debug)]
+struct UsageSample {
+    percent: f64,
+    reset: Option<String>,
+    period_type: &'static str,
+}
+
+fn usage_sample(
+    payload: &serde_json::Value,
+    object_keys: &[&str],
+    direct_used_keys: &[&str],
+    direct_limit_keys: &[&str],
+    period_type: &'static str,
+) -> Option<UsageSample> {
+    let nested = first_object(payload, object_keys);
+    let used = nested
+        .and_then(|value| first_number(value, &["usage", "used", "consumed"]))
+        .or_else(|| first_number(payload, direct_used_keys));
+    let limit = nested
+        .and_then(|value| first_number(value, &["cap", "limit", "quota", "total"]))
+        .or_else(|| first_number(payload, direct_limit_keys));
+    let percent = nested
+        .and_then(|value| first_number(value, &["usage_percent", "percent", "percentage"]))
+        .or_else(|| {
+            let (used, limit) = (used?, limit?);
+            (limit > 0.0).then_some(used / limit * 100.0)
+        })?;
+    let reset = nested
+        .and_then(|value| first_string(value, &["reset_at", "reset_label", "end", "expires_at"]));
+    Some(UsageSample {
+        percent,
+        reset,
+        period_type,
+    })
+}
+
+fn quota_usage_sample(
+    quota_usage: &serde_json::Value,
+    quotas: &serde_json::Value,
+) -> Option<UsageSample> {
+    let (used, reported_limit) = aggregate_quota_usage(quota_usage);
+    let used = used?;
+    let limit = reported_limit.or_else(|| aggregate_quota_limit(quotas))?;
+    if limit <= 0.0 {
+        return None;
+    }
+    Some(UsageSample {
+        percent: used / limit * 100.0,
+        reset: None,
+        period_type: "CHUTES_USAGE_PERIOD_DAILY",
+    })
+}
+
+fn aggregate_quota_usage(value: &serde_json::Value) -> (Option<f64>, Option<f64>) {
+    if let Some(object) = value.as_object() {
+        let direct_used = first_number(value, &["used"]);
+        let direct_quota = first_number(value, &["quota", "limit"]);
+        if direct_used.is_some() || direct_quota.is_some() {
+            return (direct_used, direct_quota);
+        }
+        let mut used: Option<f64> = None;
+        let mut quota: Option<f64> = None;
+        for entry in object.values().filter(|entry| entry.is_object()) {
+            if let Some(next) = first_number(entry, &["used"]) {
+                used = Some(used.unwrap_or(0.0) + next);
+            }
+            if let Some(next) = first_number(entry, &["quota", "limit"]) {
+                quota = Some(quota.unwrap_or(0.0) + next);
+            }
+        }
+        return (used, quota);
+    }
+    (None, None)
+}
+
+fn aggregate_quota_limit(value: &serde_json::Value) -> Option<f64> {
+    let items = value.as_array().or_else(|| {
+        value
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .or_else(|| value.get("quotas").and_then(serde_json::Value::as_array))
+    })?;
+    let mut total: Option<f64> = None;
+    for entry in items {
+        if let Some(limit) = first_number(entry, &["quota", "limit"]) {
+            total = Some(total.unwrap_or(0.0) + limit);
+        }
+    }
+    total
+}
+
+fn plan_name(payload: &serde_json::Value) -> Option<String> {
+    let plan = payload.get("plan").filter(|value| value.is_object());
+    let source = plan.unwrap_or(payload);
+    first_string(source, &["name", "plan_name", "tier"])
+        .or_else(|| first_string(payload, &["plan_name", "subscription_tier", "tier", "name"]))
+        .or_else(|| {
+            if payload
+                .get("subscription")
+                .and_then(|value| value.as_bool())
+                == Some(false)
+            {
+                return Some("Free tier".to_owned());
+            }
+            match first_number(source, &["monthly_price"])
+                .or_else(|| first_number(payload, &["monthly_price"]))
+            {
+                Some(price) if (price - 10.0).abs() < f64::EPSILON => Some("Plus".to_owned()),
+                Some(price) if (price - 20.0).abs() < f64::EPSILON => Some("Pro".to_owned()),
+                _ if payload.get("custom").and_then(|value| value.as_bool()) == Some(true) => {
+                    Some("Custom".to_owned())
+                }
+                _ if payload
+                    .get("subscription")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+                    && payload.get("custom").and_then(|value| value.as_bool()) == Some(false) =>
+                {
+                    Some("Paid tier".to_owned())
+                }
+                _ => None,
+            }
+        })
+}
+
+fn find_best_usage_object(
+    value: &serde_json::Value,
+    depth: usize,
+) -> Option<(&serde_json::Value, usize)> {
+    if depth > 6 {
+        return None;
+    }
+    let object = value.as_object()?;
+    let signals = [
+        "billing_cycle_cap",
+        "monthly",
+        "four_hour_window",
+        "rolling_4h_window",
+        "daily_quota_usage",
+        "daily_quota",
+        "weekly_window",
+        "plan",
+        "plan_name",
+    ];
+    let score = signals
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .count();
+    let mut best = (score > 0).then_some((value, score));
+    for child in object.values().filter(|child| child.is_object()) {
+        if let Some(candidate) = find_best_usage_object(child, depth + 1)
+            && best.map_or(true, |(_, best_score)| candidate.1 > best_score)
+        {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+fn first_object<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a serde_json::Value> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .filter(|value| value.is_object())
+}
+
+fn first_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| {
+        let value = value.get(*key)?;
+        value
+            .as_f64()
+            .or_else(|| value.as_str()?.parse::<f64>().ok())
+    })
+}
+
+fn first_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key)?.as_str().map(str::to_owned))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chutes_snapshot_maps_usage_without_profile_data() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {
+                "plan_name": "Developer",
+                "billing_cycle_cap": {
+                    "used": 25,
+                    "limit": 100,
+                    "reset_at": "2026-08-01T00:00:00Z"
+                }
+            },
+            "quotas": [],
+            "quota_usage": null,
+            "model_stats": null
+        });
+        let response = billing_from_chutes_snapshot(&snapshot);
+        let config = response.config.expect("usage config");
+        assert_eq!(config.credit_usage_percent, Some(25.0));
+        assert_eq!(response.subscription_tier.as_deref(), Some("Developer"));
+        assert_eq!(
+            config
+                .current_period
+                .and_then(|period| period.end)
+                .as_deref(),
+            Some("2026-08-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn chutes_snapshot_accepts_numeric_strings_and_daily_fallback() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {
+                "daily_quota_usage": {"used": "50", "limit": "200"}
+            }
+        });
+        let response = billing_from_chutes_snapshot(&snapshot);
+        assert_eq!(
+            response
+                .config
+                .and_then(|config| config.credit_usage_percent),
+            Some(25.0)
+        );
+    }
+
+    #[test]
+    fn chutes_snapshot_selects_the_most_constrained_window() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {
+                "subscription": true,
+                "custom": false,
+                "monthly_price": 20,
+                "monthly": {
+                    "usage": 25,
+                    "cap": 100,
+                    "reset_at": "2026-08-01T00:00:00Z"
+                },
+                "four_hour": {
+                    "usage": 9,
+                    "cap": 10,
+                    "reset_at": "2026-07-19T16:00:00Z"
+                }
+            },
+            "quotas": [],
+            "quota_usage": null
+        });
+        let response = billing_from_chutes_snapshot(&snapshot);
+        let config = response.config.expect("usage config");
+        assert_eq!(response.subscription_tier.as_deref(), Some("Pro"));
+        assert_eq!(config.credit_usage_percent, Some(90.0));
+        assert_eq!(
+            config
+                .usage_windows
+                .iter()
+                .map(|window| (window.period_type.as_str(), window.usage_percent))
+                .collect::<Vec<_>>(),
+            vec![
+                ("CHUTES_USAGE_PERIOD_MONTHLY", 25.0),
+                ("CHUTES_USAGE_PERIOD_FOUR_HOUR", 90.0),
+            ]
+        );
+        assert_eq!(
+            config.usage_windows[1].reset_at.as_deref(),
+            Some("2026-07-19T16:00:00Z")
+        );
+        assert_eq!(
+            config.current_period.and_then(|period| period.period_type),
+            Some("CHUTES_USAGE_PERIOD_FOUR_HOUR".to_owned())
+        );
+    }
+
+    #[test]
+    fn chutes_snapshot_aggregates_documented_per_chute_quota_usage() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {"subscription": false},
+            "quotas": {
+                "items": [
+                    {"chute_id": "*", "quota": 100},
+                    {"chute_id": "image", "quota": 50}
+                ]
+            },
+            "quota_usage": {
+                "*": {"used": 80, "quota": 100},
+                "image": {"used": 10, "quota": 50}
+            }
+        });
+        let response = billing_from_chutes_snapshot(&snapshot);
+        let config = response.config.expect("usage config");
+        assert_eq!(response.subscription_tier.as_deref(), Some("Free tier"));
+        assert_eq!(config.credit_usage_percent, Some(60.0));
+        assert_eq!(
+            config.current_period.and_then(|period| period.period_type),
+            Some("CHUTES_USAGE_PERIOD_DAILY".to_owned())
+        );
+    }
+
+    #[test]
+    fn chutes_snapshot_unwraps_nested_usage_payloads() {
+        let snapshot = serde_json::json!({
+            "subscription_usage": {
+                "data": {
+                    "plan": {"name": "Enterprise"},
+                    "daily_quota_usage": {"used": 3, "limit": 10}
+                }
+            },
+            "quotas": [],
+            "quota_usage": null
+        });
+        let response = billing_from_chutes_snapshot(&snapshot);
+        assert_eq!(response.subscription_tier.as_deref(), Some("Enterprise"));
+        assert_eq!(
+            response
+                .config
+                .and_then(|config| config.credit_usage_percent),
+            Some(30.0)
+        );
+    }
 
     #[test]
     fn auto_topup_disabled_rule_omits_enabled_field() {
@@ -412,6 +730,7 @@ mod tests {
                     start: Some("2025-04-01T00:00:00Z".into()),
                     end: Some("2025-04-08T00:00:00Z".into()),
                 }),
+                usage_windows: Vec::new(),
                 monthly_limit: Some(Cent { val: 2000 }),
                 used: Some(Cent { val: 850 }),
                 on_demand_cap: Some(Cent { val: 500 }),
@@ -466,6 +785,11 @@ mod tests {
         let config = BillingConfig {
             credit_usage_percent: None,
             current_period: None,
+            usage_windows: vec![UsageWindow {
+                period_type: "CHUTES_USAGE_PERIOD_FOUR_HOUR".into(),
+                usage_percent: 18.0,
+                reset_at: Some("2025-04-01T04:00:00Z".into()),
+            }],
             monthly_limit: Some(Cent { val: 5000 }),
             used: Some(Cent { val: 123 }),
             on_demand_cap: Some(Cent { val: 0 }),
@@ -495,6 +819,11 @@ mod tests {
         assert_eq!(rt_config.monthly_limit.unwrap().val, 5000);
         assert_eq!(rt_config.used.unwrap().val, 123);
         assert_eq!(rt_config.prepaid_balance.unwrap().val, 750);
+        assert_eq!(rt_config.usage_windows.len(), 1);
+        assert_eq!(
+            rt_config.usage_windows[0].period_type,
+            "CHUTES_USAGE_PERIOD_FOUR_HOUR"
+        );
         assert_eq!(rt_config.history.len(), 1);
     }
 
@@ -524,6 +853,7 @@ mod tests {
         let config = BillingConfig {
             credit_usage_percent: None,
             current_period: None,
+            usage_windows: Vec::new(),
             monthly_limit: Some(Cent { val: 100 }),
             used: None,
             on_demand_cap: None,
@@ -539,6 +869,7 @@ mod tests {
         // Fields with None are skipped
         assert!(json.get("creditUsagePercent").is_none());
         assert!(json.get("currentPeriod").is_none());
+        assert!(json.get("usageWindows").is_none());
         assert!(json.get("used").is_none());
         assert!(json.get("onDemandCap").is_none());
         assert!(json.get("onDemandUsed").is_none());
@@ -565,7 +896,7 @@ mod tests {
                 "prepaidBalance": {"val": 1250},
                 "isUnifiedBillingUser": true,
                 "productUsage": [
-                    {"product": "PRODUCT_GROK_BUILD", "usagePercent": 61.2}
+                    {"product": "PRODUCT_CHUTES_BUILD_BUILD", "usagePercent": 61.2}
                 ],
                 "history": [
                     {

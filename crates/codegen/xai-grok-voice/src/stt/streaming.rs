@@ -23,7 +23,7 @@ pub enum StreamingSttEvent {
     Error { message: String },
 }
 
-/// Streaming STT over `wss://api.x.ai/v1/stt`.
+/// Streaming STT over the explicitly configured TLS WebSocket endpoint.
 pub struct StreamingSttSession {
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     event_rx: mpsc::Receiver<StreamingSttEvent>,
@@ -55,7 +55,7 @@ impl StreamingSttSession {
         // still fully authorized without them).
         insert_optional_header(
             &mut request,
-            "x-grok-client-identifier",
+            "x-chutes-build-client-identifier",
             &config.client_identifier,
         );
         insert_optional_header(&mut request, "User-Agent", &config.user_agent);
@@ -303,12 +303,16 @@ mod tests {
 
     #[test]
     fn optional_header_inserted_when_present_skipped_when_empty() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
-        insert_optional_header(&mut req, "x-grok-client-identifier", "grok-shell");
+        let mut req = "wss://voice.example.com/v1/stt"
+            .into_client_request()
+            .unwrap();
+        insert_optional_header(&mut req, "x-chutes-build-client-identifier", "chutes-build");
         insert_optional_header(&mut req, "User-Agent", "");
         assert_eq!(
-            req.headers().get("x-grok-client-identifier").unwrap(),
-            "grok-shell"
+            req.headers()
+                .get("x-chutes-build-client-identifier")
+                .unwrap(),
+            "chutes-build"
         );
         assert!(
             req.headers().get("user-agent").is_none(),
@@ -318,7 +322,9 @@ mod tests {
 
     #[test]
     fn optional_header_skips_invalid_value_without_panic() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
+        let mut req = "wss://voice.example.com/v1/stt"
+            .into_client_request()
+            .unwrap();
         // A control char is not a valid header value; it must be dropped
         // silently, never panic or fail the (already-authorized) handshake.
         insert_optional_header(&mut req, "User-Agent", "bad\nvalue");

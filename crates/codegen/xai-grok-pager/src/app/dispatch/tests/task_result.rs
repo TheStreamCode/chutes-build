@@ -468,7 +468,7 @@ fn uninstall_result_notice_is_footer_only_not_row_anchored() {
     );
 }
 
-/// Regression (Bugbot): a failed `x.ai/subagent/cancel` RPC must NOT
+/// Regression (Bugbot): a failed `chutes.build/subagent/cancel` RPC must NOT
 /// finalize the row — the subagent may still be running. Only a shell
 /// response of "nothing live" finalizes it.
 #[test]
@@ -1553,7 +1553,7 @@ fn gate_refreshed_emits_check_subscription_on_gate_lift() {
     // User starts gated (no subscription).
     app.gate = Some(xai_grok_shell::auth::GateInfo {
         message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        url: Some("https://chutes.ai/pricing".into()),
         label: Some("Subscribe".into()),
     });
     assert!(!app.has_access());

@@ -98,14 +98,14 @@ pub struct RewindCheckpoint {
     #[serde(default)]
     pub hunks: Option<HunkTurnDelta>,
 }
-/// Resolve `workspace_rewind_hunks` from `GROK_WORKSPACE_REWIND_HUNKS` (default off).
+/// Resolve `workspace_rewind_hunks` from `CHUTES_BUILD_WORKSPACE_REWIND_HUNKS` (default off).
 pub(crate) fn rewind_hunks_enabled() -> bool {
-    xai_grok_config::env_bool("GROK_WORKSPACE_REWIND_HUNKS").unwrap_or(false)
+    xai_grok_config::env_bool("CHUTES_BUILD_WORKSPACE_REWIND_HUNKS").unwrap_or(false)
 }
-/// Resolve `workspace_rewind_durable` from `GROK_WORKSPACE_REWIND_DURABLE`
+/// Resolve `workspace_rewind_durable` from `CHUTES_BUILD_WORKSPACE_REWIND_DURABLE`
 /// (default off). Off ⇒ the legacy in-memory-only path with no disk I/O.
 pub(crate) fn rewind_durable_enabled() -> bool {
-    xai_grok_config::env_bool("GROK_WORKSPACE_REWIND_DURABLE").unwrap_or(false)
+    xai_grok_config::env_bool("CHUTES_BUILD_WORKSPACE_REWIND_DURABLE").unwrap_or(false)
 }
 impl WorkspaceSession {
     /// Capture the hunk delta for `prompt_index` into the in-memory store.
@@ -935,7 +935,7 @@ mod tests {
         handle
             .on_turn_boundary("main", TurnBoundary::rewind_finalize(0))
             .await;
-        let store_root = cwd.join(".grok").join("rewind-checkpoints");
+        let store_root = cwd.join(".chutes-build").join("rewind-checkpoints");
         assert!(
             !store_root.exists(),
             "flag-off finalize must not touch disk (legacy default)"
@@ -962,7 +962,7 @@ mod tests {
         );
         session.capture_hunk_delta(0).await;
         session.persist_checkpoint(0).await;
-        let store_root = cwd.join(".grok").join("rewind-checkpoints");
+        let store_root = cwd.join(".chutes-build").join("rewind-checkpoints");
         assert!(store_root.exists(), "persist creates the durable store dir");
         let stored = session
             .checkpoint_store

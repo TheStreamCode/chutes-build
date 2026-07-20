@@ -12,8 +12,8 @@ use toml::Value as TomlValue;
 /// |--------------|-----------------------------------------------------------------|
 /// | requirement  | `[features] mcp_liveness_watchers` in `requirements.toml`       |
 /// | cli          | (none — no CLI flag)                                            |
-/// | env          | `GROK_MCP_LIVENESS_WATCHERS` (handled by `BoolFlag::env`)       |
-/// | config       | `[features] mcp_liveness_watchers` in `~/.grok/config.toml`     |
+/// | env          | `CHUTES_BUILD_MCP_LIVENESS_WATCHERS` (handled by `BoolFlag::env`)       |
+/// | config       | `[features] mcp_liveness_watchers` in `~/.chutes-build/config.toml`     |
 /// | managed      | `[features] mcp_liveness_watchers` in `managed_config.toml`     |
 /// | feature_flag | (none yet — remote settings plumbing TBD)                            |
 /// | default      | `true`                                                          |
@@ -50,8 +50,8 @@ pub fn resolve_mcp_liveness_watchers(
 /// |--------------|-----------------------------------------------------------------|
 /// | requirement  | `[features] mcp_auto_restart` in `requirements.toml`            |
 /// | cli          | (none — no CLI flag)                                            |
-/// | env          | `GROK_MCP_AUTO_RESTART` (handled by `BoolFlag::env`)            |
-/// | config       | `[features] mcp_auto_restart` in `~/.grok/config.toml`          |
+/// | env          | `CHUTES_BUILD_MCP_AUTO_RESTART` (handled by `BoolFlag::env`)            |
+/// | config       | `[features] mcp_auto_restart` in `~/.chutes-build/config.toml`          |
 /// | managed      | `[features] mcp_auto_restart` in `managed_config.toml`          |
 /// | feature_flag | (none yet — remote settings plumbing TBD)                            |
 /// | default      | `true`                                                          |
@@ -88,8 +88,8 @@ pub fn resolve_mcp_auto_restart(
 /// |--------------|-----------------------------------------------------------------|
 /// | requirement  | `[features] mcp_push_server_status` in `requirements.toml`      |
 /// | cli          | (none — no CLI flag)                                            |
-/// | env          | `GROK_MCP_PUSH_SERVER_STATUS` (handled by `BoolFlag::env`)      |
-/// | config       | `[features] mcp_push_server_status` in `~/.grok/config.toml`    |
+/// | env          | `CHUTES_BUILD_MCP_PUSH_SERVER_STATUS` (handled by `BoolFlag::env`)      |
+/// | config       | `[features] mcp_push_server_status` in `~/.chutes-build/config.toml`    |
 /// | managed      | `[features] mcp_push_server_status` in `managed_config.toml`    |
 /// | feature_flag | (none yet — remote settings plumbing TBD)                            |
 /// | default      | `true`                                                          |
@@ -127,8 +127,8 @@ pub fn resolve_mcp_push_server_status(
 /// |--------------|---------------------------------------------------------------------|
 /// | requirement  | `[features] mcp_recursive_config_watch` in `requirements.toml`      |
 /// | cli          | (none — no CLI flag)                                                |
-/// | env          | `GROK_MCP_RECURSIVE_CONFIG_WATCH` (handled by `BoolFlag::env`)      |
-/// | config       | `[features] mcp_recursive_config_watch` in `~/.grok/config.toml`    |
+/// | env          | `CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH` (handled by `BoolFlag::env`)      |
+/// | config       | `[features] mcp_recursive_config_watch` in `~/.chutes-build/config.toml`    |
 /// | managed      | `[features] mcp_recursive_config_watch` in `managed_config.toml`    |
 /// | feature_flag | (none yet — remote settings plumbing TBD)                                |
 /// | default      | `true`                                                              |
@@ -164,7 +164,7 @@ pub const DEFAULT_MCP_STARTUP_TIMEOUT_SECS: u64 = 30;
 /// common third-party tooling, so an existing setting carries over).
 const ENV_MCP_TIMEOUT_MS: &str = "MCP_TIMEOUT";
 /// Env override for the MCP startup timeout, in seconds (grok-native).
-const ENV_MCP_STARTUP_TIMEOUT_SECS: &str = "GROK_MCP_STARTUP_TIMEOUT_SECS";
+const ENV_MCP_STARTUP_TIMEOUT_SECS: &str = "CHUTES_BUILD_MCP_STARTUP_TIMEOUT_SECS";
 
 /// Cached remote settings `mcp_startup_timeout_secs` (`0` = unset). MCP servers start
 /// from free functions with no handle to the live `RemoteSettings`, so the
@@ -195,7 +195,7 @@ pub fn resolved_mcp_startup_timeout_secs() -> u64 {
 
 /// Resolve the global MCP startup-handshake timeout (seconds). Precedence:
 /// requirements.toml `[mcp].startup_timeout_sec` > env (`MCP_TIMEOUT` ms /
-/// `GROK_MCP_STARTUP_TIMEOUT_SECS` secs) > effective `config.toml [mcp]` >
+/// `CHUTES_BUILD_MCP_STARTUP_TIMEOUT_SECS` secs) > effective `config.toml [mcp]` >
 /// remote settings `remote` > [`DEFAULT_MCP_STARTUP_TIMEOUT_SECS`].
 pub fn resolve_mcp_startup_timeout_secs(remote: Option<u64>) -> u64 {
     fn extract(v: &toml::Value) -> Option<u64> {
@@ -221,7 +221,7 @@ pub fn resolve_mcp_startup_timeout_secs(remote: Option<u64>) -> u64 {
 }
 
 /// `MCP_TIMEOUT` (ms, rounded up so a sub-second value never becomes 0s) >
-/// `GROK_MCP_STARTUP_TIMEOUT_SECS` (secs). Unparseable/zero values are ignored.
+/// `CHUTES_BUILD_MCP_STARTUP_TIMEOUT_SECS` (secs). Unparseable/zero values are ignored.
 fn mcp_startup_timeout_from_env() -> Option<u64> {
     if let Some(ms) = std::env::var(ENV_MCP_TIMEOUT_MS)
         .ok()
@@ -299,7 +299,7 @@ fn max_mcp_output_bytes_from_toml(v: &toml::Value) -> Option<usize> {
 ///
 /// Precedence (highest first):
 ///   1. requirements.toml `[mcp] max_output_bytes`
-///   2. env `GROK_MAX_MCP_OUTPUT_BYTES` / `MAX_MCP_OUTPUT_BYTES`
+///   2. env `CHUTES_BUILD_MAX_MCP_OUTPUT_BYTES` / `MAX_MCP_OUTPUT_BYTES`
 ///      (Grok-native wins when both set)
 ///   3. effective `config.toml [mcp] max_output_bytes`
 ///   4. remote settings `RemoteSettings.max_mcp_output_bytes`
@@ -325,7 +325,7 @@ pub fn resolve_max_mcp_output_bytes(remote: Option<u64>) -> usize {
 }
 
 /// Project tier of the MCP output cap: `[mcp] max_output_bytes` from the
-/// `.grok/config.toml` chain (`cwd` → git root), deepest file wins.
+/// `.chutes-build/config.toml` chain (`cwd` → git root), deepest file wins.
 ///
 /// Folder-trust-gated: an untrusted checkout must not raise (context-stuffing
 /// / cost vector) or lower the cap, matching how project plugin paths and
@@ -436,10 +436,10 @@ mod max_mcp_output_bytes_tests {
         // Make it a git repo so the chain walks subdir → root.
         git2::Repository::init(root).unwrap();
         let sub = root.join("crates").join("thing");
-        std::fs::create_dir_all(sub.join(".grok")).unwrap();
-        std::fs::create_dir_all(root.join(".grok")).unwrap();
+        std::fs::create_dir_all(sub.join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(root.join(".chutes-build")).unwrap();
         std::fs::write(
-            root.join(".grok/config.toml"),
+            root.join(".chutes-build/config.toml"),
             "[mcp]\nmax_output_bytes = 30000\n",
         )
         .unwrap();
@@ -449,18 +449,22 @@ mod max_mcp_output_bytes_tests {
 
         // The subdir sets it too → deeper file wins.
         std::fs::write(
-            sub.join(".grok/config.toml"),
+            sub.join(".chutes-build/config.toml"),
             "[mcp]\nmax_output_bytes = 50000\n",
         )
         .unwrap();
         assert_eq!(super::project_max_mcp_output_bytes(&sub), Some(50_000));
 
         // A deeper file *without* the key does not mask the root value.
-        std::fs::write(sub.join(".grok/config.toml"), "[ui]\nvim_mode = true\n").unwrap();
+        std::fs::write(
+            sub.join(".chutes-build/config.toml"),
+            "[ui]\nvim_mode = true\n",
+        )
+        .unwrap();
         assert_eq!(super::project_max_mcp_output_bytes(&sub), Some(30_000));
 
-        // No .grok files with the key anywhere → None.
-        std::fs::remove_file(root.join(".grok/config.toml")).unwrap();
+        // No .chutes-build files with the key anywhere → None.
+        std::fs::remove_file(root.join(".chutes-build/config.toml")).unwrap();
         assert_eq!(super::project_max_mcp_output_bytes(&sub), None);
     }
 }

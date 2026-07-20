@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// The suggestion the mock streams for every request. Serves BOTH the prompt
-/// turn and the turn-end `x.ai/suggestPrompt` call (the mock's fixed mode
+/// turn and the turn-end `chutes.build/suggestPrompt` call (the mock's fixed mode
 /// answers every request), so after the turn the ghost text mirrors it.
 /// Multi-word so the shell-side sanitizer (`sanitize_suggestion`) accepts it.
 const SUGGESTION: &str = "review the staged changes";
@@ -40,8 +40,8 @@ async fn prompt_suggestion_ghost_tab_accepts() {
 
     // env_for_pager disables the feature for the suite; re-enable it here.
     let mut env = content.env_for_pager();
-    env.retain(|(k, _)| k != "GROK_PROMPT_SUGGESTIONS");
-    env.push(("GROK_PROMPT_SUGGESTIONS".into(), "true".into()));
+    env.retain(|(k, _)| k != "CHUTES_BUILD_PROMPT_SUGGESTIONS");
+    env.push(("CHUTES_BUILD_PROMPT_SUGGESTIONS".into(), "true".into()));
     let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
     let binary = pager_binary().expect("resolve pager binary");

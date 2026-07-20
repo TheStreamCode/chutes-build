@@ -121,7 +121,7 @@ fn effective_local_ts(m: &MergedSession) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RowMeta {
-    #[serde(rename = "x.ai/session")]
+    #[serde(rename = "chutes.build/session")]
     pub session: SessionMetaEnvelope,
 }
 
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(ext["sessionId"], "conv_abc123");
         assert_eq!(ext["cwd"], "");
         assert_eq!(ext["source"], "conversation");
-        assert_eq!(ext["_meta"]["x.ai/session"]["kind"], "chat");
+        assert_eq!(ext["_meta"]["chutes.build/session"]["kind"], "chat");
         // Chat rows have no local git enrichment (fields omitted).
         assert!(ext.get("gitRootDir").is_none());
         assert!(ext.get("gitRemotes").is_none());

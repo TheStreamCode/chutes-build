@@ -5,7 +5,7 @@
 //! 2. Vector KNN search (when sqlite-vec + embeddings are available)
 //! 3. Merge results by chunk_id, normalize scores to [0,1]
 //! 4. Skip content-free chunks: empty/boilerplate templates (the
-//!    auto-generated `MEMORY.md` stub) never appear in results / injection
+//!    auto-generated `memories.md` stub) never appear in results / injection
 //! 5. Apply temporal decay: evergreen sources (global, workspace) are exempt;
 //!    session chunks decay with exponential half-life:
 //!    `decayed = base × e^(-λ × age_days)` where `λ = ln(2) / half_life_days`
@@ -39,14 +39,14 @@ pub struct SearchResult {
 /// Returns `true` for sources that contain curated long-term knowledge
 /// and should not be penalized by temporal decay.
 ///
-/// Evergreen: `"global"` (MEMORY.md), `"workspace"` (project MEMORY.md).
+/// Evergreen: `"global"` (memories.md), `"workspace"` (project memories.md).
 /// Decaying: `"session"` (auto-generated session logs).
 fn is_evergreen_source(source: &str) -> bool {
     matches!(source, "global" | "workspace")
 }
 
 /// Returns `true` when a chunk is an empty/boilerplate template (e.g. the
-/// auto-generated `MEMORY.md` stub) and should be filtered out.
+/// auto-generated `memories.md` stub) and should be filtered out.
 ///
 /// True when the chunk is structurally empty, or matches a known scaffold
 /// template via [`super::dream::is_scaffold_template`]. The marker branch is
@@ -217,7 +217,7 @@ pub(super) fn hybrid_search_merge(
     //     penalized to text_weight just because other chunks have vectors)
     //   - Chunks with ONLY vector matches: score = vector_weight × vec_score
     //
-    // This ensures FTS-only chunks (e.g., global MEMORY.md with no embedding
+    // This ensures FTS-only chunks (e.g., global memories.md with no embedding
     // match) can still score high enough to pass min_score.
     let mut fts_scores: HashMap<String, f64> = HashMap::new();
     let mut vec_scores: HashMap<String, f64> = HashMap::new();
@@ -913,7 +913,7 @@ mod tests {
         );
     }
 
-    /// Global MEMORY.md chunks (source_weight = 0.7) should still be
+    /// Global memories.md chunks (source_weight = 0.7) should still be
     /// retrievable with a reasonable threshold. Before the fix, global
     /// chunks were capped at text_weight × source_weight = 0.21, making
     /// them invisible at any threshold above 0.2.
@@ -1071,7 +1071,7 @@ mod tests {
     // Empty-template filter + score clamp tests
     // -----------------------------------------------------------------------
 
-    /// The auto-generated global MEMORY.md stub, written verbatim by
+    /// The auto-generated global memories.md stub, written verbatim by
     /// `MemoryStorage::ensure_initialized` (storage.rs), including the trailing
     /// newline. Kept in sync with that source.
     const GLOBAL_STUB: &str = "# Global Memory\n\
@@ -1094,7 +1094,7 @@ mod tests {
         // evergreen sources, where the stubs live.
         assert!(
             is_content_free(GLOBAL_STUB, "global"),
-            "the unedited global MEMORY.md stub must be content-free"
+            "the unedited global memories.md stub must be content-free"
         );
         assert!(
             is_content_free(WORKSPACE_STUB, "workspace"),

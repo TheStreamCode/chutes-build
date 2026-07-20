@@ -611,7 +611,7 @@ impl SessionActor {
                 prompt_client_identifier.or_else(|| self.client_identifier.clone());
             let ev = xai_grok_telemetry::events::PromptSubmitted {
                 prompt_length: user_message.len(),
-                model_id,
+                model_id: model_id.clone(),
                 client_identifier: effective_client_identifier,
                 screen_mode: prompt_screen_mode,
                 prompt_text: None,
@@ -621,12 +621,26 @@ impl SessionActor {
         self.maybe_inject_mcp_reminder().await;
         self.maybe_inject_mcp_connecting_reminder().await;
         self.maybe_inject_date_rollover_reminder().await;
+        self.maybe_inject_wellness_reminder();
         self.inject_plan_mode_reminders().await;
         self.inject_resumed_tasks_reminder();
         self.drain_between_turn_completions().await;
+        let delegate_images = if user_images.is_empty() {
+            false
+        } else if self.is_cursor_harness() {
+            true
+        } else {
+            // Chutes exposes live input modalities. Unknown models and catalog
+            // failures fail safe to the dedicated vision path instead of
+            // dropping an attachment or sending it to a text-only model.
+            !matches!(
+                chutes_build_core::catalog::model_supports_input(&model_id, "image").await,
+                Ok(Some(true))
+            )
+        };
         let user_message = if user_images.is_empty() {
             user_message
-        } else if self.is_cursor_harness() {
+        } else if delegate_images {
             self.transcribe_user_images(user_message, &user_images)
                 .await?
         } else {
@@ -645,7 +659,7 @@ impl SessionActor {
                     .data(format!("failed to save user images to assets dir: {e}"))
             })?
         };
-        let attached_image_refs = if self.is_cursor_harness() {
+        let attached_image_refs = if delegate_images {
             Vec::new()
         } else {
             crate::session::placeholder_images::attached_image_references(&user_images)
@@ -1239,7 +1253,7 @@ impl SessionActor {
     /// `push_user_message`, NOT `inject_synthetic_user_message`: the latter
     /// persists a `UserMessageChunk` to `updates.jsonl`, which resume
     /// replays — the raw XML would render as a user prompt. Clients see
-    /// monitor events only via the structured `x.ai/monitor_event` channel.
+    /// monitor events only via the structured `chutes.build/monitor_event` channel.
     pub(crate) async fn inject_pending_monitor_events(&self) {
         let Some(buffer) = &self.tool_context.monitor_event_buffer else {
             return;
@@ -1736,13 +1750,25 @@ impl SessionActor {
         if let Some(ref mut pt) = prompt_timing {
             pt.record_tool_prep(mcp_wait_ms, total_prep_ms);
         }
+        let tool_schema_bytes: usize = tool_definitions
+            .iter()
+            .filter_map(|definition| serde_json::to_vec(definition).ok().map(|json| json.len()))
+            .sum();
+        tracing::debug!(
+            tool_names = ?tool_definitions
+                .iter()
+                .map(|definition| definition.function.name.as_str())
+                .collect::<Vec<_>>(),
+            tool_schema_bytes,
+            "Prepared inference tool schemas"
+        );
         xai_grok_telemetry::unified_log::info(
             "shell.turn.tool_prep_done",
             Some(self.session_info.id.0.as_ref()),
             Some(serde_json::json!(
                 { "tool_count" : tool_definitions.len(), "mcp_wait_ms" : mcp_wait_ms,
-                "total_prep_ms" : total_prep_ms, "elapsed_since_turn_start_ms" :
-                conv_turn_start.elapsed().as_millis() as u64, }
+                "tool_schema_bytes" : tool_schema_bytes, "total_prep_ms" : total_prep_ms,
+                "elapsed_since_turn_start_ms" : conv_turn_start.elapsed().as_millis() as u64, }
             )),
         );
         if let Some(ref gcs_config) = trace_gcs_config {
@@ -1985,7 +2011,8 @@ impl SessionActor {
                     { "loop_index" : loop_index, "model_elapsed_ms" :
                     model_elapsed_ms, "elapsed_since_turn_start_ms" : conv_turn_start
                     .elapsed().as_millis() as u64, "ttft_ms" : ttft_ms, "itl_p50_ms"
-                    : latency.itl_p50_ms, "attempts" : latency.attempts,
+                    : latency.itl_p50_ms, "stream_setup_ms" : latency.stream_setup_ms,
+                    "attempts" : latency.attempts,
                     "prompt_tokens" : prompt_tokens, "cached_prompt_tokens" :
                     cached_prompt_tokens, "completion_tokens" : completion_tokens,
                     "reasoning_tokens" : reasoning_tokens, "tokens_per_sec" :
@@ -2418,7 +2445,7 @@ mod user_echo_broadcast_tests {
         );
     }
     /// Interject-fallback turns are persist-only: every pane already rendered
-    /// the text from the `x.ai/session/interjection` broadcast, so a live
+    /// the text from the `chutes.build/session/interjection` broadcast, so a live
     /// echo would duplicate the block.
     #[test]
     fn interject_fallback_turn_is_persist_only() {

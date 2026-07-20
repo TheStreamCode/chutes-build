@@ -126,7 +126,7 @@ impl Default for ResolvedContextualHints {
 }
 
 /// Resolve the per-tip contextual-hint gates. Per tip the precedence is:
-/// env master `GROK_CONTEXTUAL_HINTS` (all-on/off) > user config
+/// env master `CHUTES_BUILD_CONTEXTUAL_HINTS` (all-on/off) > user config
 /// `[ui.contextual_hints].X` > remote settings `contextual_hints.X` >
 /// default ON. User-explicit beats the remote tier (which only sets the
 /// default / soft-disables); the env master is a global kill/force switch.
@@ -136,7 +136,7 @@ pub fn resolve_contextual_hints(
 ) -> ResolvedContextualHints {
     use crate::agent::config::BoolFlag;
     let resolve_tip = |user: Option<bool>, feature_flag: Option<bool>| -> bool {
-        BoolFlag::env("GROK_CONTEXTUAL_HINTS")
+        BoolFlag::env("CHUTES_BUILD_CONTEXTUAL_HINTS")
             .config(user)
             .feature_flag(feature_flag)
             .default(true)
@@ -230,9 +230,9 @@ mod tests {
         assert!(resolved.project_picker_disabled);
     }
 
-    const ENV_CONTEXTUAL_HINTS: &str = "GROK_CONTEXTUAL_HINTS";
+    const ENV_CONTEXTUAL_HINTS: &str = "CHUTES_BUILD_CONTEXTUAL_HINTS";
 
-    // `GROK_CONTEXTUAL_HINTS` is process-global; serialize the tests reading it
+    // `CHUTES_BUILD_CONTEXTUAL_HINTS` is process-global; serialize the tests reading it
     // and force it unset so a developer's shell value can't make them flaky.
     static CONTEXTUAL_HINTS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

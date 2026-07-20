@@ -1,8 +1,8 @@
-//! Hub [`AuthProvider`] from `~/.grok/auth.json` for the standalone
+//! Hub [`AuthProvider`] from `~/.chutes-build/auth.json` for the standalone
 //! `workspace_server` binary: loopback `ws://` uses a plain bearer, otherwise
 //! an auto-refreshing OIDC provider that persists rotated tokens to disk.
 //!
-//! The in-leader `grok workspace` exposure does NOT use this path — it sources
+//! The in-leader `chutes-build workspace` exposure does NOT use this path — it sources
 //! an in-memory provider from the leader's `AuthManager` (see
 //! `LeaderAuthProvider`) to avoid racing the leader's own auth.json writer.
 
@@ -74,7 +74,7 @@ struct AuthEntry {
 
 fn default_auth_path() -> anyhow::Result<PathBuf> {
     let grok = xai_grok_config::user_grok_home()
-        .ok_or_else(|| anyhow::anyhow!("no user grok home (set $GROK_HOME or $HOME)"))?;
+        .ok_or_else(|| anyhow::anyhow!("no user grok home (set $CHUTES_BUILD_HOME or $HOME)"))?;
     Ok(grok.join("auth.json"))
 }
 
@@ -83,7 +83,7 @@ fn default_auth_path() -> anyhow::Result<PathBuf> {
 fn read_auth_entry(path: &Path) -> anyhow::Result<(String, AuthEntry)> {
     if !path.exists() {
         anyhow::bail!(
-            "No auth credentials found at {}. Run `grok login` first.",
+            "No auth credentials found at {}. Run `chutes-build login` first.",
             path.display()
         );
     }
@@ -98,7 +98,7 @@ fn read_auth_entry(path: &Path) -> anyhow::Result<(String, AuthEntry)> {
         .find(|(_, e)| e.refresh_token.is_some() && e.oidc_issuer.is_some())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "no OIDC auth entry found in {}. Run `grok login` first.",
+                "no OIDC auth entry found in {}. Run `chutes-build login` first.",
                 path.display()
             )
         })
@@ -207,7 +207,7 @@ fn write_json_atomic(path: &Path, value: &serde_json::Value) -> anyhow::Result<(
 }
 
 /// Build a hub auth provider for `hub_url`. `auth_config` overrides
-/// the default credential path (`~/.grok/auth.json`).
+/// the default credential path (`~/.chutes-build/auth.json`).
 pub fn provider(
     hub_url: &Url,
     auth_config: Option<&Path>,
@@ -252,7 +252,7 @@ mod tests {
             r#"{
             "legacy": { "key": "xai-plainkey", "user_id": "u1" },
             "oidc": {
-                "key": "eyJhbGciOiJFUzI1NiJ9.test",
+                "key": "fixture-oidc-key",
                 "user_id": "u2",
                 "refresh_token": "rt",
                 "oidc_issuer": "https://auth.example.com",
@@ -298,14 +298,14 @@ mod tests {
             dir.path(),
             r#"{
             "scope": {
-                "key": "eyJhbGciOiJFUzI1NiJ9.tok",
+                "key": "fixture-scope-key",
                 "user_id": "u1",
                 "auth_mode": "oidc",
                 "create_time": "2026-01-01T00:00:00Z",
                 "email": "test@x.ai",
                 "first_name": "Test",
                 "refresh_token": "rt1",
-                "oidc_issuer": "https://auth.x.ai",
+                "oidc_issuer": "https://auth.example.com",
                 "oidc_client_id": "c1",
                 "some_future_field": true
             }
@@ -322,7 +322,7 @@ mod tests {
             key: "eyJ.tok".into(),
             user_id: "u1".into(),
             refresh_token: None,
-            oidc_issuer: Some("https://auth.x.ai".into()),
+            oidc_issuer: Some("https://auth.example.com".into()),
             oidc_client_id: Some("c1".into()),
             principal_type: None,
             principal_id: None,
@@ -354,7 +354,7 @@ mod tests {
             key: "eyJ.tok".into(),
             user_id: "u1".into(),
             refresh_token: Some("rt".into()),
-            oidc_issuer: Some("https://auth.x.ai".into()),
+            oidc_issuer: Some("https://auth.example.com".into()),
             oidc_client_id: None,
             principal_type: None,
             principal_id: None,
@@ -370,7 +370,7 @@ mod tests {
             key: "eyJ.tok".into(),
             user_id: "u1".into(),
             refresh_token: Some("rt".into()),
-            oidc_issuer: Some("https://auth.x.ai".into()),
+            oidc_issuer: Some("https://auth.example.com".into()),
             oidc_client_id: Some("c1".into()),
             principal_type: Some("Team".into()),
             principal_id: Some("t1".into()),
@@ -398,7 +398,7 @@ mod tests {
             dir.path(),
             r#"{
             "legacy": { "key": "xai-old", "user_id": "u1" },
-            "oidc": { "key": "eyJ.old", "user_id": "u2", "refresh_token": "rt-old", "oidc_issuer": "https://auth.x.ai" }
+            "oidc": { "key": "eyJ.old", "user_id": "u2", "refresh_token": "rt-old", "oidc_issuer": "https://auth.example.com" }
         }"#,
         );
 
@@ -424,8 +424,8 @@ mod tests {
         let path = write_auth_json(
             dir.path(),
             r#"{
-            "zzz": { "key": "eyJ.z", "refresh_token": "rt-z", "oidc_issuer": "https://auth.x.ai" },
-            "aaa": { "key": "eyJ.a", "refresh_token": "rt-a", "oidc_issuer": "https://auth.x.ai" }
+            "zzz": { "key": "eyJ.z", "refresh_token": "rt-z", "oidc_issuer": "https://auth.example.com" },
+            "aaa": { "key": "eyJ.a", "refresh_token": "rt-a", "oidc_issuer": "https://auth.example.com" }
         }"#,
         );
 
@@ -453,7 +453,7 @@ mod tests {
         let path = write_auth_json(
             dir.path(),
             r#"{
-            "oidc": { "key": "eyJ.old", "user_id": "u1", "refresh_token": "rt-keep", "oidc_issuer": "https://auth.x.ai" }
+            "oidc": { "key": "eyJ.old", "user_id": "u1", "refresh_token": "rt-keep", "oidc_issuer": "https://auth.example.com" }
         }"#,
         );
 
@@ -475,7 +475,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write_auth_json(
             dir.path(),
-            r#"{ "oidc": { "key": "eyJ.tok", "user_id": "u1", "refresh_token": "rt", "oidc_issuer": "https://auth.x.ai", "oidc_client_id": "c1" } }"#,
+            r#"{ "oidc": { "key": "eyJ.tok", "user_id": "u1", "refresh_token": "rt", "oidc_issuer": "https://auth.example.com", "oidc_client_id": "c1" } }"#,
         );
         let url = Url::parse("ws://localhost:9988/v1/tools").unwrap();
         let auth = provider(&url, Some(&path)).unwrap();

@@ -46,7 +46,7 @@ async fn minimal_transcript_pager_restore_no_artifacts() {
     let mut env = content.env_for_pager();
     env.push(("PAGER".to_string(), "less".to_string()));
     env.push((
-        "GROK_TEST_FRAME_WRITE_DELAY_MS".to_string(),
+        "CHUTES_BUILD_TEST_FRAME_WRITE_DELAY_MS".to_string(),
         FRAME_DELAY_MS.to_string(),
     ));
     let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();

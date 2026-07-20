@@ -1,7 +1,7 @@
 //! Opt-in, content-redacted **external OTEL** telemetry stream.
 //!
 //! Enterprise customers point the Grok CLI at *their own* OpenTelemetry
-//! collector (standard `OTEL_*` env vars + the `GROK_EXTERNAL_OTEL` master
+//! collector (standard `OTEL_*` env vars + the `CHUTES_BUILD_EXTERNAL_OTEL` master
 //! switch) and receive a curated, ZDR-safe schema: ~6 counters and ~17
 //! log-record events fanned out from the same typed call sites that emit the
 //! product events ([`crate::session_ctx::log_event`]).
@@ -14,7 +14,7 @@
 //!   `OTEL_EXPORTER_OTLP_HEADERS` — this module has no dependency on
 //!   `AuthCredentialProvider` and no code path that can attach internal auth
 //!   headers.
-//! - Default **off**: with `GROK_EXTERNAL_OTEL` unset (or no exporter
+//! - Default **off**: with `CHUTES_BUILD_EXTERNAL_OTEL` unset (or no exporter
 //!   selected) nothing is constructed — zero allocation, zero threads, zero
 //!   sockets.
 //! - Independent of `TelemetryMode`, GCS trace upload, and the data-collection /
@@ -147,7 +147,7 @@ fn build_handle(cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
         tracing::warn!(
             "external otel: refusing to activate — the internal trace pipeline consumed \
              OTEL_EXPORTER_OTLP_* (deprecated fallback). Migrate internal repointing to \
-             GROK_INTERNAL_OTLP_* to use the external stream."
+             CHUTES_BUILD_INTERNAL_OTLP_* to use the external stream."
         );
         return None;
     }

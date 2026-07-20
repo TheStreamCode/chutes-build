@@ -2,7 +2,7 @@
 //!
 //! WAL keeps its wal-index in an mmap'd `-shm` file and relies on coherent
 //! shared memory plus reliable POSIX locks — guarantees network filesystems
-//! do not provide. When `$HOME` (and thus `~/.grok`) is NFS-mounted on
+//! do not provide. When `$HOME` (and thus `~/.chutes-build`) is NFS-mounted on
 //! several machines at once, a peer host truncating/rebuilding the `-shm`
 //! during WAL recovery or close rips the backing out from under our mapping
 //! and the next wal-index read dies with SIGBUS. On such mounts we use a
@@ -34,10 +34,10 @@ impl JournalMode {
     /// Pick the journal mode for a database at `db_path`.
     ///
     /// Classifies the parent directory (the DB file itself may not exist
-    /// yet), so callers must create it first. `GROK_SQLITE_JOURNAL_MODE`
+    /// yet), so callers must create it first. `CHUTES_BUILD_SQLITE_JOURNAL_MODE`
     /// (`wal`|`truncate`) overrides detection as a field kill-switch.
     pub fn for_db_path(db_path: &Path) -> Self {
-        let env = std::env::var("GROK_SQLITE_JOURNAL_MODE").ok();
+        let env = std::env::var("CHUTES_BUILD_SQLITE_JOURNAL_MODE").ok();
         match mode_from_env(env.as_deref()) {
             EnvOverride::Mode(mode) => {
                 // Loud so field flips of the kill-switch are greppable in logs.
@@ -45,7 +45,7 @@ impl JournalMode {
                     db = %db_path.display(),
                     mode = mode.as_str(),
                     source = "env",
-                    "sqlite journal mode forced by GROK_SQLITE_JOURNAL_MODE"
+                    "sqlite journal mode forced by CHUTES_BUILD_SQLITE_JOURNAL_MODE"
                 );
                 return mode;
             }
@@ -53,7 +53,7 @@ impl JournalMode {
                 // A typo in the emergency kill-switch must be loud, not silently ignored.
                 tracing::warn!(
                     value = env.as_deref().unwrap_or_default(),
-                    "invalid GROK_SQLITE_JOURNAL_MODE (accepted: wal, truncate); using detection"
+                    "invalid CHUTES_BUILD_SQLITE_JOURNAL_MODE (accepted: wal, truncate); using detection"
                 );
             }
             EnvOverride::Unset => {}
@@ -203,7 +203,7 @@ impl JournalMode {
     }
 }
 
-/// Parse result of the `GROK_SQLITE_JOURNAL_MODE` kill-switch.
+/// Parse result of the `CHUTES_BUILD_SQLITE_JOURNAL_MODE` kill-switch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EnvOverride {
     Unset,
@@ -212,7 +212,7 @@ enum EnvOverride {
     Mode(JournalMode),
 }
 
-/// `GROK_SQLITE_JOURNAL_MODE` override parsing (pure for testability).
+/// `CHUTES_BUILD_SQLITE_JOURNAL_MODE` override parsing (pure for testability).
 fn mode_from_env(value: Option<&str>) -> EnvOverride {
     // Set-but-empty counts as unset: a deliberate blank, not a typo.
     match value {
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn for_db_path_defaults_to_wal_on_local_fs() {
         // Ambient override would invalidate the assertion; skip if set.
-        if std::env::var("GROK_SQLITE_JOURNAL_MODE").is_ok() {
+        if std::env::var("CHUTES_BUILD_SQLITE_JOURNAL_MODE").is_ok() {
             return;
         }
         let tmp = TempDir::new().unwrap();

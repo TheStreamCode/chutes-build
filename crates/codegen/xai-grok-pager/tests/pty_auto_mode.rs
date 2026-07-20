@@ -5,8 +5,8 @@
 //! and assert the mode banner / status shows Auto without conflating
 //! Always-Approve.
 //!
-//! Auth: seeds `HOME/.grok/auth.json` from `GROK_AUTH_JSON` (path) or the
-//! developer's `~/.grok/auth.json` so the pager skips device-login when
+//! Auth: seeds `HOME/.chutes-build/auth.json` from `CHUTES_BUILD_AUTH_JSON` (path) or the
+//! developer's `~/.chutes-build/auth.json` so the pager skips device-login when
 //! credentials exist. Without auth the test records an environmental
 //! failure (login screen) and still asserts the harness API surface.
 //!
@@ -26,16 +26,16 @@ const WELCOME_SCREEN_SENTINEL: &str = "Quit";
 /// Back-tab / Shift+Tab (CSI Z) — pager binds this to CycleMode.
 const SHIFT_TAB: &[u8] = b"\x1b[Z";
 
-/// Prefer explicit path, else the user's real `~/.grok/auth.json`.
+/// Prefer explicit path, else the user's real `~/.chutes-build/auth.json`.
 fn auth_json_source() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("GROK_AUTH_JSON") {
+    if let Ok(p) = std::env::var("CHUTES_BUILD_AUTH_JSON") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
             return Some(pb);
         }
     }
     dirs_next_home()
-        .map(|h| h.join(".grok/auth.json"))
+        .map(|h| h.join(".chutes-build/auth.json"))
         .filter(|p| p.is_file())
 }
 
@@ -49,7 +49,7 @@ fn dirs_next_home() -> Option<PathBuf> {
 /// auto-permission-mode feature gate pinned explicitly via `gate_on` so each
 /// test is self-contained and deterministic regardless of the runner's shell.
 fn prepare_sandbox(home: &Path, gate_on: bool) -> Vec<(String, String)> {
-    let grok = home.join(".grok");
+    let grok = home.join(".chutes-build");
     let _ = std::fs::create_dir_all(&grok);
     if let Some(src) = auth_json_source() {
         let dest = grok.join("auth.json");
@@ -63,13 +63,13 @@ fn prepare_sandbox(home: &Path, gate_on: bool) -> Vec<(String, String)> {
             );
         }
     } else {
-        eprintln!("pty_auto_mode: no ~/.grok/auth.json — may hit device login");
+        eprintln!("pty_auto_mode: no ~/.chutes-build/auth.json — may hit device login");
     }
 
     let home_s = home.display().to_string();
     let mut env = vec![
         ("HOME".into(), home_s.clone()),
-        ("GROK_HOME".into(), grok.display().to_string()),
+        ("CHUTES_BUILD_HOME".into(), grok.display().to_string()),
         ("XDG_CONFIG_HOME".into(), format!("{home_s}/.config")),
         ("XDG_DATA_HOME".into(), format!("{home_s}/.local/share")),
         ("XDG_CACHE_HOME".into(), format!("{home_s}/.cache")),
@@ -78,16 +78,16 @@ fn prepare_sandbox(home: &Path, gate_on: bool) -> Vec<(String, String)> {
         ("NO_COLOR".into(), "0".into()),
         ("TERM_PROGRAM".into(), "".into()),
         ("TMUX".into(), "".into()),
-        // Do not set XAI_API_KEY — prefer OIDC entry in auth.json (pty_e2e pattern).
+        // Do not set CHUTES_API_KEY — prefer OIDC entry in auth.json (pty_e2e pattern).
     ];
     // Pin the feature gate explicitly so the cycle is deterministic regardless
-    // of the developer's shell. `GROK_AUTO_PERMISSION_MODE` is the highest gate
+    // of the developer's shell. `CHUTES_BUILD_AUTO_PERMISSION_MODE` is the highest gate
     // layer below requirements; "1"/"0" parse to on/off (xai_grok_config::
     // env_bool), and portable-pty merges this over the inherited environment —
     // so an exported value can't flip the result (Auto is present in the ring
     // with the gate on, skipped with it off).
     env.push((
-        "GROK_AUTO_PERMISSION_MODE".into(),
+        "CHUTES_BUILD_AUTO_PERMISSION_MODE".into(),
         if gate_on { "1" } else { "0" }.into(),
     ));
     env
@@ -103,7 +103,7 @@ fn is_login_screen(screen: &str) -> bool {
 /// hitting the login screen is a real failure (broken auth seeding), not an
 /// environmental skip — so the test hard-fails instead of passing vacuously.
 fn require_auth() -> bool {
-    std::env::var("GROK_PTY_REQUIRE_AUTH").is_ok_and(|v| v == "1" || v == "true")
+    std::env::var("CHUTES_BUILD_PTY_REQUIRE_AUTH").is_ok_and(|v| v == "1" || v == "true")
 }
 
 /// Cycle into Auto on the welcome / pre-session path and assert screen text
@@ -131,7 +131,7 @@ fn pty_shift_tab_cycles_to_auto_mode_banner() {
     if is_login_screen(&early) {
         assert!(
             !require_auth(),
-            "GROK_PTY_REQUIRE_AUTH set but pager hit the login screen — auth seeding broke"
+            "CHUTES_BUILD_PTY_REQUIRE_AUTH set but pager hit the login screen — auth seeding broke"
         );
         // Auth still blocking (expired token / no network). Honest env failure:
         // the UI-ring guarantee is covered by the dispatch-level unit tests; save
@@ -214,7 +214,7 @@ fn pty_shift_tab_skips_auto_when_gate_off() {
     if is_login_screen(&early) {
         assert!(
             !require_auth(),
-            "GROK_PTY_REQUIRE_AUTH set but pager hit the login screen — auth seeding broke"
+            "CHUTES_BUILD_PTY_REQUIRE_AUTH set but pager hit the login screen — auth seeding broke"
         );
         eprintln!(
             "pty_auto_mode(gate off): login/device-auth screen blocked cycle; env auth limit"

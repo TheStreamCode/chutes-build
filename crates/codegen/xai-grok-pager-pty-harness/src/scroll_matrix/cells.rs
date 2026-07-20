@@ -35,7 +35,7 @@ pub struct ExpectedProfile {
     pub wheel_lpt: u16,
     pub trackpad_lpt: u16,
     pub invert: bool,
-    /// Speed multiplier (NOT the 1-100 setting): `GROK_SCROLL_SPEED=100`
+    /// Speed multiplier (NOT the 1-100 setting): `CHUTES_BUILD_SCROLL_SPEED=100`
     /// echoes 6.0 via the pager's `speed_to_multiplier`.
     pub speed: f32,
 }
@@ -54,7 +54,7 @@ pub struct MatrixCell {
     pub id: &'static str,
     pub tier: Tier,
     /// Pager env pairs (terminal-class markers + config vars). The runner
-    /// appends `GROK_SCROLL_LOG`; the harness's env strips guarantee the
+    /// appends `CHUTES_BUILD_SCROLL_LOG`; the harness's env strips guarantee the
     /// host terminal can't leak competing markers underneath these.
     pub env: &'static [(&'static str, &'static str)],
     pub expected: ExpectedProfile,
@@ -97,11 +97,11 @@ const ITERM: (&str, &str) = ("TERM_PROGRAM", "iTerm.app");
 const ZED: (&str, &str) = ("TERM_PROGRAM", "zed");
 const VSCODE: (&str, &str) = ("TERM_PROGRAM", "vscode");
 const TMUX: (&str, &str) = ("TMUX", "/tmp/tmux-0/default,1,0");
-const SPEED100: (&str, &str) = ("GROK_SCROLL_SPEED", "100");
-const MODE_WHEEL: (&str, &str) = ("GROK_SCROLL_MODE", "wheel");
-const MODE_TRACKPAD: (&str, &str) = ("GROK_SCROLL_MODE", "trackpad");
-const LINES1: (&str, &str) = ("GROK_SCROLL_LINES", "1");
-const INVERT: (&str, &str) = ("GROK_INVERT_SCROLL", "1");
+const SPEED100: (&str, &str) = ("CHUTES_BUILD_SCROLL_SPEED", "100");
+const MODE_WHEEL: (&str, &str) = ("CHUTES_BUILD_SCROLL_MODE", "wheel");
+const MODE_TRACKPAD: (&str, &str) = ("CHUTES_BUILD_SCROLL_MODE", "trackpad");
+const LINES1: (&str, &str) = ("CHUTES_BUILD_SCROLL_LINES", "1");
+const INVERT: (&str, &str) = ("CHUTES_BUILD_INVERT_SCROLL", "1");
 
 use InvariantId::*;
 
@@ -231,7 +231,7 @@ mod tests {
     use std::collections::HashSet;
 
     /// Re-derive the expected profile from a cell's env pairs the way the
-    /// pager would (`from_terminal_context` + the `GROK_SCROLL_*` env
+    /// pager would (`from_terminal_context` + the `CHUTES_BUILD_SCROLL_*` env
     /// overrides) — a tripwire against rows drifting from `mouse.rs`.
     fn derive_expected(env: &'static [(&'static str, &'static str)]) -> ExpectedProfile {
         let get = |k: &str| env.iter().find(|(key, _)| *key == k).map(|(_, v)| *v);
@@ -247,23 +247,23 @@ mod tests {
                 Some(other) => panic!("unmapped TERM_PROGRAM {other:?}"),
             }
         };
-        if let Some(lines) = get("GROK_SCROLL_LINES") {
+        if let Some(lines) = get("CHUTES_BUILD_SCROLL_LINES") {
             let lines: u16 = lines.parse().unwrap();
             wheel_lpt = lines;
             trackpad_lpt = lines; // one knob overrides both paths
         }
         // speed_to_multiplier re-derivation for the settings used in rows.
-        let speed = match get("GROK_SCROLL_SPEED") {
+        let speed = match get("CHUTES_BUILD_SCROLL_SPEED") {
             None | Some("50") => 1.0,
             Some("100") => 6.0,
-            Some(other) => panic!("unmapped GROK_SCROLL_SPEED {other:?}"),
+            Some(other) => panic!("unmapped CHUTES_BUILD_SCROLL_SPEED {other:?}"),
         };
         ExpectedProfile {
-            mode: get("GROK_SCROLL_MODE").unwrap_or("auto"),
+            mode: get("CHUTES_BUILD_SCROLL_MODE").unwrap_or("auto"),
             ept,
             wheel_lpt,
             trackpad_lpt,
-            invert: get("GROK_INVERT_SCROLL") == Some("1"),
+            invert: get("CHUTES_BUILD_INVERT_SCROLL") == Some("1"),
             speed,
         }
     }

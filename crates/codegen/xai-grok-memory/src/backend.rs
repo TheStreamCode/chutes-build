@@ -454,7 +454,7 @@ impl MemoryBackend for MemoryBackendImpl {
         let candidate_limit = search_config.max_results * 3;
         let mut fts_results = index.search_fts(query, candidate_limit).unwrap_or_default();
 
-        // Supplemental evergreen query: ensure global/workspace MEMORY.md
+        // Supplemental evergreen query: ensure global/workspace memories.md
         // chunks appear in candidates even when session volume crowds them
         // out of the base FTS results. Mirrors hybrid_search() in search.rs.
         let evergreen = index
@@ -1024,7 +1024,7 @@ mod factory_tests {
         );
 
         // --- Correct ordering (init, then watcher) ---
-        // After ensure_initialized the directories and MEMORY.md templates exist.
+        // After ensure_initialized the directories and memories.md templates exist.
         storage.ensure_initialized().unwrap();
 
         assert!(
@@ -1036,12 +1036,12 @@ mod factory_tests {
             "workspace dir must exist after ensure_initialized"
         );
         assert!(
-            global.join("MEMORY.md").exists(),
-            "global MEMORY.md template must exist"
+            global.join("memories.md").exists(),
+            "global memories.md template must exist"
         );
         assert!(
-            workspace.join("MEMORY.md").exists(),
-            "workspace MEMORY.md template must exist"
+            workspace.join("memories.md").exists(),
+            "workspace memories.md template must exist"
         );
 
         // Watcher now succeeds because the directory exists.
@@ -1312,7 +1312,7 @@ mod tests {
         let session: xai_grok_tools::types::SharedApiKeyProvider = Arc::new(PanicKey);
 
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://llm.chutes.ai/v1",
             |_| true,
             None,
             Some(session),
@@ -1364,7 +1364,7 @@ mod tests {
         let auth: Arc<dyn xai_grok_auth::AuthCredentialProvider> = Arc::new(StubAuth);
         let api_key: xai_grok_tools::types::SharedApiKeyProvider = Arc::new(PanicKey);
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://llm.chutes.ai/v1",
             |_| true,
             Some(auth),
             Some(api_key),
@@ -1376,7 +1376,8 @@ mod tests {
             ..Default::default()
         };
         let provider =
-            build_embedding_provider(Some(&config), &scoped, None, "https://api.x.ai/v1").await;
+            build_embedding_provider(Some(&config), &scoped, None, "https://llm.chutes.ai/v1")
+                .await;
         assert!(
             provider.is_some(),
             "trusted endpoint must build a provider from the session credential"
@@ -1402,18 +1403,18 @@ mod tests {
         assert!(denied.is_empty(), "untrusted endpoint drops the credential");
 
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://llm.chutes.ai/v1",
             |_| true,
             None,
             Some(key()),
         );
         assert!(!scoped.is_empty(), "trusted endpoint keeps the credential");
         assert!(
-            scoped.approved_for("https://API.x.ai/v1"),
+            scoped.approved_for("https://API.chutes.build/v1"),
             "host casing normalizes"
         );
         assert!(
-            !scoped.approved_for("https://api.x.ai/v2"),
+            !scoped.approved_for("https://api.chutes.build/v2"),
             "different path rejected"
         );
         assert!(
@@ -1553,11 +1554,11 @@ mod tests {
         let has_workspace = results.iter().any(|r| r.source == "workspace");
         assert!(
             has_global,
-            "global MEMORY.md chunks must appear in search results"
+            "global memories.md chunks must appear in search results"
         );
         assert!(
             has_workspace,
-            "workspace MEMORY.md chunks must appear in search results"
+            "workspace memories.md chunks must appear in search results"
         );
     }
 }

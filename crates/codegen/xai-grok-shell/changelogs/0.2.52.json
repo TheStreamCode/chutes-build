@@ -106,7 +106,7 @@
   },
   {
     "category": "fixes",
-    "description": "**`grok dashboard`** now reliably opens the dashboard instead of silently falling through to a normal session.",
+    "description": "**`chutes-build dashboard`** now reliably opens the dashboard instead of silently falling through to a normal session.",
     "breaking_change": false
   },
   {

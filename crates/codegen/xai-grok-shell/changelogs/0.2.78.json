@@ -41,7 +41,7 @@
   },
   {
     "category": "performance",
-    "description": "**`grok update`** downloads have a longer timeout.",
+    "description": "**`chutes-build update`** downloads have a longer timeout.",
     "breaking_change": false
   }
 ]

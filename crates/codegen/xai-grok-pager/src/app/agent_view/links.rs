@@ -572,7 +572,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -714,7 +714,7 @@ mod link_click_tests {
             dismissible: Some(false),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Upgrade Account".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -829,7 +829,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -859,7 +859,7 @@ mod link_click_tests {
         let cta = || {
             Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Upgrade Account".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             })
         };
@@ -962,7 +962,7 @@ mod link_click_tests {
             dismissible: Some(false),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -996,7 +996,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://chutes.ai/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1034,7 +1034,7 @@ mod link_click_tests {
             (cta.y, cta.x, cta.x + cta.width),
             "span must cover exactly the [label] button cells"
         );
-        assert_eq!(&*spans[0].url, "https://x.ai/promo");
+        assert_eq!(&*spans[0].url, "https://chutes.ai/promo");
         let outcome = agent.handle_input(&Event::Mouse(mouse_down(cta.x + 1, cta.y)), &reg);
         assert!(
             matches!(

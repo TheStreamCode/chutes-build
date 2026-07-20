@@ -21,7 +21,7 @@ pub(crate) type PendingInterjection = xai_interjection_core::PendingInterjection
 /// converted into standalone prompt turns (arrived while idle, or after the
 /// running turn's final drain). The prefix keeps the turn's user echo
 /// persist-only: every pane already rendered the text from the
-/// `x.ai/session/interjection` broadcast, so a live echo would duplicate it.
+/// `chutes.build/session/interjection` broadcast, so a live echo would duplicate it.
 pub(crate) const INTERJECT_FALLBACK_PROMPT_PREFIX: &str = "interject-fallback-";
 
 impl SessionActor {
@@ -166,7 +166,7 @@ impl SessionActor {
             self.notifications
                 .gateway
                 .forward_fire_and_forget(acp::ExtNotification::new(
-                    "x.ai/session/interjection",
+                    "chutes.build/session/interjection",
                     params.into(),
                 ));
         }

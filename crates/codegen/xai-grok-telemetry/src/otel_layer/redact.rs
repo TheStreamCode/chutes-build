@@ -505,7 +505,7 @@ mod tests {
     fn error_status_message_retained_but_secret_scrubbed() {
         // Error messages are useful telemetry and must survive; only secret
         // shapes (and home/username paths) are scrubbed out of them.
-        let mut status = Status::error("upstream auth failed: sk-CANARYabcdefghij1234567890");
+        let mut status = Status::error("upstream auth failed: sk-CANARYabcdefghij1234567890"); // gitleaks:allow
         if let Status::Error { description } = &mut status {
             redact_in_place(description);
         }

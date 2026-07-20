@@ -802,13 +802,13 @@ mod tests {
     #[test]
     fn authorize_url_includes_team_principal_params() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: Some("Team".into()),
@@ -816,8 +816,8 @@ mod tests {
             referrer: Some("grok-build".into()),
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.x.ai/authorize".into(),
-            token_endpoint: "https://auth.x.ai/token".into(),
+            authorization_endpoint: "https://auth.chutes.build/authorize".into(),
+            token_endpoint: "https://auth.chutes.build/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -846,13 +846,13 @@ mod tests {
     #[test]
     fn authorize_url_uses_oauth2_referrer_override_once() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.com".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: None,
@@ -860,8 +860,8 @@ mod tests {
             referrer: Some("grok-desktop".into()),
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.x.ai/authorize".into(),
-            token_endpoint: "https://auth.x.ai/token".into(),
+            authorization_endpoint: "https://auth.chutes.build/authorize".into(),
+            token_endpoint: "https://auth.chutes.build/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -994,7 +994,7 @@ mod tests {
             .unwrap()
         }
         let team_jwt = make_jwt(serde_json::json!(
-            { "sub" : "user-42", "iss" : "https://auth.x.ai", "aud" : "test-client",
+            { "sub" : "user-42", "iss" : "https://auth.example.com", "aud" : "test-client",
             "exp" : 9999999999u64, "iat" : 1000000000u64, "scope" :
             "offline_access grok-cli:access api:access", "principal_type" : "Team",
             "principal_id" : "team-abc-123", "client_id" : "test-client", "jti" :
@@ -1007,7 +1007,7 @@ mod tests {
         assert!(peek_access_token_principal("not-a-jwt-token").is_none());
         assert!(peek_access_token_principal("").is_none());
         let no_principal = make_jwt(serde_json::json!(
-            { "sub" : "user-42", "iss" : "https://auth.x.ai", "aud" : "test-client",
+            { "sub" : "user-42", "iss" : "https://auth.example.com", "aud" : "test-client",
             "exp" : 9999999999u64, "iat" : 1000000000u64, }
         ));
         assert!(peek_access_token_principal(&no_principal).is_none());

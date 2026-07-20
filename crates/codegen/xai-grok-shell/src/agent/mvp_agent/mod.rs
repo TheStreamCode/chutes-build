@@ -100,7 +100,7 @@ use tokio_util::sync::CancellationToken;
 use xai_grok_paths::AbsPathBuf;
 use xai_grok_workspace::session::git::GitDiscoveryResult;
 use xai_hunk_tracker::HunkTrackerActor;
-/// Hard-error message for legacy Direct hub-bind sessions (`x.ai/cloud_server_id`).
+/// Hard-error message for legacy Direct hub-bind sessions (`chutes.build/cloud_server_id`).
 pub(crate) const DIRECT_HUB_CLOUD_REMOVED_MSG: &str = "Direct hub cloud removed; use Gateway (envId or existing-workspace attach)";
 /// Reject session `_meta` that still requests Direct hub bind (D8).
 ///
@@ -108,13 +108,13 @@ pub(crate) const DIRECT_HUB_CLOUD_REMOVED_MSG: &str = "Direct hub cloud removed;
 pub(crate) fn reject_direct_hub_cloud_meta(
     session_meta: Option<&acp::Meta>,
 ) -> Result<(), acp::Error> {
-    if session_meta.and_then(|m| m.get("x.ai/cloud_server_id")).is_some() {
+    if session_meta.and_then(|m| m.get("chutes.build/cloud_server_id")).is_some() {
         return Err(acp::Error::invalid_params().data(DIRECT_HUB_CLOUD_REMOVED_MSG));
     }
     Ok(())
 }
 /// Marks a notification's meta field with `isReplay: true` for replayed session updates.
-/// If `persist_data` is provided, it will be included in the meta under `x.ai/persist`.
+/// If `persist_data` is provided, it will be included in the meta under `chutes.build/persist`.
 /// Extract the numeric `tier` claim from a JWT access token (no signature
 /// verification). Maps the `prod_auth.SubscriptionTier` proto enum values
 /// to display-style strings that `normalize_tier` in the telemetry crate
@@ -232,13 +232,13 @@ impl BridgeAttach {
         !matches!(self, Self::NotAttached)
     }
 }
-/// `_meta["x.ai/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
+/// `_meta["chutes.build/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
 fn parse_session_kind(
     meta: Option<&acp::Meta>,
 ) -> crate::session::unified_list::SessionKind {
     use crate::session::unified_list::SessionKind;
     use serde::Deserialize;
-    meta.and_then(|m| m.get("x.ai/session"))
+    meta.and_then(|m| m.get("chutes.build/session"))
         .and_then(|s| s.get("kind"))
         .and_then(|k| SessionKind::deserialize(k).ok())
         .unwrap_or(SessionKind::Build)
@@ -276,7 +276,7 @@ fn chat_new_session_model_state(
 /// `session/new` / `session/load` `_meta` key carrying per-session plugin roots.
 pub(crate) const SESSION_PLUGIN_DIRS_META_KEY: &str = "pluginDirs";
 /// `initialize` response `_meta` key advertising [`SESSION_PLUGIN_DIRS_META_KEY`] support.
-pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "x.ai/pluginDirs";
+pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "chutes.build/pluginDirs";
 /// Per-session plugin roots from `session/new` / `session/load` `_meta.pluginDirs`,
 /// loaded at CliOverride scope (always trusted) into this session's registry only.
 /// Paths must be absolute (the SDKs resolve before sending); anything else is
@@ -357,7 +357,7 @@ fn parse_no_replay(meta: Option<&acp::Meta>) -> bool {
     meta.and_then(|m| m.get("noReplay")).and_then(|v| v.as_bool()).unwrap_or(false)
 }
 /// Insert `key`/`value` into a notification's `_meta`, creating the map if absent.
-/// Used to stamp `x.ai/leaderClientId` onto replay notifications so the leader can
+/// Used to stamp `chutes.build/leaderClientId` onto replay notifications so the leader can
 /// unicast them to the loading client only (see `forward_raw_replay_line`).
 fn stamp_meta_value(meta: &mut Option<acp::Meta>, key: &str, value: &serde_json::Value) {
     meta.get_or_insert_with(acp::Meta::new).insert(key.to_string(), value.clone());
@@ -370,7 +370,7 @@ fn mark_as_replay(
     let obj = meta.get_or_insert_with(acp::Meta::new);
     obj.insert("isReplay".to_string(), is_replay);
     if let Some(persist) = persist_data {
-        obj.insert("x.ai/persist".to_string(), persist.clone());
+        obj.insert("chutes.build/persist".to_string(), persist.clone());
     }
 }
 /// Resolve a session's REQUESTED auto flag from `_meta`: an explicit `autoMode`
@@ -479,7 +479,7 @@ pub(crate) fn build_prompt_response_meta(
     };
     serde_json::to_value(meta).expect("PromptResponseMeta is always serializable")
 }
-/// Typed payload for the `x.ai/settings/update` notification sent to pager
+/// Typed payload for the `chutes.build/settings/update` notification sent to pager
 /// clients after remote settings settings are refreshed on `/new`.
 ///
 /// Keeping this as a `#[derive(Serialize)]` struct gives compile-time
@@ -550,10 +550,10 @@ fn announcements_push_payload(
     };
     push.then_some(current)
 }
-/// Override with `GROK_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS`. Clamped to
+/// Override with `CHUTES_BUILD_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS`. Clamped to
 /// >= 1s: `tokio::time::interval` panics on a zero period.
 fn announcements_refresh_interval() -> std::time::Duration {
-    if let Ok(s) = std::env::var("GROK_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS")
+    if let Ok(s) = std::env::var("CHUTES_BUILD_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS")
         && let Ok(secs) = s.parse::<u64>()
     {
         return std::time::Duration::from_secs(secs.max(1));
@@ -563,13 +563,13 @@ fn announcements_refresh_interval() -> std::time::Duration {
 /// Reason why a client is not eligible to use codebase indexing.
 ///
 /// Returned by [`MvpAgent::code_nav_eligibility`] when one of the policy
-/// gates fails.  Used in `x.ai/code/status` responses and to generate
+/// gates fails.  Used in `chutes.build/code/status` responses and to generate
 /// clear error messages on code-nav requests from ineligible clients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeNavEligibility {
     /// Client type is not web (web-only for initial rollout).
     ClientNotWeb,
-    /// Client did not advertise `x.ai/codeNavigation.enabled`.
+    /// Client did not advertise `chutes.build/codeNavigation.enabled`.
     CapabilityNotAdvertised,
     /// `codebase_indexing` feature is disabled in config (or excluded by glob).
     DisabledByConfig,
@@ -651,7 +651,7 @@ pub struct MvpAgent {
     pub(crate) chat_modes: crate::agent::chat_modes::ChatModesManager,
     /// Single-flight guard for interactive login (device poll / loopback
     /// wait). Owns the active attempt's cancel token and its code/url
-    /// channels; a new `authenticate` or `x.ai/auth/cancel` cancels the
+    /// channels; a new `authenticate` or `chutes.build/auth/cancel` cancels the
     /// prior attempt.
     pub(crate) interactive_auth: crate::auth::single_flight::AuthSingleFlight,
     /// Client type. LEADER-SAFE(init-once): set once during `initialize` from
@@ -668,12 +668,12 @@ pub struct MvpAgent {
     /// attribution would require threading `clientIdentifier` from `_meta` through
     /// every session handler, which is deferred to future work.
     client_type: RefCell<ClientType>,
-    /// Whether the current client advertised `x.ai/codeNavigation.enabled`.
+    /// Whether the current client advertised `chutes.build/codeNavigation.enabled`.
     /// Updated on every `initialize()` call — same last-client-wins semantics
     /// as `client_type`.  Using `Cell<bool>` (not `RefCell`) so `.get()` is a
     /// plain copy with no borrow that could be held across an await point.
     code_nav_enabled: std::cell::Cell<bool>,
-    /// Whether the current client advertised `x.ai/folderTrust.interactive` (it
+    /// Whether the current client advertised `chutes.build/folderTrust.interactive` (it
     /// can render the interactive folder-trust prompt). Set on every
     /// `initialize()` (last-client-wins, like `code_nav_enabled`); gates the
     /// DORMANT agent→client trust round-trip in `new_session`/`load_session`.
@@ -711,7 +711,7 @@ pub struct MvpAgent {
     /// the session's cwd to the watcher task spawned in
     /// `agent/app.rs`, which calls
     /// [`crate::config::watcher::ConfigFileWatcher::watch_path`] (a
-    /// **non-recursive** watch on `<cwd>/` and `<cwd>/.grok/`).
+    /// **non-recursive** watch on `<cwd>/` and `<cwd>/.chutes-build/`).
     ///
     /// `None` outside leader mode and in tests — the registration is a
     /// no-op in that case, which is fine: the existing per-extra-path
@@ -876,7 +876,7 @@ pub struct MvpAgent {
     /// LocalSet, so a plain `Cell` suffices). LEADER-SAFE(shared): one
     /// agent-wide push stream.
     announcements_gen: std::cell::Cell<u64>,
-    /// Announcements list last actually emitted via `x.ai/announcements/update`
+    /// Announcements list last actually emitted via `chutes.build/announcements/update`
     /// (expiry-filtered), the diff baseline for `emit_announcements`.
     /// Owned by the emit gate — full-settings refreshes move `remote_settings`
     /// without touching this, so their changes still get pushed on the next
@@ -1123,7 +1123,7 @@ struct AuthRequestMeta {
     /// user abandons the browser flow, the current session continues.
     #[serde(default)]
     force_interactive: bool,
-    /// Pager auth `request_seq` for this attempt. Scopes `x.ai/auth/cancel`
+    /// Pager auth `request_seq` for this attempt. Scopes `chutes.build/auth/cancel`
     /// so a delayed cancel cannot tear down a successor login.
     #[serde(default)]
     request_seq: Option<u64>,
@@ -1201,7 +1201,7 @@ fn resolve_inference_idle_timeout_secs(
     let remote = remote_settings.and_then(|s| s.inference_idle_timeout_secs);
     per_model.or(remote).unwrap_or(600).max(10)
 }
-/// Parse the client-advertised `x.ai/hunkTracker.mode` string. Case-insensitive
+/// Parse the client-advertised `chutes.build/hunkTracker.mode` string. Case-insensitive
 /// and trimmed. Absent/blank/`off`/`disabled` => `None`; unknown => `AllDirty`.
 fn resolve_hunk_tracking_mode(
     mode_str: Option<&str>,
@@ -1300,7 +1300,7 @@ impl MvpAgent {
     /// Dispatches by on-disk method name:
     /// - ACP updates (`"session/update"`) → typed `SessionNotification` for correct
     ///   TUI dispatch (direct dispatch preserves Rust types, not method strings).
-    /// - xAI updates (`"_x.ai/session/update"`) → `ExtNotification`.
+    /// - xAI updates (`"_chutes.build/session/update"`) → `ExtNotification`.
     ///
     /// When `mark_replay` is true, the notification is tagged with
     /// `_meta.isReplay: true` so the client knows it's historical data.
@@ -1333,7 +1333,7 @@ impl MvpAgent {
             tracing::debug!("replay: skipping JSONL line with no params");
             return;
         };
-        let is_xai = method == "_x.ai/session/update";
+        let is_xai = method == "_chutes.build/session/update";
         if is_xai {
             if target_client_id.is_none() && !mark_replay {
                 if let Ok(owned) = serde_json::value::RawValue::from_string(
@@ -1345,7 +1345,7 @@ impl MvpAgent {
                                 .gateway
                                 .forward_with_completion(
                                     acp::ExtNotification::new(
-                                        "x.ai/session/update",
+                                        "chutes.build/session/update",
                                         std::sync::Arc::from(owned),
                                     ),
                                 ),
@@ -1369,10 +1369,10 @@ impl MvpAgent {
                             m.insert("isReplay".to_string(), serde_json::json!(true));
                         }
                         if let Some(pd) = persist_data {
-                            m.insert("x.ai/persist".to_string(), pd.clone());
+                            m.insert("chutes.build/persist".to_string(), pd.clone());
                         }
                         if let Some(tid) = target_client_id {
-                            m.insert("x.ai/leaderClientId".to_string(), tid.clone());
+                            m.insert("chutes.build/leaderClientId".to_string(), tid.clone());
                         }
                     }
                 }
@@ -1383,7 +1383,7 @@ impl MvpAgent {
                                 .gateway
                                 .forward_with_completion(
                                     acp::ExtNotification::new(
-                                        "x.ai/session/update",
+                                        "chutes.build/session/update",
                                         std::sync::Arc::from(raw_val),
                                     ),
                                 ),
@@ -1436,7 +1436,7 @@ impl MvpAgent {
                 mark_as_replay(&mut notification.meta, persist_data);
             }
             if let Some(tid) = target_client_id {
-                stamp_meta_value(&mut notification.meta, "x.ai/leaderClientId", tid);
+                stamp_meta_value(&mut notification.meta, "chutes.build/leaderClientId", tid);
             }
             completions.push(self.gateway.forward_with_completion(notification));
         }
@@ -1700,7 +1700,7 @@ impl MvpAgent {
                             .gateway
                             .forward_with_completion(
                                 acp::ExtNotification::new(
-                                    "x.ai/task_completed",
+                                    "chutes.build/task_completed",
                                     params.into(),
                                 ),
                             ),
@@ -1779,7 +1779,7 @@ impl MvpAgent {
         }
     }
     /// Single-shot subscription check called by the pager's "Check
-    /// subscription" button (`x.ai/auth/check_subscription`). The pager
+    /// subscription" button (`chutes.build/auth/check_subscription`). The pager
     /// calls this every 5s while the paywall is shown, acting as the poller.
     ///
     /// Queries `/user?include=subscription` for the live tier from the
@@ -1977,7 +1977,7 @@ impl MvpAgent {
                     Some(crate::auth::GateInfo {
                         message,
                         url: Some(
-                            "https://grok.com/supergrok?referrer=grok-build".to_string(),
+                            "https://chutes.ai".to_string(),
                         ),
                         label: Some("Subscribe".to_string()),
                     })
@@ -2047,7 +2047,7 @@ impl MvpAgent {
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
         self.reconfigure_heap_profile_monitor();
     }
-    /// Fire-and-forget `x.ai/settings/update` from the current remote snapshot.
+    /// Fire-and-forget `chutes.build/settings/update` from the current remote snapshot.
     pub(super) fn emit_settings_update_notification(&self) {
         let payload = {
             let cfg = self.cfg.borrow();
@@ -2077,7 +2077,7 @@ impl MvpAgent {
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {
             self.gateway
                 .forward_fire_and_forget(
-                    acp::ExtNotification::new("x.ai/settings/update", params.into()),
+                    acp::ExtNotification::new("chutes.build/settings/update", params.into()),
                 );
         }
     }
@@ -2158,7 +2158,7 @@ impl MvpAgent {
     ///    initialize + cached_token + oidc fired in quick succession before
     ///    the first sync's tar extract finished), drop this call to avoid
     ///    racing concurrent extracts that would interleave per-file writes
-    ///    against `~/.grok/bundled/` and the manifest.
+    ///    against `~/.chutes-build/bundled/` and the manifest.
     pub(crate) fn maybe_sync_bundle_in_background(&self, force: bool) {
         use crate::extensions::bundle::{
             BUNDLE_SYNC_TTL, bundle_cache_is_fresh, has_bundle_credentials,

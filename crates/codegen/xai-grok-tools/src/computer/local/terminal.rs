@@ -51,11 +51,11 @@ const BACKGROUND_MAX_RUNTIME: Duration = Duration::from_secs(36_000);
 /// Max time an *auto-backgroundable* foreground command blocks the turn before
 /// it's moved to the background (kept running, never killed), independent of its
 /// requested `timeout`. A short second timer for the auto-background budget.
-/// Env override: `GROK_FOREGROUND_BLOCK_BUDGET_MS`.
+/// Env override: `CHUTES_BUILD_FOREGROUND_BLOCK_BUDGET_MS`.
 const FOREGROUND_BLOCK_BUDGET: Duration = Duration::from_secs(15);
 
 fn foreground_block_budget_from_env() -> Duration {
-    std::env::var("GROK_FOREGROUND_BLOCK_BUDGET_MS")
+    std::env::var("CHUTES_BUILD_FOREGROUND_BLOCK_BUDGET_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_millis)
@@ -65,11 +65,11 @@ fn foreground_block_budget_from_env() -> Duration {
 /// Max bytes a command's output file may reach before the actor kills it — the
 /// size analogue of [`BACKGROUND_MAX_RUNTIME`], stopping an unbounded writer
 /// (`yes`, a runaway log) from filling the disk. Env override:
-/// `GROK_MAX_OUTPUT_FILE_BYTES`.
+/// `CHUTES_BUILD_MAX_OUTPUT_FILE_BYTES`.
 const MAX_OUTPUT_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5 GiB
 
 fn output_file_cap_from_env() -> u64 {
-    std::env::var("GROK_MAX_OUTPUT_FILE_BYTES")
+    std::env::var("CHUTES_BUILD_MAX_OUTPUT_FILE_BYTES")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(MAX_OUTPUT_FILE_BYTES)
@@ -647,7 +647,7 @@ impl LocalTerminalActor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        // Apply SHELL_ENV_OVERRIDES (TERM=dumb, NO_COLOR, GROK_AGENT=1, etc.)
+        // Apply SHELL_ENV_OVERRIDES (TERM=dumb, NO_COLOR, CHUTES_BUILD_AGENT=1, etc.)
         // + request env + pager env. Agent marker is re-applied last so request
         // env cannot clear it.
         cmd.envs(shell_state::shell_env_overrides());
@@ -2733,7 +2733,7 @@ fn spawn_shell_command(
 
         // If the sandbox profile restricts network, install a seccomp BPF
         // filter on the child that blocks connect/bind/sendto/listen/accept.
-        // The parent (grok) process retains network for the LLM API.
+        // The parent Chutes Build process retains network for the LLM API.
         // Filesystem restrictions are already inherited from the process-level
         // Landlock/Seatbelt sandbox — no action needed here for FS.
         #[cfg(target_os = "linux")]
@@ -2746,7 +2746,7 @@ fn spawn_shell_command(
     };
 
     #[cfg(not(unix))]
-    let mut build_cmd = |with_breakaway: bool| {
+    let build_cmd = |with_breakaway: bool| {
         use windows::Win32::System::Threading::{
             CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
         };
@@ -4159,13 +4159,13 @@ mod tests {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
         let result = backend
-            .run(make_request("export GROK_PERSIST_TEST=hello123"))
+            .run(make_request("export CHUTES_BUILD_PERSIST_TEST=hello123"))
             .await
             .unwrap();
         assert_eq!(result.exit_code, Some(0));
 
         let result = backend
-            .run(make_request("echo $GROK_PERSIST_TEST"))
+            .run(make_request("echo $CHUTES_BUILD_PERSIST_TEST"))
             .await
             .unwrap();
         assert_eq!(result.exit_code, Some(0));

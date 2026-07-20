@@ -1,4 +1,4 @@
-//! `GROK_SCROLL_LOG` JSONL parsing, per-stream grouping, and finalize
+//! `CHUTES_BUILD_SCROLL_LOG` JSONL parsing, per-stream grouping, and finalize
 //! synchronization.
 //!
 //! Wire schema source of truth: the pager's `ScrollLogRecord` in
@@ -104,7 +104,7 @@ impl ScrollLogLine {
     }
 }
 
-/// Parse a `GROK_SCROLL_LOG` JSONL file into records.
+/// Parse a `CHUTES_BUILD_SCROLL_LOG` JSONL file into records.
 ///
 /// Every line must parse — errors carry the 1-based line number and the
 /// offending line. Call after the capture is quiescent (the producer
@@ -174,7 +174,7 @@ impl<'a> StreamGroup<'a> {
 /// Group parsed records into per-gesture [`StreamGroup`]s.
 ///
 /// Expects the shape the pager emits when the recorder exists for the whole
-/// session (`GROK_SCROLL_LOG` set at spawn): `stream_start` → `flush`* →
+/// session (`CHUTES_BUILD_SCROLL_LOG` set at spawn): `stream_start` → `flush`* →
 /// `finalize`, repeated, with at most one trailing unfinalized stream. A
 /// direction flip emits `finalize` and the next `stream_start` at the same
 /// `ts_ms`; that boundary is a plain group boundary here.

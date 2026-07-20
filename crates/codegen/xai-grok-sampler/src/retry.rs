@@ -60,9 +60,9 @@ pub(crate) fn resolve_max_retries_with_env(
         .unwrap_or(DEFAULT_MAX_RETRIES)
 }
 
-/// Resolve max API retries: `GROK_MAX_RETRIES` env > model config > default ([`DEFAULT_MAX_RETRIES`]).
+/// Resolve max API retries: `CHUTES_BUILD_MAX_RETRIES` env > model config > default ([`DEFAULT_MAX_RETRIES`]).
 pub fn resolve_max_retries(model_max_retries: Option<u32>) -> u32 {
-    let env_override = std::env::var("GROK_MAX_RETRIES").ok();
+    let env_override = std::env::var("CHUTES_BUILD_MAX_RETRIES").ok();
     resolve_max_retries_with_env(env_override.as_deref(), model_max_retries)
 }
 

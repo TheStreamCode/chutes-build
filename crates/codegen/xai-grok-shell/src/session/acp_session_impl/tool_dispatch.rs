@@ -204,7 +204,7 @@ impl SessionActor {
             is_background: false,
         });
         // Bash mode has no model-issued wire name; resolve the toolset's
-        // execute tool by kind so the x.ai/tool identity still stamps.
+        // execute tool by kind so the chutes.build/tool identity still stamps.
         let bash_marker = serde_json::json!({"bash_mode": true}).as_object().cloned();
         let exec_wire = {
             let agent = self.agent.borrow();

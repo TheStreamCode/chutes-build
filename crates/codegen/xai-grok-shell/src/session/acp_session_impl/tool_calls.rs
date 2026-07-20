@@ -255,7 +255,7 @@ fn resume_action_for(outcome: PlanApprovalOutcome, feedback: Option<String>) -> 
     }
 }
 impl SessionActor {
-    /// Merge the canonical `x.ai/tool` identity envelope into a tool-call
+    /// Merge the canonical `chutes.build/tool` identity envelope into a tool-call
     /// event's `_meta`, resolving the tool from the live toolset by wire name.
     pub(super) fn stamp_tool_meta(
         &self,
@@ -1350,7 +1350,7 @@ impl SessionActor {
         };
         Ok(Ok(prepared))
     }
-    /// Issue the `x.ai/exit_plan_mode` reverse-request and await the user's
+    /// Issue the `chutes.build/exit_plan_mode` reverse-request and await the user's
     /// decision. Shared by the mid-turn intercept and the resume
     /// re-park. Marks `awaiting_plan_approval` while the request is
     /// outstanding and clears it on every exit path via [`AwaitingApprovalGuard`].
@@ -1376,7 +1376,7 @@ impl SessionActor {
             "exit_plan_mode reverse-request must carry a non-empty sessionId (design §5.4)"
         );
         let ext_request = acp::ExtRequest::new(
-            "x.ai/exit_plan_mode",
+            "chutes.build/exit_plan_mode",
             serde_json::value::to_raw_value(&ext_req)
                 .expect("ExitPlanModeExtRequest serialization should not fail")
                 .into(),
@@ -2102,6 +2102,7 @@ impl SessionActor {
             result.prompt_text
         };
         let mut inline_images: Vec<ContentPart> = Vec::new();
+        let mut inline_image_inputs: Vec<agent_client_protocol::ImageContent> = Vec::new();
         let extraction = if !self.is_cursor_harness()
             && !matches!(
                 result.output,
@@ -2145,6 +2146,10 @@ impl SessionActor {
                     );
                 }
                 InlineAttachVerdict::Attach => {
+                    inline_image_inputs.push(agent_client_protocol::ImageContent::new(
+                        image_content.data.clone(),
+                        image_content.mime_type.clone(),
+                    ));
                     let url = format!(
                         "data:{};base64,{}",
                         image_content.mime_type, image_content.data
@@ -2160,6 +2165,10 @@ impl SessionActor {
             && let ToolsToolOutput::ReadFile(ReadFileOutput::PdfPageImages(ref pdf)) = result.output
         {
             for page in &pdf.pages {
+                inline_image_inputs.push(agent_client_protocol::ImageContent::new(
+                    page.data.clone(),
+                    page.mime_type.clone(),
+                ));
                 let url = format!("data:{};base64,{}", page.mime_type, page.data);
                 inline_images.push(ContentPart::Image {
                     url: std::sync::Arc::<str>::from(url),
@@ -2175,6 +2184,17 @@ impl SessionActor {
                 pdf.pages.len(),
                 pdf.total_pages,
             );
+        }
+        if !inline_image_inputs.is_empty()
+            && !matches!(
+                chutes_build_core::catalog::model_supports_input(model_id, "image").await,
+                Ok(Some(true))
+            )
+        {
+            prompt_text = self
+                .transcribe_user_images(prompt_text, &inline_image_inputs)
+                .await?;
+            inline_images.clear();
         }
         let tool_chat = if inline_images.is_empty() {
             ConversationItem::tool_result(call_id.to_string(), prompt_text)
@@ -2218,12 +2238,28 @@ impl SessionActor {
                 self.send_xai_notification(XaiSessionUpdate::ImageDropped { notes })
                     .await;
             }
-            for norm in norm_result.images {
-                let url = format!("data:{};base64,{}", norm.mime_type, norm.data);
-                let mut image_msg =
-                    ConversationItem::user("[Image extracted from tool result above]");
-                image_msg.add_image(url);
-                deferred_followups.push(image_msg);
+            let normalized_images = norm_result.images;
+            if !normalized_images.is_empty()
+                && !matches!(
+                    chutes_build_core::catalog::model_supports_input(model_id, "image").await,
+                    Ok(Some(true))
+                )
+            {
+                let description = self
+                    .transcribe_user_images(
+                        "[Images extracted from the preceding tool result]".to_owned(),
+                        &normalized_images,
+                    )
+                    .await?;
+                deferred_followups.push(ConversationItem::user(description));
+            } else {
+                for norm in normalized_images {
+                    let url = format!("data:{};base64,{}", norm.mime_type, norm.data);
+                    let mut image_msg =
+                        ConversationItem::user("[Image extracted from tool result above]");
+                    image_msg.add_image(url);
+                    deferred_followups.push(image_msg);
+                }
             }
         }
         Ok(deferred_followups)

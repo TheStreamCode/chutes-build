@@ -8,12 +8,12 @@
 //! happened, when, attributed to which code path:
 //!
 //! - **Samples**: footprint/RSS + allocator gauges every
-//!   `GROK_MEMTRACE_INTERVAL_SECS` (default 30s) from a detached thread.
+//!   `CHUTES_BUILD_MEMTRACE_INTERVAL_SECS` (default 30s) from a detached thread.
 //! - **Purges**: every `memory_release` invocation, tagged with the memory
 //!   cliff that triggered it (`reason`), with before/after footprint and
 //!   duration — so over- or under-purging is visible per call site.
 //! - **Thresholds**: when the physical footprint crosses a bucket
-//!   (`GROK_MEMTRACE_THRESHOLD_MB`, default 1 GiB, then doubling), a full
+//!   (`CHUTES_BUILD_MEMTRACE_THRESHOLD_MB`, default 1 GiB, then doubling), a full
 //!   allocator stats dump (jemalloc `malloc_stats_print`) is written next to
 //!   the trace and the *threshold hook* fires — the seam the GCS trace-upload
 //!   pipeline plugs into (see below). Buckets re-arm once the footprint
@@ -21,7 +21,7 @@
 //!
 //! ## Files
 //!
-//! `$GROK_HOME/memtrace/<start-ts>-<pid>.jsonl` (+ `.1` after 4 MiB
+//! `$CHUTES_BUILD_HOME/memtrace/<start-ts>-<pid>.jsonl` (+ `.1` after 4 MiB
 //! rotation) and `<stem>-jemalloc-<seq>.txt` threshold dumps. Files are
 //! created lazily on the first event so short-lived CLI invocations leave no
 //! debris. Traces contain **process memory numbers only** — no user content —
@@ -478,7 +478,7 @@ fn with_sink(f: impl FnOnce(&Sink)) {
     }
 }
 
-/// Whether a trace sink is installed ([`start`] ran and `GROK_MEMTRACE` is
+/// Whether a trace sink is installed ([`start`] ran and `CHUTES_BUILD_MEMTRACE` is
 /// not disabled, or a test sink is scoped in). Lets callers skip gauge
 /// sampling entirely when tracing is off.
 pub(crate) fn is_active() -> bool {
@@ -511,16 +511,16 @@ pub(crate) fn record_purge(
 
 // ─── Startup ───────────────────────────────────────────────────────────────
 
-/// Env: disable with `GROK_MEMTRACE=0|false|off`.
+/// Env: disable with `CHUTES_BUILD_MEMTRACE=0|false|off`.
 fn enabled_by_env() -> bool {
     !matches!(
-        std::env::var("GROK_MEMTRACE").ok().as_deref(),
+        std::env::var("CHUTES_BUILD_MEMTRACE").ok().as_deref(),
         Some("0") | Some("false") | Some("off")
     )
 }
 
 fn interval_from_env() -> Duration {
-    let secs = std::env::var("GROK_MEMTRACE_INTERVAL_SECS")
+    let secs = std::env::var("CHUTES_BUILD_MEMTRACE_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(30)
@@ -529,7 +529,7 @@ fn interval_from_env() -> Duration {
 }
 
 fn first_threshold_from_env() -> u64 {
-    std::env::var("GROK_MEMTRACE_THRESHOLD_MB")
+    std::env::var("CHUTES_BUILD_MEMTRACE_THRESHOLD_MB")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(1024)
@@ -537,14 +537,14 @@ fn first_threshold_from_env() -> u64 {
 }
 
 /// Start memory tracing: install the process-global sink under
-/// `dir` (e.g. `$GROK_HOME/memtrace/`) and spawn the detached sampler
+/// `dir` (e.g. `$CHUTES_BUILD_HOME/memtrace/`) and spawn the detached sampler
 /// thread. Call once from the composition-root binary, AFTER the
 /// short-lived-child intercepts (mermaid render worker) so helper processes
-/// don't trace. Inert when `GROK_MEMTRACE=0`.
+/// don't trace. Inert when `CHUTES_BUILD_MEMTRACE=0`.
 ///
 /// The trace file is created lazily on the first event; the first sample is
 /// taken after one full interval, so short-lived CLI invocations
-/// (`grok --version`, `grok trace …`) leave no files behind.
+/// (`chutes-build --version`, `chutes-build trace …`) leave no files behind.
 pub fn start(dir: PathBuf) {
     if !enabled_by_env() {
         return;

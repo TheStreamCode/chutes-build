@@ -33,7 +33,7 @@ pub struct VoiceProbeReport {
     pub transcript: Option<String>,
 }
 
-/// Capture mic audio and stream it to xAI STT, reporting the transcript.
+/// Capture mic audio and stream it to the configured STT endpoint.
 #[cfg(feature = "audio")]
 pub async fn run_streaming_probe(opts: VoiceProbeOptions) -> Result<VoiceProbeReport, VoiceError> {
     let bearer = crate::auth::require_bearer(&opts.auth).await?;
@@ -131,7 +131,7 @@ pub async fn run_streaming_probe(_opts: VoiceProbeOptions) -> Result<VoiceProbeR
 
 /// Human-readable multi-line report for terminal output.
 pub fn format_probe_report(report: &VoiceProbeReport) -> String {
-    let mut out = String::from("=== xai-grok-voice probe ===\n\n");
+    let mut out = String::from("=== Chutes Build voice probe ===\n\n");
 
     out.push_str(&format!(
         "Mic capture (streamed)\n  pcm_bytes: {}\n",

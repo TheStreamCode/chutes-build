@@ -141,7 +141,7 @@ mod tests {
         let block = CreditLimitBlock::new(
             "You\u{2019}ve hit your credit limit.",
             CreditLimitCardAction::EnablePayg,
-            "https://grok.com?_s=usage",
+            "https://chutes.ai?_s=usage",
         );
         let output = block.output(&ctx());
         let all_text: String = output
@@ -159,7 +159,7 @@ mod tests {
         let block = CreditLimitBlock::new(
             "You\u{2019}ve hit your spending cap.",
             CreditLimitCardAction::IncreasePaygLimit,
-            "https://grok.com?_s=usage",
+            "https://chutes.ai?_s=usage",
         );
         let output = block.output(&ctx());
         let all_text: String = output
@@ -177,7 +177,7 @@ mod tests {
         let block = CreditLimitBlock::new(
             "You hit your weekly limit.",
             CreditLimitCardAction::PurchaseCredits,
-            "https://grok.com?_s=usage",
+            "https://chutes.ai?_s=usage",
         );
         let output = block.output(&ctx());
         let all_text: String = output
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn output_structure_and_content() {
-        let url = "https://grok.com?_s=usage";
+        let url = "https://chutes.ai?_s=usage";
         let block = CreditLimitBlock::new("Test heading", CreditLimitCardAction::EnablePayg, url);
         let output = block.output(&ctx());
 

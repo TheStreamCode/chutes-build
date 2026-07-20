@@ -474,7 +474,7 @@ pub(super) fn end_turn() -> Action {
     })
 }
 /// Plant a Build session under the process `grok_home()` (OnceLock-cached;
-/// do not rely on setting `GROK_HOME` mid-process). Caller must remove `sess_dir`.
+/// do not rely on setting `CHUTES_BUILD_HOME` mid-process). Caller must remove `sess_dir`.
 fn plant_local_build_session(cwd: &std::path::Path, session_id: &str) -> std::path::PathBuf {
     let home = xai_grok_shell::util::grok_home::grok_home();
     let encoded = xai_grok_shell::util::grok_home::encode_cwd_dirname(&cwd.to_string_lossy());
@@ -579,7 +579,7 @@ fn fork_test_app() -> AppView {
     app
 }
 /// Build a minimal `AcpArgs<acp::ExtRequest>` for an
-/// `x.ai/ask_user_question` ext-method request. Returns the args
+/// `chutes.build/ask_user_question` ext-method request. Returns the args
 /// plus the receiver half of the response oneshot so the test can
 /// assert the handler completes the ACP roundtrip.
 fn make_ask_user_question_args(
@@ -603,7 +603,7 @@ fn make_ask_user_question_args(
     };
     let (tx, rx) = tokio::sync::oneshot::channel();
     let ext = acp::ExtRequest::new(
-        "x.ai/ask_user_question",
+        "chutes.build/ask_user_question",
         serde_json::value::to_raw_value(&req)
             .expect("serialize AskUserQuestionExtRequest")
             .into(),
@@ -855,7 +855,7 @@ fn with_theme_test_env(f: impl FnOnce()) {
         .unwrap_or_else(|e| e.into_inner());
     crate::theme::cache::reset_for_test();
     crate::theme::cache::seed_auto_theme_defaults_for_test();
-    crate::theme::cache::set(crate::theme::ThemeKind::GrokNight);
+    crate::theme::cache::set(crate::theme::ThemeKind::ChutesNight);
     crate::theme::system_appearance::clear_mock();
     f();
     crate::theme::system_appearance::clear_mock();
@@ -987,6 +987,7 @@ fn test_bal(usage_pct: f64) -> crate::views::credit_bar::CreditBalance {
         on_demand_used_cents: None,
         prepaid_balance_cents: None,
         period_type: None,
+        usage_windows: Vec::new(),
         is_unified_billing_user: None,
     }
 }

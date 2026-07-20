@@ -96,7 +96,7 @@ pub(crate) fn run_external_auth_sync(command: &str, is_refresh: bool) -> Option<
         // Pipe stderr — inherit would corrupt the TUI alternate screen.
         .stderr(Stdio::piped());
     if is_refresh {
-        cmd.env("GROK_AUTH_EXPIRED", "1");
+        cmd.env("CHUTES_BUILD_AUTH_EXPIRED", "1");
     }
     xai_grok_tools::util::detach_std_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
@@ -193,10 +193,13 @@ mod tests {
 
         // x.ai issuer claim → first-party session (relay-eligible).
         let auth = parse_output(&ok(
-            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.x.ai"}"#,
+            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.example.com"}"#,
         ))
         .unwrap();
-        assert_eq!(auth.oidc_issuer.as_deref(), Some("https://auth.x.ai"));
+        assert_eq!(
+            auth.oidc_issuer.as_deref(),
+            Some("https://auth.example.com")
+        );
         assert!(auth.is_xai_auth());
 
         // Non-x.ai issuer is stored but stays third-party.
@@ -241,7 +244,7 @@ mod tests {
 
     #[test]
     fn sync_sets_grok_auth_expired_env_on_refresh() {
-        let auth = run_external_auth_sync("echo $GROK_AUTH_EXPIRED", true).unwrap();
+        let auth = run_external_auth_sync("echo $CHUTES_BUILD_AUTH_EXPIRED", true).unwrap();
         assert_eq!(auth.key, "1");
     }
 

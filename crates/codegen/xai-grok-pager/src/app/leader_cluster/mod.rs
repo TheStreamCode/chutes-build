@@ -10,13 +10,13 @@
 //! effects run through the real `effects::execute` (the same loop
 //! `event_loop::run` performs, minus the terminal).
 //!
-//! Env sandboxing follows this crate's `serial(GROK_HOME)` idiom; note
+//! Env sandboxing follows this crate's `serial(CHUTES_BUILD_HOME)` idiom; note
 //! `grok_home()` is process-cached (OnceLock), so disk assertions always go
 //! through [`effective_grok_home`] rather than assuming the temp dir won.
 //!
 //! The scenarios are `#[ignore]`d in the shared lib test binary: the harness
-//! mutates process-global env (proxy URLs, `XAI_API_KEY`,
-//! `GROK_LEADER_SOCKET`, `GROK_HOME`) for a real agent's whole lifetime, and
+//! mutates process-global env (proxy URLs, `CHUTES_API_KEY`,
+//! `CHUTES_BUILD_LEADER_SOCKET`, `CHUTES_BUILD_HOME`) for a real agent's whole lifetime, and
 //! in a several-thousand-test process that poisons concurrently-running tests
 //! (and `grok_home()`'s OnceLock is usually already pinned). Run on demand:
 //!
@@ -286,7 +286,7 @@ struct PagerLeaderCluster {
     server_cancel: CancellationToken,
     /// The current generation's server/agent/bridge tasks. `kill_leader`
     /// aborts + drains them so a respawn can never race a still-running old
-    /// agent on the same GROK_HOME (two agents on one updates.jsonl is the
+    /// agent on the same CHUTES_BUILD_HOME (two agents on one updates.jsonl is the
     /// corruption class the real leader's flock exists to prevent).
     generation_tasks: Vec<tokio::task::JoinHandle<()>>,
     client_count: Arc<AtomicUsize>,
@@ -305,7 +305,7 @@ struct PagerLeaderCluster {
 }
 
 impl PagerLeaderCluster {
-    /// Stand up the cluster. Callers MUST be `#[serial_test::serial(GROK_HOME)]`
+    /// Stand up the cluster. Callers MUST be `#[serial_test::serial(CHUTES_BUILD_HOME)]`
     /// (env mutation) and run inside a current-thread `LocalSet`.
     async fn start() -> Self {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -316,13 +316,16 @@ impl PagerLeaderCluster {
         let sock_path = grok_home.path().join("leader-cluster.sock");
 
         let env = vec![
-            crate::test_util::EnvVarGuard::set("GROK_HOME", grok_home.path()),
-            crate::test_util::EnvVarGuard::set("GROK_CLI_CHAT_PROXY_BASE_URL", server.url()),
-            crate::test_util::EnvVarGuard::set("GROK_XAI_API_BASE_URL", server.url()),
-            crate::test_util::EnvVarGuard::set("XAI_API_KEY", "test-key-for-ci"),
-            crate::test_util::EnvVarGuard::set("GROK_TELEMETRY_ENABLED", "false"),
-            crate::test_util::EnvVarGuard::set("GROK_FEEDBACK_ENABLED", "false"),
-            crate::test_util::EnvVarGuard::set("GROK_TRACE_UPLOAD", "false"),
+            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_HOME", grok_home.path()),
+            crate::test_util::EnvVarGuard::set(
+                "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+                server.url(),
+            ),
+            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_XAI_API_BASE_URL", server.url()),
+            crate::test_util::EnvVarGuard::set("CHUTES_API_KEY", "test-key-for-ci"),
+            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_TELEMETRY_ENABLED", "false"),
+            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_FEEDBACK_ENABLED", "false"),
+            crate::test_util::EnvVarGuard::set("CHUTES_BUILD_TRACE_UPLOAD", "false"),
             // Pin every leader-path derivation (LeaderLock::new / reconnect's
             // connect_or_spawn) to this cluster's socket.
             crate::test_util::EnvVarGuard::set(LEADER_SOCKET_ENV, &sock_path),
@@ -483,7 +486,7 @@ impl PagerLeaderCluster {
         // Abort + drain the generation's agent/bridge tasks (the server task
         // has already run its socket cleanup above). Channel-closure teardown
         // is only eventual; without this drain an old agent task could still
-        // be running against the same GROK_HOME when the next generation's
+        // be running against the same CHUTES_BUILD_HOME when the next generation's
         // agent starts — two writers on one updates.jsonl, the corruption
         // class the real leader's flock prevents.
         for task in self.generation_tasks.drain(..) {
@@ -499,7 +502,7 @@ impl PagerLeaderCluster {
     }
 
     /// Connect a pager client. With `reconnect: true` the bridge gets a real
-    /// `LeaderReconnector` (socket pinned via `GROK_LEADER_SOCKET`, flock held
+    /// `LeaderReconnector` (socket pinned via `CHUTES_BUILD_LEADER_SOCKET`, flock held
     /// by the cluster, so reconnects always adopt the in-process server).
     async fn client(&mut self, name: &str, reconnect: bool) -> ClusterClient {
         let conn = bounded(
@@ -582,7 +585,7 @@ impl PagerLeaderCluster {
             let _: acp::AuthenticateResponse = bounded(
                 "authenticate",
                 acp_send(
-                    acp::AuthenticateRequest::new(acp::AuthMethodId::new("xai.api_key"))
+                    acp::AuthenticateRequest::new(acp::AuthMethodId::new("chutes.api_key"))
                         .meta(serde_json::json!({ "headless": true }).as_object().cloned()),
                     &tx,
                 ),

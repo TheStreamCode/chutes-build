@@ -74,7 +74,7 @@ struct ReinitOutcome {
 struct AgentLoadOutcome {
     agent_id: super::agent::AgentId,
     success: bool,
-    /// `x.ai/runningPromptId` from the reload response: the turn another
+    /// `chutes.build/runningPromptId` from the reload response: the turn another
     /// client is driving mid-reconnect, adopted at finalize (mirrors the
     /// `SessionLoaded` adoption in `dispatch.rs`).
     running_prompt_id: Option<String>,
@@ -476,7 +476,7 @@ pub(crate) async fn run(
     // memory growth.
     if args.log_sampling {
         // SAFETY: called before any threads are spawned by init_tracing.
-        unsafe { std::env::set_var("GROK_LOG_SAMPLING", "1") };
+        unsafe { std::env::set_var("CHUTES_BUILD_LOG_SAMPLING", "1") };
     }
     let tracing_handle = crate::tracing::init_tracing();
 
@@ -604,11 +604,11 @@ pub(crate) async fn run(
         .as_ref()
         .and_then(|s| s.sharing_enabled)
         .unwrap_or(false);
-    app.plugin_cta_enabled = xai_grok_config::env_bool("GROK_PLUGIN_CTA")
+    app.plugin_cta_enabled = xai_grok_config::env_bool("CHUTES_BUILD_PLUGIN_CTA")
         .or_else(|| remote_settings.as_ref().and_then(|s| s.plugin_cta))
         .unwrap_or(false);
     // Voice is applied after auth_meta so API-key detection is accurate.
-    app.session_picker_grouped = std::env::var("GROK_SESSION_PICKER_GROUPED")
+    app.session_picker_grouped = std::env::var("CHUTES_BUILD_SESSION_PICKER_GROUPED")
         .ok()
         .and_then(|v| match v.as_str() {
             "1" | "true" => Some(true),
@@ -714,7 +714,7 @@ pub(crate) async fn run(
     } else {
         // No cached session — check if the API key is the active credential.
         app.is_api_key_auth = app.auth_methods.iter().any(|m| {
-            m.id().0.as_ref() == xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID
+            m.id().0.as_ref() == xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID
         });
         // No AuthMeta on this path — hide `/usage` for API keys.
         if app.is_api_key_auth {
@@ -782,7 +782,7 @@ pub(crate) async fn run(
         );
         if let Some(table) = raw.as_table() {
             // Voice inherits the same resolved endpoints base as chat
-            // (config > GROK_XAI_API_BASE_URL env > default).
+            // (config > CHUTES_BUILD_XAI_API_BASE_URL env > default).
             let endpoints_base =
                 xai_grok_shell::agent::config::EndpointsConfig::from_config_value(raw)
                     .xai_api_base_url;
@@ -978,7 +978,7 @@ pub(crate) async fn run(
         );
     }
 
-    // Apply initial config (may come from existing ~/.grok/pager.toml).
+    // Apply initial config (may come from existing ~/.chutes-build/pager.toml).
     let mut initial_config = config_watcher.current().clone();
     // The cache holds the USER compact value; the render value is derived
     // (auto-compact while the startup terminal is short).
@@ -1094,7 +1094,7 @@ pub(crate) async fn run(
     app.apply_effective_compact();
 
     // Apply the scroll settings from the caches (seeded by `prime` above;
-    // GROK_SCROLL_SPEED/_MODE/_LINES + GROK_INVERT_SCROLL env overrides
+    // CHUTES_BUILD_SCROLL_SPEED/_MODE/_LINES + CHUTES_BUILD_INVERT_SCROLL env overrides
     // apply on first load).
     app.scroll_config = crate::input::mouse::ScrollConfig::from_settings();
 
@@ -1353,7 +1353,7 @@ pub(crate) async fn run(
         app.draw(terminal);
     }
 
-    // Initial prompt from the CLI positional (`grok "fix the bug"`). When
+    // Initial prompt from the CLI positional (`chutes-build "fix the bug"`). When
     // already authenticated, hand it to the shared dispatcher helper (same
     // `NewSession`/`SendPrompt` path the welcome screen uses). ZDR-blocked
     // accounts cannot start a session, so drop the prompt — this mirrors the
@@ -1371,12 +1371,12 @@ pub(crate) async fn run(
         }
     }
 
-    // `grok dashboard` startup: open the dashboard view immediately. The
-    // CLI subcommand wrote a `GROK_OPEN_DASHBOARD_AT_STARTUP=1` env var
+    // `chutes-build dashboard` startup: open the dashboard view immediately. The
+    // CLI subcommand wrote a `CHUTES_BUILD_OPEN_DASHBOARD_AT_STARTUP=1` env var
     // so we don't have to thread a flag through every arg struct.
-    if std::env::var("GROK_OPEN_DASHBOARD_AT_STARTUP").as_deref() == Ok("1") {
+    if std::env::var("CHUTES_BUILD_OPEN_DASHBOARD_AT_STARTUP").as_deref() == Ok("1") {
         // SAFETY: we are pre-multithreaded init for this app loop.
-        unsafe { std::env::remove_var("GROK_OPEN_DASHBOARD_AT_STARTUP") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_OPEN_DASHBOARD_AT_STARTUP") };
         if app.session_startup_allowed() {
             let effs = dispatch::dispatch(Action::OpenDashboard, &mut app);
             if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
@@ -2021,8 +2021,8 @@ pub(crate) async fn run(
             // Hot-reload: config file changed (dev mode) or initial load.
             Ok(()) = config_watcher.changed() => {
                 let mut config = config_watcher.current().clone();
-                // Preserve fields persisted via `~/.grok/config.toml [ui]`
-                // rather than `~/.grok/pager.toml`. The watcher only knows
+                // Preserve fields persisted via `~/.chutes-build/config.toml [ui]`
+                // rather than `~/.chutes-build/pager.toml`. The watcher only knows
                 // about pager.toml, so a hot-reload would otherwise revert
                 // these to their hardcoded defaults. Compact carries the
                 // PRE-reload render value; the canonical re-derive below owns

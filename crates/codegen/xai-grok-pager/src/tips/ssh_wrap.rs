@@ -1,4 +1,4 @@
-//! SSH wrap tip: over SSH without `grok wrap`, advertise that wrapping the
+//! SSH wrap tip: over SSH without `chutes-build wrap`, advertise that wrapping the
 //! ssh command on the local machine forwards clipboard copies and restores
 //! the terminal when the connection drops.
 //!
@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 use super::EphemeralTip;
 use crate::theme::Theme;
 
-/// Ephemeral-tip dedup key for the SSH `grok wrap` hint.
+/// Ephemeral-tip dedup key for the SSH `chutes-build wrap` hint.
 pub(crate) const SSH_WRAP_TIP_KEY: &str = "ssh_wrap_tip";
 
 /// Key into the per-session in-memory seen-count map for this tip.
@@ -30,7 +30,7 @@ const SSH_WRAP_TIP_SEEN_CAP: u32 = 1;
 /// the TTL pauses while occluded instead of burning off-screen.
 pub(crate) const SSH_WRAP_TIP_TICKS: u16 = 300;
 
-/// Build "Over SSH? Run `grok wrap ssh <host>` locally for clipboard +
+/// Build "Over SSH? Run `chutes-build wrap ssh <host>` locally for clipboard +
 /// terminal restore", seen-gated to [`SSH_WRAP_TIP_SEEN_CAP`] show per
 /// session (in-memory). Ambient: it is about the session's transport, not
 /// the draft, so submitting a prompt right after session load must not
@@ -48,7 +48,7 @@ pub fn ssh_wrap_tip() -> EphemeralTip {
             SSH_WRAP_TIP_KEY,
             Line::from(vec![
                 Span::styled("Over SSH? Run ", dim),
-                Span::styled("grok wrap ssh <host>", command),
+                Span::styled("chutes-build wrap ssh <host>", command),
                 Span::styled(" locally for clipboard + terminal restore", dim),
             ]),
         )
@@ -76,7 +76,7 @@ mod tests {
         let text: String = tip.line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(
             text,
-            "Over SSH? Run grok wrap ssh <host> locally for clipboard + terminal restore"
+            "Over SSH? Run chutes-build wrap ssh <host> locally for clipboard + terminal restore"
         );
     }
 

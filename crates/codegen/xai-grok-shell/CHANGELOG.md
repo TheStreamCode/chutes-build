@@ -10,13 +10,13 @@
 
 - **New /jump slash command** lets you quickly jump to any previous turn in the conversation.
 - **New /timeline sidebar** shows a clickable tick rail for fast navigation between conversation turns.
-- **grok login** now requests Grok Projects scopes so workspace listing works after consent.
+- **chutes-build login** now requests Grok Projects scopes so workspace listing works after consent.
 - **Permission mode** can now be set fleet-wide via remote config when no local setting exists.
 - **Edit tool output** has a setting to show a compact one-line summary instead of always-expanded diffs.
 - **Tab completion** in !bash mode now works like a normal terminal (prefix fill, dropdown, directory drill-down).
 - **Enterprise deployments** can now disable voice dictation via `requirements.toml` so `/voice` and Ctrl+Space are hidden for everyone.
 - **User prompts** now appear bold only in `--minimal` mode; fullscreen keeps normal weight.
-- **`grok plugin install`** now accepts a marketplace's registered name as a qualifier.
+- **`chutes-build plugin install`** now accepts a marketplace's registered name as a qualifier.
 - Consecutive edits to the same file now collapse into a single scrollback row when collapsed edit blocks are enabled.
 - Local sessions now inherit your shell environment variables and keep the current directory across commands.
 
@@ -56,7 +56,7 @@
 
 ## Features
 
-- **grok inspect** now shows effective compatibility settings for Cursor, Claude, and Codex sessions.
+- **chutes-build inspect** now shows effective compatibility settings for Cursor, Claude, and Codex sessions.
 - **New setting** "Match display refresh rate" lets high-refresh displays run the TUI at native cadence.
 
 ## Bug Fixes
@@ -107,7 +107,7 @@
 - **`env_key`** in config now accepts an array of environment variable names.
 - Linux middle-click paste from the primary selection now works; clipboard errors are handled more reliably.
 - **/terminal-setup** now shows your terminal's color support level and which themes are available.
-- **grok setup --json** prints your team's managed configuration without installing it.
+- **chutes-build setup --json** prints your team's managed configuration without installing it.
 - Messages you type while the model waits on tasks now stay queued; pressing Enter twice sends them immediately by cancelling the current turn.
 - **How-to Guides** modal now shows a tip linking to Ask Grok above the footer shortcuts.
 - **Subagent** `task` and `spawn_subagent` tools now accept an optional `model` parameter in the CLI.
@@ -162,15 +162,15 @@
 ## Features
 
 - **System notifications** now carry structured kind/title/body for better rendering.
-- **x.ai/pr/status** now reports whether an open PR is in the merge queue.
+- **chutes.build/pr/status** now reports whether an open PR is in the merge queue.
 - **Compact mode** now activates automatically on very small terminals.
 - **Up arrow** on an empty prompt now browses prompt history; `/history` searches it.
 - **Stop hook runs** now appear inline on the turn-completed line instead of a separate block.
 - **Subagent rows** now fold into verb-group headers and the tasks pane shows live activity labels.
 - **Dashboard shortcuts** now advertise ? instead of Ctrl+. on terminals that cannot deliver the latter.
 - **Double-clicking** scrollback while Text selection is fold/nav now shows a tip offering Ctrl+Y to enable Word select.
-- **`grok worktree ls`** now works as a short alias for `grok worktree list`.
-- **MCP tool output truncation** can now be set per-repo in `.grok/config.toml`.
+- **`chutes-build worktree ls`** now works as a short alias for `chutes-build worktree list`.
+- **MCP tool output truncation** can now be set per-repo in `.chutes-build/config.toml`.
 - **Auto-send of queued follow-ups** during task waits can now be enabled fleet-wide via remote settings.
 - **Welcome screen** now offers one-click resume of a recent Claude Code session via ctrl+u.
 
@@ -211,7 +211,7 @@
 - **IME text input in Otty** no longer attaches unrelated clipboard images on every character.
 - **Rewind** now fully removes the selected turn from both scrollback and the model's conversation history.
 - **Queued prompts** now abort long blocking waits instead of waiting for the full timeout.
-- **File links and media** now work for worktree sessions under ~/.grok/worktrees/.
+- **File links and media** now work for worktree sessions under ~/.chutes-build/worktrees/.
 - **Collapsed Read/Edit tool rows** now show only the filename instead of long absolute paths.
 - **Clipboard copies on Wayland** now succeed even when the terminal loses focus mid-copy.
 - **User messages queued** behind an auto-wake turn are no longer lost when the user presses Ctrl+C.
@@ -233,13 +233,13 @@
 
 - **/sessions** now opens the Agent Dashboard instead of a separate picker.
 - **New /goal <objective>** slash command** is now available when the workspace supports it.
-- **grok inspect** now lists skills from [skills].paths and correctly labels bundled vs user skills.
+- **chutes-build inspect** now lists skills from [skills].paths and correctly labels bundled vs user skills.
 - **--minimal** and **--fullscreen** choices are now remembered for future plain grok launches.
 
 ## Bug Fixes
 
 - **Queued bash commands** promoted at turn end now render their output instead of disappearing.
-- **Xcode / Foundation ACP clients** can now drive grok agent stdio without silent parse drops on session/* calls.
+- **Xcode / Foundation ACP clients** can now drive chutes-build agent stdio without silent parse drops on session/* calls.
 - **read_file** now returns full single-line content (minified JSON, large dumps) instead of silently clipping at 2000 characters.
 - **Background task** command preambles with newlines now render on separate lines instead of collapsing.
 - **Text selections** now highlight uniformly even over inline code, links, and syntax-colored spans.
@@ -288,7 +288,7 @@
 - **Always allow** grants for MCP, web_fetch and bash now take effect immediately in auto mode without re-prompting.
 - **Cmd/Ctrl+click** on bare http(s) links now opens only once on Warp terminals.
 - **Cmd/Ctrl+click** now works on imagine media paths and URLs that wrap across multiple terminal rows.
-- **grok update** on Windows no longer fails when a previous .old executable is still running.
+- **chutes-build update** on Windows no longer fails when a previous .old executable is still running.
 
 ## Performance
 
@@ -308,10 +308,10 @@
 
 - **New /minimal and /fullscreen slash commands** let you switch the current session between minimal and fullscreen modes without quitting.
 - **Session titles** from /rename now appear on the prompt box border after resume.
-- **grok models** banner now correctly reports per-model API keys and deployment keys.
+- **chutes-build models** banner now correctly reports per-model API keys and deployment keys.
 - MCP tool output size limit is now configurable via environment variable, config.toml, or remote settings (default unchanged).
 - Chat conversations listed in the unified sidebar can now be renamed or deleted from the desktop app.
-- You can now add a local directory as a plugin marketplace source with `grok plugin marketplace add`.
+- You can now add a local directory as a plugin marketplace source with `chutes-build plugin marketplace add`.
 - **Auto permission mode** now prompts far less often on routine development commands.
 - Short media paths the model prints (images/1.jpg) are now clickable and open the file.
 - **Preview** now prefers common dev ports like 8080 when multiple HTTP servers are detected.
@@ -349,7 +349,7 @@
 - **Try Again** on the free-usage paywall now correctly resubmits after rate-limit retries.
 - **Cursor** now respects your terminal's default blink style instead of always blinking.
 - **Skill commands** in scrollback now highlight only the command name, not the arguments.
-- **Plan files** now default to .grok/plan.md to match Grok conventions.
+- **Plan files** now default to .chutes-build/plan.md to match Grok conventions.
 - **LaTeX math** renders correctly for display equations and complex subscripts.
 - **Queue hint** in the terminal no longer shows incorrect bold text on part of the message.
 
@@ -406,7 +406,7 @@
 
 ## Bug Fixes
 
-- **--minimal** flag now shows in `grok --help`.
+- **--minimal** flag now shows in `chutes-build --help`.
 - **Session resume notifications** no longer appear when a workspace boots for the first time.
 - **Claude-style Bash(cmd:*)** permission rules are now correctly translated to prefix matches.
 
@@ -452,8 +452,8 @@
 - **Queue panel** now shows action buttons on hover and the status bar displays a compact done/total task count.
 - **Hook matchers** now correctly see the real MCP tool name instead of the internal dispatcher name.
 - **Copy** now succeeds when running inside containers even when the terminal brand cannot be detected.
-- **Tool result previews** no longer paint opaque panels in `grok --minimal`.
-- **grok wrap** now correctly handles quoted strings and shell aliases.
+- **Tool result previews** no longer paint opaque panels in `chutes-build --minimal`.
+- **chutes-build wrap** now correctly handles quoted strings and shell aliases.
 - **Text selection** settings now correctly honor explicit keep_text_selection values even when legacy keys remain.
 - **Fixed a freeze** that could occur when editing and sending the last message in the queue.
 - **Fixed a startup crash** on minimal Linux systems lacking system CA certificates.
@@ -569,14 +569,14 @@
 
 ## Performance
 
-- **`grok update`** downloads have a longer timeout.
+- **`chutes-build update`** downloads have a longer timeout.
 
 
 # 0.2.77 — 2026-06-30
 
 ## Features
 
-- **Pasting images** from the local clipboard now works when running commands through `grok wrap`.
+- **Pasting images** from the local clipboard now works when running commands through `chutes-build wrap`.
 - **Turn status spinner** now shows what the agent is waiting on (response, subagent, task output, etc.).
 - **Double-click word selection** is now a discoverable option in the Text selection setting and stays in sync with highlight behavior.
 
@@ -590,7 +590,7 @@
 ## Features
 
 - **Auto permission mode** is now added to the top of Shift+Tab cycles and enabled by default in settings.
-- **grok agent stdio** now checks for updates in the background like other modes.
+- **chutes-build agent stdio** now checks for updates in the background like other modes.
 
 ## Performance
 
@@ -608,7 +608,7 @@
 ## Features
 
 - **Esc now cancels a running turn immediately**; double-Esc clears prompt or opens rewind when idle.
-- **grok wrap** now shows copy success over SSH and suggests native drag-select when paste fails.
+- **chutes-build wrap** now shows copy success over SSH and suggests native drag-select when paste fails.
 
 ## Bug Fixes
 
@@ -638,14 +638,14 @@
 
 ## Bug Fixes
 
-- **Fixed `grok agent stdio` hangs** on Windows when used with persistent clients such as VS Code.
+- **Fixed `chutes-build agent stdio` hangs** on Windows when used with persistent clients such as VS Code.
 
 
 # 0.2.70 — 2026-06-27
 
 ## Breaking Changes
 
-- **Added `grok wrap`** to run any command with local clipboard support.
+- **Added `chutes-build wrap`** to run any command with local clipboard support.
 
 ## Features
 
@@ -655,7 +655,7 @@
 
 - **Session recaps** (/recap and return-from-away) now show the full summary instead of being cut off mid-sentence.
 - **Vim mode** now focuses the prompt when you press / on a brand-new empty session.
-- **Fixed `grok agent stdio` startup hangs** on Windows when used with persistent clients such as VS Code or grok-desktop.
+- **Fixed `chutes-build agent stdio` startup hangs** on Windows when used with persistent clients such as VS Code or grok-desktop.
 - **`/mcps` list** no longer shows stale disabled entries when managed gateway tools are enabled.
 - **Mermaid diagrams opened via [Open Image]** now render at higher resolution instead of terminal size.
 - **Pressing `r` in scrollback** no longer accidentally rewinds the session.
@@ -687,7 +687,7 @@
 ## Features
 
 - **MCP servers** from host integrations can now be added, replaced, or removed without restarting the session.
-- **Agent-run terminal commands** now set `GROK_AGENT=1` so host tools can tell them apart from interactive shells.
+- **Agent-run terminal commands** now set `CHUTES_BUILD_AGENT=1` so host tools can tell them apart from interactive shells.
 
 ## Bug Fixes
 
@@ -728,7 +728,7 @@
 ## Bug Fixes
 
 - **Local MCP servers** now auto-recover after disconnects or session expiry.
-- **OIDC sessions** with XAI_API_KEY present no longer lose refresh on idle.
+- **OIDC sessions** with CHUTES_API_KEY present no longer lose refresh on idle.
 - **Inline video previews** now show an install command only when the package manager is on PATH.
 - **list_dir** now reliably shows all immediate child directories even inside large monorepos.
 - **Clicking a model** in the dashboard /model dropdown no longer opens the wrong session.
@@ -815,7 +815,7 @@
 ## Bug Fixes
 
 - **Focus reports** no longer leak as literal text when split across reads over SSH.
-- **--disable-web-search** now honored in grok -p and grok agent; auxiliary model routing respects catalog overrides.
+- **--disable-web-search** now honored in grok -p and chutes-build agent; auxiliary model routing respects catalog overrides.
 - **Focus events** now fire correctly for SSH-split focus reports.
 - **Boolean tool flags** now accept "true"/"false"/"yes"/"no"/1/0 strings and numbers in addition to native booleans.
 - **Session last-active timestamps** and message counts no longer regress under concurrent writers.
@@ -866,8 +866,8 @@
 
 - Terminal command output files are now capped at 5 GB during execution and truncated to 64 MB after the process exits.
 - Interjection messages now display the actual user text instead of a generic header.
-- The legacy `agent` command is now kept in sync with `grok` after running `grok update`.
-- Headless (`grok -p`) runs now wait for background tasks and subagents to finish before exiting.
+- The legacy `agent` command is now kept in sync with `chutes-build` after running `chutes-build update`.
+- Headless (`chutes-build -p`) runs now wait for background tasks and subagents to finish before exiting.
 
 
 # 0.2.57
@@ -875,7 +875,7 @@
 ## Features
 
 - Improved resilience to network blips during long responses by resuming instead of failing the turn.
-- **`grok plugin install <name>`** now resolves plugins from registered marketplaces instead of only local paths.
+- **`chutes-build plugin install <name>`** now resolves plugins from registered marketplaces instead of only local paths.
 
 ## Bug Fixes
 
@@ -922,7 +922,7 @@
 
 ## Features
 
-- **Added option** to fully disable the hunk tracker via --hunk-tracker-mode, GROK_HUNK_TRACKER, or config.
+- **Added option** to fully disable the hunk tracker via --hunk-tracker-mode, CHUTES_BUILD_HUNK_TRACKER, or config.
 
 ## Bug Fixes
 
@@ -988,7 +988,7 @@
 - **ptyctl resize** now correctly notifies the child process.
 - **Concurrent updates** to the same version no longer fail with permission or EEXIST errors.
 - **Mermaid diagrams** containing CJK or other non-Latin text now render correctly instead of tofu boxes.
-- **`grok dashboard`** now reliably opens the dashboard instead of silently falling through to a normal session.
+- **`chutes-build dashboard`** now reliably opens the dashboard instead of silently falling through to a normal session.
 - **Sessions** no longer remain blocked forever after a transient model catalog outage during reconnect.
 - **Cancel** no longer leaves the interface stuck on "Cancelling…" after lost responses during reconnects.
 - **Forked sessions** now retain the parent's full pre-compaction transcripts instead of only the compacted summary.
@@ -1005,7 +1005,7 @@
 
 ## Breaking Changes
 
-- **`grok mcp add`** now accepts positional arguments (e.g. `grok mcp add filesystem -- npx ...`), supports --scope project, and adds -e/-H flags for env/headers.
+- **`chutes-build mcp add`** now accepts positional arguments (e.g. `chutes-build mcp add filesystem -- npx ...`), supports --scope project, and adds -e/-H flags for env/headers.
 
 ## Features
 
@@ -1018,13 +1018,13 @@
 
 - **Plan mode exit reminders** no longer appear after the model has already started implementing the plan.
 - **Expanded thinking blocks** in scrollback now remain expanded when the agent finishes them.
-- **`grok update`** no longer downloads the same binary twice when multiple updaters or leader checks run concurrently.
+- **`chutes-build update`** no longer downloads the same binary twice when multiple updaters or leader checks run concurrently.
 - **Background task IDs** after /compact are now shown verbatim so the model can reference them correctly in later tool calls.
 - **Typing /** while scrollback is focused now focuses the prompt and opens the slash-command dropdown.
 - **Dashboard empty state** is now a single hint line; dispatch and peek placeholders appear only when unfocused.
 - **Fixed memory leaks** that could cause the CLI to use tens of gigabytes during long sessions with many tool calls.
 - **Login on SSH or headless machines** now tells you when the browser cannot be opened automatically and shows the URL to visit manually.
-- **Fixed git clone failures** on Windows when the CLI tries to clone marketplace plugins into ~/.grok.
+- **Fixed git clone failures** on Windows when the CLI tries to clone marketplace plugins into ~/.chutes-build.
 
 ## Performance
 
@@ -1084,7 +1084,7 @@
 
 ## Bug Fixes
 
-- **Fixed `grok --resume`** failing on empty image-only session folders left by cross-directory pastes.
+- **Fixed `chutes-build --resume`** failing on empty image-only session folders left by cross-directory pastes.
 - **Fixed pasted images** and relative paths using the wrong directory after cross-cwd resume.
 - **Fixed Mermaid flowcharts** that silently rendered wrong diagrams for & groups, circle/cross endings and self-loops.
 - **Fixed zsh tab-completion** for subcommands after the optional prompt argument was added.
@@ -1105,7 +1105,7 @@
 ## Bug Fixes
 
 - **Fixed** rare conversation corruption when skills changed while a tool call was still running.
-- **Fixed** `grok --resume` failing on empty image-only session folders left by cross-directory pastes.
+- **Fixed** `chutes-build --resume` failing on empty image-only session folders left by cross-directory pastes.
 - **Fixed** pasted images and relative paths using the wrong directory after resuming a session from another folder.
 - **Welcome screen logo** no longer renders as invalid characters on legacy Windows command prompts and PowerShell.
 - **Fixed** "unknown session id" errors that occurred after the leader process crashed or was killed.
@@ -1136,7 +1136,7 @@
 
 - **ask_user_question** tool can now be enabled in allowlists without requiring plan-mode tools.
 - **Shift+Tab** mode cycling (Normal → Plan → Auto-Approve) works again in the agent view.
-- **Ctrl+C** now cancels a blocking `grok update` cleanly instead of leaving an orphaned download repainting the terminal.
+- **Ctrl+C** now cancels a blocking `chutes-build update` cleanly instead of leaving an orphaned download repainting the terminal.
 
 
 # 0.2.42
@@ -1167,7 +1167,7 @@
 
 ## Features
 
-- **`grok --debug`** now produces per-session log files under ~/.grok/debug/ even with a leader process.
+- **`chutes-build --debug`** now produces per-session log files under ~/.chutes-build/debug/ even with a leader process.
 
 ## Bug Fixes
 
@@ -1208,7 +1208,7 @@
 ## Features
 
 - **MCP tool result queries** now list only command-line tools actually present on your system.
-- **`grok update`** now restarts any older running leader so all clients get the new binary.
+- **`chutes-build update`** now restarts any older running leader so all clients get the new binary.
 - **Long-running bash commands** that hit the timeout are now moved to the background by default instead of killed.
 
 ## Bug Fixes
@@ -1235,7 +1235,7 @@
 
 ## Features
 
-- **`grok login`** now defaults to device code flow, which works reliably in SSH, WSL, VPN, and browser-restricted environments.
+- **`chutes-build login`** now defaults to device code flow, which works reliably in SSH, WSL, VPN, and browser-restricted environments.
 
 ## Bug Fixes
 
@@ -1324,7 +1324,7 @@
 ## Bug Fixes
 
 - **Large pasted content** no longer triggers context-window errors or breaks compaction and memory flush.
-- **API-key users** can now run `grok agent --leader` without forced interactive login or timeouts.
+- **API-key users** can now run `chutes-build agent --leader` without forced interactive login or timeouts.
 - **Compaction** no longer retries endlessly on credit, size, or auth failures; shows a clear message instead.
 - **Windows PowerShell and cmd.exe** no longer falsely reject commands containing `&`.
 - **web_fetch** no longer crashes the CLI on pages whose root element matches a cleaning selector.
@@ -1405,7 +1405,7 @@
 
 - **Image and video generation** tools now emit structured paths so the pager renders media without regex scraping.
 - **Compaction summaries** now use a more detailed structure that improves recovery after context reset.
-- **image_gen** can now be enabled via the harness model using [features] in config.toml or the GROK_IMAGE_GEN_HARNESS env var.
+- **image_gen** can now be enabled via the harness model using [features] in config.toml or the CHUTES_BUILD_IMAGE_GEN_HARNESS env var.
 - **Improved config refresh** on new sessions from the shell.
 
 ## Bug Fixes
@@ -1419,8 +1419,8 @@
 
 - **New segments compaction mode** writes per-segment markdown files that the model can read to recover pre-compaction detail.
 - **Claude and Cursor compatibility scanning** (skills, rules, AGENTS.md) can now be toggled individually via env vars or config.toml.
-- **grok inspect** now shows the resolved on/off state and source for every Claude/Cursor compatibility toggle.
-- **Cursor MCP servers and hooks** are now discovered and can be disabled independently via GROK_CURSOR_MCPS_ENABLED / GROK_CURSOR_HOOKS_ENABLED.
+- **chutes-build inspect** now shows the resolved on/off state and source for every Claude/Cursor compatibility toggle.
+- **Cursor MCP servers and hooks** are now discovered and can be disabled independently via CHUTES_BUILD_CURSOR_MCPS_ENABLED / CHUTES_BUILD_CURSOR_HOOKS_ENABLED.
 
 ## Bug Fixes
 
@@ -1561,7 +1561,7 @@
 
 ## Features
 
-- Memory system: /remember command, note modal with raw/enhanced preview, x.ai/memory/rewrite ACP extension, Ctrl+F fullscreen toggle for /memory modal.
+- Memory system: /remember command, note modal with raw/enhanced preview, chutes.build/memory/rewrite ACP extension, Ctrl+F fullscreen toggle for /memory modal.
 - Agent configuration: /config-agents modal with agents, personas, and defaults.
 - Goal classifier: end-to-end goal tracking with subagent-powered classification.
 

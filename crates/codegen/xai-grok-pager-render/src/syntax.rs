@@ -1,8 +1,8 @@
 //! Syntax highlighting initialization.
 //!
 //! Provides lazily-initialized `Syntect` instances for code highlighting.
-//! Dark themes (GrokNight, TokyoNight) share `grok-night.tmTheme`;
-//! GrokDay uses `grok-day.tmTheme` with deepened colors for light backgrounds.
+//! Dark themes (ChutesNight, TokyoNight) share `chutes-night.tmTheme`;
+//! ChutesDay uses `chutes-day.tmTheme` with deepened colors for light backgrounds.
 
 use std::sync::OnceLock;
 
@@ -66,14 +66,14 @@ pub fn highlight_line(
 /// Returns the syntect instance matching the active theme.
 pub fn get_syntect() -> &'static Syntect {
     match crate::theme::Theme::current_kind() {
-        ThemeKind::GrokNight
+        ThemeKind::ChutesNight
         | ThemeKind::RosePineMoon
         | ThemeKind::OscuraMidnight
         | ThemeKind::Auto => SYNTECT_GROKNIGHT
-            .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme"))),
+            .get_or_init(|| Syntect::new(include_bytes!("../assets/chutes-night.tmTheme"))),
         ThemeKind::TokyoNight => SYNTECT_TOKYONIGHT
             .get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme"))),
-        ThemeKind::GrokDay => SYNTECT_GROKDAY
-            .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-day.tmTheme"))),
+        ThemeKind::ChutesDay => SYNTECT_GROKDAY
+            .get_or_init(|| Syntect::new(include_bytes!("../assets/chutes-day.tmTheme"))),
     }
 }

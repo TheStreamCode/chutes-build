@@ -1216,7 +1216,7 @@ async fn test_two_clients_session_isolation() {
 
 /// Multi-client model switch: when one TUI client switches models on a
 /// session shared with another TUI client, the leader must fan the
-/// `x.ai/session_notification` (carrying the `ModelChanged` update) out
+/// `chutes.build/session_notification` (carrying the `ModelChanged` update) out
 /// to **every** subscriber of that session — not just the invoker — so
 /// the follower client mirrors the new model in its UI.
 ///
@@ -1310,7 +1310,7 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     // BEFORE the response in `model_switch::apply`, so it must arrive at
     // each subscriber's recv() first.
     let broadcast = format!(
-        r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"{}","update":{{"sessionUpdate":"model_changed","model_id":"grok-4","reasoning_effort":"high"}}}}}}"#,
+        r#"{{"jsonrpc":"2.0","method":"chutes.build/session_notification","params":{{"sessionId":"{}","update":{{"sessionUpdate":"model_changed","model_id":"grok-4","reasoning_effort":"high"}}}}}}"#,
         shared_sid
     );
     response_tx.send(broadcast.clone()).unwrap();
@@ -1335,7 +1335,7 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
         .expect("timeout waiting for broadcast on invoker")
         .expect("invoker channel closed");
     let inv1: serde_json::Value = serde_json::from_str(&invoker_msg1).unwrap();
-    assert_eq!(inv1["method"], "x.ai/session_notification");
+    assert_eq!(inv1["method"], "chutes.build/session_notification");
     assert_eq!(inv1["params"]["sessionId"], shared_sid);
     assert_eq!(inv1["params"]["update"]["sessionUpdate"], "model_changed");
     assert_eq!(inv1["params"]["update"]["model_id"], "grok-4");
@@ -1365,7 +1365,7 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
         )
         .expect("follower channel closed");
     let f: serde_json::Value = serde_json::from_str(&follower_msg).unwrap();
-    assert_eq!(f["method"], "x.ai/session_notification");
+    assert_eq!(f["method"], "chutes.build/session_notification");
     assert_eq!(f["params"]["sessionId"], shared_sid);
     assert_eq!(f["params"]["update"]["sessionUpdate"], "model_changed");
     assert_eq!(f["params"]["update"]["model_id"], "grok-4");
@@ -1611,14 +1611,14 @@ async fn test_extension_method_roundtrip() {
     .unwrap();
 
     // Send an extension method call (e.g., fuzzy search open)
-    let ext_call = r#"{"jsonrpc":"2.0","id":50,"method":"_x.ai/search/fuzzy/open","params":{"sessionId":"sess-123","hidden":false}}"#;
+    let ext_call = r#"{"jsonrpc":"2.0","id":50,"method":"_chutes.build/search/fuzzy/open","params":{"sessionId":"sess-123","hidden":false}}"#;
     client.send(ext_call.to_string()).unwrap();
 
     let received = acp_rx.recv().await.unwrap();
     let json: serde_json::Value = serde_json::from_str(&received).unwrap();
 
     // Method should be preserved, ID should be namespaced
-    assert_eq!(json["method"], "_x.ai/search/fuzzy/open");
+    assert_eq!(json["method"], "_chutes.build/search/fuzzy/open");
     let namespaced_id = json["id"].as_str().unwrap();
     assert!(namespaced_id.contains(ID_NAMESPACE_SEP));
     assert!(namespaced_id.ends_with("|50"));
@@ -1796,7 +1796,10 @@ async fn test_session_ownership_cleanup_on_disconnect() {
     // in sync. Also verifies the eviction was actually sent.
     let eviction = acp_rx.recv().await.unwrap();
     let eviction_json: serde_json::Value = serde_json::from_str(&eviction).unwrap();
-    assert_eq!(eviction_json["method"], "x.ai/internal/evict_sessions");
+    assert_eq!(
+        eviction_json["method"],
+        "chutes.build/internal/evict_sessions"
+    );
 
     // Connect a NEW client — server should still be running
     let mut client2 = LeaderClient::connect(
@@ -1825,7 +1828,7 @@ async fn test_session_ownership_cleanup_on_disconnect() {
     // client2 should NOT receive the dead-session notification.
     // Send a second notification without a sessionId — this one SHOULD
     // arrive via fallback routing, proving client2 is alive and connected.
-    let probe = r#"{"jsonrpc":"2.0","method":"x.ai/probe","params":{"ping":true}}"#;
+    let probe = r#"{"jsonrpc":"2.0","method":"chutes.build/probe","params":{"ping":true}}"#;
     response_tx.send(probe.to_string()).unwrap();
 
     let recv = tokio::time::timeout(Duration::from_secs(2), client2.recv())
@@ -2022,7 +2025,7 @@ async fn test_code_nav_capability_injected_into_session_load() {
     cancel.cancel();
 }
 
-/// Verify that an `x.ai/code/status` extension request is forwarded to the
+/// Verify that an `chutes.build/code/status` extension request is forwarded to the
 /// agent with the correct method, sessionId, and cwd in the params.
 ///
 /// This tests the routing boundary between leader and agent for the
@@ -2044,15 +2047,15 @@ async fn test_code_status_ext_request_forwarded_to_agent() {
     .await
     .unwrap();
 
-    // Send x.ai/code/status with a sessionId — the leader must forward it to the agent.
-    let status_req = r#"{"jsonrpc":"2.0","id":42,"method":"extensions/ext","params":{"method":"x.ai/code/status","params":{"sessionId":"sess-web-1","cwd":"/repo"}}}"#;
+    // Send chutes.build/code/status with a sessionId — the leader must forward it to the agent.
+    let status_req = r#"{"jsonrpc":"2.0","id":42,"method":"extensions/ext","params":{"method":"chutes.build/code/status","params":{"sessionId":"sess-web-1","cwd":"/repo"}}}"#;
     web_client.send(status_req.to_string()).unwrap();
 
     let forwarded = acp_rx.recv().await.unwrap();
     let json: serde_json::Value = serde_json::from_str(&forwarded).unwrap();
 
     assert_eq!(json["method"], "extensions/ext");
-    assert_eq!(json["params"]["method"], "x.ai/code/status");
+    assert_eq!(json["params"]["method"], "chutes.build/code/status");
     assert_eq!(json["params"]["params"]["sessionId"], "sess-web-1");
     assert_eq!(json["params"]["params"]["cwd"], "/repo");
 
@@ -2340,7 +2343,7 @@ async fn test_connect_waits_for_leader_ready() {
 
 // ── Version mismatch notification ────────────────────────────────────
 
-/// Integration test: a connected client receives `x.ai/leader/version_mismatch`
+/// Integration test: a connected client receives `chutes.build/leader/version_mismatch`
 /// when its `client_version` differs from the leader's version.
 ///
 /// Uses `leader_version_override` so the test bypasses the `"unknown"` constant
@@ -2410,7 +2413,7 @@ async fn test_version_mismatch_notification_sent_to_client() {
         .expect("channel closed");
 
     let json: serde_json::Value = serde_json::from_str(&msg).unwrap();
-    assert_eq!(json["method"], "x.ai/leader/version_mismatch");
+    assert_eq!(json["method"], "chutes.build/leader/version_mismatch");
     assert_eq!(json["params"]["clientVersion"], "test-client-0.1.157");
     assert_eq!(json["params"]["leaderVersion"], "test-leader-0.1.150");
 
@@ -2829,13 +2832,13 @@ async fn test_leader_code_nav_isolation_end_to_end() {
         serde_json::json!(false)
     );
 
-    // Web client sends x.ai/code/status (the primary non-starting code-nav call).
-    let status_with_session = r#"{"jsonrpc":"2.0","id":10,"method":"extensions/ext","params":{"method":"x.ai/code/status","params":{"sessionId":"web-session","cwd":"/repo"}}}"#;
+    // Web client sends chutes.build/code/status (the primary non-starting code-nav call).
+    let status_with_session = r#"{"jsonrpc":"2.0","id":10,"method":"extensions/ext","params":{"method":"chutes.build/code/status","params":{"sessionId":"web-session","cwd":"/repo"}}}"#;
     web_client.send(status_with_session.to_string()).unwrap();
 
     let status_fwd = acp_rx.recv().await.unwrap();
     let status_json: serde_json::Value = serde_json::from_str(&status_fwd).unwrap();
-    assert_eq!(status_json["params"]["method"], "x.ai/code/status");
+    assert_eq!(status_json["params"]["method"], "chutes.build/code/status");
     assert_eq!(status_json["params"]["params"]["sessionId"], "web-session");
 
     web_client.cancel();
@@ -3045,8 +3048,8 @@ async fn raw_recv_acp(reader: &mut tokio::io::ReadHalf<UnixStream>) -> serde_jso
 /// request ids are unique per process (global `ClientId` counter) and the pid
 /// filter fences off other test processes appending to the same shared log.
 ///
-/// This binary does not sandbox GROK_HOME, so on a dev machine these entries
-/// land in the real `~/.grok` log — accepted: the server already writes
+/// This binary does not sandbox CHUTES_BUILD_HOME, so on a dev machine these entries
+/// land in the real `~/.chutes-build` log — accepted: the server already writes
 /// `leader.client.*` lines there from every test in this file, and the
 /// pid+request-id fence keeps the counting sound regardless of what else is
 /// in the file. (Bazel sandboxes HOME, so CI writes stay test-scoped.)
@@ -3153,7 +3156,7 @@ async fn test_hung_agent_leaves_transport_healthy_and_forwards_cancel() {
     assert_eq!(cancel_json["method"], "session/cancel");
 
     // Unrelated traffic still round-trips on the same connection.
-    let probe = r#"{"jsonrpc":"2.0","method":"x.ai/probe","params":{"ping":true}}"#;
+    let probe = r#"{"jsonrpc":"2.0","method":"chutes.build/probe","params":{"ping":true}}"#;
     response_tx.send(probe.to_string()).unwrap();
     let recv = tokio::time::timeout(Duration::from_secs(2), client.recv())
         .await
@@ -3216,7 +3219,7 @@ async fn test_sever_mid_rpc_orphans_response_and_replay_recovers() {
     // signal that the server processed the disconnect.
     let evict = acp_rx.recv().await.unwrap();
     let evict_json: serde_json::Value = serde_json::from_str(&evict).unwrap();
-    assert_eq!(evict_json["method"], "x.ai/internal/evict_sessions");
+    assert_eq!(evict_json["method"], "chutes.build/internal/evict_sessions");
 
     // The agent completes the turn anyway: durable terminal notification plus
     // the RPC response addressed to the dead client.

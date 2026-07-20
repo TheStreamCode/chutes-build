@@ -219,7 +219,7 @@ mod tests {
                     "url": null,
                     "url_raw": null,
                     "timeout_ms": 5000,
-                    "source_dir": "/home/u/.grok/hooks",
+                    "source_dir": "/home/u/.chutes-build/hooks",
                     "extra_env": { "FOO": "bar" }
                 }]
             }

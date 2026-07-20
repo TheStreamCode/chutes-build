@@ -45,13 +45,13 @@ pub fn facet_registry() -> &'static FacetRegistry {
 pub fn conversations_lane_enabled() -> bool {
     false
 }
-/// Env lane (desktop `GROK_SESSION_LIST_CONVERSATIONS`) OR process-wide
-/// `--chat` (`GROK_CHAT_MODE`); hard-off in release builds.
+/// Env lane (desktop `CHUTES_BUILD_SESSION_LIST_CONVERSATIONS`) OR process-wide
+/// `--chat` (`CHUTES_BUILD_CHAT_MODE`); hard-off in release builds.
 /// The single predicate `MvpAgent::conversations_client()` keys on.
 pub fn conversations_lane_active() -> bool {
     conversations_lane_enabled() || crate::agent::chat_modes::process_chat_mode_enabled()
 }
-/// Parse `x.ai/session/list` params and, under process-wide chat mode, force
+/// Parse `chutes.build/session/list` params and, under process-wide chat mode, force
 /// the conversations-only `kind` facet (see [`force_kind_chat`]).
 pub fn parse_list_req(raw: &str) -> Result<ListReq, serde_json::Error> {
     let mut req: ListReq = serde_json::from_str(raw)?;
@@ -92,7 +92,7 @@ impl ParsedMeta {
             return Self::default();
         };
         let facet_filters = meta
-            .get("x.ai/facetFilters")
+            .get("chutes.build/facetFilters")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
@@ -101,11 +101,11 @@ impl ParsedMeta {
             })
             .unwrap_or_default();
         let query = meta
-            .get("x.ai/query")
+            .get("chutes.build/query")
             .and_then(|v| v.as_str())
             .map(str::to_owned);
         let limit = meta
-            .get("x.ai/limit")
+            .get("chutes.build/limit")
             .and_then(serde_json::Value::as_u64)
             .map(|n| n as usize);
         Self {
@@ -131,7 +131,7 @@ pub fn force_kind_chat(req: &mut ListReq) {
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
     };
-    let mut filters = match meta.remove("x.ai/facetFilters") {
+    let mut filters = match meta.remove("chutes.build/facetFilters") {
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
     };
@@ -140,7 +140,7 @@ pub fn force_kind_chat(req: &mut ListReq) {
         serde_json::json!([SessionKind::Chat.as_str()]),
     );
     meta.insert(
-        "x.ai/facetFilters".to_owned(),
+        "chutes.build/facetFilters".to_owned(),
         serde_json::Value::Object(filters),
     );
     req.meta = Some(serde_json::Value::Object(meta));
@@ -295,9 +295,9 @@ pub struct ExtListResponse {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct ExtListResponseMeta {
-    #[serde(rename = "x.ai/facets")]
+    #[serde(rename = "chutes.build/facets")]
     pub facets: FacetSummary,
-    #[serde(rename = "x.ai/partial")]
+    #[serde(rename = "chutes.build/partial")]
     pub partial: PartialInfo,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(value["source"], "local");
         assert_eq!(value["numMessages"], 7);
         assert_eq!(value["title"], "a summary");
-        assert_eq!(value["_meta"]["x.ai/session"]["kind"], "build");
+        assert_eq!(value["_meta"]["chutes.build/session"]["kind"], "build");
         assert_eq!(value["gitRootDir"], "/Users/me/xai");
         assert_eq!(value["gitRemotes"][0], "git@github.com:example/repo.git");
         assert_eq!(value["sourceWorkspaceDir"], "/Users/me/xai-src");
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(value["sessionId"], "s1");
         assert_eq!(value["cwd"], "/Users/me/xai");
         assert_eq!(value["title"], "a summary");
-        assert_eq!(value["_meta"]["x.ai/session"]["kind"], "build");
+        assert_eq!(value["_meta"]["chutes.build/session"]["kind"], "build");
         assert!(value.get("summary").is_none());
         assert!(value.get("source").is_none());
     }
@@ -461,8 +461,8 @@ mod tests {
     #[test]
     fn parsed_meta_reads_facet_filters_query_and_limit() {
         let meta = serde_json::json!(
-            { "x.ai/facetFilters" : { "kind" : ["build"], "starred" : true },
-            "x.ai/query" : "antelope", "x.ai/limit" : 5, }
+            { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : true },
+            "chutes.build/query" : "antelope", "chutes.build/limit" : 5, }
         );
         let parsed = ParsedMeta::parse(Some(&meta));
         assert_eq!(parsed.query.as_deref(), Some("antelope"));
@@ -502,7 +502,9 @@ mod tests {
     #[test]
     fn forced_kind_replaces_client_build_filter() {
         let mut req = ListReq {
-            meta: Some(serde_json::json!({ "x.ai/facetFilters" : { "kind" : ["build"] }, })),
+            meta: Some(
+                serde_json::json!({ "chutes.build/facetFilters" : { "kind" : ["build"] }, }),
+            ),
             ..ListReq::default()
         };
         force_kind_chat(&mut req);
@@ -519,8 +521,8 @@ mod tests {
     fn forced_kind_preserves_other_facets() {
         let mut req = ListReq {
             meta: Some(serde_json::json!(
-                { "x.ai/facetFilters" : { "kind" : ["build"], "starred" : [true],
-                "workspace" : ["w1"] }, "x.ai/query" : "antelope", "x.ai/limit" : 5,
+                { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : [true],
+                "workspace" : ["w1"] }, "chutes.build/query" : "antelope", "chutes.build/limit" : 5,
                 }
             )),
             ..ListReq::default()
@@ -604,13 +606,15 @@ mod tests {
         )
         .await;
         let _env = xai_grok_test_support::EnvGuard::set(
-            "GROK_CONVERSATIONS_BASE_URL",
+            "CHUTES_BUILD_CONVERSATIONS_BASE_URL",
             format!("http://{addr}"),
         );
         let home = tempfile::tempdir().expect("tempdir");
         let client = ConversationsClient::new(xai_auth_manager(home.path()));
         let mut req = ListReq {
-            meta: Some(serde_json::json!({ "x.ai/facetFilters" : { "kind" : ["build"] }, })),
+            meta: Some(
+                serde_json::json!({ "chutes.build/facetFilters" : { "kind" : ["build"] }, }),
+            ),
             ..ListReq::default()
         };
         force_kind_chat(&mut req);
@@ -668,15 +672,22 @@ mod tests {
     #[serial_test::serial]
     fn conversations_lane_env_gating_matrix() {
         {
-            let _off = xai_grok_test_support::EnvGuard::unset("GROK_SESSION_LIST_CONVERSATIONS");
+            let _off =
+                xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
             assert!(!conversations_lane_enabled());
         }
         {
-            let _on = xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "1");
+            let _on = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "1",
+            );
             assert_eq!(conversations_lane_enabled(), false);
         }
         {
-            let _off = xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "0");
+            let _off = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "0",
+            );
             assert!(!conversations_lane_enabled());
         }
     }
@@ -685,21 +696,23 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn conversations_lane_active_truth_table() {
-        use crate::agent::chat_modes::GROK_CHAT_MODE_ENV;
-        let _chat_off = xai_grok_test_support::EnvGuard::unset(GROK_CHAT_MODE_ENV);
+        use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
+        let _chat_off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
         let _desktop_off =
-            xai_grok_test_support::EnvGuard::unset("GROK_SESSION_LIST_CONVERSATIONS");
+            xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
         assert!(
             !conversations_lane_active(),
             "no env ⇒ lane off (Build-mode default)"
         );
         {
-            let _desktop =
-                xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "1");
+            let _desktop = xai_grok_test_support::EnvGuard::set(
+                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
+                "1",
+            );
             assert_eq!(conversations_lane_active(), false);
         }
         {
-            let _chat = xai_grok_test_support::EnvGuard::set(GROK_CHAT_MODE_ENV, "1");
+            let _chat = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
             assert_eq!(
                 conversations_lane_active(),
                 false,
@@ -712,14 +725,14 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn parse_list_req_forces_kind_under_process_chat_mode_only() {
-        use crate::agent::chat_modes::GROK_CHAT_MODE_ENV;
+        use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
         let raw = serde_json::json!(
-            { "_meta" : { "x.ai/facetFilters" : { "kind" : ["build"], "starred" : [true]
+            { "_meta" : { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : [true]
             } }, }
         )
         .to_string();
         {
-            let _off = xai_grok_test_support::EnvGuard::unset(GROK_CHAT_MODE_ENV);
+            let _off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
             let req = parse_list_req(&raw).expect("parse");
             let parsed = ParsedMeta::parse(req.meta.as_ref());
             assert_eq!(
@@ -729,7 +742,7 @@ mod tests {
             );
         }
         {
-            let _on = xai_grok_test_support::EnvGuard::set(GROK_CHAT_MODE_ENV, "1");
+            let _on = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
             let req = parse_list_req(&raw).expect("parse");
             let parsed = ParsedMeta::parse(req.meta.as_ref());
             let expected = "build";
@@ -744,7 +757,7 @@ mod tests {
             );
         }
     }
-    /// Wire pin for the cross-crate `x.ai/partial` envelope the pager parses:
+    /// Wire pin for the cross-crate `chutes.build/partial` envelope the pager parses:
     /// the serialized reason strings must not drift (the pager maps unknown
     /// reasons to a generic retry notice, masking a rename).
     #[test]
@@ -762,7 +775,7 @@ mod tests {
             }))
             .expect("serialize");
             assert_eq!(
-                value["_meta"]["x.ai/partial"],
+                value["_meta"]["chutes.build/partial"],
                 serde_json::json!({ "conversations" :
                 true, "reason" : wire })
             );
@@ -775,7 +788,7 @@ mod tests {
         }))
         .expect("serialize");
         assert_eq!(
-            healthy["_meta"]["x.ai/partial"],
+            healthy["_meta"]["chutes.build/partial"],
             serde_json::json!({ "conversations" :
             false })
         );

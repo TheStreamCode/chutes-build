@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn restores_previous_value_on_normal_return() {
-        let key = "GROK_HOOKS_TEST_SUPPORT_RESTORE";
+        let key = "CHUTES_BUILD_HOOKS_TEST_SUPPORT_RESTORE";
         with_env_var(key, Some("first"), || {
             with_env_var(key, Some("second"), || {
                 assert_eq!(std::env::var(key).unwrap(), "second");
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn restores_previous_unset_state_on_normal_return() {
-        let key = "GROK_HOOKS_TEST_SUPPORT_UNSET_RESTORE";
+        let key = "CHUTES_BUILD_HOOKS_TEST_SUPPORT_UNSET_RESTORE";
         // SAFETY: see module-level note.
         unsafe {
             std::env::remove_var(key);
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn restores_after_panic() {
-        let key = "GROK_HOOKS_TEST_SUPPORT_PANIC_RESTORE";
+        let key = "CHUTES_BUILD_HOOKS_TEST_SUPPORT_PANIC_RESTORE";
         // SAFETY: see module-level note.
         unsafe {
             std::env::remove_var(key);
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn allows_explicit_unset() {
-        let key = "GROK_HOOKS_TEST_SUPPORT_EXPLICIT_UNSET";
+        let key = "CHUTES_BUILD_HOOKS_TEST_SUPPORT_EXPLICIT_UNSET";
         // SAFETY: see module-level note.
         unsafe {
             std::env::set_var(key, "before");

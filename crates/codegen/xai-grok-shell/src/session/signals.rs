@@ -2210,6 +2210,7 @@ mod tests {
 
         handle.record_inference_metrics(InferenceLatencyStats {
             time_to_first_token_ms: Some(150),
+            stream_setup_ms: 0,
             time_to_last_byte_ms: 2500,
             chunk_count: 20,
             itl_intervals_ms: vec![30, 30, 30], // 3 intervals, all 30ms
@@ -2308,6 +2309,7 @@ mod tests {
         // Response 1: intervals [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
         handle.record_inference_metrics(InferenceLatencyStats {
             time_to_first_token_ms: Some(100),
+            stream_setup_ms: 0,
             time_to_last_byte_ms: 1000,
             chunk_count: 10,
             itl_intervals_ms: vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
@@ -2321,6 +2323,7 @@ mod tests {
         // Response 2: intervals [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200] (11 intervals)
         handle.record_inference_metrics(InferenceLatencyStats {
             time_to_first_token_ms: Some(120),
+            stream_setup_ms: 0,
             time_to_last_byte_ms: 2000,
             chunk_count: 20,
             itl_intervals_ms: vec![100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
@@ -2334,6 +2337,7 @@ mod tests {
         // Response 3: intervals [5, 10, 15, 20, 25] (5 intervals)
         handle.record_inference_metrics(InferenceLatencyStats {
             time_to_first_token_ms: Some(90),
+            stream_setup_ms: 0,
             time_to_last_byte_ms: 1500,
             chunk_count: 30,
             itl_intervals_ms: vec![5, 10, 15, 20, 25],
@@ -2627,6 +2631,7 @@ mod tests {
         // Record inference metrics with ITL intervals for turn 1
         handle1.record_inference_metrics(InferenceLatencyStats {
             time_to_first_token_ms: Some(100),
+            stream_setup_ms: 0,
             time_to_last_byte_ms: 1000,
             chunk_count: 6,
             itl_intervals_ms: vec![10, 20, 30, 40, 50],

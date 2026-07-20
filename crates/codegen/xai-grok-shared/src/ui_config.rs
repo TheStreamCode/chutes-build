@@ -72,7 +72,7 @@ pub struct UiConfig {
     pub render_mermaid: Option<String>,
     /// Hunk-tracker mode the pager advertises to the agent (`agent_only` |
     /// `all_dirty` | `off`). Written by the pager's settings modal; read at
-    /// connect time (CLI `--hunk-tracker-mode` / `GROK_HUNK_TRACKER` override
+    /// connect time (CLI `--hunk-tracker-mode` / `CHUTES_BUILD_HUNK_TRACKER` override
     /// it). `off` disables hunk tracking entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hunk_tracker_mode: Option<String>,
@@ -133,7 +133,7 @@ pub struct UiConfig {
     pub collapsed_edit_blocks: Option<bool>,
     /// Next-prompt suggestions (tab autocomplete ghost text) after each turn.
     /// `None` = on (client default). Written by the pager's settings modal;
-    /// the `GROK_PROMPT_SUGGESTIONS` env var overrides at runtime.
+    /// the `CHUTES_BUILD_PROMPT_SUGGESTIONS` env var overrides at runtime.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_suggestions: Option<bool>,
     /// Startup cursor style: `None` (default) inherits the terminal's own
@@ -187,7 +187,7 @@ pub struct ContextualHints {
     /// is still fold/nav (`flash` / `hold`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub word_select: Option<bool>,
-    /// SSH wrap session-load tip (recommend `grok wrap ssh` when the session
+    /// SSH wrap session-load tip (recommend `chutes-build wrap ssh` when the session
     /// runs over SSH without an OSC 52 sink).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_wrap: Option<bool>,

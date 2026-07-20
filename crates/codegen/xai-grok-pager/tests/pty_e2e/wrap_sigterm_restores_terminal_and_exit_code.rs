@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Signal-death e2e: SIGTERM delivered to `grok wrap` itself (external kill,
+/// Signal-death e2e: SIGTERM delivered to `chutes-build wrap` itself (external kill,
 /// terminal-close HUP class) must not skip cleanup. Drop handlers never run on
 /// signal death, so wrap needs an explicit signal path that forwards the
 /// signal to the child, emits the resets for whatever the child left latched,

@@ -827,7 +827,7 @@ pub(crate) async fn handle_subagent_request(
         }
         let resolved_mem = scope.resolve_dir(&agent_name_for_memory, &ctx.parent_cwd);
         let memory_dir = &resolved_mem.path;
-        let memory_md = memory_dir.join("MEMORY.md");
+        let memory_md = memory_dir.join("memories.md");
         if memory_md.is_file() && let Ok(content) = std::fs::read_to_string(&memory_md) {
             const MAX_LINES: usize = 200;
             const MAX_BYTES: usize = 25 * 1024;

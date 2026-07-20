@@ -3,7 +3,7 @@
 //! Captures token-level timing from streaming inference responses:
 //! TTFB, TTLB, and inter-token latency (ITL) statistics.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,9 @@ pub fn compute_percentiles(sorted: &[u64]) -> (u64, u64, u64, u64, u64) {
 /// Per-response inference latency metrics computed from chunk timestamps.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InferenceLatencyStats {
+    /// Time spent serializing/sending the request and waiting for response
+    /// headers before the streaming body became available.
+    pub stream_setup_ms: u64,
     /// Time to first content token (ms)
     pub time_to_first_token_ms: Option<u64>,
     /// Time to last byte / stream end (ms). Measured at stream exhaustion,
@@ -52,8 +55,19 @@ pub struct InferenceLatencyStats {
 }
 
 impl InferenceLatencyStats {
+    /// Include the pre-stream request/header wait in end-to-end latency.
+    pub fn include_stream_setup_latency(&mut self, elapsed: Duration) {
+        let setup_ms = elapsed.as_millis() as u64;
+        self.stream_setup_ms = self.stream_setup_ms.saturating_add(setup_ms);
+        self.time_to_first_token_ms = self
+            .time_to_first_token_ms
+            .map(|value| value.saturating_add(setup_ms));
+        self.time_to_last_byte_ms = self.time_to_last_byte_ms.saturating_add(setup_ms);
+    }
+
     /// Record the computed stats as fields on a tracing span.
     pub fn record_on_span(&self, span: &tracing::Span) {
+        span.record("stream_setup_ms", self.stream_setup_ms);
         if let Some(ttfb) = self.time_to_first_token_ms {
             span.record("ttfb_ms", ttfb);
         }
@@ -106,6 +120,7 @@ impl InferenceLatencyStats {
         };
 
         Self {
+            stream_setup_ms: 0,
             time_to_first_token_ms: Some(ttfb.as_millis() as u64),
             time_to_last_byte_ms: ttlb,
             chunk_count: u32::try_from(chunk_timestamps.len()).unwrap_or(u32::MAX),
@@ -242,5 +257,19 @@ mod tests {
         // TTLB should be 500 (from stream_end), not 200 (from last chunk)
         assert_eq!(stats.time_to_last_byte_ms, 500);
         assert_eq!(stats.time_to_first_token_ms, Some(100));
+    }
+
+    #[test]
+    fn stream_setup_latency_is_included_in_ttft_and_ttlb() {
+        let start = Instant::now();
+        let chunks = vec![offset(start, 100)];
+        let end = offset(start, 200);
+        let mut stats = InferenceLatencyStats::from_timestamps(start, &chunks, end);
+
+        stats.include_stream_setup_latency(Duration::from_millis(750));
+
+        assert_eq!(stats.stream_setup_ms, 750);
+        assert_eq!(stats.time_to_first_token_ms, Some(850));
+        assert_eq!(stats.time_to_last_byte_ms, 950);
     }
 }

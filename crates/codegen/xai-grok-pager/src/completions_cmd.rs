@@ -1,4 +1,4 @@
-//! `grok completions <shell>` — generate shell completion scripts.
+//! `chutes-build completions <shell>` — generate shell completion scripts.
 //!
 //! Used by the installers and npm postinstall; must stay side-effect free
 //! (no network, auth, tracing, or tokio).
@@ -39,7 +39,7 @@ pub fn run(shell: Shell) {
 /// The generated root `_arguments` spec emits a `'::prompt …'` slot before
 /// the subcommand slot but dispatches subcommands with `case $line[2]`. zsh
 /// assigns the typed subcommand to the *prompt* slot (`$line[1]`), leaves
-/// `$line[2]` empty, and the dispatch falls through — so `grok worktree <TAB>`
+/// `$line[2]` empty, and the dispatch falls through — so `chutes-build worktree <TAB>`
 /// re-offers every top-level command. (`hide = true` on the positional does
 /// not change the generated script.)
 ///
@@ -88,7 +88,7 @@ mod tests {
 
     // The optional `[PROMPT]` positional (app/cli.rs) makes clap_complete emit
     // a `::prompt` slot before the subcommand slot and dispatch on `$line[2]`,
-    // so `grok worktree <TAB>` re-offered every top-level command (upstream
+    // so `chutes-build worktree <TAB>` re-offered every top-level command (upstream
     // clap-rs/clap#6282).
     #[test]
     fn zsh_completions_drop_prompt_slot_and_dispatch_on_line_1() {

@@ -1,0 +1,9 @@
+# Synthetic fixtures inherited from the reviewed upstream history.
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:generic-api-key:389
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:jwt:457
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-shell/tests/test_built_binary_e2e.rs:generic-api-key:1173
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-telemetry/src/otel_layer/redact.rs:generic-api-key:513
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-telemetry/src/external/tests.rs:generic-api-key:532
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-tools/src/implementations/web_search/types.rs:generic-api-key:79
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:255
+c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:301

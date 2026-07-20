@@ -65,7 +65,7 @@ pub(crate) fn wipe_substantial_draft(harness: &mut PtyHarness) {
 /// so the undo tip (a contextual hint) only fires when explicitly enabled.
 pub(crate) fn contextual_hints_env(content: &ContentController) -> Vec<(String, String)> {
     let mut env = content.env_for_pager();
-    env.push(("GROK_CONTEXTUAL_HINTS".into(), "1".into()));
+    env.push(("CHUTES_BUILD_CONTEXTUAL_HINTS".into(), "1".into()));
     env
 }
 
@@ -138,8 +138,8 @@ pub(crate) fn tall_response(sentinel: &str, rows: usize) -> String {
 /// Spawn a pager with fake session (OAuth) auth and a 1s announcements poll,
 /// then drive it into a live session (welcome → prompt → mock response).
 /// Session auth matters: the settings poll requires `auth_manager.auth()`, and
-/// the harness's default `XAI_API_KEY` (ApiKey/BYOK mode, no auth.json entry)
-/// would never fetch `/v1/settings`. Spawns WITHOUT `GROK_ANNOUNCEMENTS_OVERRIDE`
+/// the harness's default `CHUTES_API_KEY` (ApiKey/BYOK mode, no auth.json entry)
+/// would never fetch `/v1/settings`. Spawns WITHOUT `CHUTES_BUILD_ANNOUNCEMENTS_OVERRIDE`
 /// (the env override beats pushed lists in the pager and would mask updates).
 /// Call `content.set_response(..)` BEFORE this so the entry prompt streams.
 pub(crate) fn spawn_polling_session(content: &ContentController, oauth_user: &str) -> PtyHarness {
@@ -157,7 +157,7 @@ pub(crate) fn spawn_polling_session_with_env(
     let env = oauth_env_for_pager(content);
     let mut env_refs: Vec<(&str, &str)> =
         env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    env_refs.push(("GROK_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS", "1"));
+    env_refs.push(("CHUTES_BUILD_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS", "1"));
     env_refs.extend_from_slice(extra_env);
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -214,8 +214,8 @@ pub(crate) fn git_repo_with_mcp_json() -> tempfile::TempDir {
 }
 
 /// Env for a folder-trust run: the mock-server env plus a simulated release stamp
-/// (`GROK_TEST_VERSION`) and an explicit `GROK_FOLDER_TRUST` — `1` when `feature_on`,
-/// else `0` (an explicit opt-out that overrides the now-on default). HOME/GROK_HOME
+/// (`CHUTES_BUILD_TEST_VERSION`) and an explicit `CHUTES_BUILD_FOLDER_TRUST` — `1` when `feature_on`,
+/// else `0` (an explicit opt-out that overrides the now-on default). HOME/CHUTES_BUILD_HOME
 /// point at the isolated temp home, so the trust store starts empty.
 pub(crate) fn trust_env(content: &ContentController, feature_on: bool) -> Vec<(String, String)> {
     let mut env = content.env_for_pager();
@@ -223,11 +223,11 @@ pub(crate) fn trust_env(content: &ContentController, feature_on: bool) -> Vec<(S
     // release build so the folder-trust feature is actually evaluated here. The
     // feature-off case below then exercises the TRUE feature-off path, not
     // auto-trust.
-    env.push(("GROK_TEST_VERSION".into(), "0.0.0-sim".into()));
-    // Set GROK_FOLDER_TRUST explicitly: the default is on, so `0` is the opt-out
+    env.push(("CHUTES_BUILD_TEST_VERSION".into(), "0.0.0-sim".into()));
+    // Set CHUTES_BUILD_FOLDER_TRUST explicitly: the default is on, so `0` is the opt-out
     // that exercises the feature-off path rather than relying on an absent var.
     let folder_trust = if feature_on { "1" } else { "0" };
-    env.push(("GROK_FOLDER_TRUST".into(), folder_trust.into()));
+    env.push(("CHUTES_BUILD_FOLDER_TRUST".into(), folder_trust.into()));
     env
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn trust_env(content: &ContentController, feature_on: bool) -> Vec<(S
 pub(crate) fn folder_is_trusted(content: &ContentController, repo: &std::path::Path) -> bool {
     let store_path = content
         .home()
-        .join(".grok")
+        .join(".chutes-build")
         .join(xai_grok_workspace::trust::TRUST_FILE_NAME);
     let store = xai_grok_workspace::trust::TrustStore::load_from(store_path);
     store.is_trusted(&xai_grok_workspace::trust::workspace_key(repo))
@@ -261,7 +261,7 @@ pub(crate) fn turn_sentinel(n: u8) -> String {
 /// Seeded server name; it only renders once the MCP list fetch resolves.
 pub(crate) const MCP_TEST_SERVER: &str = "ptytestmcp";
 
-/// Budget for session creation plus the `x.ai/mcp/list` round-trip.
+/// Budget for session creation plus the `chutes.build/mcp/list` round-trip.
 pub(crate) const MCP_MENU_LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Configured servers list with a status badge even when never connected.
@@ -271,8 +271,8 @@ pub(crate) fn seed_mcp_server_config(content: &ContentController) {
     #[cfg(windows)]
     let command = "cmd.exe";
 
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create fake GROK_HOME");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create fake CHUTES_BUILD_HOME");
     let config = format!(
         "[mcp_servers.{MCP_TEST_SERVER}]\ncommand = \"{command}\"\nargs = []\nstartup_timeout_sec = 2\n"
     );
@@ -394,7 +394,7 @@ pub(crate) const SEND_NOW_TIP_SENTINEL: &str = "to send now";
 // The core fix (deduplication in load_hooks_from_sources) is verified by
 // unit tests in xai-grok-hooks::discovery::tests. The PTY E2E test requires
 // careful environment variable setup to avoid static caching issues with
-// GROK_HOME.
+// CHUTES_BUILD_HOME.
 
 // ── Mouse reporting toggle (opt-in scrollback Ctrl+R) ───────────────────
 
@@ -406,20 +406,20 @@ pub(crate) const MOUSE_OFF_STICKY: &str =
 pub(crate) const MOUSE_OFF_HINT_PROMPT: &str =
     "/toggle-mouse-reporting to enable mouse reporting and restore TUI features";
 
-/// Seed `~/.grok/config.toml` with a `[ui]` section body (e.g.
-/// `"vim_mode = true"`). Same `{GROK_HOME|HOME}/.grok/config.toml` location
+/// Seed `~/.chutes-build/config.toml` with a `[ui]` section body (e.g.
+/// `"vim_mode = true"`). Same `{CHUTES_BUILD_HOME|HOME}/.chutes-build/config.toml` location
 /// `seed_mouse_reporting_toggle_config` uses; call before spawning the pager.
 pub(crate) fn seed_ui_config(content: &ContentController, ui_body: &str) {
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create .chutes-build");
     let config = format!("[ui]\n{ui_body}\n");
     std::fs::write(grok_home.join("config.toml"), config).expect("write config.toml");
 }
 
 pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, enabled: bool) {
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
-    // Minimal opt-in only — matches load_config's `{GROK_HOME|HOME}/.grok/config.toml`.
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create .chutes-build");
+    // Minimal opt-in only — matches load_config's `{CHUTES_BUILD_HOME|HOME}/.chutes-build/config.toml`.
     let config = if enabled {
         "[ui]\nmouse_reporting_toggle = true\n"
     } else {
@@ -431,8 +431,8 @@ pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, en
 
 /// Seed `[ui] keep_text_selection = "hold"` under the content controller's home.
 pub(crate) fn seed_keep_text_selection_config(content: &ContentController) {
-    let grok_home = content.home().join(".grok");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    let grok_home = content.home().join(".chutes-build");
+    std::fs::create_dir_all(&grok_home).expect("create .chutes-build");
     std::fs::write(
         grok_home.join("config.toml"),
         "[ui]\nkeep_text_selection = \"hold\"\n",
@@ -443,7 +443,7 @@ pub(crate) fn seed_keep_text_selection_config(content: &ContentController) {
 /// Content env plus opt-in enablement env (belt-and-suspenders with config seed).
 pub(crate) fn mouse_toggle_env(content: &ContentController) -> Vec<(String, String)> {
     let mut env = content.env_for_pager();
-    env.push(("GROK_MOUSE_REPORTING_TOGGLE".into(), "true".into()));
+    env.push(("CHUTES_BUILD_MOUSE_REPORTING_TOGGLE".into(), "true".into()));
     env
 }
 
@@ -471,7 +471,7 @@ pub(crate) fn inject_keys_paced(harness: &mut PtyHarness, keys: &[u8]) {
 /// Widens the pager's idle-Esc double-press window (bounded by
 /// `esc_double_press_ttl` in `app_view.rs`) so a loaded shard's inter-press
 /// render round-trip can't expire the arm.
-pub(crate) const ESC_DOUBLE_PRESS_ENV: &str = "GROK_ESC_DOUBLE_PRESS_MS";
+pub(crate) const ESC_DOUBLE_PRESS_ENV: &str = "CHUTES_BUILD_ESC_DOUBLE_PRESS_MS";
 
 /// Spawn the pager with [`ESC_DOUBLE_PRESS_ENV`] set to the 60s cap.
 pub(crate) fn spawn_esc_double_press_pager(content: &ContentController) -> PtyHarness {
@@ -1098,9 +1098,9 @@ pub(crate) fn quit_minimal(harness: &mut PtyHarness) {
     }
 }
 
-// ── grok wrap e2e ───────────────────────────────────────────────────────
+// ── chutes-build wrap e2e ───────────────────────────────────────────────────────
 
-/// `grok wrap` run budget. Same contention math as the requirements-version
+/// `chutes-build wrap` run budget. Same contention math as the requirements-version
 /// test: the child's cold exec of the huge debug binary can land its first
 /// write well past 30s under the parallel pty_e2e suite.
 #[cfg(unix)]
@@ -1109,8 +1109,8 @@ pub(crate) const WRAP_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(unix)]
 const WRAP_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Run `grok wrap <wrap_args...>` to completion inside a PTY with an isolated
-/// `GROK_HOME`, returning the exit code (`None` if it never exited within
+/// Run `chutes-build wrap <wrap_args...>` to completion inside a PTY with an isolated
+/// `CHUTES_BUILD_HOME`, returning the exit code (`None` if it never exited within
 /// [`WRAP_TIMEOUT`]) and everything the wrap PTY emitted. `extra_env` is where
 /// tests pin `SHELL`; wrap needs no mock content — it dispatches in `main`
 /// before auth/network/sandbox.
@@ -1134,11 +1134,11 @@ pub(crate) fn run_wrap_driving(
 
     let mut args = vec!["wrap"];
     args.extend_from_slice(wrap_args);
-    let mut env: Vec<(&str, &str)> = vec![("GROK_HOME", &home_str), ("NO_COLOR", "1")];
+    let mut env: Vec<(&str, &str)> = vec![("CHUTES_BUILD_HOME", &home_str), ("NO_COLOR", "1")];
     env.extend_from_slice(extra_env);
 
-    let mut harness =
-        PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &args, &env).expect("spawn grok wrap");
+    let mut harness = PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &args, &env)
+        .expect("spawn chutes-build wrap");
 
     drive(&mut harness);
 
@@ -1155,7 +1155,7 @@ pub(crate) fn run_wrap_driving(
 
 /// Write an executable fake `$SHELL` that prints each argv element on its own
 /// `ARG:`-prefixed line and exits 0, so tests can assert the exact argv
-/// `grok wrap` hands to the user's shell without depending on any real
+/// `chutes-build wrap` hands to the user's shell without depending on any real
 /// shell's rc files or alias state. Keep the returned tempdir alive for the
 /// duration of the run.
 #[cfg(unix)]
@@ -1235,12 +1235,12 @@ pub(crate) fn extract_task_id(body: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_string())
 }
 
-/// Dump an asciinema cast of `harness` into `$GROK_PTY_CAST_DIR/<file_name>`
+/// Dump an asciinema cast of `harness` into `$CHUTES_BUILD_PTY_CAST_DIR/<file_name>`
 /// when the env var is set. Failures are logged, never fatal — the cast is a
 /// diagnostic artifact, not part of the assertion surface.
 #[cfg(unix)]
 pub(crate) fn write_cast_if_requested(harness: &PtyHarness, file_name: &str) {
-    let Ok(dir) = std::env::var("GROK_PTY_CAST_DIR") else {
+    let Ok(dir) = std::env::var("CHUTES_BUILD_PTY_CAST_DIR") else {
         return;
     };
     if dir.is_empty() {

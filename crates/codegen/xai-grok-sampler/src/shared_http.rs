@@ -19,7 +19,7 @@ use std::time::Duration;
 static SHARED_H2: OnceLock<reqwest::Client> = OnceLock::new();
 static SHARED_HTTP1: OnceLock<reqwest::Client> = OnceLock::new();
 
-/// Kill switch: `GROK_SAMPLER_SHARED_CLIENT=0` (or `false`, any case)
+/// Kill switch: `CHUTES_BUILD_SAMPLER_SHARED_CLIENT=0` (or `false`, any case)
 /// restores the old behavior of building a fresh `reqwest::Client` per
 /// `SamplingClient`. Resolved once per process: the environment cannot
 /// change externally after spawn, and latching keeps the rollback state
@@ -27,12 +27,14 @@ static SHARED_HTTP1: OnceLock<reqwest::Client> = OnceLock::new();
 fn sharing_disabled() -> bool {
     static DISABLED: OnceLock<bool> = OnceLock::new();
     *DISABLED.get_or_init(|| {
-        let disabled = match std::env::var("GROK_SAMPLER_SHARED_CLIENT") {
+        let disabled = match std::env::var("CHUTES_BUILD_SAMPLER_SHARED_CLIENT") {
             Ok(v) => v == "0" || v.eq_ignore_ascii_case("false"),
             Err(_) => false,
         };
         if disabled {
-            tracing::info!("sampler HTTP client sharing disabled via GROK_SAMPLER_SHARED_CLIENT");
+            tracing::info!(
+                "sampler HTTP client sharing disabled via CHUTES_BUILD_SAMPLER_SHARED_CLIENT"
+            );
         }
         disabled
     })
@@ -70,15 +72,15 @@ pub(crate) fn client_http1() -> Result<reqwest::Client, reqwest::Error> {
 /// Build a `reqwest::Client` for sampling with HTTP/2 + connection pooling.
 /// Env knobs are read once, when the shared client is first built.
 fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
-    let pool_max_idle: usize = std::env::var("GROK_POOL_MAX_IDLE")
+    let pool_max_idle: usize = std::env::var("CHUTES_BUILD_POOL_MAX_IDLE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(2);
-    let pool_idle_timeout_secs: u64 = std::env::var("GROK_POOL_IDLE_TIMEOUT_SECS")
+    let pool_idle_timeout_secs: u64 = std::env::var("CHUTES_BUILD_POOL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(90);
-    let connect_timeout_secs: u64 = std::env::var("GROK_CONNECT_TIMEOUT_SECS")
+    let connect_timeout_secs: u64 = std::env::var("CHUTES_BUILD_CONNECT_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
@@ -98,7 +100,7 @@ fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
 /// Build a `reqwest::Client` constrained to HTTP/1.1 with pooling disabled.
 /// Used as a fallback after HTTP/2 transport failures.
 fn build_http_client_http1() -> Result<reqwest::Client, reqwest::Error> {
-    let connect_timeout_secs: u64 = std::env::var("GROK_CONNECT_TIMEOUT_SECS")
+    let connect_timeout_secs: u64 = std::env::var("CHUTES_BUILD_CONNECT_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);

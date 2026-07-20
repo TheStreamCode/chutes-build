@@ -1,7 +1,7 @@
 name: goal-slash-presession-disabled
 description: >
   Counterpart to goal-slash-presession: with the goal feature flag explicitly
-  OFF (`GROK_GOAL=0` — goal mode now defaults on), `/goal` must NOT appear in
+  OFF (`CHUTES_BUILD_GOAL=0` — goal mode now defaults on), `/goal` must NOT appear in
   the pre-session slash menu — the gate stays fail-closed. The menu itself
   still works pre-session: an always-on builtin like `/compact` shows up,
   proving the absence of `/goal` is the gate and not a broken dropdown.
@@ -10,7 +10,7 @@ terminal:
   cols: 100
 environment:
   env:
-    - key: GROK_GOAL
+    - key: CHUTES_BUILD_GOAL
       value: "0"
 mock:
   response: "unused — this scenario never submits a prompt."
