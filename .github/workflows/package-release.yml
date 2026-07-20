@@ -200,7 +200,12 @@ jobs:
             exit 1
           fi
           for archive in "${archives[@]}"; do
-            npm publish "$archive" --access public --provenance
+            # npm-package-arg treats a single-slash relative path (e.g.
+            # "dist/foo.tgz") as GitHub shorthand ("user/repo") before it
+            # checks whether the path exists locally, so npm publish tries
+            # to `git ls-remote` it instead of reading the tarball. The `./`
+            # prefix disambiguates it as an explicit local path.
+            npm publish "./$archive" --access public --provenance
           done
       - name: Publish launcher
         shell: bash
@@ -209,4 +214,4 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          npm publish "dist/chutes-build-${version}.tgz" --access public --provenance
+          npm publish "./dist/chutes-build-${version}.tgz" --access public --provenance
