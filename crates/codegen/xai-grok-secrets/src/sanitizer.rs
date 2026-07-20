@@ -5,10 +5,11 @@ use std::sync::LazyLock;
 const REDACTED: &str = "[REDACTED_SECRET]";
 const REDACTED_URL_VALUE: &str = "redacted";
 
-/// Vendor API keys with `sk-`/`sk_` prefixes and xAI (`xai-`) keys. `\b`-anchored so
-/// `task-`/`disk-`/`risk-` don't fold a stray `sk-`.
+/// Vendor API keys with `sk-`/`sk_` prefixes, xAI (`xai-`) keys, and Chutes
+/// (`cpk_`/`cpk-`) keys. `\b`-anchored so `task-`/`disk-`/`risk-` don't fold a
+/// stray `sk-`.
 static API_KEY_PREFIX_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| compile(r"\b(?:sk[-_]|xai-)[A-Za-z0-9_-]{20,}"));
+    LazyLock::new(|| compile(r"\b(?:sk[-_]|xai-|cpk[-_])[A-Za-z0-9_-]{20,}"));
 /// AWS long-term (`AKIA`) and temporary (`ASIA`) access-key IDs.
 static AWS_ACCESS_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"));
@@ -354,6 +355,10 @@ mod tests {
             (
                 fixture(&["key: xai-", "abc123XYZdef456GHIjkl789"]),
                 "xai api key",
+            ),
+            (
+                fixture(&["CHUTES_API_KEY=cpk_", "abc123XYZdef456GHIjkl789"]),
+                "chutes api key",
             ),
             (
                 fixture(&["aws AKIA", "ABCDEFGHIJKLMNOP key"]),

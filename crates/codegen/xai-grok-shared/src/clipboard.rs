@@ -551,7 +551,6 @@ mod attachments_protocol {
 // ---------------------------------------------------------------------------
 #[cfg(target_os = "macos")]
 mod platform {
-    #[cfg(target_os = "linux")]
     use std::process::{Command, Stdio};
     use std::sync::OnceLock;
 

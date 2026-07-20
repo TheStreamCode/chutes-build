@@ -41,8 +41,8 @@ pub enum AuthScheme {
 impl AuthScheme {
     pub fn from_env() -> Self {
         match std::env::var("CHUTES_AUTH_SCHEME") {
-            Ok(value) if value.eq_ignore_ascii_case("bearer") => Self::Bearer,
-            _ => Self::Raw,
+            Ok(value) if value.eq_ignore_ascii_case("raw") => Self::Raw,
+            _ => Self::Bearer,
         }
     }
 }
