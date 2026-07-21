@@ -8,6 +8,7 @@ pub mod media;
 pub mod privacy;
 pub mod reasoning;
 pub mod routing;
+pub mod vision;
 pub mod wellness;
 
 pub use endpoints::{ChutesCredentials, ChutesEndpoints};

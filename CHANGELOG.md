@@ -32,6 +32,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/advisor default` clears the pin. Writes `[subagents.roles.advisor]` /
   `[subagents.toggle]` in config.toml — the running session's own model is
   never touched.
+- On-demand OCR (`ocr_page` tool): extracts text verbatim from a single image
+  or PDF page via a dedicated Chutes vision model, independent of the active
+  chat model's vision support. Billed against the account's subscription
+  quota, never the separate marketplace/wallet balance third-party chutes use.
 
 ### Changed
 

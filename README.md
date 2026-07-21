@@ -46,6 +46,10 @@ research, browser automation, and local memory in one CLI.
   inference is idle, never autoplays, and stays off the TUI render thread.
 - **Capability routing:** image inputs stay with the selected model when it
   supports vision and are otherwise delegated to a vision-capable Chutes route.
+- **On-demand OCR:** the `ocr_page` tool extracts text verbatim from a single
+  image or PDF page via a dedicated Chutes vision model, independent of the
+  active chat model's vision support. Returns extracted text only — the image
+  itself is never added to the conversation.
 - **Current coding documentation:** Context7 search and documentation tools are
   built in and avoid sending credentials or known secrets.
 - **Official Chutes research:** before answering Chutes-specific questions, the

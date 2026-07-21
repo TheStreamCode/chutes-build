@@ -4,6 +4,7 @@ pub mod account;
 pub mod browser;
 pub mod context7;
 pub mod media;
+pub mod ocr;
 
 pub use account::{GetChutesUsageInput, GetChutesUsageTool};
 pub use browser::{BrowserClient, BrowserInput, BrowserTool};
@@ -12,3 +13,4 @@ pub use media::{
     DescribeMediaModelInput, DescribeMediaModelTool, GenerateMediaInput, GenerateMediaTool,
     ListMediaModelsInput, ListMediaModelsTool,
 };
+pub use ocr::{OcrPageInput, OcrPageTool};

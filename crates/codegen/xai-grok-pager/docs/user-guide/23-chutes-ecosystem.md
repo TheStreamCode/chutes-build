@@ -31,6 +31,13 @@ are described by a vision-capable Chutes route. PDF pages returned by the file
 tool follow the same rule. Video attachments are sampled locally with FFmpeg and
 their representative frames follow the vision route.
 
+The `ocr_page` tool extracts text verbatim from a single image or PDF page on
+demand, independent of the active chat model's vision support. It always calls
+a dedicated Chutes vision model directly and returns only the extracted text —
+the image itself is never added to the conversation. Billed against the
+account's subscription quota like any other official Chutes model call, never
+the separate marketplace/wallet balance used by third-party chutes.
+
 Use the native media tools for generation and editing. Always call
 `describe_media_model` before `generate_media`, because each public chute can
 expose different cords and schemas.

@@ -173,7 +173,7 @@ fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolSe
         return;
     }
 
-    let defaults: [ToolConfig; 7] = [
+    let defaults: [ToolConfig; 8] = [
         (&chutes::Context7SearchTool).into(),
         (&chutes::Context7DocsTool).into(),
         (&chutes::GetChutesUsageTool).into(),
@@ -181,6 +181,7 @@ fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolSe
         (&chutes::DescribeMediaModelTool).into(),
         (&chutes::GenerateMediaTool).into(),
         (&chutes::BrowserTool).into(),
+        (&chutes::OcrPageTool).into(),
     ];
     for tool in defaults {
         if !tool_config
@@ -210,7 +211,7 @@ fn take_lazy_chutes_tools(
         return Vec::new();
     }
 
-    const LAZY_CHUTES_IDS: [&str; 7] = [
+    const LAZY_CHUTES_IDS: [&str; 8] = [
         "ChutesBuild:context7_search",
         "ChutesBuild:context7_docs",
         "ChutesBuild:get_chutes_usage",
@@ -218,6 +219,7 @@ fn take_lazy_chutes_tools(
         "ChutesBuild:describe_media_model",
         "ChutesBuild:generate_media",
         "ChutesBuild:browser",
+        "ChutesBuild:ocr_page",
     ];
     let mut lazy = Vec::new();
     tool_config.tools.retain(|tool| {
@@ -307,6 +309,9 @@ async fn register_lazy_chutes_tools(
             }
             "ChutesBuild:browser" => {
                 register!("chutes__browser", chutes::BrowserTool);
+            }
+            "ChutesBuild:ocr_page" => {
+                register!("chutes__ocr_page", chutes::OcrPageTool);
             }
             _ => {}
         }
