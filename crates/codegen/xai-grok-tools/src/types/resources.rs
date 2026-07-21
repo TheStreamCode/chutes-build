@@ -492,15 +492,21 @@ pub fn resolve_model_path(
     let input = sanitize_model_path_arg(input);
     let expanded = shellexpand::tilde(input);
     let input_path = std::path::Path::new(expanded.as_ref());
+    // `display_cwd` is always a Unix-style, forward-slash-rooted virtual path
+    // (the model's view of its sandbox/worktree), even when this binary runs
+    // on Windows. Use `has_root()` rather than `is_absolute()`: on Windows,
+    // `is_absolute()` also requires a drive-letter/UNC prefix, so a rooted
+    // path like `/home/user/project` would otherwise be misclassified as
+    // relative and silently skip the remap below.
     if let Some(display) = display_cwd
-        && input_path.is_absolute()
+        && input_path.has_root()
     {
         if let Ok(suffix) = input_path.strip_prefix(display) {
             return cwd.join(suffix);
         }
         return input_path.to_path_buf();
     }
-    if !input_path.is_absolute() && !expanded.is_empty() {
+    if !input_path.has_root() && !expanded.is_empty() {
         let as_absolute = std::path::PathBuf::from(format!("/{}", expanded.as_ref()));
         let effective_base = display_cwd.unwrap_or(cwd);
         if as_absolute.starts_with(effective_base)

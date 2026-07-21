@@ -23,9 +23,14 @@ pub fn is_ignored(gitignore: &Gitignore, path: &Path, git_root: Option<&Path>) -
             Err(_) => return false,
         },
         None => {
-            // Absolute path + no git root → can't strip to repo-relative;
-            // the `ignore` crate panics on absolute paths not under root.
-            if path.is_absolute() {
+            // Rooted path + no git root → can't strip to repo-relative; the
+            // `ignore` crate panics on absolute paths not under root. Use
+            // `has_root()` rather than `is_absolute()`: on Windows a
+            // forward-slash-rooted path like `/Users/x` (as produced by
+            // remote/sandbox display paths) has no drive prefix, so
+            // `is_absolute()` would misclassify it as relative and let it
+            // fall through to the raw crate call below.
+            if path.has_root() {
                 return false;
             }
             path
@@ -107,7 +112,13 @@ mod tests {
         let gi = build_gitignore(Path::new("."), &["node_modules/", "*.log"]);
         let abs_path = Path::new("/Users/someone/home/AGENTS.md");
 
-        // Proves the raw crate panics with these inputs.
+        // Proves the raw crate panics with these inputs. Unix-only: a
+        // forward-slash-rooted path with no drive prefix isn't a "real"
+        // absolute path on Windows, so the `ignore` crate's internal
+        // under-root assumption isn't violated there and this doesn't panic.
+        // The actual regression guard below (`is_ignored`) is platform-
+        // independent and always exercised.
+        #[cfg(unix)]
         assert!(
             std::panic::catch_unwind(|| {
                 gi.matched_path_or_any_parents(abs_path, false);

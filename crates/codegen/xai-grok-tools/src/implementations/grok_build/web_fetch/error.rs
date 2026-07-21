@@ -108,7 +108,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // No gh in this dir yet.
         assert!(which::which_in("gh", Some(dir.path()), dir.path()).is_err());
-        // Create an executable `gh`.
+        // Create an executable `gh`. On Windows, `which` only recognizes
+        // files whose extension is in PATHEXT, so the stub needs a `.exe`
+        // suffix there; on Unix the executable bit alone is enough.
+        #[cfg(windows)]
+        let gh = dir.path().join("gh.exe");
+        #[cfg(not(windows))]
         let gh = dir.path().join("gh");
         std::fs::write(&gh, b"#!/bin/sh\nexit 0\n").unwrap();
         #[cfg(unix)]

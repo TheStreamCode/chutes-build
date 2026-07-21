@@ -790,7 +790,13 @@ mod tests {
 
         match result {
             BashToolOutput::Bash(bash) => {
-                assert_eq!(bash.output_file, "/sessions/abc/terminal/my-call-42.log");
+                // Built the same way production does (discrete .join()
+                // calls, native separator at each boundary) rather than a
+                // hardcoded forward-slash literal, so this holds on Windows too.
+                let expected = PathBuf::from("/sessions/abc")
+                    .join("terminal")
+                    .join("my-call-42.log");
+                assert_eq!(bash.output_file, expected.display().to_string());
             }
             BashToolOutput::BackgroundTaskStarted(_) => panic!("Expected foreground output"),
         }

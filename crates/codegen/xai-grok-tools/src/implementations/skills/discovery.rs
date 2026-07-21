@@ -1396,14 +1396,19 @@ model: test-model
         std::fs::write(standard.join("SKILL.md"), "---\nname: mine\n---\n").unwrap();
 
         let paths = find_skill_paths(&cursor_dir);
-        let strs: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        // Checked via components(), not a "skills/mine" substring: these are
+        // real filesystem paths, native-separator on Windows.
         assert!(
-            strs.iter().any(|p| p.contains("skills/mine")),
-            "standard skills/ layout must still be found: {strs:?}"
+            paths
+                .iter()
+                .any(|p| p.ends_with(Path::new("skills").join("mine").join("SKILL.md"))),
+            "standard skills/ layout must still be found: {paths:?}"
         );
         assert!(
-            !strs.iter().any(|p| p.contains("skills-cursor")),
-            "skills-cursor layout must no longer be scanned: {strs:?}"
+            !paths
+                .iter()
+                .any(|p| p.components().any(|c| c.as_os_str() == "skills-cursor")),
+            "skills-cursor layout must no longer be scanned: {paths:?}"
         );
     }
 
@@ -1484,7 +1489,13 @@ model: test-model
             (grok_shell.join("SKILL.md"), SkillScope::User),
         ]);
         assert_eq!(skills.len(), 1, "cursor builtin must be dropped");
-        assert!(skills[0].path.contains("/.chutes-build/"));
+        // Checked via Path components, not a "/.chutes-build/" substring:
+        // this is a real filesystem path, native-separator on Windows.
+        assert!(
+            Path::new(&skills[0].path)
+                .components()
+                .any(|c| c.as_os_str() == ".chutes-build")
+        );
     }
 
     #[test]

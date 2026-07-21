@@ -857,7 +857,11 @@ mod tests {
         assert_eq!(processed.bytes, expected.len());
         assert!(!processed.content.contains(tail));
         assert!(expected.contains(tail));
-        let artifact = tmp.path().join("web_fetch/1.md");
+        // Two discrete .join() calls, matching how production actually
+        // builds this path (session_folder.join(ARTIFACT_DIR).join(...)) --
+        // a single join with an embedded "/" would mismatch the real,
+        // fully-native-separator path on Windows.
+        let artifact = tmp.path().join("web_fetch").join("1.md");
         assert!(
             processed
                 .content
