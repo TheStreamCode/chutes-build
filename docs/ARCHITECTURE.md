@@ -110,3 +110,69 @@ Outbound provider calls are allowlisted. Telemetry and remote error pipelines
 are hard-disabled, traces export locally, the upstream relay defaults to a
 closed loopback endpoint, and public commands that depended on upstream cloud
 services return an explicit error. See [PRIVACY.md](../PRIVACY.md).
+
+## Module ownership
+
+This is a fork, not a rewrite: most of the runtime is upstream `grok-build`
+infrastructure, unmodified or lightly adapted. Renaming every `xai-*` crate to
+match the fork's identity is explicitly out of scope (it would complicate
+future upstream syncs for no functional benefit) — this section documents the
+*intended* ownership boundary instead, so a future change lands in the layer
+it actually belongs to. It's a map of intent, not a strict enforcement
+boundary; treat crate placement as one useful signal among several, not a
+guarantee.
+
+**Chutes-owned** (product identity, provider integration, privacy posture):
+
+- `chutes-build-core` — the domain layer for everything Chutes-specific that
+  isn't a user-facing tool: model-router dispatch and virtual-model handling,
+  live capability catalog + cache, reasoning-compatibility registry, media
+  catalog/invocation client, Context7 client, credential-endpoint trust policy
+  and SSRF-safe DNS resolution, memory secret-filtering, and wellness nudges.
+- `xai-grok-tools::implementations::chutes` — the agent-callable tools backed
+  by the above (media generation/discovery, Context7 lookup, OCR
+  transcription, account usage, isolated browser control). Despite living
+  inside the (upstream) generic tool-runtime crate, this module is
+  Chutes-owned; everything else under `implementations/` is upstream-style
+  generic tooling (`read_file`, `bash`, `grep`, `web_search`, LSP, ...).
+- `xai-grok-voice`, `xai-grok-models` — Chutes-hosted STT integration and the
+  trimmed Chutes default model catalog, respectively.
+- `xai-grok-secrets` — upstream-authored, but per this fork's policy it is
+  now the single canonical secret-detection/redaction layer; Chutes-specific
+  call sites (memory persistence, Context7's outbound guard) and upstream
+  call sites (telemetry/log sanitization) both route through it rather than
+  keeping separate detectors.
+- Product-identity slices scattered through otherwise-upstream crates:
+  rebranded welcome/auth screens and "Sign in with Chutes" OAuth in
+  `xai-grok-pager`/`xai-grok-shell`, privacy-first config defaults
+  (telemetry, trace upload, update checks disabled) in `xai-grok-config*`.
+
+**Retained upstream infrastructure** (the proven agent runtime this fork
+builds on, not specific to any provider):
+
+- `xai-grok-agent` — prompt construction, planning, subagent/advisor
+  orchestration, goal tracking.
+- `xai-grok-shell`, `xai-grok-shell-base` — session lifecycle, config
+  resolution/persistence, credential provider, ACP session handling.
+- `xai-grok-sampler`, `xai-grok-sampling-types` — the HTTP/streaming client
+  and wire types for chat completions (Chutes-specific dispatch, e.g. the
+  model-router host substitution, is a small, explicitly-commented carve-out
+  inside otherwise-generic client code, not a separate Chutes crate).
+- `xai-tool-runtime`, `xai-tool-protocol`, `xai-tool-types` — the tool trait,
+  wire protocol, and shared type definitions any tool (Chutes-owned or not)
+  is built on.
+- `xai-grok-tools` (outside `implementations::chutes`) — the generic tool
+  implementations: filesystem, shell, search, LSP, MCP, skills.
+- `xai-grok-pager`, `xai-grok-pager-render` — the TUI: rendering, input,
+  scrollback, views. Chutes product identity is layered on top (see above),
+  the rendering engine itself is upstream.
+- `xai-grok-workspace` — permission model, sandboxing, worktrees.
+- `xai-grok-auth` — OAuth/credential machinery in general; the Chutes issuer
+  configuration is a caller-supplied parameter, not a fork of this crate.
+
+Crates not listed here are unremarkable utility/support code (formatting,
+markdown rendering, terminal primitives, telemetry plumbing that is disabled
+by default, etc.) and follow the same rule of thumb: if it encodes a decision
+specific to Chutes as a provider or to this fork's product identity, it's
+Chutes-owned; if it would make equal sense in the upstream project, it's
+retained infrastructure.
