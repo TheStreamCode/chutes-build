@@ -184,7 +184,15 @@ pub(crate) fn voice_mode_config_value() -> Option<bool> {
 /// Resolve voice availability.
 ///
 /// Precedence: requirements > `CHUTES_BUILD_VOICE_MODE` > config/managed
-/// `[features] voice_mode` > remote `voice_mode_enabled` > default off.
+/// `[features] voice_mode` > remote `voice_mode_enabled` > default **on**.
+///
+/// Defaults on for Chutes Build: unlike upstream, there is no
+/// subscription-tier paywall gating this feature (`apply_tier_restrictions`
+/// already exempts API-key sessions), and Chutes Build has no remote
+/// settings service of its own, so `remote` is always `None` here in
+/// practice -- the old `default(false)` made voice dictation silently
+/// unreachable for every user. Activation itself is still always manual
+/// (`/voice` or Ctrl+Space starts a capture; nothing auto-listens).
 pub(crate) fn resolve_voice_mode_enabled(
     requirement: Option<bool>,
     config: Option<bool>,
@@ -196,7 +204,7 @@ pub(crate) fn resolve_voice_mode_enabled(
         .requirement(requirement)
         .config(config)
         .feature_flag(remote)
-        .default(false)
+        .default(true)
         .resolve();
     resolved.value
 }
@@ -231,6 +239,13 @@ mod voice_gate_tests {
             Some(false),
             true
         ));
+    }
+    /// Chutes Build has no remote settings service, so `remote` is always
+    /// `None` in practice -- voice must default on, not silently unreachable.
+    #[test]
+    fn defaults_on_with_no_overrides() {
+        assert!(resolve_voice_mode_enabled(None, None, None, true));
+        assert!(resolve_voice_mode_enabled(None, None, None, false));
     }
 }
 /// Sticky banner shown while mouse reporting is off, telling the user how to
