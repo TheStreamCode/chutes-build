@@ -13,7 +13,31 @@ const ROUTER_SUPPORTED_MODALITIES: &[&str] = &["text", "image"];
 struct CatalogCacheEntry {
     endpoint: String,
     fetched_at: std::time::Instant,
-    body: serde_json::Value,
+    body: CatalogResponse,
+}
+
+/// Typed shell around the `/models` response. Kept deliberately shallow:
+/// `data` decodes as raw [`serde_json::Value`] entries rather than a typed
+/// `Vec<CatalogModel>` so that one malformed or unexpected-shape model entry
+/// (a third-party chute publishing an odd catalog record, say) can't fail
+/// the parse for the whole catalog — [`supports_input`] decodes each entry
+/// individually and best-effort skips ones that don't fit.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct CatalogResponse {
+    #[serde(default)]
+    data: Vec<serde_json::Value>,
+}
+
+/// The subset of a catalog entry's fields this crate actually consumes.
+/// Every field is optional/defaulted on purpose: a model missing `id`,
+/// `root`, or `input_modalities` must still be treated as "no match" /
+/// "no declared modalities", not fail this entry's parse.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CatalogModel {
+    id: Option<String>,
+    root: Option<String>,
+    #[serde(default)]
+    input_modalities: Vec<String>,
 }
 
 /// Cached catalog body, read on the fast path without ever holding a lock
@@ -43,6 +67,8 @@ pub enum CatalogError {
     Http(#[from] reqwest::Error),
     #[error("Chutes model catalog returned HTTP {status}")]
     Status { status: reqwest::StatusCode },
+    #[error("Chutes model catalog returned invalid JSON: {0}")]
+    Decode(serde_json::Error),
     #[error(transparent)]
     EndpointTrust(#[from] crate::endpoint_policy::EndpointTrustError),
 }
@@ -107,34 +133,27 @@ async fn cached_lookup(endpoint: &str, model: &str, modality: &str) -> Option<Op
     }
 }
 
-async fn fetch_catalog(endpoint: &str) -> Result<serde_json::Value, CatalogError> {
+async fn fetch_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
     let response = HTTP_CLIENT.get(format!("{endpoint}/models")).send().await?;
     let status = response.status();
     if !status.is_success() {
         return Err(CatalogError::Status { status });
     }
-    Ok(response.json().await?)
+    let body = response.text().await?;
+    serde_json::from_str(&body).map_err(CatalogError::Decode)
 }
 
-fn supports_input(body: &serde_json::Value, model: &str, modality: &str) -> Option<bool> {
-    body.get("data")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|models| {
-            models.iter().find(|entry| {
-                entry.get("id").and_then(serde_json::Value::as_str) == Some(model)
-                    || entry.get("root").and_then(serde_json::Value::as_str) == Some(model)
-            })
-        })
-        .map(|entry| {
-            entry
-                .get("input_modalities")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|modalities| {
-                    modalities
-                        .iter()
-                        .any(|value| value.as_str() == Some(modality))
-                })
-        })
+fn supports_input(body: &CatalogResponse, model: &str, modality: &str) -> Option<bool> {
+    body.data.iter().find_map(|raw_entry| {
+        // Best-effort per entry: an entry that doesn't fit `CatalogModel`'s
+        // shape is skipped rather than failing the whole catalog lookup.
+        let entry: CatalogModel = serde_json::from_value(raw_entry.clone()).ok()?;
+        if entry.id.as_deref() == Some(model) || entry.root.as_deref() == Some(model) {
+            Some(entry.input_modalities.iter().any(|m| m == modality))
+        } else {
+            None
+        }
+    })
 }
 
 #[cfg(test)]
@@ -205,6 +224,45 @@ mod tests {
         // Second call must hit the cache, not the mock server again --
         // `.expect(1)` above fails the test on drop if it was called twice.
         assert_eq!(second, Some(true));
+    }
+
+    /// Forward-compat: unknown top-level fields, an unrelated entry with a
+    /// completely different (also unknown-field-bearing) shape, and a
+    /// missing `input_modalities` on the matched entry must not fail the
+    /// parse or the lookup -- only the fields this crate actually reads
+    /// are typed, everything else is ignored by default.
+    #[tokio::test]
+    #[serial]
+    async fn tolerates_unknown_fields_and_missing_modalities() {
+        reset_cache().await;
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "object": "list",
+                "future_top_level_field": {"nested": true},
+                "data": [
+                    {
+                        "id": "some-other-model",
+                        "root": "some-other-model",
+                        "input_modalities": ["text"],
+                        "pricing": {"prompt": "0.0"},
+                        "future_field": "whatever",
+                    },
+                    {"id": "test-model", "root": "test-model"},
+                ],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        unsafe { set_test_env(&server.uri()) };
+
+        let result = model_supports_input("test-model", "image").await;
+
+        unsafe { clear_test_env() };
+        // Matched entry has no `input_modalities` at all -> not an error,
+        // just "doesn't declare this modality".
+        assert_eq!(result.unwrap(), Some(false));
     }
 
     #[tokio::test]

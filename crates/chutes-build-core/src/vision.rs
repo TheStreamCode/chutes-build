@@ -98,15 +98,49 @@ impl ChutesVisionClient {
     }
 }
 
+/// Shallow, forward-compatible view of an OpenAI-style chat completion
+/// response. `content`/`finish_reason` are kept as raw [`serde_json::Value`]
+/// rather than `Option<String>`: an unexpected shape there (an array of
+/// content parts, a non-string finish reason, ...) must still resolve to
+/// [`VisionError::UnexpectedResponse`], not fail the whole parse the way a
+/// typed-field mismatch would.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct ChatCompletionResponse {
+    #[serde(default)]
+    choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct ChatCompletionChoice {
+    #[serde(default)]
+    message: ChatCompletionMessage,
+    finish_reason: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct ChatCompletionMessage {
+    content: Option<serde_json::Value>,
+}
+
 fn parse_transcribe_response(body: &str) -> Result<TranscribeResponse, VisionError> {
-    let parsed: serde_json::Value = serde_json::from_str(body)?;
-    let content = parsed
-        .pointer("/choices/0/message/content")
+    let parsed: ChatCompletionResponse = serde_json::from_str(body)?;
+    let missing_content =
+        || VisionError::UnexpectedResponse("choices[0].message.content".to_owned());
+    let choice = parsed
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(missing_content)?;
+    let content = choice
+        .message
+        .content
+        .as_ref()
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| VisionError::UnexpectedResponse("choices[0].message.content".to_owned()))?
+        .ok_or_else(missing_content)?
         .to_owned();
-    let truncated = parsed
-        .pointer("/choices/0/finish_reason")
+    let truncated = choice
+        .finish_reason
+        .as_ref()
         .and_then(serde_json::Value::as_str)
         == Some("length");
 
@@ -168,5 +202,36 @@ mod tests {
     fn rejects_invalid_json() {
         let err = parse_transcribe_response("not json").unwrap_err();
         assert!(matches!(err, VisionError::Decode(_)));
+    }
+
+    /// Forward-compat: unknown top-level and per-choice fields (as a newer
+    /// API version might add, e.g. `usage`, `id`, `system_fingerprint`)
+    /// must not fail the parse -- only `content`/`finish_reason` are read.
+    #[test]
+    fn tolerates_unknown_fields() {
+        let body = r#"{
+            "id": "chatcmpl-abc",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "hello"},
+                "finish_reason": "stop",
+                "logprobs": null
+            }]
+        }"#;
+        let result = parse_transcribe_response(body).unwrap();
+        assert_eq!(result.text, "hello");
+        assert!(!result.truncated);
+    }
+
+    /// A non-string `content` (e.g. a multi-part content array) and a
+    /// non-string `finish_reason` must resolve to the friendly
+    /// `UnexpectedResponse` domain error, not a raw `Decode` failure --
+    /// the whole point of keeping these fields as `Value` internally.
+    #[test]
+    fn non_string_content_and_finish_reason_are_unexpected_not_decode() {
+        let body = r#"{"choices":[{"message":{"content":[{"type":"text","text":"hi"}]},"finish_reason":42}]}"#;
+        let err = parse_transcribe_response(body).unwrap_err();
+        assert!(matches!(err, VisionError::UnexpectedResponse(_)));
     }
 }

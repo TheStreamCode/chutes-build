@@ -45,6 +45,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so idle TUI rendering does not repeatedly probe external commands.
 - Bounded account quota fallback concurrency and cached model-capability
   discovery to reduce unnecessary API work.
+- The model-capability catalog response and the vision transcription client's
+  chat-completion response are now parsed into small typed structs instead of
+  navigated as raw JSON, so an unexpected shape in a field we don't read can't
+  silently change behavior; fields whose absence or wrong shape must stay a
+  soft "not found"/"no match" (a model's `input_modalities`, a transcription's
+  `content`/`finish_reason`) are still parsed leniently, only genuinely
+  malformed responses now surface as a distinct decode error. Account usage
+  and per-chute media responses stay dynamic on purpose — their shapes
+  legitimately vary per tier/quota kind and per third-party chute schema.
 
 ### Fixed
 
@@ -101,6 +110,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The model-capability catalog cache held a single global lock for the
   entire network refresh, serializing every concurrent lookup behind one
   HTTP request whenever the cache was stale.
+- On the Windows native build, file-tool path remapping (`resolve_model_path`)
+  and the `.gitignore` out-of-repo guard both tested `Path::is_absolute()`,
+  which on Windows also requires a drive letter. The forward-slash-rooted
+  virtual paths these paths actually deal with (e.g. a sandboxed session's
+  `/home/user/project`) were therefore misclassified as relative, silently
+  breaking model-facing path resolution and letting an out-of-repo path fall
+  through to a crate call that can panic. Both now check for a root instead
+  of a full drive-qualified absolute path.
 
 ### Security
 

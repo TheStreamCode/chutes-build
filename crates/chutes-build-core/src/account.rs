@@ -1,4 +1,14 @@
 //! Read-only access to Chutes account usage endpoints.
+//!
+//! Responses stay as raw [`serde_json::Value`] deliberately rather than
+//! typed structs: `subscription_usage`/`quotas`/`quota_usage`/`model_stats`
+//! shapes vary per account tier and per quota kind (aggregate vs. per-chute
+//! maps, see [`has_quota_usage_data`]/[`quota_chute_ids`]), and this module's
+//! job is to pass that heterogeneous data through to the tool layer, not to
+//! constrain it. The one place a fixed shape would help — telling "no quota
+//! data" apart from "endpoint failure" — is already handled explicitly by
+//! [`ChutesAccountClient::usage_snapshot`]'s per-field `Result` handling and
+//! the `quota_usage_fallback` path, not by typing the payload itself.
 
 use futures_util::StreamExt as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION};
