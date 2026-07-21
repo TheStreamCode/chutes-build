@@ -82,6 +82,25 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was explicitly configured. Embeddings now use their own configurable base
   URL (defaulting to the model's dedicated endpoint) and no longer request
   truncation.
+- `generate_media` only encoded workspace file paths found at the top level
+  of `params`; a cord requiring a wrapper shape (e.g. `{"args": {"image":
+  "input.png"}}`) never got its nested path encoded, so the literal filename
+  round-tripped to Chutes instead of the file's contents. Asset discovery now
+  recurses through nested objects and arrays.
+- `generate_media`'s schema guard unconditionally overwrote a cord's own
+  `additionalProperties`/`unevaluatedProperties` with its own default —
+  including stripping them entirely when `CHUTES_ALLOW_UNKNOWN_PARAMS` was
+  set, removing a restriction the provider declared rather than just
+  disabling this tool's own default. It now only adds its own restriction
+  where the schema has no existing opinion.
+- `generate_media` accepted any response with an empty or `octet-stream`
+  Content-Type outright, so a Chutes error response (HTML/JSON, sometimes
+  served as `octet-stream` by a proxy) could be saved to disk as if it were
+  the requested media. Responses are now verified against actual byte
+  content, not just the declared header.
+- The model-capability catalog cache held a single global lock for the
+  entire network refresh, serializing every concurrent lookup behind one
+  HTTP request whenever the cache was stale.
 
 ### Security
 
@@ -93,3 +112,18 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   snapshots.
 - Added full-history secret scanning, Rust dependency/source policy checks,
   native archive checksums, and assembled-package smoke testing to CI.
+- `CHUTES_INFERENCE_BASE_URL`/`CHUTES_API_BASE_URL`/`CHUTES_ROUTER_BASE_URL`
+  previously accepted any value with no validation, so an env-var override
+  could silently redirect Chutes credentials to an arbitrary host. These
+  (and the model-router dispatch path, which had the same gap) now require
+  HTTPS and a trusted Chutes/router host by default; `CHUTES_ALLOW_INSECURE_ENDPOINTS`
+  is an explicit opt-in for local development and forks.
+- Outbound requests for Chutes credentials and generated-media downloads now
+  refuse to connect to loopback/private/link-local/reserved addresses,
+  checked at the exact point of connection (closing a DNS-rebinding gap
+  where only literal IP addresses were previously rejected).
+- Unified secret detection: Context7's outbound-query guard and persistent
+  memory filtering matched only 12 hardcoded substrings (`api_key`,
+  `bearer`, `password`, ...) and could miss shapes like a bare AWS key or
+  GitHub token that the existing log/trace sanitizer already caught. Both
+  now route through the same canonical detector.
