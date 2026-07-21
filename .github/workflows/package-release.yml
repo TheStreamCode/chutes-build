@@ -47,27 +47,27 @@ jobs:
         include:
           - target: linux-x64-gnu
             runner: ubuntu-24.04
-            binary: target/release/chutes-build
+            binary: target/release-dist/chutes-build
             package: chutes-build-linux-x64-gnu
           - target: linux-arm64-gnu
             runner: ubuntu-24.04-arm
-            binary: target/release/chutes-build
+            binary: target/release-dist/chutes-build
             package: chutes-build-linux-arm64-gnu
           - target: darwin-x64
             runner: macos-15-intel
-            binary: target/release/chutes-build
+            binary: target/release-dist/chutes-build
             package: chutes-build-darwin-x64
           - target: darwin-arm64
             runner: macos-15
-            binary: target/release/chutes-build
+            binary: target/release-dist/chutes-build
             package: chutes-build-darwin-arm64
           - target: win32-x64
             runner: windows-2025
-            binary: target/release/chutes-build.exe
+            binary: target/release-dist/chutes-build.exe
             package: chutes-build-win32-x64
           - target: win32-arm64
             runner: windows-11-arm
-            binary: target/release/chutes-build.exe
+            binary: target/release-dist/chutes-build.exe
             package: chutes-build-win32-arm64
     steps:
       - name: Check out repository
@@ -91,7 +91,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-release-
       - name: Build native binary
-        run: cargo build -p chutes-build --release --locked
+        run: cargo build -p chutes-build --profile release-dist --locked
       - name: Smoke-test native binary
         run: node npm/scripts/verify-native-binary.mjs "${{ matrix.binary }}"
       - name: Stage native npm package

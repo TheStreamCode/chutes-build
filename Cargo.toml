@@ -343,6 +343,10 @@ codegen-units = 1
 strip = false
 debug = 1
 split-debuginfo = "off"
+# Distribution builds are always a single clean CI build, never an
+# iterative local edit-compile loop -- incremental compilation's caching
+# machinery only adds overhead here, with no reuse to benefit from.
+incremental = false
 
 # Production profile for latency-sensitive x-product services (VF, home-mixer).
 # Thin LTO gives ~90% of full LTO benefit at significantly faster link time.
