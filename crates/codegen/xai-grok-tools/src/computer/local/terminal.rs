@@ -3286,7 +3286,14 @@ mod tests {
     #[tokio::test]
     async fn test_stderr_captured() {
         let backend = LocalTerminalBackend::new();
-        let result = backend.run(make_request("echo error >&2")).await.unwrap();
+        // PowerShell's redirection operators can only merge a stream INTO
+        // stream 1 (`2>&1`, `*>&1`); there's no `1>&2` equivalent of bash's
+        // `>&2`, so write to the real OS stderr handle directly instead.
+        #[cfg(unix)]
+        let command = "echo error >&2";
+        #[cfg(windows)]
+        let command = "[Console]::Error.WriteLine('error')";
+        let result = backend.run(make_request(command)).await.unwrap();
 
         assert!(result.combined_output.contains("error"));
         assert_eq!(result.exit_code, Some(0));
@@ -3427,9 +3434,16 @@ mod tests {
         let backend = LocalTerminalBackend::new();
         let tmp = tempfile::TempDir::new().unwrap();
 
+        // Command that produces output over time (not all at once). Verified
+        // the PowerShell pipeline form streams each object as it's produced
+        // (not buffered until process exit) rather than assuming it.
+        #[cfg(unix)]
+        let command = "for i in 1 2 3; do echo chunk_$i; sleep 0.15; done";
+        #[cfg(windows)]
+        let command = "1,2,3 | ForEach-Object { \"chunk_$_\"; Start-Sleep -Milliseconds 150 }";
+
         let request = TerminalRunRequest {
-            // Command that produces output over time (not all at once)
-            command: "for i in 1 2 3; do echo chunk_$i; sleep 0.15; done".to_string(),
+            command: command.to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
             timeout: Duration::from_secs(5),
@@ -3501,10 +3515,15 @@ mod tests {
         let backend = LocalTerminalBackend::new();
         let tmp = tempfile::TempDir::new().unwrap();
 
+        // ~1.8 KB of ASCII over ~1.8s; far exceeds the 200-char limit so
+        // truncation fires early and keeps firing on the shrinking tail.
+        #[cfg(unix)]
+        let command = "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done";
+        #[cfg(windows)]
+        let command = "1..60 | ForEach-Object { 'LINE{0:D3}-XXXXXXXXXXXXXXXXXXXX' -f $_; Start-Sleep -Milliseconds 30 }";
+
         let request = TerminalRunRequest {
-            // ~1.8 KB of ASCII over ~1.8s; far exceeds the 200-char limit so
-            // truncation fires early and keeps firing on the shrinking tail.
-            command: "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done".to_string(),
+            command: command.to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
             timeout: Duration::from_secs(10),
@@ -4135,9 +4154,17 @@ mod tests {
 
     // ================================================================
     // Persistent shell tests
+    //
+    // `spawn_persistent_command` (the fd-3/4 snapshot mechanism these tests
+    // exercise) is itself `#[cfg(unix)]` -- on Windows `spawn_command` always
+    // falls through to the one-off, non-persistent path regardless of the
+    // `persistent_shell` flag, since there is no Windows implementation of
+    // shell-state snapshotting. These tests are gated `#[cfg(unix)]` to match
+    // the feature they test, not to route around a shell-syntax mismatch.
     // ================================================================
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_persistent_shell_cd_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4156,6 +4183,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_persistent_shell_env_var_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4197,6 +4225,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_persistent_shell_function_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4216,6 +4245,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_persistent_shell_variable_capture() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4239,18 +4269,27 @@ mod tests {
     #[tokio::test]
     async fn test_non_persistent_shell_no_state() {
         // Verify the default (non-persistent) mode doesn't carry state.
+        // Each `run` spawns a fresh shell process (bash on Unix, the
+        // detected Windows shell -- pwsh when present -- on Windows), so the
+        // set/read commands are platform-specific syntax for the same check:
+        // an env var set in one invocation must not be visible in the next.
         let backend = LocalTerminalBackend::new();
 
-        let result = backend
-            .run(make_request("export SHOULD_NOT_PERSIST=yes"))
-            .await
-            .unwrap();
+        #[cfg(unix)]
+        let (set_cmd, read_cmd) = (
+            "export SHOULD_NOT_PERSIST=yes",
+            "echo ${SHOULD_NOT_PERSIST:-empty}",
+        );
+        #[cfg(windows)]
+        let (set_cmd, read_cmd) = (
+            "$env:SHOULD_NOT_PERSIST = 'yes'",
+            "if ($env:SHOULD_NOT_PERSIST) { $env:SHOULD_NOT_PERSIST } else { 'empty' }",
+        );
+
+        let result = backend.run(make_request(set_cmd)).await.unwrap();
         assert_eq!(result.exit_code, Some(0));
 
-        let result = backend
-            .run(make_request("echo ${SHOULD_NOT_PERSIST:-empty}"))
-            .await
-            .unwrap();
+        let result = backend.run(make_request(read_cmd)).await.unwrap();
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(
             result.combined_output.trim(),

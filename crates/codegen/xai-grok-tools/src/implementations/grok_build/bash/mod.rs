@@ -2579,6 +2579,31 @@ mod tests {
         }
     }
 
+    /// A command that echoes 1..3 with a delay between each line, so streamed
+    /// chunks arrive over time instead of all at once. PowerShell's pipeline
+    /// form is used on Windows (verified to stream per-object rather than
+    /// buffering until process exit, matching bash's behavior here).
+    #[cfg(unix)]
+    fn incrementing_echo_command() -> &'static str {
+        "for i in 1 2 3; do echo $i; sleep 0.1; done"
+    }
+    #[cfg(windows)]
+    fn incrementing_echo_command() -> &'static str {
+        "1,2,3 | ForEach-Object { $_; Start-Sleep -Milliseconds 100 }"
+    }
+
+    /// ~1.8 KB of padded `LINE###-XXXX...` lines over ~1.8s -- far exceeds a
+    /// small byte limit so truncation fires early and keeps firing on the
+    /// shrinking tail.
+    #[cfg(unix)]
+    fn truncation_probe_command() -> &'static str {
+        "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done"
+    }
+    #[cfg(windows)]
+    fn truncation_probe_command() -> &'static str {
+        "1..60 | ForEach-Object { 'LINE{0:D3}-XXXXXXXXXXXXXXXXXXXX' -f $_; Start-Sleep -Milliseconds 30 }"
+    }
+
     // ─── Streaming tests ───
 
     /// Deterministic regression guard for Key Decision 6 (delta math keyed off
@@ -2708,12 +2733,9 @@ mod tests {
         let mut ctx = xai_tool_runtime::ToolCallContext::default();
         ctx.extensions.insert(resources.into_shared());
         let tool = BashTool;
-        let mut stream = xai_tool_runtime::Tool::execute(
-            &tool,
-            ctx,
-            make_input("for i in 1 2 3; do echo $i; sleep 0.1; done"),
-        )
-        .await;
+        let mut stream =
+            xai_tool_runtime::Tool::execute(&tool, ctx, make_input(incrementing_echo_command()))
+                .await;
 
         let mut progress = 0usize;
         let mut terminal: Option<Result<BashToolOutput, xai_tool_runtime::ToolError>> = None;
@@ -2756,7 +2778,7 @@ mod tests {
         let mut stream = xai_tool_runtime::Tool::execute(
             &tool,
             test_ctx(resources.into_shared()),
-            make_input("for i in 1 2 3; do echo $i; sleep 0.1; done"),
+            make_input(incrementing_echo_command()),
         )
         .await;
 
@@ -2806,9 +2828,7 @@ mod tests {
         let mut stream = xai_tool_runtime::Tool::execute(
             &tool,
             test_ctx(resources.into_shared()),
-            make_input(
-                "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done",
-            ),
+            make_input(truncation_probe_command()),
         )
         .await;
 

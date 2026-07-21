@@ -118,6 +118,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   breaking model-facing path resolution and letting an out-of-repo path fall
   through to a crate call that can panic. Both now check for a root instead
   of a full drive-qualified absolute path.
+- On the Windows native build, LSP crash-recovery silently failed to replay
+  a server's previously-open documents after a restart: it derived each
+  document's file path by stripping the literal `"file://"` prefix off its
+  URI, which on Windows leaves an invalid leading slash before the drive
+  letter (`/C:/...`), so the on-disk re-read failed and the document was
+  quietly dropped instead of being replayed. Now uses proper file-URI-to-path
+  conversion.
 
 ### Security
 

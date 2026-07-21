@@ -35,9 +35,14 @@ fn replay_tracked_documents(
     tracked_docs
         .iter()
         .filter_map(|(uri_str, lang_id)| {
-            let path = uri_str
-                .strip_prefix("file://")
-                .map(PathBuf::from)
+            // `Url::to_file_path` (not manual "file://" prefix-stripping):
+            // stripping just the literal prefix leaves a leading `/` before
+            // the drive letter on Windows (`file:///C:/...` -> `/C:/...`),
+            // which isn't a valid path and makes the read below silently
+            // fail via the `?` on every restart replay.
+            let path = Url::parse(uri_str)
+                .ok()
+                .and_then(|url| url.to_file_path().ok())
                 .unwrap_or_else(|| PathBuf::from(uri_str));
             let content = std::fs::read_to_string(&path).ok()?;
             restarted_client.notify_file_change(&path, &content, lang_id);
