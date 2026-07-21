@@ -1,5 +1,7 @@
 use super::persist::update_config;
 use anyhow::Result;
+use toml::Value as TomlValue;
+use toml::map::Map as TomlMap;
 
 // ---------------------------------------------------------------------------
 // Settings helpers — typed disk-write wrappers for each setting.
@@ -284,4 +286,240 @@ pub async fn set_show_tips(value: bool) -> Result<()> {
 /// Restart-required: auto-update check fires once on startup.
 pub async fn set_auto_update(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.auto_update = Some(value)).await
+}
+
+// ---------------------------------------------------------------------------
+// `/advisor` — writes directly into `[subagents]`, bypassing the typed
+// `Config`/`update_config` path above. `[subagents.roles]`/`[subagents.toggle]`
+// are `HashMap`-shaped and `SubagentRole` doesn't derive `Serialize`, so they
+// don't fit `mcp::Config`; the runtime read side (`resolve_effective_overrides`,
+// `[subagents.toggle]`) already resolves these keys for every subagent,
+// built-in or custom, so only the write side is new here.
+// ---------------------------------------------------------------------------
+
+/// Read-modify-write helper scoped to the `[subagents]` table. Mirrors
+/// `save_config`'s lock + atomic-write dance without going through the typed
+/// `Config` struct.
+async fn update_subagents_section<F>(f: F) -> Result<()>
+where
+    F: FnOnce(&mut TomlMap<String, TomlValue>),
+{
+    let _guard = super::persist::lock_config_writes().await;
+    let path = super::mcp::user_config_path();
+    let content = super::persist::read_to_string_or_empty(&path)?;
+    let mut root: TomlValue = if content.trim().is_empty() {
+        TomlValue::Table(TomlMap::new())
+    } else {
+        toml::from_str(&content)?
+    };
+    if !matches!(root, TomlValue::Table(_)) {
+        root = TomlValue::Table(TomlMap::new());
+    }
+    let table = root.as_table_mut().expect("root normalized to Table above");
+    let subagents = table
+        .entry("subagents".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    if !matches!(subagents, TomlValue::Table(_)) {
+        *subagents = TomlValue::Table(TomlMap::new());
+    }
+    let TomlValue::Table(subagents_table) = subagents else {
+        unreachable!("normalized to Table above");
+    };
+    f(subagents_table);
+    let toml_str = toml::to_string_pretty(&root)?;
+    super::persist::atomic_write_string(&path, &toml_str)?;
+    Ok(())
+}
+
+/// Get-or-create `[subagents.roles.advisor]`, normalizing any non-table value
+/// left over from a hand-edited config.
+fn advisor_role_table(
+    subagents: &mut TomlMap<String, TomlValue>,
+) -> &mut TomlMap<String, TomlValue> {
+    let roles = subagents
+        .entry("roles".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    if !matches!(roles, TomlValue::Table(_)) {
+        *roles = TomlValue::Table(TomlMap::new());
+    }
+    let TomlValue::Table(roles_table) = roles else {
+        unreachable!("normalized to Table above");
+    };
+    let advisor = roles_table
+        .entry("advisor".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    if !matches!(advisor, TomlValue::Table(_)) {
+        *advisor = TomlValue::Table(TomlMap::new());
+    }
+    let TomlValue::Table(advisor_table) = advisor else {
+        unreachable!("normalized to Table above");
+    };
+    advisor_table
+}
+
+/// Set or clear `[subagents.roles.advisor].model` on an already-loaded
+/// `[subagents]` table. Pure/sync so it's unit-testable without file I/O.
+fn apply_advisor_model(subagents: &mut TomlMap<String, TomlValue>, model: Option<String>) {
+    let advisor = advisor_role_table(subagents);
+    match model {
+        Some(m) if !m.is_empty() => {
+            advisor.insert("model".to_string(), TomlValue::String(m));
+        }
+        _ => {
+            advisor.remove("model");
+        }
+    }
+}
+
+/// Set or clear `[subagents.toggle].advisor` on an already-loaded
+/// `[subagents]` table. `true` (the built-in default) removes the key rather
+/// than writing it, so an untouched config file stays untouched. Pure/sync
+/// so it's unit-testable without file I/O.
+fn apply_advisor_enabled(subagents: &mut TomlMap<String, TomlValue>, enabled: bool) {
+    let toggle = subagents
+        .entry("toggle".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    if !matches!(toggle, TomlValue::Table(_)) {
+        *toggle = TomlValue::Table(TomlMap::new());
+    }
+    let TomlValue::Table(toggle_table) = toggle else {
+        unreachable!("normalized to Table above");
+    };
+    if enabled {
+        toggle_table.remove("advisor");
+    } else {
+        toggle_table.insert("advisor".to_string(), TomlValue::Boolean(false));
+    }
+}
+
+/// Persist `[subagents.roles.advisor].model`. `None` (or empty) clears the
+/// pin, falling back to the parent session's model — same precedence the
+/// `/model` picker's `default_model` uses for the primary session.
+pub async fn set_advisor_model(model: Option<String>) -> Result<()> {
+    update_subagents_section(|subagents| apply_advisor_model(subagents, model)).await
+}
+
+/// Persist `[subagents.toggle].advisor`. `true` (the built-in default) is
+/// removed rather than written, so an untouched config file stays untouched.
+pub async fn set_advisor_enabled(enabled: bool) -> Result<()> {
+    update_subagents_section(|subagents| apply_advisor_enabled(subagents, enabled)).await
+}
+
+#[cfg(test)]
+mod advisor_tests {
+    use super::*;
+
+    fn table_with(toml_str: &str) -> TomlMap<String, TomlValue> {
+        let TomlValue::Table(t) = toml::from_str::<TomlValue>(toml_str).unwrap() else {
+            panic!("expected a table")
+        };
+        t
+    }
+
+    #[test]
+    fn apply_advisor_model_creates_missing_sections() {
+        let mut subagents = TomlMap::new();
+        apply_advisor_model(&mut subagents, Some("glm-5.2".to_string()));
+        let model = subagents
+            .get("roles")
+            .and_then(|v| v.get("advisor"))
+            .and_then(|v| v.get("model"))
+            .and_then(|v| v.as_str());
+        assert_eq!(model, Some("glm-5.2"));
+    }
+
+    #[test]
+    fn apply_advisor_model_preserves_sibling_roles_and_fields() {
+        let mut subagents = table_with(
+            r#"
+            [roles.explore]
+            model = "grok-3-fast"
+
+            [roles.advisor]
+            reasoning_effort = "high"
+            "#,
+        );
+        apply_advisor_model(&mut subagents, Some("kimi-k2.6".to_string()));
+        let roles = subagents.get("roles").unwrap();
+        assert_eq!(
+            roles
+                .get("explore")
+                .and_then(|v| v.get("model"))
+                .and_then(|v| v.as_str()),
+            Some("grok-3-fast"),
+            "sibling role must survive"
+        );
+        let advisor = roles.get("advisor").unwrap();
+        assert_eq!(
+            advisor.get("reasoning_effort").and_then(|v| v.as_str()),
+            Some("high"),
+            "existing advisor field must survive"
+        );
+        assert_eq!(
+            advisor.get("model").and_then(|v| v.as_str()),
+            Some("kimi-k2.6")
+        );
+    }
+
+    #[test]
+    fn apply_advisor_model_none_clears_pin_without_dropping_effort() {
+        let mut subagents = table_with(
+            r#"
+            [roles.advisor]
+            model = "grok-3"
+            reasoning_effort = "max"
+            "#,
+        );
+        apply_advisor_model(&mut subagents, None);
+        let advisor = subagents.get("roles").unwrap().get("advisor").unwrap();
+        assert!(advisor.get("model").is_none());
+        assert_eq!(
+            advisor.get("reasoning_effort").and_then(|v| v.as_str()),
+            Some("max")
+        );
+    }
+
+    #[test]
+    fn apply_advisor_model_empty_string_also_clears() {
+        let mut subagents = table_with("[roles.advisor]\nmodel = \"grok-3\"\n");
+        apply_advisor_model(&mut subagents, Some(String::new()));
+        assert!(
+            subagents
+                .get("roles")
+                .unwrap()
+                .get("advisor")
+                .unwrap()
+                .get("model")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn apply_advisor_enabled_false_writes_toggle() {
+        let mut subagents = TomlMap::new();
+        apply_advisor_enabled(&mut subagents, false);
+        assert_eq!(
+            subagents
+                .get("toggle")
+                .and_then(|v| v.get("advisor"))
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn apply_advisor_enabled_true_removes_toggle_key() {
+        let mut subagents = table_with("[toggle]\nadvisor = false\nexplore = true\n");
+        apply_advisor_enabled(&mut subagents, true);
+        let toggle = subagents.get("toggle").unwrap();
+        assert!(
+            toggle.get("advisor").is_none(),
+            "re-enabling clears the override"
+        );
+        assert_eq!(
+            toggle.get("explore").and_then(|v| v.as_bool()),
+            Some(true),
+            "sibling toggle must survive"
+        );
+    }
 }

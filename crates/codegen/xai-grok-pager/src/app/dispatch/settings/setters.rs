@@ -1840,6 +1840,40 @@ pub(in crate::app::dispatch) fn clear_fork_secondary_model(app: &mut AppView) ->
     }]
 }
 
+// ---------------------------------------------------------------------------
+// `/advisor` — pins/unpins the model and enabled state of the built-in
+// advisor subagent. Unlike the settings above, these write directly to
+// `[subagents.roles.advisor]` / `[subagents.toggle]` (not part of the typed
+// settings registry — see `Effect::SetAdvisorModel` doc comment) and have no
+// live in-memory mirror to keep in sync or roll back: advisor is spawned
+// on-demand, so the persisted config is the only state that matters.
+// ---------------------------------------------------------------------------
+
+/// Outer dispatcher for `Action::SetAdvisorModel`. `model.is_empty()` clears
+/// the pin (advisor falls back to inheriting the parent session's model).
+pub(in crate::app::dispatch) fn set_advisor_model(app: &mut AppView, model: String) -> Vec<Effect> {
+    let toast = if model.is_empty() {
+        "\u{2713} Advisor model: inherit from session".to_string()
+    } else {
+        format!("\u{2713} Advisor model: {model}")
+    };
+    app.show_toast(&toast);
+    vec![Effect::SetAdvisorModel(model)]
+}
+
+/// Outer dispatcher for `Action::SetAdvisorEnabled`.
+pub(in crate::app::dispatch) fn set_advisor_enabled(
+    app: &mut AppView,
+    enabled: bool,
+) -> Vec<Effect> {
+    app.show_toast(if enabled {
+        "\u{2713} Advisor enabled"
+    } else {
+        "\u{2713} Advisor disabled"
+    });
+    vec![Effect::SetAdvisorEnabled(enabled)]
+}
+
 // `web_search_model`, `session_summary_model`, and
 // `default_reasoning_effort` setters were removed alongside their
 // registry entries. Mirror fields and TOML schema stay for compat.

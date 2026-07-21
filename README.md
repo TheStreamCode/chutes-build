@@ -24,7 +24,10 @@ research, browser automation, and local memory in one CLI.
   controls inherited from the mature upstream runtime.
 - **Advisor:** a read-only, on-demand reasoning agent that reviews plans,
   difficult decisions, blockers, and completion claims without taking over the
-  executor loop.
+  executor loop. Reasons at maximum effort by default. `/advisor on|off`
+  toggles it; `/advisor <model>` pins a specific model (e.g. your largest or
+  highest-tier available one — Chutes' catalog carries no price/size metadata
+  to pick one automatically); `/advisor default` clears the pin.
 - **Subagent orchestration:** foreground and background workers, concurrent
   fan-out, multi-worker waits, bounded nesting, and isolated worktrees. The
   `chutes-build-orchestrator` preset is tuned for parallel decomposition.

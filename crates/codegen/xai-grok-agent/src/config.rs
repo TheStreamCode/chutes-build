@@ -1614,6 +1614,12 @@ impl AgentDefinition {
         }
     }
     /// Advisor subagent — on-demand senior review with read-only evidence.
+    ///
+    /// Defaults to maximum reasoning effort: it is invoked sparingly, for
+    /// plans, blockers, and completion claims, where review quality matters
+    /// more than latency or cost. `[subagents.roles.advisor]` in config.toml
+    /// (`model`, `reasoning_effort`) overrides this, e.g. to pin it to a
+    /// specific higher-capability model.
     pub fn advisor() -> Self {
         Self {
             description: xai_tool_types::ADVISOR_SUBAGENT.description.to_string(),
@@ -1621,6 +1627,7 @@ impl AgentDefinition {
             permission_mode: PermissionMode::Plan,
             prompt_body: Some(xai_tool_types::ADVISOR_PROMPT.to_string()),
             inherit_skills: false,
+            effort: Some(Effort::Max),
             ..Self::base(BuiltinAgentName::Advisor, "")
         }
     }

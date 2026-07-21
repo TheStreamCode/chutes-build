@@ -553,6 +553,14 @@ pub enum Action {
     /// Clear the persisted fork-secondary model — restores to built-in
     /// default. Active agent keeps its value; next fork uses the default.
     ClearForkSecondaryModel,
+    /// Pin the model the built-in `advisor` subagent uses, via
+    /// `[subagents.roles.advisor].model` in config.toml. Empty string clears
+    /// the pin (advisor inherits the parent session's model — its built-in
+    /// default). Does not touch the live session's own model.
+    SetAdvisorModel(String),
+    /// Enable/disable the built-in `advisor` subagent, via
+    /// `[subagents.toggle].advisor` in config.toml.
+    SetAdvisorEnabled(bool),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required — tips are resolved once at startup.
     SetShowTips(bool),
@@ -1569,6 +1577,14 @@ pub enum Effect {
         value: crate::settings::SettingValue,
         rollback_value: crate::settings::SettingValue,
     },
+    /// Persist `[subagents.roles.advisor].model` directly (not routed through
+    /// `PersistSetting` — `[subagents]` is `HashMap`-shaped and isn't part of
+    /// the typed settings registry). Empty string clears the pin. No live
+    /// state to roll back on failure; a toast reports the error.
+    SetAdvisorModel(String),
+    /// Persist `[subagents.toggle].advisor` directly, same rationale as
+    /// [`Effect::SetAdvisorModel`].
+    SetAdvisorEnabled(bool),
     /// Send structured prompt blocks to the agent.
     /// Used for skill injection where the prompt consists of
     /// multiple content blocks (metadata + skill body).

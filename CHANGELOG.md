@@ -26,6 +26,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Hybrid memory search enabled by default: local recall now combines full-text
   search with semantic vector search against a built-in Chutes-hosted
   embedding model (`Qwen/Qwen3-Embedding-8B-TEE`).
+- Advisor now reasons at maximum effort by default (previously inherited
+  whatever effort the parent session was using). `/advisor on|off` enables or
+  disables the subagent; `/advisor <model>` pins the model it uses;
+  `/advisor default` clears the pin. Writes `[subagents.roles.advisor]` /
+  `[subagents.toggle]` in config.toml — the running session's own model is
+  never touched.
 
 ### Changed
 

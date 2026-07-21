@@ -1882,6 +1882,35 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::SetAdvisorModel(model) => {
+            tasks.spawn(async move {
+                let to_persist = if model.is_empty() { None } else { Some(model.clone()) };
+                match xai_grok_shell::util::config::set_advisor_model(to_persist).await {
+                    Ok(()) => TaskResult::SettingPersisted {
+                        key: "advisor_model",
+                        value: crate::settings::SettingValue::String(model),
+                    },
+                    Err(error) => TaskResult::SettingPersistFailedBestEffort {
+                        key: "advisor_model",
+                        error: error.to_string(),
+                    },
+                }
+            });
+        }
+        Effect::SetAdvisorEnabled(enabled) => {
+            tasks.spawn(async move {
+                match xai_grok_shell::util::config::set_advisor_enabled(enabled).await {
+                    Ok(()) => TaskResult::SettingPersisted {
+                        key: "advisor_enabled",
+                        value: crate::settings::SettingValue::Bool(enabled),
+                    },
+                    Err(error) => TaskResult::SettingPersistFailedBestEffort {
+                        key: "advisor_enabled",
+                        error: error.to_string(),
+                    },
+                }
+            });
+        }
         Effect::Authenticate {
             request_seq,
             method_id,
