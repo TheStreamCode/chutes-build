@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time"] }
 url = { workspace = true }
 urlencoding = { workspace = true }
+xai-grok-secrets = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

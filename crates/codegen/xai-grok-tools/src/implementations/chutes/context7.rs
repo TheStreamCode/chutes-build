@@ -195,4 +195,21 @@ mod tests {
             .is_err()
         );
     }
+
+    /// This guard shares detection rules with memory persistence and log
+    /// sanitization via `chutes_build_core::privacy::contains_probable_secret`
+    /// -> `xai_grok_secrets::detect_probable_secret`; a secret shape with no
+    /// keyword marker (an AWS key has no "api_key"/"token"/etc. substring)
+    /// must still be blocked here, not just in the other two call sites.
+    #[test]
+    fn local_secret_guard_blocks_shapes_without_a_keyword_marker() {
+        assert!(
+            reject_sensitive(
+                "tokio",
+                "see aws AKIAABCDEFGHIJKLMNOP for setup",
+                "context7_search"
+            )
+            .is_err()
+        );
+    }
 }

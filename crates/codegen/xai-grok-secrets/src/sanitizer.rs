@@ -92,6 +92,15 @@ static MATCH_ANY: LazyLock<RegexSet> = LazyLock::new(|| {
     .expect("redact_secrets RegexSet")
 });
 
+/// Cheap boolean check for whether `text` looks like it contains a secret,
+/// using the same pattern set as [`redact_secrets`]. Prefer this over
+/// `redact_secrets(text) != text` when the caller only needs a yes/no
+/// decision (e.g. whether to block a request, or blank a whole line) rather
+/// than the redacted text itself.
+pub fn detect_probable_secret(text: &str) -> bool {
+    MATCH_ANY.is_match(text)
+}
+
 pub fn redact_secrets(input: &str) -> Cow<'_, str> {
     if !MATCH_ANY.is_match(input) {
         return Cow::Borrowed(input);
