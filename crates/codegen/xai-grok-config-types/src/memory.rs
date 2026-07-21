@@ -27,6 +27,21 @@ impl Default for MemoryIndexConfig {
     }
 }
 
+/// Chutes-hosted embedding model used for hybrid memory search by default.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "Qwen/Qwen3-Embedding-8B-TEE";
+
+/// Vector dimensionality of [`DEFAULT_EMBEDDING_MODEL`]'s output.
+pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 4096;
+
+/// Dedicated per-chute endpoint for [`DEFAULT_EMBEDDING_MODEL`].
+///
+/// Chutes' general inference gateway (`llm.chutes.ai`) does not proxy
+/// `/embeddings` — it returns 404. Only this per-chute subdomain serves the
+/// model, so embeddings need their own base URL instead of reusing the chat
+/// completion endpoint.
+pub const DEFAULT_EMBEDDING_BASE_URL: &str =
+    "https://chutes-qwen-qwen3-embedding-8b-tee.chutes.ai/v1";
+
 /// Embedding provider configuration (`[memory.embedding]`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
@@ -37,14 +52,20 @@ pub struct MemoryEmbeddingConfig {
     pub model: Option<String>,
     /// Embedding vector dimensions.
     pub dimensions: usize,
+    /// API base URL for embedding requests. `None` reuses the chat
+    /// completion endpoint (BYOK providers that also serve `/embeddings`
+    /// there); `Some` overrides it — needed for [`DEFAULT_EMBEDDING_MODEL`],
+    /// which lives on its own subdomain.
+    pub base_url: Option<String>,
 }
 
 impl Default for MemoryEmbeddingConfig {
     fn default() -> Self {
         Self {
             provider: "api".to_string(),
-            model: None,
-            dimensions: 1024,
+            model: Some(DEFAULT_EMBEDDING_MODEL.to_string()),
+            dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            base_url: Some(DEFAULT_EMBEDDING_BASE_URL.to_string()),
         }
     }
 }
@@ -410,7 +431,13 @@ mod tests {
     #[test]
     fn sub_config_defaults_match() {
         assert_eq!(MemoryIndexConfig::default().max_chunk_chars, 1600);
-        assert_eq!(MemoryEmbeddingConfig::default().dimensions, 1024);
+        let embedding = MemoryEmbeddingConfig::default();
+        assert_eq!(embedding.dimensions, DEFAULT_EMBEDDING_DIMENSIONS);
+        assert_eq!(embedding.model.as_deref(), Some(DEFAULT_EMBEDDING_MODEL));
+        assert_eq!(
+            embedding.base_url.as_deref(),
+            Some(DEFAULT_EMBEDDING_BASE_URL)
+        );
         let s = MemorySearchConfig::default();
         assert_eq!(s.max_results, 6);
         assert_eq!(s.recency_decay, DEFAULT_RECENCY_DECAY);

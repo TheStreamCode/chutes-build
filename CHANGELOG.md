@@ -21,6 +21,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Privacy-first defaults with telemetry, remote trace upload, and automatic
   update checks disabled.
 - Cross-platform npm launcher and native package pipeline.
+- Voice dictation (`/voice`, Ctrl+Space, or the mic icon), enabled by default;
+  recording still starts only on an explicit manual press.
+- Hybrid memory search enabled by default: local recall now combines full-text
+  search with semantic vector search against a built-in Chutes-hosted
+  embedding model (`Qwen/Qwen3-Embedding-8B-TEE`).
 
 ### Changed
 
@@ -59,6 +64,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Chutes for a generic "Invalid input parameters" error instead of a precise
   local one.
 - The terminal window/tab title showed "grok" instead of "chutes-build".
+- Memory embeddings always sent requests to the chat completion base URL
+  (`llm.chutes.ai`, which does not proxy `/embeddings` and 404s), and
+  unconditionally requested Matryoshka-truncated output via a `dimensions`
+  field the default embedding model rejects outright (400). Together these
+  made vector memory search completely unusable even when `[memory.embedding]`
+  was explicitly configured. Embeddings now use their own configurable base
+  URL (defaulting to the model's dedicated endpoint) and no longer request
+  truncation.
 
 ### Security
 

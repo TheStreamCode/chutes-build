@@ -365,7 +365,14 @@ pub(crate) async fn spawn_session_actor(
         let _ = web_search_sampling_config;
         xai_grok_tools::implementations::WebSearchConfig::Native
     };
-    let embed_base_url = sampling_config.base_url.clone();
+    // The embedding model lives on its own per-chute subdomain, not on the
+    // general chat inference gateway (which 404s on `/embeddings`). Prefer
+    // the configured embedding base URL; fall back to the chat endpoint for
+    // BYOK providers that serve both from the same host.
+    let embed_base_url = memory_config
+        .as_ref()
+        .and_then(|mc| mc.embedding.base_url.clone())
+        .unwrap_or_else(|| sampling_config.base_url.clone());
     let embed_api_key = sampling_config.api_key.clone();
     let session_pruning_config: crate::config::PruningConfig = memory_config.as_ref().map_or_else(
         || crate::config::PruningConfig {

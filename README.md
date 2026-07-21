@@ -54,6 +54,11 @@ research, browser automation, and local memory in one CLI.
   connection and an isolated temporary browser profile.
 - **Local memory:** Chutes Build maintains a secret-filtered `memories.md` file
   and can be launched with `--no-memory` when a stateless session is preferred.
+  Recall is hybrid by default — full-text search combined with semantic vector
+  search against a built-in Chutes-hosted embedding model.
+- **Voice input:** hold-to-record dictation transcribes speech into the prompt
+  box. Enabled by default; activation is always manual (mic icon, `/voice`, or
+  Ctrl+Space) — Chutes Build never records without an explicit press.
 - **Time awareness and wellness:** the agent receives the local date, time, and
   timezone and can suggest a break after long or late sessions.
 - **Privacy by construction:** telemetry, remote error reporting, automatic

@@ -116,10 +116,14 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
         // Process in batches to respect API payload limits
         for batch in texts.chunks(self.max_batch_size) {
             let input: Vec<&str> = batch.to_vec();
+            // `self.dimensions` is the vector width the local sqlite-vec index was
+            // built for — not a truncation request. Sending it as `dimensions` asks
+            // the API for Matryoshka truncation, which non-truncatable models (e.g.
+            // Qwen3-Embedding) reject outright with a 400. Configured `dimensions`
+            // must match what `model` actually returns natively.
             let body_json = serde_json::json!({
                 "model": self.model,
                 "input": input,
-                "dimensions": self.dimensions,
             });
 
             // Retry with exponential backoff on transient errors (429, 5xx)
@@ -279,5 +283,33 @@ mod tests {
         let provider = MockEmbeddingProvider { dimensions: 128 };
         let results = provider.embed_batch(&["test"]).await.unwrap();
         assert_eq!(results[0].len(), 128);
+    }
+
+    /// Live check against the real default embedding endpoint. Not run in CI
+    /// (no network / API key there) — run manually with
+    /// `CHUTES_API_KEY=... cargo test -p xai-grok-memory --lib -- --ignored live_default_embedding_config_round_trips`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_default_embedding_config_round_trips() {
+        let Ok(api_key) = std::env::var("CHUTES_API_KEY") else {
+            return;
+        };
+        let config = xai_grok_config_types::MemoryEmbeddingConfig::default();
+        let base_url = config
+            .base_url
+            .clone()
+            .expect("default config has a base_url");
+        let provider = ApiEmbeddingProvider::from_session(&config, base_url, api_key)
+            .expect("default config has a model");
+        let result = provider
+            .embed_batch(&["live embedding integration check"])
+            .await
+            .expect("embed_batch against the real default endpoint must succeed");
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].len(),
+            config.dimensions,
+            "returned vector width must match the configured dimensions"
+        );
     }
 }
