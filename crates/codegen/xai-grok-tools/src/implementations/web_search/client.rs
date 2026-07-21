@@ -280,10 +280,9 @@ fn duckduckgo_target_url(href: &str) -> Option<String> {
     if url
         .host_str()
         .is_some_and(|host| host.ends_with("duckduckgo.com"))
+        && let Some((_, target)) = url.query_pairs().find(|(key, _)| key == "uddg")
     {
-        if let Some((_, target)) = url.query_pairs().find(|(key, _)| key == "uddg") {
-            return Some(target.into_owned());
-        }
+        return Some(target.into_owned());
     }
     Some(url.to_string())
 }

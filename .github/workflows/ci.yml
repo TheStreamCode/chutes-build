@@ -78,6 +78,12 @@ jobs:
         run: cargo check -p chutes-build --locked
       - name: Test Chutes Build core
         run: cargo test -p chutes-build-core --locked
+      - name: Test Chutes-native tools
+        run: cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
+      - name: Clippy (Chutes-owned packages)
+        run: |
+          cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools \
+            --all-targets --locked --no-deps -- -D warnings
 
   npm-package:
     name: npm package
@@ -103,6 +109,29 @@ jobs:
   windows-check:
     name: Rust check (Windows)
     runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Restore Cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-
+      - name: Check Chutes Build
+        run: cargo check -p chutes-build --locked
+
+  macos-check:
+    name: Rust check (macOS)
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Check out repository

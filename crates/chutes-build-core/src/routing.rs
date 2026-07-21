@@ -64,17 +64,9 @@ pub fn select_capable_model<'a>(
         .filter(|candidate| candidate.score(class, require_tools) != i64::MIN)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FallbackPolicy {
     pub strict_model: bool,
-}
-
-impl Default for FallbackPolicy {
-    fn default() -> Self {
-        Self {
-            strict_model: false,
-        }
-    }
 }
 
 impl FallbackPolicy {

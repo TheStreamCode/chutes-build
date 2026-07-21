@@ -439,7 +439,7 @@ fn parse_cords(value: &serde_json::Value) -> Vec<Cord> {
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|cord| {
+        .map(|cord| {
             let path =
                 first_string(cord, &["public_api_path", "path"]).unwrap_or_else(|| "/".to_owned());
             let path = if path.starts_with('/') {
@@ -447,7 +447,7 @@ fn parse_cords(value: &serde_json::Value) -> Vec<Cord> {
             } else {
                 format!("/{path}")
             };
-            Some(Cord {
+            Cord {
                 name: first_string(cord, &["name"]).unwrap_or_else(|| {
                     path.trim_start_matches('/')
                         .split('/')
@@ -462,7 +462,7 @@ fn parse_cords(value: &serde_json::Value) -> Vec<Cord> {
                 content_type: first_string(cord, &["output_content_type"]),
                 schema: first_value(cord, &["input_schema", "minimal_input_schema", "input"])
                     .or_else(|| cord.pointer("/schema/input").cloned()),
-            })
+            }
         })
         .collect()
 }

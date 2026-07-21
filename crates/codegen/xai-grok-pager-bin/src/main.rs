@@ -1071,7 +1071,9 @@ async fn run_agent_command(
                             stdin_lines.recv() => { let Some(line) = maybe_line else {
                             break }; let line = String::from_utf8_lossy(& line); let
                             trimmed = line.trim_end_matches(['\r', '\n']).to_string(); if
-                            trimmed.is_empty() { continue; } if trimmed
+                            trimmed.is_empty() { continue; }
+
+                            if trimmed
                             .contains("\"initialize\"") || trimmed
                             .contains("\"session/load\"") || trimmed
                             .contains("\"session/new\"") { cache_outgoing_acp_state(&
