@@ -302,6 +302,8 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             .map_err(|error| execution_error("generate_media", error))?;
         assert_content_type(input.kind, &media.content_type)
             .map_err(|error| execution_error("generate_media", error))?;
+        let detected = verify_media_content(input.kind, &media.bytes)
+            .map_err(|error| execution_error("generate_media", error))?;
 
         let configured_output = input.output_dir.clone().or_else(|| {
             std::env::var("CHUTES_OUTPUT_DIR").ok().map(|base| {
@@ -314,7 +316,9 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
         let output_dir = secure_output_dir(&cwd, configured_output.as_deref(), input.kind)
             .await
             .map_err(|error| execution_error("generate_media", error))?;
-        let extension = extension_for(&media.content_type, input.kind);
+        let extension = detected
+            .map(|detected| detected.extension())
+            .unwrap_or_else(|| extension_for(&media.content_type, input.kind));
         let stem = input
             .filename
             .as_deref()
@@ -563,23 +567,32 @@ fn validate_schema_fields(
     }
 }
 
-/// Recursively force (`close = true`) or lift (`close = false`)
-/// `additionalProperties` on every object schema segment that declares
-/// `properties`. Chutes cord schemas rarely set `additionalProperties`
+/// Recursively force (`close = true`) `additionalProperties: false` on every
+/// object schema segment that declares `properties` and doesn't already
+/// restrict it itself. Chutes cord schemas rarely set `additionalProperties`
 /// themselves, but this tool treats every declared-`properties` object as
 /// closed by default (catches typo'd field names instead of silently
-/// dropping/forwarding them) -- `CHUTES_ALLOW_UNKNOWN_PARAMS=1` lifts that
-/// back to standard JSON Schema's open-by-default behavior.
+/// dropping/forwarding them) -- `CHUTES_ALLOW_UNKNOWN_PARAMS=1` disables this
+/// pass entirely (`close = false`), leaving the schema exactly as Chutes
+/// published it, standard JSON Schema's open-by-default semantics included.
+///
+/// Never overwrites a schema that already has an opinion:
+/// `additionalProperties` (boolean *or* schema-valued -- either means the
+/// author already restricted or intentionally allowed extra fields) and
+/// `unevaluatedProperties` are both left untouched when present, so this
+/// tool only ever narrows validation the schema left unspecified, never a
+/// restriction (or permission) Chutes explicitly declared.
 fn close_object_schemas(schema: &mut serde_json::Value, close: bool) {
+    if !close {
+        return;
+    }
     match schema {
         serde_json::Value::Object(map) => {
-            if map.contains_key("properties") {
-                if close {
-                    map.insert("additionalProperties".to_owned(), serde_json::json!(false));
-                } else {
-                    map.remove("additionalProperties");
-                    map.remove("unevaluatedProperties");
-                }
+            if map.contains_key("properties")
+                && !map.contains_key("additionalProperties")
+                && !map.contains_key("unevaluatedProperties")
+            {
+                map.insert("additionalProperties".to_owned(), serde_json::json!(false));
             }
             for value in map.values_mut() {
                 close_object_schemas(value, close);
@@ -594,45 +607,67 @@ fn close_object_schemas(schema: &mut serde_json::Value, close: bool) {
     }
 }
 
+/// Known free-text field names that must never be treated as a file path,
+/// however path-like their value happens to look. Checked at every nesting
+/// level (a `caption` inside `args.caption` is excluded exactly like a
+/// top-level `caption` would be), not just at the top level.
+const TEXT_FIELDS: &[&str] = &[
+    "prompt",
+    "negative_prompt",
+    "text",
+    "lyrics",
+    "caption",
+    "description",
+    "style",
+];
+
+/// Recursively walks `params` and base64-encodes any string value that
+/// resolves to a real file inside the workspace, so nested wrapper shapes
+/// some cords require (e.g. `{"args": {"image": "input.png"}}`) are handled
+/// the same as a top-level field.
 async fn encode_workspace_assets(
     params: &mut serde_json::Map<String, serde_json::Value>,
     cwd: &Path,
 ) -> Result<(), String> {
-    const TEXT_FIELDS: &[&str] = &[
-        "prompt",
-        "negative_prompt",
-        "text",
-        "lyrics",
-        "caption",
-        "description",
-        "style",
-    ];
     let canonical_cwd = dunce::canonicalize(cwd).map_err(|error| error.to_string())?;
     for (key, value) in params.iter_mut() {
+        encode_workspace_assets_in_value(key, value, &canonical_cwd).await?;
+    }
+    Ok(())
+}
+
+fn encode_workspace_assets_in_value<'a>(
+    key: &'a str,
+    value: &'a mut serde_json::Value,
+    cwd: &'a Path,
+) -> futures::future::BoxFuture<'a, Result<(), String>> {
+    Box::pin(async move {
         if TEXT_FIELDS.contains(&key.to_lowercase().as_str()) {
-            continue;
+            return Ok(());
         }
         match value {
             serde_json::Value::String(candidate) => {
-                if let Some(encoded) = encode_workspace_file(candidate, &canonical_cwd).await? {
+                if let Some(encoded) = encode_workspace_file(candidate, cwd).await? {
                     *candidate = encoded;
                 }
             }
             serde_json::Value::Array(items) => {
-                for item in items {
-                    if let serde_json::Value::String(candidate) = item {
-                        if let Some(encoded) =
-                            encode_workspace_file(candidate, &canonical_cwd).await?
-                        {
-                            *candidate = encoded;
-                        }
-                    }
+                // Array items have no field name of their own; the parent
+                // key's text-field exclusion still applies to each element
+                // (e.g. an `examples` array of caption strings).
+                for item in items.iter_mut() {
+                    encode_workspace_assets_in_value(key, item, cwd).await?;
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (child_key, child_value) in map.iter_mut() {
+                    encode_workspace_assets_in_value(child_key, child_value, cwd).await?;
                 }
             }
             _ => {}
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 async fn encode_workspace_file(value: &str, cwd: &Path) -> Result<Option<String>, String> {
@@ -880,6 +915,66 @@ fn assert_content_type(kind: MediaKind, content_type: &str) -> Result<(), String
     Ok(())
 }
 
+/// Confirms `bytes` actually look like the requested media family before
+/// they're saved to disk, using magic-byte detection rather than trusting
+/// only the (server- or proxy-controlled) declared `Content-Type` header.
+/// Chutes error responses are typically HTML or JSON; neither has a
+/// reliable magic-byte signature (`infer` can't identify them), so those are
+/// caught separately by a lightweight textual sniff.
+///
+/// Returns the sniffed type on success (`None` when the bytes are a
+/// recognized family member but not one `infer` has a matcher for, or when
+/// they're inconclusive but pass through anyway -- e.g. a real WAV/FLAC
+/// variant `infer` doesn't cover) so the caller can prefer it over the
+/// declared header when choosing a filename extension.
+fn verify_media_content(kind: MediaKind, bytes: &[u8]) -> Result<Option<infer::Type>, String> {
+    if bytes.is_empty() {
+        return Err("model returned an empty response body".to_owned());
+    }
+    if looks_like_text_error_document(bytes) {
+        return Err(format!(
+            "model returned what looks like an HTML/JSON/text document instead of {} data",
+            kind.as_str()
+        ));
+    }
+    let Some(detected) = infer::get(bytes) else {
+        // No magic-byte match at all (e.g. some raw PCM/less-common audio
+        // containers): not proof of anything either way, fall through to
+        // the header-based check already run by the caller.
+        return Ok(None);
+    };
+    let expected_family = match kind {
+        MediaKind::Image => "image/",
+        MediaKind::Video => "video/",
+        MediaKind::Music | MediaKind::Speech => "audio/",
+    };
+    if !detected.mime_type().starts_with(expected_family) {
+        return Err(format!(
+            "response bytes are `{}` (detected from content), expected `{expected_family}*`",
+            detected.mime_type()
+        ));
+    }
+    Ok(Some(detected))
+}
+
+/// Cheap prefix sniff for HTML/JSON error bodies, which `infer`'s
+/// magic-byte matchers can't catch (plain text has no binary signature).
+/// Only a short prefix is UTF-8-decoded; real binary media essentially
+/// never happens to be valid UTF-8 there, so this is a fast, low-risk check
+/// that doesn't require decoding the whole (possibly huge) response.
+fn looks_like_text_error_document(bytes: &[u8]) -> bool {
+    let prefix_len = bytes.len().min(512);
+    let Ok(text) = std::str::from_utf8(&bytes[..prefix_len]) else {
+        return false;
+    };
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('<') {
+        return true;
+    }
+    (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && serde_json::from_slice::<serde_json::Value>(bytes).is_ok()
+}
+
 fn extension_for(content_type: &str, kind: MediaKind) -> &'static str {
     match content_type
         .split(';')
@@ -1006,6 +1101,21 @@ fn read_only_capabilities() -> xai_tool_protocol::ToolCapabilities {
 mod tests {
     use super::*;
 
+    /// Serializes tests that call `encode_workspace_assets`/
+    /// `encode_workspace_file` against the process-global
+    /// `CHUTES_MAX_INPUT_ASSET_BYTES` env var, so the one test that mutates
+    /// it can't make an unrelated concurrently-running test see a bogus
+    /// byte limit.
+    async fn with_asset_encoding_lock<F, Fut, R>(f: F) -> R
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = R>,
+    {
+        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = LOCK.lock().await;
+        f().await
+    }
+
     #[test]
     fn invoke_url_does_not_duplicate_owner() {
         let detail = serde_json::json!({ "username": "mike", "slug": "mike-flux" });
@@ -1018,6 +1128,68 @@ mod tests {
     #[test]
     fn output_filename_is_sanitized() {
         assert_eq!(sanitize_filename("../my unsafe/image.png"), "image");
+    }
+
+    #[test]
+    fn accepts_real_media_bytes_for_each_family() {
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
+        let jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF";
+        let webp = b"RIFF\x00\x00\x00\x00WEBPVP8 ";
+        let gif = b"GIF89a\x01\x00\x01\x00";
+        let mp4 = b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41";
+        let webm = b"\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01";
+        let wav = b"RIFF\x00\x00\x00\x00WAVEfmt ";
+        let mp3 = b"ID3\x03\x00\x00\x00\x00\x00\x00";
+        let ogg = b"OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00";
+        let flac = b"fLaC\x00\x00\x00\x22";
+
+        for (bytes, kind, label) in [
+            (&png[..], MediaKind::Image, "png"),
+            (&jpeg[..], MediaKind::Image, "jpeg"),
+            (&webp[..], MediaKind::Image, "webp"),
+            (&gif[..], MediaKind::Image, "gif"),
+            (&mp4[..], MediaKind::Video, "mp4"),
+            (&webm[..], MediaKind::Video, "webm"),
+            (&wav[..], MediaKind::Music, "wav"),
+            (&mp3[..], MediaKind::Music, "mp3"),
+            (&ogg[..], MediaKind::Music, "ogg"),
+            (&flac[..], MediaKind::Music, "flac"),
+        ] {
+            let result = verify_media_content(kind, bytes);
+            assert!(result.is_ok(), "{label} should be accepted: {result:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_html_error_page() {
+        let body = b"<!DOCTYPE html><html><body>502 Bad Gateway</body></html>";
+        assert!(verify_media_content(MediaKind::Image, body).is_err());
+    }
+
+    #[test]
+    fn rejects_json_error_payload() {
+        let body = br#"{"error": "no instances available"}"#;
+        assert!(verify_media_content(MediaKind::Image, body).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_response() {
+        assert!(verify_media_content(MediaKind::Image, b"").is_err());
+    }
+
+    #[test]
+    fn rejects_wrong_media_family_by_content() {
+        let wav = b"RIFF\x00\x00\x00\x00WAVEfmt ";
+        // Real audio bytes returned when an image was requested must still
+        // be rejected -- the declared header isn't the only thing checked.
+        assert!(verify_media_content(MediaKind::Image, wav).is_err());
+    }
+
+    #[test]
+    fn octet_stream_with_real_media_bytes_is_identified_and_accepted() {
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR";
+        let detected = verify_media_content(MediaKind::Image, png).unwrap();
+        assert_eq!(detected.unwrap().mime_type(), "image/png");
     }
 
     #[test]
@@ -1099,5 +1271,249 @@ mod tests {
         write_new_file(&path, b"first").await.unwrap();
         assert!(write_new_file(&path, b"second").await.is_err());
         assert_eq!(tokio::fs::read(path).await.unwrap(), b"first");
+    }
+
+    #[test]
+    fn schema_close_preserves_explicit_additional_properties_true() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "prompt": { "type": "string" } },
+            "additionalProperties": true
+        });
+        close_object_schemas(&mut schema, true);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn schema_close_preserves_schema_valued_additional_properties() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "prompt": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        });
+        close_object_schemas(&mut schema, true);
+        assert_eq!(
+            schema["additionalProperties"],
+            serde_json::json!({ "type": "string" })
+        );
+    }
+
+    #[test]
+    fn schema_close_preserves_unevaluated_properties() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "prompt": { "type": "string" } },
+            "unevaluatedProperties": false
+        });
+        close_object_schemas(&mut schema, true);
+        assert!(
+            !schema
+                .as_object()
+                .unwrap()
+                .contains_key("additionalProperties"),
+            "must not add additionalProperties alongside an explicit unevaluatedProperties: {schema}"
+        );
+    }
+
+    #[test]
+    fn schema_close_still_closes_schemas_with_no_explicit_opinion() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "prompt": { "type": "string" } }
+        });
+        close_object_schemas(&mut schema, true);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn allow_unknown_leaves_the_schema_completely_untouched() {
+        // CHUTES_ALLOW_UNKNOWN_PARAMS must never *remove* a restriction the
+        // provider declared -- it only disables this tool's own default.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": { "prompt": { "type": "string" } },
+            "additionalProperties": false
+        });
+        let original = schema.clone();
+        close_object_schemas(&mut schema, false);
+        assert_eq!(
+            schema, original,
+            "allow_unknown must not alter provider schema"
+        );
+    }
+
+    #[tokio::test]
+    async fn encodes_asset_nested_inside_an_object_wrapper() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("input.png"), b"fake png bytes").unwrap();
+            let mut params = serde_json::json!({ "args": { "image": "input.png" } })
+                .as_object()
+                .cloned()
+                .unwrap();
+            encode_workspace_assets(&mut params, root.path())
+                .await
+                .unwrap();
+            let encoded = params["args"]["image"].as_str().unwrap();
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .unwrap(),
+                b"fake png bytes"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn encodes_asset_nested_inside_an_array_of_objects() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("a.png"), b"a-bytes").unwrap();
+            std::fs::write(root.path().join("b.png"), b"b-bytes").unwrap();
+            let mut params = serde_json::json!({
+                "images": [{ "path": "a.png" }, { "path": "b.png" }]
+            })
+            .as_object()
+            .cloned()
+            .unwrap();
+            encode_workspace_assets(&mut params, root.path())
+                .await
+                .unwrap();
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(params["images"][0]["path"].as_str().unwrap())
+                    .unwrap(),
+                b"a-bytes"
+            );
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(params["images"][1]["path"].as_str().unwrap())
+                    .unwrap(),
+                b"b-bytes"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn text_fields_are_never_treated_as_paths_even_when_nested() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            // A file that happens to exist at this relative path -- if the
+            // exclusion didn't apply at nested levels too, this would
+            // wrongly get base64-encoded instead of staying literal prompt
+            // text.
+            std::fs::write(root.path().join("a cat"), b"decoy").unwrap();
+            let mut params = serde_json::json!({ "args": { "prompt": "a cat" } })
+                .as_object()
+                .cloned()
+                .unwrap();
+            encode_workspace_assets(&mut params, root.path())
+                .await
+                .unwrap();
+            assert_eq!(params["args"]["prompt"], serde_json::json!("a cat"));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_asset_outside_the_workspace() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let outside_file = outside.path().join("secret.png");
+            std::fs::write(&outside_file, b"outside bytes").unwrap();
+            let mut params = serde_json::json!({ "image": outside_file.to_str().unwrap() })
+                .as_object()
+                .cloned()
+                .unwrap();
+            assert!(
+                encode_workspace_assets(&mut params, root.path())
+                    .await
+                    .is_err()
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_asset() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("big.bin"), vec![0u8; 4096]).unwrap();
+            // SAFETY: serialized by `with_asset_encoding_lock` against every
+            // other test in this module that reads this env var.
+            unsafe {
+                std::env::set_var("CHUTES_MAX_INPUT_ASSET_BYTES", "10");
+            }
+            let mut params = serde_json::json!({ "image": "big.bin" })
+                .as_object()
+                .cloned()
+                .unwrap();
+            let result = encode_workspace_assets(&mut params, root.path()).await;
+            unsafe {
+                std::env::remove_var("CHUTES_MAX_INPUT_ASSET_BYTES");
+            }
+            assert!(result.is_err());
+        })
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_symlink_escaping_the_workspace() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("secret.png");
+            std::fs::write(&target, b"outside bytes").unwrap();
+            let link = root.path().join("escape.png");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            let mut params = serde_json::json!({ "image": "escape.png" })
+                .as_object()
+                .cloned()
+                .unwrap();
+            assert!(
+                encode_workspace_assets(&mut params, root.path())
+                    .await
+                    .is_err()
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn relative_and_absolute_in_workspace_paths_both_resolve() {
+        with_asset_encoding_lock(|| async {
+            let root = tempfile::tempdir().unwrap();
+            let canonical_root = dunce::canonicalize(root.path()).unwrap();
+            std::fs::write(canonical_root.join("rel.png"), b"rel-bytes").unwrap();
+            std::fs::write(canonical_root.join("abs.png"), b"abs-bytes").unwrap();
+            let abs_path = canonical_root.join("abs.png").to_str().unwrap().to_owned();
+            let mut params = serde_json::json!({
+                "rel": "rel.png",
+                "abs": abs_path,
+            })
+            .as_object()
+            .cloned()
+            .unwrap();
+            encode_workspace_assets(&mut params, root.path())
+                .await
+                .unwrap();
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(params["rel"].as_str().unwrap())
+                    .unwrap(),
+                b"rel-bytes"
+            );
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(params["abs"].as_str().unwrap())
+                    .unwrap(),
+                b"abs-bytes"
+            );
+        })
+        .await;
     }
 }

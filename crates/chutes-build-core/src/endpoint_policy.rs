@@ -83,6 +83,88 @@ pub fn validate_endpoint_url(url: &str) -> Result<(), EndpointTrustError> {
     Ok(())
 }
 
+/// DNS resolver that refuses to hand back private/loopback/link-local/
+/// reserved addresses, so an outbound request to an attacker-influenced
+/// hostname (e.g. a URL embedded in a chute's response) can't reach the
+/// internal network -- including via DNS rebinding, since the check runs on
+/// the exact addresses the connection is about to use, not a separate
+/// earlier lookup that could go stale before the connect happens.
+///
+/// Wraps the system resolver (`tokio::net::lookup_host`, the same
+/// `getaddrinfo`-backed resolution reqwest's default resolver would use)
+/// rather than implementing DNS itself.
+///
+/// Respects [`INSECURE_OPT_IN_VAR`], same as [`validate_endpoint_url`] --
+/// otherwise a local dev/fork setup that opted a `127.0.0.1` endpoint past
+/// URL validation would still get blocked here, at the DNS layer.
+#[derive(Debug, Clone, Default)]
+pub struct SsrfSafeResolver;
+
+impl reqwest::dns::Resolve for SsrfSafeResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("DNS resolution failed for {host}: {error}").into()
+                })?
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("no addresses resolved for {host}").into());
+            }
+            if insecure_opt_in() {
+                return Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs);
+            }
+            if let Some(blocked) = addrs.iter().find(|addr| is_blocked_address(addr.ip())) {
+                return Err(format!(
+                    "refusing to connect to {host}: resolves to {} \
+                     (private/loopback/link-local/reserved address)",
+                    blocked.ip()
+                )
+                .into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+fn is_blocked_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_multicast()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || is_ipv6_unique_local(&v6)
+                || is_ipv6_link_local(&v6)
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_blocked_address(std::net::IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// `fc00::/7` -- IPv6 unique local addresses (the IPv6 analog of
+/// RFC1918 private ranges). Not yet covered by a stable `Ipv6Addr` method.
+fn is_ipv6_unique_local(ip: &std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
+/// `fe80::/10` -- IPv6 link-local addresses. Not yet covered by a stable
+/// `Ipv6Addr` method.
+fn is_ipv6_link_local(ip: &std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +309,91 @@ mod tests {
                 Err(EndpointTrustError::InsecureScheme)
             );
         });
+    }
+
+    #[test]
+    fn blocks_loopback_addresses() {
+        assert!(is_blocked_address("127.0.0.1".parse().unwrap()));
+        assert!(is_blocked_address("::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocks_private_ipv4_ranges() {
+        for ip in ["10.0.0.1", "172.16.0.1", "192.168.1.1"] {
+            assert!(
+                is_blocked_address(ip.parse().unwrap()),
+                "{ip} should be blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn blocks_link_local_addresses() {
+        assert!(is_blocked_address("169.254.1.1".parse().unwrap()));
+        assert!(is_blocked_address("fe80::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocks_unspecified_and_multicast() {
+        assert!(is_blocked_address("0.0.0.0".parse().unwrap()));
+        assert!(is_blocked_address("::".parse().unwrap()));
+        assert!(is_blocked_address("224.0.0.1".parse().unwrap()));
+        assert!(is_blocked_address("ff02::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocks_ipv6_unique_local_addresses() {
+        assert!(is_blocked_address("fc00::1".parse().unwrap()));
+        assert!(is_blocked_address("fd12:3456:789a::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn blocks_ipv4_mapped_ipv6_private_address() {
+        // ::ffff:10.0.0.1 -- an IPv6-mapped view of a private IPv4 address;
+        // must be blocked via the same policy as the plain IPv4 form.
+        assert!(is_blocked_address("::ffff:10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn allows_public_addresses() {
+        assert!(!is_blocked_address("8.8.8.8".parse().unwrap()));
+        assert!(!is_blocked_address("2001:4860:4860::8888".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn resolver_rejects_a_hostname_that_only_resolves_to_loopback() {
+        use reqwest::dns::Resolve as _;
+        // SAFETY: gated behind #[serial].
+        unsafe {
+            std::env::remove_var(INSECURE_OPT_IN_VAR);
+        }
+        let resolver = SsrfSafeResolver;
+        let name: reqwest::dns::Name = "localhost".parse().unwrap();
+        let result = resolver.resolve(name).await;
+        assert!(
+            result.is_err(),
+            "localhost must not resolve for outbound requests"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn resolver_allows_loopback_when_insecure_opt_in_is_set() {
+        use reqwest::dns::Resolve as _;
+        // SAFETY: gated behind #[serial].
+        unsafe {
+            std::env::set_var(INSECURE_OPT_IN_VAR, "1");
+        }
+        let resolver = SsrfSafeResolver;
+        let name: reqwest::dns::Name = "localhost".parse().unwrap();
+        let result = resolver.resolve(name).await;
+        unsafe {
+            std::env::remove_var(INSECURE_OPT_IN_VAR);
+        }
+        assert!(
+            result.is_ok(),
+            "opt-in must allow local dev/test endpoints to resolve"
+        );
     }
 }

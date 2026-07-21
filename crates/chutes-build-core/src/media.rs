@@ -20,6 +20,9 @@ impl ChutesMediaClient {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(600))
                 .redirect(reqwest::redirect::Policy::none())
+                .dns_resolver(std::sync::Arc::new(
+                    crate::endpoint_policy::SsrfSafeResolver,
+                ))
                 .build()?,
             endpoints,
             credentials: ChutesCredentials::from_env()?,
