@@ -14,12 +14,14 @@ pub struct ChutesAccountClient {
 
 impl ChutesAccountClient {
     pub fn from_env() -> Result<Self, AccountError> {
+        let endpoints = ChutesEndpoints::default();
+        endpoints.validate()?;
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            endpoints: ChutesEndpoints::default(),
+            endpoints,
             credentials: ChutesCredentials::from_env()?,
         })
     }
@@ -89,7 +91,7 @@ impl ChutesAccountClient {
             .get(format!("{}{}", self.endpoints.account, path))
             .header(
                 AUTHORIZATION,
-                self.credentials.management_authorization().as_ref(),
+                self.credentials.management_authorization_header(),
             )
             .header(ACCEPT, "application/json")
             .send()
@@ -167,6 +169,8 @@ fn encode_path_segment(value: &str) -> String {
 pub enum AccountError {
     #[error(transparent)]
     Credentials(#[from] crate::endpoints::CredentialError),
+    #[error(transparent)]
+    EndpointTrust(#[from] crate::endpoint_policy::EndpointTrustError),
     #[error(transparent)]
     Request(#[from] reqwest::Error),
     #[error("Chutes account API returned HTTP {status}: {body}")]

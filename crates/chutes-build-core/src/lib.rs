@@ -3,6 +3,7 @@
 pub mod account;
 pub mod catalog;
 pub mod context7;
+pub mod endpoint_policy;
 pub mod endpoints;
 pub mod media;
 pub mod privacy;

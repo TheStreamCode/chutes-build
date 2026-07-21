@@ -23,12 +23,14 @@ pub struct ChutesVisionClient {
 
 impl ChutesVisionClient {
     pub fn from_env() -> Result<Self, VisionError> {
+        let endpoints = ChutesEndpoints::default();
+        endpoints.validate()?;
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            endpoints: ChutesEndpoints::default(),
+            endpoints,
             credentials: ChutesCredentials::from_env()?,
         })
     }
@@ -72,7 +74,7 @@ impl ChutesVisionClient {
             .post(url)
             .header(
                 AUTHORIZATION,
-                self.credentials.inference_authorization().as_ref(),
+                self.credentials.inference_authorization_header(),
             )
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "application/json")
@@ -121,6 +123,8 @@ pub struct TranscribeResponse {
 pub enum VisionError {
     #[error(transparent)]
     Credentials(#[from] crate::endpoints::CredentialError),
+    #[error(transparent)]
+    EndpointTrust(#[from] crate::endpoint_policy::EndpointTrustError),
     #[error("Chutes vision request failed: {0}")]
     Request(#[from] reqwest::Error),
     #[error("Chutes returned HTTP {status}: {body}")]

@@ -826,12 +826,22 @@ impl SamplingClient {
         format!("{base}/{path}")
     }
 
-    fn chat_completions_endpoint(&self, model: &str) -> String {
+    fn chat_completions_endpoint(&self, model: &str) -> Result<String> {
         if is_chutes_backend(&self.base_url) && model.eq_ignore_ascii_case("model-router") {
             let endpoints = chutes_build_core::endpoints::ChutesEndpoints::default();
-            return format!("{}/chat/completions", endpoints.router);
+            // `CHUTES_ROUTER_BASE_URL` is env-overridable; refuse to send a
+            // session credential to whatever it resolves to unless it's
+            // still a trusted Chutes/router host (see `endpoint_policy`).
+            chutes_build_core::endpoint_policy::validate_endpoint_url(&endpoints.router).map_err(
+                |_| {
+                    SamplingError::InvalidConfiguration(
+                        "CHUTES_ROUTER_BASE_URL is not a trusted endpoint",
+                    )
+                },
+            )?;
+            return Ok(format!("{}/chat/completions", endpoints.router));
         }
-        self.endpoint("chat/completions")
+        Ok(self.endpoint("chat/completions"))
     }
 
     fn apply_defaults(&self, mut request: ChatCompletionRequest) -> Result<ChatCompletionRequest> {
@@ -921,7 +931,7 @@ impl SamplingClient {
             user_id: payload.x_grok_user_id.as_deref(),
         };
         let http_request = grok_headers
-            .apply(self.post(self.chat_completions_endpoint(&model_id)))
+            .apply(self.post(self.chat_completions_endpoint(&model_id)?))
             .json(&ChatRequestWithTemplate {
                 inner: &payload,
                 chat_template_kwargs: chat_template_kwargs.as_ref(),
@@ -994,7 +1004,7 @@ impl SamplingClient {
                 deployment_id: attempt_payload.x_grok_deployment_id.as_deref(),
                 user_id: attempt_payload.x_grok_user_id.as_deref(),
             };
-            let endpoint = self.chat_completions_endpoint(candidate);
+            let endpoint = self.chat_completions_endpoint(candidate)?;
             let built_request = grok_headers
                 .apply(self.post(endpoint.clone()))
                 .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
@@ -2453,11 +2463,13 @@ mod tests {
         .expect("client should construct");
 
         assert_eq!(
-            client.chat_completions_endpoint("zai-org/GLM-5.2-TEE"),
+            client
+                .chat_completions_endpoint("zai-org/GLM-5.2-TEE")
+                .unwrap(),
             "https://llm.chutes.ai/v1/chat/completions"
         );
         assert_eq!(
-            client.chat_completions_endpoint("model-router"),
+            client.chat_completions_endpoint("model-router").unwrap(),
             format!(
                 "{}/chat/completions",
                 chutes_build_core::endpoints::ChutesEndpoints::default().router

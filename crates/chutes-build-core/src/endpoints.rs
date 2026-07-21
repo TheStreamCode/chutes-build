@@ -23,6 +23,18 @@ impl Default for ChutesEndpoints {
     }
 }
 
+impl ChutesEndpoints {
+    /// Validate all three endpoints against the trust policy in
+    /// [`crate::endpoint_policy`]. Credential-bearing clients call this once
+    /// at construction time, before any request is built.
+    pub fn validate(&self) -> Result<(), crate::endpoint_policy::EndpointTrustError> {
+        crate::endpoint_policy::validate_endpoint_url(&self.inference)?;
+        crate::endpoint_policy::validate_endpoint_url(&self.account)?;
+        crate::endpoint_policy::validate_endpoint_url(&self.router)?;
+        Ok(())
+    }
+}
+
 fn env_url(name: &str, fallback: &str) -> String {
     std::env::var(name)
         .ok()
@@ -86,6 +98,27 @@ impl ChutesCredentials {
             AuthScheme::Bearer => Cow::Owned(format!("Bearer {}", self.api_key)),
         }
     }
+
+    /// Like [`Self::inference_authorization`], but as a `HeaderValue` marked
+    /// sensitive so it's redacted from HTTP debug/trace logging.
+    pub fn inference_authorization_header(&self) -> reqwest::header::HeaderValue {
+        sensitive_header_value(&self.inference_authorization())
+    }
+
+    /// Like [`Self::management_authorization`], but as a `HeaderValue` marked
+    /// sensitive so it's redacted from HTTP debug/trace logging.
+    pub fn management_authorization_header(&self) -> reqwest::header::HeaderValue {
+        sensitive_header_value(&self.management_authorization())
+    }
+}
+
+/// Build a `HeaderValue` with `set_sensitive(true)` so libraries that respect
+/// the flag (e.g. `reqwest`/`hyper`'s debug formatting) never print it.
+fn sensitive_header_value(value: &str) -> reqwest::header::HeaderValue {
+    let mut header = reqwest::header::HeaderValue::from_str(value)
+        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("invalid-credential"));
+    header.set_sensitive(true);
+    header
 }
 
 #[derive(Debug, thiserror::Error)]

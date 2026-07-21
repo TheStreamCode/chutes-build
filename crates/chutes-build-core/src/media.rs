@@ -14,12 +14,14 @@ pub struct ChutesMediaClient {
 
 impl ChutesMediaClient {
     pub fn from_env() -> Result<Self, MediaError> {
+        let endpoints = ChutesEndpoints::default();
+        endpoints.validate()?;
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(600))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
-            endpoints: ChutesEndpoints::default(),
+            endpoints,
             credentials: ChutesCredentials::from_env()?,
         })
     }
@@ -62,7 +64,7 @@ impl ChutesMediaClient {
             .request(method, url)
             .header(
                 AUTHORIZATION,
-                self.credentials.management_authorization().as_ref(),
+                self.credentials.management_authorization_header(),
             )
             .header(CONTENT_TYPE, "application/json")
             .header(ACCEPT, "*/*")
@@ -78,7 +80,7 @@ impl ChutesMediaClient {
         if is_chutes_url(&url) {
             request = request.header(
                 AUTHORIZATION,
-                self.credentials.management_authorization().as_ref(),
+                self.credentials.management_authorization_header(),
             );
         }
         response_to_media(request.send().await?).await
@@ -91,7 +93,7 @@ impl ChutesMediaClient {
         let response = request
             .header(
                 AUTHORIZATION,
-                self.credentials.management_authorization().as_ref(),
+                self.credentials.management_authorization_header(),
             )
             .header(ACCEPT, "application/json")
             .send()
@@ -218,6 +220,8 @@ fn max_media_bytes() -> usize {
 pub enum MediaError {
     #[error(transparent)]
     Credentials(#[from] crate::endpoints::CredentialError),
+    #[error(transparent)]
+    EndpointTrust(#[from] crate::endpoint_policy::EndpointTrustError),
     #[error("Chutes media request failed: {0}")]
     Request(#[from] reqwest::Error),
     #[error("Chutes returned HTTP {status}: {body}")]
