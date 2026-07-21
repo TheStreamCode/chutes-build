@@ -1410,11 +1410,11 @@ mod tests {
         );
         assert!(!scoped.is_empty(), "trusted endpoint keeps the credential");
         assert!(
-            scoped.approved_for("https://API.chutes.build/v1"),
+            scoped.approved_for("https://LLM.chutes.ai/v1"),
             "host casing normalizes"
         );
         assert!(
-            !scoped.approved_for("https://api.chutes.build/v2"),
+            !scoped.approved_for("https://llm.chutes.ai/v2"),
             "different path rejected"
         );
         assert!(
