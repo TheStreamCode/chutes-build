@@ -379,7 +379,7 @@ impl FileToolset {
                 };
                 Ok(vec![
                     ToolConfig {
-                        id: "GrokBuildHashline:hashline_read".to_owned(),
+                        id: "ChutesBuildHashline:hashline_read".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -388,7 +388,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "GrokBuildHashline:hashline_edit".to_owned(),
+                        id: "ChutesBuildHashline:hashline_edit".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -397,7 +397,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "GrokBuildHashline:hashline_grep".to_owned(),
+                        id: "ChutesBuildHashline:hashline_grep".to_owned(),
                         params: params_map,
                         name_override: None,
                         params_name_overrides: None,
@@ -439,9 +439,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"GrokBuildHashline:hashline_read"));
-        assert!(ids.contains(&"GrokBuildHashline:hashline_edit"));
-        assert!(ids.contains(&"GrokBuildHashline:hashline_grep"));
+        assert!(ids.contains(&"ChutesBuildHashline:hashline_read"));
+        assert!(ids.contains(&"ChutesBuildHashline:hashline_edit"));
+        assert!(ids.contains(&"ChutesBuildHashline:hashline_grep"));
     }
 
     /// Plan/explore omit `search_replace` by contract ("no Write/Edit/
@@ -474,13 +474,13 @@ mod tests {
                 .collect();
             // The swap engages (read moves to hashline)...
             assert!(
-                ids.contains(&"GrokBuildHashline:hashline_read"),
+                ids.contains(&"ChutesBuildHashline:hashline_read"),
                 "{name}: {ids:?}"
             );
             assert!(!ids.contains(&"ChutesBuild:read_file"), "{name}: {ids:?}");
             // ...but never grants the edit slot.
             assert!(
-                !ids.contains(&"GrokBuildHashline:hashline_edit"),
+                !ids.contains(&"ChutesBuildHashline:hashline_edit"),
                 "{name}: override granted an edit tool to a no-edit toolset: {ids:?}"
             );
         }

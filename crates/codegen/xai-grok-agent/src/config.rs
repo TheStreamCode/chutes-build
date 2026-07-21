@@ -1453,12 +1453,12 @@ impl AgentDefinition {
         file_tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
     ) {
         const FILE_TOOL_SLOTS: &[[&str; 2]] = &[
-            ["ChutesBuild:read_file", "GrokBuildHashline:hashline_read"],
+            ["ChutesBuild:read_file", "ChutesBuildHashline:hashline_read"],
             [
                 "ChutesBuild:search_replace",
-                "GrokBuildHashline:hashline_edit",
+                "ChutesBuildHashline:hashline_edit",
             ],
-            ["ChutesBuild:grep", "GrokBuildHashline:hashline_grep"],
+            ["ChutesBuild:grep", "ChutesBuildHashline:hashline_grep"],
         ];
         for tool in self.tool_config.tools.iter_mut() {
             let Some(slot) = FILE_TOOL_SLOTS

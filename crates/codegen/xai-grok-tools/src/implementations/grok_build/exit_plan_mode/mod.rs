@@ -260,8 +260,12 @@ mod tests {
                 assert!(message.contains("start coding"));
                 assert!(plan_content.contains("Do thing A"));
                 assert!(plan_content.contains("Do thing B"));
-                // Cwd fallback now displays the resolved absolute path (shared resolver).
-                assert!(plan_file_path.ends_with(".chutes-build/plan.md"));
+                // Cwd fallback now displays the resolved absolute path (shared
+                // resolver). Checked as two components rather than one
+                // "a/b" substring: the path is joined with the platform's
+                // native separator, which is `\` on Windows.
+                assert!(plan_file_path.contains(".chutes-build"));
+                assert!(plan_file_path.ends_with("plan.md"));
             }
             other => panic!("Expected PlanReady, got {:?}", other),
         }
@@ -350,7 +354,10 @@ mod tests {
             ToolNotification::PlanModeExited(exited) => {
                 assert_eq!(exited.tool_call_id, "call-99");
                 assert_eq!(exited.plan_content, Some("The plan".to_string()));
-                assert!(exited.plan_file_path.ends_with(".chutes-build/plan.md"));
+                // Two components, not one "a/b" substring -- see the
+                // matching comment in `exit_with_plan_content`.
+                assert!(exited.plan_file_path.contains(".chutes-build"));
+                assert!(exited.plan_file_path.ends_with("plan.md"));
             }
             other => panic!("Expected PlanModeExited, got {:?}", other),
         }
@@ -398,7 +405,10 @@ mod tests {
         assert!(prompt.contains("saved at:"));
         assert!(prompt.contains("Step 1"));
         assert!(prompt.contains("Step 2"));
-        assert!(prompt.contains(".chutes-build/plan.md"));
+        // Two components, not one "a/b" substring -- see the matching
+        // comment in `exit_with_plan_content`.
+        assert!(prompt.contains(".chutes-build"));
+        assert!(prompt.contains("plan.md"));
         assert!(prompt.contains("## Plan:"));
     }
 

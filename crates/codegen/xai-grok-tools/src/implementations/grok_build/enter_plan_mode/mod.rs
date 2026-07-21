@@ -613,8 +613,9 @@ mod tests {
 
     #[tokio::test]
     async fn falls_back_to_cwd_when_no_plan_file_path_resource() {
+        let cwd = PathBuf::from("/workspace/my-project");
         let mut resources = Resources::new();
-        resources.insert(Cwd(PathBuf::from("/workspace/my-project")));
+        resources.insert(Cwd(cwd.clone()));
         let shared = resources.into_shared();
 
         let result = xai_tool_runtime::Tool::run(
@@ -628,10 +629,14 @@ mod tests {
         let EnterPlanModeOutput::Entered {
             ref plan_file_path, ..
         } = result;
-        assert_eq!(
-            plan_file_path,
-            "/workspace/my-project/.chutes-build/plan.md"
-        );
+        // Built the same way production resolves it (join component-by-
+        // component) rather than a hardcoded forward-slash literal, so this
+        // assertion reflects the host's real path-separator behavior instead
+        // of assuming Unix.
+        let expected = crate::types::resources::PLAN_FILE_RELATIVE_PATH
+            .split('/')
+            .fold(cwd, |acc, segment| acc.join(segment));
+        assert_eq!(plan_file_path, &expected.display().to_string());
     }
 
     #[tokio::test]

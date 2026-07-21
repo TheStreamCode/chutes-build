@@ -175,7 +175,7 @@ pub fn prune_orphaned_background_task_tools(config: &mut crate::registry::types:
 
 fn is_background_capable_bash_tool(tc: &crate::registry::types::ToolConfig) -> bool {
     match tc.id.as_str() {
-        "ChutesBuild:run_terminal_cmd" | "GrokBuildConcise:run_terminal_cmd" => tc
+        "ChutesBuild:run_terminal_cmd" | "ChutesBuildConcise:run_terminal_cmd" => tc
             .params
             .as_ref()
             .and_then(|params| params.get("enabled_background"))

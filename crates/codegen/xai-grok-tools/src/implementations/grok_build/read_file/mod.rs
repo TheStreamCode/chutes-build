@@ -370,6 +370,18 @@ pub(crate) async fn run_read_file(
                     "Error: {} is a directory, not a file.",
                     display_path.display()
                 )),
+                // Windows never raises `IsADirectory` (only Unix's EISDIR
+                // maps to it); reading a directory there surfaces
+                // `ERROR_ACCESS_DENIED` -> `PermissionDenied` instead. Check
+                // the path itself so a real directory still gets the clear
+                // "is a directory" message rather than a misleading
+                // "permission denied" on every platform.
+                Some(std::io::ErrorKind::PermissionDenied) if path.is_dir() => {
+                    ReadFileOutput::IsADirectory(format!(
+                        "Error: {} is a directory, not a file.",
+                        display_path.display()
+                    ))
+                }
                 Some(std::io::ErrorKind::PermissionDenied) => ReadFileOutput::PermissionDenied(
                     format!("Permission denied: {}", display_path.display()),
                 ),

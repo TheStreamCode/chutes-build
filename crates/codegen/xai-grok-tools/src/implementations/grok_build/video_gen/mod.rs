@@ -59,7 +59,11 @@ pub use xai_grok_tools_api::slash_commands::{
     imagine_video_usage_message,
 };
 
-pub const REFERENCE_TO_VIDEO_TOOL_NAME: &str = "reference_to_video";
+// Matches IMAGE_GEN_TOOL_NAME/IMAGE_TO_VIDEO_TOOL_NAME (xai-grok-tools-api):
+// this legacy tool is retired and its "name" now points at its replacement,
+// the native generate_media tool, rather than a tool id that was never
+// registered in the toolset.
+pub const REFERENCE_TO_VIDEO_TOOL_NAME: &str = "generate_media";
 
 #[derive(Clone, Deserialize, PartialEq, Eq)]
 pub struct S3AccessCredentials {

@@ -863,9 +863,9 @@ impl ToolRegistryBuilder {
                 "ChutesBuild:grep",
             ];
             let hashline_file_ids: &[&str] = &[
-                "GrokBuildHashline:hashline_read",
-                "GrokBuildHashline:hashline_edit",
-                "GrokBuildHashline:hashline_grep",
+                "ChutesBuildHashline:hashline_read",
+                "ChutesBuildHashline:hashline_edit",
+                "ChutesBuildHashline:hashline_grep",
             ];
             let has_standard = config
                 .tools
@@ -1855,22 +1855,22 @@ fn explain_requirement_failure(
         "ChutesBuild:get_task_output" => {
             let has_grok_build_bash = has_tool_with_bool_param(
                 proposed,
-                "GrokBuild",
+                "ChutesBuild",
                 "run_terminal_cmd",
                 "enabled_background",
                 true,
             );
             let has_grok_build_concise_bash = has_tool_with_bool_param(
                 proposed,
-                "GrokBuildConcise",
+                "ChutesBuildConcise",
                 "run_terminal_cmd",
                 "enabled_background",
                 true,
             );
             let has_opencode_bash = has_tool(proposed, "OpenCode", "bash");
-            let has_task = has_tool(proposed, "GrokBuild", "task");
+            let has_task = has_tool(proposed, "ChutesBuild", "task");
             let mut notes = vec![];
-            if has_tool(proposed, "GrokBuild", "run_terminal_cmd")
+            if has_tool(proposed, "ChutesBuild", "run_terminal_cmd")
                 && !has_grok_build_bash
             {
                 notes
@@ -1878,15 +1878,15 @@ fn explain_requirement_failure(
                         "ChutesBuild:run_terminal_cmd is present but enabled_background=false",
                     );
             }
-            if has_tool(proposed, "GrokBuildConcise", "run_terminal_cmd")
+            if has_tool(proposed, "ChutesBuildConcise", "run_terminal_cmd")
                 && !has_grok_build_concise_bash
             {
                 notes
                     .push(
-                        "GrokBuildConcise:run_terminal_cmd is present but enabled_background=false",
+                        "ChutesBuildConcise:run_terminal_cmd is present but enabled_background=false",
                     );
             }
-            let mut message = "get_task_output requires a background-capable bash tool (ChutesBuild:run_terminal_cmd or GrokBuildConcise:run_terminal_cmd with enabled_background=true), OpenCode:bash, or ChutesBuild:task"
+            let mut message = "get_task_output requires a background-capable bash tool (ChutesBuild:run_terminal_cmd or ChutesBuildConcise:run_terminal_cmd with enabled_background=true), OpenCode:bash, or ChutesBuild:task"
                 .to_string();
             let has_provider = has_grok_build_bash || has_grok_build_concise_bash
                 || has_opencode_bash || has_task;
@@ -2164,9 +2164,13 @@ mod tests {
     #[tokio::test]
     async fn full_toolset_descriptions_render_cleanly() {
         use crate::implementations::grok_build::{
-            IMAGE_GEN_TOOL_NAME, IMAGE_TO_VIDEO_TOOL_NAME, REFERENCE_TO_VIDEO_TOOL_NAME,
-            SCHEDULER_CREATE_TOOL_NAME, SCHEDULER_DELETE_TOOL_NAME,
+            IMAGE_GEN_TOOL_NAME, SCHEDULER_CREATE_TOOL_NAME, SCHEDULER_DELETE_TOOL_NAME,
         };
+        // IMAGE_GEN_TOOL_NAME, IMAGE_TO_VIDEO_TOOL_NAME, and
+        // REFERENCE_TO_VIDEO_TOOL_NAME are all retired legacy tool names that
+        // now alias the same replacement, the native generate_media tool
+        // (see xai-grok-tools-api::slash_commands and video_gen::mod.rs) --
+        // only one is listed here, or `finalize` rejects the duplicate ids.
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: [
@@ -2186,8 +2190,6 @@ mod tests {
                 "web_fetch",
                 "lsp",
                 IMAGE_GEN_TOOL_NAME,
-                IMAGE_TO_VIDEO_TOOL_NAME,
-                REFERENCE_TO_VIDEO_TOOL_NAME,
                 "monitor",
                 SCHEDULER_CREATE_TOOL_NAME,
                 SCHEDULER_DELETE_TOOL_NAME,
@@ -2518,7 +2520,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuildConcise:read_file".to_string(),
+                    id: "ChutesBuildConcise:read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2527,7 +2529,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuildConcise:search_replace".to_string(),
+                    id: "ChutesBuildConcise:search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2536,7 +2538,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "GrokBuildConcise:run_terminal_cmd".to_string(),
+                    id: "ChutesBuildConcise:run_terminal_cmd".to_string(),
                     params: Some(
                         serde_json::json!({ "enabled_background" : true })
                             .as_object()
@@ -2722,7 +2724,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "GrokBuildHashline:hashline_read".to_string(),
+                id: "ChutesBuildHashline:hashline_read".to_string(),
                 params: Some(
                     serde_json::from_value(serde_json::json!({ "hash_len" : 0 })).unwrap(),
                 ),
@@ -3920,19 +3922,19 @@ mod tests {
         assert!(
             builder
                 .tools
-                .contains_key("GrokBuildHashline:hashline_read"),
+                .contains_key("ChutesBuildHashline:hashline_read"),
             "hashline_read should be registered"
         );
         assert!(
             builder
                 .tools
-                .contains_key("GrokBuildHashline:hashline_edit"),
+                .contains_key("ChutesBuildHashline:hashline_edit"),
             "hashline_edit should be registered"
         );
         assert!(
             builder
                 .tools
-                .contains_key("GrokBuildHashline:hashline_grep"),
+                .contains_key("ChutesBuildHashline:hashline_grep"),
             "hashline_grep should be registered"
         );
     }
@@ -3942,9 +3944,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("GrokBuildHashline:hashline_read"),
-                hashline_tool_config("GrokBuildHashline:hashline_edit"),
-                hashline_tool_config("GrokBuildHashline:hashline_grep"),
+                hashline_tool_config("ChutesBuildHashline:hashline_read"),
+                hashline_tool_config("ChutesBuildHashline:hashline_edit"),
+                hashline_tool_config("ChutesBuildHashline:hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -3980,9 +3982,9 @@ mod tests {
         let builder2 = ToolRegistryBuilder::new();
         let hashline_config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("GrokBuildHashline:hashline_read"),
-                hashline_tool_config("GrokBuildHashline:hashline_edit"),
-                hashline_tool_config("GrokBuildHashline:hashline_grep"),
+                hashline_tool_config("ChutesBuildHashline:hashline_read"),
+                hashline_tool_config("ChutesBuildHashline:hashline_edit"),
+                hashline_tool_config("ChutesBuildHashline:hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -3997,9 +3999,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("GrokBuildHashline:hashline_read"),
-                hashline_tool_config("GrokBuildHashline:hashline_edit"),
-                hashline_tool_config("GrokBuildHashline:hashline_grep"),
+                hashline_tool_config("ChutesBuildHashline:hashline_read"),
+                hashline_tool_config("ChutesBuildHashline:hashline_edit"),
+                hashline_tool_config("ChutesBuildHashline:hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -4020,7 +4022,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 hashline_tool_config("ChutesBuild:read_file"),
-                hashline_tool_config("GrokBuildHashline:hashline_edit"),
+                hashline_tool_config("ChutesBuildHashline:hashline_edit"),
                 hashline_tool_config("ChutesBuild:grep"),
             ],
             behavior_preset: None,
@@ -4076,7 +4078,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "GrokBuildHashline:hashline_read".to_owned(),
+                    id: "ChutesBuildHashline:hashline_read".to_owned(),
                     params: Some(
                         serde_json::json!({ "scheme" : "chunk", "hash_len" : 2, "chunk_size"
                 : 16 })

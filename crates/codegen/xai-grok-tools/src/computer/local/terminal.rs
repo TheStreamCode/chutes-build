@@ -1260,10 +1260,11 @@ impl LocalTerminalActor {
         // pid the OS may have recycled. Runs after the poll loop so it catches a
         // reap from any path (normal/kill/oom/timeout) within one tick.
         //
-        // Unix-only: only `killpg` can hit a recycled pid. On Windows the group
-        // is a JobObject HANDLE (no recyclable pid), so an early drop buys
-        // nothing — the Arc is released when the `ProcessState` is removed.
-        #[cfg(unix)]
+        // Not Unix-specific: on Windows the group is a JobObject HANDLE (no
+        // recyclable pid), so this early drop isn't needed for kill-safety
+        // there -- but running it on both platforms keeps
+        // `ProcessScope::live_count()` observably consistent as soon as a
+        // child is reaped, rather than only once the TTL evicts the entry.
         for process in self.processes.values_mut() {
             if process.process_group.is_some() && process.child.id().is_none() {
                 process.process_group = None;

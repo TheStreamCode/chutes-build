@@ -1026,7 +1026,7 @@ impl AgentBuilder {
                 &mut tool_config,
                 &[
                     "ChutesBuild:run_terminal_cmd",
-                    "GrokBuildConcise:run_terminal_cmd",
+                    "ChutesBuildConcise:run_terminal_cmd",
                 ],
                 bash_params,
             );

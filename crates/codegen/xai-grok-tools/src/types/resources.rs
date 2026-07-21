@@ -19,7 +19,7 @@ use crate::notification::types::ToolNotificationHandle;
 use serde::Serialize;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 /// Marker trait for types that can be stored in `Resources`.
@@ -425,7 +425,15 @@ pub(crate) fn resolve_plan_file_path(res: &Resources) -> (Option<PathBuf>, Strin
     let path = if let Some(configured) = res.get::<PlanFilePath>() {
         configured.0.clone()
     } else if let Some(cwd) = res.get::<Cwd>() {
-        cwd.0.join(PLAN_FILE_RELATIVE_PATH)
+        // `PathBuf::join` only inserts the platform separator at this one
+        // join point; it never renormalizes the `/` already embedded inside
+        // `PLAN_FILE_RELATIVE_PATH` itself, so a naive `cwd.0.join(...)`
+        // produces a mixed-separator path on Windows (e.g.
+        // `C:\...\project\.chutes-build/plan.md`). Join component-by-component
+        // so every segment boundary gets the native separator.
+        Path::new(PLAN_FILE_RELATIVE_PATH)
+            .components()
+            .fold(cwd.0.clone(), |acc, component| acc.join(component))
     } else {
         PathBuf::from(PLAN_FILE_RELATIVE_PATH)
     };

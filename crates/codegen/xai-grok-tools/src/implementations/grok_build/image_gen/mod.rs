@@ -547,8 +547,9 @@ mod tests {
 
     #[tokio::test]
     async fn tier_restricted_short_circuits_with_upsell() {
-        // A free / X Basic user's image_gen call returns the SuperGrok upsell
-        // prose as a normal result (no HTTP, no error card) so the model can
+        // This legacy tool is retired in favor of the native generate_media
+        // tool; a tier-restricted call short-circuits to that deprecation
+        // notice as a normal result (no HTTP, no error card) so the model can
         // relay it. Only the client is inserted — the short-circuit returns
         // before any other resource (e.g. SessionFolder) is required.
         let cfg = ImageGenConfig::Enabled {
@@ -576,8 +577,8 @@ mod tests {
 
         match result {
             ToolOutput::Text(t) => {
-                assert!(t.text.contains("SuperGrok"), "got: {}", t.text);
-                assert!(t.text.contains("supergrok?referrer=grok-build"));
+                assert_eq!(t.text, TIER_RESTRICTED_UPSELL);
+                assert!(t.text.contains("generate_media"), "got: {}", t.text);
             }
             other => panic!("expected Text upsell, got {other:?}"),
         }
