@@ -47,6 +47,24 @@ pub fn record_dot(filled: bool) -> &'static str {
     }
 }
 
+/// One column of the voice-recording wave animation. `level` is `0..=8`
+/// (0 = flat/silent, 8 = tallest). Eighth-block glyphs (`▁▂▃▄▅▆▇█`)
+/// normally, a plain ASCII ramp on legacy ConHost (no eighth-block glyphs
+/// in the raster font). Always 1 column wide.
+pub fn wave_bar(level: u8) -> &'static str {
+    const ASCII: [&str; 9] = [" ", ".", ".", ":", ":", "+", "+", "#", "#"];
+    const UNICODE: [&str; 9] = [
+        " ", "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}", "\u{2586}", "\u{2587}",
+        "\u{2588}",
+    ];
+    let level = (level as usize).min(8);
+    if is_legacy_windows_console() {
+        ASCII[level]
+    } else {
+        UNICODE[level]
+    }
+}
+
 /// `"❙"` normally, `"|"` on legacy ConHost. Always 1 column wide.
 pub fn collapsed_accent() -> &'static str {
     if is_legacy_windows_console() {
@@ -584,6 +602,17 @@ mod tests {
         assert_eq!(record_dot(false).width(), 1);
         assert_eq!("\u{25C9}".width(), 1); // ◉ FISHEYE
         assert_eq!("\u{25CE}".width(), 1); // ◎ BULLSEYE
+    }
+
+    // Every wave-bar level must be exactly 1 column so a row of bars lines
+    // up regardless of level, and out-of-range levels must clamp instead
+    // of panicking.
+    #[test]
+    fn wave_bar_levels_are_one_column_and_clamp() {
+        for level in 0..=255u8 {
+            assert_eq!(wave_bar(level).width(), 1, "level {level}");
+        }
+        assert_eq!(wave_bar(8), wave_bar(255));
     }
 
     #[test]

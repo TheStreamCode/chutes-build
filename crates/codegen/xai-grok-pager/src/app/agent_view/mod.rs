@@ -300,6 +300,27 @@ fn record_dot_pulse() -> (bool, f32) {
     let brightness = 0.4 + 0.6 * (0.5 + 0.5 * s);
     (s >= 0.0, brightness)
 }
+/// Current heights (`0..=8` each) for `n` voice wave-bar columns.
+///
+/// Purely decorative: a traveling sine wave on a fixed wall-clock period
+/// (not the animation tick, and not driven by the actual mic level), each
+/// column phase-offset from its neighbor so it reads as a flowing wave
+/// instead of every bar pulsing in lockstep. Same "never speeds up or
+/// syncs with streaming redraws" rationale as [`record_dot_pulse`].
+fn voice_wave_levels(n: usize) -> Vec<u8> {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    let epoch = EPOCH.get_or_init(Instant::now);
+    let t = epoch.elapsed().as_secs_f32();
+    (0..n)
+        .map(|i| {
+            let phase = t / 0.9 + i as f32 * 0.5;
+            let s = (phase * std::f32::consts::TAU).sin();
+            ((s * 0.5 + 0.5) * 8.0).round() as u8
+        })
+        .collect()
+}
 /// A clickable/hoverable screen region.
 ///
 /// Tracks an optional screen rect (set during render) and whether the

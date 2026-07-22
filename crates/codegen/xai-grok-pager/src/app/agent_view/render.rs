@@ -3,7 +3,7 @@
 use super::{
     ActivePane, AgentPane, AgentView, AgentViewLayout, CtaPhase, InlineMediaHitAreas,
     MODE_BANNER_FADE_TICKS, PromptMode, collect_citation_links, dropdown_items_width,
-    record_dot_pulse, render_dropdown_chrome, supports_osc22,
+    record_dot_pulse, render_dropdown_chrome, supports_osc22, voice_wave_levels,
 };
 use crate::actions::{ActionId, ActionRegistry};
 use crate::key;
@@ -2123,6 +2123,28 @@ impl AgentView {
                 Style::default().fg(stop_fg).bg(bg),
             );
             self.hit_voice_stop_button.rect = Some(Rect::new(stop_x, rec_area.y, stop_w, 1));
+            // Flowing wave animation between the label and the stop button,
+            // filling whatever room is left (nothing else lives in this gap).
+            let wave_start_x =
+                content_x + 2 + unicode_width::UnicodeWidthStr::width("Recording") as u16 + 1;
+            let wave_end_x = stop_x.saturating_sub(1);
+            if wave_end_x > wave_start_x {
+                let wave_width = (wave_end_x - wave_start_x) as usize;
+                for (i, level) in voice_wave_levels(wave_width).into_iter().enumerate() {
+                    let bar_color = crate::render::color::blend_color(
+                        bg,
+                        theme.accent_error,
+                        0.35 + 0.065 * level as f32,
+                    )
+                    .unwrap_or(theme.accent_error);
+                    buf.set_string(
+                        wave_start_x + i as u16,
+                        rec_area.y,
+                        crate::glyphs::wave_bar(level),
+                        Style::default().fg(bar_color).bg(bg),
+                    );
+                }
+            }
         } else {
             self.hit_voice_stop_button.clear();
         }
