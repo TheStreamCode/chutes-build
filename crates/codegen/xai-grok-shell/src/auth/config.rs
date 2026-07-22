@@ -16,9 +16,16 @@ fn default_oidc_scopes() -> Vec<String> {
 /// indicator, `chutes:read` backs model/media discovery, `chutes:invoke`
 /// backs inference and media generation. Broader scopes (`admin`,
 /// `*:write`, `*:delete`, `secrets:*`) are deliberately not requested.
+///
+/// No `openid` here: unlike [`default_oidc_scopes`] (genuine third-party
+/// OIDC providers), Chutes' own IDP has no `openid` scope at all -- its
+/// scope system is resource-permission-based, not identity-claim-based, and
+/// requesting an unrecognized scope only risks the token exchange rejecting
+/// the whole client. `extract_user_info` in `oidc/protocol.rs` already
+/// tolerates a login with no `id_token` for exactly this reason; real
+/// identity is filled in afterward by the account enrichment call.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
-        "openid".into(),
         "profile".into(),
         "account:read".into(),
         "chutes:read".into(),
@@ -398,20 +405,15 @@ mod tests {
     }
     /// FROZEN client contract: the scopes the "Sign in with Chutes" OAuth
     /// client requests. The server must keep accepting all of them; existing
-    /// tokens carry exactly this set.
+    /// tokens carry exactly this set. No `openid` -- Chutes' IDP has no such
+    /// scope (confirmed against its own app-registration scope list).
     #[test]
     fn default_oauth2_scopes_are_frozen() {
         let scopes = default_oauth2_scopes();
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
         assert_eq!(
             scopes,
-            [
-                "openid",
-                "profile",
-                "account:read",
-                "chutes:read",
-                "chutes:invoke"
-            ]
+            ["profile", "account:read", "chutes:read", "chutes:invoke"]
         );
     }
     #[test]

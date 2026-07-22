@@ -55,8 +55,6 @@ pub(super) enum OidcError {
     AudienceMismatch,
     #[error("OIDC id_token nonce mismatch")]
     NonceMismatch,
-    #[error("OIDC token response missing id_token")]
-    MissingIdToken,
     #[error("OIDC id_token validation failed: {0}")]
     IdTokenValidationFailed(String),
     #[error(
@@ -723,7 +721,35 @@ pub(super) async fn extract_user_info(
             coding_data_retention_opt_out: false,
         });
     }
-    let token = id_token.ok_or_else(|| anyhow::Error::new(OidcError::MissingIdToken))?;
+    let Some(token) = id_token else {
+        // Some OAuth2 providers behind this flow (Chutes' own IDP included)
+        // are not full OIDC providers and never issue an id_token -- their
+        // scope system has no `openid` concept, so there is nothing to
+        // validate. Proceed with an empty identity rather than failing the
+        // login outright; `recovery.rs` already treats an empty `user_id` as
+        // "no identity yet" and the account enrichment call (see
+        // `auth::manager::enrichment`) fills in the real email/name
+        // afterward. This mirrors the device-code login path, which has
+        // never required an id_token for personal (non-Team) logins.
+        return Ok(OidcUserInfo {
+            user_id: String::new(),
+            email: None,
+            first_name: None,
+            last_name: None,
+            profile_image_asset_id: None,
+            principal_type: principal_type.map(ToOwned::to_owned),
+            principal_id: principal_id.map(ToOwned::to_owned),
+            team_id: fallback_team_id,
+            team_name: None,
+            team_role: None,
+            organization_id: None,
+            organization_name: None,
+            organization_role: None,
+            user_blocked_reason: None,
+            team_blocked_reasons: vec![],
+            coding_data_retention_opt_out: false,
+        });
+    };
     validate_and_extract_user_info(
         token,
         discovery,
@@ -914,6 +940,35 @@ mod tests {
         assert_eq!(user_info.principal_id.as_deref(), Some("team-123"));
         assert_eq!(user_info.team_id.as_deref(), Some("team-123"));
         assert!(user_info.email.is_none());
+    }
+    /// Regression: Chutes' own IDP has no `openid` scope and never issues an
+    /// id_token, even for a personal (non-Team) login. This must not fail
+    /// the login -- real identity comes from the post-login account
+    /// enrichment call instead.
+    #[tokio::test]
+    async fn extract_user_info_allows_personal_login_without_id_token() {
+        let discovery = Discovery {
+            authorization_endpoint: "https://api.chutes.ai/authorize".into(),
+            token_endpoint: "https://api.chutes.ai/token".into(),
+            jwks_uri: Some("https://api.chutes.ai/jwks".into()),
+            id_token_signing_alg_values_supported: Some(vec!["RS256".into()]),
+        };
+        let user_info = extract_user_info(
+            None,
+            &discovery,
+            "https://api.chutes.ai",
+            "test-client",
+            "nonce123",
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("personal login should not require id_token");
+        assert_eq!(user_info.user_id, "");
+        assert!(user_info.email.is_none());
+        assert!(user_info.principal_type.is_none());
+        assert!(user_info.team_id.is_none());
     }
     #[test]
     fn validate_state_rejects_mismatch() {
