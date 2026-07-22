@@ -1985,8 +1985,14 @@ fn build_update_config() -> UpdateConfig {
 /// Central gate for auto-update checks; add new suppression rules here,
 /// not at call sites.
 fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
-    let _ = no_auto_update_flag;
-    false
+    if cfg!(debug_assertions) {
+        return false;
+    }
+    if no_auto_update_flag {
+        return false;
+    }
+    !std::env::var_os("CHUTES_BUILD_DISABLE_AUTOUPDATER")
+        .is_some_and(|v| env_flag_enabled(&v.to_string_lossy()))
 }
 /// Gate for the stdio agent's background auto-update: only the direct stdio
 /// agent, from the managed install. Other modes update in `run_agent_command`.
