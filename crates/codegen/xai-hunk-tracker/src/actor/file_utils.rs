@@ -318,6 +318,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_read_file_bounded_symlink() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("real.txt");

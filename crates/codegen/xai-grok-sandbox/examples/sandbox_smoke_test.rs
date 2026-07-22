@@ -14,9 +14,22 @@
 //! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- read-only
 //! ```
 
+// Exercises Landlock (Linux) / Seatbelt (macOS) kernel enforcement and reads
+// libc error codes directly; there is no Windows equivalent to smoke-test.
+// A real `fn main` must still exist unconditionally -- `#![cfg(unix)]` at the
+// crate root would compile out the whole binary's content on Windows, and
+// Cargo still expects a `main` to link the example target either way.
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("sandbox_smoke_test is Unix-only (Landlock/Seatbelt); nothing to run here.");
+}
+
+#[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
 use xai_grok_sandbox::{ProfileName, SandboxManager};
 
+#[cfg(unix)]
 fn main() {
     // Parse profile from args (default: workspace).
     let profile_name = std::env::args()
@@ -124,6 +137,7 @@ fn main() {
     println!("\n✅ Smoke test complete");
 }
 
+#[cfg(unix)]
 fn test_read(label: &str, path: &Path) {
     if path.is_file() {
         match std::fs::read(path) {
@@ -153,6 +167,7 @@ fn test_read(label: &str, path: &Path) {
     }
 }
 
+#[cfg(unix)]
 fn test_write(label: &str, path: &Path) {
     match std::fs::write(path, b"sandbox-test") {
         Ok(()) => {
