@@ -221,6 +221,7 @@ fn voice_interim_sets_then_error_clears_state() {
         &mut app,
         xai_grok_voice::VoiceEvent::Error {
             message: "boom".into(),
+            hint: None,
         },
     );
     assert!(!app.voice_listening());
