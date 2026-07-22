@@ -6,6 +6,47 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-22
+
+### Added
+
+- Voice recording bar: an animated wave visual while the mic is capturing.
+- Auto-update checks re-enabled (were previously hardcoded off regardless of
+  config or CLI flag). Still off in debug builds; honors `--no-auto-update`
+  and the new `CHUTES_BUILD_DISABLE_AUTOUPDATER` env var.
+
+### Fixed
+
+- Voice dictation actually works now: default transcription switched to a
+  batch REST call against Chutes' own STT endpoint. The prior WebSocket
+  streaming client only ever worked against the original upstream backend —
+  every dictation attempt against Chutes' inference API failed with a
+  WebSocket 404 (no such route exists there). The streaming transport is
+  still available (`stt_mode = "streaming"`) for a backend that speaks it.
+- Voice dictation: the 10-second no-speech timeout now distinguishes true mic
+  silence (permissions, muted input) from other failures and surfaces a
+  platform-specific fix hint instead of one generic message.
+- Sampler: a zero-retry budget now fails fast instead of silently falling
+  through the generic/rate-limit retry paths; retry backoff sleeps are now
+  cancellable, so a cancelled request during backoff no longer waits out the
+  full delay.
+
+### Security
+
+- Sandbox: fixed a fail-open bypass where an unopenable device file (e.g.
+  `/dev/tty` with no controlling terminal under headless/CI) aborted the
+  entire Landlock/Seatbelt ruleset instead of just skipping that one rule,
+  leaving the sandbox unenforced.
+- Permission auto-mode and exec-risk classification brought forward from a
+  stale pre-0.2.106 baseline: kubectl/`ps`/`rg` heuristic hardening
+  (credential-plugin and environment-dump risks), a 3-tier environment-risk
+  model replacing a binary check, opaque-shell detection, an ambient
+  exec-risk scan for `git -C`/`--git-dir`/submodule config paths, and
+  reinstated consecutive/total auto-deny limits.
+- MCP tool permission checks now use an overlap-aware `server__tool` name
+  parser (rejects names with more than one delimiter boundary) instead of
+  splitting on the first occurrence.
+
 ## [0.2.0] - 2026-07-22
 
 ### Added

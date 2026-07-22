@@ -1,6 +1,6 @@
 {
   "name": "chutes-build",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Privacy-first coding agent optimized for the Chutes ecosystem",
   "license": "Apache-2.0",
   "author": "Michael Gasperini (Mikesoft)",
