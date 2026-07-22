@@ -1007,6 +1007,9 @@ pub(crate) async fn spawn_session_actor(
     let sampler_retry_policy = xai_grok_sampler::RetryPolicy {
         max_retries: max_retries.unwrap_or(5),
         rate_limit_retry_threshold: 2,
+        // Upstream derives this from its workflow token-budget feature, which
+        // Chutes Build doesn't have; preserve current behavior (always retry).
+        retry_only_before_output: false,
     };
     let (sampler_event_tx, sampler_event_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_grok_sampler::SamplingEvent>();
