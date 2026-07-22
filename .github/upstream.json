@@ -2,8 +2,8 @@
   "repository": "xai-org/grok-build",
   "branch": "main",
   "versionManifest": "crates/codegen/xai-grok-pager-bin/Cargo.toml",
-  "lastReviewedCommit": "a881e6703f46b01d8c7d4a5437683546df30449d",
-  "lastReviewedVersion": "0.2.106",
+  "lastReviewedCommit": "3af4d5d39897855bdcc74f23e690024a5dc05573",
+  "lastReviewedVersion": "0.2.109",
   "lastReviewedRelease": null,
-  "reviewedAt": "2026-07-21"
+  "reviewedAt": "2026-07-22"
 }
