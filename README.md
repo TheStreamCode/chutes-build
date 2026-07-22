@@ -4,6 +4,8 @@
 [![npm version](https://img.shields.io/npm/v/chutes-build.svg)](https://www.npmjs.com/package/chutes-build)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+![Chutes Build](assets/chutes/video/chutes-build-hero.gif)
+
 Chutes Build is a privacy-first, open-source coding agent optimized for the
 [Chutes](https://chutes.ai) ecosystem. It combines an interactive terminal UI,
 coding tools, model routing, parallel subagents, multimodal generation, web
