@@ -333,8 +333,6 @@ panic = "abort"
 #
 # Hardening: thin LTO for cross-crate optimization with reasonable link times,
 # codegen-units=1 maximizes optimization (whole-program analysis, no CGU boundaries).
-# debug=1 emits line-tables DWARF; strip=false keeps symbols so CI can extract
-# .debug sidecars (Linux) or .dSYM bundles (macOS) before stripping post-build.
 # Linker flags (RELRO, NX stack) are set per-target in .cargo/config.toml.
 [profile.release-dist]
 inherits = "release"
@@ -346,8 +344,19 @@ lto = "thin"
 # own release default) restores per-crate parallelism while thin LTO still
 # does the cross-crate optimization.
 codegen-units = 16
-strip = false
-debug = 1
+# strip=true, debug=0: no packaging step extracts/uploads a separate debug
+# sidecar (.debug/.dSYM) today, so unstripped DWARF info just ships inside
+# the npm-distributed binary unused. On Linux specifically, codegen-units=16
+# multiplies per-unit DWARF duplication badly enough that the packaged
+# linux-arm64-gnu tarball grew from ~184MB to >1GB unpacked and started
+# failing npm's publish size limit (413 Payload Too Large). Stripping keeps
+# the release-dist profile's actual purpose -- a small binary for
+# distribution -- without giving codegen-units back its build-time win. If
+# maintainer-facing crash backtraces from a distributed binary are ever
+# needed, extract a real debug sidecar in CI instead of shipping full DWARF
+# in the binary everyone downloads.
+strip = true
+debug = 0
 split-debuginfo = "off"
 # Distribution builds are always a single clean CI build, never an
 # iterative local edit-compile loop -- incremental compilation's caching
