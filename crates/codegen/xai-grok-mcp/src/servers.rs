@@ -1044,15 +1044,31 @@ pub fn parse_mcp_meta_config(
 /// here so existing call sites continue to work.
 pub use xai_grok_telemetry::enums::McpInitStrategy;
 
-/// Parse MCP tool name in format "server__tool"
-/// Returns (server_name, tool_name) if valid MCP tool, None otherwise
-pub fn parse_mcp_tool_name(name: &str) -> Option<(String, String)> {
-    let parts: Vec<&str> = name.splitn(2, MCP_TOOL_NAME_DELIMITER).collect();
-    if parts.len() == 2 {
-        Some((parts[0].to_string(), parts[1].to_string()))
-    } else {
-        None
+/// Parse a non-empty `server__tool` ID with one overlap-aware delimiter and
+/// valid [`xai_tool_protocol::ToolId`] syntax.
+pub fn parse_mcp_qualified_name(name: &str) -> Option<(xai_tool_protocol::ToolId, &str, &str)> {
+    let delimiter = MCP_TOOL_NAME_DELIMITER.as_bytes();
+    // Byte windows preserve both overlapping `__` boundaries in `___`.
+    let mut boundaries = name
+        .as_bytes()
+        .windows(delimiter.len())
+        .enumerate()
+        .filter_map(|(index, window)| (window == delimiter).then_some(index));
+    let boundary = boundaries.next()?;
+    if boundaries.next().is_some() {
+        return None;
     }
+    let (server, tool_with_delimiter) = name.split_at(boundary);
+    let tool = &tool_with_delimiter[MCP_TOOL_NAME_DELIMITER.len()..];
+    if server.is_empty() || tool.is_empty() {
+        return None;
+    }
+    Some((xai_tool_protocol::ToolId::new(name).ok()?, server, tool))
+}
+
+/// Parse an MCP tool name in `server__tool` format into owned segments.
+pub fn parse_mcp_tool_name(name: &str) -> Option<(String, String)> {
+    parse_mcp_qualified_name(name).map(|(_, server, tool)| (server.to_owned(), tool.to_owned()))
 }
 
 #[derive(Debug, thiserror::Error)]

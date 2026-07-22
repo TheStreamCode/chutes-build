@@ -1064,6 +1064,15 @@ impl SessionActor {
                     self.permissions.set_classifier_transcript(turns);
                 }
             }
+            let edit_path_context = matches!(&access_kind, AccessKind::Edit(_)).then(|| {
+                xai_grok_workspace::permission::types::EditPathContext {
+                    real_cwd: std::path::PathBuf::from(self.session_info.cwd.as_str()),
+                    display_cwd: self
+                        .display_cwd
+                        .get()
+                        .map(|cwd| std::path::PathBuf::from(cwd.as_str())),
+                }
+            });
             let decision = {
                 let _pending_guard =
                     crate::session::pending_interaction::PendingInteractionGuard::new(
@@ -1074,9 +1083,10 @@ impl SessionActor {
                         crate::session::pending_interaction::PendingKind::Permission,
                     );
                 self.permissions
-                    .request(
+                    .request_with_edit_path_context(
                         access_kind.clone(),
                         tool_call_update,
+                        edit_path_context,
                         Some(self.session_info.id.0.to_string()),
                         None,
                         None,
