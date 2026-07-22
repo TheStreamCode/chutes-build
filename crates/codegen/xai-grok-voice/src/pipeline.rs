@@ -225,6 +225,128 @@ async fn start_capture_session(
     auth: &SharedVoiceAuth,
     event_tx: &mpsc::Sender<VoiceEvent>,
 ) -> Result<ActivePtt, VoiceError> {
+    match config.stt_mode {
+        crate::config::SttMode::Batch => start_batch_capture_session(config, auth, event_tx).await,
+        crate::config::SttMode::Streaming => {
+            start_streaming_capture_session(config, auth, event_tx).await
+        }
+    }
+}
+
+/// Buffer the whole utterance locally and transcribe it in one request on
+/// release ([`crate::config::SttMode::Batch`]). No interim events — the
+/// transcript arrives as a single [`VoiceEvent::UtteranceFinal`] (or
+/// [`VoiceEvent::Error`]) once the backend responds.
+#[cfg(feature = "audio")]
+async fn start_batch_capture_session(
+    config: &VoiceConfig,
+    auth: &SharedVoiceAuth,
+    event_tx: &mpsc::Sender<VoiceEvent>,
+) -> Result<ActivePtt, VoiceError> {
+    let (mic_tx, mut mic_rx) = mpsc::channel::<Vec<u8>>(64);
+    let sample_rate = config.sample_rate;
+    let capture_task =
+        tokio::task::spawn_blocking(move || crate::audio::spawn_pcm_capture(sample_rate, mic_tx));
+    let capture = capture_task.await.map_err(|join_err| {
+        VoiceError::Config(format!("voice capture task failed: {join_err}"))
+    })??;
+    let peak = capture.peak_meter();
+
+    let (finish_tx, mut finish_rx) = mpsc::channel::<()>(1);
+    let config = config.clone();
+    let auth = auth.clone();
+    let out = event_tx.clone();
+    let mut capture = Some(capture);
+
+    let reader = tokio::spawn(async move {
+        let stop_capture = |capture: &mut Option<crate::audio::CaptureHandle>| {
+            if let Some(handle) = capture.take() {
+                handle.stop();
+            }
+        };
+
+        let mut buffer: Vec<u8> = Vec::new();
+        // Same rationale as the streaming path: tear down rather than holding
+        // an open mic indefinitely if nothing ever comes through.
+        let silence_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            tokio::select! {
+                chunk = mic_rx.recv() => match chunk {
+                    Some(c) => buffer.extend_from_slice(&c),
+                    None => break, // mic stopped on its own (device error)
+                },
+                msg = finish_rx.recv() => {
+                    if msg.is_none() {
+                        return;
+                    }
+                    stop_capture(&mut capture);
+                    // Drain whatever the mic already queued rather than racing it.
+                    while let Ok(c) = mic_rx.try_recv() {
+                        buffer.extend_from_slice(&c);
+                    }
+                    break;
+                }
+                _ = tokio::time::sleep_until(silence_deadline) => {
+                    stop_capture(&mut capture);
+                    let (message, hint) = silence_guard_error(peak.load(Ordering::Relaxed));
+                    let _ = out.send(VoiceEvent::Error { message, hint }).await;
+                    return;
+                }
+            }
+        }
+
+        let final_peak = peak.load(Ordering::Relaxed);
+        if crate::pcm::is_silence(final_peak) {
+            let (message, hint) = silence_guard_error(final_peak);
+            let _ = out.send(VoiceEvent::Error { message, hint }).await;
+            return;
+        }
+
+        let bearer = match crate::auth::require_bearer(&auth).await {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = out
+                    .send(VoiceEvent::Error {
+                        message: e.to_string(),
+                        hint: None,
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        match crate::stt::transcribe_batch(&config, &bearer, &buffer).await {
+            Ok(text) if !text.trim().is_empty() => {
+                let _ = out.send(VoiceEvent::UtteranceFinal { text }).await;
+            }
+            Ok(_) => {
+                let _ = out
+                    .send(VoiceEvent::Error {
+                        message: "heard audio but no speech was detected — try again".into(),
+                        hint: None,
+                    })
+                    .await;
+            }
+            Err(e) => {
+                let _ = out
+                    .send(VoiceEvent::Error {
+                        message: e.to_string(),
+                        hint: None,
+                    })
+                    .await;
+            }
+        }
+    });
+
+    Ok(ActivePtt { finish_tx, reader })
+}
+
+#[cfg(feature = "audio")]
+async fn start_streaming_capture_session(
+    config: &VoiceConfig,
+    auth: &SharedVoiceAuth,
+    event_tx: &mpsc::Sender<VoiceEvent>,
+) -> Result<ActivePtt, VoiceError> {
     // Open the mic concurrently with the bearer + connect handshake (TLS +
     // WebSocket + `transcript.created`). Both legs take hundreds of ms and used
     // to run in series before any capture, clipping the first word of a hold.

@@ -14310,8 +14310,10 @@ name = "xai-grok-voice"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "cpal",
  "futures-util",
+ "reqwest 0.12.24",
  "rustls",
  "serde",
  "serde_json",

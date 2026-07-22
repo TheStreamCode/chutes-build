@@ -2,6 +2,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::VoiceError;
 
+/// STT transport mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SttMode {
+    /// One-shot batch transcription (default): the pipeline buffers the whole
+    /// utterance locally and posts it once, on release, to a REST endpoint
+    /// (Chutes' `/stt/whisper`-shaped backends). No live interim preview —
+    /// the transcript arrives all at once after a short round trip.
+    #[default]
+    Batch,
+    /// Real-time WebSocket streaming STT with live interim results. Requires
+    /// a backend that speaks the streaming protocol (`[`Self::stt_ws_url`]),
+    /// which Chutes' default inference API does not.
+    Streaming,
+}
+
 /// Voice settings for the STT transport.
 ///
 /// Prefer **https** `api_base` (same shape as chat). [`Self::stt_ws_url`] derives
@@ -12,10 +28,21 @@ use crate::error::VoiceError;
 pub struct VoiceConfig {
     /// HTTPS API root (or bare host). Bases may end in `/v1` or `/xai/v1`; the
     /// default STT path de-duplicates a leading `v1/` so both become `…/v1/stt`.
+    /// Only consulted in [`SttMode::Streaming`].
     pub api_base: String,
     pub stt_ws_path: String,
+    /// Which STT transport to use. See [`SttMode`].
+    pub stt_mode: SttMode,
+    /// HTTPS base for the [`SttMode::Batch`] REST transcription endpoint
+    /// (Chutes' `vonkaiser-audiodojo` chute by default). Unlike `api_base`,
+    /// this always has a working default — Chutes' own inference API has no
+    /// batch STT route, so there is no `[endpoints]` fallback to inherit.
+    pub batch_api_base: String,
     /// Preferred STT language (catalog code or `"auto"`). Resolved via
-    /// [`crate::language_for_api`] at connect time.
+    /// [`crate::language_for_api`] at connect time in [`SttMode::Streaming`];
+    /// in [`SttMode::Batch`], `"auto"` is sent as an omitted `language` field
+    /// so the backend's own (real) auto-detection runs instead of guessing
+    /// from the process locale.
     pub language: String,
     pub sample_rate: u32,
     pub stt_endpointing_ms: u32,
@@ -33,6 +60,8 @@ impl Default for VoiceConfig {
         Self {
             api_base: "https://127.0.0.1:9".into(),
             stt_ws_path: "/v1/stt".into(),
+            stt_mode: SttMode::default(),
+            batch_api_base: "https://vonkaiser-audiodojo.chutes.ai".into(),
             language: "en".into(),
             sample_rate: 16_000,
             stt_endpointing_ms: 400,
@@ -124,6 +153,28 @@ mod tests {
             VoiceConfig::default().stt_ws_url().unwrap(),
             "wss://127.0.0.1:9/v1/stt"
         );
+    }
+
+    #[test]
+    fn default_stt_mode_is_batch_with_a_working_endpoint() {
+        let cfg = VoiceConfig::default();
+        assert_eq!(cfg.stt_mode, SttMode::Batch);
+        assert_eq!(cfg.batch_api_base, "https://vonkaiser-audiodojo.chutes.ai");
+    }
+
+    #[test]
+    fn stt_mode_round_trips_through_toml() {
+        let table: toml::Table = toml::from_str(
+            r#"
+[voice]
+stt_mode = "streaming"
+batch_api_base = "https://stt.example.com"
+"#,
+        )
+        .unwrap();
+        let cfg = VoiceConfig::from_config_table(&table, None);
+        assert_eq!(cfg.stt_mode, SttMode::Streaming);
+        assert_eq!(cfg.batch_api_base, "https://stt.example.com");
     }
 
     #[test]
