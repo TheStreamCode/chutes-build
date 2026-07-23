@@ -1738,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "chutes-build"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -13587,7 +13587,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -13904,7 +13904,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-shell"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -14300,7 +14300,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-version"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "semver",
 ]

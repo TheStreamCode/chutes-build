@@ -6,6 +6,29 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-23
+
+### Fixed
+
+- OAuth login (`l` / `/login`, "Sign in with Chutes"): the token exchange now
+  sends a `client_secret` when one is configured. The built-in app requires
+  one, so every login attempt failed with `invalid_client` regardless of
+  scopes requested. `openid` is also requested again — Chutes' own app docs
+  list it as required, contradicting the assumption an earlier revision of
+  this list was based on.
+- A `client_secret` supplied via `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` /
+  `CHUTES_BUILD_OIDC_CLIENT_SECRET` was silently dropped before reaching the
+  token request whenever `config.toml` also had an
+  `[grok_com_config.oidc]`/`[oauth2]` table: the config merge round-trips
+  through a generic TOML value, which does not preserve fields marked
+  `#[serde(skip)]`.
+
+### Documentation
+
+- README: documented the OAuth env vars above and that Chutes does not yet
+  support dynamic client registration, so a failing default login currently
+  means registering your own app instead.
+
 ## [0.3.0] - 2026-07-22
 
 ### Added
