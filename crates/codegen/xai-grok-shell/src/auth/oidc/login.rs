@@ -482,6 +482,7 @@ pub async fn run_login_flow_with_config(
         &redirect_uri,
         &oidc.client_id,
         &pkce.code_verifier,
+        oidc.client_secret.as_deref(),
     )
     .await?;
     tracing::info!(
@@ -585,6 +586,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "email".into()],
             audience: None,
+            client_secret: None,
         };
         let discovery = discover(&oidc_cfg.issuer).await.unwrap();
         let pkce = generate_pkce();
@@ -627,6 +629,7 @@ mod tests {
             &redirect_uri,
             &oidc_cfg.client_id,
             &pkce.code_verifier,
+            oidc_cfg.client_secret.as_deref(),
         )
         .await
         .unwrap();

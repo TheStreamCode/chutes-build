@@ -17,15 +17,16 @@ fn default_oidc_scopes() -> Vec<String> {
 /// backs inference and media generation. Broader scopes (`admin`,
 /// `*:write`, `*:delete`, `secrets:*`) are deliberately not requested.
 ///
-/// No `openid` here: unlike [`default_oidc_scopes`] (genuine third-party
-/// OIDC providers), Chutes' own IDP has no `openid` scope at all -- its
-/// scope system is resource-permission-based, not identity-claim-based, and
-/// requesting an unrecognized scope only risks the token exchange rejecting
-/// the whole client. `extract_user_info` in `oidc/protocol.rs` already
-/// tolerates a login with no `id_token` for exactly this reason; real
-/// identity is filled in afterward by the account enrichment call.
+/// `openid` IS requested: Chutes' own "Sign in with Chutes" docs list it as
+/// "required for all apps". An earlier revision of this list omitted it on
+/// since-contradicted guidance that Chutes' IDP had no `openid` scope at
+/// all -- omitting it did not change the token-exchange `invalid_client`
+/// failure it was meant to fix, and the published docs say the opposite.
+/// `extract_user_info` in `oidc/protocol.rs` still tolerates a login with no
+/// `id_token`, regardless of which way this list goes.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
+        "openid".into(),
         "profile".into(),
         "account:read".into(),
         "chutes:read".into(),
@@ -116,6 +117,12 @@ pub struct OidcAuthConfig {
     pub scopes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<String>,
+    /// Sent as a `client_secret` form field on token exchange/refresh when
+    /// set. Diagnostic/testing knob for the "Sign in with Chutes" app, which
+    /// is otherwise a secret-less public PKCE client -- see
+    /// `CHUTES_BUILD_OAUTH2_CLIENT_SECRET`. Never persisted to config.toml.
+    #[serde(skip)]
+    pub client_secret: Option<String>,
 }
 /// OAuth2 provider configuration (`CHUTES_BUILD_OAUTH2_ISSUER` / `CHUTES_BUILD_OAUTH2_CLIENT_ID`).
 ///
@@ -133,6 +140,9 @@ pub struct OAuth2ProviderConfig {
     /// Client-supplied referrer for OAuth usage-attribution analytics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
+    /// See [`OidcAuthConfig::client_secret`]. Never persisted to config.toml.
+    #[serde(skip)]
+    pub client_secret: Option<String>,
 }
 /// Issuer for the built-in "Sign in with Chutes" OAuth app. Matches the
 /// `issuer` field in `https://idp.chutes.ai/.well-known/openid-configuration`
@@ -273,6 +283,7 @@ impl OAuth2ProviderConfig {
                 std::env::var("CHUTES_BUILD_OAUTH2_REFERRER")
                     .unwrap_or_else(|_| DEFAULT_OAUTH2_REFERRER.to_owned()),
             ),
+            client_secret: std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_SECRET").ok(),
         })
     }
     /// Convert to [`OidcAuthConfig`] to reuse the OIDC login flow.
@@ -281,6 +292,7 @@ impl OAuth2ProviderConfig {
             issuer: self.issuer.clone(),
             client_id: self.client_id.clone(),
             scopes: self.scopes.clone(),
+            client_secret: self.client_secret.clone(),
             audience: None,
         }
     }
@@ -353,6 +365,7 @@ impl OidcAuthConfig {
                 .map(|s| s.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_else(|_| default_oidc_scopes()),
             audience: std::env::var("CHUTES_BUILD_OIDC_AUDIENCE").ok(),
+            client_secret: std::env::var("CHUTES_BUILD_OIDC_CLIENT_SECRET").ok(),
         })
     }
 }
@@ -368,6 +381,7 @@ mod tests {
             principal_type: Some("Team".into()),
             principal_id: Some("team-abc".into()),
             referrer: Some("grok-build".into()),
+            client_secret: None,
         };
         assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");
     }
@@ -389,6 +403,7 @@ mod tests {
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-build".into()),
+            client_secret: None,
         };
         assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");
     }
@@ -405,15 +420,21 @@ mod tests {
     }
     /// FROZEN client contract: the scopes the "Sign in with Chutes" OAuth
     /// client requests. The server must keep accepting all of them; existing
-    /// tokens carry exactly this set. No `openid` -- Chutes' IDP has no such
-    /// scope (confirmed against its own app-registration scope list).
+    /// tokens carry exactly this set. Includes `openid` -- Chutes' own
+    /// "Sign in with Chutes" docs list it as required for all apps.
     #[test]
     fn default_oauth2_scopes_are_frozen() {
         let scopes = default_oauth2_scopes();
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
         assert_eq!(
             scopes,
-            ["profile", "account:read", "chutes:read", "chutes:invoke"]
+            [
+                "openid",
+                "profile",
+                "account:read",
+                "chutes:read",
+                "chutes:invoke"
+            ]
         );
     }
     #[test]

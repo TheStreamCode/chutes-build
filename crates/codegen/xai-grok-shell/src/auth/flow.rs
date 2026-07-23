@@ -1338,6 +1338,7 @@ mod tests {
                 client_id: "client".into(),
                 scopes: vec!["openid".into()],
                 audience: None,
+                client_secret: None,
             }),
             oauth2: None,
             ..GrokComConfig::default()

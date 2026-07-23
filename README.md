@@ -235,6 +235,30 @@ run `/usage` for every active window, percentage, and reset time. If aggregate
 quota usage is unavailable, the client falls back concurrently to the
 documented per-chute quota endpoints.
 
+### OAuth login (Sign in with Chutes)
+
+Pressing `l` at the welcome screen (or `/login`) runs a standard OAuth 2.0 +
+PKCE flow against Chutes' own identity provider, using a built-in client ID.
+Chutes' OIDC discovery document currently exposes no dynamic client
+registration endpoint and its token endpoint accepts `client_secret_post` /
+`client_secret_basic` alongside `none`, so whether the flow needs a secret
+depends on how the specific OAuth app was registered.
+
+If login fails with `invalid_client`, register your own app under
+[Chutes' developer settings](https://chutes.ai/app/api) and point Chutes
+Build at it instead:
+
+```powershell
+$env:CHUTES_BUILD_OAUTH2_CLIENT_ID = "cid_..."
+$env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."   # only if your app has one
+chutes-build
+```
+
+Both variables are read once at startup and are never written to
+`config.toml` or any other file on disk. `k` / `/apikey` (pasting a Chutes
+API key directly) needs no app registration at all and always works as a
+fallback.
+
 ### Optional web and browser configuration
 
 Web search uses DuckDuckGo without a dedicated key. For Brave Search:

@@ -1875,6 +1875,22 @@ impl Config {
         if config.grok_com_config.oidc.is_none() && config.grok_com_config.oauth2.is_none() {
             config.grok_com_config.oauth2 = crate::auth::OAuth2ProviderConfig::from_env();
         }
+        // `client_secret` is `#[serde(skip)]` (never persisted to config.toml), so
+        // it doesn't survive the deep-merge-then-deserialize above even when an
+        // `[grok_com_config.oidc]`/`[oauth2]` table is present from config.toml --
+        // that merge round-trips through a `toml::Value`, which silently drops any
+        // skipped field. Patch it back in from the env var after the fact, on
+        // whichever of the two ended up populated.
+        if let Some(oidc) = config.grok_com_config.oidc.as_mut()
+            && oidc.client_secret.is_none()
+        {
+            oidc.client_secret = std::env::var("CHUTES_BUILD_OIDC_CLIENT_SECRET").ok();
+        }
+        if let Some(oauth2) = config.grok_com_config.oauth2.as_mut()
+            && oauth2.client_secret.is_none()
+        {
+            oauth2.client_secret = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_SECRET").ok();
+        }
         if config.client_version.is_none() {
             config.client_version = Self::default().client_version;
         }

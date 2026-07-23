@@ -402,21 +402,27 @@ pub(super) async fn exchange_code(
     redirect_uri: &str,
     client_id: &str,
     code_verifier: &str,
+    client_secret: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
     tracing::debug!(
-        token_endpoint = % token_endpoint, "OIDC: exchanging code for tokens"
+        token_endpoint = % token_endpoint, has_client_secret = client_secret.is_some(),
+        "OIDC: exchanging code for tokens"
     );
+    let mut form = vec![
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+        ("client_id", client_id),
+        ("code_verifier", code_verifier),
+    ];
+    if let Some(secret) = client_secret {
+        form.push(("client_secret", secret));
+    }
     let resp = with_alpha_test_key(
         crate::http::shared_client()
             .post(token_endpoint)
             .header("x-grok-client-version", xai_grok_version::VERSION)
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", redirect_uri),
-                ("client_id", client_id),
-                ("code_verifier", code_verifier),
-            ])
+            .form(&form)
             .timeout(std::time::Duration::from_secs(15)),
         token_endpoint,
     )
@@ -786,6 +792,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "profile".into()],
             audience: Some("api://grok".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://example.okta.com/authorize".into(),
@@ -832,6 +839,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.example.com".into(),
@@ -840,6 +848,7 @@ mod tests {
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
             referrer: Some("grok-build".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.chutes.build/authorize".into(),
@@ -876,6 +885,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.example.com".into(),
@@ -884,6 +894,7 @@ mod tests {
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-desktop".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.chutes.build/authorize".into(),

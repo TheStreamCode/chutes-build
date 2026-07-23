@@ -720,6 +720,7 @@ pub(crate) mod tests {
                 principal_type: Some("Team".into()),
                 principal_id: Some("team-required".into()),
                 referrer: None,
+                client_secret: None,
             }),
             ..GrokComConfig::default()
         };
