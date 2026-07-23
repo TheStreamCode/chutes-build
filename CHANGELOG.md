@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
 ### Added
 
 - Machine-readable `--json` output for the model catalog and local session
@@ -29,6 +31,20 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- OAuth login (`l` / `/login`, "Sign in with Chutes"): the token exchange (and
+  now refresh) send a `client_secret` when one is configured. The built-in app
+  (`cid_nyt9i...`) currently rejects the token exchange with `invalid_client`
+  unless a secret is sent, despite being documented as a public PKCE client —
+  confirmed by isolating scope as a non-factor in a controlled A/B test.
+  `openid` is also requested again — Chutes' own app docs list it as
+  required, contradicting the assumption an earlier revision of this list was
+  based on.
+- A `client_secret` supplied via `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` /
+  `CHUTES_BUILD_OIDC_CLIENT_SECRET` was silently dropped before reaching the
+  token request whenever `config.toml` also had an
+  `[grok_com_config.oidc]`/`[oauth2]` table: the config merge round-trips
+  through a generic TOML value, which does not preserve fields marked
+  `#[serde(skip)]`.
 - Relative `--cwd` values are canonicalized before changing directories,
   avoiding a second relative-path resolution.
 - `--load` now behaves as an alias of `--resume`; resume/restore conflicts,
@@ -60,25 +76,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Chutes Build privacy contract.
 - The no-op `trace --local`, `agent serve --remote`, and duplicate load/update
   flags.
-
-## [0.3.1] - 2026-07-23
-
-### Fixed
-
-- OAuth login (`l` / `/login`, "Sign in with Chutes"): the token exchange (and
-  now refresh) send a `client_secret` when one is configured. The built-in app
-  (`cid_nyt9i...`) currently rejects the token exchange with `invalid_client`
-  unless a secret is sent, despite being documented as a public PKCE client —
-  confirmed by isolating scope as a non-factor in a controlled A/B test.
-  `openid` is also requested again — Chutes' own app docs list it as
-  required, contradicting the assumption an earlier revision of this list was
-  based on.
-- A `client_secret` supplied via `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` /
-  `CHUTES_BUILD_OIDC_CLIENT_SECRET` was silently dropped before reaching the
-  token request whenever `config.toml` also had an
-  `[grok_com_config.oidc]`/`[oauth2]` table: the config merge round-trips
-  through a generic TOML value, which does not preserve fields marked
-  `#[serde(skip)]`.
 
 ### Documentation
 

@@ -1,6 +1,6 @@
 {
   "name": "chutes-build",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Privacy-first coding agent optimized for the Chutes ecosystem",
   "license": "Apache-2.0",
   "author": "Michael Gasperini (Mikesoft)",
@@ -34,12 +34,12 @@
     "verify:release": "node npm/scripts/verify-release.mjs"
   },
   "optionalDependencies": {
-    "chutes-build-darwin-arm64": "0.3.1",
-    "chutes-build-darwin-x64": "0.3.1",
-    "chutes-build-linux-arm64-gnu": "0.3.1",
-    "chutes-build-linux-x64-gnu": "0.3.1",
-    "chutes-build-win32-arm64": "0.3.1",
-    "chutes-build-win32-x64": "0.3.1"
+    "chutes-build-darwin-arm64": "0.4.0",
+    "chutes-build-darwin-x64": "0.4.0",
+    "chutes-build-linux-arm64-gnu": "0.4.0",
+    "chutes-build-linux-x64-gnu": "0.4.0",
+    "chutes-build-win32-arm64": "0.4.0",
+    "chutes-build-win32-x64": "0.4.0"
   },
   "keywords": [
     "ai",
