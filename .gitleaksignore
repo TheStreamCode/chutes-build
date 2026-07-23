@@ -7,3 +7,7 @@ c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-telemetry/src/e
 c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-tools/src/implementations/web_search/types.rs:generic-api-key:79
 c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:255
 c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:301
+07b6400464f2a030cc2fc27e7b30538d36d5967d:crates/codegen/xai-grok-workspace/src/permission/bash_command_splitting.rs:generic-api-key:1401
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/codegen/xai-grok-tools/src/implementations/chutes/context7.rs:aws-access-token:209
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:github-pat:66
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:aws-access-token:64

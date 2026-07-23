@@ -17,6 +17,12 @@ concurrency:
 env:
   CARGO_BUILD_JOBS: 2
   CARGO_TERM_COLOR: always
+  # CI runners have no recognized terminal brand (no WT_SESSION/TERM_PROGRAM
+  # etc.), so `is_legacy_windows_console()` default-denies to legacy/ASCII
+  # glyphs on the Windows runner -- unlike a real dev machine's terminal.
+  # Force the modern-glyph path so Windows tests exercise the same rendering
+  # as local development. No-op on non-Windows hosts.
+  CHUTES_BUILD_FORCE_LEGACY_CONSOLE: "0"
 
 jobs:
   security:

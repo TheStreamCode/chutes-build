@@ -8396,8 +8396,10 @@ mod tests {
         );
         let content = buf_to_text(&buf);
         assert!(
-            content.contains("Shift+Enter:send") || content.contains("Alt+Enter:send"),
-            "multiline footer must advertise Shift/Alt+Enter as send, got: {content:?}",
+            content.contains("Shift+Enter:send")
+                || content.contains("Alt+Enter:send")
+                || content.contains("Opt+Enter:send"),
+            "multiline footer must advertise Shift/Alt/Opt+Enter as send, got: {content:?}",
         );
         // Bare Enter:send would appear as "  Enter:send" (footer pad); the
         // modified chords contain the substring "Enter:send" so avoid that.
@@ -8433,8 +8435,10 @@ mod tests {
         );
         let content = buf_to_text(&buf);
         assert!(
-            content.contains("Shift+Enter:create") || content.contains("Alt+Enter:create"),
-            "multiline empty footer must advertise Shift/Alt+Enter as create, got: {content:?}",
+            content.contains("Shift+Enter:create")
+                || content.contains("Alt+Enter:create")
+                || content.contains("Opt+Enter:create"),
+            "multiline empty footer must advertise Shift/Alt/Opt+Enter as create, got: {content:?}",
         );
         assert!(
             !content.contains("  Enter:create"),
