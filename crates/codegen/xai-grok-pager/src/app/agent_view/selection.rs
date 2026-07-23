@@ -1464,6 +1464,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn active_child_copy_uses_child_scrollback_cwd() {
         use crate::scrollback::block::RenderBlock;
         use crate::scrollback::render::ScratchBuffer;

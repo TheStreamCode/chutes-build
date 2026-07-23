@@ -197,7 +197,6 @@ fn dispatch_load_session_ungated(
         agent_mut.turn_started_at = Some(std::time::Instant::now());
     }
     agent_mut.apply_app_scoped_gates(
-        app.sharing_enabled,
         app.usage_visible,
         app.subscription_tier.as_deref(),
         app.chat_mode,
@@ -843,7 +842,6 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
         agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
-            app.sharing_enabled,
             app.usage_visible,
             app.subscription_tier.as_deref(),
             app.chat_mode,

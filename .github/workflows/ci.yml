@@ -74,16 +74,26 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-cargo-
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
       - name: Test Chutes Build core
         run: cargo test -p chutes-build-core --locked
+      - name: Test CLI parser and pager behavior
+        run: |
+          cargo test -p chutes-build --locked
+          cargo test -p xai-grok-pager --lib --locked
+          cargo test -p xai-grok-pager --test settings_e2e --locked
+      - name: Test authentication and session integration
+        run: "cargo test -p xai-grok-shell --lib auth:: --locked"
       - name: Test Chutes-native tools
-        run: cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
+        run: "cargo test -p xai-grok-tools --lib implementations::chutes:: --locked"
       - name: Clippy (Chutes-owned packages)
         run: |
           cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools \
             --all-targets --locked --no-deps -- -D warnings
+          cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
 
   npm-package:
     name: npm package
@@ -107,9 +117,9 @@ jobs:
         run: npm pack --dry-run
 
   windows-check:
-    name: Rust check (Windows)
+    name: Rust quality (Windows)
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -128,6 +138,14 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-cargo-
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
+      - name: Test CLI and pager on Windows
+        run: |
+          cargo test -p chutes-build --locked
+          cargo test -p xai-grok-pager --lib --locked
+      - name: Test authentication and tools on Windows
+        run: |
+          cargo test -p xai-grok-shell --lib auth:: --locked
+          cargo test -p xai-grok-tools --locked
 
   macos-check:
     name: Rust check (macOS)
@@ -151,3 +169,5 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-cargo-
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
+      - name: Test pager on macOS
+        run: cargo test -p xai-grok-pager --lib --locked

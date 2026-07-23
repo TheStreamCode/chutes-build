@@ -432,7 +432,6 @@ pub(super) fn render_version_badge(
         spans.push(sep);
     }
 
-    let channel = xai_grok_update::channel_label();
     match &mode {
         VersionBadgeMode::Full { .. } => {
             spans.push(Span::styled(
@@ -442,7 +441,7 @@ pub(super) fn render_version_badge(
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
-                format!("{}{}", xai_grok_version::VERSION, channel),
+                xai_grok_version::VERSION,
                 Style::default().fg(theme.gray),
             ));
             spans.push(Span::styled(
@@ -453,15 +452,7 @@ pub(super) fn render_version_badge(
             ));
         }
         VersionBadgeMode::HeroFooter => {
-            let channel_display = if channel.is_empty() {
-                "Beta"
-            } else {
-                channel.trim()
-            };
-            spans.push(Span::styled(
-                channel_display,
-                Style::default().fg(theme.gray),
-            ));
+            spans.push(Span::styled("Beta", Style::default().fg(theme.gray)));
         }
         VersionBadgeMode::HeroInline => {
             spans.push(Span::styled(
@@ -3310,7 +3301,7 @@ mod tests {
         // the box gets pushed down and the version row clips at exactly
         // min_content_height. 19 == min_content_height(0, 6, 0, 0): a 13-row box
         // + 1 flex gap + 5 fixed-below.
-        let area = Rect::new(0, 0, 100, 19);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 19);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 6,
@@ -3339,7 +3330,7 @@ mod tests {
         // At h >= 26, logo07 is used (7 lines). With menu_height=3:
         // right_col = 2 + 0 + 0 + 1 + 3 = 6, inner = max(7, 6) = 7.
         // hero_box_height = 2 (borders) + 2 (v_pad) + 7 = 11.
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 3,
@@ -3351,7 +3342,7 @@ mod tests {
 
     #[test]
     fn hero_box_logo_top_aligned() {
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 3,
@@ -3365,7 +3356,7 @@ mod tests {
     fn hero_box_with_changelog() {
         // With no announcement, the changelog renders inside the box (info
         // slot), not in a separate area below it.
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
             menu_height: 3,
@@ -3382,7 +3373,7 @@ mod tests {
 
     #[test]
     fn hero_box_with_announcement() {
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let a = long_ann();
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
@@ -3407,7 +3398,7 @@ mod tests {
     fn hero_box_announcement_takes_priority_over_changelog() {
         // When both are present, the info slot is sized for the announcement
         // and the changelog is suppressed (never shown outside the box).
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let a = long_ann();
         let layout = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
@@ -3426,7 +3417,7 @@ mod tests {
         // A real announcement can't disable the hero box: the slot is clamped to
         // whatever still fits (the renderer trails a `…`), so the box stays
         // active rather than falling back to the stacked layout.
-        let area = Rect::new(0, 0, 100, 17);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 17);
         let a = long_ann();
         let without = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,
@@ -3456,7 +3447,7 @@ mod tests {
         // With a changelog/announcement the subtitle is hidden, but there's
         // still exactly one padding row between the actions and the bottom
         // border. (menu=4 + info=3 fills the inner, so the menu reaches the pad.)
-        let area = Rect::new(0, 0, 100, 50);
+        let area = Rect::new(0, 0, HERO_BOX_MIN_WIDTH, 50);
         let a = long_ann();
         let no_info = WelcomeLayout::compute(WelcomeLayoutInput {
             content_area: area,

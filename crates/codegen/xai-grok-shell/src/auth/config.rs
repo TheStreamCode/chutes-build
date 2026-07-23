@@ -160,7 +160,7 @@ pub const DEFAULT_OAUTH2_CLIENT_ID: &str = "cid_nyt9i000ht1wubapyssg4zlt";
 /// non-production builds accept. Lives in its own const, referenced by both
 /// profiles below, so the frozen-contract test (monorepo CI compiles with
 /// that feature enabled) still pins this production-origin const.
-const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &[];
+const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://chutes.ai"];
 /// See the opt-in non-production feature variant above — builds without
 /// the feature accept only the production accounts app.
 pub fn allowed_accounts_app_origins() -> Vec<String> {
@@ -369,6 +369,26 @@ impl OidcAuthConfig {
         })
     }
 }
+
+/// Resolve an in-memory client secret for the issuer/client pair stored in an
+/// OAuth session. Secrets are read live from environment configuration and are
+/// never copied into the persisted auth record.
+pub(crate) fn refresh_client_secret(issuer: &str, client_id: &str) -> Option<String> {
+    let matches = |configured_issuer: &str, configured_client_id: &str| {
+        configured_issuer.trim_end_matches('/') == issuer.trim_end_matches('/')
+            && configured_client_id == client_id
+    };
+
+    if let Some(config) = OidcAuthConfig::from_env()
+        && matches(&config.issuer, &config.client_id)
+    {
+        return config.client_secret;
+    }
+    OAuth2ProviderConfig::from_env()
+        .filter(|config| matches(&config.issuer, &config.client_id))
+        .and_then(|config| config.client_secret)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,7 +400,7 @@ mod tests {
             scopes: default_team_oauth2_scopes(),
             principal_type: Some("Team".into()),
             principal_id: Some("team-abc".into()),
-            referrer: Some("grok-build".into()),
+            referrer: Some("chutes-build".into()),
             client_secret: None,
         };
         assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");
@@ -402,7 +422,7 @@ mod tests {
             scopes: default_oauth2_scopes(),
             principal_type: None,
             principal_id: None,
-            referrer: Some("grok-build".into()),
+            referrer: Some("chutes-build".into()),
             client_secret: None,
         };
         assert_eq!(cfg.auth_scope(), "https://auth.example.com::client-123");

@@ -498,7 +498,7 @@ fn find_best_usage_object(
     let mut best = (score > 0).then_some((value, score));
     for child in object.values().filter(|child| child.is_object()) {
         if let Some(candidate) = find_best_usage_object(child, depth + 1)
-            && best.map_or(true, |(_, best_score)| candidate.1 > best_score)
+            && best.is_none_or(|(_, best_score)| candidate.1 > best_score)
         {
             best = Some(candidate);
         }

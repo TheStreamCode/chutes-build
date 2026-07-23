@@ -215,9 +215,20 @@ async fn run_external_auth_provider(
         "auth: running external auth provider"
     );
 
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.args(["-c", command])
-        .stdin(std::process::Stdio::null())
+    #[cfg(unix)]
+    let mut cmd = {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", command]);
+        cmd
+    };
+    #[cfg(not(unix))]
+    let mut cmd = {
+        let invocation = xai_grok_config::shell::shell_command_argv(command);
+        let mut cmd = tokio::process::Command::new(invocation.program);
+        cmd.args(invocation.args).envs(invocation.env);
+        cmd
+    };
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true);
 
@@ -986,6 +997,16 @@ mod tests {
     use crate::env::EnvVarGuard;
     use chrono::Utc;
 
+    #[cfg(unix)]
+    fn output_command(value: &str) -> String {
+        format!("printf '%s' '{}'", value.replace('\'', "'\\''"))
+    }
+
+    #[cfg(windows)]
+    fn output_command(value: &str) -> String {
+        format!("[Console]::Out.Write('{}')", value.replace('\'', "''"))
+    }
+
     /// Run `f` with `CHUTES_BUILD_LOGIN_DEVICE_FLOW` set to `value` (unset for `None`).
     /// `EnvVarGuard` serializes the process env and restores it on drop, so
     /// `resolve_device_flow` reads the env tier from a known state.
@@ -1099,7 +1120,7 @@ mod tests {
     async fn mint_session_noninteractive_uses_external_provider() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(output_command("xai-ext-token")),
             ..GrokComConfig::default()
         };
         let mgr = Arc::new(
@@ -1119,7 +1140,7 @@ mod tests {
             AuthManager::new(dir.path(), pinned_cfg("team-good"))
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = format!("printf '%s' {}", team_jwt("team-wrong"));
+        let cmd = output_command(&team_jwt("team-wrong"));
 
         assert!(
             run_external_auth_provider(&cmd, &mgr, false, None)
@@ -1146,7 +1167,7 @@ mod tests {
             AuthManager::new(dir.path(), pinned_cfg("team-good"))
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = format!("printf '%s' {jwt}");
+        let cmd = output_command(&jwt);
 
         let (auth, _) = run_external_auth_provider(&cmd, &mgr, false, None)
             .await
@@ -1178,9 +1199,10 @@ mod tests {
         );
         assert!(mgr.current_or_expired().is_none(), "precondition: no auth");
 
-        let (auth, _) = run_external_auth_provider("printf '%s' fresh-token", &mgr, true, None)
-            .await
-            .unwrap();
+        let (auth, _) =
+            run_external_auth_provider(&output_command("fresh-token"), &mgr, true, None)
+                .await
+                .unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "flags must come from /user fetch");
         assert_eq!(auth.user_id, "u-1");
@@ -1200,9 +1222,10 @@ mod tests {
             ..oidc_session("old-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider("printf '%s' fresh-token", &mgr, true, None)
-            .await
-            .unwrap();
+        let (auth, _) =
+            run_external_auth_provider(&output_command("fresh-token"), &mgr, true, None)
+                .await
+                .unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "flags must carry from previous auth");
         assert_eq!(auth.user_id, "test-user");
@@ -1217,7 +1240,7 @@ mod tests {
         // pick up the provider instead of starting an interactive device login.
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(output_command("xai-ext-token")),
             // oauth2=Some, oidc=None → the device flow is available (opt-in).
             ..GrokComConfig::default()
         };
@@ -1847,7 +1870,12 @@ mod tests {
             AuthManager::new(dir.path(), GrokComConfig::default())
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = r#"sh -c 'i=0; while [ $i -lt 2000 ]; do printf "%s" "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; printf token'"#;
+        #[cfg(unix)]
+        let cmd = r#"i=0; while [ $i -lt 2000 ]; do printf "%s" "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; printf token"#;
+        #[cfg(windows)]
+        let cmd = "$line = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; \
+                   1..2000 | ForEach-Object { [Console]::Error.Write($line) }; \
+                   [Console]::Out.Write('token')";
         let (auth, _) = run_external_auth_provider(cmd, &mgr, false, None)
             .await
             .expect("CLI path must inherit stderr so large stderr does not deadlock");

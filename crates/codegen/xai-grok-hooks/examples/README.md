@@ -1,6 +1,10 @@
 # Hook Examples
 
-Sample hooks for Grok. Copy to `~/.chutes-build/hooks/` to enable globally, or to `<project>/.chutes-build/hooks/` for project-scoped hooks (requires `/hooks-trust`).
+Sample hooks for Chutes Build. Copy to `~/.chutes-build/hooks/` to enable globally, or to `<project>/.chutes-build/hooks/` for project-scoped hooks (requires `/hooks-trust`).
+
+The shell-script examples require Bash (for example Git for Windows Bash, WSL,
+or a Unix host). The Python guard requires `python3`. On Windows, copy the
+files with PowerShell; executable-bit changes are not required on NTFS.
 
 ## Available Examples
 
@@ -11,7 +15,15 @@ Sample hooks for Grok. Copy to `~/.chutes-build/hooks/` to enable globally, or t
 Denies obviously destructive shell commands before they execute:
 - `rm -rf /`, `sudo rm -rf`, `mkfs`, `dd` to devices, fork bombs
 
-**Install:**
+**Install (PowerShell):**
+```powershell
+$hooks = Join-Path $HOME ".chutes-build\hooks"
+New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
+Copy-Item "examples\hooks\safe-shell.json" $hooks
+Copy-Item "examples\hooks\bin\safe-shell-guard.sh" (Join-Path $hooks "bin")
+```
+
+**Install (Bash):**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/safe-shell.json ~/.chutes-build/hooks/
@@ -36,7 +48,15 @@ It is careful to avoid false positives: `ls -R | grep foo` (the `-R` belongs to
 `ls`), `grep -e -r file` (`-r` is the pattern), and `grep -- -r file` are all
 allowed.
 
-**Install:**
+**Install (PowerShell):**
+```powershell
+$hooks = Join-Path $HOME ".chutes-build\hooks"
+New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
+Copy-Item "examples\hooks\no-recursive-grep.json" $hooks
+Copy-Item "examples\hooks\bin\no-recursive-grep-guard.py" (Join-Path $hooks "bin")
+```
+
+**Install (Bash):**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/no-recursive-grep.json ~/.chutes-build/hooks/
@@ -51,7 +71,15 @@ chmod +x ~/.chutes-build/hooks/bin/no-recursive-grep-guard.py
 
 Appends session metadata to `~/.chutes-build/session-audit.log` — event, session ID, cwd, timestamp.
 
-**Install:**
+**Install (PowerShell):**
+```powershell
+$hooks = Join-Path $HOME ".chutes-build\hooks"
+New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
+Copy-Item "examples\hooks\session-log.json" $hooks
+Copy-Item "examples\hooks\bin\session-log.sh" (Join-Path $hooks "bin")
+```
+
+**Install (Bash):**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/session-log.json ~/.chutes-build/hooks/
@@ -65,7 +93,15 @@ chmod +x ~/.chutes-build/hooks/bin/session-log.sh
 
 Logs all tool calls to `~/.chutes-build/tool-activity.log` — tool name, event type, effective tool name, backgrounded status.
 
-**Install:**
+**Install (PowerShell):**
+```powershell
+$hooks = Join-Path $HOME ".chutes-build\hooks"
+New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
+Copy-Item "examples\hooks\tool-logger.json" $hooks
+Copy-Item "examples\hooks\bin\tool-logger.sh" (Join-Path $hooks "bin")
+```
+
+**Install (Bash):**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/tool-logger.json ~/.chutes-build/hooks/
@@ -93,7 +129,9 @@ Hook files use the Claude-compatible JSON format:
 ```
 
 - **Event names:** `SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`
-- **Matcher:** regex on tool name. Claude names like `Bash`, `Read`, `Edit` are auto-expanded to also match Grok names (`run_terminal_cmd`, `read_file`, `search_replace`)
+- **Matcher:** regex on tool name. Claude-compatible names like `Bash`, `Read`,
+  and `Edit` are auto-expanded to the runtime names (`run_terminal_cmd`,
+  `read_file`, and `search_replace`).
 - **Timeout:** in seconds (default: 5)
 - **Command:** path to script (relative to hook file directory) or inline shell command
 

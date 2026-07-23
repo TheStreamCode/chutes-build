@@ -6,16 +6,73 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Machine-readable `--json` output for the model catalog and local session
+  list/search/delete commands.
+- Headless worktree creation, including `--worktree-ref`, and headless
+  `--no-subagents` / memory controls.
+- CSS-selector or snapshot-index addressing for browser click/type actions.
+- A complete public CLI and slash-command reference.
+
+### Changed
+
+- Session storage, search, deletion, traces, and workspace state are now
+  enforced as local-only product policy. Inherited remote write-back settings
+  cannot override it.
+- Updates are manual through npm/release artifacts. The runtime no longer links
+  or starts the inherited automatic updater.
+- Custom model catalogs use `CHUTES_MODELS_API_KEY`; ambient Chutes API/session
+  credentials are restricted to allowlisted official HTTPS endpoints.
+- Destructive session, memory, plugin, marketplace, and worktree operations
+  require confirmation or an explicit `--yes`.
+
+### Fixed
+
+- Relative `--cwd` values are canonicalized before changing directories,
+  avoiding a second relative-path resolution.
+- `--load` now behaves as an alias of `--resume`; resume/restore conflicts,
+  headless-only options, `--no-plan`, `--best-of-n`, and prompt/subcommand
+  combinations fail with actionable parser errors instead of being ignored.
+- Agent `--reauthenticate`, `--reasoning-effort`, model-list cancellation,
+  export/clipboard failures, worktree partial failures, plugin registry
+  failures, and custom OAuth refresh secrets now behave consistently.
+- `CHUTES_BUILD_HOME` now relocates user roles/personas and the bundled-agent
+  cache together with the rest of the application state, including on Windows.
+- Media writes roll back partial artifacts when either media or provenance
+  persistence fails.
+
+### Security
+
+- Removed the hidden remote workspace-exposure CLI and disabled the matching
+  leader protocol capability.
+- `mcp list --json` redacts environment/header values, command arguments, and
+  URL credentials/query/fragment data.
+- `agent serve` defaults to loopback, rejects short secrets, and requires
+  `--allow-remote-bind` for non-loopback listeners.
+- Plugin/marketplace removal and generated-media persistence now surface
+  partial failures instead of reporting false success.
+
+### Removed
+
+- Inherited remote share, feedback, coding-data retention, update, setup, and
+  workspace-exposure commands that were unavailable or incompatible with the
+  Chutes Build privacy contract.
+- The no-op `trace --local`, `agent serve --remote`, and duplicate load/update
+  flags.
+
 ## [0.3.1] - 2026-07-23
 
 ### Fixed
 
-- OAuth login (`l` / `/login`, "Sign in with Chutes"): the token exchange now
-  sends a `client_secret` when one is configured. The built-in app requires
-  one, so every login attempt failed with `invalid_client` regardless of
-  scopes requested. `openid` is also requested again — Chutes' own app docs
-  list it as required, contradicting the assumption an earlier revision of
-  this list was based on.
+- OAuth login (`l` / `/login`, "Sign in with Chutes"): the token exchange (and
+  now refresh) send a `client_secret` when one is configured. The built-in app
+  (`cid_nyt9i...`) currently rejects the token exchange with `invalid_client`
+  unless a secret is sent, despite being documented as a public PKCE client —
+  confirmed by isolating scope as a non-factor in a controlled A/B test.
+  `openid` is also requested again — Chutes' own app docs list it as
+  required, contradicting the assumption an earlier revision of this list was
+  based on.
 - A `client_secret` supplied via `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` /
   `CHUTES_BUILD_OIDC_CLIENT_SECRET` was silently dropped before reaching the
   token request whenever `config.toml` also had an
@@ -25,9 +82,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Documentation
 
-- README: documented the OAuth env vars above and that Chutes does not yet
-  support dynamic client registration, so a failing default login currently
-  means registering your own app instead.
+- README: documented the OAuth environment variables and the custom-client
+  fallback.
 
 ## [0.3.0] - 2026-07-22
 

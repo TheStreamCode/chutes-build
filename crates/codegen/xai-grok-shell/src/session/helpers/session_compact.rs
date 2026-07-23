@@ -71,8 +71,12 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
                     && *status != StatusCode::TOO_MANY_REQUESTS)
         }
         SamplingError::MaxTokensTruncation => true,
-        SamplingError::Http(_)
-        | SamplingError::EventStreamError(_)
+        SamplingError::Http(error) => error.status().is_some_and(|status| {
+            status.is_client_error()
+                && status != StatusCode::REQUEST_TIMEOUT
+                && status != StatusCode::TOO_MANY_REQUESTS
+        }),
+        SamplingError::EventStreamError(_)
         | SamplingError::StreamError { .. }
         | SamplingError::EmptyResponse { .. }
         | SamplingError::DoomLoopDetected { .. } => false,
@@ -852,6 +856,33 @@ mod classify_tests {
         assert!(!is_det(&classify_sampling_error(SamplingError::Http(
             http_err
         ))));
+    }
+    #[tokio::test]
+    async fn sampling_http_client_error_is_deterministic() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                axum::Router::new().fallback(|| async {
+                    (
+                        axum::http::StatusCode::BAD_REQUEST,
+                        "invalid request payload",
+                    )
+                }),
+            )
+            .await
+            .unwrap();
+        });
+        let http_err = reqwest::get(format!("http://{addr}"))
+            .await
+            .unwrap()
+            .error_for_status()
+            .expect_err("HTTP 400 must become a reqwest status error");
+        assert!(is_det(&classify_sampling_error(SamplingError::Http(
+            http_err
+        ))));
+        server.abort();
     }
     #[test]
     fn sampling_serialization_is_deterministic() {

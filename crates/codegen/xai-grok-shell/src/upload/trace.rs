@@ -2494,15 +2494,15 @@ mod tests {
     #[test]
     fn sample_rss_bytes_returns_plausible_value() {
         let rss = crate::session::signals::sample_rss_bytes();
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            assert!(rss > 0, "expected non-zero RSS on Unix, got {rss}");
+            assert!(rss > 0, "expected non-zero RSS on this platform, got {rss}");
             assert!(
                 rss < 10 * 1024 * 1024 * 1024,
                 "RSS {rss} exceeds 10 GiB — likely a unit-scaling regression"
             );
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         assert_eq!(rss, 0);
     }
     #[test]

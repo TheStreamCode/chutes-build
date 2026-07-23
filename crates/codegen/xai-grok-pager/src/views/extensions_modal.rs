@@ -4549,7 +4549,7 @@ mod tests {
         assert!(
             rows.labels
                 .iter()
-                .any(|l| l.starts_with("Managed by grok.com")),
+                .any(|l| l.starts_with("Managed by Chutes Build")),
             "managed section header must appear"
         );
         assert!(

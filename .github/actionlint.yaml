@@ -1,0 +1,6 @@
+self-hosted-runner:
+  # These are standard GitHub-hosted labels introduced after actionlint 1.7.7's
+  # built-in label catalogue.
+  labels:
+    - macos-15-intel
+    - windows-11-arm

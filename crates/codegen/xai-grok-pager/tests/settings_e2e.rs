@@ -50,11 +50,9 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "scroll_lines",
     "invert_scroll",
     "display_refresh_auto_cadence",
-    "coding_data_sharing",
     "default_selected_permission",
     "plan_mode",
     "show_tips",
-    "auto_update",
     "fork_secondary_model",
     "show_thinking_blocks",
     "prompt_suggestions",
@@ -1593,7 +1591,6 @@ fn registry_kind_membership_through_pr_14() {
             "vim_mode",
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
-            "auto_update",
             "show_tips",
             // Per-tip contextual-hint children (hidden from the top-level list,
             // toggled inside the group sub-sheet) are still Bool settings.
@@ -1618,7 +1615,6 @@ fn registry_kind_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
-            "coding_data_sharing",
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
@@ -1687,7 +1683,6 @@ fn enum_settings_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
-            "coding_data_sharing",
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
@@ -1739,9 +1734,9 @@ fn defaults_round_trip_through_registry() {
             "remember_tool_approvals" => SettingValue::Bool(false),
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "keep_text_selection" => SettingValue::Enum("flash"),
-            "theme" => SettingValue::Enum("groknight"),
-            "auto_dark_theme" => SettingValue::Enum("groknight"),
-            "auto_light_theme" => SettingValue::Enum("grokday"),
+            "theme" => SettingValue::Enum("chutesnight"),
+            "auto_dark_theme" => SettingValue::Enum("chutesnight"),
+            "auto_light_theme" => SettingValue::Enum("chutesday"),
             "render_mermaid" => SettingValue::Enum("auto"),
             "multiline_mode" => SettingValue::Bool(false),
             "permission_mode" => SettingValue::Enum("ask"),
@@ -1752,14 +1747,12 @@ fn defaults_round_trip_through_registry() {
             "scroll_lines" => SettingValue::Int(3),
             "invert_scroll" => SettingValue::Bool(false),
             "display_refresh_auto_cadence" => SettingValue::Bool(false),
-            "coding_data_sharing" => SettingValue::Enum("opt-in"),
             "default_selected_permission" => SettingValue::Enum("always_allow_all_sessions"),
             "hunk_tracker_mode" => SettingValue::Enum("agent_only"),
             "voice_capture_mode" => SettingValue::Enum("hold"),
             "voice_stt_language" => SettingValue::Enum("en"),
             "plan_mode" => SettingValue::Enum("off"),
             "show_tips" => SettingValue::Bool(true),
-            "auto_update" => SettingValue::Bool(true),
             "fork_secondary_model" => SettingValue::String(String::new()),
             "show_thinking_blocks" => SettingValue::Bool(true),
             "prompt_suggestions" => SettingValue::Bool(true),
@@ -3585,7 +3578,7 @@ fn reset_overlay_dims_all_rows_except_target() {
 }
 
 /// User-feedback follow-up: the settings modal renders a 1-line
-/// "Ask Grok" tip footer at the bottom of the content area in
+/// "Ask Chutes Build" tip footer at the bottom of the content area in
 /// Browse, FilterFocused, and PickingEnum modes (always-on tip).
 /// The footer is suppressed in `EditingValue` because the editor
 /// needs every line for input + validation. This pins the
@@ -3596,7 +3589,7 @@ fn docs_footer_renders_for_browse_and_picker() {
     let area = Rect {
         x: 0,
         y: 0,
-        width: 120,
+        width: 180,
         height: 30,
     };
     for fixture_label in ["browse", "picker"] {
@@ -3621,12 +3614,12 @@ fn docs_footer_renders_for_browse_and_picker() {
             all_text.push('\n');
         }
         assert!(
-            all_text.contains("Ask Grok"),
-            "[{fixture_label}] docs footer (`Ask Grok`) must appear in the rendered modal:\n\
+            all_text.contains("Ask Chutes Build"),
+            "[{fixture_label}] docs footer (`Ask Chutes Build`) must appear in the rendered modal:\n\
              {all_text}"
         );
         assert!(
-            all_text.contains("change theme to grokday"),
+            all_text.contains("change theme to chutesday"),
             "[{fixture_label}] docs footer must include the example phrasing"
         );
     }
@@ -4406,9 +4399,24 @@ fn pr8_default_model_and_max_thoughts_width_defaults_roundtrip() {
 // coding_data_sharing (Privacy Enum, no preview — async ACP)
 // ---------------------------------------------------------------------------
 
+fn coding_data_sharing_is_unavailable() -> bool {
+    if chutes_build_core::product::CODING_DATA_RETENTION_CONTROLS {
+        return false;
+    }
+    let registry = SettingsRegistry::defaults();
+    assert!(
+        registry.find("coding_data_sharing").is_none(),
+        "the remote coding-data control must not be registered in Chutes Build"
+    );
+    true
+}
+
 /// `coding_data_sharing` lives under `Privacy`.
 #[test]
 fn pr9_coding_data_sharing_renders_under_privacy_category() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let reg = SettingsRegistry::defaults();
     let meta = reg
         .find("coding_data_sharing")
@@ -4428,6 +4436,9 @@ fn pr9_coding_data_sharing_renders_under_privacy_category() {
 /// `coding_data_sharing` must be `supports_preview: false` (async ACP).
 #[test]
 fn pr9_coding_data_sharing_does_not_support_preview() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let reg = SettingsRegistry::defaults();
     let meta = reg
         .find("coding_data_sharing")
@@ -4478,6 +4489,9 @@ fn pr9_current_value_for_reads_pager_snapshot_inverts_opt_out() {
 /// Enter opens picker seeded to current state.
 #[test]
 fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let mut s = make_state();
     navigate_to(&mut s, "coding_data_sharing");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -4505,6 +4519,9 @@ fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
 /// Nav in picker must NOT dispatch preview (async ACP).
 #[test]
 fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     for nav_key in &[
         KeyCode::Down,
         KeyCode::Char('j'),
@@ -4533,6 +4550,9 @@ fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
 /// Enter commits `SetCodingDataSharing { opted_in }` (opt-in→true).
 #[test]
 fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let reg = SettingsRegistry::defaults();
     let meta = reg.find("coding_data_sharing").unwrap();
     let (default_canonical, choices) = match &meta.kind {
@@ -4579,6 +4599,9 @@ fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
 /// Esc in non-preview picker returns to Browse without Action.
 #[test]
 fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let mut s = make_state();
     navigate_to(&mut s, "coding_data_sharing");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -4599,6 +4622,9 @@ fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
 /// Picker seeds at "opt-out" when `coding_data_sharing_opt_out: true`.
 #[test]
 fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let snapshot = PagerLocalSnapshot {
         coding_data_sharing_opt_out: true,
         ..PagerLocalSnapshot::default()
@@ -4641,6 +4667,9 @@ fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
 /// Exactly 2 canonical choices: {opt-in, opt-out}.
 #[test]
 fn pr9_coding_data_sharing_choices_use_canonical_strings() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let reg = SettingsRegistry::defaults();
     let meta = reg.find("coding_data_sharing").unwrap();
     let canonicals: Vec<&str> = match &meta.kind {
@@ -4667,6 +4696,9 @@ fn pr9_coding_data_sharing_choices_use_canonical_strings() {
 /// Search "privacy" finds exactly `coding_data_sharing`.
 #[test]
 fn pr9_search_privacy_matches_coding_data_sharing() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let reg = SettingsRegistry::defaults();
     let hits = reg.search("privacy");
     // The category label "Privacy" appears as a header but is not
@@ -4698,6 +4730,9 @@ fn pr9_search_privacy_matches_coding_data_sharing() {
 /// First click on unselected row only selects.
 #[test]
 fn pr9_mouse_click_on_unselected_coding_data_sharing_row_only_selects() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -4719,6 +4754,9 @@ fn pr9_mouse_click_on_unselected_coding_data_sharing_row_only_selects() {
 /// Second click on selected row opens picker.
 #[test]
 fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -4754,6 +4792,9 @@ fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
 /// Value-column click opens picker in one click.
 #[test]
 fn pr9_mouse_click_on_coding_data_sharing_indicator_opens_picker_in_one_click() {
+    if coding_data_sharing_is_unavailable() {
+        return;
+    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -6088,7 +6129,7 @@ fn mouse_click_on_voice_stt_language_indicator_opens_picker_in_one_click() {
 }
 
 // ---------------------------------------------------------------------------
-// CLI batch: show_tips, auto_update (SHELL Bool, restart_required)
+// CLI batch: show_tips (SHELL Bool, restart_required)
 // ---------------------------------------------------------------------------
 
 /// Space-toggle on `show_tips` dispatches typed setter.
@@ -6101,11 +6142,12 @@ fn pr13_space_on_show_tips_dispatches_typed_setter() {
 }
 
 #[test]
-fn pr13_space_on_auto_update_dispatches_typed_setter() {
-    let mut s = make_state();
-    navigate_to(&mut s, "auto_update");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
-    assert_set_bool_action(outcome, "auto_update", false);
+fn automatic_self_update_is_not_registered() {
+    let registry = SettingsRegistry::defaults();
+    assert!(
+        registry.find("auto_update").is_none(),
+        "manual release channels must not expose an auto-update setting"
+    );
 }
 
 /// Value-column click on `show_tips` toggles in one click.
@@ -6123,53 +6165,35 @@ fn pr13_mouse_click_on_show_tips_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "show_tips", false);
 }
 
-/// Two-stage select-then-toggle on `auto_update`.
+/// The retired auto-update setting is not rendered in the modal.
 #[test]
-fn pr13_mouse_click_on_auto_update_two_stage_select_then_toggle() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "auto_update") as u16;
-
-    // First click: select-only (the focused row was compact_mode).
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
+fn automatic_self_update_is_not_visible_in_modal() {
+    let s = make_state();
     assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "first click on a different row body should only select, got: {outcome:?}"
+        s.rows
+            .iter()
+            .all(|row| !matches!(row, RowEntry::Setting { key, .. } if *key == "auto_update")),
+        "manual release channels must not render an auto-update row"
     );
-
-    // Second click on the SAME row should now toggle.
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert_set_bool_action(outcome, "auto_update", false);
 }
 
 /// CLI-batch settings are all `restart_required: true`.
 #[test]
 fn pr13_cli_batch_all_settings_are_restart_required() {
     let reg = SettingsRegistry::defaults();
-    for key in ["show_tips", "auto_update"] {
-        let meta = reg
-            .find(key)
-            .unwrap_or_else(|| panic!("registry must contain `{key}` (PR 13)"));
-        assert!(
-            meta.restart_required,
-            "PR-13 setting `{key}` must have restart_required: true \
-             (consumer reads value once at startup; the modal renders \
-             the restart pill when this row is expanded)",
-        );
-        // Sanity: these CLI-batch settings are all SHELL-owned Bool.
-        assert_eq!(meta.owner, SettingOwner::Shell);
-        assert!(matches!(meta.kind, SettingKind::Bool { .. }));
-    }
+    let key = "show_tips";
+    let meta = reg
+        .find(key)
+        .unwrap_or_else(|| panic!("registry must contain `{key}` (PR 13)"));
+    assert!(
+        meta.restart_required,
+        "PR-13 setting `{key}` must have restart_required: true \
+         (consumer reads value once at startup; the modal renders \
+         the restart pill when this row is expanded)",
+    );
+    // Sanity: this CLI-batch setting is SHELL-owned and Boolean.
+    assert_eq!(meta.owner, SettingOwner::Shell);
+    assert!(matches!(meta.kind, SettingKind::Bool { .. }));
 }
 
 /// CLI-batch defaults round-trip through `current_value_for`.
@@ -6178,23 +6202,22 @@ fn pr13_cli_batch_defaults_roundtrip_via_current_value_for() {
     use xai_grok_pager::settings::current_value_for;
     let ui = UiConfig::default();
     let pager = PagerLocalSnapshot::default();
-    for (key, expected) in [("show_tips", true), ("auto_update", true)] {
-        let value = current_value_for(key, &ui, &pager)
-            .unwrap_or_else(|| panic!("current_value_for(`{key}`) must resolve"));
-        assert_eq!(
-            value,
-            SettingValue::Bool(expected),
-            "PR 13: `{key}` defaults to {expected} (matches the consumer's \
-             .unwrap_or(...) at the original read site)",
-        );
-    }
+    let (key, expected) = ("show_tips", true);
+    let value = current_value_for(key, &ui, &pager)
+        .unwrap_or_else(|| panic!("current_value_for(`{key}`) must resolve"));
+    assert_eq!(
+        value,
+        SettingValue::Bool(expected),
+        "PR 13: `{key}` defaults to {expected} (matches the consumer's \
+         .unwrap_or(...) at the original read site)",
+    );
 }
 
 /// CLI-batch settings are discoverable via search.
 #[test]
 fn pr13_cli_batch_settings_are_discoverable_via_search() {
     let reg = SettingsRegistry::defaults();
-    let cases = [("tip", "show_tips"), ("auto-update", "auto_update")];
+    let cases = [("tip", "show_tips")];
     for (query, expected_key) in cases {
         let hits = reg.search(query);
         assert!(

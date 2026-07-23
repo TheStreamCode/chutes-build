@@ -111,7 +111,7 @@ pub(crate) fn read_to_string_or_empty(path: &std::path::Path) -> std::io::Result
 
 /// Atomic write via temp file + `rename` (mirrors [`save_config`]) so a crash
 /// mid-write can't truncate `config.toml`. Preserves the dest mode on unix.
-pub(crate) fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+pub fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

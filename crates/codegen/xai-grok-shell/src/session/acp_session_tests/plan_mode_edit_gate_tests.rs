@@ -34,7 +34,7 @@ async fn build_gate_actor() -> SessionActor {
     });
     actor
 }
-/// Flip the fixture's tracker to Active (plan file: `/tmp/test-session/plan.md`).
+/// Flip the fixture's tracker to Active.
 fn activate_plan_mode(actor: &SessionActor) {
     let mut tracker = actor.plan_mode.lock();
     assert!(tracker.enter_pending());
@@ -46,7 +46,12 @@ fn search_replace_call(id: &str, path: &str) -> ToolCallResponse {
         kind: "function".to_string(),
         function: crate::sampling::types::ToolCallFunction::new(
             "search_replace",
-            format!(r#"{{"file_path":"{path}","old_string":"a","new_string":"b"}}"#),
+            serde_json::json!({
+                "file_path": path,
+                "old_string": "a",
+                "new_string": "b",
+            })
+            .to_string(),
         ),
     }
 }
@@ -88,8 +93,13 @@ async fn plan_mode_rejects_grok_edit_outside_plan_file_despite_allow_all_permiss
         .run_until(async {
             let actor = build_gate_actor().await;
             activate_plan_mode(&actor);
-            let result =
-                prepare(&actor, search_replace_call("call_gate", "/tmp/src/main.rs")).await;
+            let plan_path = actor.plan_mode.lock().plan_file_path().to_path_buf();
+            let outside_path = std::env::temp_dir().join("src").join("main.rs");
+            let result = prepare(
+                &actor,
+                search_replace_call("call_gate", &outside_path.display().to_string()),
+            )
+            .await;
             assert!(
                 matches!(result, Err(ToolLoop::Continue)),
                 "gate must reject with Continue (tool not executed); got {result:?}"
@@ -100,7 +110,7 @@ async fn plan_mode_rejects_grok_edit_outside_plan_file_despite_allow_all_permiss
                 "rejection text: {text}"
             );
             assert!(
-                text.contains("/tmp/test-session/plan.md"),
+                text.contains(&plan_path.display().to_string()),
                 "must name the plan file so the model knows the one editable path: {text}"
             );
             assert!(
@@ -119,9 +129,10 @@ async fn plan_mode_allows_plan_file_edit() {
         .run_until(async {
             let actor = build_gate_actor().await;
             activate_plan_mode(&actor);
+            let plan_path = actor.plan_mode.lock().plan_file_path().to_path_buf();
             let result = prepare(
                 &actor,
-                search_replace_call("call_plan_file", "/tmp/test-session/plan.md"),
+                search_replace_call("call_plan_file", &plan_path.display().to_string()),
             )
             .await;
             assert!(
@@ -140,9 +151,10 @@ async fn inactive_plan_mode_does_not_gate_edits() {
     local
         .run_until(async {
             let actor = build_gate_actor().await;
+            let outside_path = std::env::temp_dir().join("src").join("main.rs");
             let result = prepare(
                 &actor,
-                search_replace_call("call_no_plan", "/tmp/src/main.rs"),
+                search_replace_call("call_no_plan", &outside_path.display().to_string()),
             )
             .await;
             assert!(

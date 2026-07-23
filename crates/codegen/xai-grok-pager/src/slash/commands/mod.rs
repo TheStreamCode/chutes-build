@@ -104,13 +104,11 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(plugin::PluginsCommand),
         Arc::new(plugin::MarketplaceCommand),
         Arc::new(plugin::SkillsCommand),
-        Arc::new(share::ShareCommand),
         Arc::new(session_info::SessionInfoCommand),
         Arc::new(rename::RenameCommand),
         Arc::new(dashboard::DashboardCommand),
         Arc::new(cd::CdCommand),
         Arc::new(theme::ThemeCommand),
-        Arc::new(feedback::FeedbackCommand),
         Arc::new(announcements::AnnouncementsCommand),
         Arc::new(remember::RememberCommand),
         Arc::new(plan::PlanCommand),
@@ -128,7 +126,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(timeline::TimelineCommand),
         Arc::new(toggle_mouse_reporting::ToggleMouseReportingCommand),
         Arc::new(settings_cmd::SettingsCommand),
-        Arc::new(privacy::PrivacyCommand),
         Arc::new(rewind::RewindCommand),
         Arc::new(jump::JumpCommand),
         Arc::new(login::LoginCommand),
@@ -212,6 +209,17 @@ mod tests {
             "/vim-mode should be registered"
         );
         assert!(reg.get("find").is_some(), "/find should be registered");
+    }
+
+    #[test]
+    fn remote_product_commands_are_not_registered() {
+        let registry = CommandRegistry::new(builtin_commands());
+        for command in ["share", "feedback", "privacy"] {
+            assert!(
+                registry.get(command).is_none(),
+                "/{command} must not be exposed by Chutes Build"
+            );
+        }
     }
     #[test]
     fn loop_command_declares_scheduler_tool_requirement() {
@@ -483,7 +491,7 @@ mod tests {
     fn usage_manage_returns_open_url() {
         match run_usage("manage") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://chutes.ai/?_s=usage");
+                assert_eq!(url, "https://chutes.ai/app/chute/usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }
@@ -515,7 +523,7 @@ mod tests {
     fn usage_manage_with_leading_whitespace() {
         match run_usage("  manage  ") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://chutes.ai/?_s=usage");
+                assert_eq!(url, "https://chutes.ai/app/chute/usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }

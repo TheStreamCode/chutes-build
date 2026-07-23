@@ -113,10 +113,12 @@ pub(crate) async fn oidc_token_exchange(auth: &GrokAuth) -> OidcRefreshResult {
             return OidcRefreshResult::Failed;
         }
     };
+    let client_secret = crate::auth::config::refresh_client_secret(issuer, client_id);
     let tokens = match refresh_tokens(
         &discovery.token_endpoint,
         refresh_tok,
         client_id,
+        client_secret.as_deref(),
         auth.principal_type.as_deref(),
         auth.principal_id.as_deref(),
     )

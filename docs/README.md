@@ -5,6 +5,10 @@ prototypes for Chutes Build.
 
 ## Technical references
 
+- [CLI reference](cli-reference.md) documents every visible top-level command,
+  global option family, machine-readable mode, and destructive-operation gate.
+- [Slash commands](slash-commands.md) lists the interactive command surface
+  registered by the TUI.
 - [Architecture](ARCHITECTURE.md) describes runtime layers, model routing,
   reasoning isolation, inference transport, account quota normalization,
   official-source policy, orchestration, and privacy boundaries.

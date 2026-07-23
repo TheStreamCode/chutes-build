@@ -182,6 +182,7 @@ enabled = true
 items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"chutes\"]
 
 # [[ui.notifications.hooks]]
+# Commands run through `sh -c` on Unix and Windows PowerShell on Windows.
 # command = \"terminal-notifier -title 'Chutes Build' -message '$CHUTES_BUILD_MESSAGE'\"
 # events = [\"turn_complete\", \"approval_required\"]
 # only_unfocused = true

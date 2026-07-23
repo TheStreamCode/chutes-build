@@ -11,10 +11,26 @@ fn execute_hook(
     session_id: Option<&str>,
     timeout: Duration,
 ) {
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c")
-        .arg(command)
-        .env("CHUTES_BUILD_EVENT", event_str)
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut command_process = Command::new("powershell.exe");
+        command_process.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            command,
+        ]);
+        command_process
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut command_process = Command::new("sh");
+        command_process.args(["-c", command]);
+        command_process
+    };
+
+    cmd.env("CHUTES_BUILD_EVENT", event_str)
         .env("CHUTES_BUILD_MESSAGE", message)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -89,7 +105,75 @@ pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
 mod tests {
     use super::*;
     use crate::notifications::config::NotificationEventKind;
+    use std::path::Path;
     use std::time::Instant;
+
+    #[cfg(windows)]
+    fn quote_path(path: &Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\'', "''"))
+    }
+
+    #[cfg(not(windows))]
+    fn quote_path(path: &Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+    }
+
+    #[cfg(windows)]
+    fn write_env_command(out: &Path) -> String {
+        format!(
+            "@('CHUTES_BUILD_EVENT=' + $env:CHUTES_BUILD_EVENT, \
+             'CHUTES_BUILD_MESSAGE=' + $env:CHUTES_BUILD_MESSAGE, \
+             'CHUTES_BUILD_SESSION_ID=' + $env:CHUTES_BUILD_SESSION_ID) | \
+             Set-Content -LiteralPath {}",
+            quote_path(out)
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn write_env_command(out: &Path) -> String {
+        format!(
+            "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
+             \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
+            quote_path(out)
+        )
+    }
+
+    #[cfg(windows)]
+    fn dump_env_command(out: &Path) -> String {
+        format!(
+            "Get-ChildItem Env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)\" }} | \
+             Set-Content -LiteralPath {}",
+            quote_path(out)
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn dump_env_command(out: &Path) -> String {
+        format!("env > {}", quote_path(out))
+    }
+
+    #[cfg(windows)]
+    fn sleep_command(seconds: u64) -> String {
+        format!("Start-Sleep -Seconds {seconds}")
+    }
+
+    #[cfg(not(windows))]
+    fn sleep_command(seconds: u64) -> String {
+        format!("sleep {seconds}")
+    }
+
+    #[cfg(windows)]
+    fn create_file_command(path: &Path) -> String {
+        format!(
+            "Set-Content -LiteralPath {} -Value '' -NoNewline",
+            quote_path(path)
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn create_file_command(path: &Path) -> String {
+        format!("touch {}", quote_path(path))
+    }
 
     fn test_event() -> NotificationEvent {
         NotificationEvent {
@@ -104,11 +188,7 @@ mod tests {
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
-        let command = format!(
-            "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
-             \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
-            out.display()
-        );
+        let command = write_env_command(&out);
 
         execute_hook(
             &command,
@@ -137,7 +217,7 @@ mod tests {
     fn omits_session_id_when_none() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
-        let command = format!("env > {}", out.display());
+        let command = dump_env_command(&out);
 
         execute_hook(
             &command,
@@ -158,7 +238,7 @@ mod tests {
     fn kills_on_timeout() {
         let start = Instant::now();
         execute_hook(
-            "sleep 100",
+            &sleep_command(100),
             "Turn complete",
             "msg",
             None,
@@ -197,7 +277,7 @@ mod tests {
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
-        let command = format!("touch {}", marker.display());
+        let command = create_file_command(&marker);
 
         execute_hook(
             &command,
@@ -213,7 +293,7 @@ mod tests {
     #[test]
     fn run_hook_spawns_thread_without_panic() {
         let hook = NotificationHook {
-            command: "true".into(),
+            command: "exit 0".into(),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 5,
@@ -227,7 +307,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
         let hook = NotificationHook {
-            command: format!("sleep 100; touch {}", marker.display()),
+            command: format!("{}; {}", sleep_command(100), create_file_command(&marker)),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 0, // exercises the .max(1) clamp inside run_hook
@@ -256,11 +336,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
         let hook = NotificationHook {
-            command: format!(
-                "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
-                 \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
-                out.display()
-            ),
+            command: write_env_command(&out),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 5,
@@ -277,7 +353,7 @@ mod tests {
             }
             assert!(
                 Instant::now() < deadline,
-                "hook did not produce output file within 5s (sh or printf may not be available)"
+                "hook did not produce output file within 5s"
             );
             std::thread::sleep(Duration::from_millis(50));
         };

@@ -67,11 +67,10 @@ fn show_privacy_info_zdr() {
     let effects = dispatch(Action::ShowPrivacyInfo, &mut app);
     assert!(effects.is_empty());
     let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Zero Data Retention"));
+    assert!(text.contains("Privacy: local-first"));
+    assert!(text.contains("not uploaded"));
 }
 
-/// `/privacy` info-print uses the desktop-aligned "privacy mode" /
-/// "share data" labels from the user's intentional rewrite.
 #[test]
 fn show_privacy_info_opted_out() {
     let mut app = test_app_with_agent();
@@ -79,11 +78,8 @@ fn show_privacy_info_opted_out() {
     let effects = dispatch(Action::ShowPrivacyInfo, &mut app);
     assert!(effects.is_empty());
     let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("Privacy: privacy mode"),
-        "info-print must use 'Privacy: privacy mode' (desktop-aligned label): {text}",
-    );
-    assert!(text.contains("/privacy opt-in"));
+    assert!(text.contains("Privacy: local-first"));
+    assert!(text.contains("selected model provider"));
 }
 
 #[test]
@@ -93,38 +89,19 @@ fn show_privacy_info_opted_in() {
     let effects = dispatch(Action::ShowPrivacyInfo, &mut app);
     assert!(effects.is_empty());
     let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("Privacy: share data"),
-        "info-print must use 'Privacy: share data' (desktop-aligned label): {text}",
-    );
-    assert!(text.contains("/privacy opt-out"));
+    assert!(text.contains("Privacy: local-first"));
+    assert!(text.contains("PRIVACY.md"));
 }
 
-/// The info-print uses desktop-aligned labels ("privacy mode" /
-/// "share data"). This test pins those labels to catch accidental
-/// regressions to the registry's "Opt in" / "Opt out" display
-/// strings.
 #[test]
 fn show_privacy_info_does_not_use_old_desktop_labels() {
-    // opted-out → "Privacy: privacy mode"
     let mut app = test_app_with_agent();
     app.coding_data_retention_opt_out = true;
     let _ = dispatch(Action::ShowPrivacyInfo, &mut app);
     let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("privacy mode"),
-        "[opted-out] info-print must contain 'privacy mode': {text:?}",
-    );
-
-    // opted-in → "Privacy: share data"
-    let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = false;
-    let _ = dispatch(Action::ShowPrivacyInfo, &mut app);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(
-        text.contains("share data"),
-        "[opted-in] info-print must contain 'share data': {text:?}",
-    );
+    assert!(!text.contains("privacy mode"));
+    assert!(!text.contains("share data"));
+    assert!(text.contains("local-first"));
 }
 
 // ── coding_data_sharing dispatch tests ───
@@ -141,6 +118,16 @@ fn show_privacy_info_does_not_use_old_desktop_labels() {
 //     mutation; `TaskResult::CodingDataSharingUpdated` re-anchors
 //     to the server-confirmed value.
 
+fn assert_coding_data_sharing_unavailable(app: &mut AppView, opted_in: bool) {
+    let previous = app.coding_data_retention_opt_out;
+    let effects = dispatch(Action::SetCodingDataSharing { opted_in }, app);
+    assert!(effects.is_empty());
+    assert_eq!(app.coding_data_retention_opt_out, previous);
+    let text = last_system_text(app, AgentId(0));
+    assert!(text.contains("not available in Chutes Build"), "{text}");
+    assert!(text.contains("sessions remain local"), "{text}");
+}
+
 /// Idempotent re-dispatch when already opted-in toasts but emits
 /// no Effect (avoids a wasted ACP round-trip).
 ///
@@ -150,31 +137,8 @@ fn show_privacy_info_does_not_use_old_desktop_labels() {
 #[test]
 fn set_coding_data_sharing_idempotent_opt_in() {
     let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = false; // currently opted-in
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
-    assert!(
-        effects.is_empty(),
-        "idempotent re-dispatch must NOT emit Effect"
-    );
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains("Opt in"),
-        "toast must show display name 'Opt in' (PR 9 R1, General-3 Issue 6): {toast}",
-    );
-    assert!(
-        !toast.contains("opt-in"),
-        "toast must NOT use snake-case canonical 'opt-in' — display name only: {toast}",
-    );
-    assert!(
-        toast.contains('\u{26A0}'),
-        "idempotent opt-in toast uses ⚠ destructive-warning glyph (PR 9 R1, \
-             General-3 Issue 5): {toast}",
-    );
-    // State unchanged.
-    assert!(
-        !app.coding_data_retention_opt_out,
-        "idempotent path must not mutate state",
-    );
+    app.coding_data_retention_opt_out = false;
+    assert_coding_data_sharing_unavailable(&mut app, true);
 }
 
 /// Idempotent re-dispatch when already opted-out toasts but emits
@@ -185,30 +149,8 @@ fn set_coding_data_sharing_idempotent_opt_in() {
 #[test]
 fn set_coding_data_sharing_idempotent_opt_out() {
     let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = true; // currently opted-out
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    assert!(
-        effects.is_empty(),
-        "idempotent re-dispatch must NOT emit Effect"
-    );
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains("Opt out"),
-        "toast must show display name 'Opt out': {toast}",
-    );
-    assert!(
-        toast.contains('\u{2713}'),
-        "idempotent opt-out toast uses ✓ safe-default glyph: {toast}",
-    );
-    assert!(
-        !toast.contains('\u{26A0}'),
-        "opt-out is the safe direction — must NOT use ⚠: {toast}",
-    );
-    // State unchanged.
-    assert!(
-        app.coding_data_retention_opt_out,
-        "idempotent path must not mutate state",
-    );
+    app.coding_data_retention_opt_out = true;
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// ZDR teams are blocked from toggling. The blocked path
@@ -218,23 +160,7 @@ fn set_coding_data_sharing_blocked_by_zdr() {
     let mut app = test_app_with_agent();
     app.is_zdr = true;
     app.coding_data_retention_opt_out = false;
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    assert!(effects.is_empty(), "ZDR block must NOT emit Effect");
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains("Zero Data Retention"),
-        "ZDR toast must surface the policy: {toast}",
-    );
-    assert!(
-        toast.contains('\u{2717}'),
-        "blocked toast uses ✗ glyph: {toast}"
-    );
-    // State unchanged — the user was blocked, the optimistic
-    // mutation never happened.
-    assert!(
-        !app.coding_data_retention_opt_out,
-        "ZDR block must not mutate state",
-    );
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// ZDR block fires even when the toggle would be a no-op
@@ -245,9 +171,7 @@ fn set_coding_data_sharing_blocked_by_zdr_even_if_idempotent() {
     let mut app = test_app_with_agent();
     app.is_zdr = true;
     app.coding_data_retention_opt_out = false;
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
-    assert!(effects.is_empty());
-    assert!(read_toast(&app).contains("Zero Data Retention"));
+    assert_coding_data_sharing_unavailable(&mut app, true);
 }
 
 /// Non-admin team members are blocked from toggling (matches
@@ -258,13 +182,7 @@ fn set_coding_data_sharing_blocked_non_admin() {
     app.team_name = Some("Acme".into());
     app.team_role = Some("Member".into());
     app.coding_data_retention_opt_out = false;
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    assert!(effects.is_empty());
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains("team admin"),
-        "non-admin toast must mention team admin: {toast}",
-    );
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// Admin team members CAN toggle. The admin-allowed path produces
@@ -274,28 +192,8 @@ fn set_coding_data_sharing_allowed_for_admin() {
     let mut app = test_app_with_agent();
     app.team_name = Some("Acme".into());
     app.team_role = Some("Admin".into());
-    app.coding_data_retention_opt_out = false; // currently opted-in
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    assert_eq!(effects.len(), 1);
-    match &effects[0] {
-        Effect::SetCodingDataSharing {
-            opted_in,
-            rollback_to_opted_in,
-            ..
-        } => {
-            assert!(!*opted_in, "Effect must carry opted_in=false");
-            assert!(
-                *rollback_to_opted_in,
-                "rollback_to_opted_in must capture pre-toggle opt-in=true",
-            );
-        }
-        other => panic!("expected SetCodingDataSharing Effect, got {other:?}"),
-    }
-    // Optimistic mutation already applied.
-    assert!(
-        app.coding_data_retention_opt_out,
-        "admin-allowed dispatch must optimistically flip state",
-    );
+    app.coding_data_retention_opt_out = false;
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// Non-idempotent dispatch emits one Effect AND mutates state
@@ -303,31 +201,8 @@ fn set_coding_data_sharing_allowed_for_admin() {
 #[test]
 fn set_coding_data_sharing_produces_effect_and_optimistic_mutation() {
     let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = false; // currently opted-in
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    assert_eq!(effects.len(), 1, "non-idempotent dispatch emits one Effect");
-    match &effects[0] {
-        Effect::SetCodingDataSharing {
-            agent_id,
-            opted_in,
-            rollback_to_opted_in,
-        } => {
-            assert_eq!(*agent_id, AgentId(0));
-            assert!(!*opted_in);
-            assert!(
-                *rollback_to_opted_in,
-                "rollback_to_opted_in must be pre-toggle value (true == opted-in)",
-            );
-        }
-        other => panic!("expected SetCodingDataSharing Effect, got {other:?}"),
-    }
-    // Optimistic mutation applied.
-    assert!(
-        app.coding_data_retention_opt_out,
-        "dispatch must optimistically mutate state",
-    );
-    // Toast on every dispatch (SHELL setter contract).
-    assert!(app.agents[&AgentId(0)].toast.is_some());
+    app.coding_data_retention_opt_out = false;
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// `TaskResult::CodingDataSharingUpdated` re-anchors state to the
@@ -484,16 +359,15 @@ fn set_coding_data_sharing_refreshes_open_modal_snapshot() {
             "initial snapshot must read opt_out=false (opted-in)",
         );
     }
-    // Dispatch the toggle.
-    let _ = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    // Snapshot now reflects the optimistic mutation.
+    // Dispatching the unavailable toggle must not mutate the snapshot.
+    assert_coding_data_sharing_unavailable(&mut app, false);
     let state = match &app.agents[&agent_id].active_modal {
         Some(crate::views::modal::ActiveModal::Settings { state }) => state,
         _ => panic!("Settings modal must still be open after SetCodingDataSharing dispatch"),
     };
     assert!(
-        state.pager_snapshot.coding_data_sharing_opt_out,
-        "snapshot must refresh to reflect opt_out=true (opted-out) after dispatch",
+        !state.pager_snapshot.coding_data_sharing_opt_out,
+        "unavailable setting must leave the snapshot unchanged",
     );
 }
 
@@ -538,36 +412,8 @@ fn coding_data_sharing_failed_refreshes_open_modal_snapshot() {
 #[test]
 fn set_coding_data_sharing_opt_in_renders_destructive_warning_toast() {
     let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = true; // currently opted-out
-    let effects = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
-    assert_eq!(effects.len(), 1, "non-idempotent opt-in must emit Effect");
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains('\u{26A0}'),
-        "opt-in toast MUST use ⚠ glyph (PR 9 R1, General-3 Issue 5 — \
-             privacy-degrading transition deserves destructive-warning glyph): {toast}",
-    );
-    assert!(
-        !toast.contains('\u{2713}'),
-        "opt-in toast MUST NOT use the uniform ✓ glyph — that's the \
-             safe-default toast for opt-out: {toast}",
-    );
-    assert!(
-        toast.contains("Opt in"),
-        "destructive toast still uses display name 'Opt in': {toast}",
-    );
-    // Consequence text pinned: a future PR softening this loses
-    // the safety affordance.
-    assert!(
-        toast.contains("code samples"),
-        "destructive toast must spell out the consequence \
-             (mention 'code samples'): {toast}",
-    );
-    assert!(
-        toast.contains("training"),
-        "destructive toast must spell out the consequence \
-             (mention 'training'): {toast}",
-    );
+    app.coding_data_retention_opt_out = true;
+    assert_coding_data_sharing_unavailable(&mut app, true);
 }
 
 /// The opt-out transition uses the
@@ -577,19 +423,8 @@ fn set_coding_data_sharing_opt_in_renders_destructive_warning_toast() {
 #[test]
 fn set_coding_data_sharing_opt_out_renders_safe_default_toast() {
     let mut app = test_app_with_agent();
-    app.coding_data_retention_opt_out = false; // currently opted-in
-    let _ = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    let toast = read_toast(&app);
-    assert!(
-        toast.contains('\u{2713}'),
-        "opt-out toast uses ✓ safe-default glyph: {toast}",
-    );
-    assert!(
-        !toast.contains('\u{26A0}'),
-        "opt-out toast MUST NOT use ⚠ — that's reserved for the privacy-degrading \
-             direction (PR 9 R1): {toast}",
-    );
-    assert!(toast.contains("Opt out"));
+    app.coding_data_retention_opt_out = false;
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// The toast renders
@@ -605,23 +440,10 @@ fn set_coding_data_sharing_opt_out_renders_safe_default_toast() {
 #[test]
 fn coding_data_sharing_toast_format_uses_display_name() {
     let mut app = test_app_with_agent();
-    // Opt-in direction.
     app.coding_data_retention_opt_out = true;
-    let _ = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
-    let opt_in_toast = read_toast(&app);
-    assert!(
-        opt_in_toast.contains("Opt in"),
-        "opt-in toast uses display 'Opt in', not canonical 'opt-in': {opt_in_toast}",
-    );
-    // Clear and test opt-out direction.
-    app.agents.get_mut(&AgentId(0)).unwrap().toast = None;
+    assert_coding_data_sharing_unavailable(&mut app, true);
     app.coding_data_retention_opt_out = false;
-    let _ = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
-    let opt_out_toast = read_toast(&app);
-    assert!(
-        opt_out_toast.contains("Opt out"),
-        "opt-out toast uses display 'Opt out', not canonical 'opt-out': {opt_out_toast}",
-    );
+    assert_coding_data_sharing_unavailable(&mut app, false);
 }
 
 /// The failure toast
@@ -917,24 +739,4 @@ fn show_usage_with_redirect_url_shows_link_and_skips_fetch() {
         last_system_text(&app, AgentId(0)).contains("https://billing.example.com/me"),
         "redirect message should use the remote settings-provided URL"
     );
-}
-
-// ── Minimal update-notice tests ──────────────────────────────────────
-
-#[test]
-fn minimal_update_notice_commits_a_system_block() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    commit_minimal_update_notice(&mut app, "9.9.9");
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Update available: v9.9.9"), "got: {text:?}");
-    assert!(text.contains("restart to apply"), "got: {text:?}");
-}
-
-#[test]
-fn minimal_update_notice_no_active_agent_is_noop() {
-    let mut app = test_app();
-    // Must not panic and must not require an agent.
-    commit_minimal_update_notice(&mut app, "9.9.9");
 }

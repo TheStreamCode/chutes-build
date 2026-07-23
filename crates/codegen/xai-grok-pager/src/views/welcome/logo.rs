@@ -113,11 +113,7 @@ fn shine_opacity(diag: f32, secs: f32) -> f32 {
 /// colors cannot be interpolated safely, so they receive a crisp two-color
 /// glint instead of silently collapsing to the resting color.
 fn shine_color(base: Color, hilite: Color, opacity: f32) -> Color {
-    blend_color(base, hilite, opacity).unwrap_or_else(
-        || {
-            if opacity >= 0.22 { hilite } else { base }
-        },
-    )
+    blend_color(base, hilite, opacity).unwrap_or(if opacity >= 0.22 { hilite } else { base })
 }
 
 fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {

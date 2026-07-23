@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn get_howto_doc_delegates_to_find_doc() {
         assert!(get_howto_doc("Getting Started").is_some());
-        assert!(get_howto_doc("Chutes Ecosystem").is_some());
+        assert!(get_howto_doc("Chutes Models and Ecosystem").is_some());
         assert!(get_howto_doc("no such doc").is_none());
     }
 

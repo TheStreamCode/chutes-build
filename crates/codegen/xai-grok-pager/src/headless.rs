@@ -170,7 +170,11 @@ pub struct HeadlessOptions {
     /// Fork on resume/continue (`--fork-session`).
     pub fork_session: bool,
     pub worktree: Option<String>,
+    pub worktree_ref: Option<String>,
     pub restore_code: bool,
+    pub no_subagents: bool,
+    pub experimental_memory: bool,
+    pub no_memory: bool,
     pub agent: Option<String>,
     pub agents_json: Option<String>,
     pub cli_tools: Option<String>,
@@ -834,6 +838,140 @@ fn headless_materialize_ctx(has_worktree: bool) -> crate::app::session_startup::
     }
 }
 
+async fn prepare_headless_worktree(
+    acp_tx: &AcpAgentTx,
+    source_cwd: &Path,
+    materialized: crate::app::session_startup::MaterializedStartup,
+    label: Option<&str>,
+    git_ref: Option<&str>,
+    restore_code: bool,
+) -> Result<(crate::app::session_startup::MaterializedStartup, PathBuf)> {
+    use crate::app::session_startup::MaterializedStartup;
+
+    let copy_mode = if git_ref.is_some() { "clean" } else { "dirty" };
+    match materialized {
+        MaterializedStartup::Resume {
+            session_id, title, ..
+        } => {
+            let mut payload = serde_json::json!({
+                "sessionId": session_id,
+                "sourceCwd": source_cwd.to_string_lossy(),
+                "copyMode": copy_mode,
+                "worktreeType": xai_grok_shell::util::config::worktree_type(),
+                "restoreCode": restore_code,
+            });
+            if let Some(reference) = git_ref {
+                payload["gitRef"] = serde_json::Value::String(reference.to_owned());
+            }
+            let response: acp::ExtResponse = acp_send(
+                acp::ExtRequest::new(
+                    "chutes.build/git/worktree/resume_session",
+                    serde_json::value::to_raw_value(&payload)?.into(),
+                ),
+                acp_tx,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("couldn't resume session in worktree: {error}"))?;
+            let value: serde_json::Value = serde_json::from_str(response.0.get())?;
+            let result = worktree_result(&value)?;
+            let new_session_id = result
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&session_id)
+                .to_owned();
+            let effective_cwd = result
+                .get("effectiveCwd")
+                .or_else(|| result.get("worktreePath"))
+                .and_then(serde_json::Value::as_str)
+                .map(PathBuf::from)
+                .ok_or_else(|| anyhow::anyhow!("worktree response is missing effectiveCwd"))?;
+            Ok((
+                MaterializedStartup::Resume {
+                    session_id: new_session_id,
+                    original_cwd: Some(effective_cwd.clone()),
+                    title,
+                },
+                effective_cwd,
+            ))
+        }
+        MaterializedStartup::NewAuto | MaterializedStartup::NewWithId { .. } => {
+            let preferred_id = match materialized {
+                MaterializedStartup::NewWithId { session_id } => session_id,
+                _ => format!(
+                    "headless-{}",
+                    &uuid::Uuid::new_v4().simple().to_string()[..12]
+                ),
+            };
+            let mut payload = serde_json::json!({
+                "sourceWorktreePath": source_cwd.to_string_lossy(),
+                "newSessionId": preferred_id,
+                "copyMode": copy_mode,
+            });
+            if let Some(label) = label.filter(|value| !value.is_empty()) {
+                payload["label"] = serde_json::Value::String(label.to_owned());
+            }
+            if let Some(reference) = git_ref {
+                payload["gitRef"] = serde_json::Value::String(reference.to_owned());
+            }
+            let response: acp::ExtResponse = acp_send(
+                acp::ExtRequest::new(
+                    "chutes.build/git/worktree/create_from_worktree_sync",
+                    serde_json::value::to_raw_value(&payload)?.into(),
+                ),
+                acp_tx,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("couldn't create worktree: {error}"))?;
+            let value: serde_json::Value = serde_json::from_str(response.0.get())?;
+            let result = worktree_result(&value)?;
+            let worktree_root = result
+                .get("worktreePath")
+                .and_then(serde_json::Value::as_str)
+                .map(PathBuf::from)
+                .ok_or_else(|| anyhow::anyhow!("worktree response is missing worktreePath"))?;
+            let effective_cwd = worktree_effective_cwd(source_cwd, &worktree_root, result);
+            Ok((
+                MaterializedStartup::NewWithId {
+                    session_id: preferred_id,
+                },
+                effective_cwd,
+            ))
+        }
+        MaterializedStartup::Fork { .. } => {
+            anyhow::bail!("--fork-session cannot be combined with --worktree")
+        }
+    }
+}
+
+fn worktree_result(value: &serde_json::Value) -> Result<&serde_json::Value> {
+    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
+        anyhow::bail!("worktree operation failed: {error}");
+    }
+    Ok(value.get("result").unwrap_or(value))
+}
+
+fn worktree_effective_cwd(
+    source_cwd: &Path,
+    worktree_root: &Path,
+    result: &serde_json::Value,
+) -> PathBuf {
+    let Some(source_git_root) = result
+        .get("sourceGitRoot")
+        .and_then(serde_json::Value::as_str)
+        .map(Path::new)
+    else {
+        return worktree_root.to_owned();
+    };
+    source_cwd
+        .strip_prefix(source_git_root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map_or_else(
+            || worktree_root.to_owned(),
+            |relative| worktree_root.join(relative),
+        )
+}
+
 /// Run a headless single-turn prompt.
 ///
 /// Spawns the agent in-process, runs the full ACP lifecycle (init → auth →
@@ -880,13 +1018,17 @@ pub async fn run_single_turn(
         cli_subagents: None,
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: false,
-        cli_no_memory: false,
+        cli_experimental_memory: options.experimental_memory,
+        cli_no_memory: options.no_memory,
         disable_web_search: options.disable_web_search,
         todo_gate: false,
         laziness_debug_log: None,
         storage_mode: None,
     });
+    if options.no_subagents {
+        agent_config.subagents_enabled = false;
+        agent_config.cli_subagents = Some(false);
+    }
 
     agent_config.mode = xai_grok_shell::agent::config::AgentMode::Headless;
     agent_config.default_yolo_mode = options.yolo;
@@ -1009,21 +1151,34 @@ pub async fn run_single_turn(
         &cwd_str,
     )
     .await?;
+    let (materialized, session_cwd) = if let Some(label) = options.worktree.as_deref() {
+        prepare_headless_worktree(
+            &acp_tx,
+            &cwd,
+            materialized,
+            Some(label),
+            options.worktree_ref.as_deref(),
+            options.restore_code,
+        )
+        .await?
+    } else {
+        (materialized, cwd.clone())
+    };
 
     // Open session
-    let restore_code = options.restore_code.then_some(true);
+    let restore_code = (options.restore_code && options.worktree.is_none()).then_some(true);
     let t_session = Instant::now();
     let opened = match materialized {
-        MaterializedStartup::NewAuto => open_session(&acp_tx, &cwd, None, None).await,
+        MaterializedStartup::NewAuto => open_session(&acp_tx, &session_cwd, None, None).await,
         MaterializedStartup::NewWithId { session_id } => {
-            open_session_with_id(&acp_tx, &cwd, &session_id).await
+            open_session_with_id(&acp_tx, &session_cwd, &session_id).await
         }
         MaterializedStartup::Resume {
             session_id,
             original_cwd,
             ..
         } => {
-            let load_cwd = original_cwd.as_deref().unwrap_or(cwd.as_path());
+            let load_cwd = original_cwd.as_deref().unwrap_or(session_cwd.as_path());
             open_session(&acp_tx, load_cwd, Some(session_id.as_str()), restore_code).await
         }
         MaterializedStartup::Fork {
@@ -1034,7 +1189,7 @@ pub async fn run_single_turn(
         } => {
             fork_then_open(
                 &acp_tx,
-                &cwd,
+                &session_cwd,
                 &parent_session_id,
                 parent_cwd.as_deref(),
                 new_session_id.as_deref(),

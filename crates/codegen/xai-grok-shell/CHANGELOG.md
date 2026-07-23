@@ -1,5 +1,9 @@
 # Changelog
 
+> Historical upstream changelog retained for provenance. Entries below may use
+> upstream Grok names or describe cloud features that are not available in
+> Chutes Build. See the repository-level `CHANGELOG.md` for product changes.
+
 # 0.2.102 — 2026-07-16
 
 ## Breaking Changes

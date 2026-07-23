@@ -87,6 +87,9 @@ pub enum UninstallError {
         other_plugins: Vec<String>,
         total: usize,
     },
+    Operation {
+        message: String,
+    },
 }
 
 impl std::fmt::Display for UninstallError {
@@ -115,6 +118,7 @@ impl std::fmt::Display for UninstallError {
                 writeln!(f)?;
                 write!(f, "Uninstalling will remove all {total} plugin(s).")
             }
+            Self::Operation { message } => f.write_str(message),
         }
     }
 }
@@ -152,9 +156,9 @@ pub fn uninstall_plugin(
         });
     }
 
-    if let Err(e) = git_install::remove_repo_path(&repo.path) {
-        tracing::warn!("failed to remove repo path: {e}");
-    }
+    git_install::remove_repo_path(&repo.path).map_err(|e| UninstallError::Operation {
+        message: format!("Failed to remove plugin directory: {e}"),
+    })?;
 
     if !keep_data {
         // Plugins under $HOME are user-scope; everything else is config-path scope.
@@ -166,7 +170,11 @@ pub fn uninstall_plugin(
     }
 
     registry.remove(&repo_key);
-    save_registry_or_warn(&registry);
+    registry.save().map_err(|e| UninstallError::Operation {
+        message: format!(
+            "Plugin files were removed, but the install registry could not be updated: {e}"
+        ),
+    })?;
 
     Ok(UninstallOutcome {
         repo_key,
@@ -1107,8 +1115,17 @@ fn install_marketplace_entry(
     })
 }
 
-/// Remove all plugins installed from a marketplace source. Returns removed repo keys.
-pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Vec<String> {
+/// Result of removing plugins that came from one marketplace source.
+pub struct MarketplaceUninstallOutcome {
+    pub removed_repos: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+/// Remove all plugins installed from a marketplace source.
+///
+/// A repo is removed from the registry only after its files were removed.
+/// Failures are returned to the caller instead of being logged as success.
+pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> MarketplaceUninstallOutcome {
     let mut registry = InstallRegistry::load();
     let to_remove: Vec<(String, std::path::PathBuf, InstalledRepo)> = registry
         .list()
@@ -1124,9 +1141,12 @@ pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Vec<String
         })
         .collect();
 
+    let mut removed_repos = Vec::new();
+    let mut failures = Vec::new();
     for (key, path, repo) in &to_remove {
         if let Err(e) = git_install::remove_repo_path(path) {
-            tracing::warn!("failed to remove plugin dir for {key}: {e}");
+            failures.push(format!("{key}: failed to remove plugin directory: {e}"));
+            continue;
         }
         let scope = match dirs::home_dir() {
             Some(home) if path.starts_with(&home) => PluginScope::User,
@@ -1134,13 +1154,19 @@ pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Vec<String
         };
         git_install::cleanup_plugin_data(repo, scope);
         registry.remove(key);
+        removed_repos.push(key.clone());
     }
 
-    if !to_remove.is_empty() {
-        save_registry_or_warn(&registry);
+    if !removed_repos.is_empty()
+        && let Err(e) = registry.save()
+    {
+        failures.push(format!("failed to save install registry: {e}"));
     }
 
-    to_remove.into_iter().map(|(key, _, _)| key).collect()
+    MarketplaceUninstallOutcome {
+        removed_repos,
+        failures,
+    }
 }
 
 /// Remove a `[[marketplace.sources]]` entry matching `git` or `path`.

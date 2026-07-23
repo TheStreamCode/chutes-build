@@ -1475,7 +1475,19 @@ mod tests {
     }
 
     use crate::render::tool_paths::ToolPathSurface;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    fn project_path_fixture(relative: &str) -> (PathBuf, PathBuf) {
+        let cwd = if cfg!(windows) {
+            PathBuf::from(r"C:\Users\me\project")
+        } else {
+            PathBuf::from("/Users/me/project")
+        };
+        let absolute = relative
+            .split('/')
+            .fold(cwd.clone(), |path, component| path.join(component));
+        (cwd, absolute)
+    }
 
     #[test]
     fn test_edit_block_header() {
@@ -1491,7 +1503,10 @@ mod tests {
             None,
         );
         let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Edit src/main.rs");
+        assert_eq!(
+            text,
+            format!("Edit {}", PathBuf::from("src").join("main.rs").display())
+        );
     }
 
     #[test]
@@ -1611,9 +1626,8 @@ mod tests {
 
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
-        let abs = "/Users/me/project/src/foo.rs";
-        let cwd = Path::new("/Users/me/project");
-        let block = EditToolCallBlock::new(abs, vec![]);
+        let (cwd, abs) = project_path_fixture("src/foo.rs");
+        let block = EditToolCallBlock::new(abs.to_string_lossy(), vec![]);
         let theme = Theme::current();
         let header = block.header_line(
             &theme,
@@ -1621,15 +1635,18 @@ mod tests {
             false,
             false,
             ToolPathSurface::Expanded,
-            Some(cwd),
+            Some(&cwd),
             None,
         );
         let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Edit src/foo.rs");
+        assert_eq!(
+            text,
+            format!("Edit {}", PathBuf::from("src").join("foo.rs").display())
+        );
 
         let mut ctx = test_ctx();
         ctx.mode = DisplayMode::Expanded;
-        ctx.cwd = Some(cwd.to_path_buf());
+        ctx.cwd = Some(cwd);
         let preamble = block.preamble(&ctx).unwrap();
         let preamble_text: String = preamble
             .lines
@@ -1637,7 +1654,7 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(preamble_text, "Edit /Users/me/project/src/foo.rs");
+        assert_eq!(preamble_text, format!("Edit {}", abs.display()));
     }
 
     #[test]
@@ -1656,25 +1673,25 @@ mod tests {
 
     #[test]
     fn header_link_target_is_absolute_file_for_all_surfaces() {
-        let abs = "/Users/me/project/src/foo.rs";
-        let cwd = Path::new("/Users/me/project");
-        let block = EditToolCallBlock::new(abs, vec![]);
-        let target = block.path_link_target(Some(cwd)).expect("file target");
+        let (cwd, abs) = project_path_fixture("src/foo.rs");
+        let block = EditToolCallBlock::new(abs.to_string_lossy(), vec![]);
+        let target = block.path_link_target(Some(&cwd)).expect("file target");
         assert_eq!(
             target,
-            crate::render::osc8::LinkTarget::File(Arc::from(Path::new(abs)))
+            crate::render::osc8::LinkTarget::File(Arc::from(abs.as_path()))
         );
+        let expected_url = url::Url::from_file_path(&abs).expect("absolute file URL");
         assert_eq!(
             crate::render::osc8::resolve_link_target(&target)
                 .unwrap()
                 .osc8_url
                 .unwrap()
                 .as_ref(),
-            "file:///Users/me/project/src/foo.rs"
+            expected_url.as_str()
         );
 
         let mut ctx = test_ctx();
-        ctx.cwd = Some(cwd.to_path_buf());
+        ctx.cwd = Some(cwd);
         ctx.mode = DisplayMode::Collapsed;
         let collapsed = block.output(&ctx);
         assert_eq!(
@@ -1687,7 +1704,7 @@ mod tests {
         let expanded = block.output(&ctx);
         assert_eq!(
             expanded.lines[0].content.spans[1].content.as_ref(),
-            "src/foo.rs"
+            PathBuf::from("src").join("foo.rs").to_string_lossy()
         );
         assert_eq!(expanded.lines[0].link_target.as_ref(), Some(&target));
     }

@@ -22,6 +22,13 @@ enum SpawnBehaviour {
     Runtime { message: String, cancelled: bool },
 }
 
+fn parse_plan_path(prompt: &str) -> Option<String> {
+    const PREFIX: &str = "your only write is `";
+    let start = prompt.find(PREFIX)? + PREFIX.len();
+    let end = start + prompt[start..].find('`')?;
+    Some(prompt[start..end].to_string())
+}
+
 /// Captured planner spawn flags (harness-internal `SubagentRequest` fields).
 #[derive(Default)]
 struct PlannerSpawnCapture {
@@ -69,17 +76,7 @@ fn spawn_planner_coordinator_capturing(
                     .lock()
                     .unwrap()
                     .push(req.runtime_overrides.model.clone());
-                // The prompt embeds the path several times; we
-                // just need any one. Walk left from the first
-                // `/plan.md` occurrence to find the absolute path.
-                let plan_path = req.prompt.find("/plan.md").map(|end_idx| {
-                    let end = end_idx + "/plan.md".len();
-                    let start = req.prompt[..end_idx]
-                        .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
-                        .map(|i| i + 1)
-                        .unwrap_or(0);
-                    req.prompt[start..end].to_string()
-                });
+                let plan_path = parse_plan_path(&req.prompt);
                 let result = match &behaviour {
                     SpawnBehaviour::WritePlanThenDone { body } => {
                         if let Some(p) = plan_path.as_deref() {
@@ -850,14 +847,7 @@ async fn lifecycle_fail_pause_resume_retry_success() {
                 while let Some(ev) = rx.recv().await {
                     if let SubagentEvent::Spawn(req) = ev {
                         let n = count_task.fetch_add(1, SeqOrd::SeqCst);
-                        let plan_path = req.prompt.find("/plan.md").map(|end_idx| {
-                            let end = end_idx + "/plan.md".len();
-                            let start = req.prompt[..end_idx]
-                                .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
-                                .map(|i| i + 1)
-                                .unwrap_or(0);
-                            req.prompt[start..end].to_string()
-                        });
+                        let plan_path = parse_plan_path(&req.prompt);
                         if let Some(ref p) = plan_path {
                             targets_task.lock().unwrap().push(p.clone());
                         }

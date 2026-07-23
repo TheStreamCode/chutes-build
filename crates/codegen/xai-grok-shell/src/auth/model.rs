@@ -123,10 +123,10 @@ impl GrokAuth {
             .num_seconds()
     }
 
-    /// `true` when the token comes from a first-party xAI account —
-    /// either an OIDC login against https://auth.example.com (or the local-dev
-    /// equivalent), or an external auth provider that declared an xAI
-    /// issuer for its token.
+    /// `true` when the token comes from the built-in Chutes identity provider —
+    /// either an OIDC login against the production issuer (or its local-dev
+    /// equivalent), or an external auth provider that declared that issuer
+    /// for its token.
     ///
     /// The issuer is a client-side hint, not a trust assertion: everything
     /// it unlocks still authenticates the actual token server-side, and it

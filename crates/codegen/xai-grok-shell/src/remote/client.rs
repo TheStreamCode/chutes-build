@@ -666,6 +666,7 @@ struct ModelsResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointAuth {
     ApiKey,
+    CustomApiKey,
     Session,
 }
 struct ListModelsEndpoint {
@@ -691,7 +692,7 @@ impl ListModelsEndpoint {
         if endpoints.has_custom_endpoint() {
             Self {
                 url: endpoints.resolve_models_list_url(),
-                auth: EndpointAuth::ApiKey,
+                auth: EndpointAuth::CustomApiKey,
             }
         } else if fetch_auth == crate::agent::models::ModelFetchAuth::ApiKey {
             Self {
@@ -731,7 +732,23 @@ pub(crate) fn fetch_models_blocking(
                 })
                 .map_err(|_| {
                     BackendError::Auth(
-                        "No API key for custom models endpoint. Set CHUTES_API_KEY.".into(),
+                        "No credential for the official Chutes models endpoint. \
+                         Set CHUTES_API_KEY or sign in."
+                            .into(),
+                    )
+                })?;
+            request = request.header("Authorization", format!("Bearer {}", api_key));
+        }
+        EndpointAuth::CustomApiKey => {
+            let api_key = std::env::var("CHUTES_MODELS_API_KEY")
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    BackendError::Auth(
+                        "No credential for custom models endpoint. Set CHUTES_MODELS_API_KEY; \
+                         CHUTES_API_KEY is restricted to official Chutes hosts."
+                            .into(),
                     )
                 })?;
             request = request.header("Authorization", format!("Bearer {}", api_key));
@@ -1778,7 +1795,7 @@ mod tests {
         );
     }
     /// INVARIANT: the `/models` fetch URL + auth scheme match the auth mode —
-    /// Session/Deployment → cli-chat-proxy (Session auth), never the inference host;
+    /// Session/Deployment → configured Chutes router (Session auth), never the inference host;
     /// ApiKey → `xai_api_base_url` (ApiKey, public default when unset); a custom
     /// models endpoint → that URL verbatim.
     #[test]
@@ -1801,15 +1818,12 @@ mod tests {
             .unwrap(),
         );
         let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
-        assert_eq!(
-            session.url,
-            "https://cli-chat-proxy.chutes-build.com/v1/models"
-        );
+        assert_eq!(session.url, "https://model-router-ten.vercel.app/v1/models");
         assert_eq!(session.auth, EndpointAuth::Session);
         let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
         assert_eq!(
             deployment.url,
-            "https://cli-chat-proxy.chutes-build.com/v1/models"
+            "https://model-router-ten.vercel.app/v1/models"
         );
         assert_eq!(deployment.auth, EndpointAuth::Session);
         let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
@@ -1829,10 +1843,10 @@ mod tests {
         );
         let ep = ListModelsEndpoint::from_endpoints(&custom, ModelFetchAuth::Session);
         assert_eq!(ep.url, "https://models.acme.com/v1/models");
-        assert_eq!(ep.auth, EndpointAuth::ApiKey);
+        assert_eq!(ep.auth, EndpointAuth::CustomApiKey);
     }
-    /// REGRESSION: `chutes-build setup` must send the deployment key to
-    /// the proxy, never the inference endpoint.
+    /// A deployment key must target the configured router, never the
+    /// inference endpoint.
     #[test]
     #[serial_test::serial]
     fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
@@ -1854,7 +1868,7 @@ mod tests {
         let url = EndpointsConfig::from_config_value(&managed).resolve_managed_config_url();
         assert_eq!(
             url,
-            "https://cli-chat-proxy.chutes-build.com/v1/deployment/config"
+            "https://model-router-ten.vercel.app/v1/deployment/config"
         );
         assert!(
             !url.contains("acme-corp"),

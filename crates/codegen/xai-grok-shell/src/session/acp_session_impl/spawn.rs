@@ -4,6 +4,17 @@
 #![allow(clippy::items_after_test_module)]
 use super::*;
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
+
+pub(super) fn runtime_web_search_config(
+    disable_web_search: bool,
+) -> xai_grok_tools::implementations::WebSearchConfig {
+    if disable_web_search {
+        xai_grok_tools::implementations::WebSearchConfig::Disabled
+    } else {
+        xai_grok_tools::implementations::WebSearchConfig::Native
+    }
+}
+
 /// Partition CLI `--allow` rules under the pin: blanket catch-all allows
 /// (`Allow(Any)` `*` / `**`, plus bare/match-all Bash/MCP/WebFetch grants — see
 /// `resolution::is_catchall_allow`) substitute for the blocked `--yolo`, so drop them when
@@ -357,14 +368,11 @@ pub(crate) async fn spawn_session_actor(
             (0, Vec::new(), Vec::new())
         };
     let primary_model_id = sampling_config.model.clone();
-    let web_search_config = if disable_web_search {
-        xai_grok_tools::implementations::WebSearchConfig::Disabled
-    } else {
-        // Native search uses its own optional provider credential and must
-        // never forward the Chutes inference key to a search engine.
-        let _ = web_search_sampling_config;
-        xai_grok_tools::implementations::WebSearchConfig::Native
-    };
+    // Native search uses its own optional provider credential and must never
+    // forward the Chutes inference key to a search engine. Keep accepting the
+    // legacy sampling value at this boundary for upstream compatibility.
+    let _ = web_search_sampling_config;
+    let web_search_config = runtime_web_search_config(disable_web_search);
     // The embedding model lives on its own per-chute subdomain, not on the
     // general chat inference gateway (which 404s on `/embeddings`). Prefer
     // the configured embedding base URL; fall back to the chat endpoint for

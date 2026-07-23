@@ -49,7 +49,7 @@ pub struct SessionIndexState {
 }
 
 /// A single search result row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionSearchRow {
     pub session_id: String,
     pub cwd: String,

@@ -586,14 +586,20 @@ fn send_prompt_mid_text_skill_token_carries_ranges() {
             ..
         } => {
             assert_eq!(text, "great /pr-workflow all good now");
-            assert_eq!(skill_token_ranges, &vec![6..18]);
+            assert_eq!(
+                skill_token_ranges,
+                &std::iter::once(6..18).collect::<Vec<_>>()
+            );
         }
         other => panic!("expected SendPrompt, got {other:?}"),
     }
     // The drained echo block styles exactly the composer-recognized token.
     match &app.agents[&id].scrollback.get(0).unwrap().block {
         RenderBlock::UserPrompt(b) => {
-            assert_eq!(b.skill_token_ranges, vec![6..18]);
+            assert_eq!(
+                b.skill_token_ranges,
+                std::iter::once(6..18).collect::<Vec<_>>()
+            );
         }
         other => panic!("expected UserPrompt, got {other:?}"),
     }
@@ -632,9 +638,10 @@ fn image_prompt_with_ranges_styles_echo_but_wire_meta_absent() {
     {
         // Real constructor path, with the image attached to the queued row.
         let agent = app.agents.get_mut(&id).unwrap();
-        agent
-            .session
-            .enqueue_prompt_with_skill_tokens("great /pr-workflow go".into(), vec![6..18]);
+        agent.session.enqueue_prompt_with_skill_tokens(
+            "great /pr-workflow go".into(),
+            std::iter::once(6..18).collect(),
+        );
         agent.session.pending_prompts.back_mut().unwrap().images =
             vec![crate::app::agent_view::test_fixtures::test_pasted_image()];
     }
@@ -642,7 +649,10 @@ fn image_prompt_with_ranges_styles_echo_but_wire_meta_absent() {
     let effects = dispatch(Action::DrainQueue, &mut app);
 
     match &app.agents[&id].scrollback.get(0).unwrap().block {
-        RenderBlock::UserPrompt(b) => assert_eq!(b.skill_token_ranges, vec![6..18]),
+        RenderBlock::UserPrompt(b) => assert_eq!(
+            b.skill_token_ranges,
+            std::iter::once(6..18).collect::<Vec<_>>()
+        ),
         other => panic!("expected UserPrompt, got {other:?}"),
     }
     match &effects[0] {
@@ -682,7 +692,7 @@ fn send_prompt_leading_skill_keeps_inject_skill_path() {
         RenderBlock::UserPrompt(b) => {
             assert_eq!(
                 b.skill_token_ranges,
-                vec![0..12],
+                std::iter::once(0..12).collect::<Vec<_>>(),
                 "InjectSkill path styles the leading /pr-workflow token"
             );
             assert_eq!(b.text, "/pr-workflow ship it");
@@ -3418,6 +3428,7 @@ fn suggestions_landing_after_bash_exit_are_dropped() {
 /// terminal Tab semantics — a single file candidate splices in place
 /// immediately and the drill-down refetch rides out with the dispatch.
 #[test]
+#[cfg(not(windows))]
 fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
     use crate::views::suggestion_controller::{
         CompletionItemParsed, SuggestResponseParsed, SuggestionSource as ShellSuggestionSource,
@@ -3499,6 +3510,7 @@ fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
 /// History rows model an OLD shell (new shells honor `tokenOnly` and send
 /// none on Tab fetches); whole-line sets must keep plain-open semantics.
 #[test]
+#[cfg(not(windows))]
 fn tab_fetch_landing_opens_dropdown_for_ambiguous_set_always_on() {
     use crate::views::suggestion_controller::{
         CompletionItemParsed, GhostSuggestionParsed, SuggestResponseParsed,

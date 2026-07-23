@@ -326,11 +326,7 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(default_filename_stem);
         let path = output_dir.join(format!("{stem}.{extension}"));
-        write_new_file(&path, &media.bytes)
-            .await
-            .map_err(|error| execution_error("generate_media", error))?;
-        let sidecar = if env_flag_default("CHUTES_PROVENANCE", true) {
-            let sidecar = path.with_extension(format!("{extension}.provenance.json"));
+        let provenance = if env_flag_default("CHUTES_PROVENANCE", true) {
             let provenance = serde_json::json!({
                 "provider": "chutes",
                 "model": &input.model,
@@ -340,17 +336,21 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
                 "cost": media.cost,
                 "created_at": chrono::Utc::now().to_rfc3339(),
             });
-            write_new_file(
-                &sidecar,
-                &serde_json::to_vec_pretty(&provenance)
+            Some(
+                serde_json::to_vec_pretty(&provenance)
                     .map_err(|error| execution_error("generate_media", error))?,
             )
-            .await
-            .map_err(|error| execution_error("generate_media", error))?;
-            Some(sidecar)
         } else {
             None
         };
+        let sidecar = write_artifact_bundle(
+            &path,
+            &media.bytes,
+            provenance.as_deref(),
+            &format!("{extension}.provenance.json"),
+        )
+        .await
+        .map_err(|error| execution_error("generate_media", error))?;
 
         Ok(ToolOutput::MediaArtifact(MediaArtifact {
             schema_version: MediaArtifact::SCHEMA_VERSION,
@@ -884,8 +884,42 @@ async fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error>
         .create_new(true)
         .open(path)
         .await?;
-    file.write_all(bytes).await?;
-    file.flush().await
+    let write_result = match file.write_all(bytes).await {
+        Ok(()) => file.flush().await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = write_result {
+        drop(file);
+        let _ = tokio::fs::remove_file(path).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn write_artifact_bundle(
+    media_path: &Path,
+    media_bytes: &[u8],
+    provenance: Option<&[u8]>,
+    provenance_extension: &str,
+) -> Result<Option<PathBuf>, std::io::Error> {
+    write_new_file(media_path, media_bytes).await?;
+    let Some(provenance) = provenance else {
+        return Ok(None);
+    };
+    let sidecar = media_path.with_extension(provenance_extension);
+    if let Err(error) = write_new_file(&sidecar, provenance).await {
+        if let Err(cleanup_error) = tokio::fs::remove_file(media_path).await {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "{error}; additionally failed to roll back {}: {cleanup_error}",
+                    media_path.display()
+                ),
+            ));
+        }
+        return Err(error);
+    }
+    Ok(Some(sidecar))
 }
 
 fn assert_content_type(kind: MediaKind, content_type: &str) -> Result<(), String> {
@@ -1271,6 +1305,26 @@ mod tests {
         write_new_file(&path, b"first").await.unwrap();
         assert!(write_new_file(&path, b"second").await.is_err());
         assert_eq!(tokio::fs::read(path).await.unwrap(), b"first");
+    }
+
+    #[tokio::test]
+    async fn provenance_failure_rolls_back_new_media_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("asset.png");
+        let sidecar = root.path().join("asset.png.provenance.json");
+        tokio::fs::write(&sidecar, b"existing").await.unwrap();
+
+        let result = write_artifact_bundle(
+            &path,
+            b"new media",
+            Some(b"new provenance"),
+            "png.provenance.json",
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!path.exists(), "media must be rolled back");
+        assert_eq!(tokio::fs::read(sidecar).await.unwrap(), b"existing");
     }
 
     #[test]

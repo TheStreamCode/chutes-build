@@ -1218,7 +1218,7 @@ mod tests {
     fn filtered_indices_preserves_headers_for_matching_entries() {
         let entries = build_test_entries();
         let mut state = MemoryModalState::new(entries);
-        state.query = "memory".to_string();
+        state.query = "memories".to_string();
         state.invalidate_filter();
 
         let indices = state.filtered_indices();

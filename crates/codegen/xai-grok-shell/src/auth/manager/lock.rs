@@ -498,6 +498,13 @@ mod tests {
         dir.path().join("auth.json")
     }
 
+    fn read_holder_info_from_guard(lock: &mut AuthFileLock) -> String {
+        lock._file.seek(io::SeekFrom::Start(0)).unwrap();
+        let mut content = String::new();
+        lock._file.read_to_string(&mut content).unwrap();
+        content
+    }
+
     // ── Pure-function unit tests (no runtime needed) ─────────────────
 
     #[test]
@@ -586,11 +593,11 @@ mod tests {
         // flock over an empty lock file.
         let dir = TempDir::new().unwrap();
         let path = auth_json_path(&dir);
-        let lock_path = path.with_file_name("auth.json.lock");
 
-        let lock = try_lock_auth_file_nonblocking(&path).expect("uncontended non-blocking acquire");
+        let mut lock =
+            try_lock_auth_file_nonblocking(&path).expect("uncontended non-blocking acquire");
 
-        let content = std::fs::read_to_string(&lock_path).unwrap();
+        let content = read_holder_info_from_guard(&mut lock);
         let (pid, _ts) =
             parse_holder_info(&content).expect("non-blocking acquire must write parseable info");
         assert_eq!(pid, std::process::id());
@@ -765,12 +772,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = auth_json_path(&dir);
 
-        let lock = try_lock_auth_file_async(&path, StdDuration::from_secs(1)).await;
+        let mut lock = try_lock_auth_file_async(&path, StdDuration::from_secs(1)).await;
         assert!(lock.is_some(), "should acquire lock");
 
-        // Verify lock file has holder info.
-        let lock_path = path.with_file_name("auth.json.lock");
-        let content = std::fs::read_to_string(&lock_path).unwrap();
+        // Verify holder info through the locked handle. Opening the path again
+        // while it is exclusively locked is rejected by Windows.
+        let content = read_holder_info_from_guard(lock.as_mut().unwrap());
         let (pid, _ts) = parse_holder_info(&content).unwrap();
         assert_eq!(pid, std::process::id());
 

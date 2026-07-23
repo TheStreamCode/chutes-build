@@ -109,7 +109,7 @@ Nesting is bounded to prevent unreviewable recursive swarms.
 Outbound provider calls are allowlisted. Telemetry and remote error pipelines
 are hard-disabled, traces export locally, the upstream relay defaults to a
 closed loopback endpoint, and public commands that depended on upstream cloud
-services return an explicit error. See [PRIVACY.md](../PRIVACY.md).
+services are not registered. See [PRIVACY.md](../PRIVACY.md).
 
 ## Module ownership
 
@@ -144,8 +144,10 @@ guarantee.
   keeping separate detectors.
 - Product-identity slices scattered through otherwise-upstream crates:
   rebranded welcome/auth screens and "Sign in with Chutes" OAuth in
-  `xai-grok-pager`/`xai-grok-shell`, privacy-first config defaults
-  (telemetry, trace upload, update checks disabled) in `xai-grok-config*`.
+  `xai-grok-pager`/`xai-grok-shell`, plus compile-time product policy in
+  `chutes-build-core::product` that disables remote session sharing/search,
+  workspace exposure, feedback/data-retention controls, trace upload, and
+  automatic updates.
 
 **Retained upstream infrastructure** (the proven agent runtime this fork
 builds on, not specific to any provider):

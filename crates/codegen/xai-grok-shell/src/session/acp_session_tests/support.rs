@@ -80,17 +80,18 @@ async fn test_agent_from_config(
     use xai_grok_tools::registry::types::SessionContext;
     let builder = crate::tools::bridge::ToolBridge::get_builder();
     let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs);
+    let temp_root = std::env::temp_dir();
     let ctx = SessionContext {
         backend,
         fs,
-        cwd: std::path::PathBuf::from("/tmp"),
-        session_folder: std::env::temp_dir().join("grok-test"),
+        cwd: temp_root.clone(),
+        session_folder: temp_root.join("grok-test"),
         session_env: std::sync::Arc::new(std::collections::HashMap::new()),
         notification_handle: ToolNotificationHandle::noop(),
         owner_session_id: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        state_path: std::path::PathBuf::from("/tmp/tool_state.json"),
+        state_path: std::env::temp_dir().join("tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
         web_fetch_config: Default::default(),
@@ -146,7 +147,8 @@ pub(crate) async fn create_test_actor_ex(
     SessionActor,
     tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
 ) {
-    let cwd = xai_grok_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+    let cwd = xai_grok_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap();
+    let session_root = cwd.join("test-session");
     let fs = Arc::new(xai_grok_workspace::file_system::MockFs::new(
         cwd.to_path_buf(),
     ));
@@ -288,17 +290,13 @@ pub(crate) async fn create_test_actor_ex(
         turn_start_prompt_mode: parking_lot::Mutex::new(PromptMode::Agent),
         turn_prompt_mode: Arc::new(parking_lot::Mutex::new(PromptMode::Agent)),
         plan_mode: Arc::new(parking_lot::Mutex::new(
-            crate::session::plan_mode::PlanModeTracker::new(std::path::PathBuf::from(
-                "/tmp/test-session",
-            )),
+            crate::session::plan_mode::PlanModeTracker::new(session_root.to_path_buf()),
         )),
         goal_enabled: false,
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(false),
         goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
         goal_tracker: Arc::new(parking_lot::Mutex::new(
-            crate::session::goal_tracker::GoalTracker::new(std::path::PathBuf::from(
-                "/tmp/test-session",
-            )),
+            crate::session::goal_tracker::GoalTracker::new(session_root.to_path_buf()),
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
@@ -342,7 +340,7 @@ pub(crate) async fn create_test_actor_ex(
         hook_load_errors: std::cell::RefCell::new(Vec::new()),
         plugin_registry: std::cell::RefCell::new(None),
         plugin_registry_handle: None,
-        events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+        events: crate::session::events::EventTracker::new(cwd.as_path()),
         observability_bridge: noop_observability_bridge(),
         current_turn_number: std::cell::Cell::new(0),
         last_recap_main_turn: std::cell::Cell::new(0),

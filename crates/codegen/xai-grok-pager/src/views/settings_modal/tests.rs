@@ -554,12 +554,11 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
     );
 }
 
-/// The default registry contains Appearance settings
-/// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
+/// The default registry contains Appearance settings, the Editor entry
 /// `multiline_mode`, the Agent entries `permission_mode` and
-/// `plan_mode`, the Privacy entry `coding_data_sharing`, the
-/// Models entry `default_model`, and the Advanced entries
-/// `show_tips` and `auto_update`. `default_reasoning_effort` and
+/// `plan_mode`, the Models entry `default_model`, and the Advanced
+/// entry `show_tips`. Remote privacy controls and automatic updates are
+/// intentionally absent. `default_reasoning_effort` and
 /// `auto_compact_threshold_percent` are not exposed in the modal.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
@@ -584,12 +583,10 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             &SettingCategory::Mouse,
             &SettingCategory::Editor,
             &SettingCategory::Agent,
-            &SettingCategory::Privacy,
             &SettingCategory::Models,
             // The Session category has no registered settings, so its
             // header is not emitted.
-            // Advanced category (first entries:
-            // `show_tips`, `auto_update`).
+            // Advanced category (first entry: `show_tips`).
             &SettingCategory::Advanced,
         ]
     );
@@ -666,8 +663,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "toolset.ask_user_question.timeout_enabled",
             // PAGER-owned plan_mode (Agent category).
             "plan_mode",
-            // SHELL-owned coding_data_sharing (Privacy category).
-            "coding_data_sharing",
             // SHELL-owned default_model (Models category).
             "default_model",
             // Models category. `default_reasoning_effort`,
@@ -683,7 +678,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
             // from the top-level list and reached via the sub-sheet.
             "contextual_hints",
-            "auto_update",
             // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
             "hunk_tracker_mode",
         ]
@@ -4637,23 +4631,24 @@ fn pathologically_narrow_truncates_label_with_ellipsis() {
 /// Two-line rows expand `state.row_rects` to span BOTH lines so
 /// mouse clicks on either line trigger the same default action.
 ///
-/// `coding_data_sharing`: label 19 + value "Opt out" 7 + chevron
-/// 2 + chrome 4 = 32 cells one-line. We render at width=28 so
-/// the row drops to two lines.
+/// `default_selected_permission` has a long label and value. We render at
+/// width=40 so the value drops to a second line.
 #[test]
 fn two_line_row_hit_rect_spans_both_lines() {
     let mut s = make_state();
     let row_idx = s
         .rows
         .iter()
-        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "coding_data_sharing"))
-        .expect("coding_data_sharing must be registered");
-    // Render at a narrow width so coding_data_sharing forces a
+        .position(
+            |r| matches!(r, RowEntry::Setting { key, .. } if *key == "default_selected_permission"),
+        )
+        .expect("default_selected_permission must be registered");
+    // Render at a narrow width so default_selected_permission forces a
     // two-line layout.
     let area = Rect {
         x: 0,
         y: 0,
-        width: 28,
+        width: 40,
         height: 60,
     };
     let mut buf = Buffer::empty(area);
@@ -4670,7 +4665,7 @@ fn two_line_row_hit_rect_spans_both_lines() {
 
     // Synthesize a click on line 2 of the row. The mouse handler
     // should fire the default action (open the enum picker for
-    // coding_data_sharing).
+    // default_selected_permission).
     s.list_area = area;
     let click_y = rect.y + 1;
     // Click somewhere in the middle of line 2.
@@ -4706,20 +4701,22 @@ fn two_line_row_hit_rect_spans_both_lines() {
 #[test]
 fn two_line_row_with_expansion_renders_three_segments() {
     let mut s = make_state();
-    // Coding data sharing's label + value (with chevron) won't
-    // fit on a 28-col line, forcing two-line layout.
+    // The default-selected-permission label + value (with chevron) will not
+    // fit on a 40-column line, forcing two-line layout.
     let row_idx = s
         .rows
         .iter()
-        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "coding_data_sharing"))
-        .expect("coding_data_sharing must be registered");
+        .position(
+            |r| matches!(r, RowEntry::Setting { key, .. } if *key == "default_selected_permission"),
+        )
+        .expect("default_selected_permission must be registered");
     s.selected = row_idx;
-    s.expanded_keys.insert("coding_data_sharing");
+    s.expanded_keys.insert("default_selected_permission");
 
     let area = Rect {
         x: 0,
         y: 0,
-        width: 28,
+        width: 40,
         height: 60,
     };
     let mut buf = Buffer::empty(area);
@@ -4735,18 +4732,13 @@ fn two_line_row_with_expansion_renders_three_segments() {
     // The row label is on line 1.
     let label_line = buf_row_text(&buf, rect.y, area.x, area.width);
     assert!(
-        label_line.contains("Coding data sharing"),
+        label_line.contains("Default selected permission"),
         "line 1 must contain the row label: {label_line:?}"
     );
-    // The value (display: "Opt out" or similar) is on line 2.
+    // The current permission value is on line 2.
     let value_line = buf_row_text(&buf, rect.y + 1, area.x, area.width);
-    // Value comes from displaying the canonical → display mapping,
-    // which uses the synthetic enum's "Third Option" canonical of
-    // "opt-out". The display fallback returns the canonical when
-    // the lookup misses — registry has the real `CodingDataSharing`
-    // choices, so display should be "Opt out".
     assert!(
-        value_line.contains("Opt") || value_line.contains("opt") || value_line.contains("out"),
+        value_line.contains("Always") || value_line.contains("allow"),
         "line 2 must contain the value text: {value_line:?}"
     );
     // The expanded description renders on line 3 and below.
@@ -4859,7 +4851,7 @@ fn synthetic_enum_chevron_meta_constructs() {
 }
 
 // -- User-feedback follow-up: always reserve a blank line between
-//    the "Tip · Ask Grok…" docs footer and the keybindings hints.
+//    the "Tip · Ask Chutes Build…" docs footer and the keybindings hints.
 //
 // Before this fix, when the hints wrapped to 2 lines (narrow modal
 // widths) the chrome's 2-row footer was fully consumed by hint
@@ -5660,16 +5652,16 @@ fn docs_footer_tip_is_centered() {
     );
 
     // SHORT path: width that fits SHORT but not LONG.
-    // SHORT = "Tip · Ask Grok to change a setting" (34 cells);
-    // LONG ≈ 73 cells. width=40 lands in the SHORT band.
-    let (row_short, tip_start_short, trailing_short) = render(40);
+    // SHORT = "Tip · Ask Chutes Build to change a setting" (42 cells);
+    // LONG ≈ 73 cells. width=48 lands in the SHORT band.
+    let (row_short, tip_start_short, trailing_short) = render(48);
     assert!(
         row_short.contains("change a setting"),
-        "width=40 must render SHORT path (contains `change a setting`): {row_short:?}",
+        "width=48 must render SHORT path (contains `change a setting`): {row_short:?}",
     );
     assert!(
         !row_short.contains("chutesday"),
-        "width=40 must NOT render LONG path (no `chutesday`): {row_short:?}",
+        "width=48 must NOT render LONG path (no `chutesday`): {row_short:?}",
     );
     assert!(
         tip_start_short.abs_diff(trailing_short) <= 1,
@@ -5713,7 +5705,7 @@ fn tip_line_has_blank_row_above() {
     let mut tip_y: Option<u16> = None;
     for y in 0..area.height {
         let txt = buf_row_text(&buf, y, area.x, area.width);
-        if txt.contains("Tip") && txt.contains("Ask Grok") {
+        if txt.contains("Tip") && txt.contains("Ask Chutes Build") {
             tip_y = Some(y);
             break;
         }

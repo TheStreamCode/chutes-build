@@ -1125,8 +1125,6 @@ fn remove_source_locked(source_url_or_path: &str) -> xai_hooks_plugins_types::Ac
     let grok_home = xai_grok_config::grok_home();
     let _flock = acquire_init_lock(&grok_home).ok();
 
-    let uninstalled = plugin::uninstall_marketplace_source_plugins(source_url_or_path);
-
     // Remove the source and (if official) set the flag in ONE atomic write so a
     // crash can't drop the flag and re-add the source next startup.
     let config_path = grok_home.join("config.toml");
@@ -1192,13 +1190,29 @@ fn remove_source_locked(source_url_or_path: &str) -> xai_hooks_plugins_types::Ac
         );
     }
 
-    let msg = if uninstalled.is_empty() {
+    // The source config is durable before installed plugin files are touched.
+    // This prevents a config-write failure from leaving the source registered
+    // after its plugins have already been deleted.
+    let uninstall = plugin::uninstall_marketplace_source_plugins(source_url_or_path);
+    if !uninstall.failures.is_empty() {
+        return ActionOutcome {
+            status: OutcomeStatus::InternalError,
+            message: format!(
+                "Marketplace source was removed, but plugin cleanup failed: {}",
+                uninstall.failures.join("; ")
+            ),
+            requires_reload: true,
+            requires_restart: false,
+        };
+    }
+
+    let msg = if uninstall.removed_repos.is_empty() {
         format!("Removed marketplace source: {source_url_or_path}")
     } else {
         format!(
             "Removed marketplace source and uninstalled {} plugin(s): {}",
-            uninstalled.len(),
-            uninstalled.join(", ")
+            uninstall.removed_repos.len(),
+            uninstall.removed_repos.join(", ")
         )
     };
     ActionOutcome {

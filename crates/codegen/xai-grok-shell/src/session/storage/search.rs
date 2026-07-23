@@ -90,7 +90,7 @@ pub struct SessionSearchRequest {
 }
 
 /// Raw search response returned to the ACP extension handler.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionSearchResponse {
     pub results: Vec<SessionSearchRow>,
     pub next_offset: Option<usize>,

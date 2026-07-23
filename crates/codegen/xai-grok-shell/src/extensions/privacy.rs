@@ -18,6 +18,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_set(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
+    if !chutes_build_core::product::CODING_DATA_RETENTION_CONTROLS {
+        return Err(acp::Error::method_not_found());
+    }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Params {

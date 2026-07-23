@@ -2468,7 +2468,7 @@ mod tests {
 
         let helper = ctrl.recognized_token_ranges(text, &models);
         assert_eq!(helper, composer);
-        assert_eq!(helper, vec![17..23]);
+        assert_eq!(helper, std::iter::once(17..23).collect::<Vec<_>>());
 
         // Cursor inside the suppressed /compact token: the under-cursor teal
         // source (command_recognized) must agree with the ranges — no teal

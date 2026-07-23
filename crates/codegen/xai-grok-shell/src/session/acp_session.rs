@@ -1679,7 +1679,7 @@ mod tool_meta_stamp_tests {
                     tool_meta(early.as_ref()).expect("early ToolCall carries chutes.build/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
-                assert_eq!(t["namespace"], "grok_build");
+                assert_eq!(t["namespace"], "chutes_build");
                 assert!(t.get("input").is_none(), "identity-only before parse");
                 let refined = refined.expect("refinement ToolCallUpdate emitted");
                 let t = tool_meta(refined.as_ref()).expect("refinement carries chutes.build/tool");

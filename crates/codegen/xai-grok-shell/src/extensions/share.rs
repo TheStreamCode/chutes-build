@@ -29,6 +29,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
+    if !chutes_build_core::product::REMOTE_SESSION_SHARING {
+        return Err(acp::Error::method_not_found());
+    }
     let request: ShareSessionRequest = parse_params(args)?;
 
     // Get auth - required for sharing.
@@ -200,13 +203,12 @@ mod tests {
 
         let expires_at = Utc::now() + ttl;
 
-        // We must explicitly set oidc_issuer to a first-party xAI issuer.
-        // Only OIDC tokens against https://auth.example.com (or the local-dev equivalent)
-        // return true from is_xai_auth(). This is required for the share tests to
-        // exercise the happy path through require_xai_auth_for_share.
+        // We must explicitly set oidc_issuer to the first-party Chutes issuer.
+        // This is required for the share tests to exercise the happy path
+        // through require_xai_auth_for_share.
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
-            oidc_issuer: Some("https://auth.example.com".to_string()),
+            oidc_issuer: Some(crate::auth::XAI_OAUTH2_ISSUER.to_string()),
             key: "test-key".into(),
             expires_at: Some(expires_at),
             create_time: Utc::now() - Duration::hours(1),

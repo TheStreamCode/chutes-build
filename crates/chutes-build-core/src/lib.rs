@@ -7,6 +7,7 @@ pub mod endpoint_policy;
 pub mod endpoints;
 pub mod media;
 pub mod privacy;
+pub mod product;
 pub mod reasoning;
 pub mod routing;
 pub mod vision;

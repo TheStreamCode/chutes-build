@@ -529,9 +529,13 @@ mod tests {
 
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
-        let abs = "/Users/me/project/src/main.rs";
-        let cwd = std::path::PathBuf::from("/Users/me/project");
-        let block = ReadToolCallBlock::new(abs).with_content("hello".into(), 1);
+        let cwd = if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\Users\me\project")
+        } else {
+            std::path::PathBuf::from("/Users/me/project")
+        };
+        let abs = cwd.join("src").join("main.rs");
+        let block = ReadToolCallBlock::new(abs.to_string_lossy()).with_content("hello".into(), 1);
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
         ctx.cwd = Some(cwd.clone());
@@ -542,7 +546,13 @@ mod tests {
             .iter()
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(header, "Read src/main.rs");
+        assert_eq!(
+            header,
+            format!(
+                "Read {}",
+                std::path::PathBuf::from("src").join("main.rs").display()
+            )
+        );
 
         let preamble = block.preamble(&ctx).unwrap();
         let preamble_text: String = preamble
@@ -551,7 +561,7 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(preamble_text, "Read /Users/me/project/src/main.rs");
+        assert_eq!(preamble_text, format!("Read {}", abs.display()));
     }
 
     #[test]
@@ -606,20 +616,35 @@ mod tests {
     fn expanded_header_selection_matches_relative_path() {
         use crate::scrollback::types::derive_selection_text;
 
-        let block = ReadToolCallBlock::new("/Users/me/project/src/main.rs");
+        let cwd = if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\Users\me\project")
+        } else {
+            std::path::PathBuf::from("/Users/me/project")
+        };
+        let block = ReadToolCallBlock::new(cwd.join("src").join("main.rs").to_string_lossy());
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
-        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
+        ctx.cwd = Some(cwd);
         let header = &block.output(&ctx).lines[0];
-        assert_eq!(derive_selection_text(header), "src/main.rs");
+        assert_eq!(
+            derive_selection_text(header),
+            std::path::PathBuf::from("src")
+                .join("main.rs")
+                .to_string_lossy()
+        );
     }
 
     #[test]
     fn header_link_target_is_absolute_file_for_collapsed_and_expanded() {
-        let abs = "/Users/me/project/src/main.rs";
-        let block = ReadToolCallBlock::new(abs);
+        let cwd = if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\Users\me\project")
+        } else {
+            std::path::PathBuf::from("/Users/me/project")
+        };
+        let abs = cwd.join("src").join("main.rs");
+        let block = ReadToolCallBlock::new(abs.to_string_lossy());
         let mut ctx = make_ctx();
-        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
+        ctx.cwd = Some(cwd);
 
         let collapsed = block.output(&ctx);
         let target = collapsed.lines[0]
@@ -628,17 +653,16 @@ mod tests {
             .expect("link target");
         assert_eq!(
             target,
-            &crate::render::osc8::LinkTarget::File(
-                std::sync::Arc::from(std::path::Path::new(abs),)
-            )
+            &crate::render::osc8::LinkTarget::File(std::sync::Arc::from(abs.as_path(),))
         );
+        let expected_url = url::Url::from_file_path(&abs).expect("absolute file URL");
         assert_eq!(
             crate::render::osc8::resolve_link_target(target)
                 .unwrap()
                 .osc8_url
                 .unwrap()
                 .as_ref(),
-            "file:///Users/me/project/src/main.rs"
+            expected_url.as_str()
         );
         assert_eq!(
             collapsed.lines[0].content.spans[1].content.as_ref(),
@@ -649,7 +673,9 @@ mod tests {
         let expanded = block.output(&ctx);
         assert_eq!(
             expanded.lines[0].content.spans[1].content.as_ref(),
-            "src/main.rs"
+            std::path::PathBuf::from("src")
+                .join("main.rs")
+                .to_string_lossy()
         );
         assert_eq!(expanded.lines[0].link_target.as_ref(), Some(target));
     }

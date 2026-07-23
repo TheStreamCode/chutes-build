@@ -1398,7 +1398,8 @@ mod tests {
             })
         );
 
-        let environment_key_command = "CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager";
+        let environment_key_command =
+            "CHUTES_API_KEY='xai-some-key' cargo run --bin xai-grok-pager";
         assert_eq!(
             primary_command_from_script(environment_key_command),
             Some(BashCommandHighlights {

@@ -3247,14 +3247,19 @@ mod tests {
     #[tokio::test]
     async fn test_output_size_guard_kills_runaway() {
         // Serialize flag-asserting tests; opt into the guards for this one.
-        // Tiny cap so `yes` trips it within a tick or two.
+        // Tiny cap so the platform's endless writer trips it within a tick or two.
         let backend = LocalTerminalBackend::new_with_output_cap(2_000);
 
         let output_file =
             std::env::temp_dir().join(format!("terminal-test-size-{}.out", std::process::id()));
+        #[cfg(unix)]
+        let command = "yes";
+        #[cfg(windows)]
+        let command = "$chunk = (('x' * 500) -join ''); while ($true) { \
+                       [Console]::Out.Write($chunk); Start-Sleep -Milliseconds 1 }";
 
         let request = TerminalRunRequest {
-            command: "yes".to_string(), // floods stdout forever
+            command: command.to_string(),
             working_directory: PathBuf::from("/tmp"),
             env: HashMap::new(),
             // Long timeout: the SIZE guard, not the timeout, must fire.
@@ -3587,9 +3592,15 @@ mod tests {
         let backend = LocalTerminalBackend::new_with_output_cap(cap);
         let tmp = tempfile::TempDir::new().unwrap();
         let output_file = tmp.path().join("output.log");
+        #[cfg(unix)]
+        let command = format!("head -c {output_amount} /dev/zero | tr '\\0' 'x'");
+        #[cfg(windows)]
+        let command = "$chunk = (('x' * 500) -join ''); while ($true) { \
+                       [Console]::Out.Write($chunk); Start-Sleep -Milliseconds 1 }"
+            .to_string();
 
         let request = TerminalRunRequest {
-            command: format!("head -c {output_amount} /dev/zero | tr '\\0' 'x'"),
+            command,
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
             timeout: Duration::from_secs(30),
@@ -3622,9 +3633,13 @@ mod tests {
         let backend = LocalTerminalBackend::new();
         let tmp = tempfile::TempDir::new().unwrap();
         let output_file = tmp.path().join("output.log");
+        #[cfg(unix)]
+        let command = "head -c 200000 /dev/zero | tr '\\0' 'x'";
+        #[cfg(windows)]
+        let command = "[Console]::Out.Write((('x' * 200000) -join ''))";
 
         let request = TerminalRunRequest {
-            command: "head -c 200000 /dev/zero | tr '\\0' 'x'".to_string(),
+            command: command.to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
             timeout: Duration::from_secs(10),

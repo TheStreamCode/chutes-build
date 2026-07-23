@@ -2150,7 +2150,7 @@ mod inline_auto_compact_flow_tests {
         gateway_tx: mpsc::UnboundedSender<xai_acp_lib::AcpClientMessage>,
         persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
     ) -> SessionActor {
-        let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+        let cwd = AbsPathBuf::new(std::env::temp_dir()).unwrap();
         let fs = Arc::new(MockFs::new(cwd.to_path_buf()));
         let terminal = Arc::new(DummyTerminal {});
         let (hunk_tx, _hunk_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2647,27 +2647,29 @@ mod inline_auto_compact_flow_tests {
     }
     /// Mock LLM endpoint answering every request with a deterministic 400.
     async fn spawn_deterministic_400_server() -> String {
+        use axum::Json;
+        use axum::body::Bytes;
+        use axum::http::StatusCode;
+        use serde_json::json;
+
+        async fn reject(_body: Bytes) -> (StatusCode, Json<serde_json::Value>) {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "bad schema",
+                    }
+                })),
+            )
+        }
+
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                tokio::spawn(async move {
-                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                    let mut buf = [0u8; 4096];
-                    let _ = stream.read(&mut buf).await;
-                    let body =
-                        r#"{"error":{"type":"invalid_request_error","message":"bad schema"}}"#;
-                    let resp = format!(
-                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        body.len(),
-                        body
-                    );
-                    let _ = stream.write_all(resp.as_bytes()).await;
-                });
-            }
+            axum::serve(listener, axum::Router::new().fallback(reject))
+                .await
+                .unwrap();
         });
         format!("http://{addr}")
     }
@@ -2692,6 +2694,8 @@ mod inline_auto_compact_flow_tests {
                 actor.chat_state_handle.replace_conversation(vec![
                     ConversationItem::system("sys"),
                     ConversationItem::user("hello"),
+                    ConversationItem::assistant("response"),
+                    ConversationItem::user("follow-up"),
                 ]);
                 let result = actor.run_compact(None).await;
                 assert!(result.is_err(), "mock 400 must fail the compaction");
@@ -2711,7 +2715,7 @@ mod inline_auto_compact_flow_tests {
                 assert_ne!(
                     actor.compaction.auto_compact_suppressed.load(Relaxed),
                     SUPPRESS_NONE,
-                    "the same deterministic failure on the AUTO path must suppress"
+                    "the same deterministic failure on the AUTO path must suppress: {result:?}"
                 );
             })
             .await;

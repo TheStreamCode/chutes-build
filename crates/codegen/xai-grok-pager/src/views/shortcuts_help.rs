@@ -3065,11 +3065,22 @@ mod tests {
     }
 
     #[test]
-    fn build_entries_surfaces_interject_ctrl_i_fallback() {
+    fn build_entries_surfaces_interject_terminal_fallback() {
         let registry = ActionRegistry::defaults();
         let entries = build_entries(&all_contexts(), &registry, true);
-        // Action label is compact "send now" wording (interject under the hood).
-        assert_cheatsheet_row_has_key(&entries, "send now", "Ctrl+i");
+        let keys: Vec<String> = entries
+            .iter()
+            .find_map(|entry| match entry {
+                ShortcutsHelpEntry::Hint { item, .. } if item.label == "send now" => {
+                    Some(item.keys.iter().map(|key| key.display()).collect())
+                }
+                _ => None,
+            })
+            .expect("send now row");
+        assert!(
+            keys.iter().any(|key| key == "Ctrl+i" || key == "Ctrl+l"),
+            "send now must advertise the Windows or VS Code fallback; got {keys:?}"
+        );
     }
 
     #[test]

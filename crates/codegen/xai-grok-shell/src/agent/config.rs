@@ -2053,7 +2053,7 @@ impl Config {
         false
     }
     pub fn is_trace_upload_enabled(&self) -> bool {
-        false
+        chutes_build_core::product::REMOTE_TRACE_UPLOAD
     }
     pub fn is_feedback_enabled(&self) -> bool {
         false
@@ -2075,7 +2075,10 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-        Resolved::new(false, ConfigSource::Default)
+        Resolved::new(
+            chutes_build_core::product::REMOTE_TRACE_UPLOAD,
+            ConfigSource::Default,
+        )
     }
     /// Resolve jemalloc heap-profile config from stored remote settings + gates.
     pub fn resolve_jemalloc_heap_profile(
@@ -4250,15 +4253,20 @@ pub(crate) fn first_own_credential(
 /// Priority: model api_key/env_key > session token > CHUTES_API_KEY.
 ///
 /// When `env_key` lists multiple names, the first set non-empty value is used.
+/// Ambient Chutes credentials are only sent to official Chutes HTTPS
+/// endpoints. Custom providers must configure `api_key` or `env_key` on the
+/// model explicitly.
 pub fn resolve_credentials(model: &ModelEntry, session_key: Option<&str>) -> ResolvedCredentials {
     let info = model.info();
+    let official_session_url =
+        chutes_build_core::endpoint_policy::is_official_credential_url(&info.base_url);
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
         (
             Some(key),
             info.base_url.clone(),
             xai_chat_state::AuthType::ApiKey,
         )
-    } else if let Some(key) = session_key {
+    } else if let Some(key) = session_key.filter(|_| official_session_url) {
         (
             Some(key.to_owned()),
             info.base_url.clone(),
@@ -4269,7 +4277,21 @@ pub fn resolve_credentials(model: &ModelEntry, session_key: Option<&str>) -> Res
             .api_base_url
             .clone()
             .unwrap_or_else(|| info.base_url.clone());
-        (Some(key), url, xai_chat_state::AuthType::ApiKey)
+        if chutes_build_core::endpoint_policy::is_official_credential_url(&url) {
+            (Some(key), url, xai_chat_state::AuthType::ApiKey)
+        } else {
+            tracing::warn!(
+                model = % info.model,
+                base_url = % url,
+                "refusing to send an ambient Chutes API key to a custom endpoint; configure \
+                 model.api_key or model.env_key explicitly"
+            );
+            (
+                None,
+                info.base_url.clone(),
+                xai_chat_state::AuthType::ApiKey,
+            )
+        }
     } else {
         if let Some(ref env_keys) = model.env_key
             && !env_keys.is_empty()
@@ -5566,7 +5588,7 @@ reasoning_effort = "low"
             std::env::remove_var(primary);
             std::env::set_var(alias, "token-via-lc-alias");
         }
-        let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
+        let mut model = test_model_entry("m", "https://llm.chutes.ai/v1", None, None, None);
         model.env_key = Some(EnvKeys::new([primary, alias]));
         assert!(
             model.has_own_credentials(),
@@ -5600,7 +5622,7 @@ reasoning_effort = "low"
         let alias = "CHUTES_BUILD_TEST_EMPTY_ENV_LC_ALIAS";
         let _primary = EnvGuard::set(primary, "");
         let _alias = EnvGuard::set(alias, "");
-        let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
+        let mut model = test_model_entry("m", "https://llm.chutes.ai/v1", None, None, None);
         model.env_key = Some(EnvKeys::new([primary, alias]));
         assert!(!model.has_own_credentials());
         let creds = resolve_credentials(&model, Some("session-jwt"));
@@ -5620,7 +5642,7 @@ reasoning_effort = "low"
         let _alias = EnvGuard::set(alias, "");
         let _global = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, sentinel);
         let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
-        let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
+        let mut model = test_model_entry("m", "https://llm.chutes.ai/v1", None, None, None);
         model.env_key = Some(EnvKeys::new([primary, alias]));
         assert!(!model.has_own_credentials());
         let creds = resolve_credentials(&model, None);
@@ -5630,7 +5652,7 @@ reasoning_effort = "low"
     #[test]
     fn resolve_credentials_empty_api_key_falls_through_to_session() {
         use xai_chat_state::AuthType;
-        let model = test_model_entry("m", "https://inference.example/v1", Some(""), None, None);
+        let model = test_model_entry("m", "https://llm.chutes.ai/v1", Some(""), None, None);
         assert!(!model.has_own_credentials());
         let creds = resolve_credentials(&model, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
@@ -5660,7 +5682,7 @@ reasoning_effort = "low"
     #[test]
     fn resolve_credentials_sets_auth_type() {
         use xai_chat_state::AuthType;
-        let model = test_model_entry("m", "https://example.com/v1", None, None, None);
+        let model = test_model_entry("m", "https://llm.chutes.ai/v1", None, None, None);
         let creds = resolve_credentials(&model, Some("tok"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
         let byok = test_model_entry("m", "https://example.com/v1", Some("key"), None, None);
@@ -5924,7 +5946,7 @@ reasoning_effort = "low"
         assert_eq!(model.api_key, Some("user-custom-api-key".to_string()));
         assert_eq!(model.info.model, dm);
         assert_eq!(
-            model.info.base_url, "https://cli-chat-proxy.chutes-build.com/v1",
+            model.info.base_url, CLI_CHAT_PROXY_BASE_URL_DEFAULT,
             "base_url should inherit from default, not be stale"
         );
     }
@@ -7038,7 +7060,8 @@ reasoning_effort = "low"
             "#,
         )
         .unwrap();
-        let cfg = Config::new_from_toml_cfg(&raw).expect("should parse");
+        let mut cfg = Config::new_from_toml_cfg(&raw).expect("should parse");
+        cfg.telemetry.apply_env_overrides();
         assert!(cfg.telemetry.events_url.is_none());
         assert!(cfg.telemetry.events_api_key.is_none());
         assert!(cfg.telemetry.mixpanel_token.is_none());
@@ -7345,7 +7368,7 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, Some("session-token-123"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
         assert_eq!(
-            sampling.base_url, "https://cli-chat-proxy.chutes-build.com/v1",
+            sampling.base_url, CLI_CHAT_PROXY_BASE_URL_DEFAULT,
             "session auth should route to cli-chat-proxy, not api.x.ai"
         );
     }
@@ -7427,7 +7450,7 @@ reasoning_effort = "low"
         );
         let model_no_key = test_model_entry(
             "test",
-            "https://proxy.api/v1",
+            CLI_CHAT_PROXY_BASE_URL_DEFAULT,
             None,
             None,
             Some("https://llm.chutes.ai/v1"),
@@ -7439,7 +7462,7 @@ reasoning_effort = "low"
             "session token should beat env key when model has no own credentials"
         );
         assert_eq!(
-            sampling.base_url, "https://proxy.api/v1",
+            sampling.base_url, CLI_CHAT_PROXY_BASE_URL_DEFAULT,
             "session auth should use base_url, not api_base_url"
         );
         let sampling = resolve_sampling(&model_no_key, None);
@@ -7491,10 +7514,7 @@ reasoning_effort = "low"
         assert_eq!(sampling.base_url, "https://inference.example.com/v1");
         let sampling = resolve_sampling(default, Some("session-key"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-        assert_eq!(
-            sampling.base_url,
-            "https://cli-chat-proxy.chutes-build.com/v1",
-        );
+        assert_eq!(sampling.base_url, CLI_CHAT_PROXY_BASE_URL_DEFAULT,);
     }
     #[test]
     fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
@@ -7818,12 +7838,12 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_feedback_defaults_to_true_when_unset() {
+    fn resolve_feedback_defaults_to_false_when_unavailable_in_product() {
         unsafe { std::env::remove_var("CHUTES_BUILD_FEEDBACK_ENABLED") };
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
         let cfg = Config::default();
         let r = cfg.resolve_feedback();
-        assert!(r.value, "feedback should be true by default");
+        assert!(!r.value, "remote feedback is unavailable in this product");
         assert_eq!(r.source, ConfigSource::Default);
     }
     #[test]
@@ -8045,7 +8065,7 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_feedback_env_overrides_all() {
+    fn resolve_feedback_ignores_env_when_unavailable_in_product() {
         unsafe { std::env::set_var("CHUTES_BUILD_FEEDBACK_ENABLED", "true") };
         let mut cfg = Config::default();
         cfg.features.feedback = Some(false);
@@ -8054,13 +8074,13 @@ reasoning_effort = "low"
             ..Default::default()
         });
         let r = cfg.resolve_feedback();
-        assert_eq!(r.source, ConfigSource::Env);
-        assert!(r.value);
+        assert_eq!(r.source, ConfigSource::Default);
+        assert!(!r.value);
         unsafe { std::env::remove_var("CHUTES_BUILD_FEEDBACK_ENABLED") };
     }
     #[test]
     #[serial]
-    fn resolve_feedback_config_overrides_remote_settings() {
+    fn resolve_feedback_ignores_config_when_unavailable_in_product() {
         unsafe { std::env::remove_var("CHUTES_BUILD_FEEDBACK_ENABLED") };
         let mut cfg = Config::default();
         cfg.features.feedback = Some(true);
@@ -8069,12 +8089,12 @@ reasoning_effort = "low"
             ..Default::default()
         });
         let r = cfg.resolve_feedback();
-        assert_eq!(r.source, ConfigSource::Config);
-        assert!(r.value);
+        assert_eq!(r.source, ConfigSource::Default);
+        assert!(!r.value);
     }
     #[test]
     #[serial]
-    fn resolve_feedback_remote_settings_used_when_no_local() {
+    fn resolve_feedback_ignores_remote_settings_when_unavailable_in_product() {
         unsafe { std::env::remove_var("CHUTES_BUILD_FEEDBACK_ENABLED") };
         let cfg = Config {
             remote_settings: Some(crate::util::config::RemoteSettings {
@@ -8084,8 +8104,8 @@ reasoning_effort = "low"
             ..Default::default()
         };
         let r = cfg.resolve_feedback();
-        assert_eq!(r.source, ConfigSource::Remote);
-        assert!(r.value);
+        assert_eq!(r.source, ConfigSource::Default);
+        assert!(!r.value);
     }
     #[test]
     #[serial]
@@ -8104,23 +8124,20 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
+    fn resolve_trace_upload_cannot_be_enabled_by_config_or_requirements() {
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
         let mut cfg = Config::default();
         cfg.features.telemetry = Some(TelemetryMode::Disabled);
         cfg.telemetry.trace_upload = Some(true);
         let r = cfg.resolve_trace_upload();
-        assert!(
-            r.value,
-            "explicit trace_upload config wins over telemetry off"
-        );
-        assert_eq!(r.source, ConfigSource::Config);
+        assert!(!r.value);
+        assert_eq!(r.source, ConfigSource::Default);
         cfg.telemetry.trace_upload = None;
         cfg.requirements
             .trace_upload
             .pin(true, crate::config::RequirementSource::Unknown);
-        assert!(cfg.resolve_trace_upload().value);
+        assert!(!cfg.resolve_trace_upload().value);
     }
     #[test]
     #[serial]
@@ -8141,13 +8158,13 @@ reasoning_effort = "low"
         assert_eq!(d["has_remote_settings"], serde_json::json!(true));
         cfg.telemetry.trace_upload = Some(true);
         let d = cfg.trace_upload_decision_debug();
-        assert_eq!(d["trace_upload"], serde_json::json!(true));
-        assert_eq!(d["trace_upload_source"], serde_json::json!("config"));
+        assert_eq!(d["trace_upload"], serde_json::json!(false));
+        assert_eq!(d["trace_upload_source"], serde_json::json!("default"));
         assert_eq!(d["in_cfg_telemetry_trace_upload"], serde_json::json!(true));
     }
     #[test]
     #[serial]
-    fn resolve_trace_upload_honors_config_when_telemetry_on() {
+    fn resolve_trace_upload_stays_disabled_when_telemetry_on() {
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
         let mut cfg = Config::default();
@@ -8155,10 +8172,10 @@ reasoning_effort = "low"
         cfg.telemetry.trace_upload = Some(false);
         let r = cfg.resolve_trace_upload();
         assert!(!r.value);
-        assert_eq!(r.source, ConfigSource::Config);
+        assert_eq!(r.source, ConfigSource::Default);
         cfg.telemetry.trace_upload = None;
         let r = cfg.resolve_trace_upload();
-        assert!(r.value, "defaults on when telemetry fully enabled");
+        assert!(!r.value, "product policy must keep trace uploads disabled");
     }
     #[test]
     #[serial]
@@ -10395,12 +10412,12 @@ telemetry = "garbage"
     }
     #[test]
     #[serial]
-    fn is_telemetry_explicitly_disabled_sync_env_signals() {
+    fn telemetry_is_always_disabled_sync_in_this_product() {
         unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "0") };
         unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
         assert!(is_telemetry_explicitly_disabled_sync());
         unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "1") };
-        assert!(!is_telemetry_explicitly_disabled_sync());
+        assert!(is_telemetry_explicitly_disabled_sync());
         unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
         unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
         assert!(is_telemetry_explicitly_disabled_sync());
@@ -10440,7 +10457,7 @@ default = "grok-4.5"
             [models]
             default = "grok-4.5"
 
-            [model.chutes-build-build]
+            [model.model-router]
             model = "grok-4.5"
             context_window = 500000
             base_url = "https://inference.example.com/v1"
@@ -10461,8 +10478,8 @@ default = "grok-4.5"
         prefetched.insert("grok-4.5".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
         let by_key = resolved
-            .get("grok-build")
-            .expect("grok-build key must exist");
+            .get("model-router")
+            .expect("model-router key must exist");
         assert_eq!(by_key.info.context_window.get(), 500_000);
         assert_eq!(by_key.info.model, "grok-4.5");
         let by_latest = resolved.get("grok-4.5").expect("grok-4.5 key must exist");
@@ -10470,7 +10487,7 @@ default = "grok-4.5"
             by_latest.info.context_window.get(),
             500_000,
             "BUG: prefetched 'grok-4.5' should inherit 500k from \
-             sibling 'grok-build' (same model slug), not stay at {default_cw}"
+             sibling 'model-router' (same model slug), not stay at {default_cw}"
         );
     }
     /// Slug propagation should carry over api_backend but NOT agent_type.
@@ -10832,13 +10849,13 @@ default = "grok-4.5"
     fn resolve_model_list_config_reasoning_efforts_beats_remote() {
         let raw_config: toml::Value = toml::from_str(
             r#"
-            [model.chutes-build-x]
+            [model.model-router]
             reasoning_efforts = ["low"]
             "#,
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
-        let mut entry = prefetch_model_entry("grok-x", 200_000, ApiBackend::default());
+        let mut entry = prefetch_model_entry("model-router", 200_000, ApiBackend::default());
         entry.info.reasoning_efforts = vec![ReasoningEffortOption {
             id: "high".to_string(),
             value: ReasoningEffort::High,
@@ -10847,11 +10864,11 @@ default = "grok-4.5"
             default: false,
         }];
         let mut prefetched = IndexMap::new();
-        prefetched.insert("grok-x".to_owned(), entry);
+        prefetched.insert("model-router".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
         let efforts = &resolved
-            .get("grok-x")
-            .expect("grok-x")
+            .get("model-router")
+            .expect("model-router")
             .info
             .reasoning_efforts;
         assert_eq!(efforts.len(), 1);
@@ -10864,11 +10881,11 @@ default = "grok-4.5"
     fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_fallback() {
         let cfg = Config::default();
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        let entry = prefetch_model_entry("grok-build", default_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("model-router", default_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("grok-build".to_owned(), entry);
+        prefetched.insert("model-router".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("grok-build").expect("model must exist");
+        let entry = resolved.get("model-router").expect("model must exist");
         assert_ne!(
             entry.info.context_window.get(),
             default_cw,
@@ -10879,11 +10896,11 @@ default = "grok-4.5"
     fn resolve_model_list_does_not_override_explicitly_set_context_window() {
         let cfg = Config::default();
         let explicit_cw = 65_536;
-        let entry = prefetch_model_entry("grok-build", explicit_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("model-router", explicit_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("grok-build".to_owned(), entry);
+        prefetched.insert("model-router".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("grok-build").expect("model must exist");
+        let entry = resolved.get("model-router").expect("model must exist");
         assert_eq!(
             entry.info.context_window.get(),
             explicit_cw,
@@ -10894,13 +10911,13 @@ default = "grok-4.5"
     fn resolve_model_list_inherits_agent_type_and_api_backend() {
         let cfg = Config::default();
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        let entry = prefetch_model_entry("grok-build", default_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("model-router", default_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("grok-build".to_owned(), entry);
+        prefetched.insert("model-router".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("grok-build").expect("model must exist");
+        let entry = resolved.get("model-router").expect("model must exist");
         let defaults = default_model_entries(&EndpointsConfig::default());
-        if let Some(default) = defaults.get("grok-build") {
+        if let Some(default) = defaults.get("model-router") {
             if default.info.agent_type != DEFAULT_AGENT_TYPE {
                 assert_eq!(
                     entry.info.agent_type, default.info.agent_type,
@@ -10940,21 +10957,21 @@ default = "grok-4.5"
         let cfg = Config::default();
         let mut defs = default_model_entries(&EndpointsConfig::default());
         let mut p = IndexMap::new();
-        if let Some(e) = defs.shift_remove("grok-build") {
-            p.insert("grok-build".to_string(), e);
+        if let Some(e) = defs.shift_remove("model-router") {
+            p.insert("model-router".to_string(), e);
         }
         let resolved = resolve_model_list(&cfg, Some(p));
-        assert!(resolved.contains_key("grok-build"));
+        assert!(resolved.contains_key("model-router"));
         let no_p = resolve_model_list(&cfg, None);
-        assert!(no_p.contains_key("grok-build"));
+        assert!(no_p.contains_key("model-router"));
     }
     #[test]
     fn resolve_model_list_prefetch_visibility_matches_auth_and_server_list() {
         let cfg = Config::default();
         let mut defs = default_model_entries(&EndpointsConfig::default());
         let mut p = IndexMap::new();
-        if let Some(e) = defs.shift_remove("grok-build") {
-            p.insert("grok-build".to_string(), e);
+        if let Some(e) = defs.shift_remove("model-router") {
+            p.insert("model-router".to_string(), e);
         }
         let resolved = resolve_model_list(&cfg, Some(p));
         let sess: Vec<_> = resolved
@@ -10966,7 +10983,7 @@ default = "grok-4.5"
             .filter(|e| e.visible_for_auth(false))
             .collect();
         assert_eq!(sess.len(), 1);
-        assert!(api.is_empty());
+        assert_eq!(api.len(), 1);
     }
     #[test]
     fn resolve_model_list_keeps_prefetch_only_entries_and_prunes_defaults() {
@@ -10976,7 +10993,7 @@ default = "grok-4.5"
         p.insert("secret-xyz".to_string(), e);
         let resolved = resolve_model_list(&cfg, Some(p));
         assert!(resolved.contains_key("secret-xyz"));
-        assert!(!resolved.contains_key("grok-build"));
+        assert!(!resolved.contains_key("model-router"));
     }
     #[test]
     fn resolve_model_list_prefetch_replaces_bundled_entirely() {
@@ -10986,7 +11003,7 @@ default = "grok-4.5"
         p.insert("grok-4.5".to_string(), e);
         let resolved = resolve_model_list(&cfg, Some(p));
         assert!(resolved.contains_key("grok-4.5"));
-        assert!(!resolved.contains_key("grok-build"));
+        assert!(!resolved.contains_key("model-router"));
     }
     #[test]
     fn resolve_model_list_empty_prefetch_yields_empty_base() {
@@ -10994,15 +11011,15 @@ default = "grok-4.5"
         let resolved = resolve_model_list(&cfg, Some(IndexMap::new()));
         assert!(resolved.is_empty());
     }
-    /// Regression: enterprise managed config aliases grok-build to their own
-    /// endpoint with env_key. The bundled grok-build has supported_in_api=false.
+    /// Regression: enterprise managed config aliases the bundled model to its
+    /// own endpoint with env_key.
     /// The config overlay must be visible to API-key users (env_key = BYOK).
     #[test]
     fn byok_config_overlay_visible_to_api_key_users() {
         let raw: toml::Value = toml::from_str(
             r#"
-            [model.chutes-build-build]
-            model = "grok-4.5"
+            [model.model-router]
+            model = "model-router"
             base_url = "https://inference.company.com/v1"
             env_key = "COMPANY_TOKEN"
             "#,
@@ -11010,30 +11027,34 @@ default = "grok-4.5"
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
-        let entry = resolved.get("grok-build").expect("grok-build must exist");
+        let entry = resolved
+            .get("model-router")
+            .expect("model-router must exist");
         assert!(
             entry.visible_for_auth(false),
             "BYOK config entry must be visible to API-key users — \
              bundled supported_in_api=false must not leak into credentialed overlays"
         );
     }
-    /// Guard: config overlay WITHOUT credentials must NOT override the
-    /// bundled supported_in_api flag. Only BYOK triggers the override.
+    /// Guard: a plain config overlay preserves the bundled model's API-key
+    /// visibility.
     #[test]
     fn plain_config_overlay_preserves_bundled_visibility() {
         let raw: toml::Value = toml::from_str(
             r#"
-            [model.chutes-build-build]
+            [model.model-router]
             context_window = 300000
             "#,
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
-        let entry = resolved.get("grok-build").expect("grok-build must exist");
+        let entry = resolved
+            .get("model-router")
+            .expect("model-router must exist");
         assert!(
-            !entry.visible_for_auth(false),
-            "non-BYOK config overlay must preserve bundled supported_in_api=false"
+            entry.visible_for_auth(false),
+            "plain config overlay must preserve bundled supported_in_api=true"
         );
     }
     #[test]

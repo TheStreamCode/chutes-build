@@ -6455,10 +6455,12 @@ pub(crate) mod tests {
         assert!(app.usage_visible);
     }
     #[test]
-    fn apply_auth_meta_api_key_enables_voice_and_skips_tier_gate() {
+    fn apply_auth_meta_api_key_preserves_voice_and_skips_tier_gate() {
         let mut app = test_app();
         advertise_media_tools(&mut app);
-        assert!(!app.voice_mode_enabled);
+        // Startup resolves the local voice policy before auth metadata arrives.
+        // Keep this test independent of the developer's real config.toml.
+        app.voice_mode_enabled = true;
         app.apply_auth_meta(&xai_grok_shell::auth::AuthMeta {
             auth_mode: Some("ApiKey".into()),
             subscription_tier: Some("API Key".into()),
@@ -6471,6 +6473,7 @@ pub(crate) mod tests {
         assert!(!app.is_voice_tier_restricted());
         assert!(app.voice_mode_enabled);
         let mut app = test_app();
+        app.voice_mode_enabled = true;
         app.apply_auth_meta(&xai_grok_shell::auth::AuthMeta {
             subscription_tier: Some("api_key".into()),
             ..Default::default()
@@ -6507,12 +6510,7 @@ pub(crate) mod tests {
         app.welcome_prompt
             .slash_controller
             .registry_mut()
-            .set_available_tools(
-                ["image_gen", "image_to_video"]
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            );
+            .set_available_tools(["generate_media"].into_iter().map(str::to_string).collect());
         app.welcome_prompt.set_voice_visible(true);
     }
     fn assert_tier_restricted_commands_absent(app: &AppView) {
@@ -6653,6 +6651,7 @@ pub(crate) mod tests {
     #[test]
     fn welcome_ctrl_q_requires_confirmation() {
         let mut app = test_app();
+        pin_non_vscode_registry(&mut app);
         let outcome = app.handle_input(&key_event(KeyCode::Char('q'), KeyModifiers::CONTROL));
         assert!(matches!(outcome, InputOutcome::Changed));
         let pending = app
@@ -7252,6 +7251,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_sets_pending_action() {
         let mut app = test_app_with_agent();
+        pin_non_vscode_registry(&mut app);
         let outcome = app.handle_input(&ctrl_q());
         assert!(matches!(outcome, InputOutcome::Changed));
         assert!(app.pending_action.is_some());
@@ -7260,6 +7260,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_double_press_quits() {
         let mut app = test_app_with_agent();
+        pin_non_vscode_registry(&mut app);
         let _ = app.handle_input(&ctrl_q());
         assert!(app.pending_action.is_some());
         let outcome = app.handle_input(&ctrl_q());
@@ -7275,6 +7276,7 @@ pub(crate) mod tests {
         {
             agent.vim_mode = true;
         }
+        pin_non_vscode_registry(&mut app);
         let _ = app.handle_input(&ctrl_q());
         assert!(app.pending_action.is_some());
         let outcome = app.handle_input(&key_event(KeyCode::Char('j'), KeyModifiers::NONE));
@@ -8984,6 +8986,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_on_dashboard_arms_quit() {
         let mut app = test_app();
+        pin_non_vscode_registry(&mut app);
         app.active_view = ActiveView::AgentDashboard;
         app.dashboard = Some(crate::views::dashboard::DashboardState::new());
         let outcome = app.handle_input(&key_event(KeyCode::Char('q'), KeyModifiers::CONTROL));
@@ -10416,7 +10419,7 @@ pub(crate) mod tests {
         let mut app = test_app();
         app.project_picker_shown = false;
         app.project_picker_disabled = false;
-        app.cwd = std::path::PathBuf::from("/tmp");
+        app.cwd = std::env::temp_dir().join("chutes-build-project-picker-test");
         assert!(app.needs_project_picker());
     }
     /// Chat mode hides the welcome picker's source filter, so `f` must not

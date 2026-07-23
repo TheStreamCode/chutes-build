@@ -89,9 +89,20 @@ pub(crate) fn run_external_auth_sync(command: &str, is_refresh: bool) -> Option<
 
     tracing::info!(cmd = %command, is_refresh, timeout_secs, "auth: running external auth provider (sync)");
 
-    let mut cmd = Command::new("sh");
-    cmd.args(["-c", command])
-        .stdin(Stdio::null())
+    #[cfg(unix)]
+    let mut cmd = {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", command]);
+        cmd
+    };
+    #[cfg(not(unix))]
+    let mut cmd = {
+        let invocation = xai_grok_config::shell::shell_command_argv(command);
+        let mut cmd = Command::new(invocation.program);
+        cmd.args(invocation.args).envs(invocation.env);
+        cmd
+    };
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         // Pipe stderr — inherit would corrupt the TUI alternate screen.
         .stderr(Stdio::piped());
@@ -163,10 +174,33 @@ pub(crate) fn refresh_with_command(command: &str, prev_auth: &GrokAuth) -> Optio
 mod tests {
     use super::*;
 
+    fn exit_status(success: bool) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(if success { 0 } else { 1 << 8 })
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(if success { 0 } else { 1 })
+        }
+    }
+
+    #[cfg(unix)]
+    fn output_command(value: &str) -> String {
+        format!("printf '%s' '{}'", value.replace('\'', "'\\''"))
+    }
+
+    #[cfg(windows)]
+    fn output_command(value: &str) -> String {
+        format!("[Console]::Out.Write('{}')", value.replace('\'', "''"))
+    }
+
     #[test]
     fn parse_output_nonzero_exit_is_err() {
         let output = std::process::Output {
-            status: std::process::Command::new("false").status().unwrap(),
+            status: exit_status(false),
             stdout: b"token".to_vec(),
             stderr: vec![],
         };
@@ -176,7 +210,7 @@ mod tests {
     #[test]
     fn parse_output_empty_stdout_is_err() {
         let output = std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status(true),
             stdout: b"  \n".to_vec(),
             stderr: vec![],
         };
@@ -186,23 +220,26 @@ mod tests {
     #[test]
     fn parse_output_issuer_claim_enables_xai_auth() {
         let ok = |stdout: &str| std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status(true),
             stdout: stdout.as_bytes().to_vec(),
             stderr: vec![],
         };
 
-        // x.ai issuer claim → first-party session (relay-eligible).
-        let auth = parse_output(&ok(
-            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.example.com"}"#,
-        ))
-        .unwrap();
+        // Built-in Chutes issuer claim → first-party session (relay-eligible).
+        let output = serde_json::json!({
+            "access_token": "t",
+            "expires_in": 900,
+            "issuer": crate::auth::config::XAI_OAUTH2_ISSUER,
+        })
+        .to_string();
+        let auth = parse_output(&ok(&output)).unwrap();
         assert_eq!(
             auth.oidc_issuer.as_deref(),
-            Some("https://auth.example.com")
+            Some(crate::auth::config::XAI_OAUTH2_ISSUER)
         );
         assert!(auth.is_xai_auth());
 
-        // Non-x.ai issuer is stored but stays third-party.
+        // Any other issuer is stored but stays third-party.
         let auth = parse_output(&ok(
             r#"{"access_token":"t","issuer":"https://idp.acme.example"}"#,
         ))
@@ -229,7 +266,7 @@ mod tests {
     #[test]
     fn parse_output_malformed_json_falls_back_to_bare() {
         let output = std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status(true),
             stdout: b"{not valid json}".to_vec(),
             stderr: vec![],
         };
@@ -244,7 +281,11 @@ mod tests {
 
     #[test]
     fn sync_sets_grok_auth_expired_env_on_refresh() {
-        let auth = run_external_auth_sync("echo $CHUTES_BUILD_AUTH_EXPIRED", true).unwrap();
+        #[cfg(unix)]
+        let command = "printf '%s' \"$CHUTES_BUILD_AUTH_EXPIRED\"";
+        #[cfg(windows)]
+        let command = "[Console]::Out.Write($env:CHUTES_BUILD_AUTH_EXPIRED)";
+        let auth = run_external_auth_sync(command, true).unwrap();
         assert_eq!(auth.key, "1");
     }
 
@@ -257,7 +298,7 @@ mod tests {
             organization_id: Some("org-1".into()),
             ..GrokAuth::test_default()
         };
-        let auth = refresh_with_command("echo fresh-token", &prev).unwrap();
+        let auth = refresh_with_command(&output_command("fresh-token"), &prev).unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "ZDR flag must survive refresh");
         assert!(auth.coding_data_retention_opt_out);
@@ -272,11 +313,19 @@ mod tests {
     #[test]
     fn sync_refresh_interactive_times_out() {
         // Binary writes link to stderr then blocks — 5s refresh timeout kills it.
+        #[cfg(unix)]
         let cmd = r#"echo 'Visit http://example.com/auth' >&2; sleep 20; echo token"#;
+        #[cfg(windows)]
+        let cmd = "[Console]::Error.WriteLine('Visit http://example.com/auth'); \
+                   Start-Sleep -Seconds 20; [Console]::Out.Write('token')";
         let start = std::time::Instant::now();
         let result = run_external_auth_sync(cmd, true);
         let elapsed = start.elapsed();
         assert!(result.is_none(), "should timeout and return None");
+        assert!(
+            elapsed >= std::time::Duration::from_secs(4),
+            "test command must reach the refresh timeout (took {elapsed:?})"
+        );
         assert!(
             elapsed.as_secs() < 10,
             "refresh should use 5s timeout, not 60s (took {}s)",

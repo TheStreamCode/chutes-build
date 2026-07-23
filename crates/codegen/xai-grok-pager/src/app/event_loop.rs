@@ -466,9 +466,6 @@ pub(crate) async fn run(
     remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
     term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
 ) -> anyhow::Result<RunResult> {
     // Initialize tracing capture. The channel `rx` will be wired to a
     // TracingModel (and ultimately a tracing pane) once integrated.
@@ -600,10 +597,11 @@ pub(crate) async fn run(
         .as_ref()
         .and_then(|s| s.show_resolved_model)
         .unwrap_or(true);
-    app.sharing_enabled = remote_settings
-        .as_ref()
-        .and_then(|s| s.sharing_enabled)
-        .unwrap_or(false);
+    app.sharing_enabled = chutes_build_core::product::REMOTE_SESSION_SHARING
+        && remote_settings
+            .as_ref()
+            .and_then(|s| s.sharing_enabled)
+            .unwrap_or(false);
     app.plugin_cta_enabled = xai_grok_config::env_bool("CHUTES_BUILD_PLUGIN_CTA")
         .or_else(|| remote_settings.as_ref().and_then(|s| s.plugin_cta))
         .unwrap_or(false);
@@ -1468,10 +1466,6 @@ pub(crate) async fn run(
     // armed only when the startup query is still unanswered.
     let mut xt_filter = super::xt_filter::XtversionFilter::new();
 
-    // Background update check: resolves when the spawned update task
-    // determines whether a newer version is available.
-    let mut bg_update_rx = bg_update_rx;
-
     // `app::run` publishes the resolved theme into `theme_cache::CURRENT`
     // before `init_terminal` so `apply_cursor_color()` sees it. Pin the
     // invariant so a future refactor that drops the `theme_cache::set` call
@@ -1807,34 +1801,6 @@ pub(crate) async fn run(
                 app.draw(terminal);
                 last_draw_at = Instant::now();
                 draw_scheduled_at = None;
-            }
-
-            // Background update check completed.
-            result = async {
-                match bg_update_rx.as_mut() {
-                    Some(rx) => rx.await.ok().flatten(),
-                    None => std::future::pending().await,
-                }
-            } => {
-                // Consume the receiver so this arm becomes inert.
-                bg_update_rx = None;
-                if let Some(update) = result {
-                    tracing::info!(
-                        latest_version = %update.latest_version,
-                        "Background update check: newer version available"
-                    );
-                    let latest = update.latest_version;
-                    app.pending_update_version = Some(latest.clone());
-                    // The full TUI surfaces this on the welcome screen, which
-                    // minimal has none of — commit a one-line notice into
-                    // native scrollback instead (update notice).
-                    if term_state.screen_mode.is_minimal() {
-                        dispatch::commit_minimal_update_notice(&mut app, &latest);
-                    }
-                    app.draw(terminal);
-                    last_draw_at = Instant::now();
-                    draw_scheduled_at = None;
-                }
             }
 
             maybe_ev = input_rx.recv() => {

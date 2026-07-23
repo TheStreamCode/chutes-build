@@ -25,7 +25,8 @@ pub(crate) struct BuiltinCommand {
 /// - `Scheduler`: `scheduler_create` is registered.
 /// - `Hooks`: a hook registry is loaded.
 /// - `Plugins`: a plugin registry is loaded.
-/// - `Feedback`: the feedback manager is enabled.
+/// - `Feedback`: the product supports remote feedback and the feedback manager
+///   is enabled.
 /// - `MemoryConfigured`: memory backend params exist (may be currently
 ///   disabled). Used for `/memory` so the user can re-enable via toggle.
 /// - `Goal`: `resolve_goal()` feature flag is on AND `update_goal` is in the
@@ -189,9 +190,15 @@ pub(super) const BUILTIN_COMMANDS: &[BuiltinCommand] = &[
                 BuiltinAction::PluginsInstall { source, trust }
             } else if let Some(args) = trimmed.strip_prefix("uninstall ") {
                 let args = args.trim();
-                let confirm = args.ends_with(" --confirm") || args == "--confirm";
+                let confirm = args.ends_with(" --yes")
+                    || args == "--yes"
+                    || args.ends_with(" --confirm")
+                    || args == "--confirm";
                 let name = if confirm {
-                    args.trim_end_matches(" --confirm").trim().to_string()
+                    args.trim_end_matches(" --yes")
+                        .trim_end_matches(" --confirm")
+                        .trim()
+                        .to_string()
                 } else {
                     args.to_string()
                 };
@@ -394,7 +401,7 @@ impl CommandAvailability {
     pub fn allows(&self, gate: BuiltinGate) -> bool {
         match gate {
             BuiltinGate::AlwaysOn => true,
-            BuiltinGate::Feedback => self.feedback,
+            BuiltinGate::Feedback => chutes_build_core::product::REMOTE_FEEDBACK && self.feedback,
             BuiltinGate::Memory => self.memory,
             BuiltinGate::MemoryConfigured => self.memory_configured,
             BuiltinGate::Scheduler => self.scheduler,
@@ -404,8 +411,8 @@ impl CommandAvailability {
         }
     }
 
-    /// Test helper: every gate satisfied (matches the legacy "feedback only"
-    /// fixture but enables every newly-gated command too).
+    /// Test helper: every session-level gate satisfied. Compile-time product
+    /// policy still takes precedence over these values.
     #[cfg(test)]
     pub fn all_enabled() -> Self {
         Self {
@@ -1522,7 +1529,6 @@ mod tests {
                 "plugins",
                 "reload-plugins",
                 "session-info",
-                "feedback",
                 "goal",
                 "loop",
                 "commit",
@@ -2130,18 +2136,22 @@ mod tests {
     }
 
     #[test]
-    fn feedback_resolves_when_enabled() {
-        let outcome = resolve(
-            vec![text_block("/feedback hello")],
-            &[],
-            all_gated(),
-            SkillSlashRewrite::default(),
-        )
-        .unwrap_err();
-        assert!(matches!(
-            outcome,
-            SlashCommandOutcome::Builtin(BuiltinAction::Feedback { ref text }) if text == "hello"
-        ));
+    fn feedback_does_not_resolve_when_disabled_by_product_policy() {
+        let availability = CommandAvailability {
+            feedback: true,
+            ..CommandAvailability::default()
+        };
+        assert!(
+            resolve(
+                vec![text_block("/feedback hello")],
+                &[],
+                availability,
+                SkillSlashRewrite::default(),
+            )
+            .is_ok()
+        );
+        let names = advertised_names_with(availability);
+        assert!(!names.iter().any(|name| name == "feedback"));
     }
 
     /// Collect the advertised command names for the given availability.

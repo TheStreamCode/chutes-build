@@ -2041,9 +2041,9 @@ fn media_artifact(
     else {
         return None;
     };
-    let artifact_path = std::fs::canonicalize(&artifact.path).ok()?;
+    let artifact_path = dunce::canonicalize(&artifact.path).ok()?;
     if let Some(cwd) = session_cwd {
-        let cwd = std::fs::canonicalize(cwd).ok()?;
+        let cwd = dunce::canonicalize(cwd).ok()?;
         if !artifact_path.starts_with(cwd) {
             return None;
         }
@@ -3159,7 +3159,7 @@ mod tests {
             RenderBlock::UserPrompt(block) => {
                 assert_eq!(
                     block.skill_token_ranges,
-                    vec![0..10],
+                    std::iter::once(0..10).collect::<Vec<_>>(),
                     "leading /implement token styled as skill"
                 );
                 assert_eq!(block.text, "/implement fix the rendering bug");
@@ -3183,7 +3183,10 @@ mod tests {
         let entry = sb.get(0).unwrap();
         match &entry.block {
             RenderBlock::UserPrompt(block) => {
-                assert_eq!(block.skill_token_ranges, vec![0..7]);
+                assert_eq!(
+                    block.skill_token_ranges,
+                    std::iter::once(0..7).collect::<Vec<_>>()
+                );
                 assert_eq!(block.text, "/deploy");
             }
             other => panic!("expected UserPrompt, got {:?}", other),
@@ -6118,7 +6121,7 @@ mod tests {
             RenderBlock::UserPrompt(block) => {
                 assert_eq!(
                     block.skill_token_ranges,
-                    vec![0..5],
+                    std::iter::once(0..5).collect::<Vec<_>>(),
                     "leading /loop token styled as skill"
                 );
                 assert_eq!(block.text, "/loop 1m print current time");
@@ -6167,7 +6170,10 @@ mod tests {
         let entry = sb.get(0).unwrap();
         match &entry.block {
             RenderBlock::UserPrompt(block) => {
-                assert_eq!(block.skill_token_ranges, vec![0..10]);
+                assert_eq!(
+                    block.skill_token_ranges,
+                    std::iter::once(0..10).collect::<Vec<_>>()
+                );
                 assert_eq!(block.text, "/implement fix bug");
             }
             other => panic!("expected UserPrompt, got {:?}", other),
@@ -6191,7 +6197,10 @@ mod tests {
         let entry = sb.get(0).unwrap();
         match &entry.block {
             RenderBlock::UserPrompt(block) => {
-                assert_eq!(block.skill_token_ranges, vec![0..7]);
+                assert_eq!(
+                    block.skill_token_ranges,
+                    std::iter::once(0..7).collect::<Vec<_>>()
+                );
                 assert_eq!(block.text, "/commit fix typo");
             }
             other => panic!("expected UserPrompt, got {:?}", other),
@@ -6202,7 +6211,10 @@ mod tests {
         let entry2 = sb2.get(0).unwrap();
         match &entry2.block {
             RenderBlock::UserPrompt(block) => {
-                assert_eq!(block.skill_token_ranges, vec![0..5]);
+                assert_eq!(
+                    block.skill_token_ranges,
+                    std::iter::once(0..5).collect::<Vec<_>>()
+                );
                 assert_eq!(block.text, "/help");
             }
             other => panic!("expected UserPrompt, got {:?}", other),
@@ -6329,7 +6341,10 @@ mod tests {
         match &sb.get(0).unwrap().block {
             RenderBlock::UserPrompt(block) => {
                 assert_eq!(block.text, "great /pr-workflow all good now");
-                assert_eq!(block.skill_token_ranges, vec![6..18]);
+                assert_eq!(
+                    block.skill_token_ranges,
+                    std::iter::once(6..18).collect::<Vec<_>>()
+                );
             }
             other => panic!("expected UserPrompt, got {:?}", other),
         }
@@ -6360,7 +6375,7 @@ mod tests {
                 assert_eq!(block.text, "/commit now", "displayText still applies");
                 assert_eq!(
                     block.skill_token_ranges,
-                    vec![0..7],
+                    std::iter::once(0..7).collect::<Vec<_>>(),
                     "displayAsSkill styling (leading token), not the wire-space ranges"
                 );
             }

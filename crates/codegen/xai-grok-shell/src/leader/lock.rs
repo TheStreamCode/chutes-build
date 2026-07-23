@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -258,6 +258,13 @@ impl LeaderLock {
 
     /// Read PID from lock file (for diagnostics).
     pub fn read_pid(&self) -> Option<u32> {
+        if let Some(file) = self.lock_file.as_ref() {
+            let mut file = file.try_clone().ok()?;
+            file.seek(SeekFrom::Start(0)).ok()?;
+            let mut content = String::new();
+            file.read_to_string(&mut content).ok()?;
+            return content.trim().parse().ok();
+        }
         Self::read_pid_from_path(&self.lock_path)
     }
 
@@ -409,6 +416,7 @@ mod tests {
 
         let pid = lock.read_pid().unwrap();
         assert_eq!(pid, std::process::id());
+        lock.release().unwrap();
         assert_eq!(
             LeaderLock::read_pid_from_path(lock.lock_path()),
             Some(std::process::id())

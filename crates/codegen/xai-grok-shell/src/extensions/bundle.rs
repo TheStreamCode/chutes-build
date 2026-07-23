@@ -433,11 +433,14 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
     struct HomeGuard {
-        previous: Option<std::ffi::OsString>,
+        previous_home: Option<std::ffi::OsString>,
+        previous_config_home: Option<std::ffi::OsString>,
+        #[cfg(windows)]
+        previous_user_profile: Option<std::ffi::OsString>,
     }
     impl Drop for HomeGuard {
         fn drop(&mut self) {
-            match self.previous.take() {
+            match self.previous_home.take() {
                 Some(previous) => unsafe {
                     std::env::set_var("HOME", previous);
                 },
@@ -445,14 +448,42 @@ mod tests {
                     std::env::remove_var("HOME");
                 },
             }
+            match self.previous_config_home.take() {
+                Some(previous) => unsafe {
+                    std::env::set_var("CHUTES_BUILD_HOME", previous);
+                },
+                None => unsafe {
+                    std::env::remove_var("CHUTES_BUILD_HOME");
+                },
+            }
+            #[cfg(windows)]
+            match self.previous_user_profile.take() {
+                Some(previous) => unsafe {
+                    std::env::set_var("USERPROFILE", previous);
+                },
+                None => unsafe {
+                    std::env::remove_var("USERPROFILE");
+                },
+            }
         }
     }
     fn with_bundled_home(tmp: &TempDir) -> HomeGuard {
-        let previous = std::env::var_os("HOME");
+        let previous_home = std::env::var_os("HOME");
+        let previous_config_home = std::env::var_os("CHUTES_BUILD_HOME");
+        #[cfg(windows)]
+        let previous_user_profile = std::env::var_os("USERPROFILE");
         unsafe {
             std::env::set_var("HOME", tmp.path());
+            std::env::set_var("CHUTES_BUILD_HOME", tmp.path().join(".chutes-build"));
+            #[cfg(windows)]
+            std::env::set_var("USERPROFILE", tmp.path());
         }
-        HomeGuard { previous }
+        HomeGuard {
+            previous_home,
+            previous_config_home,
+            #[cfg(windows)]
+            previous_user_profile,
+        }
     }
     fn sample_bundle() -> SubagentBundle {
         let mut bundle = SubagentBundle::empty("bundle-v1");

@@ -211,14 +211,14 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
 ///
 /// | plan  | subagents | ask-user | agentProfile                   | askUserQuestion    |
 /// |-------|-----------|----------|--------------------------------|--------------------|
-/// | false | false     | false    | `grok-build` (default)         | `false`            |
-/// | false | true      | false    | `grok-build` (default)         | `false`            |
-/// | false | false     | true     | `grok-build-ask-user`          | omitted (shell gate) |
-/// | false | true      | true     | `grok-build-ask-user`          | omitted (shell gate) |
-/// | true  | false     | false    | `grok-build-plan-no-subagents` | `false`            |
-/// | true  | true      | false    | `grok-build-plan`              | `false`            |
-/// | true  | false     | true     | `grok-build-plan-no-subagents` | omitted (shell gate) |
-/// | true  | true      | true     | `grok-build-plan`              | omitted (shell gate) |
+/// | false | false     | false    | `chutes-build` (default)         | `false`            |
+/// | false | true      | false    | `chutes-build` (default)         | `false`            |
+/// | false | false     | true     | `chutes-build-ask-user`          | omitted (shell gate) |
+/// | false | true      | true     | `chutes-build-ask-user`          | omitted (shell gate) |
+/// | true  | false     | false    | `chutes-build-plan-no-subagents` | `false`            |
+/// | true  | true      | false    | `chutes-build-plan`              | `false`            |
+/// | true  | false     | true     | `chutes-build-plan-no-subagents` | omitted (shell gate) |
+/// | true  | true      | true     | `chutes-build-plan`              | omitted (shell gate) |
 ///
 /// When [`Self::chat_mode`] is set (gateway light-frontend / `--chat`), Build
 /// `agentProfile` injection is omitted (K12) and `_meta["chutes.build/session"].kind`
@@ -254,7 +254,7 @@ pub(crate) struct SessionFlags {
 impl SessionFlags {
     /// Resolve the agent profile name from the flags.
     ///
-    /// Returns `None` for the default `grok-build` profile (no `_meta`
+    /// Returns `None` for the default `chutes-build` profile (no `_meta`
     /// needed; it already includes TaskTool). Chat mode never injects a
     /// Build profile (remote owns agent behavior).
     pub(super) fn agent_profile(&self) -> Option<&'static str> {
@@ -262,9 +262,9 @@ impl SessionFlags {
             return None;
         }
         match (self.plan_mode, self.subagents, self.ask_user) {
-            (true, true, _) => Some("grok-build-plan"),
-            (true, false, _) => Some("grok-build-plan-no-subagents"),
-            (false, _, true) => Some("grok-build-ask-user"),
+            (true, true, _) => Some("chutes-build-plan"),
+            (true, false, _) => Some("chutes-build-plan-no-subagents"),
+            (false, _, true) => Some("chutes-build-ask-user"),
             (false, _, false) => None,
         }
     }

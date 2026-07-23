@@ -162,6 +162,7 @@ impl RoleToolNames {
     /// template does not contain is a no-op, so all three role templates share
     /// one call even though each names only the subset it uses.
     pub(crate) fn apply(&self, template: &str) -> String {
+        let template = template.replace("\r\n", "\n");
         let resolve = |token: &str| -> Option<&str> {
             Some(match token {
                 "READ_TOOL" => self.read.as_str(),
@@ -176,7 +177,7 @@ impl RoleToolNames {
             })
         };
         let mut out = String::with_capacity(template.len() + 64);
-        let mut rest = template;
+        let mut rest = template.as_str();
         while let Some(open) = rest.find('{') {
             out.push_str(&rest[..open]);
             let after = &rest[open + 1..];

@@ -168,7 +168,8 @@ pub(super) async fn run_session(
             "MEMORY_IDLE_FLUSH: skipped — another flush already in progress"); } } });
             } else { tracing::debug!(target : xai_grok_telemetry::memory_log::TARGET,
             "MEMORY_IDLE_FLUSH: skipped, no new messages since last flush (len={current_len})");
-            } if let Some(timeout) = session.idle_flush_timeout { idle_flush_sleep
+            }
+            if let Some(timeout) = session.idle_flush_timeout { idle_flush_sleep
             .as_mut().reset(tokio::time::Instant::now() + timeout); } } _ = & mut
             dream_check_sleep, if session.dream_check_timeout.is_some() && session.memory
             .is_enabled() => { tracing::debug!(target :
@@ -201,7 +202,8 @@ pub(super) async fn run_session(
             { session.emit_buffered(first). await; if let Some(second) = second { session
             .emit_buffered(second). await; } } } } SessionEvent::FlushReplay { respond_to
             } => { if let Some(notification) = replay_buffer.flush() { session
-            .emit_buffered(notification). await; } if let Some(tx) = respond_to { let _ =
+            .emit_buffered(notification). await; }
+            if let Some(tx) = respond_to { let _ =
             tx.send(()); } } } } } maybe_completion = completion_rx.recv() => { let
             Some((prompt_id, result)) = maybe_completion else { if let Some(cancel) = &
             session.sync_loop_cancel { cancel.cancel(); } cleanup_session_scratch(&
@@ -259,13 +261,15 @@ pub(super) async fn run_session(
             session.maybe_run_dream(). await; let telem = session.memory
             .telemetry_snapshot(); session.emit_memory_session_summary(& telem,
             total_chunks_at_end, session_end_result); if let Some(notification) =
-            replay_buffer.flush() { session.emit_buffered(notification). await; } { let
+            replay_buffer.flush() { session.emit_buffered(notification). await; }
+            { let
             model_id = session.current_model_id(). await; if let Some(signals) = session
             .signals_handle().snapshot(). await {
             xai_grok_telemetry::session_ctx::log_event(xai_grok_telemetry::events::SessionEnded
             { duration_secs : session.session_start.elapsed().as_secs(), turn_count :
             signals.turn_count as u64, tool_call_count : signals.tool_call_count as u64,
-            compaction_count : signals.compaction_count as u64, model_id, },); } } if let
+            compaction_count : signals.compaction_count as u64, model_id, },); } }
+            if let
             Some(cancel) = & session.sync_loop_cancel { cancel.cancel(); } session
             .feedback_manager.shutdown(session.upload_queue.get()). await; if ! session
             .startup_hints.is_subagent { session.persist_background_task_manifest().
@@ -285,12 +289,14 @@ pub(super) async fn run_session(
             super::PromptOrigin::from_prompt_id(& prompt_id); if ! origin.is_synthetic()
             { let mut state = session.state.lock(). await; state.notifications_suppressed
             = false; session.user_input_generation.fetch_add(1,
-            std::sync::atomic::Ordering::AcqRel); } if origin.is_synthetic() { let state
+            std::sync::atomic::Ordering::AcqRel); }
+            if origin.is_synthetic() { let state
             = session.state.lock(). await; let has_running = state.running_task
             .is_some(); let queue_depth = state.pending_inputs.len(); drop(state);
             tracing::info!(prompt_id = % prompt_id, has_running_task = has_running,
             queue_depth = queue_depth,
-            "auto-wake: session actor received synthetic prompt"); } if let Some(ref tp)
+            "auto-wake: session actor received synthetic prompt"); }
+            if let Some(ref tp)
             = traceparent { let meta = serde_json::json!({ "traceparent" : tp });
             xai_file_utils::trace_context::link_current_span_to_meta(& meta); } let
             (trace_gcs_config, artifact_tracker) = match artifact_upload_ctx { Some(tu)
@@ -569,7 +575,8 @@ pub(super) async fn run_session(
             .session_info.cwd)); if tool_name.is_empty() { let set = disabled_tools
             .entry(crate ::util::config::MANAGED_GATEWAY_DISABLED_CONNECTORS_KEY
             .to_string()).or_default(); if enabled { set.remove(& server_name); } else {
-            set.insert(server_name.clone()); } if set.is_empty() { disabled_tools
+            set.insert(server_name.clone()); }
+            if set.is_empty() { disabled_tools
             .remove(crate ::util::config::MANAGED_GATEWAY_DISABLED_CONNECTORS_KEY); } }
             else if enabled { if let Some(set) = disabled_tools.get_mut(& server_name) {
             set.remove(& tool_name); if set.is_empty() { disabled_tools.remove(&
@@ -598,7 +605,8 @@ pub(super) async fn run_session(
             ::session::mcp_servers::MCP_TOOL_NAME_DELIMITER, tool_name,); let mut
             mcp_state = session.mcp_state.lock(). await; if enabled { if let Some(set) =
             mcp_state.disabled_tools.get_mut(& server_name) { set.remove(& tool_name); if
-            set.is_empty() { mcp_state.disabled_tools.remove(& server_name); } } if let
+            set.is_empty() { mcp_state.disabled_tools.remove(& server_name); } }
+            if let
             Some(reg) = mcp_state.disabled_tool_registrations.remove(& qualified) && reg
             .model_visible { let bridge = session.agent.borrow().tool_bridge().clone();
             if let Err(e) = bridge.register_mcp_tools(reg.name, reg.tool, Some(reg

@@ -46,35 +46,54 @@ enum WorktreeCommand {
     /// List tracked worktrees
     #[command(visible_alias = "ls")]
     List {
+        /// Filter by repository path.
         #[arg(long)]
         repo: Option<String>,
+        /// Filter by one or more comma-separated worktree types.
         #[arg(long, value_delimiter = ',')]
         r#type: Vec<String>,
+        /// Emit machine-readable JSON output.
         #[arg(long)]
         json: bool,
+        /// Include inactive and otherwise hidden records.
         #[arg(long)]
         all: bool,
     },
     /// Show details for a specific worktree
-    Show { id_or_path: String },
+    Show {
+        /// Worktree ID or filesystem path.
+        id_or_path: String,
+    },
     /// Remove worktrees
     Rm {
+        /// Worktree IDs or paths to remove.
         #[arg(required = true)]
         ids: Vec<String>,
+        /// Request forced removal.
         #[arg(short, long)]
         force: bool,
+        /// Report what would be removed without changing anything.
         #[arg(long)]
         dry_run: bool,
+        /// Remove without an interactive confirmation.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Garbage-collect orphaned/stale worktrees
     #[command(alias = "prune")]
     Gc {
+        /// Report eligible worktrees without removing them.
         #[arg(long)]
         dry_run: bool,
+        /// Remove only records older than this duration.
         #[arg(long)]
         max_age: Option<String>,
+        /// Include records that normal safety checks would retain.
         #[arg(short, long)]
         force: bool,
+        /// Garbage-collect without an interactive confirmation.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Database maintenance
     Db {
@@ -94,6 +113,8 @@ enum WorktreeDbCommand {
 }
 
 pub async fn run(args: WorktreeArgs, agent_config: &AgentConfig) -> Result<()> {
+    confirm_destructive_command(&args.command)?;
+
     let cancel = CancellationToken::new();
     let spawned = crate::acp::spawn::spawn_grok_shell(agent_config.clone(), &cancel, None).await?;
 
@@ -134,13 +155,53 @@ async fn dispatch(command: WorktreeCommand, tx: &xai_acp_lib::AcpAgentTx) -> Res
             ids,
             force,
             dry_run,
+            ..
         } => cmd_rm(tx, ids, force, dry_run).await,
         WorktreeCommand::Gc {
             dry_run,
             max_age,
             force,
+            ..
         } => cmd_gc(tx, dry_run, max_age, force).await,
         WorktreeCommand::Db { command } => cmd_db(tx, command).await,
+    }
+}
+
+fn confirm_destructive_command(command: &WorktreeCommand) -> Result<()> {
+    let prompt = match command {
+        WorktreeCommand::Rm {
+            ids,
+            dry_run: false,
+            yes: false,
+            ..
+        } => Some(format!(
+            "Permanently remove {} worktree(s): {}? [y/N] ",
+            ids.len(),
+            ids.join(", ")
+        )),
+        WorktreeCommand::Gc {
+            dry_run: false,
+            yes: false,
+            ..
+        } => Some("Garbage-collect eligible worktrees? [y/N] ".to_string()),
+        _ => None,
+    };
+    let Some(prompt) = prompt else {
+        return Ok(());
+    };
+
+    use std::io::{IsTerminal as _, Write as _};
+    if !std::io::stdin().is_terminal() {
+        bail!("refusing destructive worktree operation on non-interactive stdin; pass --yes");
+    }
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    if matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        bail!("worktree operation cancelled")
     }
 }
 
@@ -236,6 +297,7 @@ async fn cmd_rm(
     force: bool,
     dry_run: bool,
 ) -> Result<()> {
+    let mut failures = 0usize;
     for id_or_path in &ids {
         let resp: Result<RemoveResponse> = ext_call(
             tx,
@@ -255,12 +317,22 @@ async fn cmd_rm(
                     println!("  would remove: {path}");
                 } else if r.removed {
                     println!("  removed: {path}");
+                } else {
+                    failures += 1;
+                    eprintln!("  error removing {id_or_path}: worktree was not removed");
                 }
             }
-            Err(e) => eprintln!("  error removing {id_or_path}: {e}"),
+            Err(e) => {
+                failures += 1;
+                eprintln!("  error removing {id_or_path}: {e}");
+            }
         }
     }
-    Ok(())
+    if failures == 0 {
+        Ok(())
+    } else {
+        bail!("failed to remove {failures} worktree(s)")
+    }
 }
 
 async fn cmd_gc(
@@ -463,6 +535,7 @@ mod tests {
                 ids,
                 force,
                 dry_run,
+                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);
@@ -488,6 +561,7 @@ mod tests {
                 ids,
                 force,
                 dry_run,
+                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);
@@ -513,6 +587,7 @@ mod tests {
                 force,
                 dry_run,
                 max_age,
+                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);

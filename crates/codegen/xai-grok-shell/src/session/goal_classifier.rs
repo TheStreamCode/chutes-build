@@ -4031,6 +4031,7 @@ mod tests {
     fn verifier_template_default_render_pins_canonical_text() {
         let rendered = RoleToolNames::inherit_defaults().apply(GOAL_VERIFIER_PROMPT_TEMPLATE);
         let expected = GOAL_VERIFIER_PROMPT_TEMPLATE
+            .replace("\r\n", "\n")
             .replace("{READ_TOOL}", "read_file")
             .replace("{LIST_TOOL}", "list_dir")
             .replace("{SEARCH_TOOL}", "grep")

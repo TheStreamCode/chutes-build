@@ -210,7 +210,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
         agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
-            app.sharing_enabled,
             app.usage_visible,
             app.subscription_tier.as_deref(),
             app.chat_mode,

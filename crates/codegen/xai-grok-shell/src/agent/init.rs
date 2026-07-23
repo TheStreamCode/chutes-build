@@ -98,8 +98,12 @@ fn resolve_config(cfg: &AgentConfig, auth_manager: &AuthManager) -> AgentConfig 
     crate::util::config::sync_campaign_fields(&mut cfg);
     crate::agent::config::apply_remote_settings_side_effects(cfg.remote_settings.as_ref());
 
-    // env var > remote settings > Local. Skip remote settings for Generic (grok -p, subagents).
-    if cfg.storage_mode == StorageMode::Local
+    // Chutes Build sessions are local-only. Keep the generic resolver below
+    // for source compatibility, but never retain a directly constructed
+    // writeback configuration in this product.
+    if !chutes_build_core::product::REMOTE_SESSION_REGISTRY {
+        cfg.storage_mode = StorageMode::Local;
+    } else if cfg.storage_mode == StorageMode::Local
         && cfg.mode != crate::agent::config::AgentMode::Generic
     {
         cfg.storage_mode = StorageMode::resolve(None, cfg.remote_settings.as_ref());

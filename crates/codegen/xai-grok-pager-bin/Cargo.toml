@@ -23,7 +23,6 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-shell = { workspace = true }
-xai-grok-update = { path = "../xai-grok-update" }
 xai-grok-version = { workspace = true }
 xai-grok-workspace = { workspace = true }
 xai-crash-handler = { path = "../xai-crash-handler" }

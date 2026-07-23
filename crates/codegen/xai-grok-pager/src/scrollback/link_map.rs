@@ -235,6 +235,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn file_target_provenance_survives_overlay_to_visible_map() {
         let path = Arc::<std::path::Path>::from(std::path::Path::new(
             "/tmp/non-display-target/file name.rs",

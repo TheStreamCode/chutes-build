@@ -4,7 +4,7 @@ use super::*;
 fn follow_up_chip_bypasses_project_picker() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
-    app.cwd = PathBuf::from("/tmp");
+    app.cwd = std::env::temp_dir().join("chutes-build-follow-up-picker-test");
     app.project_picker_shown = false;
     assert!(
         app.needs_project_picker(),

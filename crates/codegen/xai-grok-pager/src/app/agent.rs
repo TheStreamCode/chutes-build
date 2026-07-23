@@ -1319,9 +1319,15 @@ mod tests {
     #[test]
     fn enqueue_prompt_with_skill_tokens_preserves_ranges() {
         let mut s = test_session();
-        s.enqueue_prompt_with_skill_tokens("great /commit now".into(), vec![6..13]);
+        s.enqueue_prompt_with_skill_tokens(
+            "great /commit now".into(),
+            std::iter::once(6..13).collect(),
+        );
         let p = s.dequeue_prompt().unwrap();
-        assert_eq!(p.skill_token_ranges, vec![6..13]);
+        assert_eq!(
+            p.skill_token_ranges,
+            std::iter::once(6..13).collect::<Vec<_>>()
+        );
         assert_eq!(p.kind, QueueEntryKind::Prompt);
         assert!(p.wire_blocks.is_none());
     }

@@ -579,9 +579,15 @@ impl SessionActor {
                          Provide the name of an installed plugin to remove.",
                     )
                     .await;
+                } else if !confirm {
+                    self.send_slash_command_output(&format!(
+                        "Uninstalling a plugin permanently removes its installed repository and data.\n\
+                         To confirm:\n  /plugins uninstall {name} --yes"
+                    ))
+                    .await;
                 } else {
                     use crate::plugin::UninstallError;
-                    match crate::plugin::uninstall_plugin(&name, confirm, false) {
+                    match crate::plugin::uninstall_plugin(&name, true, false) {
                         Ok(outcome) => {
                             xai_grok_telemetry::session_ctx::log_event(
                                 xai_grok_telemetry::events::PluginUninstalled {
@@ -608,7 +614,7 @@ impl SessionActor {
                                  {}\n\
                                  \n\
                                  Uninstalling will remove all {total} plugin(s). To proceed:\n\
-                                   /plugins uninstall {name} --confirm\n\
+                                   /plugins uninstall {name} --yes\n\
                                  \n\
                                  To disable a single plugin without removing the repo, add to config.toml:\n\
                                    [plugins]\n\
@@ -621,6 +627,12 @@ impl SessionActor {
                             self.send_slash_command_output(&format!(
                                 "Plugin \"{name}\" not found in install registry.\n\
                                  Use /plugins list to see installed plugins."
+                            ))
+                            .await;
+                        }
+                        Err(UninstallError::Operation { message }) => {
+                            self.send_slash_command_output(&format!(
+                                "Failed to uninstall plugin: {message}"
                             ))
                             .await;
                         }

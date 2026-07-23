@@ -47,7 +47,8 @@ fn format_acp_error_rate_limit_surfaces_detail_or_fallback() {
 /// byte pairs; the text itself is untouched.
 #[test]
 fn plain_prompt_block_stamps_skill_token_ranges_meta() {
-    let block = plain_prompt_content_block("great /pr-workflow go".into(), &[6..18]);
+    let ranges = std::iter::once(6..18).collect::<Vec<_>>();
+    let block = plain_prompt_content_block("great /pr-workflow go".into(), &ranges);
     let acp::ContentBlock::Text(tb) = block else {
         panic!("expected text block");
     };
@@ -1512,7 +1513,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "grok-build-plan",
+            "chutes-build-plan",
         ),
         (
             SessionFlags {
@@ -1521,7 +1522,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "grok-build-plan-no-subagents",
+            "chutes-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1530,7 +1531,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "grok-build-plan",
+            "chutes-build-plan",
         ),
         (
             SessionFlags {
@@ -1539,7 +1540,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "grok-build-plan-no-subagents",
+            "chutes-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1548,7 +1549,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "grok-build-ask-user",
+            "chutes-build-ask-user",
         ),
         (
             SessionFlags {
@@ -1557,7 +1558,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "grok-build-ask-user",
+            "chutes-build-ask-user",
         ),
     ];
     for (flags, expected_name) in test_cases {
@@ -1574,13 +1575,13 @@ fn agent_profile_names_are_valid_builtins() {
         );
     }
 }
-/// Default flags produce no agent profile (uses grok-build default).
+/// Default flags produce no agent profile (uses chutes-build default).
 #[test]
 fn default_flags_produce_no_profile() {
     let flags = SessionFlags::default();
     assert_eq!(flags.agent_profile(), None);
 }
-/// --subagents alone produces no profile (grok-build already has TaskTool).
+/// --subagents alone produces no profile (chutes-build already has TaskTool).
 #[test]
 fn subagents_without_plan_produces_no_profile() {
     let flags = SessionFlags {
@@ -1613,7 +1614,7 @@ fn runtime_default_flags_produce_plan_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-plan");
+    assert_eq!(meta["agentProfile"], "chutes-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1630,7 +1631,10 @@ fn plan_only_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-plan-no-subagents");
+    assert_eq!(
+        meta["agentProfile"],
+        "chutes-build-plan-no-subagents"
+    );
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1646,11 +1650,11 @@ fn plan_with_subagents_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-plan");
+    assert_eq!(meta["agentProfile"], "chutes-build-plan");
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
-/// --ask-user alone selects the grok-build-ask-user profile.
+/// --ask-user alone selects the chutes-build-ask-user profile.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn ask_user_alone_meta() {
@@ -1662,7 +1666,7 @@ fn ask_user_alone_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-ask-user");
+    assert_eq!(meta["agentProfile"], "chutes-build-ask-user");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1678,14 +1682,17 @@ fn plan_with_ask_user_uses_plan_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-plan-no-subagents");
+    assert_eq!(
+        meta["agentProfile"],
+        "chutes-build-plan-no-subagents"
+    );
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
 /// --no-plan --no-subagents --no-ask-user picks the default profile but
 /// must still emit `askUserQuestion: false` so the shell can strip the
 /// tool at the builder. Mirrors the runtime: `subagents` toggle alone
-/// does not need an `agentProfile` (default `grok-build` already has it).
+/// does not need an `agentProfile` (default `chutes-build` already has it).
 #[test]
 fn subagents_alone_emits_only_ask_user_question_disable() {
     let flags = SessionFlags {
@@ -1698,7 +1705,7 @@ fn subagents_alone_emits_only_ask_user_question_disable() {
     assert!(meta.get("agentProfile").is_none());
     assert_eq!(meta["askUserQuestion"], false);
 }
-/// All three flags on at the runtime default produce grok-build-plan
+/// All three flags on at the runtime default produce chutes-build-plan
 /// and no `askUserQuestion` field.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
@@ -1711,7 +1718,7 @@ fn all_flags_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "grok-build-plan");
+    assert_eq!(meta["agentProfile"], "chutes-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1909,9 +1916,9 @@ fn agent_profile_definitions_have_correct_names() {
     use std::str::FromStr;
     use xai_grok_agent::config::BuiltinAgentName;
     for name in [
-        "grok-build-plan",
-        "grok-build-plan-no-subagents",
-        "grok-build-ask-user",
+        "chutes-build-plan",
+        "chutes-build-plan-no-subagents",
+        "chutes-build-ask-user",
     ] {
         let builtin = BuiltinAgentName::from_str(name).unwrap();
         let def = builtin.definition();

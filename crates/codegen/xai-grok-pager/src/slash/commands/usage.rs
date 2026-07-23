@@ -59,7 +59,9 @@ impl SlashCommand for UsageCommand {
         let arg = args.trim();
         match arg {
             "" | "show" => CommandResult::Action(Action::ShowUsage),
-            "manage" => CommandResult::Action(Action::OpenUrl("https://chutes.ai".to_string())),
+            "manage" => CommandResult::Action(Action::OpenUrl(
+                "https://chutes.ai/app/chute/usage".to_string(),
+            )),
             _ => CommandResult::Error(format!(
                 "Unknown argument: {arg}. Use /usage show or /usage manage"
             )),

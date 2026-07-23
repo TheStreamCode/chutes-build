@@ -176,7 +176,9 @@ pub(super) enum GoalResumeOutcome {
 /// Goal-only `<task_completion_discipline>` (Rules 1–4); `{TODO_TOOL}` from [`GoalToolNames`].
 /// Template must end with `\n` so `{DISCIPLINE_BLOCK}TRACKING:` glues correctly.
 pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
-    GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
+    GOAL_TASK_DISCIPLINE_TEMPLATE
+        .replace("\r\n", "\n")
+        .replace("{TODO_TOOL}", &names.todo)
 }
 
 /// Render the plan-aware reminder block. `Plan: <abs path>` renders
@@ -192,6 +194,7 @@ pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalTo
     );
     // Column-0 single-line `Plan: <abs>` contract — see fn docs.
     GOAL_PLAN_BLOCK_TEMPLATE
+        .replace("\r\n", "\n")
         .replace("{PLAN_PATH}", &plan_path.display().to_string())
         .replace("{TODO_TOOL}", &names.todo)
 }
@@ -272,6 +275,7 @@ pub(super) fn render_goal_rules(
         None => String::new(),
     };
     GOAL_RULES_TEMPLATE
+        .replace("\r\n", "\n")
         .replace("{OBJECTIVE}", objective)
         .replace("{GOAL_TOOL}", &names.goal)
         .replace("{TASK_TOOL}", &names.task)
@@ -417,6 +421,7 @@ pub(super) fn render_goal_continuation_directive(
     let strategist_note = neutralize_directive_slot(strategist_note);
     let next_step = neutralize_directive_slot(next_step);
     GOAL_CONTINUATION_DIRECTIVE_TEMPLATE
+        .replace("\r\n", "\n")
         .replace("{objective}", objective)
         .replace("{tokens}", &tokens.to_string())
         .replace("{elapsed}", elapsed)

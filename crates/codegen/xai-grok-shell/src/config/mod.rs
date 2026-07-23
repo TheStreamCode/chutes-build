@@ -465,9 +465,12 @@ impl SubagentsConfig {
             result.discover_roles(cwd);
             result.discover_personas(cwd);
         }
-        if let Some(home) = dirs::home_dir() {
-            result.discover_roles(&home);
-            result.discover_personas(&home);
+        let user_root = std::env::var_os("CHUTES_BUILD_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|home| home.join(".chutes-build")));
+        if let Some(user_root) = user_root {
+            result.discover_roles_in_dir(&user_root.join("roles"));
+            result.discover_personas_in_dir(&user_root.join("personas"));
         }
         let bundled_root = bundle::bundled_root();
         result.discover_roles_in_dir(&bundled_root.join("roles"));
@@ -789,6 +792,17 @@ impl StorageMode {
         cli_override: Option<&str>,
         remote: Option<&crate::util::config::RemoteSettings>,
     ) -> Self {
+        if !chutes_build_core::product::REMOTE_SESSION_REGISTRY {
+            if cli_override == Some("writeback")
+                || std::env::var("CHUTES_BUILD_STORAGE_MODE").as_deref() == Ok("writeback")
+                || remote.is_some_and(|settings| settings.writeback_enabled == Some(true))
+            {
+                tracing::warn!(
+                    "remote session writeback is unavailable in Chutes Build; using local storage"
+                );
+            }
+            return Self::Local;
+        }
         if let Some(mode) = cli_override {
             match mode {
                 "writeback" => return Self::Writeback,

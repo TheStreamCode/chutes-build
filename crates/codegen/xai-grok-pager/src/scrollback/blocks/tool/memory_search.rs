@@ -304,14 +304,14 @@ fn shorten_path(path: &str) -> &str {
     let memory_root = xai_grok_config::grok_home().join("memory");
     let memory_prefix = memory_root.display().to_string();
     if let Some(rest) = path.strip_prefix(&memory_prefix) {
-        let rest = rest.strip_prefix('/').unwrap_or(rest);
-        if let Some(after_slash) = rest.find('/') {
+        let rest = rest.trim_start_matches(['/', '\\']);
+        if let Some(after_slash) = rest.find(['/', '\\']) {
             return &rest[after_slash + 1..];
         }
         return rest;
     }
     // Fallback: strip to filename
-    path.rsplit('/').next().unwrap_or(path)
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {

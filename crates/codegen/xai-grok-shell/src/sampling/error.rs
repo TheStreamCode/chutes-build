@@ -378,9 +378,9 @@ mod tests {
             rate_limited_user_message(true),
             RATE_LIMITED_USER_MESSAGE_API_KEY
         );
-        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Upgrade your account"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("team"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("credits"));
+        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("provider rate limit"));
+        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Chutes account"));
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("rate or credit limit"));
         assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("https://chutes.ai"));
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("Upgrade your account"));
     }
@@ -418,10 +418,7 @@ mod tests {
             format_rate_limited_user_message(Some(rpm), true),
             RATE_LIMITED_USER_MESSAGE_API_KEY
         );
-        assert!(
-            RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://chutes.ai/docs/developers/rate-limits#rate-limit-tiers")
-        );
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("https://chutes.ai"));
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("grok.com/supergrok"));
     }
 

@@ -1527,9 +1527,9 @@ mod tests {
         assert!(row0.ends_with(HIDE_BUTTON), "row0={row0:?}");
         assert!(row0.contains(HIDE_CTA), "row0={row0:?}");
 
-        // [Label] = 15 cols at x 0; [hide] right-aligned at 80−6=74; the hide
+        // [Label] = 21 cols at x 0; [hide] right-aligned at 80−6=74; the hide
         // CTA ends gap-adjacent to it (74−2−25=47).
-        assert_eq!(hits.cta, Some(Rect::new(0, 0, 15, 1)), "[Label] hit rect");
+        assert_eq!(hits.cta, Some(Rect::new(0, 0, 21, 1)), "[Label] hit rect");
         assert_eq!(hits.hide, Some(Rect::new(74, 0, 6, 1)), "[hide] hit rect");
 
         let theme = Theme::current();

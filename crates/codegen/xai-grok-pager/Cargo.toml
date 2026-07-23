@@ -10,6 +10,7 @@ authors = ["xAI"]
 dunce = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-grok-version = { workspace = true }
+chutes-build-core = { path = "../../chutes-build-core" }
 
 # Shared prompt-queue wire types
 xai-prompt-queue = { workspace = true }
@@ -81,9 +82,6 @@ nucleo = { workspace = true }
 # Prompt text input
 xai-ratatui-textarea = { workspace = true }
 xai-ratatui-inline = { workspace = true }
-
-# Update
-xai-grok-update = { path = "../xai-grok-update" }
 
 # ACP
 agent-client-protocol = { workspace = true }

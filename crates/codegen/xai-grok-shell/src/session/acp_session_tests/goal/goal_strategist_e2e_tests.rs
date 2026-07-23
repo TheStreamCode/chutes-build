@@ -181,15 +181,12 @@ fn parse_details_path(prompt: &str) -> Option<String> {
     crate::session::goal_classifier::parse_skeptic_details_path_from_prompt(prompt)
 }
 
-/// Pull the absolute `.../strategy.md` path out of the strategist prompt
-/// (walk left from `/strategy.md` to the path start).
+/// Pull the absolute strategy path out of the prompt's backtick-delimited
+/// output-file instruction.
 fn parse_strategy_path(prompt: &str) -> Option<String> {
-    let end_idx = prompt.find("/strategy.md")?;
-    let end = end_idx + "/strategy.md".len();
-    let start = prompt[..end_idx]
-        .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    const PREFIX: &str = "Write a short Markdown note to `";
+    let start = prompt.find(PREFIX)? + PREFIX.len();
+    let end = start + prompt[start..].find('`')?;
     Some(prompt[start..end].to_string())
 }
 

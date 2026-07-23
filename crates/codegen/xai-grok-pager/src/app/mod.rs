@@ -49,7 +49,6 @@ pub use cli::{
     AgentArgs, AgentCmd, Command, HeadlessArgs, LeaderArgs, LeaderMgmtArgs, LeaderMgmtCommand,
     LeaderTargetArgs, OutputFormat, PagerArgs, ServeArgs, WrapArgs,
 };
-pub use cli::{WorkspaceMgmtArgs, WorkspaceMgmtCommand, WorkspaceStartArgs};
 use crossterm::cursor::{self, SetCursorStyle};
 use crossterm::event;
 use crossterm::execute;
@@ -446,12 +445,7 @@ fn resolve_hunk_tracker_mode(
 ///
 /// Returns `Ok(true)` when the user accepted a pending update. The caller
 /// should print a message telling the user to relaunch `chutes-build`.
-pub async fn run(
-    args: PagerArgs,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
-) -> anyhow::Result<bool> {
+pub async fn run(args: PagerArgs) -> anyhow::Result<bool> {
     xai_tty_utils::redirect_native_stderr();
     let screen_mode_override = screen_mode_relaunch::take_screen_mode_env_override();
     let cancel = CancellationToken::new();
@@ -704,7 +698,6 @@ pub async fn run(
     }
     let effective_args = PagerArgs {
         resume_session: None,
-        load_session: None,
         continue_last_session: false,
         session_id: None,
         fork_session: false,
@@ -726,7 +719,6 @@ pub async fn run(
         remote_settings,
         term_state,
         materialized,
-        bg_update_rx,
     )
     .await;
     crate::unified_log::flush_blocking().await;
@@ -983,11 +975,11 @@ pub(crate) mod win_native_selection {
             let Ok(saved) = u32::try_from(saved) else {
                 return;
             };
-            if let Some((handle, current)) = stdin_console_mode() {
-                if current != saved {
-                    unsafe {
-                        let _ = SetConsoleMode(handle, saved);
-                    }
+            if let Some((handle, current)) = stdin_console_mode()
+                && current != saved
+            {
+                unsafe {
+                    let _ = SetConsoleMode(handle, saved);
                 }
             }
         }
@@ -1602,12 +1594,6 @@ mod tests {
         assert_eq!(args.session_to_resume(), Some("abc-123"));
     }
     #[test]
-    fn cli_resume_preferred_over_load() {
-        let mut args = try_parse_pager(&["grok-pager", "--resume", "from-resume"]).unwrap();
-        args.load_session = Some("from-load".into());
-        assert_eq!(args.session_to_resume(), Some("from-resume"));
-    }
-    #[test]
     fn cli_continue_flag_parses() {
         let args = try_parse_pager(&["grok-pager", "--continue"]).unwrap();
         assert!(args.continue_last_session);
@@ -1767,9 +1753,9 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_grok() {
+    fn cli_command_name_is_chutes_build() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "grok");
+        assert_eq!(PagerArgs::command().get_name(), "chutes-build");
     }
     #[test]
     fn cli_help_output_header() {
@@ -1779,9 +1765,9 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Chutes Build TUI",
+                "Chutes Build — privacy-first coding agent for Chutes",
                 "",
-                "Usage: grok [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: chutes-build [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]

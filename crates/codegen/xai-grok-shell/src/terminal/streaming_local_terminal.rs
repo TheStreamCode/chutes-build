@@ -1219,6 +1219,44 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    fn ext_echo_command() -> (&'static str, Vec<String>) {
+        (
+            "pwsh",
+            vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "Write-Output hello".into(),
+            ],
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn ext_echo_command() -> (&'static str, Vec<String>) {
+        ("echo", vec!["hello".into()])
+    }
+
+    #[cfg(windows)]
+    fn ext_sleep_command() -> (&'static str, Vec<String>) {
+        (
+            "pwsh",
+            vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-NonInteractive".into(),
+                "-Command".into(),
+                "Start-Sleep -Seconds 30".into(),
+            ],
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn ext_sleep_command() -> (&'static str, Vec<String>) {
+        ("sleep", vec!["30".into()])
+    }
+
     fn extract_statuses(notifications: &[acp::SessionNotification]) -> Vec<acp::ToolCallStatus> {
         notifications
             .iter()
@@ -1251,6 +1289,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_kill_returns_signal() {
         let session_id = format!("s1-kill-{}", std::process::id());
         let tool_id = format!("t1-kill-{}", std::process::id());
@@ -1305,17 +1344,11 @@ mod tests {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("ext-create-{}", std::process::id());
+                let (program, args) = ext_echo_command();
 
-                let id = create_terminal(
-                    &session_id,
-                    "echo",
-                    &["hello".to_string()],
-                    HashMap::new(),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap();
+                let id = create_terminal(&session_id, program, &args, HashMap::new(), None, None)
+                    .await
+                    .unwrap();
                 assert!(!id.is_empty());
 
                 let status = wait_for_terminal_exit(&session_id, &id).await.unwrap();
@@ -1335,17 +1368,11 @@ mod tests {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("ext-release-{}", std::process::id());
+                let (program, args) = ext_sleep_command();
 
-                let id = create_terminal(
-                    &session_id,
-                    "sleep",
-                    &["30".to_string()],
-                    HashMap::new(),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap();
+                let id = create_terminal(&session_id, program, &args, HashMap::new(), None, None)
+                    .await
+                    .unwrap();
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -1362,29 +1389,18 @@ mod tests {
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("kill-all-{}", std::process::id());
+                let (program, args) = ext_sleep_command();
 
                 // Create two terminals: one normal, one we'll background.
-                let normal_id = create_terminal(
-                    &session_id,
-                    "sleep",
-                    &["30".to_string()],
-                    HashMap::new(),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap();
+                let normal_id =
+                    create_terminal(&session_id, program, &args, HashMap::new(), None, None)
+                        .await
+                        .unwrap();
 
-                let bg_id = create_terminal(
-                    &session_id,
-                    "sleep",
-                    &["30".to_string()],
-                    HashMap::new(),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap();
+                let bg_id =
+                    create_terminal(&session_id, program, &args, HashMap::new(), None, None)
+                        .await
+                        .unwrap();
 
                 // Wait for both to start.
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1463,6 +1479,7 @@ mod tests {
     /// ProcessGroup::leader() to ProcessSession. A parent shell spawns
     /// a background child; killing the terminal should reap both.
     #[tokio::test]
+    #[cfg(unix)]
     async fn test_process_group_kill_with_session() {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -1518,18 +1535,12 @@ mod tests {
             .run_until(async {
                 let session_a = format!("kill-all-a-{}", std::process::id());
                 let session_b = format!("kill-all-b-{}", std::process::id());
+                let (program, args) = ext_sleep_command();
 
                 // Create a terminal in session B.
-                let id_b = create_terminal(
-                    &session_b,
-                    "sleep",
-                    &["30".to_string()],
-                    HashMap::new(),
-                    None,
-                    None,
-                )
-                .await
-                .unwrap();
+                let id_b = create_terminal(&session_b, program, &args, HashMap::new(), None, None)
+                    .await
+                    .unwrap();
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 

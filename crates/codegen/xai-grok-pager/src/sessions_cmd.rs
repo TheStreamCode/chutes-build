@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 use xai_grok_shell::agent::config::Config as AgentConfig;
-use xai_grok_shell::auth::{AuthManager, try_ensure_fresh_auth};
+use xai_grok_shell::auth::AuthManager;
 use xai_grok_shell::session::merge::MergedSession;
 use xai_grok_shell::util::grok_home::grok_home;
 #[derive(Debug, clap::Args, Clone)]
@@ -17,6 +17,9 @@ enum SessionsCommand {
         /// Maximum number of sessions to show
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Search sessions by keyword
     Search {
@@ -25,52 +28,37 @@ enum SessionsCommand {
         /// Maximum number of sessions to show
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Permanently delete a session from history
     Delete {
         /// Session id to delete.
         id: String,
+        /// Delete without an interactive confirmation.
+        #[arg(long = "yes", short = 'y')]
+        yes: bool,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
-    // Best-effort only. Do not force an interactive public login for enterprise
-    // deployments that only configure a deployment_key + custom xai_api_base_url.
-    // If the user has previously run the interactive `chutes-build` TUI (which succeeds
-    // for these setups), any cached credential will be used. Otherwise we still
-    // proceed so the SessionRegistryClient can use the deployment_key when
-    // talking to the custom proxy.
-    let auth = try_ensure_fresh_auth(&agent_config.grok_com_config).await;
-
-    let auth_manager = std::sync::Arc::new(AuthManager::new(
-        &grok_home(),
-        agent_config.grok_com_config.clone(),
-    ));
-
-    let client = xai_grok_shell::agent::session_registry_client::SessionRegistryClient::new(
-        agent_config.endpoints.proxy_url(),
-        String::new(),
-    )
-    .with_deployment_key(agent_config.endpoints.deployment_key.clone())
-    .with_alpha_test_key(agent_config.endpoints.alpha_test_key.clone())
-    .with_auth(auth_manager.clone());
-
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
 
     match args.command {
-        SessionsCommand::List { limit } => {
-            let sessions = xai_grok_shell::session::merge::fetch_merged(
-                Some(&client),
-                cwd.to_str(),
-                None,
-                limit,
-            )
-            .await;
-            print_sessions_grouped(&sessions);
+        SessionsCommand::List { limit, json } => {
+            let sessions =
+                xai_grok_shell::session::merge::fetch_merged(None, cwd.to_str(), None, limit).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&sessions)?);
+            } else {
+                print_sessions_grouped(&sessions);
+            }
         }
-        SessionsCommand::Search { query, limit } => {
-            use std::collections::HashSet;
-            use xai_grok_shell::session::merge::REMOTE_TIMEOUT;
+        SessionsCommand::Search { query, limit, json } => {
             use xai_grok_shell::session::storage::search::{SessionSearchRequest, execute_search};
 
             let req = SessionSearchRequest {
@@ -81,29 +69,11 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 include_content: true,
             };
             let root = grok_home();
-
-            let remote_limit = (limit * 3).max(100) as i64;
-            let (local_resp, remote_results) = tokio::join!(execute_search(&root, &req), async {
-                tokio::time::timeout(
-                    REMOTE_TIMEOUT,
-                    client.search(Some(&req.query), remote_limit),
-                )
-                .await
-                .unwrap_or_else(|_| {
-                    eprintln!(
-                        "warning: remote session search timed out, showing local results only"
-                    );
-                    Ok(Vec::new())
-                })
-                .unwrap_or_else(|e| {
-                    eprintln!("warning: remote session search failed: {e}");
-                    Vec::new()
-                })
-            });
-
-            let resp = local_resp?;
-            let local_ids: HashSet<&str> =
-                resp.results.iter().map(|r| r.session_id.as_str()).collect();
+            let resp = execute_search(&root, &req).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+                return Ok(());
+            }
 
             for hit in &resp.results {
                 let title = if hit.title.is_empty() {
@@ -127,66 +97,45 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                     hit.snippet.as_deref().unwrap_or("")
                 );
             }
-
-            let remaining = limit.saturating_sub(resp.results.len());
-            let mut remote_shown = 0usize;
-            for r in &remote_results {
-                if remote_shown >= remaining {
-                    break;
-                }
-                if local_ids.contains(r.session_id.as_str()) {
-                    continue;
-                }
-                let title = if r.summary.is_empty() {
-                    "(untitled)"
-                } else {
-                    &r.summary
-                };
-                let time = chrono::DateTime::parse_from_rfc3339(&r.updated_at)
-                    .map(|dt| {
-                        dt.with_timezone(&chrono::Local)
-                            .format("%b %d, %l:%M%P")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
-                let snippet: String = r
-                    .first_prompt
-                    .as_deref()
-                    .unwrap_or("")
-                    .chars()
-                    .take(80)
-                    .collect();
-                println!(
-                    "{} (remote)  {}\n  {}\n  {}",
-                    r.session_id, time, title, snippet
-                );
-                remote_shown += 1;
-            }
-
-            println!("\nTotal: {}", resp.results.len() + remote_shown);
+            println!("\nTotal: {}", resp.results.len());
         }
-        SessionsCommand::Delete { id } => {
-            // Always attempt the remote delete when authenticated and not
-            // ZDR — `list` / `search` likewise query remote unconditionally
-            // rather than gating on storage mode (which the CLI cannot
-            // resolve here: it builds config without remote settings). The
-            // backend delete is idempotent (a `404` is treated as success),
-            // so this is safe for local-only sessions with no remote copy.
-            // ZDR teams never upload, so there is nothing remote to delete.
-            let needs_remote = auth.as_ref().is_some_and(|a| !a.is_zdr_team());
-
+        SessionsCommand::Delete { id, yes, json } => {
+            if !yes && !confirm_local_delete(&id)? {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"sessionId": id, "deleted": false, "cancelled": true})
+                    );
+                } else {
+                    println!("Deletion cancelled.");
+                }
+                return Ok(());
+            }
             // Pass `cwd = None` so the session is found by id regardless of
-            // which workspace it was created in; the local delete still uses
-            // the resolved per-session cwd.
+            // which workspace it was created in. Chutes Build never contacts
+            // a remote registry from this command.
+            let auth_manager = std::sync::Arc::new(AuthManager::new(
+                &grok_home(),
+                agent_config.grok_com_config.clone(),
+            ));
             let deletion = xai_grok_shell::session::persistence::delete_session_history(
                 &id,
                 None,
-                needs_remote,
+                false,
                 auth_manager.clone(),
             )
             .await?;
 
-            if deletion.any_removed() {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "sessionId": id,
+                        "deleted": deletion.local_removed,
+                        "scope": "local"
+                    })
+                );
+            } else if deletion.any_removed() {
                 println!("Deleted session {id}");
             } else {
                 println!("No session found with id {id}.");
@@ -195,6 +144,25 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn confirm_local_delete(id: &str) -> Result<bool> {
+    use std::io::{IsTerminal as _, Write as _};
+
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "refusing to delete session {id} without confirmation on non-interactive stdin; \
+             pass --yes"
+        );
+    }
+    print!("Permanently delete local session {id}? [y/N] ");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 /// Print sessions grouped by worktree label, preserving the original table

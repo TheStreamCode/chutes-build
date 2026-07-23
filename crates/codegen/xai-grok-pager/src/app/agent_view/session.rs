@@ -856,7 +856,6 @@ impl AgentView {
     /// One place for the app-scoped gates a new/adopted session inherits so the session-creation sites cannot drift.
     pub(crate) fn apply_app_scoped_gates(
         &mut self,
-        sharing_enabled: bool,
         usage_visible: bool,
         account_plan: Option<&str>,
         chat_mode: bool,
@@ -864,7 +863,7 @@ impl AgentView {
         announcements: &[xai_grok_announcements::RemoteAnnouncement],
         restricted_commands: &[String],
     ) {
-        self.set_sharing_enabled(sharing_enabled);
+        self.set_sharing_enabled(chutes_build_core::product::REMOTE_SESSION_SHARING);
         self.set_usage_visible(usage_visible);
         self.account_plan = account_plan.map(str::to_owned);
         self.app_chat_mode = chat_mode;

@@ -400,7 +400,10 @@ mod tests {
             }
         }
 
-        let path_var = format!("{}:{}", bin1.to_str().unwrap(), bin2.to_str().unwrap());
+        let path_var = std::env::join_paths([&bin1, &bin2])
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let result = scan_path_from(&path_var);
         assert_eq!(result, vec!["shared_cmd"]);
     }

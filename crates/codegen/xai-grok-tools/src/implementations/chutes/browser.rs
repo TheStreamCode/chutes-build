@@ -38,6 +38,8 @@ pub struct BrowserInput {
     pub url: Option<String>,
     /// CSS selector for `click` or `type`.
     pub selector: Option<String>,
+    /// Element index returned by `snapshot`, as an alternative to `selector`.
+    pub index: Option<usize>,
     /// Text for `type`.
     pub text: Option<String>,
     /// Submit the nearest form after typing.
@@ -98,22 +100,19 @@ impl BrowserClient {
             }
             BrowserAction::Snapshot => session.snapshot().await,
             BrowserAction::Click => {
-                let selector = required(input.selector, "selector")?;
+                let element = element_expression(input.selector, input.index)?;
                 let script = format!(
-                    "(() => {{ const el = document.querySelector({}); if (!el) return {{ok:false,error:'selector not found'}}; el.scrollIntoView({{block:'center'}}); el.click(); return {{ok:true,tag:el.tagName}}; }})()",
-                    serde_json::to_string(&selector).map_err(|error| error.to_string())?
+                    "(() => {{ const el = {element}; if (!el) return {{ok:false,error:'element not found'}}; el.scrollIntoView({{block:'center'}}); el.click(); return {{ok:true,tag:el.tagName}}; }})()",
                 );
                 let result = session.evaluate(&script).await?;
                 tokio::time::sleep(Duration::from_millis(250)).await;
                 Ok(result)
             }
             BrowserAction::Type => {
-                let selector = required(input.selector, "selector")?;
+                let element = element_expression(input.selector, input.index)?;
                 let text = required(input.text, "text")?;
                 let script = format!(
-                    "(() => {{ const el = document.querySelector({selector}); if (!el) return {{ok:false,error:'selector not found'}}; el.focus(); const value={text}; const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const setter=Object.getOwnPropertyDescriptor(proto,'value')?.set; if (setter) setter.call(el,value); else el.value=value; el.dispatchEvent(new Event('input',{{bubbles:true}})); el.dispatchEvent(new Event('change',{{bubbles:true}})); if ({submit}) el.form?.requestSubmit(); return {{ok:true,tag:el.tagName}}; }})()",
-                    selector =
-                        serde_json::to_string(&selector).map_err(|error| error.to_string())?,
+                    "(() => {{ const el = {element}; if (!el) return {{ok:false,error:'element not found'}}; el.focus(); const value={text}; const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const setter=Object.getOwnPropertyDescriptor(proto,'value')?.set; if (setter) setter.call(el,value); else el.value=value; el.dispatchEvent(new Event('input',{{bubbles:true}})); el.dispatchEvent(new Event('change',{{bubbles:true}})); if ({submit}) el.form?.requestSubmit(); return {{ok:true,tag:el.tagName}}; }})()",
                     text = serde_json::to_string(&text).map_err(|error| error.to_string())?,
                     submit = input.submit.unwrap_or(false),
                 );
@@ -147,18 +146,7 @@ impl BrowserClient {
                         format!("Failed to create screenshot directory: {error}")
                     })?;
                 }
-                let mut file = tokio::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&output)
-                    .await
-                    .map_err(|error| format!("Failed to create screenshot: {error}"))?;
-                file.write_all(&bytes)
-                    .await
-                    .map_err(|error| format!("Failed to write screenshot: {error}"))?;
-                file.flush()
-                    .await
-                    .map_err(|error| format!("Failed to flush screenshot: {error}"))?;
+                write_new_screenshot(&output, &bytes).await?;
                 Ok(serde_json::json!({"path": output, "format": "png"}))
             }
             BrowserAction::Close => unreachable!(),
@@ -363,7 +351,7 @@ impl crate::types::tool_metadata::ToolMetadata for BrowserTool {
     }
 
     fn description_template(&self) -> &str {
-        "Control an isolated local Chrome or Edge session: navigate, inspect a structured page snapshot, click, type, submit forms, capture workspace screenshots, or close the session. Browser actions can affect external sites; inspect before mutating."
+        "Control an isolated local Chrome or Edge session: navigate, inspect a structured page snapshot, click or type by CSS selector or snapshot index, submit forms, capture workspace screenshots, or close the session. Browser actions can affect external sites; inspect before mutating."
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -425,6 +413,20 @@ fn required(value: Option<String>, field: &str) -> Result<String, String> {
         .ok_or_else(|| format!("'{field}' is required for this browser action"))
 }
 
+fn element_expression(selector: Option<String>, index: Option<usize>) -> Result<String, String> {
+    match (selector.filter(|value| !value.trim().is_empty()), index) {
+        (Some(selector), None) => Ok(format!(
+            "document.querySelector({})",
+            serde_json::to_string(&selector).map_err(|error| error.to_string())?
+        )),
+        (None, Some(index)) => Ok(format!(
+            "[...document.querySelectorAll('a,button,input,textarea,select,[role],h1,h2,h3,p,li')].filter(el => {{ const s=getComputedStyle(el), r=el.getBoundingClientRect(); return s.display!=='none' && s.visibility!=='hidden' && r.width>0 && r.height>0; }})[{index}]"
+        )),
+        (Some(_), Some(_)) => Err("Use either 'selector' or 'index', not both".to_owned()),
+        (None, None) => Err("'selector' or 'index' is required for this browser action".to_owned()),
+    }
+}
+
 fn validate_navigation_url(raw: String) -> Result<String, String> {
     let url = reqwest::Url::parse(&raw).map_err(|error| format!("Invalid URL: {error}"))?;
     if !matches!(url.scheme(), "http" | "https") {
@@ -466,6 +468,34 @@ fn workspace_output_path(cwd: &Path, relative: &str) -> Result<PathBuf, String> 
         return Err("Screenshot path must stay inside the current workspace".to_owned());
     }
     Ok(output)
+}
+
+async fn write_new_screenshot(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+        .map_err(|error| format!("Failed to create screenshot: {error}"))?;
+    let write_result = async {
+        file.write_all(bytes)
+            .await
+            .map_err(|error| format!("Failed to write screenshot: {error}"))?;
+        file.flush()
+            .await
+            .map_err(|error| format!("Failed to flush screenshot: {error}"))
+    }
+    .await;
+    drop(file);
+    if let Err(error) = write_result {
+        if let Err(cleanup_error) = tokio::fs::remove_file(path).await {
+            return Err(format!(
+                "{error}; failed to remove partial screenshot: {cleanup_error}"
+            ));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn env_flag(name: &str) -> bool {
@@ -545,5 +575,24 @@ mod tests {
         assert!(validate_navigation_url("https://example.com".into()).is_ok());
         assert!(validate_navigation_url("file:///etc/passwd".into()).is_err());
         assert!(validate_navigation_url("https://user:pass@example.com".into()).is_err());
+    }
+
+    #[test]
+    fn browser_elements_can_be_selected_by_css_or_snapshot_index() {
+        let selector = element_expression(Some("#submit".into()), None).unwrap();
+        assert!(selector.contains("querySelector"));
+        let index = element_expression(None, Some(7)).unwrap();
+        assert!(index.ends_with("[7]"));
+        assert!(element_expression(None, None).is_err());
+        assert!(element_expression(Some("#x".into()), Some(1)).is_err());
+    }
+
+    #[tokio::test]
+    async fn screenshot_writer_never_overwrites_an_existing_file() {
+        let cwd = tempfile::tempdir().unwrap();
+        let path = cwd.path().join("page.png");
+        std::fs::write(&path, b"original").unwrap();
+        assert!(write_new_screenshot(&path, b"replacement").await.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
     }
 }

@@ -29,8 +29,8 @@
     }
 
     #[test]
-    fn settings_api_key_keeps_voice_despite_remote_false() {
-        // Remote false alone must not disable an already API-key session.
+    fn explicit_voice_disable_applies_to_api_key_sessions() {
+        // An explicit voice policy applies consistently to every auth mode.
         let mut app = make_app_with_agent("sess-api-key");
         app.is_api_key_auth = true;
         app.apply_voice_mode_enabled(true);
@@ -39,10 +39,10 @@
             &voice_settings_update(false),
             &mut app
         ));
-        assert!(app.voice_mode_enabled);
-        assert!(app.voice_ui_active);
+        assert!(!app.voice_mode_enabled);
+        assert!(!app.voice_ui_active);
 
-        // Same update can stamp API Key while remote settings sends voice false.
+        // The same payload can stamp API Key while disabling voice.
         let mut app = make_app_with_agent("sess-combined");
         let notif = acp::ExtNotification::new(
             "chutes.build/settings/update",
@@ -56,7 +56,7 @@
         );
         assert!(handle_ext_notification(&notif, &mut app));
         assert!(app.is_api_key_auth);
-        assert!(app.voice_mode_enabled);
+        assert!(!app.voice_mode_enabled);
         assert!(app.tier_restricted_commands.is_empty());
     }
 
@@ -451,7 +451,14 @@
             "settings/update must not replace the pushed announcements"
         );
         assert_eq!(app.announcements_last_gen, 7, "watermark untouched");
-        assert!(app.sharing_enabled, "other settings fields still apply");
+        assert!(
+            !app.sharing_enabled,
+            "remote settings must not override the product sharing policy"
+        );
+        assert!(
+            app.agents.values().all(|agent| !agent.sharing_enabled),
+            "the product sharing policy must propagate to existing agents"
+        );
     }
 
     /// User-owned mode must not re-arm default_yolo or rewrite UI from remote.

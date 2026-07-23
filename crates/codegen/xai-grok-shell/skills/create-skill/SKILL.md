@@ -1,15 +1,15 @@
 ---
 name: create-skill
 description: >
-  Interactively create a new Grok skill (SKILL.md + optional scripts/references).
+  Interactively create a new Chutes Build skill (SKILL.md + optional scripts/references).
   Use when the user wants to create a skill, scaffold a skill, or runs /create-skill.
 metadata:
-  short-description: "Create a new Grok skill"
+  short-description: "Create a new Chutes Build skill"
 ---
 
 # Create Skill
 
-Interactively gather requirements from the user and create a fully working Grok skill on disk.
+Interactively gather requirements from the user and create a fully working Chutes Build skill on disk.
 
 ## Step 1: Gather information
 
@@ -26,17 +26,18 @@ Ask the user the following questions **one at a time as regular conversation que
 
 Write a `description` frontmatter value that includes:
 - What the skill does (1-2 sentences)
-- Trigger phrases and keywords so Grok knows when to auto-invoke it
+- Trigger phrases and keywords so Chutes Build knows when to auto-invoke it
 - The slash command name (e.g. "Use when the user runs /deploy-k8s")
 
 Show the drafted description to the user and let them approve or edit it.
 
 ## Step 3: Create the directory
 
-Run this bash command to create the skill directory:
+Create the skill directory with a platform-appropriate filesystem operation.
+For example, in PowerShell:
 
-```bash
-mkdir -p <SKILL_DIR>
+```powershell
+New-Item -ItemType Directory -Force -Path "<SKILL_DIR>"
 ```
 
 Where `<SKILL_DIR>` is:
@@ -65,11 +66,12 @@ Also write any supporting files (scripts, references) using the same create meth
 
 ## Step 5: Verify and confirm
 
-1. Run `cat <SKILL_DIR>/SKILL.md` to verify the file was written correctly.
+1. Read `<SKILL_DIR>/SKILL.md` back with the available file-reading tool to
+   verify the file was written correctly.
 2. Tell the user the skill is ready and how to use it:
    - Slash command: `/<skill-name>`
    - TUI menu: `/skills <skill-name>`
-   - Automatic: Grok will invoke it when the description matches user intent
+   - Automatic: Chutes Build will invoke it when the description matches user intent
 3. Tell the user the skill should appear in the slash menu within a few seconds (skills auto-reload when files change on disk).
 
 ## Guidelines

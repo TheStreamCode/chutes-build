@@ -34,8 +34,22 @@ permission prompts enabled, use trusted repositories, and never expose secrets
 in prompts or committed files.
 
 The project intentionally disables telemetry, remote trace uploads, automatic
-updates, upstream session sharing, and upstream managed configuration. Any
-change to those guarantees requires an explicit security and privacy review.
+updates, upstream session sharing/search, remote workspace exposure, and
+upstream managed configuration. These are compile-time product policies, not
+server-controlled feature flags. Any change to those guarantees requires an
+explicit security and privacy review.
+
+Ambient Chutes credentials are restricted to allowlisted official HTTPS hosts.
+Custom inference and model-catalog endpoints require dedicated credentials.
+OAuth client secrets are read from the environment, used for token exchange
+and refresh when configured, and are never persisted by Chutes Build.
+
+Machine-readable MCP listings redact environment/header values and URL
+credentials. Destructive session, memory, plugin, marketplace, and worktree
+operations require an interactive confirmation unless an explicit `--yes`
+flag is provided. Media downloads enforce HTTPS, redirect and destination
+checks, private-address rejection, size limits, and transactional artifact
+writes.
 
 ## Automated release checks
 

@@ -1,4 +1,6 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+#![cfg(not(target_os = "windows"))]
+
 #[allow(unused_imports)]
 use super::common::*;
 

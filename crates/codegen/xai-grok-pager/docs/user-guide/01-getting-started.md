@@ -13,18 +13,22 @@ Run `target\release\chutes-build.exe` on Windows or
 
 ## Authenticate
 
+Run `chutes-build` and press `l` to sign in with Chutes through the browser, or
+press `k` to enter an API key. For a non-interactive environment:
+
 ```powershell
 $env:CHUTES_API_KEY = "your-api-key"
 chutes-build
 ```
 
-Alternatively run `chutes-build login` to enter the key through a hidden
-prompt. No browser/OAuth flow is required.
+`chutes-build login` stores an API key through a hidden prompt. `/login` and
+`/apikey` reopen the corresponding TUI choices.
 
 `Auto (Chutes Router)` is the first model choice and the default when no model
 preference has been saved. Its stable ID is `model-router`. Use `/model` in an
 interactive session or `--model <id>` at launch to select a concrete model. Run
-`chutes-build models` to inspect the current catalog.
+`chutes-build models` to inspect the current catalog, or add `--json` for
+machine-readable output.
 
 When a concrete model supports configurable reasoning, the model picker shows
 only its valid modes. Use `/effort` to change the mode later. Auto and

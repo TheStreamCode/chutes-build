@@ -1191,9 +1191,10 @@ fn dummy_tracker(
     use crate::session::signals::SessionSignalsHandle;
     use std::sync::atomic::AtomicBool;
     let gateway = test_gateway();
-    let cwd = xai_grok_paths::AbsPathBuf::new(PathBuf::from("/tmp")).unwrap();
+    let test_cwd = std::env::temp_dir();
+    let cwd = xai_grok_paths::AbsPathBuf::new(test_cwd.clone()).unwrap();
     let fs: Arc<dyn xai_grok_workspace::file_system::AsyncFileSystem> = Arc::new(
-        xai_grok_workspace::file_system::LocalFs::new(PathBuf::from("/tmp")),
+        xai_grok_workspace::file_system::LocalFs::new(test_cwd.clone()),
     );
     let terminal: Arc<dyn crate::terminal::AsyncTerminalRunner> = Arc::new(
         crate::terminal::TerminalRunner::new(
@@ -1224,7 +1225,7 @@ fn dummy_tracker(
         ),
         info: Info {
             id: acp::SessionId::new(subagent_id),
-            cwd: "/tmp".into(),
+            cwd: test_cwd.to_string_lossy().into_owned(),
         },
         max_turns: None,
         hunk_tracker_handle: xai_hunk_tracker::HunkTrackerHandle::noop(),
@@ -1245,12 +1246,12 @@ fn dummy_tracker(
         code_nav_enabled: false,
         ask_user_question_enabled: true,
         plan_mode: Arc::new(
-            parking_lot::Mutex::new(PlanModeTracker::new(PathBuf::from("/tmp"))),
+            parking_lot::Mutex::new(PlanModeTracker::new(test_cwd)),
         ),
         force_compact: Arc::new(AtomicBool::new(false)),
         permission_handle: xai_grok_workspace::permission::PermissionHandle::allow_all(),
         attribution_callback: None,
-        agent_name: "grok-build".to_string(),
+        agent_name: "chutes-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
         allowed_subagent_types: None,

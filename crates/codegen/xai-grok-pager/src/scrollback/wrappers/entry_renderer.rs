@@ -1482,10 +1482,11 @@ mod tests {
     }
 
     #[test]
-    fn background_block_gutter_uses_block_background_fill() {
-        // Background blocks own the gutter via the existing full-area fill, so
-        // the no-bg clear must not run for them. Concrete theme so bg_light !=
-        // bg_base (Theme::current() quantizes both to Reset in the test env).
+    fn user_prompt_gutter_uses_semantic_prompt_band() {
+        // User prompts paint a semantic per-line band after the block-level
+        // background. The band uses the active theme because block output is
+        // rendered through Theme::current(), while this concrete theme keeps
+        // the block-level premise (bg_light != bg_base) deterministic.
         let theme = Theme::chutesnight();
         assert_ne!(
             theme.bg_light, theme.bg_base,
@@ -1500,13 +1501,14 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
-        // Gutter cell carries the block background, proving the block fill
-        // (not the bg_base clear) owns it. UserPrompt has vpad → content on row 1.
+        // The semantic row background must extend through the timestamp
+        // gutter. UserPrompt has vpad, so its content starts on row 1.
         let gutter_x = gutter_band(&renderer, width).start + 2;
         let gutter_cell = buf.cell((gutter_x, 1)).unwrap();
         assert_eq!(
-            gutter_cell.bg, theme.bg_light,
-            "background block gutter must use the block bg fill"
+            gutter_cell.bg,
+            Theme::current().bg_light,
+            "user prompt gutter must use the semantic prompt band"
         );
     }
 

@@ -681,7 +681,7 @@ mod tests {
                 "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
                 "1",
             );
-            assert_eq!(conversations_lane_enabled(), false);
+            assert!(!conversations_lane_enabled());
         }
         {
             let _off = xai_grok_test_support::EnvGuard::set(
@@ -709,13 +709,12 @@ mod tests {
                 "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
                 "1",
             );
-            assert_eq!(conversations_lane_active(), false);
+            assert!(!conversations_lane_active());
         }
         {
             let _chat = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
-            assert_eq!(
-                conversations_lane_active(),
-                false,
+            assert!(
+                !conversations_lane_active(),
                 "process chat mode must enable the lane (chat feature only)"
             );
         }

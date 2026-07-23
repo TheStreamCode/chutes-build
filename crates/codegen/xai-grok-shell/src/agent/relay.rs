@@ -519,7 +519,8 @@ where
                 format!("acp_outbound::session/update::{params}") } Some(m) =>
                 format!("acp_outbound::{m}"), None => "acp_outbound::response"
                 .to_string(), }; debug!("{line_to_print}"); } else {
-                debug!("acp_outbound::response"); } } if ! msg.is_empty() && let Err(e) =
+                debug!("acp_outbound::response"); } }
+                if ! msg.is_empty() && let Err(e) =
                 ws_outbound.send(Message::Text(Utf8Bytes::from(msg))). await {
                 warn!(error = ? e, "failed to send to WS"); break; } } None => {
                 info!("Agent outbound channel closed"); break; } } } _ = keepalive.tick()

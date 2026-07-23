@@ -382,7 +382,7 @@ pub(super) fn build_authorize_url(
     let referrer = oauth2
         .and_then(|o| o.referrer.as_deref())
         .filter(|r| !r.is_empty())
-        .unwrap_or("grok-build");
+        .unwrap_or("chutes-build");
     url.push_str(&format!("&referrer={}", urlencoding::encode(referrer)));
     url
 }
@@ -471,6 +471,7 @@ pub(super) async fn refresh_tokens(
     token_endpoint: &str,
     refresh_token: &str,
     client_id: &str,
+    client_secret: Option<&str>,
     principal_type: Option<&str>,
     principal_id: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
@@ -484,6 +485,7 @@ pub(super) async fn refresh_tokens(
             token_endpoint,
             refresh_token,
             client_id,
+            client_secret,
             principal_type,
             principal_id,
         )
@@ -499,6 +501,7 @@ async fn refresh_tokens_once(
     token_endpoint: &str,
     refresh_token: &str,
     client_id: &str,
+    client_secret: Option<&str>,
     principal_type: Option<&str>,
     principal_id: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
@@ -507,6 +510,9 @@ async fn refresh_tokens_once(
         ("refresh_token", refresh_token),
         ("client_id", client_id),
     ];
+    if let Some(secret) = client_secret {
+        params.push(("client_secret", secret));
+    }
     if let Some(pt) = principal_type {
         params.push(("principal_type", pt));
     }
@@ -822,7 +828,7 @@ mod tests {
             "nonce=nonce123",
             "scope=openid",
             "audience=api",
-            "referrer=grok-build",
+            "referrer=chutes-build",
         ] {
             assert!(url.contains(required), "missing param: {required}");
         }
@@ -847,7 +853,7 @@ mod tests {
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
-            referrer: Some("grok-build".into()),
+            referrer: Some("chutes-build".into()),
             client_secret: None,
         };
         let discovery = Discovery {
@@ -871,7 +877,7 @@ mod tests {
         );
         assert!(url.contains("principal_type=Team"));
         assert!(url.contains("principal_id=team-123"));
-        assert!(url.contains("referrer=grok-build"));
+        assert!(url.contains("referrer=chutes-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -916,7 +922,7 @@ mod tests {
             "nonce123",
         );
         assert!(url.contains("referrer=grok-desktop"));
-        assert!(!url.contains("referrer=grok-build"));
+        assert!(!url.contains("referrer=chutes-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -1229,7 +1235,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
+        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
             .await
             .expect("transient 5xx must be retried until success");
         assert_eq!(resp.access_token, "new-at");
@@ -1237,6 +1243,50 @@ mod tests {
             hits.load(Ordering::SeqCst),
             2,
             "first attempt fails 503, second succeeds — exactly 2 hits"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn refresh_tokens_sends_configured_client_secret() {
+        let received = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let received_for_handler = received.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = axum::Router::new().route(
+            "/token",
+            axum::routing::post(move |body: axum::body::Bytes| {
+                let received = received_for_handler.clone();
+                async move {
+                    *received.lock().unwrap() = String::from_utf8_lossy(&body).into_owned();
+                    (
+                        axum::http::StatusCode::OK,
+                        r#"{"access_token":"new-at","expires_in":3600}"#,
+                    )
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let token_endpoint = format!("http://127.0.0.1:{port}/token");
+
+        refresh_tokens(
+            &token_endpoint,
+            "rt",
+            "client",
+            Some("client secret"),
+            None,
+            None,
+        )
+        .await
+        .expect("refresh should succeed");
+
+        let body = received.lock().unwrap().clone();
+        let fields = url::form_urlencoded::parse(body.as_bytes())
+            .into_owned()
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            fields.get("client_secret").map(String::as_str),
+            Some("client secret")
         );
         server.abort();
     }
@@ -1267,7 +1317,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let err = refresh_tokens(&token_endpoint, "rt", "client", None, None)
+        let err = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
             .await
             .expect_err("invalid_grant is terminal");
         assert!(
@@ -1314,7 +1364,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
+        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
             .await
             .expect("a non-terminal coded 4xx must be retried until success");
         assert_eq!(resp.access_token, "new-at");

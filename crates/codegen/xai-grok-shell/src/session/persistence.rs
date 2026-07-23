@@ -1958,6 +1958,10 @@ fn collect_session_files_recursive(base: &Path, dir: &Path, files: &mut Vec<Copi
             let Some(name) = rel_path.to_str() else {
                 continue;
             };
+            #[cfg(windows)]
+            let name = name.replace('\\', "/");
+            #[cfg(not(windows))]
+            let name = name.to_owned();
             let data = match std::fs::read(&path) {
                 Ok(c) => c,
                 Err(e) => {
@@ -1965,10 +1969,7 @@ fn collect_session_files_recursive(base: &Path, dir: &Path, files: &mut Vec<Copi
                     continue;
                 }
             };
-            files.push(CopiedSessionFile {
-                name: name.to_string(),
-                data,
-            });
+            files.push(CopiedSessionFile { name, data });
         } else if path.is_dir() {
             collect_session_files_recursive(base, &path, files);
         }

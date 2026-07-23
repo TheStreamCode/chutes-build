@@ -232,7 +232,7 @@ fn slash_plan_desc_forwards_skill_token_ranges() {
             assert_eq!(text, "great /pr-workflow go");
             assert_eq!(
                 skill_token_ranges,
-                &vec![6..18],
+                &std::iter::once(6..18).collect::<Vec<_>>(),
                 "offsets recomputed against the stripped desc"
             );
         }
@@ -241,7 +241,10 @@ fn slash_plan_desc_forwards_skill_token_ranges() {
     // The drained echo block carries the same desc-space ranges.
     match &app.agents[&id].scrollback.get(0).unwrap().block {
         RenderBlock::UserPrompt(b) => {
-            assert_eq!(b.skill_token_ranges, vec![6..18]);
+            assert_eq!(
+                b.skill_token_ranges,
+                std::iter::once(6..18).collect::<Vec<_>>()
+            );
         }
         other => panic!("expected UserPrompt, got {other:?}"),
     }

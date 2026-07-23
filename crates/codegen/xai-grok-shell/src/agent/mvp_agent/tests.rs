@@ -426,13 +426,9 @@ fn harness_pair(id: &str) -> Vec<xai_grok_sampling_types::conversation::Conversa
         ConversationItem::tool_result(id, "<subagent_result>\nsubagent_id: skeptic-1"),
     ]
 }
-/// Agent-side upload path: each drained harness turn takes a distinct,
-/// monotonic turn number that CONTINUES past the user turn, advances the
-/// per-session counter, and is persisted via exactly one `SetNextTraceTurn`.
-/// This is what makes each sibling `turn_{N}` reachable — without the
-/// advance every harness turn would clobber the same GCS path.
+/// Product policy wins over a locally enabled trace-upload configuration.
 #[tokio::test(flavor = "current_thread")]
-async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
+async fn upload_harness_trace_turns_respects_product_policy() {
     let agent = build_minimal_agent_for_tests();
     {
         let mut cfg = agent.cfg.borrow_mut();
@@ -481,10 +477,9 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         )
         .await;
     let numbers: Vec<u64> = built.iter().map(|(_, m, _)| m.turn_number).collect();
-    assert_eq!(numbers, vec![3, 4], "siblings take base, base+1");
     assert!(
-        built.iter().all(|(_, m, _)| m.model == "test-model"),
-        "harness metadata carries the requested model alias",
+        numbers.is_empty(),
+        "remote trace uploads are unavailable in this product"
     );
     let (cmd_tx, mut cmd_rx) =
         tokio::sync::mpsc::unbounded_channel::<crate::session::SessionCommand>();
@@ -499,8 +494,8 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         .await;
     assert_eq!(
         agent.session_turn_number(&sid),
-        Some(5),
-        "two siblings advance the counter by two from the user turn",
+        Some(3),
+        "disabled uploads must not consume trace turn numbers",
     );
     let mut persisted = Vec::new();
     while let Ok(cmd) = cmd_rx.try_recv() {
@@ -513,8 +508,8 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     }
     assert_eq!(
         persisted,
-        vec![5],
-        "persist the advanced counter once, ahead of the spawned uploads",
+        Vec::<u64>::new(),
+        "disabled uploads must not persist a trace counter",
     );
 }
 /// With trace upload disabled the agent-side path must NOT burn a turn
@@ -544,16 +539,10 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
         "uploads-disabled path must not persist a counter",
     );
 }
-/// Guards the per-harness-turn manifest seam: (1) every turn's ctx carries
-/// a FRESH `artifact_tracker`, so turn 1 never inherits turn 0's recorded
-/// artifacts; (2) recording the turn's metadata + turn_messages yields a
-/// manifest listing exactly those two; (3) `fully_uploaded` is true iff
-/// neither failed.
+/// Trace manifests are not constructed when remote trace upload is disabled
+/// by the product policy.
 #[tokio::test(flavor = "current_thread")]
-async fn upload_harness_trace_turns_build_per_turn_manifest() {
-    use crate::upload::manifest::{
-        ArtifactResult, ArtifactStatus, build_manifest, record_artifact, resolve_upload_method,
-    };
+async fn upload_harness_trace_turns_do_not_build_remote_manifests() {
     let agent = build_minimal_agent_for_tests();
     {
         let mut cfg = agent.cfg.borrow_mut();
@@ -597,62 +586,15 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
             vec![harness_pair("a"), harness_pair("b")],
         )
         .await;
-    assert_eq!(
-        built.len(),
-        2,
-        "both harness turns obtained a trace context"
-    );
-    let ctx0 = &built[0].0;
-    record_artifact(
-        &ctx0.artifact_tracker,
-        "metadata.json",
-        ArtifactResult::Succeeded,
-    );
-    record_artifact(
-        &ctx0.artifact_tracker,
-        "turn_messages.json",
-        ArtifactResult::Succeeded,
-    );
-    let m0 = build_manifest(&ctx0.artifact_tracker, resolve_upload_method(ctx0));
-    assert!(matches!(
-        m0.artifacts.get("metadata.json"),
-        Some(ArtifactStatus::Succeeded)
-    ));
-    assert!(matches!(
-        m0.artifacts.get("turn_messages.json"),
-        Some(ArtifactStatus::Succeeded)
-    ));
-    assert!(m0.fully_uploaded, "both succeeded → fully_uploaded");
-    let ctx1 = &built[1].0;
-    let before = build_manifest(&ctx1.artifact_tracker, resolve_upload_method(ctx1));
     assert!(
-        before.artifacts.is_empty(),
-        "per-turn tracker: turn 1 must not inherit turn 0's artifacts",
+        built.is_empty(),
+        "remote trace manifests are unavailable in this product"
     );
-    record_artifact(
-        &ctx1.artifact_tracker,
-        "metadata.json",
-        ArtifactResult::Succeeded,
-    );
-    record_artifact(
-        &ctx1.artifact_tracker,
-        "turn_messages.json",
-        ArtifactResult::Failed {
-            reason: "upload_failed",
-            error: None,
-        },
-    );
-    let m1 = build_manifest(&ctx1.artifact_tracker, resolve_upload_method(ctx1));
-    assert!(
-        !m1.fully_uploaded,
-        "a failed turn_messages flips fully_uploaded",
-    );
-    assert_eq!(m1.artifacts.len(), 2, "no cross-turn contamination");
 }
 /// With no overrides and model_agent_type = None, the default agent is used.
 #[test]
 #[serial_test::serial]
-fn resolve_agent_definition_defaults_to_grok_build() {
+fn resolve_agent_definition_defaults_to_plan_profile() {
     let prev = std::env::var("CHUTES_BUILD_AGENT").ok();
     unsafe {
         std::env::remove_var("CHUTES_BUILD_AGENT");
@@ -665,7 +607,7 @@ fn resolve_agent_definition_defaults_to_grok_build() {
         None,
         None,
     );
-    assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
+    assert_eq!(def.name, "chutes-build-plan");
     if let Some(v) = prev {
         unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
@@ -711,7 +653,7 @@ fn resolve_agent_definition_none_agent_type_does_not_override() {
         None,
         None,
     );
-    assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
+    assert_eq!(def.name, "chutes-build-plan");
     if let Some(v) = prev {
         unsafe { std::env::set_var("CHUTES_BUILD_AGENT", v) }
     }
@@ -1117,13 +1059,14 @@ fn make_test_handle(
     yolo: bool,
     client_id: Option<&str>,
 ) -> crate::session::SessionHandle {
+    let test_cwd = std::env::temp_dir();
     let (cmd_tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel();
     let (hunk_event_tx, _hunk_event_rx) = tokio::sync::mpsc::unbounded_channel();
     let hunk_cancel = tokio_util::sync::CancellationToken::new();
     let hunk_tracker_handle = xai_hunk_tracker::HunkTrackerActor::spawn(
         "test".to_string(),
-        std::path::PathBuf::from("/tmp"),
+        test_cwd.clone(),
         hunk_event_tx,
         xai_hunk_tracker::TrackingMode::AllDirty,
         hunk_cancel,
@@ -1137,7 +1080,7 @@ fn make_test_handle(
         )),
         info: crate::session::info::Info {
             id: acp::SessionId::new("test"),
-            cwd: "/tmp".to_string(),
+            cwd: test_cwd.to_string_lossy().into_owned(),
         },
         max_turns: None,
         hunk_tracker_handle,
@@ -1153,9 +1096,9 @@ fn make_test_handle(
         upload_queue: Arc::new(OnceLock::new()),
         upload_failures_since_success: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         tool_context: crate::tools::ToolContext::new_local_context(
-            xai_grok_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap(),
+            xai_grok_paths::AbsPathBuf::new(test_cwd.clone()).unwrap(),
             std::sync::Arc::new(xai_grok_workspace::file_system::LocalFs::new(
-                std::path::PathBuf::from("/tmp"),
+                test_cwd.clone(),
             )),
             std::sync::Arc::new(crate::terminal::LocalTerminalRunner),
         ),
@@ -1169,12 +1112,12 @@ fn make_test_handle(
         code_nav_enabled: false,
         ask_user_question_enabled: true,
         plan_mode: std::sync::Arc::new(parking_lot::Mutex::new(
-            crate::session::plan_mode::PlanModeTracker::new(std::path::PathBuf::from("/tmp")),
+            crate::session::plan_mode::PlanModeTracker::new(test_cwd),
         )),
         force_compact: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         permission_handle: xai_grok_workspace::permission::PermissionHandle::allow_all(),
         attribution_callback: None,
-        agent_name: "grok-build".to_string(),
+        agent_name: "chutes-build".to_string(),
         managed_mcp_proxy_base_url: String::new(),
         session_default_agent_profile: None,
         allowed_subagent_types: None,
@@ -2603,20 +2546,20 @@ fn enable_trace_upload_config(agent: &MvpAgent) {
     cfg.telemetry.trace_upload = Some(true);
 }
 #[tokio::test]
-async fn product_analytics_enabled_for_normal_user_with_telemetry_on() {
+async fn product_analytics_disabled_by_product_policy() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_product_telemetry(&agent);
-    assert!(agent.product_analytics_enabled());
+    assert!(!agent.product_analytics_enabled());
 }
 #[tokio::test]
-async fn product_analytics_enabled_despite_coding_retention_opt_out() {
+async fn product_analytics_stays_disabled_with_coding_retention_opt_out() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth {
         coding_data_retention_opt_out: true,
         ..crate::auth::GrokAuth::test_default()
     });
     enable_product_telemetry(&agent);
     assert!(agent.is_data_collection_disabled());
-    assert!(agent.product_analytics_enabled());
+    assert!(!agent.product_analytics_enabled());
 }
 #[tokio::test]
 async fn product_analytics_disabled_for_zdr_team() {
@@ -2665,10 +2608,10 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
     });
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
+    assert!(
+        agent.diagnostic_upload_config().is_none(),
+        "remote trace upload is unavailable in this product"
+    );
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -2676,19 +2619,19 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
     );
 }
 #[tokio::test]
-async fn diagnostic_upload_sent_for_normal_user() {
+async fn diagnostic_upload_disabled_for_normal_user_by_product_policy() {
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
     assert!(
-        count.load(std::sync::atomic::Ordering::SeqCst) >= 1,
-        "positive control: diagnostics upload reaches the proxy for a \
-         normal user"
+        agent.diagnostic_upload_config().is_none(),
+        "remote trace upload is unavailable in this product"
+    );
+    assert_eq!(
+        count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "product policy must prevent diagnostics requests"
     );
 }
 /// The diagnostics privacy gate fails closed: with no credential in the
@@ -2700,10 +2643,10 @@ async fn diagnostic_upload_skipped_without_credentials() {
     let agent = build_minimal_agent_for_tests();
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
+    assert!(
+        agent.diagnostic_upload_config().is_none(),
+        "remote trace upload is unavailable in this product"
+    );
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -2714,27 +2657,23 @@ async fn diagnostic_upload_skipped_without_credentials() {
 /// must re-check the live trace-upload mirror at invocation time: a
 /// mid-session config-level kill switch stops diagnostics uploads too.
 #[tokio::test]
-async fn diagnostic_upload_skipped_after_mid_session_trace_upload_kill_switch() {
+async fn diagnostic_upload_stays_disabled_after_config_flip() {
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.cfg.borrow_mut().endpoints.trace_upload_url = Some(stub_url);
     agent.sync_collection_config_gate();
-    let uploader = agent
-        .diagnostic_upload_config()
-        .expect("uploader is wired whenever trace upload config is on");
+    assert!(agent.diagnostic_upload_config().is_none());
     {
         let mut cfg = agent.cfg.borrow_mut();
         cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
         cfg.telemetry.trace_upload = Some(false);
     }
     agent.sync_collection_config_gate();
-    uploader(b"log".to_vec(), "tok".into(), "user-id-1".into()).await;
     assert_eq!(
         count.load(std::sync::atomic::Ordering::SeqCst),
         0,
-        "an already-wired diagnostics uploader must honor a mid-session \
-         trace-upload kill switch"
+        "product policy must prevent diagnostics requests"
     );
 }
 /// The live collection gate reads a `Send` mirror of the config-level
@@ -2742,15 +2681,15 @@ async fn diagnostic_upload_skipped_after_mid_session_trace_upload_kill_switch() 
 /// current so a mid-session remote-settings flip (kill switch) stops
 /// collection without a new session.
 #[tokio::test]
-async fn collection_config_gate_mirror_follows_trace_upload_flip() {
+async fn collection_config_gate_mirror_stays_disabled_by_product_policy() {
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.sync_collection_config_gate();
     assert!(
-        agent
+        !agent
             .trace_upload_live
             .load(std::sync::atomic::Ordering::Relaxed),
-        "precondition: mirror reflects the enabled switch"
+        "product policy overrides the config-level enable switch"
     );
     {
         let mut cfg = agent.cfg.borrow_mut();

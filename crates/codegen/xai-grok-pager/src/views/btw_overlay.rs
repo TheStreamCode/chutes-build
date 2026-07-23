@@ -749,6 +749,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn done_state_scans_file_paths_like_scrollback() {
         // Absolute path text (not a markdown hyperlink) should still become a
         // file:// overlay via scan_lines_for_url_overlays.

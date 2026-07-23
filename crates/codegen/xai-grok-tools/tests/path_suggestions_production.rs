@@ -220,9 +220,10 @@ async fn pattern3_dropped_folder_with_display_remap() {
     if let Some(ref suggestion) = hint.suggestion {
         // Suggestion must be in display space, not resolved space.
         let s = suggestion.display().to_string();
-        assert!(
-            s.contains("/home/user/project/"),
-            "suggestion should use display path, got: {s}"
+        assert_eq!(
+            suggestion,
+            &display_cwd.join("src"),
+            "suggestion should use the platform-native display path"
         );
         assert!(
             !s.contains("worktree"),

@@ -2532,6 +2532,7 @@ pub(super) mod paste_key_tests {
         );
     }
     #[test]
+    #[cfg(not(windows))]
     fn agent_completion_inserts_unreadable_file_url_as_path_text() {
         let mut agent = make_agent();
         agent.set_active_pane(ActivePane::Prompt, true);

@@ -151,7 +151,7 @@ mod tests {
             .collect();
         assert!(all_text.contains("credit limit"));
         assert!(all_text.contains("enabling pay-as-you-go"));
-        assert!(all_text.contains("grok.com?_s=usage"));
+        assert!(all_text.contains("chutes.ai?_s=usage"));
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
             .collect();
         assert!(all_text.contains("spending cap"));
         assert!(all_text.contains("increasing your spending limit"));
-        assert!(all_text.contains("grok.com?_s=usage"));
+        assert!(all_text.contains("chutes.ai?_s=usage"));
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod tests {
             .flat_map(|l| l.content.spans.iter().map(|s| s.content.as_ref()))
             .collect();
         assert!(all_text.contains("purchasing more credits"));
-        assert!(all_text.contains("grok.com?_s=usage"));
+        assert!(all_text.contains("chutes.ai?_s=usage"));
     }
 
     #[test]

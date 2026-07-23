@@ -64,7 +64,7 @@ async fn fetch_npm_tag_passes_pkg_and_tag_to_npm() {
     let args = &log[0];
     assert!(args.contains("view"), "args: {args}");
     // For "latest" tag, no `@latest` suffix is appended in pkg_spec.
-    assert!(args.contains("@xai-official/grok"), "args: {args}");
+    assert!(args.contains("chutes-build"), "args: {args}");
     assert!(!args.contains("@latest"), "args: {args}");
     assert!(args.contains("--json"), "args: {args}");
 }
@@ -79,11 +79,7 @@ async fn fetch_npm_tag_alpha_appends_at_alpha_suffix() {
     assert_eq!(v, "0.1.181-alpha.1");
 
     let log = g.args_log();
-    assert!(
-        log[0].contains("@xai-official/grok@alpha"),
-        "args: {}",
-        log[0]
-    );
+    assert!(log[0].contains("chutes-build@alpha"), "args: {}", log[0]);
 }
 
 #[tokio::test]
@@ -217,7 +213,7 @@ async fn install_npm_calls_npm_with_version_arg() {
     assert_eq!(log.len(), 1, "exactly one npm invocation");
     let args = &log[0];
     assert!(args.contains("i -g"), "args: {args}");
-    assert!(args.contains("@xai-official/grok@0.1.181"), "args: {args}");
+    assert!(args.contains("chutes-build@0.1.181"), "args: {args}");
 }
 
 #[tokio::test]
@@ -228,7 +224,7 @@ async fn install_npm_falls_back_to_dist_tag_on_no_target() {
     install_npm_for_test(None, "stable", None).unwrap();
     let log = g.args_log();
     assert!(
-        log[0].contains("@xai-official/grok@latest"),
+        log[0].contains("chutes-build@latest"),
         "stable channel uses @latest dist-tag: {}",
         log[0]
     );
@@ -242,7 +238,7 @@ async fn install_npm_falls_back_to_alpha_dist_tag_on_alpha_channel() {
     install_npm_for_test(None, "alpha", None).unwrap();
     let log = g.args_log();
     assert!(
-        log[0].contains("@xai-official/grok@alpha"),
+        log[0].contains("chutes-build@alpha"),
         "alpha channel uses @alpha dist-tag: {}",
         log[0]
     );

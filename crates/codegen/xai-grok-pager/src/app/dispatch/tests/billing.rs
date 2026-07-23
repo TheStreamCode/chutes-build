@@ -108,7 +108,7 @@ fn credit_limit_retry_preserves_image_submission_state() {
 fn is_max_tier_positive_match() {
     assert!(is_max_tier(Some("supergrok_heavy")));
     assert!(is_max_tier(Some("SuperGrok Heavy")));
-    assert!(is_max_tier(Some("SUPERCHUTES_BUILD_HEAVY")));
+    assert!(is_max_tier(Some("SUPERGROK_HEAVY")));
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn upsell_non_max_qa_heading_is_spending_cap_when_payg_on() {
 }
 
 #[test]
-fn upsell_non_max_upgrade_url_is_supergrok() {
+fn upsell_non_max_upgrade_url_is_chutes_pricing() {
     let mut app = test_app_with_agent();
     open_upsell_qa(
         &mut app,
@@ -200,12 +200,11 @@ fn upsell_non_max_upgrade_url_is_supergrok() {
         .id
         .as_deref()
         .unwrap();
-    assert!(url.contains("supergrok"), "got: {url}");
-    assert!(url.contains("referrer=grok-build"), "got: {url}");
+    assert_eq!(url, UPSELL_URL_UPGRADE);
 }
 
 #[test]
-fn upsell_non_max_payg_url_is_usage() {
+fn upsell_non_max_payg_url_is_chutes_pricing() {
     let mut app = test_app_with_agent();
     open_upsell_qa(
         &mut app,
@@ -215,7 +214,7 @@ fn upsell_non_max_payg_url_is_usage() {
         .id
         .as_deref()
         .unwrap();
-    assert!(url.contains("_s=usage"), "got: {url}");
+    assert_eq!(url, UPSELL_URL_PAYG);
 }
 
 #[test]
@@ -255,10 +254,7 @@ fn upsell_non_max_unified_shows_buy_credits() {
         "Upgrade to a higher tier for more usage"
     );
     assert_eq!(q.options[1].label, "Buy more credits");
-    assert_eq!(
-        q.options[1].description,
-        "Purchase credits to keep using Grok Build"
-    );
+    assert_eq!(q.options[1].description, "Review Chutes usage and credits");
 }
 
 #[test]
@@ -826,13 +822,13 @@ fn free_usage_upsell_shows_two_options_with_exact_labels() {
     assert_eq!(q.question, "You hit your free usage limit.");
     let expected = [
         (
-            "Upgrade to SuperGrok",
-            "For everyday coding and productivity tasks",
+            "Open Chutes",
+            "Review available models, account usage, and credits",
             Some(UPSELL_URL_UPGRADE),
         ),
         (
-            "Upgrade to SuperGrok Heavy",
-            "Get the most out of Grok Build. Highest usage limits.",
+            "Choose another model",
+            "Return to Chutes Build and select a capable model",
             Some(UPSELL_URL_UPGRADE),
         ),
     ];
@@ -932,8 +928,8 @@ fn free_usage_translate_local_submit_maps_options() {
 
 // ── Restricted-command upsell tests ─────────────────────────────────
 
-/// Submitting a tier-restricted command opens the two-option SuperGrok
-/// upsell and neither runs the command nor leaks the text to the model.
+/// Submitting a tier-restricted command opens the Chutes guidance modal and
+/// neither runs the command nor leaks the text to the model.
 #[test]
 fn restricted_command_submit_opens_two_option_upsell() {
     let mut app = test_app_with_agent();
@@ -966,11 +962,14 @@ fn restricted_command_submit_opens_two_option_upsell() {
         )
     ));
     let q = &qv.questions[0];
-    assert_eq!(q.question, "Unlock all features with SuperGrok.");
+    assert_eq!(
+        q.question,
+        "This feature is unavailable for the current Chutes model."
+    );
     assert_eq!(q.options.len(), 2);
-    assert_eq!(q.options[0].label, "Upgrade to SuperGrok");
+    assert_eq!(q.options[0].label, "Open Chutes");
     assert_eq!(q.options[0].id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(q.options[1].label, "Upgrade to SuperGrok Heavy");
+    assert_eq!(q.options[1].label, "Choose another model");
     assert_eq!(q.options[1].id.as_deref(), Some(UPSELL_URL_UPGRADE));
 }
 

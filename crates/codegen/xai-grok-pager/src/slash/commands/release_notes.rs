@@ -3,6 +3,11 @@
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
+const EMBEDDED_CHANGELOG: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../CHANGELOG.md"
+));
+
 /// Show release notes for the current pager version.
 pub struct ReleaseNotesCommand;
 
@@ -24,14 +29,10 @@ impl SlashCommand for ReleaseNotesCommand {
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
-        let changelog = xai_grok_shell::util::changelog::ChangelogManager::new().fetch();
-        match changelog.markdown {
-            Some(content) => CommandResult::Action(Action::ShowReleaseNotes {
-                title: "Release Notes".to_string(),
-                content: content.trim().to_string(),
-            }),
-            None => CommandResult::Error("No release notes available (offline).".to_string()),
-        }
+        CommandResult::Action(Action::ShowReleaseNotes {
+            title: "Release Notes".to_string(),
+            content: EMBEDDED_CHANGELOG.trim().to_string(),
+        })
     }
 }
 
@@ -48,13 +49,15 @@ mod tests {
     }
 
     #[test]
-    fn release_notes_returns_action_or_error() {
+    fn release_notes_are_available_offline() {
         let models = crate::acp::model_state::ModelState::default();
         let mut ctx = super::super::tests::make_ctx(&models);
         let result = ReleaseNotesCommand.run(&mut ctx, "");
-        assert!(
-            matches!(result, CommandResult::Action(_) | CommandResult::Error(_)),
-            "expected Action or Error, got {result:?}"
-        );
+        let CommandResult::Action(Action::ShowReleaseNotes { title, content }) = result else {
+            panic!("expected ShowReleaseNotes action");
+        };
+        assert_eq!(title, "Release Notes");
+        assert!(content.starts_with("# Changelog"));
+        assert!(content.contains(env!("CARGO_PKG_VERSION")));
     }
 }

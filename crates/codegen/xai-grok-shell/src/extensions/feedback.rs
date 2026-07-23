@@ -80,6 +80,9 @@ async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
+    if !chutes_build_core::product::REMOTE_FEEDBACK {
+        return Err(acp::Error::method_not_found());
+    }
     if !agent.cfg.borrow().is_feedback_enabled() {
         return Err(acp::Error::internal_error().data(
             "Feedback is disabled. To enable, set CHUTES_BUILD_FEEDBACK_ENABLED=true or \

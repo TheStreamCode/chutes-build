@@ -10,6 +10,7 @@ use agent_client_protocol as acp;
 use chrono::{DateTime, Utc};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use xai_grok_workspace::util::is_lock_contended;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveSession {
@@ -119,7 +120,7 @@ where
             let _ = lock_file.unlock();
             result.map(Some)
         }
-        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) if is_lock_contended(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }

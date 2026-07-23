@@ -2,8 +2,14 @@
 use super::*;
 fn with_env_var<T>(name: &str, value: &str, f: impl FnOnce() -> T) -> T {
     let previous = std::env::var(name).ok();
+    #[cfg(windows)]
+    let previous_user_profile = (name == "HOME").then(|| std::env::var_os("USERPROFILE"));
     unsafe {
         std::env::set_var(name, value);
+        #[cfg(windows)]
+        if name == "HOME" {
+            std::env::set_var("USERPROFILE", value);
+        }
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
     match previous {
@@ -16,6 +22,17 @@ fn with_env_var<T>(name: &str, value: &str, f: impl FnOnce() -> T) -> T {
             unsafe {
                 std::env::remove_var(name);
             }
+        }
+    }
+    #[cfg(windows)]
+    if let Some(previous) = previous_user_profile {
+        match previous {
+            Some(previous) => unsafe {
+                std::env::set_var("USERPROFILE", previous);
+            },
+            None => unsafe {
+                std::env::remove_var("USERPROFILE");
+            },
         }
     }
     match result {
@@ -2268,11 +2285,14 @@ fn discover_personas_inline_takes_precedence() {
     );
 }
 #[test]
+#[serial_test::serial]
 fn bundled_personas_and_roles_have_lowest_priority_in_resolve_order() {
     let tmp = tempfile::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     let workspace = tmp.path().join("workspace");
     let bundled = home.join(".chutes-build").join("bundled");
+    let _config_home =
+        xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.join(".chutes-build"));
     std::fs::create_dir_all(workspace.join(".chutes-build").join("roles")).unwrap();
     std::fs::create_dir_all(workspace.join(".chutes-build").join("personas")).unwrap();
     std::fs::create_dir_all(home.join(".chutes-build").join("roles")).unwrap();
@@ -2869,7 +2889,8 @@ fn validate_hooks_path_rejects_relative_path() {
 }
 #[test]
 fn validate_hooks_path_rejects_outside_grok_home() {
-    let result = validate_hooks_path("/tmp/evil-hooks");
+    let outside = std::env::temp_dir().join("evil-hooks");
+    let result = validate_hooks_path(outside.to_string_lossy().as_ref());
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -3137,5 +3158,19 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     assert!(
         crate ::agent::folder_trust::project_scope_allowed(cwd),
         "gate must still allow the kill-switched folder after the config read"
+    );
+}
+#[test]
+fn storage_mode_is_local_even_when_writeback_is_requested() {
+    use super::StorageMode;
+
+    assert_eq!(StorageMode::resolve(Some("writeback"), None), StorageMode::Local);
+    let remote = crate::util::config::RemoteSettings {
+        writeback_enabled: Some(true),
+        ..Default::default()
+    };
+    assert_eq!(
+        StorageMode::resolve(None, Some(&remote)),
+        StorageMode::Local
     );
 }

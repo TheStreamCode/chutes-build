@@ -20,8 +20,8 @@ use super::inference_metrics::{InferenceLatencyStats, compute_percentiles};
 
 /// Sample the process resident-set high-water mark in bytes.
 ///
-/// Uses `getrusage(RUSAGE_SELF)` on Unix; returns 0 if sampling fails or on
-/// non-Unix targets. Cheap enough to call once per turn.
+/// Uses `getrusage(RUSAGE_SELF)` on Unix and `GetProcessMemoryInfo` on Windows;
+/// returns 0 if sampling fails. Cheap enough to call once per turn.
 pub(crate) fn sample_rss_bytes() -> u64 {
     #[cfg(unix)]
     {
@@ -46,7 +46,27 @@ pub(crate) fn sample_rss_bytes() -> u64 {
     }
     #[cfg(not(unix))]
     {
-        0
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::System::ProcessStatus::{
+                GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+            };
+            use windows::Win32::System::Threading::GetCurrentProcess;
+
+            let mut counters = PROCESS_MEMORY_COUNTERS {
+                cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                ..Default::default()
+            };
+            if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb).is_ok() {
+                counters.PeakWorkingSetSize as u64
+            } else {
+                0
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            0
+        }
     }
 }
 

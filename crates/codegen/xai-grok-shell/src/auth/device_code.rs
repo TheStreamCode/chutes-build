@@ -153,7 +153,7 @@ pub async fn request_device_code(
             .form(&[
                 ("client_id", client_id),
                 ("scope", scope_str.as_str()),
-                ("referrer", "grok-build"),
+                ("referrer", "chutes-build"),
             ]),
         &url,
     )

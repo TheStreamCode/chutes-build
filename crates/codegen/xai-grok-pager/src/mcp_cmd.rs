@@ -155,14 +155,7 @@ fn run_list(json: bool) -> Result<()> {
     if json {
         let payload: serde_json::Value = servers
             .iter()
-            .map(|(name, (config, scope))| {
-                let mut entry = serde_json::to_value(config).unwrap_or_default();
-                if let Some(obj) = entry.as_object_mut() {
-                    obj.insert("name".into(), serde_json::Value::String(name.clone()));
-                    obj.insert("scope".into(), serde_json::Value::String(scope.to_string()));
-                }
-                entry
-            })
+            .map(|(name, (config, scope))| public_server_summary(name, scope, config))
             .collect();
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else if servers.is_empty() {
@@ -174,10 +167,10 @@ fn run_list(json: bool) -> Result<()> {
                     if args.is_empty() {
                         command.clone()
                     } else {
-                        format!("{} {}", command, args.join(" "))
+                        format!("{command} ({} arguments)", args.len())
                     }
                 }
-                McpServerTransportConfig::StreamableHttp { url, .. } => url.clone(),
+                McpServerTransportConfig::StreamableHttp { url, .. } => redact_url(url),
             };
             let status = if config.enabled { "" } else { " (disabled)" };
             let scope_note = if *scope == "project" {
@@ -189,6 +182,96 @@ fn run_list(json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Produce list output that is safe to paste into bug reports. Environment
+/// values, headers, command arguments, URL credentials, query strings, and
+/// fragments are deliberately omitted.
+fn public_server_summary(name: &str, scope: &str, config: &McpServerConfig) -> serde_json::Value {
+    let mut base = serde_json::json!({
+        "name": name,
+        "scope": scope,
+        "enabled": config.enabled,
+        "startup_timeout_sec": config.startup_timeout_sec,
+        "tool_timeout_sec": config.tool_timeout_sec,
+        "tool_timeouts": config.tool_timeouts,
+        "expose_image_base64": config.expose_image_base64,
+    });
+    let object = base
+        .as_object_mut()
+        .expect("MCP public summary is always a JSON object");
+
+    match &config.transport {
+        McpServerTransportConfig::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => {
+            let mut env_keys = env
+                .as_ref()
+                .map(|values| values.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            env_keys.sort();
+            object.extend([
+                ("transport".into(), serde_json::json!("stdio")),
+                ("command".into(), serde_json::json!(command)),
+                ("args_count".into(), serde_json::json!(args.len())),
+                ("env_keys".into(), serde_json::json!(env_keys)),
+                ("cwd".into(), serde_json::json!(cwd)),
+            ]);
+        }
+        McpServerTransportConfig::StreamableHttp {
+            url,
+            transport_type,
+            bearer_token_env_var,
+            headers,
+            oauth_client_id,
+            oauth_client_secret_env_var,
+            oauth_scopes,
+        } => {
+            let mut header_names = headers
+                .as_ref()
+                .map(|values| values.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            header_names.sort();
+            object.extend([
+                (
+                    "transport".into(),
+                    serde_json::json!(transport_type.as_deref().unwrap_or("http")),
+                ),
+                ("url".into(), serde_json::json!(redact_url(url))),
+                (
+                    "bearer_token_env_var".into(),
+                    serde_json::json!(bearer_token_env_var),
+                ),
+                ("header_names".into(), serde_json::json!(header_names)),
+                ("oauth_client_id".into(), serde_json::json!(oauth_client_id)),
+                (
+                    "oauth_client_secret_env_var".into(),
+                    serde_json::json!(oauth_client_secret_env_var),
+                ),
+                ("oauth_scopes".into(), serde_json::json!(oauth_scopes)),
+            ]);
+        }
+    }
+
+    base
+}
+
+fn redact_url(raw: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(raw) else {
+        return "[invalid URL]".to_string();
+    };
+    if !parsed.username().is_empty() {
+        let _ = parsed.set_username("[redacted]");
+    }
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(Some("[redacted]"));
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
 }
 
 #[derive(Debug)]
@@ -1115,5 +1198,71 @@ mod tests {
             Some((McpScope::Project, project))
         );
         assert_eq!(surviving_definition(false, None), None);
+    }
+
+    #[test]
+    fn public_summary_omits_mcp_secret_values() {
+        let config = McpServerConfig {
+            transport: McpServerTransportConfig::StreamableHttp {
+                url: "https://user:password@example.com/mcp?api_key=query-secret#fragment"
+                    .to_string(),
+                transport_type: Some("sse".to_string()),
+                bearer_token_env_var: Some("MCP_TOKEN".to_string()),
+                headers: Some(HashMap::from([
+                    (
+                        "Authorization".to_string(),
+                        "Bearer header-secret".to_string(),
+                    ),
+                    ("X-Api-Key".to_string(), "api-secret".to_string()),
+                ])),
+                oauth_client_id: Some("public-client".to_string()),
+                oauth_client_secret_env_var: Some("OAUTH_SECRET".to_string()),
+                oauth_scopes: Some(vec!["read".to_string()]),
+            },
+            enabled: true,
+            oauth: None,
+            setup: None,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            tool_timeouts: None,
+            expose_image_base64: None,
+        };
+
+        let output = public_server_summary("remote", "user", &config).to_string();
+        assert!(output.contains("Authorization"));
+        assert!(output.contains("MCP_TOKEN"));
+        assert!(!output.contains("password"));
+        assert!(!output.contains("query-secret"));
+        assert!(!output.contains("header-secret"));
+        assert!(!output.contains("api-secret"));
+        assert!(!output.contains("fragment"));
+    }
+
+    #[test]
+    fn public_summary_omits_stdio_arguments_and_env_values() {
+        let config = McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: "server".to_string(),
+                args: vec!["--token".to_string(), "argument-secret".to_string()],
+                env: Some(HashMap::from([(
+                    "DATABASE_URL".to_string(),
+                    "environment-secret".to_string(),
+                )])),
+                cwd: None,
+            },
+            enabled: true,
+            oauth: None,
+            setup: None,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            tool_timeouts: None,
+            expose_image_base64: None,
+        };
+
+        let output = public_server_summary("stdio", "project", &config).to_string();
+        assert!(output.contains("DATABASE_URL"));
+        assert!(output.contains("\"args_count\":2"));
+        assert!(!output.contains("argument-secret"));
+        assert!(!output.contains("environment-secret"));
     }
 }

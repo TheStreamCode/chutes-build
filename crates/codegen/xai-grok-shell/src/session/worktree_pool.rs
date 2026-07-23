@@ -1857,10 +1857,13 @@ pool_size = 3
         let base = pool_base_directory();
         let instance_dir = base.join("test-instance-uuid");
         assert!(instance_dir.starts_with(&base));
-        assert!(
-            instance_dir
-                .to_string_lossy()
-                .contains("worktree_pool/test-instance-uuid")
+        assert_eq!(
+            base.file_name().and_then(std::ffi::OsStr::to_str),
+            Some("worktree_pool")
+        );
+        assert_eq!(
+            instance_dir.file_name().and_then(std::ffi::OsStr::to_str),
+            Some("test-instance-uuid")
         );
     }
 

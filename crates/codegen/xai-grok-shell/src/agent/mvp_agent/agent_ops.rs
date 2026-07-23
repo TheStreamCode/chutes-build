@@ -488,6 +488,9 @@ impl MvpAgent {
     pub(super) fn build_registry_config(
         &self,
     ) -> Option<crate::session::RegistryConfig> {
+        if !chutes_build_core::product::REMOTE_SESSION_REGISTRY {
+            return None;
+        }
         let remote = self
             .cfg
             .borrow()

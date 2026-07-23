@@ -84,6 +84,9 @@ struct BundleFile<'a> {
 }
 
 pub fn bundled_root() -> PathBuf {
+    if let Some(config_home) = std::env::var_os("CHUTES_BUILD_HOME") {
+        return PathBuf::from(config_home).join(BUNDLED_DIR_NAME);
+    }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".chutes-build")

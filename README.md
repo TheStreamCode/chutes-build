@@ -11,7 +11,7 @@
 One CLI, no compromises: an interactive terminal UI, a full coding agent
 runtime, native Chutes model routing, parallel subagents, multimodal
 generation, web research, browser automation, and local memory — with
-telemetry, remote trace upload, and phone-home update checks off by default.
+telemetry, remote trace upload, and phone-home update checks disabled.
 
 ![Chutes Build terminal UI](assets/chutes/screenshot/chutes-build.png)
 
@@ -24,6 +24,7 @@ telemetry, remote trace upload, and phone-home update checks off by default.
 - [Quick start](#quick-start)
 - [Features](#features)
 - [Configuration](#configuration)
+- [CLI reference](#cli-reference)
 - [Privacy & security](#privacy--security)
 - [Project](#project)
 
@@ -31,7 +32,7 @@ telemetry, remote trace upload, and phone-home update checks off by default.
 
 - 🔒 **Privacy by construction** — telemetry, remote error reporting, automatic
   update checks, remote trace upload, and upstream session sharing are all
-  disabled by default.
+  disabled at the product-policy level.
 - ⚡ **Chutes-native inference** — live model discovery, `Auto (Chutes Router)`
   as the default, and automatic fallback when a model is temporarily
   unavailable.
@@ -111,7 +112,7 @@ chutes-build
 `Auto (Chutes Router)` is the first entry in the model picker and the default
 when no preference has been saved. Select a concrete model with `/model` or
 `chutes-build --model <model-id>`. Inspect the resolved catalog with
-`chutes-build models`.
+`chutes-build models` or machine-readable `chutes-build models --json`.
 
 ## Features
 
@@ -120,6 +121,10 @@ when no preference has been saved. Select a concrete model with `/model` or
 - **Coding agent runtime:** repository inspection, edits, shell commands,
   planning, goals, MCP servers, skills, sessions, worktrees, and permission
   controls inherited from the mature upstream runtime.
+- **Local session lifecycle:** list, search, resume, fork, export, trace, and
+  delete sessions without a remote registry. Machine-readable list/search
+  output is available with `--json`; destructive commands require confirmation
+  unless `--yes` is supplied.
 - **Advisor:** a read-only, on-demand reasoning agent that reviews plans,
   difficult decisions, blockers, and completion claims without taking over the
   executor loop. Reasons at maximum effort by default. `/advisor on|off`
@@ -165,14 +170,17 @@ when no preference has been saved. Select a concrete model with `/model` or
   treating directly relevant official pages as primary authority.
 - **Research and browser tools:** native web search (DuckDuckGo by default,
   optionally Brave) plus agentic Chrome/Edge control through a local DevTools
-  connection and an isolated temporary browser profile.
+  connection and an isolated temporary browser profile. Browser actions accept
+  either CSS selectors or the numeric element indices shown by snapshots.
 
 ### Memory & voice
 
 - **Local memory:** Chutes Build maintains a secret-filtered `memories.md` file
   and can be launched with `--no-memory` when a stateless session is preferred.
   Recall is hybrid by default — full-text search combined with semantic vector
-  search against a built-in Chutes-hosted embedding model.
+  search against a built-in Chutes-hosted embedding model. Semantic recall
+  sends the selected memory chunks to that Chutes embedding endpoint; use
+  `--no-memory` when this is not appropriate.
 - **Voice input:** hold-to-record dictation transcribes speech into the prompt
   box. Enabled by default; activation is always manual (mic icon, `/voice`, or
   Ctrl+Space) — Chutes Build never records without an explicit press.
@@ -182,10 +190,22 @@ when no preference has been saved. Select a concrete model with `/model` or
 ### Privacy by construction
 
 Telemetry, remote error reporting, automatic update checks, remote trace
-upload, and upstream session sharing are disabled. See
+upload, upstream session sharing, and remote workspace exposure are disabled.
+Updates are installed manually from npm or a release artifact. See
 [Privacy & security](#privacy--security) below for the full data boundary.
 
 ## Configuration
+
+### State root
+
+User state defaults to `~/.chutes-build`. Set `CHUTES_BUILD_HOME` to relocate
+the complete state tree, including configuration, credentials, sessions, logs,
+trace exports, plugins, user roles/personas, and the managed bundled-agent
+cache. Chutes Build does not combine roles or bundle data from the default home
+with a custom state root.
+
+Project-scoped `.chutes-build` directories remain inside their repositories and
+continue to take precedence over user and bundled agent definitions.
 
 ### Model selection, reasoning, and routing
 
@@ -216,6 +236,12 @@ Fallback happens only for transient availability/capability responses and only
 before response streaming begins. Chutes Build does not redirect requests or
 credentials to a non-Chutes inference endpoint.
 
+Ambient Chutes credentials are attached only to official Chutes/router
+endpoints. Custom inference models must declare their own `api_key` or
+`env_key`; a custom model-catalog endpoint uses the dedicated
+`CHUTES_MODELS_API_KEY`. Neither receives `CHUTES_API_KEY` or a cached Chutes
+session token implicitly.
+
 The inference client shares pooled HTTP connections, enables TCP no-delay, and
 forwards parsed SSE events without an application-level streaming buffer. Cold
 starts and model-side generation can still dominate latency. Auto is the
@@ -238,15 +264,10 @@ documented per-chute quota endpoints.
 ### OAuth login (Sign in with Chutes)
 
 Pressing `l` at the welcome screen (or `/login`) runs a standard OAuth 2.0 +
-PKCE flow against Chutes' own identity provider, using a built-in client ID.
-Chutes' OIDC discovery document currently exposes no dynamic client
-registration endpoint and its token endpoint accepts `client_secret_post` /
-`client_secret_basic` alongside `none`, so whether the flow needs a secret
-depends on how the specific OAuth app was registered.
-
-If login fails with `invalid_client`, register your own app under
-[Chutes' developer settings](https://chutes.ai/app/api) and point Chutes
-Build at it instead:
+PKCE flow against Chutes' own identity provider. The built-in app is a public
+client and does not bundle or require a client secret. Custom confidential
+clients can be configured under
+[Chutes' developer settings](https://chutes.ai/app/api):
 
 ```powershell
 $env:CHUTES_BUILD_OAUTH2_CLIENT_ID = "cid_..."
@@ -254,10 +275,10 @@ $env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."   # only if your app has one
 chutes-build
 ```
 
-Both variables are read once at startup and are never written to
-`config.toml` or any other file on disk. `k` / `/apikey` (pasting a Chutes
-API key directly) needs no app registration at all and always works as a
-fallback.
+Both variables are read from the environment and are never written to
+`config.toml` or any other file on disk. The custom secret is included in both
+the initial token exchange and refresh requests. `k` / `/apikey` (pasting a
+Chutes API key directly) needs no app registration.
 
 ### Optional web and browser configuration
 
@@ -291,14 +312,24 @@ limited to 512 MiB by default (`CHUTES_MAX_MEDIA_BYTES`, hard ceiling 2 GiB),
 while workspace inputs are limited to 64 MiB by default
 (`CHUTES_MAX_INPUT_ASSET_BYTES`, hard ceiling 512 MiB).
 
+## CLI reference
+
+The complete command and option reference is in
+[docs/cli-reference.md](docs/cli-reference.md). Interactive slash commands are
+documented in [docs/slash-commands.md](docs/slash-commands.md). Installed
+binaries remain authoritative for the exact version: use
+`chutes-build --help` and `chutes-build <command> --help`.
+
 ## Privacy & security
 
 ### Local data
 
 User-level state defaults to `~/.chutes-build` or the directory set in
 `CHUTES_BUILD_HOME`. Project memory is stored in `memories.md`. Configuration,
-sessions, logs, exports, and credentials remain local unless a tool action
-explicitly calls an external service.
+sessions, logs, exports, credentials, plugins, user roles/personas, and bundled
+agent definitions remain local. Prompts, selected repository content, memory
+embeddings, voice recordings, OCR/media inputs, and browser traffic leave the
+machine only when their corresponding hosted feature is invoked.
 
 See [PRIVACY.md](PRIVACY.md) for the exact network and data boundaries.
 

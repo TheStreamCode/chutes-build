@@ -13,8 +13,8 @@
 //! ```
 //!
 //! The cgroup-dependent tests (1–5) are `#[ignore]`d by default so they don't
-//! run in CI where cgroup delegation is typically unavailable.  Test 6 (no-config)
-//! always runs.
+//! run in CI where cgroup delegation is typically unavailable. Test 6
+//! (no-config) always runs on Linux.
 //!
 //! The tests exercise:
 //! 1. A command that stays under the memory limit → exits normally (exit 0)
@@ -22,6 +22,8 @@
 //! 3. The session (backend) survives an OOM and can run another command after
 //! 4. Background tasks are also killed on OOM
 //! 5. A gradual allocator that slowly ramps up past the limit
+
+#![cfg(target_os = "linux")]
 
 use std::collections::HashMap;
 use std::path::PathBuf;

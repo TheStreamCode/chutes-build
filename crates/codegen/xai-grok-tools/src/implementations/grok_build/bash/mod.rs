@@ -2933,7 +2933,10 @@ mod tests {
         // Fast-exiting command that emits its full output in one burst —
         // exercises the "drained after the last periodic chunk" path that the
         // bug missed. ASCII so lossy UTF-8 conversion is exact.
+        #[cfg(unix)]
         let cmd = "printf 'tail-bytes-after-final-tick\\n'";
+        #[cfg(windows)]
+        let cmd = "Write-Output 'tail-bytes-after-final-tick'";
         let mut stream = xai_tool_runtime::Tool::execute(
             &tool,
             test_ctx(resources.into_shared()),

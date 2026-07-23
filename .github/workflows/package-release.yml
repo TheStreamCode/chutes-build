@@ -202,7 +202,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           for archive in "${archives[@]}"; do
             base="$(basename "$archive" .tgz)"
-            pkg="${base%-$version}"
+            pkg="${base%-"$version"}"
             # Idempotent: a prior run of this job may have already published
             # some packages before failing on a later one (e.g. npm's
             # burst-publish spam heuristic). Re-publishing the same

@@ -8,7 +8,11 @@ Common environment variables:
 
 | Variable | Purpose |
 | --- | --- |
+| `CHUTES_BUILD_HOME` | complete user state root (default: `~/.chutes-build`) |
 | `CHUTES_API_KEY` | Chutes API credential |
+| `CHUTES_MODELS_API_KEY` | dedicated credential for a custom model-catalog endpoint |
+| `CHUTES_BUILD_OAUTH2_CLIENT_ID` | optional custom OAuth client ID |
+| `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` | optional custom confidential-client secret |
 | `CHUTES_ROUTER_BASE_URL` | compatible Chutes router override |
 | `CHUTES_FALLBACK_MODELS` | ordered comma-separated fallback models |
 | `CHUTES_STRICT_MODEL=1` | disable automatic fallback |
@@ -23,6 +27,15 @@ Common environment variables:
 The CLI supports local TOML configuration inherited from the agent runtime.
 Do not enable unknown upstream cloud, telemetry, relay, or upload settings:
 those paths are intentionally disabled in Chutes Build.
+
+Sessions, traces, memory, and workspace state remain local. Remote session
+write-back, session sharing, workspace exposure, trace upload, telemetry, and
+automatic update checks cannot be enabled through configuration. Install
+updates manually through npm or a release artifact.
+
+`CHUTES_BUILD_HOME` also controls plugins, user roles/personas, and managed
+bundled-agent definitions. Project-scoped `.chutes-build` directories stay in
+their repositories and keep their higher precedence.
 
 Use `/model` to select Auto or a concrete model and `/effort` to change the
 reasoning mode when the current model supports it. Model-specific capability

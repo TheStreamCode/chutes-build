@@ -654,6 +654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     #[serial_test::serial]
     fn revoke_on_unrecordable_home_root_records_no_deny() {
         let _sim = simulate_release_build();
@@ -689,6 +690,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     #[serial_test::serial]
     fn envrc_gate_drops_untrusted_then_loads_when_store_trusted() {
         let _sim = simulate_release_build();
@@ -1506,6 +1508,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "windows"))]
     #[serial_test::serial]
     fn local_build_is_inert_launch_trust_auto_trusts() {
         // On a local/dev build the whole folder-trust system is inert: an

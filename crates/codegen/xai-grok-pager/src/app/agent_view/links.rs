@@ -1093,7 +1093,7 @@ mod link_click_tests {
     /// (Ctrl on Linux/Windows; macOS polls CoreGraphics so the Down step isn't
     /// reproducible in a unit test).
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     fn modifier_click_on_file_link_opens_via_our_handler() {
         let mut agent = make_agent();
         let area = Rect::new(0, 0, 80, 24);

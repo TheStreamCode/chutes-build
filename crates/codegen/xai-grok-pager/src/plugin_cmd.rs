@@ -108,9 +108,9 @@ pub enum PluginCommand {
     Uninstall {
         /// Plugin name (as shown by `chutes-build plugin list`).
         name: String,
-        /// Skip confirmation for multi-plugin repos.
-        #[arg(long)]
-        confirm: bool,
+        /// Uninstall without an interactive confirmation.
+        #[arg(long = "yes", short = 'y', alias = "confirm")]
+        yes: bool,
         /// Preserve the plugin's persistent data directory.
         #[arg(long)]
         keep_data: bool,
@@ -183,6 +183,9 @@ pub enum MarketplaceCommand {
     Remove {
         /// Git URL or local path of the source to remove.
         url: String,
+        /// Remove the source and its plugins without an interactive confirmation.
+        #[arg(long = "yes", short = 'y')]
+        yes: bool,
     },
     /// Refresh marketplace source(s) and sync git caches
     Update {
@@ -241,9 +244,9 @@ pub async fn run(args: PluginArgs) -> Result<()> {
         PluginCommand::Install { source, trust } => cmd_install(&source, trust),
         PluginCommand::Uninstall {
             name,
-            confirm,
+            yes,
             keep_data,
-        } => cmd_uninstall(&name, confirm, keep_data),
+        } => cmd_uninstall(&name, yes, keep_data),
         PluginCommand::Update { name } => cmd_update(name.as_deref()),
         PluginCommand::Enable { name } => cmd_enable(&name),
         PluginCommand::Disable { name } => cmd_disable(&name),
@@ -524,8 +527,23 @@ fn cmd_install_marketplace(
     }
 }
 
-fn cmd_uninstall(name: &str, confirm: bool, keep_data: bool) -> Result<()> {
-    match plugin::uninstall_plugin(name, confirm, keep_data) {
+fn cmd_uninstall(name: &str, yes: bool, keep_data: bool) -> Result<()> {
+    if !yes {
+        let registry = InstallRegistry::load();
+        if let Some((_, repo, _)) = registry.find_plugin(name) {
+            let plugins = repo.plugins.keys().cloned().collect::<Vec<_>>();
+            confirm_or_bail(
+                &format!(
+                    "Permanently uninstall {} plugin(s) from this installation: {}? [y/N] ",
+                    plugins.len(),
+                    plugins.join(", ")
+                ),
+                "--yes",
+            )?;
+        }
+    }
+
+    match plugin::uninstall_plugin(name, true, keep_data) {
         Ok(outcome) => {
             xai_grok_telemetry::session_ctx::log_event(
                 xai_grok_telemetry::events::PluginUninstalled {
@@ -550,7 +568,7 @@ fn cmd_uninstall(name: &str, confirm: bool, keep_data: bool) -> Result<()> {
             "Plugin \"{name}\" belongs to repo \"{repo_key}\" which also contains:\n\
              {}\n\n\
              Uninstalling will remove all {total} plugin(s). To proceed:\n\
-               chutes-build plugin uninstall {name} --confirm",
+               chutes-build plugin uninstall {name} --yes",
             other_plugins
                 .iter()
                 .map(|p| format!("  - {p}"))
@@ -558,6 +576,24 @@ fn cmd_uninstall(name: &str, confirm: bool, keep_data: bool) -> Result<()> {
                 .join("\n"),
         ),
         Err(e @ UninstallError::NotFound { .. }) => bail!("{e}"),
+        Err(e) => bail!("{e}"),
+    }
+}
+
+fn confirm_or_bail(prompt: &str, bypass_flag: &str) -> Result<()> {
+    use std::io::{IsTerminal as _, Write as _};
+
+    if !std::io::stdin().is_terminal() {
+        bail!("refusing destructive operation on non-interactive stdin; pass {bypass_flag}");
+    }
+    print!("{prompt}");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    if matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        bail!("operation cancelled")
     }
 }
 
@@ -795,7 +831,7 @@ async fn run_marketplace(cmd: MarketplaceCommand) -> Result<()> {
     match cmd {
         MarketplaceCommand::List { json } => marketplace_list(&sources, json),
         MarketplaceCommand::Add { url } => marketplace_add(&sources, &url),
-        MarketplaceCommand::Remove { url } => marketplace_remove(&sources, &url),
+        MarketplaceCommand::Remove { url, yes } => marketplace_remove(&sources, &url, yes),
         MarketplaceCommand::Update { name } => marketplace_update(&sources, name.as_deref()),
     }
 }
@@ -940,6 +976,7 @@ fn marketplace_add(
 fn marketplace_remove(
     sources: &[xai_grok_plugin_marketplace::MarketplaceSource],
     url: &str,
+    yes: bool,
 ) -> Result<()> {
     let url = url.trim();
     if url.is_empty() {
@@ -971,35 +1008,60 @@ fn marketplace_remove(
 
     let identity = source_identity(source);
 
-    let uninstalled = plugin::uninstall_marketplace_source_plugins(&identity);
+    if !yes {
+        confirm_or_bail(
+            &format!(
+                "Remove marketplace source \"{}\" and uninstall all plugins installed from it? [y/N] ",
+                source.name
+            ),
+            "--yes",
+        )?;
+    }
 
     let config_path = xai_grok_config::grok_home().join("config.toml");
     let mut removed_from_config = false;
-    if let Ok(content) = std::fs::read_to_string(&config_path)
-        && let Some(new) = plugin::remove_toml_marketplace_block(&content, &identity)
-    {
-        if let Err(e) = std::fs::write(&config_path, new) {
-            tracing::warn!("failed to write config.toml: {e}");
-        } else {
-            removed_from_config = true;
+    match std::fs::read_to_string(&config_path) {
+        Ok(content) => {
+            if let Some(new) = plugin::remove_toml_marketplace_block(&content, &identity) {
+                xai_grok_shell::util::config::atomic_write_string(&config_path, &new)
+                    .map_err(|e| anyhow::anyhow!("Failed to update config.toml: {e}"))?;
+                removed_from_config = true;
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            bail!("Failed to read {}: {e}", config_path.display());
         }
     }
 
     // Fallback: settings.json / known_marketplaces.json.
-    if !removed_from_config && !plugin::try_remove_source_from_json_files(&identity) {
-        eprintln!(
-            "Warning: source was found but could not be removed from config files.\n\
-             It may be defined in a managed or read-only settings file."
+    if !removed_from_config {
+        if plugin::try_remove_source_from_json_files(&identity) {
+            removed_from_config = true;
+        } else {
+            bail!(
+                "Marketplace source was found at runtime but could not be removed from config files; \
+                 it may be defined in a managed or read-only settings file"
+            );
+        }
+    }
+
+    debug_assert!(removed_from_config);
+    let uninstall = plugin::uninstall_marketplace_source_plugins(&identity);
+    if !uninstall.failures.is_empty() {
+        bail!(
+            "Marketplace source was removed, but plugin cleanup failed: {}",
+            uninstall.failures.join("; ")
         );
     }
 
-    if uninstalled.is_empty() {
+    if uninstall.removed_repos.is_empty() {
         println!("Removed marketplace source: {url}");
     } else {
         println!(
             "Removed marketplace source and uninstalled {} plugin(s): {}",
-            uninstalled.len(),
-            uninstalled.join(", "),
+            uninstall.removed_repos.len(),
+            uninstall.removed_repos.join(", "),
         );
     }
     Ok(())

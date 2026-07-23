@@ -108,11 +108,12 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         app.show_resolved_model = v;
     }
     if let Some(v) = update.sharing_enabled {
-        app.sharing_enabled = v;
+        let enabled = chutes_build_core::product::REMOTE_SESSION_SHARING && v;
+        app.sharing_enabled = enabled;
         // Propagate to existing agents so slash-command registries stay
         // in sync (same fan-out pattern used when creating new agents).
         for agent in app.agents.values_mut() {
-            agent.set_sharing_enabled(v);
+            agent.set_sharing_enabled(enabled);
         }
     }
     // Tier before voice: same payload may set "API Key" and voice_mode_enabled=false.

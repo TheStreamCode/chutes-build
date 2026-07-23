@@ -56,6 +56,23 @@ fn is_trusted_host(host: &str) -> bool {
         .any(|trusted| host == *trusted || host.ends_with(&format!(".{trusted}")))
 }
 
+/// Return whether `url` is an official HTTPS Chutes endpoint that may receive
+/// the ambient `CHUTES_API_KEY` or a Chutes session token.
+///
+/// Unlike [`validate_endpoint_url`], this never honors the local-development
+/// escape hatch. Credentials for custom endpoints must be supplied explicitly
+/// on that model instead of inheriting a Chutes credential.
+pub fn is_official_credential_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    parsed.scheme() == "https"
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.port_or_known_default() == Some(443)
+        && parsed.host_str().is_some_and(is_trusted_host)
+}
+
 /// Validate that `url` is safe to use as a Chutes endpoint base.
 ///
 /// Fails closed: parse errors, embedded userinfo, non-HTTPS schemes,
@@ -229,6 +246,20 @@ mod tests {
                 Err(EndpointTrustError::UntrustedHost)
             );
         });
+    }
+
+    #[test]
+    fn ambient_credentials_are_scoped_to_official_https_urls() {
+        assert!(is_official_credential_url("https://llm.chutes.ai/v1"));
+        assert!(is_official_credential_url(
+            "https://model-router-ten.vercel.app/v1"
+        ));
+        assert!(!is_official_credential_url("https://chutes.ai.evil.test"));
+        assert!(!is_official_credential_url("http://llm.chutes.ai/v1"));
+        assert!(!is_official_credential_url("https://llm.chutes.ai:8443/v1"));
+        assert!(!is_official_credential_url(
+            "https://user:pass@llm.chutes.ai/v1"
+        ));
     }
 
     #[test]

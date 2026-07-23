@@ -149,7 +149,7 @@ impl LeaderServerControlState {
             control_v1: true,
             runtime_cpu_profile: manager.runtime_cpu_profile(),
             profile_formats: manager.profile_formats().to_vec(),
-            workspace_exposure: true,
+            workspace_exposure: chutes_build_core::product::REMOTE_WORKSPACE_EXPOSURE,
             relaunch_v1: true,
         }
     }
@@ -1581,8 +1581,10 @@ pub async fn run_leader_server(
             session_driver.insert(sid.clone(), next); debug!(session_id = % sid,
             old_driver = id.0, new_driver = next.0,
             "Transferred session driver after disconnect"); } else { session_driver
-            .remove(& sid); } } } if last_active_client == Some(id) { last_active_client
-            = None; } if ! detached_sessions.is_empty() { let evict_notification =
+            .remove(& sid); } } }
+            if last_active_client == Some(id) { last_active_client
+            = None; }
+            if ! detached_sessions.is_empty() { let evict_notification =
             serde_json::json!({ "jsonrpc" : "2.0", "method" :
             "chutes.build/internal/evict_sessions", "params" : { "sessionIds" : detached_sessions
             } }); let _ = acp_tx.send(evict_notification.to_string()); info!(client_id =
@@ -1598,7 +1600,12 @@ pub async fn run_leader_server(
             agent_activity = agent_activity.clone(); let relaunching = relaunching
             .clone(); tokio::spawn(async move { let result = match command {
             ControlCommand::StopCpuProfile => { handle_stop_cpu_profile(control_state).
-            await } ControlCommand::WorkspaceStart { hub_url, cwd } => {
+            await } ControlCommand::WorkspaceStart { .. } |
+            ControlCommand::WorkspacePause | ControlCommand::WorkspaceResume |
+            ControlCommand::WorkspaceStop | ControlCommand::WorkspaceStatus if !
+            chutes_build_core::product::REMOTE_WORKSPACE_EXPOSURE => {
+            Err(workspace_err("remote workspace exposure is not available in Chutes Build"))
+            } ControlCommand::WorkspaceStart { hub_url, cwd } => {
             handle_workspace_start(control_state, hub_url, cwd, cancel.clone(),). await }
             ControlCommand::WorkspacePause => { handle_workspace_pause(control_state).
             await } ControlCommand::WorkspaceResume => {
@@ -1611,7 +1618,8 @@ pub async fn run_leader_server(
             = matches!(result, Ok(ControlPayload::Relaunching { .. })); if let Err(e) =
             client_tx.send(ServerMessage::ControlResult { request_id, result } .into()).
             await { warn!(client_id = id.0, error = % e,
-            "Failed to send control response to client"); } if arm_relaunch {
+            "Failed to send control response to client"); }
+            if arm_relaunch {
             spawn_relaunch_drain(shutdown_tx, cancel, agent_busy, agent_activity,); } });
             } } ServerEvent::Message(id, ClientMessage::Acp { payload }) => { let mut
             json : Option < serde_json::Value > = serde_json::from_str(& payload).ok();
@@ -1621,23 +1629,29 @@ pub async fn run_leader_server(
             .try_send(ClientOutbound::Acp(error_payload.into())); } trace!(client_id = id
             .0, "Returned leader_starting error (not yet ready)"); } else {
             trace!(client_id = id.0,
-            "Dropped pre-ready notification (leader not yet ready)"); } continue; } if
+            "Dropped pre-ready notification (leader not yet ready)"); } continue; }
+            if
             let Some(client) = clients.get(& id) && client.mode == ClientMode::Stdio {
-            last_active_client = Some(id); } if let Some(session_id) = json.as_ref()
+            last_active_client = Some(id); }
+            if let Some(session_id) = json.as_ref()
             .and_then(extract_session_id) { session_subscribers.entry(session_id.clone())
             .or_default().insert(id); session_driver.entry(session_id.clone())
             .or_insert(id); backfill_child_routes(& session_id, id, & child_sessions, &
-            mut session_subscribers, & mut session_driver,); } if let (Some(json),
+            mut session_subscribers, & mut session_driver,); }
+            if let (Some(json),
             Some(client)) = (json.as_ref(), clients.get_mut(& id)) { if let
             Some(yolo_mode) = extract_yolo_mode_change(json) { client.capabilities
             .yolo_mode = yolo_mode; debug!(client_id = id.0, yolo_mode,
-            "Updated client yolo_mode from notification"); } if let Some(auto_mode) =
+            "Updated client yolo_mode from notification"); }
+            if let Some(auto_mode) =
             extract_auto_mode_change(json) { client.capabilities.auto_mode = auto_mode;
             debug!(client_id = id.0, auto_mode,
-            "Updated client auto_mode from notification"); } if let Some(new_model) =
+            "Updated client auto_mode from notification"); }
+            if let Some(new_model) =
             extract_model_id_from_set_model(json) { debug!(client_id = id.0, model = %
             new_model, "Updated client default_model from session/setModel"); client
-            .capabilities.default_model = Some(new_model); } } if let (Some(json),
+            .capabilities.default_model = Some(new_model); } }
+            if let (Some(json),
             Some(client)) = (json.as_mut(), clients.get_mut(& id)) { if ! client
             .initialize_seen { let (injected, was_initialize) =
             inject_client_identity_into_initialize(json, & client.client_type);
@@ -1652,7 +1666,8 @@ pub async fn run_leader_server(
             is_session_load_request(json) && let Some(load_sid) =
             extract_session_id(json) && let Some((ns_id, _)) = rewritten.as_ref() {
             pending_load_by_req.insert(ns_id.clone(), (id, load_sid.clone()));
-            load_live_buffer.entry((id, load_sid)).or_default(); } if rewritten.is_some()
+            load_live_buffer.entry((id, load_sid)).or_default(); }
+            if rewritten.is_some()
             { pending_requests += 1; agent_busy.store(true, Ordering::Relaxed); } let
             outbound = select_outbound_payload(json.as_ref(), payload_mutated, payload);
             let _ = acp_tx.send(outbound); } ServerEvent::Message(_, _) => {} } }
@@ -1661,13 +1676,15 @@ pub async fn run_leader_server(
             parsed_response = json.as_mut().and_then(parse_response_id); if
             parsed_response.is_some() { pending_requests = pending_requests
             .saturating_sub(1); agent_busy.store(pending_requests > 0,
-            Ordering::Relaxed); } if let Some((orphan_client, ref orphan_req_id)) =
+            Ordering::Relaxed); }
+            if let Some((orphan_client, ref orphan_req_id)) =
             parsed_response && ! clients.contains_key(& orphan_client) { warn!(client_id
             = orphan_client.0, request_id = orphan_req_id.as_str(),
             "Dropping RPC response: requesting client disconnected (response orphaned)");
             xai_grok_telemetry::unified_log::warn("leader.response.orphaned", None,
             Some(serde_json::json!({ "client_id" : orphan_client.0, "request_id" :
-            orphan_req_id, })),); } if let Some((client_id, ref raw_response_id)) =
+            orphan_req_id, })),); }
+            if let Some((client_id, ref raw_response_id)) =
             parsed_response && let Some(client) = clients.get_mut(& client_id) && let
             Some(json) = json.as_mut() { if let Some(session_id) =
             extract_session_id_from_result(json) { session_subscribers.entry(session_id
@@ -1675,7 +1692,8 @@ pub async fn run_leader_server(
             .clone()).or_insert(client_id); backfill_child_routes(& session_id,
             client_id, & child_sessions, & mut session_subscribers, & mut
             session_driver,); trace!(client_id = client_id.0, session_id,
-            "Subscribed client to session from response"); } if client
+            "Subscribed client to session from response"); }
+            if client
             .patch_initialize_model { client.patch_initialize_model = false;
             patch_initialize_response_model(json, & client.capabilities.default_model); }
             let restored_payload : Arc < str > = json.to_string().into(); match client.tx
@@ -1689,33 +1707,39 @@ pub async fn run_leader_server(
             e, "Failed to send response to client (channel closed)");
             xai_grok_telemetry::unified_log::warn("leader.response.send_failed", None,
             Some(serde_json::json!({ "client_id" : client_id.0, "reason" :
-            "channel_closed", })),); } } if let Some((buf_client, buf_sid)) =
+            "channel_closed", })),); } }
+            if let Some((buf_client, buf_sid)) =
             pending_load_by_req.remove(raw_response_id) { let replay_cutoff : Option <
             u64 > = load_replay_max_seq.remove(& (buf_client, buf_sid.clone())); if let
             Some(buffered) = load_live_buffer.remove(& (buf_client, buf_sid.clone())) &&
             let Some(target) = clients.get(& buf_client) { let mut count = 0usize; let
             mut deduped = 0usize; for (buffered_payload, buffered_seq) in buffered { if
             let Some(cutoff) = replay_cutoff && buffered_seq.is_some_and(| s | s <=
-            cutoff) { deduped += 1; continue; } if let Err(e) = target.tx
+            cutoff) { deduped += 1; continue; }
+            if let Err(e) = target.tx
             .try_send(ClientOutbound::Acp(buffered_payload)) { warn!(client_id =
             buf_client.0, error = % e,
             "Failed to flush buffered live notification after load (channel closed)");
-            break; } count += 1; } if count > 0 || deduped > 0 { trace!(client_id =
+            break; } count += 1; }
+            if count > 0 || deduped > 0 { trace!(client_id =
             buf_client.0, count, deduped,
             "Flushed buffered live notifications after load (replay-overlap dropped)"); }
-            } if let Some(cached) = interaction_requests.get(buf_sid.as_str()) && let
+            }
+            if let Some(cached) = interaction_requests.get(buf_sid.as_str()) && let
             Some(target) = clients.get(& buf_client) { let count = cached.len(); for req
             in cached.values() { if let Err(e) = target.tx
             .try_send(ClientOutbound::Acp(req.clone())) { warn!(client_id = buf_client.0,
             error = % e,
             "Failed to replay interaction request after load (channel closed)"); break; }
-            } if count > 0 { trace!(client_id = buf_client.0, count, session_id = buf_sid
+            }
+            if count > 0 { trace!(client_id = buf_client.0, count, session_id = buf_sid
             .as_str(), "Replayed pending interaction modals to newly-attached client"); }
             } } continue; } let payload : Arc < str > = payload.into(); let json = json;
             if json.as_ref().is_some_and(is_machine_wide_broadcast_notification) { for
             client in clients.values() { let _ = client.tx
             .try_send(ClientOutbound::Acp(payload.clone())); }
-            trace!("Broadcast machine-wide notification to all clients"); continue; } if
+            trace!("Broadcast machine-wide notification to all clients"); continue; }
+            if
             let Some(target) = json.as_ref().and_then(extract_target_client_id) { if let
             Some(client) = clients.get(& target) { match json.as_ref()
             .and_then(extract_child_session_event) {
@@ -1743,7 +1767,8 @@ pub async fn run_leader_server(
             .as_ref().and_then(extract_child_session_event) && session_subscribers.get(&
             child_sid).is_none_or(| subs | subs.is_empty()) { prune_child_route(&
             child_sid, & mut session_subscribers, & mut session_driver, & mut
-            child_sessions,); } if orphan_replay_warned.insert(target) { warn!(client_id
+            child_sessions,); }
+            if orphan_replay_warned.insert(target) { warn!(client_id
             = target.0,
             "Dropping targeted replay notification: loading client disconnected mid-replay (rest of burst logged at trace)");
             } else { trace!(client_id = target.0,
@@ -1760,7 +1785,8 @@ pub async fn run_leader_server(
             is_reverse_request && json.as_ref().is_some_and(is_interaction_request); if
             is_interaction && let Some(ref sid) = session_id && let Some(tcid) = json
             .as_ref().and_then(extract_interaction_tool_call_id) { interaction_requests
-            .entry(sid.clone()).or_default().insert(tcid, payload.clone()); } if let
+            .entry(sid.clone()).or_default().insert(tcid, payload.clone()); }
+            if let
             Some(ref sid) = session_id && session_subscribers.contains_key(sid.as_str())
             { let child_event = json.as_ref().and_then(extract_child_session_event); let
             event_seq = json.as_ref().and_then(event_seq_of); if (is_reverse_request && !
@@ -1783,7 +1809,8 @@ pub async fn run_leader_server(
             "Buffered live notification during in-flight load"); continue; }
             warn!(client_id = cid.0, session_id = sid.as_str(),
             "Live buffer for in-flight load exceeded cap; forwarding live (ordering not guaranteed)");
-            } if let Some(client) = clients.get(& cid) { if let Err(e) = client.tx
+            }
+            if let Some(client) = clients.get(& cid) { if let Err(e) = client.tx
             .try_send(ClientOutbound::Acp(payload.clone())) { warn!(client_id = cid.0,
             session_id = sid.as_str(), error = % e,
             "Failed to broadcast notification to subscriber (channel closed)"); } else {
@@ -2099,6 +2126,14 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn leader_does_not_advertise_remote_workspace_exposure() {
+        let temp = TempDir::new().unwrap();
+        let state = default_test_control_state(&temp.path().join("leader.sock"));
+        assert!(!state.leader_capabilities().workspace_exposure);
+    }
+
     /// Parse a raw payload for the parse-once helper APIs. Panics on invalid
     /// JSON — the routing loop parses once up front, and non-JSON payloads
     /// never reach the helpers (they forward/drop verbatim).
