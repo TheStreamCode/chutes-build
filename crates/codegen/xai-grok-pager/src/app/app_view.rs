@@ -6667,6 +6667,10 @@ pub(crate) mod tests {
     #[test]
     fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
         let mut app = test_app();
+        // `test_app()`'s default cwd ("/tmp") doesn't exist on Windows;
+        // this test canonicalizes it, so it needs a cwd that's real on
+        // every platform.
+        app.cwd = std::env::temp_dir();
         app.foreign_session_compat =
             xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
                 cursor: true,

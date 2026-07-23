@@ -18,6 +18,10 @@ fn foreign_resume_hint(
 #[test]
 fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     let mut launch = test_app();
+    // `test_app()`'s default cwd ("/tmp") doesn't exist on Windows; this
+    // test canonicalizes it, so it needs a cwd that's real on every
+    // platform.
+    launch.cwd = std::env::temp_dir();
     launch.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             cursor: true,
@@ -67,6 +71,7 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     );
 
     let mut stale = test_app();
+    stale.cwd = std::env::temp_dir();
     stale.foreign_session_compat = launch.foreign_session_compat;
     let Effect::CanonicalizeForeignResumeCwd {
         requested_cwd,
@@ -103,6 +108,10 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
 #[test]
 fn foreign_resume_result_rejects_startup_conflict_before_completion() {
     let mut app = test_app();
+    // `test_app()`'s default cwd ("/tmp") doesn't exist on Windows; this
+    // test canonicalizes it, so it needs a cwd that's real on every
+    // platform.
+    app.cwd = std::env::temp_dir();
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             cursor: true,

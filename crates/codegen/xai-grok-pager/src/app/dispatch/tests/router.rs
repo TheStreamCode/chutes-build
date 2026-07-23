@@ -17,6 +17,10 @@ fn seed_foreign_resume_hint(
     app: &mut AppView,
     tool: xai_grok_workspace::foreign_sessions::ForeignSessionTool,
 ) {
+    // `test_app()`'s default cwd ("/tmp") doesn't exist on Windows; this
+    // helper canonicalizes it, so it needs a cwd that's real on every
+    // platform.
+    app.cwd = std::env::temp_dir();
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
