@@ -238,9 +238,18 @@ pub(crate) async fn spawn_session_actor(
             WebFetchConfig::Enabled { params } => params.allowed_domains(),
             WebFetchConfig::Disabled => vec![],
         };
+        // Untrusted clones must not have their `.claude/settings.json` /
+        // `.chutes-build/config.toml` [permission] rules (incl. bypassPermissions)
+        // auto-applied -- same folder-trust verdict used for hooks below.
+        let project_trusted = crate::agent::folder_trust::resolve_and_record(
+            tool_context.cwd.as_path(),
+            remote_settings.as_ref(),
+            false,
+        );
         let mut permission_config =
             xai_grok_workspace::permission::resolution::resolve_permission_config_with_fallback(
                 tool_context.cwd.as_path(),
+                project_trusted,
             )
             .await;
         let yolo_pin = xai_grok_workspace::permission::resolution::yolo_disabled_by_policy();

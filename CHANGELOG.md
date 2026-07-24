@@ -6,6 +6,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Permission resolution now honors the folder-trust verdict: an untrusted
+  project's `.claude/settings.json` (including `defaultMode: bypassPermissions`)
+  and `.chutes-build/config.toml` `[permission]` rules are no longer
+  auto-applied. A cloned repository could previously ship permission rules
+  that auto-approved tool calls regardless of the folder's trust state. Global
+  and admin-tier permission sources are unaffected. Found while reviewing
+  upstream grok-build for changes worth porting.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added
