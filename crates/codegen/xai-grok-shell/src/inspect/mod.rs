@@ -576,7 +576,8 @@ async fn list_permissions(cwd: &Path, project_trusted: bool) -> PermissionsRepor
         }
     }
 
-    let Some(resolved) = resolution::resolve_permissions_with_provenance(cwd, project_trusted).await
+    let Some(resolved) =
+        resolution::resolve_permissions_with_provenance(cwd, project_trusted).await
     else {
         return PermissionsReport {
             sources: vec![],
