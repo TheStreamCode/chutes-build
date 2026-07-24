@@ -5634,8 +5634,11 @@ pub(crate) mod tests {
             app.needs_animation(),
             "an open prompt history overlay must request animation ticks"
         );
+        // Generous budget (~10s): the history daemon runs on a background
+        // thread that a loaded CI runner may not schedule promptly, and this
+        // is polling for delivery, not timing behavior under test.
         let mut delivered = false;
-        for _ in 0..1000 {
+        for _ in 0..10_000 {
             if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
                 delivered = true;
                 break;
