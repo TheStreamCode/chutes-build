@@ -15,7 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_BUILD_JOBS: 2
+  # GitHub-hosted Linux/Windows runners have 4 vCPUs; this was needlessly
+  # capped at 2, roughly doubling compile time on a cold cache. A cold
+  # cache (evicted after today's several Cargo.lock-changing version
+  # bumps) combined with the 60-minute job timeout let a full rebuild get
+  # cancelled mid-compile, before any test ever ran.
+  CARGO_BUILD_JOBS: 4
   CARGO_TERM_COLOR: always
   # CI runners have no recognized terminal brand (no WT_SESSION/TERM_PROGRAM
   # etc.), so `is_legacy_windows_console()` default-denies to legacy/ASCII
