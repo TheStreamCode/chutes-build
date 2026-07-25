@@ -1729,6 +1729,14 @@ mod tests {
         resources.insert(SessionIdResource("parent".to_string()));
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
+        // The mutual-exclusion error only fires when `cwd` resolves to a real
+        // directory (see `sanitize_cwd_value`/the `is_dir()` check above) --
+        // otherwise a nonexistent cwd is silently cleared and worktree wins.
+        // A hardcoded "/tmp" only "exists" on Windows by coincidence (whatever
+        // the current drive's root happens to contain); std::env::temp_dir()
+        // is real on every platform, including a fresh CI runner.
+        let cwd = std::env::temp_dir().to_string_lossy().into_owned();
+
         let result = xai_tool_runtime::Tool::run(
             &TaskTool,
             test_ctx(resources.into_shared()),
@@ -1740,7 +1748,7 @@ mod tests {
                 capability_mode: None,
                 isolation: Some(SubagentIsolationMode::Worktree),
                 resume_from: None,
-                cwd: Some("/tmp".into()),
+                cwd: Some(cwd),
                 model: None,
                 task_id: None,
             },
