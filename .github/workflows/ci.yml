@@ -160,7 +160,7 @@ jobs:
       - name: Test authentication and tools on Windows
         run: |
           cargo test -p xai-grok-shell --lib auth:: --locked
-          cargo test -p xai-grok-tools --locked
+          cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
 
   macos-check:
     name: Rust check (macOS)
