@@ -16,3 +16,7 @@ Worker subagents support:
 Use the `chutes-build-orchestrator` preset when a task clearly benefits from
 parallel decomposition. Avoid parallel agents for tightly coupled edits or
 tasks too small to justify coordination overhead.
+
+Plugin-provided workers may inherit only the parent's already-connected MCP
+pool after the normal filter. They cannot declare their own servers, hooks, or
+permission policy.

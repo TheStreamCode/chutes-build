@@ -13,3 +13,11 @@ start retry, workspace-bounded output, and provenance sidecars. Compatible
 settings include `CHUTES_OUTPUT_DIR`, `CHUTES_WARMUP`,
 `CHUTES_COLD_START_RETRIES`, `CHUTES_ALLOW_UNKNOWN_PARAMS`, and
 `CHUTES_PROVENANCE`.
+
+Managed MCP catalog refreshes propagate into live parent sessions and rebuild
+the tool-search index without an application restart. Plugin subagents can see
+only their parent's already-connected pool after the normal inheritance filter;
+plugins cannot declare a new server, hook, or permission policy for themselves.
+
+Generated media downloads default to 128 MiB with a 512 MiB hard ceiling and
+stream through temporary files instead of requiring a complete in-memory body.

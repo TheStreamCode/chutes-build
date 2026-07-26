@@ -584,25 +584,57 @@ fn session_created_without_flag_emits_no_extension_fetches() {
     assert_eq!(count_extension_fetches(&effects), 0);
 }
 #[test]
-fn session_failed_clears_flag_no_fetches() {
-    use crate::views::extensions_modal::{ExtensionsModalState, ExtensionsTab};
+fn session_failed_keeps_existing_agent_clears_loading_and_toasts() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
         let a = app.agents.get_mut(&id).unwrap();
-        a.session.session_id = None;
+        a.session.session_id = Some(acp::SessionId::new("existing"));
         a.pending_extensions_fetch = true;
-        a.extensions_modal = Some(ExtensionsModalState::new(ExtensionsTab::Hooks));
+        a.session.prompt_history_loading = true;
+        a.mcp_init_progress = Some(crate::app::agent_view::McpInitProgress {
+            total: 0,
+            connected: 0,
+            started_at: std::time::Instant::now(),
+        });
     }
     let effects = dispatch(
         Action::TaskComplete(TaskResult::SessionFailed {
             agent_id: id,
-            error: "boom".to_string(),
+            error: "No space left on device".to_string(),
         }),
         &mut app,
     );
-    assert_eq!(count_extension_fetches(&effects), 0);
-    assert!(!app.agents[&id].pending_extensions_fetch);
+    assert!(effects.is_empty());
+    let agent = &app.agents[&id];
+    assert!(!agent.pending_extensions_fetch);
+    assert!(!agent.session.prompt_history_loading);
+    assert!(agent.mcp_init_progress.is_none());
+    assert_eq!(
+        agent.toast.as_ref().map(|(message, _)| message.as_str()),
+        Some("Session creation failed: No space left on device")
+    );
+}
+#[test]
+fn session_failed_orphan_returns_to_welcome_with_warning() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.session_id = None;
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::SessionFailed {
+            agent_id: id,
+            error: "No space left on device".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    assert!(!app.agents.contains_key(&id));
+    assert!(matches!(app.active_view, ActiveView::Welcome));
+    assert!(
+        app.startup_warnings.iter().any(|warning| {
+            warning.message == "Session creation failed: No space left on device"
+        })
+    );
 }
 #[test]
 fn switch_model_without_session_does_nothing() {

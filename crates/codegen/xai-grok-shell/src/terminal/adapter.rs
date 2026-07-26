@@ -21,6 +21,8 @@ use xai_grok_tools::computer::types::{
 };
 use xai_grok_tools::notification::types::ToolNotificationHandle;
 
+use super::output_recorder::OutputRecorder;
+
 // ── Tracked task state ───────────────────────────────────────────────
 
 struct TrackedTask {
@@ -96,61 +98,83 @@ async fn watch_for_exit(
     task_id: String,
     tasks: TaskMap,
     notification_handle: ToolNotificationHandle,
+    mut recorder: OutputRecorder,
 ) {
     let terminal_id = acp::TerminalId::new(task_id.clone());
-
-    match gateway
-        .send(acp::WaitForTerminalExitRequest::new(
-            session_id.clone(),
-            terminal_id.clone(),
-        ))
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            tracing::warn!(
-                task_id,
-                error = %e,
-                "watch_for_exit: gateway error waiting for terminal exit, polling until exit"
-            );
-            if !poll_for_terminal_exit(&gateway, &session_id, &terminal_id, None).await {
-                // Gateway lost — mark the task as completed so it doesn't
-                // remain as a ghost "running" entry forever.
-                let snapshot = {
-                    let mut tasks = tasks.lock().unwrap();
-                    let Some(task) = tasks.get_mut(&task_id) else {
-                        return;
-                    };
-                    task.mark_completed(None, Some("gateway-lost".into()), String::new(), false);
-                    task.to_snapshot(
-                        &task_id,
-                        String::new(),
-                        false,
-                        None,
-                        Some("gateway-lost".into()),
-                    )
-                };
-                notification_handle.send_task_complete(snapshot);
-                let _ = gateway
-                    .send(acp::ReleaseTerminalRequest::new(session_id, terminal_id))
-                    .await;
-                return;
+    let wait = gateway.send(acp::WaitForTerminalExitRequest::new(
+        session_id.clone(),
+        terminal_id.clone(),
+    ));
+    tokio::pin!(wait);
+    let mut final_output = None;
+    let mut wait_failed = false;
+    loop {
+        tokio::select! {
+            result = &mut wait => {
+                if let Err(error) = result {
+                    tracing::warn!(task_id, %error, "wait_for_exit failed; polling for terminal exit");
+                    wait_failed = true;
+                }
+                break;
+            }
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {
+                if let Ok(output) = gateway
+                    .send(acp::TerminalOutputRequest::new(session_id.clone(), terminal_id.clone()))
+                    .await
+                {
+                    if let Err(error) = recorder.append(&output.output).await {
+                        tracing::debug!(task_id, %error, "remote output recorder append failed");
+                    }
+                    if output.exit_status.is_some() {
+                        final_output = Some(output);
+                        break;
+                    }
+                }
             }
         }
     }
-
-    let (exit_code, signal, output_text, truncated) = match gateway
-        .send(acp::TerminalOutputRequest::new(
-            session_id.clone(),
-            terminal_id.clone(),
-        ))
-        .await
+    if wait_failed
+        && final_output.is_none()
+        && !poll_for_terminal_exit(&gateway, &session_id, &terminal_id, None).await
     {
-        Ok(o) => {
-            let (code, sig) = parse_exit(&o.exit_status);
-            (code, sig, o.output, o.truncated)
+        let snapshot = {
+            let mut tasks = tasks.lock().unwrap();
+            let Some(task) = tasks.get_mut(&task_id) else {
+                return;
+            };
+            task.mark_completed(None, Some("gateway-lost".into()), String::new(), false);
+            task.to_snapshot(
+                &task_id,
+                String::new(),
+                false,
+                None,
+                Some("gateway-lost".into()),
+            )
+        };
+        notification_handle.send_task_complete(snapshot);
+        let _ = gateway
+            .send(acp::ReleaseTerminalRequest::new(session_id, terminal_id))
+            .await;
+        return;
+    }
+
+    let output = match final_output {
+        Some(output) => Some(output),
+        None => gateway
+            .send(acp::TerminalOutputRequest::new(
+                session_id.clone(),
+                terminal_id.clone(),
+            ))
+            .await
+            .ok(),
+    };
+    let (exit_code, signal, output_text, truncated) = match output {
+        Some(output) => {
+            let _ = recorder.append(&output.output).await;
+            let (code, signal) = parse_exit(&output.exit_status);
+            (code, signal, output.output, output.truncated)
         }
-        Err(_) => (None, None, String::new(), false),
+        None => (None, None, String::new(), false),
     };
 
     let snapshot = {
@@ -292,6 +316,9 @@ impl AcpTerminalAdapter {
 impl TerminalBackend for AcpTerminalAdapter {
     async fn run(&self, request: TerminalRunRequest) -> Result<TerminalRunResult, ComputerError> {
         let command = wrap_command(&request.command)?;
+        let mut recorder =
+            OutputRecorder::new(request.output_file.clone(), request.output_byte_limit);
+        recorder.initialize().await;
         let create_res = self.create_terminal(command, &request).await?;
 
         let timed_out = match tokio::time::timeout(
@@ -335,6 +362,9 @@ impl TerminalBackend for AcpTerminalAdapter {
             .await;
 
         let (exit_code, signal) = parse_exit(&output.exit_status);
+        if let Err(error) = recorder.append(&output.output).await {
+            tracing::debug!(%error, "remote output recorder failed to write final output");
+        }
         let total_bytes = output.output.len();
         Ok(TerminalRunResult {
             combined_output: output.output,
@@ -362,6 +392,8 @@ impl TerminalBackend for AcpTerminalAdapter {
 
         let create_res = self.create_terminal(command.clone(), &request).await?;
         let task_id = create_res.terminal_id.0.to_string();
+        let recorder = OutputRecorder::new(output_file.clone(), request.output_byte_limit);
+        recorder.initialize().await;
 
         {
             let mut tasks = self.tasks.lock().unwrap();
@@ -390,6 +422,7 @@ impl TerminalBackend for AcpTerminalAdapter {
             task_id.clone(),
             Arc::clone(&self.tasks),
             notification_handle,
+            recorder,
         ));
 
         Ok(BackgroundHandle {

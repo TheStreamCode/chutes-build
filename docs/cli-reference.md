@@ -76,6 +76,11 @@ rejected because the two operations have incompatible ownership semantics.
   trusted environment.
 - `--sandbox <PROFILE>` selects a configured sandbox profile.
 
+In `auto` mode, only deterministic read-only shell commands use the local
+fast-path. Builds, code runners, repository mutations, and other actions are
+classified with conversation context; an unavailable or malformed classifier
+falls back to the normal permission prompt.
+
 `--rules`, `--system-prompt-override`, `--verbatim`, `--disable-web-search`,
 `--no-alt-screen`, `--minimal`, `--fullscreen`, `--debug`, `--debug-file`, and
 `--leader-socket` provide the remaining runtime/UI controls. Use `--help` for

@@ -1,4 +1,4 @@
-# npm distribution
+# npm distribution and native packages
 
 The public `chutes-build` package is a dependency-free Node.js launcher. Its
 optional dependencies contain the native Rust executable for each supported
@@ -10,6 +10,9 @@ Supported release targets:
 - Windows x64 and ARM64
 - macOS x64 and ARM64
 - Linux glibc x64 and ARM64
+
+For installation and first-run instructions, see the repository
+[`README`](../README.md) and [getting-started guide](../docs/getting-started.md).
 
 ## Prepare a platform package
 

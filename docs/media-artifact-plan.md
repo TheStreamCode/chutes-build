@@ -1,6 +1,6 @@
-# MediaArtifact Plan
+# Media artifact architecture
 
-## Implementation status (2026-07-19)
+## Implementation status (reviewed 2026-07-26)
 
 Phases 1 and 2 are implemented for new Chutes `generate_media` results: the
 versioned artifact is serialized through the tool output and ACP, the pager
@@ -19,6 +19,12 @@ auto-pauses if a new inference begins. Static image/poster preparation is
 off-thread, serialized, bounded, and deferred until model inference is idle.
 Waveform analysis is cancellable when inference resumes. Broader
 terminal-protocol coverage remains planned.
+
+Generated response bodies no longer require a full in-memory buffer: non-JSON
+success responses stream to a temporary file, use a 128 MiB default limit with
+a 512 MiB hard ceiling, and are copied into the workspace with create-new
+semantics. Error and JSON bodies are capped at 32 MiB. Partial media/provenance
+bundles roll back on persistence failure.
 
 ## Objective
 

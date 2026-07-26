@@ -1,7 +1,7 @@
 {
   "name": "chutes-build",
   "version": "0.4.0",
-  "description": "Privacy-first coding agent optimized for the Chutes ecosystem",
+  "description": "Privacy-first, open-source coding agent for the Chutes ecosystem",
   "license": "Apache-2.0",
   "author": "Michael Gasperini (Mikesoft)",
   "homepage": "https://github.com/TheStreamCode/chutes-build#readme",
@@ -43,8 +43,16 @@
   },
   "keywords": [
     "ai",
+    "ai-agents",
     "chutes",
     "cli",
-    "coding-agent"
+    "coding-agent",
+    "developer-tools",
+    "mcp",
+    "multimodal",
+    "privacy",
+    "rust",
+    "terminal",
+    "tui"
   ]
 }

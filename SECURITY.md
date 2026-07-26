@@ -44,12 +44,20 @@ Custom inference and model-catalog endpoints require dedicated credentials.
 OAuth client secrets are read from the environment, used for token exchange
 and refresh when configured, and are never persisted by Chutes Build.
 
+Credential-bearing and download clients reject URL credentials, unexpected
+ports, insecure schemes, redirects, and private, loopback, link-local, or
+special-use DNS results. Development endpoint overrides require the explicit
+`CHUTES_ALLOW_INSECURE_ENDPOINTS=1` opt-in; the opt-in does not make ambient
+Chutes credentials transferable to arbitrary model endpoints. Custom Context7
+endpoints require their own opt-in and never receive `CONTEXT7_API_KEY`.
+
 Machine-readable MCP listings redact environment/header values and URL
 credentials. Destructive session, memory, plugin, marketplace, and worktree
 operations require an interactive confirmation unless an explicit `--yes`
-flag is provided. Media downloads enforce HTTPS, redirect and destination
-checks, private-address rejection, size limits, and transactional artifact
-writes.
+flag is provided. Media responses stream to bounded temporary storage, default
+to 128 MiB with a 512 MiB hard ceiling, and use transactional create-new
+artifact writes. Automatic permission mode only fast-paths deterministic
+read-only shell commands; classifier failure returns to the normal user prompt.
 
 ## Automated release checks
 

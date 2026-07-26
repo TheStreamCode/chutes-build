@@ -6,8 +6,44 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Remote ACP background terminal tasks now persist their cumulative output
+  locally while they run; terminal results use the real remote exit status.
+- Repeated identical tool calls are detected, warned about, and eventually
+  stopped without emitting a misleading assistant response; repeated `true`
+  no-ops use a shorter limit.
+
+### Changed
+
+- Dependabot auto-merge is limited to patch updates. Minor and major updates
+  remain open for manual review.
+- The upstream-watch workflow refreshes the existing review issue with the
+  current upstream commit and version instead of leaving stale issue content.
+- Plugin subagents inherit the parent's already-connected MCP pool through the
+  normal inheritance filter, without allowing plugins to create connections.
+- A fresh managed-MCP catalog is propagated to live sessions and refreshes the
+  tool-search index without requiring an application restart.
+
+### Fixed
+
+- Session-creation failures now clear the stuck loading state, remove orphaned
+  sessions, and surface a useful warning or failure block.
+- A bare `Esc` cancels a running turn in non-vim and minimal modes while
+  fullscreen vim retains navigation semantics; the queued draft is preserved.
+- Fork/rewind copies only live history and the compaction checkpoint files it
+  actually references, rejecting malformed paths and non-regular files.
+
 ### Security
 
+- Chutes and Context7 endpoint resolution now rejects insecure schemes,
+  credentials in URLs, private/special-use network targets, and unapproved
+  custom endpoints unless the corresponding explicit development opt-in is
+  enabled. API keys are never sent to custom Context7 endpoints.
+- Generated media streams to temporary files with bounded response sizes and
+  uses create-new persistence so existing artifacts cannot be overwritten.
+- Automatic permission classification only fast-paths deterministic read-only
+  shell commands; classifier failures fall back to the normal user prompt.
 - Permission resolution now honors the folder-trust verdict: an untrusted
   project's `.claude/settings.json` (including `defaultMode: bypassPermissions`)
   and `.chutes-build/config.toml` `[permission]` rules are no longer
@@ -15,6 +51,18 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that auto-approved tool calls regardless of the folder's trust state. Global
   and admin-tier permission sources are unaffected. Found while reviewing
   upstream grok-build for changes worth porting.
+
+### Documentation
+
+- Reworked the README around a concise product overview, static terminal
+  screenshot, quick start, privacy contract, common workflows, and repository
+  map; removed the obsolete promotional video assets.
+- Added dedicated getting-started and configuration guides, reorganized the
+  documentation index, and aligned privacy, security, architecture, npm,
+  contributor, and embedded `/docs` references with current behavior.
+- Corrected OAuth guidance, media response limits, automatic-permission
+  semantics, remote terminal behavior, `Esc` cancellation, and upstream
+  baseline rules.
 
 ## [0.4.0] - 2026-07-23
 

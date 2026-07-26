@@ -105,12 +105,8 @@ jobs:
               --json number,title \
               --jq '[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty'
           )"
-          if [[ -n "$existing_issue" ]]; then
-            echo "Review issue #${existing_issue} is already open." >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file - <<EOF
+          issue_body="${RUNNER_TEMP}/upstream-review.md"
+          cat >"$issue_body" <<EOF
           A newer state of [\`${{ steps.upstream.outputs.repository }}\`](https://github.com/${{ steps.upstream.outputs.repository }}) is available for review.
 
           - Last reviewed commit: \`${{ steps.upstream.outputs.reviewed_commit }}\`
@@ -122,3 +118,10 @@ jobs:
 
           Review and port relevant changes according to [the upstream sync procedure](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/upstream-sync.md). Do not merge upstream wholesale or update \`.github/upstream.json\` before the selected changes pass the Chutes Build quality gates.
           EOF
+          if [[ -n "$existing_issue" ]]; then
+            gh issue edit "$existing_issue" --repo "$GITHUB_REPOSITORY" --body-file "$issue_body"
+            echo "Refreshed review issue #${existing_issue}." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$issue_body"

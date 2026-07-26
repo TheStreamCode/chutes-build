@@ -39,6 +39,10 @@ package contents before continuing. Run Gitleaks against both the working tree
 and complete Git history. Never place a Chutes API key in release configuration
 or CI.
 
+Validate relative Markdown links and changed workflow YAML. The root README,
+public guides, embedded `/docs` guides, privacy/security documents, and current
+CLI behavior must agree before a release candidate is packaged.
+
 ## Build and publish
 
 1. Run the `Package release` workflow from `main` with `publish` disabled.

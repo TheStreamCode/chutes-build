@@ -48,8 +48,14 @@ previews. Music and speech cards provide a local audio toggle backed by
 `ffplay`; if it is unavailable, Chutes Build opens the file in the operating
 system's default player. Media never autoplays.
 
+Downloads stream through temporary files and default to a 128 MiB limit with a
+512 MiB hard ceiling. Workspace inputs default to 64 MiB with the same hard
+ceiling. Final artifact writes do not overwrite an existing destination.
+
 Context7 tools provide current library documentation. They reject known secret
-material and send only library identifiers and documentation queries.
+material and send only library identifiers and documentation queries. An
+optional Context7 key is sent only to the official HTTPS service; a custom
+endpoint requires an explicit development opt-in and never receives that key.
 
 ## Official Chutes sources
 

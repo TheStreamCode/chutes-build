@@ -62,6 +62,11 @@ pub(crate) enum TurnOutcome {
     },
     /// The `--max-turns` limit was reached after a tool-execution cycle.
     MaxTurnsReached { limit: usize },
+    /// Silent EndTurn after a repeated identical tool-call loop. Kept distinct
+    /// from normal completion so autonomous goal continuation cannot reopen it.
+    StationarityEnded {
+        snapshot: Box<Option<TurnDeltaSnapshot>>,
+    },
 }
 
 #[derive(Debug)]

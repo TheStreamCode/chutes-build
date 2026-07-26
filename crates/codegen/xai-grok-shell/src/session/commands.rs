@@ -24,6 +24,8 @@ pub struct CancellationContext {
 #[derive(Debug, Clone)]
 pub enum PromptCompletionKind {
     Completed,
+    /// Silent EndTurn after repeated identical tool-call thrash.
+    StationarityEnded,
     Cancelled {
         category: Option<xai_file_utils::events::types::CancellationCategory>,
         context: Option<CancellationContext>,

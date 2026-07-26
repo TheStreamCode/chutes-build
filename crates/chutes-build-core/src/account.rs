@@ -31,7 +31,7 @@ impl ChutesAccountClient {
                 .timeout(std::time::Duration::from_secs(15))
                 .redirect(reqwest::redirect::Policy::none())
                 .dns_resolver(std::sync::Arc::new(
-                    crate::endpoint_policy::SsrfSafeResolver,
+                    crate::endpoint_policy::SsrfSafeResolver::default(),
                 ))
                 .build()?,
             endpoints,

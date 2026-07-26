@@ -36,6 +36,8 @@ image/video decoding uses local image codecs and FFmpeg tools when installed,
 and audio uses `ffplay` or the operating system's default player. Preview work
 is bounded, off-thread, serialized, and deferred while inference is active. No
 remote preview, thumbnail, codec, waveform, or playback service is used.
+Non-JSON media downloads stream through local temporary files and are removed
+after persistence or failure; error and JSON bodies remain memory-bounded.
 
 ## Outbound connections
 
@@ -47,9 +49,9 @@ explicit hosted feature:
 | `model-router-ten.vercel.app` | default Chutes-compatible model routing | prompts, selected context/tool schemas, model inputs, Chutes API credential |
 | `llm.chutes.ai` | Chutes inference, model catalog, semantic memory, voice transcription, OCR, and vision | model requests and the selected inputs: prompts/context, memory chunks, audio, images, PDF pages, or sampled video frames; Chutes API credential |
 | `api.chutes.ai` | Chutes account and media APIs | account requests, media parameters and user-selected media assets; Chutes API credential |
-| `api.chutes.ai/idp` | OAuth sign-in and refresh | authorization code or refresh token, PKCE verifier, public/custom client ID, and a custom client secret only when configured |
+| `api.chutes.ai/idp` | OAuth sign-in and refresh | authorization code or refresh token, PKCE verifier, registered client ID, and a client secret only when configured |
 | `chutes.ai/docs`, `chutes.ai/news` | mandatory primary-source verification for Chutes topics | requested official page URLs; no Chutes API credential |
-| `context7.com` | current library documentation | library names and documentation queries; credentials and known secrets are rejected |
+| `context7.com` | current library documentation | library names and documentation queries; known secrets are rejected and an optional Context7 key is sent only to the official HTTPS service |
 | DuckDuckGo or Brave Search | web search | search query; Brave receives only its dedicated key |
 | User-selected web pages | web fetch/browser automation | normal HTTP/browser traffic required by the requested action |
 | User-configured MCP servers/plugins | external tools | data required by the selected tool and its own configuration |
@@ -60,6 +62,12 @@ custom endpoint, web search, Context7, arbitrary websites, MCP servers, or
 browser automation. Custom inference models must declare a dedicated
 `api_key`/`env_key`; a custom model-catalog endpoint uses
 `CHUTES_MODELS_API_KEY`.
+
+Local endpoint overrides are rejected unless they pass the official-host HTTPS
+policy or the operator explicitly enables the development-only insecure
+endpoint opt-in. That opt-in relaxes URL/DNS trust for a controlled local fork;
+it does not attach ambient Chutes credentials to arbitrary custom models.
+Likewise, a custom Context7 endpoint never receives `CONTEXT7_API_KEY`.
 
 Model catalog and account usage requests may run during startup after
 authentication. Prompts and repository content are not sent by those discovery

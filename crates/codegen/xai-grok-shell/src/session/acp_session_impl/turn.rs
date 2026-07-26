@@ -829,7 +829,7 @@ impl SessionActor {
             })
             .await;
         match &result {
-            Ok(TurnOutcome::Completed { .. }) => {
+            Ok(TurnOutcome::Completed { .. }) | Ok(TurnOutcome::StationarityEnded { .. }) => {
                 self.emit_turn_ended(
                     crate::session::events::TurnOutcomeLabel::Completed,
                     None,
@@ -852,7 +852,11 @@ impl SessionActor {
                         duration_ms: turn_duration_ms,
                         tool_call_count: turn_tool_count,
                         model_id: turn_model_id,
-                        cancellation_category: None,
+                        cancellation_category: matches!(
+                            &result,
+                            Ok(TurnOutcome::StationarityEnded { .. })
+                        )
+                        .then(|| "action_stationarity".to_string()),
                         error_category: None,
                     },
                 );
@@ -984,7 +988,9 @@ impl SessionActor {
             );
         }
         let stop_reason_str = match &result {
-            Ok(TurnOutcome::Completed { .. }) => "end_turn",
+            Ok(TurnOutcome::Completed { .. }) | Ok(TurnOutcome::StationarityEnded { .. }) => {
+                "end_turn"
+            }
             Ok(TurnOutcome::Cancelled { .. }) | Ok(TurnOutcome::MaxTurnsReached { .. }) => {
                 "cancelled"
             }
@@ -1000,7 +1006,7 @@ impl SessionActor {
         )
         .await;
         match &result {
-            Ok(TurnOutcome::Completed { .. }) => {
+            Ok(TurnOutcome::Completed { .. }) | Ok(TurnOutcome::StationarityEnded { .. }) => {
                 for contributor in self.extension_registry.turn_lifecycle_contributors() {
                     contributor
                         .on_turn_done(&xai_agent_lifecycle::TurnDoneInput)
@@ -1066,6 +1072,12 @@ impl SessionActor {
                         *snapshot,
                         PromptCompletionKind::Completed,
                         structured_output,
+                    ),
+                    TurnOutcome::StationarityEnded { snapshot } => (
+                        acp::StopReason::EndTurn,
+                        *snapshot,
+                        PromptCompletionKind::StationarityEnded,
+                        None,
                     ),
                     TurnOutcome::Cancelled { category, context } => {
                         let cancellation_ctx = context.and_then(|v| serde_json::from_value(v).ok());
@@ -1307,7 +1319,11 @@ impl SessionActor {
     /// their turns successfully, so a per-turn reset would make the
     /// 3-streak pause unreachable. It resets on goal create / resume /
     /// clear and on a `completed: true` `update_goal`.
-    pub(crate) async fn handle_turn_end(&self, turn_succeeded: bool) {
+    pub(crate) async fn handle_turn_end(
+        &self,
+        turn_succeeded: bool,
+        suppress_goal_continuation: bool,
+    ) {
         let goal_active_now = laziness_injection_active(
             self.goal_harness_enabled(),
             self.goal_tracker.lock().status(),
@@ -1315,7 +1331,9 @@ impl SessionActor {
         if turn_succeeded && goal_active_now {
             self.goal_continuation_streak
                 .store(0, std::sync::atomic::Ordering::Relaxed);
-            self.maybe_queue_goal_continuation().await;
+            if !suppress_goal_continuation {
+                self.maybe_queue_goal_continuation().await;
+            }
             return;
         }
         if !turn_succeeded && goal_active_now {
@@ -1407,7 +1425,10 @@ impl SessionActor {
                 json_schema.clone(),
             )
             .await;
-        if matches!(result, Ok(TurnOutcome::MaxTurnsReached { .. })) {
+        if matches!(
+            result,
+            Ok(TurnOutcome::MaxTurnsReached { .. }) | Ok(TurnOutcome::StationarityEnded { .. })
+        ) {
             return result;
         }
         if let Ok(TurnOutcome::Completed {
@@ -1471,7 +1492,10 @@ impl SessionActor {
                     None,
                 )
                 .await;
-            if matches!(result, Ok(TurnOutcome::MaxTurnsReached { .. })) {
+            if matches!(
+                result,
+                Ok(TurnOutcome::MaxTurnsReached { .. }) | Ok(TurnOutcome::StationarityEnded { .. })
+            ) {
                 return result;
             }
             if let Ok(TurnOutcome::Completed {
@@ -1796,6 +1820,7 @@ impl SessionActor {
         let mut turn_span_totals = TurnSpanTotals::default();
         let mut model_fingerprint: Option<String> = None;
         let mut structured_output_retries: u32 = 0;
+        let mut identical_tool_calls = IdenticalToolCallRun::default();
         let structured_output_validator = json_schema.as_ref().map(|schema| {
             jsonschema::validator_for(schema).map_err(|e| format!("invalid output schema: {e}"))
         });
@@ -1825,6 +1850,39 @@ impl SessionActor {
         loop {
             self.emit_event(crate::session::events::Event::LoopStarted { loop_index });
             loop_index += 1;
+            if identical_tool_calls.run_len >= identical_tool_calls.hard_stop_threshold() {
+                let run_len = identical_tool_calls.run_len;
+                let tool_name = identical_tool_calls.tool_name.clone();
+                tracing::warn!(
+                    session_id = %self.session_info.id,
+                    tool_name = %tool_name,
+                    run_len,
+                    "action stationarity: ending turn after repeated identical tool calls"
+                );
+                xai_grok_telemetry::unified_log::warn(
+                    "shell.turn.action_stationarity_stop",
+                    Some(self.session_info.id.0.as_ref()),
+                    Some(serde_json::json!({
+                        "loop_index": loop_index,
+                        "tool_name": tool_name,
+                        "run_len": run_len,
+                    })),
+                );
+                xai_grok_telemetry::session_ctx::log_event(
+                    xai_grok_telemetry::events::ActionStationarityStop { run_len, tool_name },
+                );
+                let snapshot = self
+                    .finalize_turn_bookkeeping(
+                        req_id,
+                        conv_turn_start,
+                        &turn_span_totals,
+                        model_fingerprint.clone(),
+                    )
+                    .await;
+                return Ok(TurnOutcome::StationarityEnded {
+                    snapshot: Box::new(snapshot),
+                });
+            }
             self.drain_pending_interjections().await;
             self.flush_pending_skill_reminders().await;
             self.inject_pending_monitor_events().await;
@@ -2263,6 +2321,41 @@ impl SessionActor {
                 }
                 turn_tools_called.push(tc.name.clone());
             }
+            let step_signature = tool_calls
+                .iter()
+                .map(|tc| format!("{}\u{1f}{}", tc.name, tc.arguments.as_ref()))
+                .collect::<Vec<_>>()
+                .join("\u{1e}");
+            let step_tool_name = tool_calls
+                .first()
+                .map(|tc| tc.name.clone())
+                .unwrap_or_default();
+            let identical_run_len = identical_tool_calls.observe(
+                &step_signature,
+                &step_tool_name,
+                is_true_noop_step(&tool_calls),
+            );
+            if identical_run_len == NUDGE_AFTER_IDENTICAL_TOOL_CALLS {
+                tracing::warn!(
+                    session_id = %self.session_info.id,
+                    tool_name = %step_tool_name,
+                    run_len = identical_run_len,
+                    "action stationarity: nudging model to break repeated identical tool calls"
+                );
+                let reminder = self
+                    .tool_bridge_handle()
+                    .render_prompt(
+                        ACTION_STATIONARITY_NUDGE_TEMPLATE,
+                        &serde_json::json!({
+                            "tool_name": step_tool_name,
+                            "run_len": identical_run_len,
+                        }),
+                    )
+                    .await
+                    .unwrap_or_else(|| ACTION_STATIONARITY_NUDGE_TEMPLATE.to_string());
+                self.push_system_reminder(&reminder);
+                continue;
+            }
             let tool_call_responses: Vec<ToolCallResponse> = tool_calls
                 .into_iter()
                 .map(|tc| ToolCallResponse {
@@ -2330,6 +2423,107 @@ impl SessionActor {
                 continue;
             }
         }
+    }
+}
+const MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS: u32 = 16;
+const NUDGE_AFTER_IDENTICAL_TOOL_CALLS: u32 = 8;
+const MAX_CONSECUTIVE_TRUE_NOOPS: u32 = 4;
+const _: () = assert!(NUDGE_AFTER_IDENTICAL_TOOL_CALLS < MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS);
+const _: () = assert!(MAX_CONSECUTIVE_TRUE_NOOPS < NUDGE_AFTER_IDENTICAL_TOOL_CALLS);
+const ACTION_STATIONARITY_NUDGE_TEMPLATE: &str = "You have called the same tool \
+     (`${{ tool_name }}`) with the exact same arguments ${{ run_len }} times in a row, \
+     getting the same result each time. Stop repeating this call. If you are waiting on a \
+     long-running job, use a background task or a single delayed check. If you cannot make \
+     progress, stop and tell the user what you are waiting for. This turn will be halted \
+     automatically if the identical call keeps repeating.";
+fn hash_step_signature(signature: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    signature.hash(&mut hasher);
+    hasher.finish()
+}
+fn command_is_true(command: &str) -> bool {
+    command.trim().eq_ignore_ascii_case("true")
+}
+fn is_true_noop_step(tool_calls: &[xai_grok_sampling_types::conversation::ToolCall]) -> bool {
+    let [tool_call] = tool_calls else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(tool_call.arguments.as_ref())
+        .ok()
+        .and_then(|args| {
+            args.get("command")
+                .and_then(serde_json::Value::as_str)
+                .map(command_is_true)
+        })
+        .unwrap_or(false)
+}
+#[derive(Default)]
+struct IdenticalToolCallRun {
+    last_signature_hash: Option<u64>,
+    tool_name: String,
+    run_len: u32,
+    is_true_noop_run: bool,
+}
+impl IdenticalToolCallRun {
+    fn observe(&mut self, signature: &str, tool_name: &str, is_true_noop: bool) -> u32 {
+        let hash = hash_step_signature(if is_true_noop {
+            "\0true_noop"
+        } else {
+            signature
+        });
+        if self.last_signature_hash == Some(hash) {
+            self.run_len += 1;
+        } else {
+            self.run_len = 1;
+            self.last_signature_hash = Some(hash);
+            self.is_true_noop_run = is_true_noop;
+        }
+        self.tool_name = tool_name.to_string();
+        self.run_len
+    }
+    fn hard_stop_threshold(&self) -> u32 {
+        if self.is_true_noop_run {
+            MAX_CONSECUTIVE_TRUE_NOOPS
+        } else {
+            MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS
+        }
+    }
+}
+#[cfg(test)]
+mod identical_tool_call_run_tests {
+    use super::{
+        IdenticalToolCallRun, MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS, MAX_CONSECUTIVE_TRUE_NOOPS,
+        command_is_true,
+    };
+
+    #[test]
+    fn identical_calls_reset_and_stop_at_the_hard_limit() {
+        let mut run = IdenticalToolCallRun::default();
+        assert_eq!(run.observe("a", "a", false), 1);
+        assert_eq!(run.observe("a", "a", false), 2);
+        assert_eq!(run.observe("b", "b", false), 1);
+        for expected in 1..=MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS {
+            assert_eq!(run.observe("same", "same", false), expected);
+        }
+        assert_eq!(
+            run.hard_stop_threshold(),
+            MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS
+        );
+    }
+
+    #[test]
+    fn true_noops_share_a_shorter_limit() {
+        let mut run = IdenticalToolCallRun::default();
+        for expected in 1..=MAX_CONSECUTIVE_TRUE_NOOPS {
+            assert_eq!(
+                run.observe(&format!("sig-{expected}"), "bash", true),
+                expected
+            );
+        }
+        assert_eq!(run.hard_stop_threshold(), MAX_CONSECUTIVE_TRUE_NOOPS);
+        assert!(command_is_true(" TRUE "));
+        assert!(!command_is_true("true && echo hi"));
     }
 }
 /// Backoff schedule for resubmits after a *successful* 401 auth recovery

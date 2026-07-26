@@ -45,8 +45,12 @@ pub enum EndpointTrustError {
     UnexpectedPort(u16),
 }
 
+pub(crate) fn env_opt_in(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 fn insecure_opt_in() -> bool {
-    std::env::var(INSECURE_OPT_IN_VAR).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    env_opt_in(INSECURE_OPT_IN_VAR)
 }
 
 fn is_trusted_host(host: &str) -> bool {
@@ -114,12 +118,29 @@ pub fn validate_endpoint_url(url: &str) -> Result<(), EndpointTrustError> {
 /// Respects [`INSECURE_OPT_IN_VAR`], same as [`validate_endpoint_url`] --
 /// otherwise a local dev/fork setup that opted a `127.0.0.1` endpoint past
 /// URL validation would still get blocked here, at the DNS layer.
-#[derive(Debug, Clone, Default)]
-pub struct SsrfSafeResolver;
+#[derive(Debug, Clone)]
+pub struct SsrfSafeResolver {
+    insecure_opt_in_var: &'static str,
+}
+
+impl Default for SsrfSafeResolver {
+    fn default() -> Self {
+        Self::with_insecure_opt_in_var(INSECURE_OPT_IN_VAR)
+    }
+}
+
+impl SsrfSafeResolver {
+    pub const fn with_insecure_opt_in_var(insecure_opt_in_var: &'static str) -> Self {
+        Self {
+            insecure_opt_in_var,
+        }
+    }
+}
 
 impl reqwest::dns::Resolve for SsrfSafeResolver {
     fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let host = name.as_str().to_owned();
+        let insecure_opt_in_var = self.insecure_opt_in_var;
         Box::pin(async move {
             let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
                 .await
@@ -130,7 +151,7 @@ impl reqwest::dns::Resolve for SsrfSafeResolver {
             if addrs.is_empty() {
                 return Err(format!("no addresses resolved for {host}").into());
             }
-            if insecure_opt_in() {
+            if env_opt_in(insecure_opt_in_var) {
                 return Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs);
             }
             if let Some(blocked) = addrs.iter().find(|addr| is_blocked_address(addr.ip())) {
@@ -156,6 +177,7 @@ fn is_blocked_address(ip: std::net::IpAddr) -> bool {
                 || v4.is_multicast()
                 || v4.is_broadcast()
                 || v4.is_documentation()
+                || is_ipv4_special_use(&v4)
         }
         std::net::IpAddr::V6(v6) => {
             v6.is_loopback()
@@ -163,11 +185,38 @@ fn is_blocked_address(ip: std::net::IpAddr) -> bool {
                 || v6.is_multicast()
                 || is_ipv6_unique_local(&v6)
                 || is_ipv6_link_local(&v6)
+                || is_ipv6_special_use(&v6)
                 || v6
                     .to_ipv4_mapped()
                     .is_some_and(|v4| is_blocked_address(std::net::IpAddr::V4(v4)))
         }
     }
+}
+
+/// Stable checks for IANA special-purpose IPv4 ranges not covered by the
+/// stable `Ipv4Addr` predicates used above.
+fn is_ipv4_special_use(ip: &std::net::Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    a == 0 // "this network" (0.0.0.0/8)
+        || (a == 100 && (64..=127).contains(&b)) // shared/CGNAT (100.64.0.0/10)
+        || (a == 192 && b == 0 && c == 0) // IETF protocol assignments
+        || (a == 192 && b == 88 && c == 99) // deprecated 6to4 relay anycast
+        || (a == 198 && (b == 18 || b == 19)) // benchmarking (198.18.0.0/15)
+        || a >= 240 // reserved/future use (includes limited broadcast)
+}
+
+/// Stable checks for non-global IPv6 ranges that should never be reachable by
+/// an outbound media/documentation fetch.
+fn is_ipv6_special_use(ip: &std::net::Ipv6Addr) -> bool {
+    let s = ip.segments();
+    (s[0] == 0x0100 && s[1..4] == [0, 0, 0]) // discard-only 100::/64
+        || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation 2001:db8::/32
+        || (s[0] == 0x2001 && s[1] == 0x0002 && s[2] == 0) // benchmarking 2001:2::/48
+        || (s[0] == 0x2001 && (s[1] & 0xfff0) == 0x0010) // ORCHIDv1 2001:10::/28
+        || (s[0] == 0x2001 && (s[1] & 0xfff0) == 0x0020) // ORCHIDv2 2001:20::/28
+        || s[0] == 0x2002 // deprecated 6to4 2002::/16
+        || (s[0] & 0xfff0) == 0x3ff0 // documentation 3fff::/20
+        || s[0] == 0x5f00 // segment-routing SIDs 5f00::/16
 }
 
 /// `fc00::/7` -- IPv6 unique local addresses (the IPv6 analog of
@@ -391,6 +440,44 @@ mod tests {
         assert!(!is_blocked_address("2001:4860:4860::8888".parse().unwrap()));
     }
 
+    #[test]
+    fn blocks_additional_ipv4_special_use_ranges() {
+        for ip in [
+            "0.1.2.3",
+            "100.64.0.1",
+            "100.127.255.254",
+            "192.0.0.8",
+            "192.88.99.1",
+            "198.18.0.1",
+            "198.19.255.254",
+            "240.0.0.1",
+        ] {
+            assert!(
+                is_blocked_address(ip.parse().unwrap()),
+                "{ip} should be blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn blocks_additional_ipv6_special_use_ranges() {
+        for ip in [
+            "100::1",
+            "2001:2::1",
+            "2001:db8::1",
+            "2001:10::1",
+            "2001:20::1",
+            "2002::1",
+            "3fff::1",
+            "5f00::1",
+        ] {
+            assert!(
+                is_blocked_address(ip.parse().unwrap()),
+                "{ip} should be blocked"
+            );
+        }
+    }
+
     #[tokio::test]
     #[serial]
     async fn resolver_rejects_a_hostname_that_only_resolves_to_loopback() {
@@ -399,7 +486,7 @@ mod tests {
         unsafe {
             std::env::remove_var(INSECURE_OPT_IN_VAR);
         }
-        let resolver = SsrfSafeResolver;
+        let resolver = SsrfSafeResolver::default();
         let name: reqwest::dns::Name = "localhost".parse().unwrap();
         let result = resolver.resolve(name).await;
         assert!(
@@ -416,7 +503,7 @@ mod tests {
         unsafe {
             std::env::set_var(INSECURE_OPT_IN_VAR, "1");
         }
-        let resolver = SsrfSafeResolver;
+        let resolver = SsrfSafeResolver::default();
         let name: reqwest::dns::Name = "localhost".parse().unwrap();
         let result = resolver.resolve(name).await;
         unsafe {

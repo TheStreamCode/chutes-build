@@ -1,6 +1,6 @@
 # Token Efficiency Plan
 
-## Implementation status (2026-07-19)
+## Implementation status (reviewed 2026-07-26)
 
 The low-risk foundation is implemented:
 
@@ -13,6 +13,8 @@ The low-risk foundation is implemented:
 - a deterministic local micro-benchmark compares exact-body project-instruction
   deduplication and compact typed-media receipts against their legacy forms,
   including explicit content-preservation invariants.
+- repeated identical tool-call signatures now receive one corrective reminder
+  and terminate at a bounded threshold; repeated `true` no-ops stop earlier.
 
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped

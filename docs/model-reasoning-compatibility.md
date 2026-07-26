@@ -4,8 +4,9 @@ Chutes Build exposes reasoning controls only when the deployed model's published
 chat template supports them. A model advertising `reasoning` does not imply that
 its effort can be changed.
 
-Verified against the Chutes catalog and upstream Hugging Face artifacts on
-2026-07-19.
+This table is a verified compatibility snapshot from 2026-07-19. The live
+Chutes catalog and explicit per-model menus remain authoritative; the runtime
+does not assume that this snapshot describes models added later.
 
 | Chutes model | Upstream control | Chutes Build choices |
 | --- | --- | --- |

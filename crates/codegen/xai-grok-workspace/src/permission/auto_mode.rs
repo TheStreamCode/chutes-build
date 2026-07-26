@@ -466,6 +466,126 @@ fn classify_bash(cmd: &str) -> ClassifierVerdict {
     ClassifierVerdict::Block
 }
 
+/// A narrower subset of the heuristic used for the no-latency pre-pass.
+/// Commands that execute project-controlled code or mutate repository state
+/// must be decided by the model (or a normal permission prompt if it is not
+/// available), even though the broader heuristic can still describe them as
+/// routine development work.
+fn bash_is_deterministic_read_only(cmd: &str) -> bool {
+    if classify_bash(cmd) != ClassifierVerdict::Allow {
+        return false;
+    }
+    let Some(tree) = try_parse_shell(cmd) else {
+        return false;
+    };
+    let Some(commands) = try_parse_word_only_commands_sequence(&tree, cmd) else {
+        return false;
+    };
+    !commands.is_empty()
+        && commands
+            .iter()
+            .all(|command| command_is_deterministic_read_only(command.words()))
+}
+
+fn command_is_deterministic_read_only(words: &[String]) -> bool {
+    let inner = unwrap_wrappers(words);
+    if inner.is_empty() {
+        return false;
+    }
+    let head = inner[0]
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(inner[0].as_str())
+        .to_ascii_lowercase();
+    if head == "git" {
+        return git_command_is_read_only(inner);
+    }
+    if head == "gh" {
+        return gh_subcommand_is_read_only(inner);
+    }
+    if head == "find" {
+        return find_is_read_only(inner);
+    }
+    matches!(
+        head.as_str(),
+        "cd" | "pushd"
+            | "popd"
+            | "ls"
+            | "pwd"
+            | "echo"
+            | "printf"
+            | "cat"
+            | "head"
+            | "tail"
+            | "wc"
+            | "rg"
+            | "grep"
+            | "which"
+            | "type"
+            | "true"
+            | "false"
+            | "test"
+            | "sort"
+            | "uniq"
+            | "tr"
+            | "cut"
+            | "diff"
+            | "jq"
+            | "date"
+            | "whoami"
+            | "hostname"
+            | "uname"
+            | "nproc"
+            | "stat"
+            | "file"
+            | "tree"
+            | "basename"
+            | "dirname"
+            | "realpath"
+            | "readlink"
+            | "strings"
+            | "sleep"
+            | "df"
+            | "du"
+            | "ps"
+            | "top"
+            | "htop"
+    )
+}
+
+fn git_command_is_read_only(inner: &[String]) -> bool {
+    let Some(subcommand) = inner.get(1).map(|value| value.to_ascii_lowercase()) else {
+        return false;
+    };
+    match subcommand.as_str() {
+        "status" | "diff" | "log" | "show" | "blame" | "ls-files" | "rev-parse" | "describe"
+        | "merge-base" => true,
+        "grep" => !inner.iter().skip(2).any(|word| {
+            let flag = word.split('=').next().unwrap_or(word);
+            word.starts_with("-O")
+                || (flag.starts_with("--o") && "--open-files-in-pager".starts_with(flag))
+        }),
+        "worktree" => inner.get(2).is_some_and(|value| value == "list"),
+        "branch" => !inner.iter().skip(2).any(|value| {
+            matches!(
+                value.as_str(),
+                "-d" | "-D"
+                    | "-m"
+                    | "-M"
+                    | "-c"
+                    | "-C"
+                    | "--delete"
+                    | "--move"
+                    | "--copy"
+                    | "--edit-description"
+                    | "--set-upstream-to"
+                    | "--unset-upstream"
+            )
+        }),
+        _ => false,
+    }
+}
+
 /// One parsed command is routine if, after peeling canonical wrappers, its inner
 /// command matches [`ROUTINE_PREFIXES`] on a word boundary (equal, or prefix then
 /// a space — plain `starts_with` over-matches `top`→`topgrade`, `ls`→`lsof`).
@@ -1293,12 +1413,11 @@ pub type ClassifyTextChannel = tokio::sync::mpsc::UnboundedSender<(
 )>;
 
 /// Production auto-mode classifier. Order of decision:
-/// 1. deterministic [`HeuristicPermissionClassifier`] pre-pass — a provably
-///    routine, side-effect-free action allows immediately (no model call);
+/// 1. deterministic [`HeuristicPermissionClassifier`] pre-pass — only a
+///    provably read-only shell action allows immediately (no model call);
 /// 2. the injected side-query (LLM) when present;
-/// 3. the heuristic's (non-Allow) verdict when the model is unavailable /
-///    unparseable, so the gate never silent-always-approves without *some*
-///    conversation-aware decision.
+/// 3. a normal permission prompt when the model is unavailable, fails, or
+///    returns an unparseable response.
 ///
 /// Tradeoff of (1): conversational deny guidance cannot veto a provably-routine
 /// command (only the hostile-intent scan gates the pre-pass); durable
@@ -1373,16 +1492,18 @@ impl PermissionClassifier for LlmPermissionClassifier {
         context: ClassifierContext,
     ) -> Pin<Box<dyn Future<Output = ClassifierOutcome> + Send + 'a>> {
         Box::pin(async move {
-            // Deterministic pre-pass: a provable heuristic Allow skips the model
-            // (no side-query latency, no false block); anything unprovable still
-            // gets the model verdict.
+            // Deterministic pre-pass: only provably read-only shell commands
+            // skip the model. Code runners and repository mutations always go
+            // through the side-query or a normal permission prompt.
             let heuristic = HeuristicPermissionClassifier::classify_sync(
                 tool_name,
                 access,
                 access_detail,
                 &context,
             );
-            if heuristic == ClassifierVerdict::Allow {
+            if heuristic == ClassifierVerdict::Allow
+                && matches!(access, AccessKind::Bash(command) if bash_is_deterministic_read_only(command))
+            {
                 return ClassifierVerdict::Allow.into();
             }
             let messages = build_classifier_messages(
@@ -1396,17 +1517,20 @@ impl PermissionClassifier for LlmPermissionClassifier {
             let model_text = if let Some(ref tx) = self.classify_channel {
                 let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
                 if tx.send((messages, resp_tx)).is_err() {
-                    None
+                    return ClassifierVerdict::Unavailable.into();
                 } else {
                     match resp_rx.await {
                         Ok(Ok(text)) => Some(text),
-                        Ok(Err(_)) | Err(_) => None,
+                        Ok(Err(_)) | Err(_) => return ClassifierVerdict::Unavailable.into(),
                     }
                 }
             } else if let Some(ref classify_text) = self.classify_text {
-                (classify_text(messages).await).ok()
+                match classify_text(messages).await {
+                    Ok(text) => Some(text),
+                    Err(_) => return ClassifierVerdict::Unavailable.into(),
+                }
             } else {
-                None
+                return ClassifierVerdict::Unavailable.into();
             };
             if let Some(text) = model_text {
                 let outcome = parse_classifier_model_output(&text);
@@ -1414,9 +1538,8 @@ impl PermissionClassifier for LlmPermissionClassifier {
                     return outcome;
                 }
             }
-            // Model unavailable / unparseable: fall back to the heuristic verdict
-            // computed above (non-Allow here — Allow already short-circuited).
-            heuristic.into()
+            // An unparseable classifier response is not an authorization.
+            ClassifierVerdict::Unavailable.into()
         })
     }
 }
@@ -2372,10 +2495,9 @@ mod tests {
         ));
     }
 
-    /// Side-query errors / unparseable model text must fall back to the
-    /// transcript-aware heuristic (not silent always-allow).
+    /// Side-query errors and unparseable model text must force a normal prompt.
     #[tokio::test]
-    async fn side_query_error_and_unparseable_fall_back_to_heuristic() {
+    async fn side_query_error_and_unparseable_are_unavailable() {
         let err_clf = LlmPermissionClassifier {
             classify_text: Some(Arc::new(|_m: Vec<ClassifierMessage>| {
                 Box::pin(async { Err("timeout".into()) })
@@ -2384,7 +2506,6 @@ mod tests {
             fallback: HeuristicPermissionClassifier,
             prompt_type: ClassifierPromptType::Full,
         };
-        // cargo is heuristic-allow when side-query fails
         assert_eq!(
             err_clf
                 .classify(
@@ -2395,9 +2516,8 @@ mod tests {
                 )
                 .await
                 .verdict,
-            ClassifierVerdict::Allow
+            ClassifierVerdict::Unavailable
         );
-        // dangerous stays blocked via heuristic
         assert_eq!(
             err_clf
                 .classify(
@@ -2408,7 +2528,7 @@ mod tests {
                 )
                 .await
                 .verdict,
-            ClassifierVerdict::Block
+            ClassifierVerdict::Unavailable
         );
 
         let garbage = LlmPermissionClassifier::with_fixed_model_text("not-json-at-all");
@@ -2422,15 +2542,14 @@ mod tests {
                 )
                 .await
                 .verdict,
-            ClassifierVerdict::Allow,
-            "unparseable model text → heuristic allow for cargo"
+            ClassifierVerdict::Unavailable,
+            "unparseable model text must not authorize cargo"
         );
     }
 
-    /// Channel closed / send failure falls through to heuristic (production
-    /// path when session LocalSet worker dies).
+    /// Channel closed / send failure forces a normal permission prompt.
     #[tokio::test]
-    async fn classify_channel_closed_falls_back_to_heuristic() {
+    async fn classify_channel_closed_is_unavailable() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(
             Vec<ClassifierMessage>,
             tokio::sync::oneshot::Sender<Result<String, String>>,
@@ -2447,7 +2566,7 @@ mod tests {
             )
             .await
             .verdict,
-            ClassifierVerdict::Allow
+            ClassifierVerdict::Unavailable
         );
     }
 
@@ -2471,18 +2590,22 @@ mod tests {
             .await
             .verdict
         };
-        // Provably routine chains (incl. the reported `find; grep` repro) must
-        // allow despite the model saying block.
+        // Provably read-only chains must allow despite the model saying block.
         for cmd in [
-            "cargo test",
             "find /repo/templates -name '*boostback*' 2>/dev/null; grep -rn boostback_burn /repo/templates --include '*.template'",
-            "cd crates && cargo build",
             "git status && git diff | head -50",
         ] {
             assert_eq!(
                 v(block_all.clone(), cmd).await,
                 ClassifierVerdict::Allow,
                 "pre-pass must allow provably-routine `{cmd}` without the model"
+            );
+        }
+        for cmd in ["cargo test", "cd crates && cargo build", "git fetch"] {
+            assert_eq!(
+                v(block_all.clone(), cmd).await,
+                ClassifierVerdict::Block,
+                "code execution or repository mutation must reach the model for `{cmd}`"
             );
         }
         // Not provable by the heuristic → the model verdict decides.

@@ -7491,6 +7491,29 @@ pub(crate) mod tests {
         assert!(app.agents[&id].session.state.is_turn_running());
     }
     #[test]
+    fn esc_from_non_vim_prompt_cancels_running_turn() {
+        let mut app = test_app_with_agent();
+        let id = super::super::agent::AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = false;
+        agent.session.state = AgentState::TurnRunning;
+        agent.active_pane = crate::views::agent::ActivePane::Prompt;
+        agent.prompt.textarea.set_text("draft while streaming");
+
+        let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
+        );
+        assert_eq!(
+            app.agents[&id].prompt.textarea.text(),
+            "draft while streaming",
+            "cancelling must preserve the queued draft"
+        );
+    }
+    #[test]
     fn esc_from_prompt_pane_running_turn_with_draft_is_swallowed_not_clear() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);

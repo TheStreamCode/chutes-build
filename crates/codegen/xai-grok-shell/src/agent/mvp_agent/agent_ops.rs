@@ -241,6 +241,67 @@ impl MvpAgent {
             }
         });
     }
+    /// Push a freshly fetched managed-MCP catalog into every live session.
+    /// The disk/config merge happens off the `mcp/list` response path.
+    pub(crate) fn sync_fresh_managed_mcp_to_sessions(
+        &self,
+        managed: &[crate::session::managed_mcp::ManagedMcpConfig],
+    ) {
+        let sessions: Vec<_> = self
+            .sessions
+            .borrow()
+            .values()
+            .map(|handle| {
+                (
+                    handle.cmd_tx.clone(),
+                    handle.info.cwd.clone(),
+                    handle.initial_client_mcp_servers.clone(),
+                )
+            })
+            .collect();
+        if sessions.is_empty() {
+            return;
+        }
+        let compat = self.cfg.borrow().compat_resolved;
+        let plugin_snapshot = self.plugin_registry_handle.snapshot();
+        let managed = managed.to_vec();
+        tokio::task::spawn_local(async move {
+            let mut updated = 0u32;
+            for (cmd_tx, cwd, initial_client_mcp_servers) in sessions {
+                let cwd = std::path::PathBuf::from(cwd);
+                if crate::session::managed_mcp::merge_and_send_managed_mcp_update(
+                    &cmd_tx,
+                    &cwd,
+                    initial_client_mcp_servers,
+                    &managed,
+                    plugin_snapshot.as_deref(),
+                    &compat,
+                ) {
+                    updated += 1;
+                }
+            }
+            if updated > 0 {
+                tracing::info!(
+                    updated,
+                    managed_count = managed.len(),
+                    "synced fresh managed MCP catalog into live sessions"
+                );
+            }
+        });
+    }
+    /// Rebuild the `search_tool` MCP index in every live session after a fresh
+    /// gateway catalog has committed.
+    pub(crate) fn refresh_mcp_search_index_in_sessions(&self) {
+        let session_txs: Vec<_> = self
+            .sessions
+            .borrow()
+            .values()
+            .map(|handle| handle.cmd_tx.clone())
+            .collect();
+        for tx in session_txs {
+            let _ = tx.send(SessionCommand::RefreshMcpSearchIndex);
+        }
+    }
     /// Resolve the launch dir's project-scope trust verdict ONCE and return it
     /// with its path.
     ///

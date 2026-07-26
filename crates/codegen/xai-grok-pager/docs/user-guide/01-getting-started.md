@@ -1,49 +1,53 @@
 # Getting Started
 
-Chutes Build is a terminal coding agent for the Chutes ecosystem.
+Chutes Build is a privacy-first terminal coding agent for the Chutes ecosystem.
 
-## Build
+## Install
+
+Published packages include a native executable:
 
 ```powershell
-cargo build -p chutes-build --release
+npm install -g chutes-build
+chutes-build
 ```
 
-Run `target\release\chutes-build.exe` on Windows or
-`target/release/chutes-build` on macOS and Linux.
+Source builds use `cargo build -p chutes-build --release`.
 
 ## Authenticate
 
-Run `chutes-build` and press `l` to sign in with Chutes through the browser, or
-press `k` to enter an API key. For a non-interactive environment:
+An API key is the most reliable first-run path. Press `k`, run `/apikey`, or
+use the hidden local prompt:
+
+```powershell
+chutes-build login
+```
+
+For a process-local key:
 
 ```powershell
 $env:CHUTES_API_KEY = "your-api-key"
 chutes-build
 ```
 
-`chutes-build login` stores an API key through a hidden prompt. `/login` and
-`/apikey` reopen the corresponding TUI choices.
+Press `l` or run `/login` for browser OAuth + PKCE. If the bundled client is
+rejected with `invalid_client`, use an API key or configure a registered Chutes
+OAuth client ID and secret through the environment.
 
-`Auto (Chutes Router)` is the first model choice and the default when no model
-preference has been saved. Its stable ID is `model-router`. Use `/model` in an
-interactive session or `--model <id>` at launch to select a concrete model. Run
-`chutes-build models` to inspect the current catalog, or add `--json` for
-machine-readable output.
+## Start safely
 
-When a concrete model supports configurable reasoning, the model picker shows
-only its valid modes. Use `/effort` to change the mode later. Auto and
-fixed-reasoning models do not show an effort selector.
+Run Chutes Build from the repository you want it to inspect. Keep permission
+prompts enabled, review commands before approval, and treat repository
+instructions, model output, websites, MCP servers, and plugins as untrusted.
 
-After account usage loads, the status bar shows the current Chutes plan and the
-rolling four-hour/monthly percentages when available. Its color follows the
-most constrained window. Click it or run `/usage` to inspect every active
-window and reset time.
+`Auto (Chutes Router)` is the first model choice and default when no preference
+has been saved. Use `/model` or `--model <id>` to choose a concrete model and
+`/effort` for one of that model's supported reasoning modes. Run
+`chutes-build models --json` for a machine-readable catalog.
 
-Chutes Build can inspect and edit files, execute commands, invoke MCP tools,
-start subagents, search the web, and control an isolated browser. Review tool
-requests before approval, especially in untrusted repositories.
+The status bar shows available Chutes plan/quota windows. Click it or run
+`/usage` for details. Use `/help` for commands, `/docs` for these guides, and
+`--no-memory` when the session must be stateless.
 
-For Chutes-specific questions, the main agent and subagents check the official
-[documentation](https://chutes.ai/docs) and [news](https://chutes.ai/news)
-before answering. When current official verification is unavailable, the agent
-must say so.
+For Chutes-specific questions, the main agent and subagents consult official
+[documentation](https://chutes.ai/docs) and [news](https://chutes.ai/news).
+When current official verification is unavailable, they must say so.

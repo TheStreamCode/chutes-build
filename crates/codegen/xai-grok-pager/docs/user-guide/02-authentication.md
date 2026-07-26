@@ -1,10 +1,26 @@
 # Authentication
 
-Chutes Build supports browser-based OAuth 2.0 + PKCE and Chutes API keys.
-Press `l` on the welcome screen or use `/login` for OAuth. The built-in public
-client does not require a client secret.
+Chutes Build supports Chutes API keys and browser OAuth 2.0 Authorization Code
+with PKCE.
 
-Custom OAuth clients can be supplied without persisting their secret:
+## API keys
+
+Press `k`, run `/apikey`, or use `chutes-build login` for hidden local input.
+For a process-local credential:
+
+```powershell
+$env:CHUTES_API_KEY = "your-api-key"
+```
+
+`login --api-key-stdin` is intended only for protected automation. Avoid
+command-line secret values because process listings and shell history may expose
+them.
+
+## Browser OAuth
+
+Press `l` or run `/login`. Chutes OAuth applications may require a registered
+client ID and client secret. Chutes Build reads both from the environment and
+never persists the secret:
 
 ```powershell
 $env:CHUTES_BUILD_OAUTH2_CLIENT_ID = "cid_..."
@@ -12,28 +28,20 @@ $env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."
 chutes-build
 ```
 
-The secret is used for both token exchange and refresh when configured.
+The secret is used for token exchange and refresh when configured. If the
+bundled client returns `invalid_client`, use an API key or configure a dedicated
+registered application.
 
-For API-key authentication, the recommended environment variable is
-`CHUTES_API_KEY`.
-
-```powershell
-$env:CHUTES_API_KEY = "your-api-key"
-```
-
-`chutes-build login` stores a key using the local credential mechanism. Use
-`chutes-build login --api-key-stdin` only in automation where stdin is already
-protected.
+## Credential boundaries
 
 Ambient Chutes credentials are attached only to allowlisted official HTTPS
-Chutes and Chutes-router hosts. They are never forwarded to custom endpoints,
-Context7, web search, arbitrary pages, browser automation, plugins, or MCP
-servers.
+Chutes/router hosts. They are never forwarded to custom endpoints, Context7,
+web search, arbitrary pages, browser automation, plugins, or MCP servers.
 
 Custom inference models must configure their own `api_key` or `env_key`. A
-custom model-catalog endpoint uses `CHUTES_MODELS_API_KEY`; it never receives
+custom model catalog uses `CHUTES_MODELS_API_KEY` and never receives
 `CHUTES_API_KEY` implicitly.
 
-Never place API keys in prompts, source code, `memories.md`, committed config,
-or command-line arguments. Rotate a key immediately if it appears in logs,
-screenshots, chat history, or a public repository.
+Never place secrets in prompts, source code, `memories.md`, committed config,
+logs, or screenshots. Rotate a credential immediately after accidental
+exposure.

@@ -744,6 +744,10 @@ impl AgentView {
         }
     }
 
+    /// How long after an Esc-fired cancel the idle rewind arm stays suppressed.
+    pub(crate) const ESC_CANCEL_REWIND_GRACE: std::time::Duration =
+        std::time::Duration::from_millis(1000);
+
     /// Esc policy (Prompt/Scrollback after overlay steal).
     ///
     /// Call only after overlay / dropdown / search / selection declined Esc.
@@ -763,13 +767,18 @@ impl AgentView {
         // handling the Esc, a following `d` is the user's text, not a dump.
         self.esc_pressed_at = None;
 
-        // Mid-turn running: swallow Esc (do not cancel or arm clear/rewind).
-        if self.session.state.is_turn_running() {
+        // Fullscreen vim keeps Esc for navigation; minimal/non-vim cancels the
+        // running turn immediately from either prompt or scrollback.
+        if self.session.state.is_turn_running()
+            && !crate::app::esc_cancels_turn(crate::app::minimal_mode_active(), self.vim_mode)
+        {
             return Some(InputOutcome::Changed);
         }
-        // Stuck cancel: re-send CancelTurn (Ctrl+C escalates to Quit instead).
-        if self.session.state.is_cancelling() {
+        // A stuck cancellation re-sends the request. The grace prevents a fast
+        // second Esc from becoming an idle rewind gesture after cancellation.
+        if self.session.state.is_turn_running() || self.session.state.is_cancelling() {
             self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::Esc);
+            self.suppress_rewind_arm(std::time::Instant::now());
             return Some(InputOutcome::Action(Action::CancelTurn));
         }
 
@@ -814,6 +823,7 @@ impl AgentView {
             && self.prompt_input_mode == PromptInputMode::Normal
             && self.no_input_overlay_pending()
             && !self.prompt.history_search.is_active()
+            && !self.rewind_arm_suppressed(std::time::Instant::now())
         {
             return Some(InputOutcome::ArmPending {
                 action: Action::RewindShowPicker,
@@ -828,6 +838,21 @@ impl AgentView {
         // pending needs-input overlay / open history search): swallow Esc (not
         // FocusScrollback, and not a bubble-up to global quit).
         Some(InputOutcome::Changed)
+    }
+
+    pub(crate) fn suppress_rewind_arm(&mut self, now: std::time::Instant) {
+        self.rewind_suppress_deadline = Some(now + Self::ESC_CANCEL_REWIND_GRACE);
+    }
+
+    pub(crate) fn rewind_arm_suppressed(&mut self, now: std::time::Instant) -> bool {
+        match self.rewind_suppress_deadline {
+            Some(deadline) if now < deadline => true,
+            Some(_) => {
+                self.rewind_suppress_deadline = None;
+                false
+            }
+            None => false,
+        }
     }
 
     /// Put a history entry into the composer (browse-mode live populate and

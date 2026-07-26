@@ -292,6 +292,9 @@ pub struct CopySessionResult {
     /// Number of `compaction/segment_*.md` (+ `INDEX.md`) files copied from the
     /// source session's compaction archive. `0` when disabled or none exist.
     pub compaction_segments_copied: usize,
+    /// Number of checkpoint JSON files referenced by copied updates and copied
+    /// into the fork. A fork needs these files for later cross-compaction rewind.
+    pub compaction_checkpoints_copied: usize,
 }
 
 /// Options for copying session data during fork

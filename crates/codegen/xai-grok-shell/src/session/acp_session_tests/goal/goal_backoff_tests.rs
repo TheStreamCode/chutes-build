@@ -862,12 +862,14 @@ fn sample_turn_invalid_request_err() -> PromptTurnResult {
 }
 
 async fn simulate_completion_with_result(actor: &SessionActor, result: PromptTurnResult) {
-    let (turn_succeeded, infra_pause_message) =
+    let (turn_succeeded, suppress_goal_continuation, infra_pause_message) =
         SessionActor::post_turn_goal_degradation_plan(&result);
     if let Some(message) = infra_pause_message {
         actor.apply_infra_pause_after_turn_err(message).await;
     }
-    actor.handle_turn_end(turn_succeeded).await;
+    actor
+        .handle_turn_end(turn_succeeded, suppress_goal_continuation)
+        .await;
 }
 
 fn agent_message_text_from_notification(n: &acp::SessionNotification) -> Option<String> {

@@ -1,10 +1,11 @@
 name: Dependabot auto-merge
 
-# Enables auto-merge on Dependabot's patch and minor updates. GitHub then merges
+# Enables auto-merge on Dependabot's patch updates. GitHub then merges
 # them once the branch protection checks pass — a red build never lands.
 #
-# Major bumps are deliberately excluded: they are the ones that break builds, and
-# they stay open for a human to read.
+# Minor and major bumps stay open for human review. This is especially important
+# for the large Rust workspace and for pre-1.0 dependencies, where a semver-minor
+# update can still contain meaningful behavior changes.
 #
 # No step approves anything. The branch protection on these repositories requires
 # passing status checks but not an approving review, so auto-merge is satisfied by
@@ -38,16 +39,14 @@ jobs:
         id: meta
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
-      - name: Enable auto-merge for patch and minor updates
-        if: |
-          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-          steps.meta.outputs.update-type == 'version-update:semver-minor'
+      - name: Enable auto-merge for patch updates
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Leave major updates for manual review
-        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+      - name: Leave minor and major updates for manual review
+        if: steps.meta.outputs.update-type != 'version-update:semver-patch'
         run: |
-          echo "::notice::Major update (${{ steps.meta.outputs.dependency-names }}) left for manual review."
+          echo "::notice::${{ steps.meta.outputs.update-type }} update (${{ steps.meta.outputs.dependency-names }}) left for manual review."

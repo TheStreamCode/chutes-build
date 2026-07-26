@@ -59,8 +59,8 @@ use crate::session::mcp_servers::{MCP_TOOL_NAME_DELIMITER, McpClient, McpServerN
 pub struct McpListRequest {
     #[serde(default)]
     pub session_id: Option<String>,
-    /// When false, bypasses the managed MCP config cache and fetches fresh
-    /// from cli-chat-proxy. Set this after OAuth enrollment or disconnect.
+    /// When false, bypass cache and fetch fresh state, then synchronize it into
+    /// live sessions so newly enrolled tools appear without a restart.
     #[serde(default = "default_true")]
     pub cache: bool,
 }
@@ -959,6 +959,22 @@ async fn handle_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         },
         session_state_fut
     );
+
+    if !cache {
+        // A failed legacy fetch leaves the cache `NotFetched`; never replace a
+        // working live catalog with that failure-shaped empty vector. A genuine
+        // successful empty catalog is `Ready(vec![])` and must still propagate.
+        let managed_ready = matches!(
+            agent.managed_mcp_cache().lock().await.cache,
+            crate::session::managed_mcp::ManagedMcpCache::Ready(_)
+        );
+        if managed_ready {
+            agent.sync_fresh_managed_mcp_to_sessions(&managed_configs);
+        }
+        if gateway_catalog.is_some() {
+            agent.refresh_mcp_search_index_in_sessions();
+        }
+    }
 
     let compat = agent.cfg.borrow().compat_resolved;
     let plugin_registry_snapshot = agent.plugin_registry_snapshot();

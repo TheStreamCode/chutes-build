@@ -8,6 +8,10 @@ substitute for keeping credentials out of prompts. Review `memories.md` before
 committing it and add it to `.gitignore` when project memory should remain
 private.
 
+Memory is local at rest. Hybrid semantic recall sends only selected memory text
+chunks to the configured Chutes-hosted embedding route. Use `--no-memory` when
+neither local recall/writes nor that embedding request is appropriate.
+
 Start a stateless session with:
 
 ```powershell

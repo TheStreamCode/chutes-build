@@ -31,8 +31,8 @@ use super::session::fork::{
     handle_fork_session_failed, handle_fork_session_ready, handle_worktree_forked,
 };
 use super::session::lifecycle::{
-    dispatch_exit_session, handle_session_created, handle_switch_model_complete,
-    handle_worktree_session_created, handle_worktree_session_failed,
+    dispatch_exit_session, handle_session_created, handle_session_failed,
+    handle_switch_model_complete, handle_worktree_session_created, handle_worktree_session_failed,
 };
 use super::session::load::{
     handle_card_detail_loaded, handle_deep_search_results, handle_session_load_failed,
@@ -178,14 +178,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             models: new_models,
         } => handle_session_created(app, agent_id, session_id, new_models),
         TaskResult::SessionFailed { agent_id, error } => {
-            tracing::error!(
-                agent = ? agent_id, error = % error, "Session creation failed"
-            );
-            if let Some(agent) = app.agents.get_mut(&agent_id) {
-                agent.pending_extensions_fetch = false;
-                agent.session.prompt_history_loading = false;
-            }
-            vec![]
+            handle_session_failed(app, agent_id, error)
         }
         TaskResult::WorktreeSessionCreated {
             agent_id,

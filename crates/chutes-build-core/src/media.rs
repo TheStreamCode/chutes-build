@@ -14,6 +14,7 @@
 
 use futures_util::StreamExt as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::{ChutesCredentials, ChutesEndpoints};
 
@@ -33,7 +34,7 @@ impl ChutesMediaClient {
                 .timeout(std::time::Duration::from_secs(600))
                 .redirect(reqwest::redirect::Policy::none())
                 .dns_resolver(std::sync::Arc::new(
-                    crate::endpoint_policy::SsrfSafeResolver,
+                    crate::endpoint_policy::SsrfSafeResolver::default(),
                 ))
                 .build()?,
             endpoints,
@@ -160,10 +161,80 @@ fn is_chutes_url(url: &url::Url) -> bool {
 }
 
 #[derive(Debug)]
+enum MediaBody {
+    Bytes(Vec<u8>),
+    TempFile {
+        path: tempfile::TempPath,
+        byte_len: u64,
+    },
+}
+
+#[derive(Debug)]
 pub struct MediaResponse {
-    pub bytes: Vec<u8>,
+    body: MediaBody,
     pub content_type: String,
     pub cost: Option<f64>,
+}
+
+impl MediaResponse {
+    pub fn from_bytes(bytes: Vec<u8>, content_type: String, cost: Option<f64>) -> Self {
+        Self {
+            body: MediaBody::Bytes(bytes),
+            content_type,
+            cost,
+        }
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        match &self.body {
+            MediaBody::Bytes(bytes) => Some(bytes),
+            MediaBody::TempFile { .. } => None,
+        }
+    }
+
+    pub fn byte_len(&self) -> u64 {
+        match &self.body {
+            MediaBody::Bytes(bytes) => bytes.len() as u64,
+            MediaBody::TempFile { byte_len, .. } => *byte_len,
+        }
+    }
+
+    pub async fn read_prefix(&self, limit: usize) -> Result<Vec<u8>, std::io::Error> {
+        match &self.body {
+            MediaBody::Bytes(bytes) => Ok(bytes[..bytes.len().min(limit)].to_vec()),
+            MediaBody::TempFile { path, .. } => {
+                let mut file = tokio::fs::File::open(path).await?;
+                let mut bytes = vec![0; limit];
+                let read = file.read(&mut bytes).await?;
+                bytes.truncate(read);
+                Ok(bytes)
+            }
+        }
+    }
+
+    /// Copy the response into a newly-created destination without ever holding
+    /// a streamed binary response in memory or overwriting an existing file.
+    pub async fn write_new(&self, path: &std::path::Path) -> Result<(), std::io::Error> {
+        let mut output = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .await?;
+        let result = match &self.body {
+            MediaBody::Bytes(bytes) => output.write_all(bytes).await,
+            MediaBody::TempFile { path, .. } => match tokio::fs::File::open(path).await {
+                Ok(mut input) => tokio::io::copy(&mut input, &mut output).await.map(|_| ()),
+                Err(error) => Err(error),
+            },
+        };
+        if result.is_ok() {
+            output.flush().await?;
+        } else {
+            drop(output);
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        result
+    }
 }
 
 async fn response_to_media(response: reqwest::Response) -> Result<MediaResponse, MediaError> {
@@ -189,42 +260,70 @@ async fn response_to_media(response: reqwest::Response) -> Result<MediaResponse,
             .and_then(|value| value.parse().ok())
     });
     let max_bytes = max_media_bytes();
+    let collect_in_memory =
+        !status.is_success() || content_type.to_ascii_lowercase().contains("json");
+    let response_limit = if collect_in_memory {
+        max_bytes.min(32 * 1024 * 1024)
+    } else {
+        max_bytes
+    };
     if response
         .content_length()
-        .is_some_and(|length| length > max_bytes as u64)
+        .is_some_and(|length| length > response_limit as u64)
     {
-        return Err(MediaError::TooLarge { max_bytes });
-    }
-    let mut bytes = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(max_bytes as u64) as usize,
-    );
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        if bytes.len().saturating_add(chunk.len()) > max_bytes {
-            return Err(MediaError::TooLarge { max_bytes });
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    if !status.is_success() {
-        return Err(MediaError::Http {
-            status: status.as_u16(),
-            body: String::from_utf8_lossy(&bytes).chars().take(500).collect(),
+        return Err(MediaError::TooLarge {
+            max_bytes: response_limit,
         });
     }
+    let content_length = response.content_length().unwrap_or_default();
+    let mut stream = response.bytes_stream();
+    if collect_in_memory {
+        let mut bytes = Vec::with_capacity(content_length.min(response_limit as u64) as usize);
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if bytes.len().saturating_add(chunk.len()) > response_limit {
+                return Err(MediaError::TooLarge {
+                    max_bytes: response_limit,
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return Err(MediaError::Http {
+                status: status.as_u16(),
+                body: String::from_utf8_lossy(&bytes).chars().take(500).collect(),
+            });
+        }
+        return Ok(MediaResponse::from_bytes(bytes, content_type, cost));
+    }
+
+    let (temp_file, temp_path) = tempfile::NamedTempFile::new()?.into_parts();
+    let mut temp_file = tokio::fs::File::from_std(temp_file);
+    let mut byte_len = 0u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        byte_len = byte_len.saturating_add(chunk.len() as u64);
+        if byte_len > response_limit as u64 {
+            return Err(MediaError::TooLarge {
+                max_bytes: response_limit,
+            });
+        }
+        temp_file.write_all(&chunk).await?;
+    }
+    temp_file.flush().await?;
     Ok(MediaResponse {
-        bytes,
+        body: MediaBody::TempFile {
+            path: temp_path,
+            byte_len,
+        },
         content_type,
         cost,
     })
 }
 
 fn max_media_bytes() -> usize {
-    const DEFAULT: usize = 512 * 1024 * 1024;
-    const MAX: usize = 2 * 1024 * 1024 * 1024;
+    const DEFAULT: usize = 128 * 1024 * 1024;
+    const MAX: usize = 512 * 1024 * 1024;
     std::env::var("CHUTES_MAX_MEDIA_BYTES")
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
@@ -239,6 +338,8 @@ pub enum MediaError {
     EndpointTrust(#[from] crate::endpoint_policy::EndpointTrustError),
     #[error("Chutes media request failed: {0}")]
     Request(#[from] reqwest::Error),
+    #[error("failed to stage Chutes media response: {0}")]
+    Io(#[from] std::io::Error),
     #[error("Chutes returned HTTP {status}: {body}")]
     Http { status: u16, body: String },
     #[error("Chutes returned invalid JSON: {0}")]

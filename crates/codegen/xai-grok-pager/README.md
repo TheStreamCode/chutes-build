@@ -42,7 +42,8 @@ src/
 | `Ctrl+P` or `?` | Agent screen | Open command palette |
 | `Ctrl+L` | Any (non–VS Code family) | Open plugins/hooks modal; on VS Code / Cursor / Windsurf / Zed use `/plugins` or `/hooks` (`Ctrl+L` is mid-turn interject) |
 | `Tab` | Prompt | Switch to scrollback |
-| `Esc` | Turn running | No-op (does not cancel; use `Ctrl+C`) |
+| `Esc` | Turn running, non-vim or minimal mode | Cancel the turn and preserve the queued draft |
+| `Esc` | Turn running, fullscreen vim mode | Keep vim navigation semantics; use `Ctrl+C` to cancel |
 | `Esc` `Esc` | Idle, non-empty prompt | Clear prompt (within 800ms; first press shows hint) |
 | `Esc` `Esc` | Idle, empty prompt + messages | Open rewind picker (silent first press) |
 | `Ctrl+M` | Prompt | Toggle multiline mode |

@@ -16,6 +16,8 @@ pub use acp_terminal::AcpTerminalRunner;
 pub mod adapter;
 pub use adapter::AcpTerminalAdapter;
 
+mod output_recorder;
+
 pub mod pty_session;
 
 pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);

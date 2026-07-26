@@ -14,7 +14,7 @@ body:
     attributes:
       label: Chutes Build version
       description: Run `chutes-build --version` or provide the source revision.
-      placeholder: 0.1.0
+      placeholder: 0.4.0 or commit SHA
     validations:
       required: true
   - type: dropdown

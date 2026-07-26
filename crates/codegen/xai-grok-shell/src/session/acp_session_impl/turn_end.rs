@@ -358,12 +358,20 @@ impl SessionActor {
         )
     }
 
-    /// `(turn_succeeded, infra_pause_message)` for the completion handler.
+    /// `(turn_succeeded, suppress_goal_continuation, infra_pause_message)` for
+    /// the completion handler. Stationarity is successful but must not reopen
+    /// the same loop through autonomous goal continuation.
     /// `infra_pause_message` is extracted before `handle_completion` consumes
     /// `result`.
     pub(super) fn post_turn_goal_degradation_plan(
         result: &PromptTurnResult,
-    ) -> (bool, Option<String>) {
+    ) -> (bool, bool, Option<String>) {
+        let suppress_goal_continuation = result.as_ref().ok().is_some_and(|ok| {
+            matches!(
+                ok.completion_kind,
+                crate::session::commands::PromptCompletionKind::StationarityEnded
+            )
+        });
         let turn_cancelled = result.as_ref().ok().is_some_and(|ok| {
             matches!(
                 ok.completion_kind,
@@ -377,7 +385,11 @@ impl SessionActor {
             .err()
             .filter(|err| Self::is_infra_turn_error(err))
             .map(Self::format_turn_error_message);
-        (turn_succeeded, infra_pause_message)
+        (
+            turn_succeeded,
+            suppress_goal_continuation,
+            infra_pause_message,
+        )
     }
 
     pub(super) async fn apply_infra_pause_after_turn_err(&self, message: String) -> bool {

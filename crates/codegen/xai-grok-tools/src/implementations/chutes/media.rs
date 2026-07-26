@@ -302,7 +302,11 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             .map_err(|error| execution_error("generate_media", error))?;
         assert_content_type(input.kind, &media.content_type)
             .map_err(|error| execution_error("generate_media", error))?;
-        let detected = verify_media_content(input.kind, &media.bytes)
+        let sniff = media
+            .read_prefix(8 * 1024)
+            .await
+            .map_err(|error| execution_error("generate_media", error))?;
+        let detected = verify_media_content(input.kind, &sniff)
             .map_err(|error| execution_error("generate_media", error))?;
 
         let configured_output = input.output_dir.clone().or_else(|| {
@@ -345,12 +349,13 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
         };
         let sidecar = write_artifact_bundle(
             &path,
-            &media.bytes,
+            &media,
             provenance.as_deref(),
             &format!("{extension}.provenance.json"),
         )
         .await
         .map_err(|error| execution_error("generate_media", error))?;
+        let byte_len = media.byte_len();
 
         Ok(ToolOutput::MediaArtifact(MediaArtifact {
             schema_version: MediaArtifact::SCHEMA_VERSION,
@@ -362,7 +367,7 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             },
             path,
             mime_type: media.content_type,
-            byte_len: media.bytes.len() as u64,
+            byte_len,
             provenance_path: sidecar,
             provider: "chutes".to_owned(),
             model: input.model,
@@ -768,8 +773,11 @@ async fn resolve_media_response(
     if !response.content_type.to_lowercase().contains("json") {
         return Ok(response);
     }
+    let response_bytes = response
+        .bytes()
+        .ok_or_else(|| "JSON media response was not available in memory".to_owned())?;
     let value: serde_json::Value =
-        serde_json::from_slice(&response.bytes).map_err(|error| error.to_string())?;
+        serde_json::from_slice(response_bytes).map_err(|error| error.to_string())?;
     let candidate = find_asset_string(&value)
         .ok_or_else(|| "model returned JSON without a recognizable media asset".to_owned())?;
     if let Some((metadata, encoded)) = candidate
@@ -783,11 +791,11 @@ async fn resolve_media_response(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded.trim())
             .map_err(|error| error.to_string())?;
-        return Ok(MediaResponse {
+        return Ok(MediaResponse::from_bytes(
             bytes,
-            content_type: content_type.to_owned(),
-            cost: response.cost,
-        });
+            content_type.to_owned(),
+            response.cost,
+        ));
     }
     if candidate.starts_with("https://") || candidate.starts_with("http://") {
         let mut downloaded = client
@@ -800,11 +808,11 @@ async fn resolve_media_response(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(candidate.trim())
         .map_err(|error| error.to_string())?;
-    Ok(MediaResponse {
+    Ok(MediaResponse::from_bytes(
         bytes,
-        content_type: default_content_type(kind).to_owned(),
-        cost: response.cost,
-    })
+        default_content_type(kind).to_owned(),
+        response.cost,
+    ))
 }
 
 fn find_asset_string(value: &serde_json::Value) -> Option<&str> {
@@ -898,11 +906,11 @@ async fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error>
 
 async fn write_artifact_bundle(
     media_path: &Path,
-    media_bytes: &[u8],
+    media: &MediaResponse,
     provenance: Option<&[u8]>,
     provenance_extension: &str,
 ) -> Result<Option<PathBuf>, std::io::Error> {
-    write_new_file(media_path, media_bytes).await?;
+    media.write_new(media_path).await?;
     let Some(provenance) = provenance else {
         return Ok(None);
     };
@@ -1316,7 +1324,7 @@ mod tests {
 
         let result = write_artifact_bundle(
             &path,
-            b"new media",
+            &MediaResponse::from_bytes(b"new media".to_vec(), "image/png".to_owned(), None),
             Some(b"new provenance"),
             "png.provenance.json",
         )

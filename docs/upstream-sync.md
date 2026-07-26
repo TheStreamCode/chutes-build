@@ -8,8 +8,8 @@ are monitored, but they are never merged or released automatically.
 The daily `Upstream watch` workflow checks both the latest GitHub release and
 the head of upstream `main`. Upstream currently has no published releases or
 tags, so commit monitoring is the active signal. When the reviewed baseline is
-outdated, the workflow opens one review issue and remains quiet while that issue
-is open.
+outdated, the workflow opens one review issue and refreshes its body while that
+issue remains open, so the recorded current commit/version never goes stale.
 
 The last reviewed commit, upstream source version, and release are recorded in
 `.github/upstream.json`. These values are independent of the Chutes Build
@@ -35,6 +35,12 @@ below.
 7. Set `lastReviewedCommit`, `lastReviewedVersion`, `lastReviewedRelease`, and
    `reviewedAt` to the state actually reviewed, then close the upstream review
    issue.
+
+Do not advance the baseline when a required build/test gate times out or remains
+inconclusive. Record the port in `CHANGELOG.md`, keep the review issue current,
+and advance the baseline only after local or CI evidence closes the gap. The
+generated root `Cargo.toml` is not an upstream-port edit surface; change the
+owning crate manifest or generator instead.
 
 ## Local inspection
 

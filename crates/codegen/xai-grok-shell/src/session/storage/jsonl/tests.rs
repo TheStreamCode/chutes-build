@@ -585,6 +585,69 @@ async fn copy_session_data_copies_compaction_segments_when_enabled() {
         .join(xai_chat_state::compaction_transcript::COMPACTION_DIR).exists()
     );
 }
+fn checkpoint_record(id: &str) -> SessionUpdate {
+    use crate::extensions::notification::{
+        CompactionCheckpointInfo, SessionNotification as XaiSessionNotification,
+        SessionUpdate as XaiSessionUpdateType,
+    };
+    SessionUpdate::Xai(Box::new(XaiSessionNotification {
+        session_id: acp::SessionId::new("ckpt-src"),
+        update: XaiSessionUpdateType::CompactionCheckpoint(Box::new(CompactionCheckpointInfo {
+            checkpoint_id: id.to_string(),
+            prompt_index_at_compaction: 1,
+            checkpoint_file: format!("compaction_checkpoints/{id}.json"),
+            auto_continue: None,
+            schema_version: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        })),
+        meta: None,
+    }))
+}
+#[tokio::test]
+async fn copy_session_data_copies_referenced_compaction_checkpoint() {
+    use crate::extensions::notification::CompactionCheckpointFile;
+    let temp_dir = TempDir::new().unwrap();
+    let adapter = JsonlStorageAdapter::with_root(temp_dir.path().to_path_buf());
+    let source_info = Info {
+        id: acp::SessionId::new("ckpt-src"),
+        cwd: "/source/workspace".to_string(),
+    };
+    adapter.init_session(&source_info, default_model_id()).await.unwrap();
+    adapter
+        .append_update(&source_info, &checkpoint_record("ckpt-a"))
+        .await
+        .unwrap();
+    adapter
+        .write_compaction_checkpoint(
+            &source_info,
+            &CompactionCheckpointFile {
+                checkpoint_id: "ckpt-a".to_string(),
+                prompt_index_at_compaction: 1,
+                compacted_history: vec![],
+                schema_version: 1,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                original_user_info: None,
+                reread_file_paths: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    let target_info = Info {
+        id: acp::SessionId::new("ckpt-dst"),
+        cwd: "/target/workspace".to_string(),
+    };
+    let result = adapter
+        .copy_session_data(&source_info, &target_info, CopySessionOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(result.compaction_checkpoints_copied, 1);
+    assert!(
+        adapter
+            .session_dir(&target_info)
+            .join("compaction_checkpoints/ckpt-a.json")
+            .is_file()
+    );
+}
 #[tokio::test]
 async fn test_copy_session_data_basic() {
     let temp_dir = TempDir::new().unwrap();

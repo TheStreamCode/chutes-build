@@ -14,14 +14,14 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "net", "time"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "net", "time"] }
 url = { workspace = true }
 urlencoding = { workspace = true }
 xai-grok-secrets = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }
-tempfile = { workspace = true }
 wiremock = { workspace = true }
 
 [lints]

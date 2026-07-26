@@ -794,6 +794,12 @@ pub(crate) fn fork_filter_chat(items: &mut Vec<ConversationItem>) {
     }
     items.truncate(last_complete_end);
 }
+fn conversation_truncate_after_prompt(
+    conversation: &[ConversationItem],
+    target_prompt_index: usize,
+) -> usize {
+    conversation_truncate_for_prompt(conversation, target_prompt_index + 1)
+}
 impl JsonlStorageAdapter {
     /// Fully synchronous version of `copy_session_data` for use inside
     /// `spawn_blocking`. Identical logic but uses `std::fs::write` instead
@@ -814,13 +820,31 @@ impl JsonlStorageAdapter {
         let mut updates_to_copy: Vec<super::SessionUpdate> =
             self.read_updates_jsonl(self.updates_file(source_info))?;
         if let Some(target_idx) = options.target_prompt_index {
-            chat_to_copy.truncate(conversation_truncate_for_prompt(&chat_to_copy, target_idx));
+            updates_to_copy = super::filter_rewind_updates(updates_to_copy);
             updates_to_copy.truncate(updates_truncate_for_prompt(&updates_to_copy, target_idx));
+            chat_to_copy.truncate(conversation_truncate_after_prompt(
+                &chat_to_copy,
+                target_idx,
+            ));
         }
         if options.fork_filter {
             fork_filter_chat(&mut chat_to_copy);
             updates_to_copy.clear();
         }
+        let checkpoint_files: std::collections::BTreeSet<String> = updates_to_copy
+            .iter()
+            .filter_map(|update| {
+                let super::SessionUpdate::Xai(notification) = update else {
+                    return None;
+                };
+                let crate::extensions::notification::SessionUpdate::CompactionCheckpoint(info) =
+                    &notification.update
+                else {
+                    return None;
+                };
+                Some(info.checkpoint_file.clone())
+            })
+            .collect();
         let inherited_prefix_len = if options.fork_filter {
             Some(chat_to_copy.len())
         } else {
@@ -992,6 +1016,74 @@ impl JsonlStorageAdapter {
         } else {
             0
         };
+        let mut compaction_checkpoints_copied = 0usize;
+        let source_session_dir = self.session_dir(source_info);
+        let checkpoint_dir_usable = if checkpoint_files.is_empty() {
+            false
+        } else {
+            match std::fs::symlink_metadata(source_session_dir.join("compaction_checkpoints")) {
+                Ok(meta) if meta.file_type().is_dir() => true,
+                Ok(meta) => {
+                    tracing::warn!(
+                        file_type = ?meta.file_type(),
+                        session_id = %source_info.id,
+                        "compaction_checkpoints is not a real directory; skipping checkpoint copy",
+                    );
+                    false
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    tracing::warn!(
+                        session_id = %source_info.id,
+                        "compaction_checkpoints directory missing; skipping checkpoint copy",
+                    );
+                    false
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        if checkpoint_dir_usable {
+            for checkpoint_file in &checkpoint_files {
+                let relative = Path::new(checkpoint_file);
+                let well_formed = relative.parent() == Some(Path::new("compaction_checkpoints"))
+                    && relative.extension() == Some("json".as_ref());
+                if !well_formed {
+                    tracing::warn!(
+                        checkpoint_file = %checkpoint_file,
+                        session_id = %source_info.id,
+                        "skipping compaction checkpoint with unexpected path during copy",
+                    );
+                    continue;
+                }
+                let source = source_session_dir.join(relative);
+                match std::fs::symlink_metadata(&source) {
+                    Ok(meta) if meta.file_type().is_file() => {}
+                    Ok(meta) => {
+                        tracing::warn!(
+                            path = %source.display(),
+                            file_type = ?meta.file_type(),
+                            session_id = %source_info.id,
+                            "compaction checkpoint source is not a regular file; skipping copy",
+                        );
+                        continue;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        tracing::warn!(
+                            path = %source.display(),
+                            session_id = %source_info.id,
+                            "compaction checkpoint file missing from source; skipping copy",
+                        );
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                }
+                let destination = target_dir.join(relative);
+                if let Some(parent) = destination.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&source, &destination)?;
+                compaction_checkpoints_copied += 1;
+            }
+        }
         Ok(super::CopySessionResult {
             chat_messages_copied: num_chat_messages,
             updates_copied: num_messages,
@@ -1001,6 +1093,7 @@ impl JsonlStorageAdapter {
             tool_state_copied,
             announcement_state_copied,
             compaction_segments_copied,
+            compaction_checkpoints_copied,
         })
     }
 }

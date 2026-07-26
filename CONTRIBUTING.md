@@ -17,15 +17,36 @@ Chutes Build is a Rust workspace. Use the toolchain and dependency versions
 already selected by the repository and do not mix package managers or regenerate
 unrelated lockfiles.
 
+The root `Cargo.toml` is generated and treated as read-only. Update the owning
+crate manifest or generator source instead. Keep retained `xai-*` crate names
+stable unless a migration has an explicit upstream-sync benefit.
+
 ```powershell
-cargo check -p chutes-build
-cargo test -p chutes-build-core
+cargo check -p chutes-build --locked
+cargo test -p chutes-build-core --locked
 cargo fmt --all -- --check
 ```
 
 Run the smallest relevant tests first, then expand verification according to the
 risk of the change. Network-dependent tests must not require a contributor's
 personal credentials or make billable calls by default.
+
+## Documentation workflow
+
+Public documentation is indexed in [`docs/README.md`](docs/README.md):
+
+- keep the root README concise and product-oriented;
+- put setup and environment details in `docs/getting-started.md` and
+  `docs/configuration.md`;
+- update the matching embedded guide under
+  `crates/codegen/xai-grok-pager/docs/user-guide/` when `/docs` behavior
+  changes; and
+- label design records and incomplete plans explicitly instead of presenting
+  them as shipped user features.
+
+Validate relative Markdown links, code fences, `git diff --check`, and any
+changed YAML before opening a pull request. Documentation claims about Chutes
+APIs or OAuth must cite current official Chutes documentation.
 
 ## Model compatibility changes
 

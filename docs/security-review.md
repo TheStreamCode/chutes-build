@@ -1,68 +1,110 @@
-# Security Review
+# Security review
 
-Review date: 2026-07-19
+Review date: 2026-07-26
 
 This review covers the public Chutes Build source tree, local agent/runtime
 boundaries, Chutes and third-party network clients, browser automation, media
-artifacts, dependency policy, and npm release assembly. It does not certify
-third-party model behavior, MCP servers, websites, or services selected by a
-user.
+artifacts, dependency policy, upstream ports, and npm release assembly. It does
+not certify third-party models, MCP servers, plugins, websites, or services a
+user chooses to invoke.
 
-## Release-blocking controls
+## Network and credential controls
 
-- Chutes credentials use redacted debug output. Redirects are disabled on
-  credential-bearing HTTP clients.
-- Media invocation accepts only HTTPS DNS hosts under `chutes.ai`. External
-  media downloads never receive Chutes credentials and reject embedded
-  credentials, IP literals, and localhost hostnames.
-- Generated media and browser screenshots resolve through canonical workspace
-  ancestors, reject traversal and absolute output paths, and use create-new
-  writes to prevent silent overwrite.
-- Generated-media downloads default to a 512 MiB limit with a 2 GiB hard
-  ceiling. Workspace media inputs default to 64 MiB with a 512 MiB hard
-  ceiling.
+- Ambient Chutes credentials are attached only to official allowlisted HTTPS
+  destinations. Redirects are disabled on credential-bearing clients.
+- Endpoint URLs reject embedded credentials, unexpected ports, insecure
+  schemes, and untrusted hosts. DNS resolution rejects private, loopback,
+  link-local, multicast, documentation, and other special-use ranges at connect
+  time to reduce SSRF and DNS-rebinding exposure.
+- `CHUTES_ALLOW_INSECURE_ENDPOINTS=1` is an explicit development escape hatch
+  for a local fork. It does not make ambient credentials available to arbitrary
+  custom model endpoints.
+- Context7 accepts its optional API key only for the official HTTPS service.
+  Custom endpoints require `CONTEXT7_ALLOW_INSECURE_ENDPOINTS=1` and never
+  receive that key.
+- Custom inference models and custom model catalogs use dedicated credentials;
+  neither inherits `CHUTES_API_KEY` or a cached Chutes session token.
+- OAuth client secrets are read from environment variables, used for both
+  exchange and refresh when configured, and never serialized to `config.toml`.
+
+## Files, media, and browser controls
+
+- Generated artifacts and browser screenshots resolve through canonical
+  workspace ancestors, reject traversal/absolute destinations, and use
+  create-new writes to prevent silent overwrite.
+- Non-JSON media responses stream to temporary files. Downloads default to 128
+  MiB and are clamped to a 512 MiB hard ceiling; error/JSON bodies are capped at
+  32 MiB. Workspace inputs default to 64 MiB with a 512 MiB hard ceiling.
+- Media/provenance bundles roll back partial writes. Temporary downloads are
+  removed after persistence or failure.
 - The browser uses an isolated temporary profile, a loopback DevTools endpoint
-  with an exact origin, and password-value redaction in page snapshots.
-- Account quota fallback work is capped at 100 chute IDs and eight concurrent
-  requests. Model capability discovery has an endpoint-aware 60-second cache
-  and a bounded request timeout.
-- CI scans complete Git history with a version- and checksum-pinned Gitleaks
-  binary. Cargo Deny evaluates advisories, licenses, duplicate dependencies,
-  and package sources for every supported release target.
+  with an exact origin, disabled sync/background features, and password-value
+  redaction in snapshots.
+- Local image/video decoding, waveform analysis, and playback are bounded,
+  off-thread, non-autoplaying, and cancelled when their owning view is dropped.
+
+## Agent and tool controls
+
+- Folder trust gates project permission rules and settings. An untrusted clone
+  cannot auto-apply its own bypass configuration.
+- Automatic permission mode only fast-paths deterministic read-only shell
+  commands. Builds, code runners, mutations, and network-capable actions use the
+  classifier or normal prompt; classifier failures and malformed output return
+  to the prompt.
+- Repeated identical tool calls receive a corrective reminder and terminate at
+  a bounded stationarity threshold without fabricating an assistant response.
+- Machine-readable MCP listings omit environment/header values, command
+  arguments, and sensitive URL components. Plugin subagents can inherit only
+  the parent's already-connected, normally filtered MCP pool.
+- Destructive session, memory, plugin, marketplace, and worktree operations
+  require confirmation unless an explicit `--yes` is supplied.
+- Fork/rewind copies only live history and referenced regular compaction
+  checkpoint files; malformed paths, directories, and symlinks are skipped.
+
+## Product and release controls
+
+- Telemetry, remote error reporting, trace upload, upstream session
+  sharing/search, remote workspace exposure, upstream managed configuration,
+  and automatic updates are disabled by product policy.
+- CI scans complete Git history with a pinned Gitleaks binary. Cargo Deny checks
+  advisories, licenses, duplicate dependencies, and package sources for every
+  supported release target.
 - Each native npm archive is built on its target architecture, executed with
   `--version`, accompanied by a SHA-256 sidecar, re-verified after artifact
-  download, and assembled with the launcher for a final Linux smoke test.
+  download, and assembled with the launcher for a final smoke test.
+- Dependabot auto-merge is limited to patch releases. Minor and major updates
+  remain open for human review, including pre-1.0 dependencies.
+- Upstream baselines advance only after selected ports pass the required local
+  or CI gates. A timeout is inconclusive, not a successful review.
 
 ## Dependency policy
 
-Direct dependencies with available compatible security fixes are upgraded
-before release. `deny.toml` is the machine-readable policy and records bounded
-exceptions for transitive advisories that currently lack compatible maintained
-replacements or do not reach the vulnerable operation in Chutes Build.
+Direct dependencies with compatible security fixes are upgraded before a
+release. `deny.toml` is the machine-readable policy and records bounded
+exceptions for transitive advisories that lack a compatible maintained
+replacement or do not reach the vulnerable operation in Chutes Build.
 
-The accepted set currently consists of the RSA decryption timing advisory (the
-crate is used here for JWT signature verification and test key generation),
-unmaintained transitive crates in syntax highlighting, async retry, TUI,
-desktop theme, ranking, and PDF font stacks, plus a build-only Quick XML version
-used by Wayland protocol generation on Linux. These exceptions remain visible
-in CI and must be revisited during dependency or upstream synchronization.
+The accepted set currently includes the RSA decryption timing advisory (the
+crate is used for JWT verification and test keys), unmaintained transitive
+crates in syntax highlighting, async retry, TUI, desktop theme, ranking, and PDF
+font stacks, plus a build-only Quick XML version used by Wayland protocol
+generation. These exceptions remain visible in CI and must be revisited during
+dependency or upstream synchronization.
 
 ## Residual trust boundaries
 
-Chutes Build is intentionally capable of executing commands, modifying files,
-starting subagents, and controlling a browser after the applicable permission
+Chutes Build intentionally executes commands, modifies files, invokes hosted
+models, starts subagents, and controls a browser after the applicable permission
 decision. Repository instructions, model output, web content, downloaded
-documents, plugins, and MCP responses are untrusted input. Users should retain
-permission prompts for sensitive actions and avoid exposing credentials or
-private source in prompts sent to external services.
+documents, plugins, MCP responses, and generated media remain untrusted input.
 
-Generated assets may be hosted by a Chutes-provided external CDN. Those HTTPS
-downloads are credential-free, size-bounded, and do not follow redirects, but
-the remote bytes still require normal decoder and content handling safeguards.
+Generated assets may be hosted by a Chutes-provided external CDN. Downloads are
+credential-free, redirect-free, DNS/size bounded, and validated before
+persistence, but the bytes still cross normal decoder and file trust boundaries.
 
-## Local verification
+## Verification gates
 
-The narrow release checks are:
+Run the narrowest relevant tests first, then the release gates:
 
 ```powershell
 npm test
@@ -76,6 +118,7 @@ cargo deny --locked check advisories licenses bans sources
 git diff --check
 ```
 
-The cross-platform native builds and assembled npm installation are verified by
-the `Package release` workflow with publishing disabled before any public
-release is authorized.
+Validate changed workflow YAML and relative Markdown links. Run the `Package
+release` workflow with publishing disabled before authorizing any public
+release. If a required local gate cannot complete, preserve the failure/timeout
+as evidence and wait for successful CI rather than marking it passed.

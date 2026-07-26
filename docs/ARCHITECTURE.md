@@ -14,7 +14,9 @@ privacy-sensitive cloud behavior.
    image-capability delegation, retry classification, and streaming safeguards.
 4. **Tools:** coding/filesystem tools, MCP, Context7, web search, isolated browser
    control, and native Chutes media invocation.
-5. **Local state:** configuration, credentials, sessions, logs, exports, and
+5. **Safety and lifecycle:** folder trust, permission classification, endpoint
+   policy, bounded tool output, cancellation, and loop-stationarity handling.
+6. **Local state:** configuration, credentials, sessions, logs, exports, and
    secret-filtered `memories.md` maintenance.
 
 ## Routing behavior
@@ -49,6 +51,12 @@ FFmpeg process. Music and speech use process-owned pause/resume, seek, volume,
 duration, and lazy waveform state with native-open fallback. Media-only activity
 uses the low-frequency TUI tick instead of the normal animation tick. Legacy
 media variants remain readable for session compatibility.
+
+Media HTTP success bodies that are not JSON stream to a temporary file instead
+of accumulating in memory. The default download limit is 128 MiB with a 512
+MiB hard ceiling; error and JSON bodies are capped at 32 MiB. Workspace inputs
+default to 64 MiB with the same 512 MiB hard ceiling. Final artifact bundles
+use create-new writes and roll back partial persistence.
 
 ## Reasoning compatibility
 
@@ -110,6 +118,33 @@ Outbound provider calls are allowlisted. Telemetry and remote error pipelines
 are hard-disabled, traces export locally, the upstream relay defaults to a
 closed loopback endpoint, and public commands that depended on upstream cloud
 services are not registered. See [PRIVACY.md](../PRIVACY.md).
+
+All Chutes endpoint overrides pass a central URL and DNS policy before use.
+Without an explicit development opt-in, endpoints must be allowlisted HTTPS
+hosts with no embedded credentials or custom port, and resolved addresses must
+not be private, loopback, link-local, multicast, documentation, or other
+special-use ranges. Ambient credentials are attached only when the final URL is
+still an official credential destination. Context7 applies the same fail-closed
+shape and never forwards its optional API key to a custom endpoint.
+
+Automatic permission mode has a narrow no-latency prepass for deterministic
+read-only shell commands. Project-controlled code, builds, mutations, and
+network-capable actions go through the classifier or normal permission prompt;
+classifier timeouts, transport failures, and malformed responses do not become
+implicit approvals or denials.
+
+## Runtime resilience
+
+Repeated identical tool-call signatures receive a corrective reminder and are
+eventually terminated as a silent stationarity outcome. A repeated `true`
+no-op uses a shorter threshold. This prevents unbounded token/tool loops without
+fabricating a final assistant answer.
+
+Remote ACP background terminals poll cumulative output into the same local log
+contract as local tasks and retain the real remote exit status. Session-creation
+failures clear loading state and remove orphan entries. Fork/rewind filters dead
+history before copying and transfers only referenced, regular compaction
+checkpoint files.
 
 ## Module ownership
 
@@ -178,3 +213,7 @@ by default, etc.) and follow the same rule of thumb: if it encodes a decision
 specific to Chutes as a provider or to this fork's product identity, it's
 Chutes-owned; if it would make equal sense in the upstream project, it's
 retained infrastructure.
+
+The root `Cargo.toml` is generated and read-only. Dependency ownership belongs
+to crate manifests or the generator, which keeps the retained workspace shape
+reviewable against upstream.

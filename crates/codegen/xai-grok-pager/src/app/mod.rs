@@ -135,6 +135,11 @@ static MINIMAL_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
 pub(crate) fn minimal_mode_active() -> bool {
     MINIMAL_MODE_ACTIVE.load(Ordering::Acquire)
 }
+/// Whether a bare Esc should cancel a running turn. Fullscreen vim keeps Esc
+/// for navigation; minimal mode has no fullscreen scrollback, so it cancels.
+pub(crate) fn esc_cancels_turn(is_minimal: bool, vim_mode: bool) -> bool {
+    is_minimal || !vim_mode
+}
 /// Test-only override for [`minimal_mode_active`] (unit tests exercising
 /// minimal-gated input paths without a terminal). Save/restore around use —
 /// this is process-global state.

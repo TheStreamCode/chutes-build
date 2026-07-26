@@ -105,6 +105,33 @@ pub fn merge_managed_mcp_servers(
     .collect()
 }
 
+/// Re-merge a fresh managed catalog into one live session and enqueue the
+/// update. The oneshot receiver is intentionally dropped: this is a background
+/// synchronization path and must not delay the catalog response.
+pub(crate) fn merge_and_send_managed_mcp_update(
+    cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::session::SessionCommand>,
+    cwd: &std::path::Path,
+    initial_client_mcp_servers: Vec<acp::McpServer>,
+    managed: &[ManagedMcpConfig],
+    plugin_registry: Option<&xai_grok_agent::plugins::PluginRegistry>,
+    compat: &xai_grok_tools::types::compat::CompatConfig,
+) -> bool {
+    let merged = merge_managed_mcp_servers(
+        initial_client_mcp_servers,
+        cwd,
+        managed,
+        plugin_registry,
+        compat,
+    );
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    cmd_tx
+        .send(crate::session::SessionCommand::UpdateMcpServers {
+            mcp_servers: merged,
+            respond_to: tx,
+        })
+        .is_ok()
+}
+
 pub fn merge_managed_mcp_servers_with_policy(
     client_mcp_servers: Vec<acp::McpServer>,
     cwd: &std::path::Path,

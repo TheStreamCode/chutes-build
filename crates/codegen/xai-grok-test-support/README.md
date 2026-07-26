@@ -1,6 +1,6 @@
 # xai-grok-test-support
 
-Shared test infrastructure for the grok-build crates: mock inference server,
+Shared test infrastructure for the retained Chutes Build runtime crates: mock inference server,
 SSE wire-format generators, ACP stdio clients, headless
 runner, and sandboxed process env. Consumed by `xai-grok-shell` integration
 tests, `xai-grok-pager-pty-harness` (`ContentController`), and `xai-grok-sampler`

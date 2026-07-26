@@ -967,22 +967,13 @@ pub(crate) async fn handle_subagent_request(
                 })
                 .collect()
     };
-    let parent_mcp_pool = if is_plugin_agent {
-        if ctx.parent_mcp_pool.is_some() {
-            tracing::debug!(
-                agent = % definition.name,
-                "skipping MCP pool inheritance for plugin agent"
-            );
-        }
-        None
-    } else {
-        ctx.parent_mcp_pool
-                .take()
-                .and_then(|pool| filter_pool_by_inheritance(
-                    pool,
-                    &definition.mcp_inheritance,
-                ))
-    };
+    // Plugin agents cannot declare their own servers, but they should see the
+    // same already-connected MCP pool as their parent (subject to the normal
+    // inheritance filter). No plugin-controlled connection is created here.
+    let parent_mcp_pool = ctx
+        .parent_mcp_pool
+        .take()
+        .and_then(|pool| filter_pool_by_inheritance(pool, &definition.mcp_inheritance));
     let mcp_inherited_count = parent_mcp_pool
         .as_ref()
         .map(|p| p.len() as u32)

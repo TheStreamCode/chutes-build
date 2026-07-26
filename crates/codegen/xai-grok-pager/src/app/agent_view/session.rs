@@ -253,6 +253,7 @@ impl AgentView {
             cancel_turn_buttons: Vec::new(),
             cancel_subagents_preference: None,
             cancel_trigger_hint: None,
+            rewind_suppress_deadline: None,
             rewind_state: None,
             rewind_points: None,
             inline_edit: None,
