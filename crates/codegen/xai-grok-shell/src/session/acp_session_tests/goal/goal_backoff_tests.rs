@@ -31,7 +31,7 @@ async fn goal_backoff_pauses_after_three_consecutive_failed_turns() {
         .run_until(async {
             let actor = make_test_actor_with_active_goal().await;
             for _ in 0..GOAL_CONTINUATION_BACKOFF_THRESHOLD {
-                actor.handle_turn_end(false).await;
+                actor.handle_turn_end(false, false).await;
             }
             let status = actor.goal_tracker.lock().status();
             assert_eq!(
@@ -51,11 +51,11 @@ async fn goal_backoff_resets_on_success() {
             let actor = make_test_actor_with_active_goal().await;
             // Seed blocked streak so we can verify turn end leaves it alone.
             actor.goal_blocked_streak.store(2, Ordering::Relaxed);
-            actor.handle_turn_end(false).await; // streak = 1
+            actor.handle_turn_end(false, false).await; // streak = 1
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 1);
-            actor.handle_turn_end(false).await; // streak = 2
+            actor.handle_turn_end(false, false).await; // streak = 2
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 2);
-            actor.handle_turn_end(true).await; // streak = 0; continuation enqueued
+            actor.handle_turn_end(true, false).await; // streak = 0; continuation enqueued
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 0);
             assert_eq!(
                 actor.goal_blocked_streak.load(Ordering::Relaxed),
@@ -63,7 +63,7 @@ async fn goal_backoff_resets_on_success() {
                 "turn success must NOT reset the blocked streak (a model \
                  blocking once per turn would otherwise never hit 3/3)",
             );
-            actor.handle_turn_end(false).await; // streak = 1
+            actor.handle_turn_end(false, false).await; // streak = 1
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 1);
             let status = actor.goal_tracker.lock().status();
             assert_eq!(
@@ -125,7 +125,7 @@ async fn handle_turn_end_skip_increment_when_goal_not_active() {
                 .goal_tracker
                 .lock()
                 .pause(crate::session::goal_tracker::GoalPauseReason::User);
-            actor.handle_turn_end(false).await;
+            actor.handle_turn_end(false, false).await;
             // Streak should not increment because goal is not Active.
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 0);
             assert_eq!(
@@ -295,7 +295,7 @@ async fn handle_turn_end_bail_on_success_with_pending_todos_queues_bail_flavor()
                     .chat_state_handle
                     .push_assistant_response(ConversationItem::assistant("Giving up."));
 
-                actor.handle_turn_end(true).await;
+                actor.handle_turn_end(true, false).await;
 
                 assert_eq!(
                     actor.goal_continuation_streak.load(Ordering::Relaxed),
@@ -408,7 +408,7 @@ async fn handle_turn_end_bail_on_success_without_pending_todos_uses_generic_flav
                 .chat_state_handle
                 .push_assistant_response(ConversationItem::assistant("Giving up."));
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             let nudge = {
                 let state = actor.state.lock().await;
@@ -473,7 +473,7 @@ async fn handle_turn_end_verified_complete_during_drain_skips_bail_nudge() {
             .unwrap();
             drop(tx);
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             assert_eq!(
                 actor.goal_tracker.lock().status(),
@@ -520,7 +520,7 @@ async fn handle_turn_end_success_skips_when_goal_not_active() {
                 .chat_state_handle
                 .push_assistant_response(ConversationItem::assistant("Giving up."));
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             assert_eq!(
                 actor.goal_continuation_streak.load(Ordering::Relaxed),
@@ -563,7 +563,7 @@ async fn handle_turn_end_bail_on_success_fails_open_when_todo_resource_missing()
                 .chat_state_handle
                 .push_assistant_response(ConversationItem::assistant("Giving up."));
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             let nudge = {
                 let state = actor.state.lock().await;
@@ -615,7 +615,7 @@ async fn handle_turn_end_success_ordinary_text_uses_generic_flavor() {
                     "Implemented the helper and ran the tests.",
                 ));
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             let nudge = {
                 let state = actor.state.lock().await;
@@ -722,7 +722,7 @@ async fn handle_turn_end_classifier_nudge_pre_empts_bail_nudge_and_event() {
                 .push_assistant_response(ConversationItem::assistant("Giving up."));
             seed_pending_classifier_nudge(&actor).await;
 
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
 
             {
                 let state = actor.state.lock().await;
@@ -778,7 +778,7 @@ async fn handle_turn_end_non_success_increments_streak_regardless_of_text() {
                     .chat_state_handle
                     .push_assistant_response(ConversationItem::assistant(text));
 
-                actor.handle_turn_end(false).await;
+                actor.handle_turn_end(false, false).await;
 
                 assert_eq!(
                     actor.goal_continuation_streak.load(Ordering::Relaxed),
@@ -831,7 +831,7 @@ async fn handle_turn_end_non_success_auto_pauses_at_backoff_threshold() {
                 actor
                     .chat_state_handle
                     .push_assistant_response(ConversationItem::assistant(text));
-                actor.handle_turn_end(false).await;
+                actor.handle_turn_end(false, false).await;
             }
 
             assert_eq!(
@@ -2238,8 +2238,8 @@ async fn goal_clear_resets_streak() {
         .run_until(async {
             let actor = make_test_actor_with_active_goal().await;
             // Simulate two failed turns to seed the continuation streak.
-            actor.handle_turn_end(false).await;
-            actor.handle_turn_end(false).await;
+            actor.handle_turn_end(false, false).await;
+            actor.handle_turn_end(false, false).await;
             assert_eq!(actor.goal_continuation_streak.load(Ordering::Relaxed), 2);
             // Seed blocked streak too.
             actor.goal_blocked_streak.store(2, Ordering::Relaxed);
@@ -3505,7 +3505,7 @@ async fn handle_turn_end_trips_budget_on_failed_turn() {
 
             // Turn FAILED (turn_succeeded = false) — the path that previously
             // skipped budget enforcement entirely.
-            actor.handle_turn_end(false).await;
+            actor.handle_turn_end(false, false).await;
 
             assert_eq!(
                 actor.goal_tracker.lock().status(),
@@ -3540,7 +3540,7 @@ async fn handle_turn_end_keeps_goal_active_under_budget_on_failed_turn() {
             );
             insert_record(&actor, "a", Some("test-goal"), 0, 10_000); // under budget
 
-            actor.handle_turn_end(false).await;
+            actor.handle_turn_end(false, false).await;
 
             assert_eq!(
                 actor.goal_tracker.lock().status(),
@@ -3789,7 +3789,7 @@ async fn blocked_streak_reaches_pause_across_successful_turns() {
                         "attempt {attempt}/3 must not pause yet",
                     );
                     // The blocked attempt ends its turn successfully.
-                    actor.handle_turn_end(true).await;
+                    actor.handle_turn_end(true, false).await;
                     assert_eq!(
                         actor.goal_blocked_streak.load(Ordering::Relaxed),
                         attempt,
@@ -4137,7 +4137,7 @@ async fn goal_budget_reached_stops_goal_at_turn_end() {
                 .unwrap()
                 .token_budget = Some(50_000);
             insert_record(&actor, "a", Some("test-goal"), 0, 50_000);
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
             {
                 let tracker = actor.goal_tracker.lock();
                 let o = tracker.snapshot().unwrap();
@@ -4180,7 +4180,7 @@ async fn goal_under_budget_continues_normally() {
                 .unwrap()
                 .token_budget = Some(1_000_000);
             insert_record(&actor, "a", Some("test-goal"), 0, 50_000);
-            actor.handle_turn_end(true).await;
+            actor.handle_turn_end(true, false).await;
             assert_eq!(
                 actor.goal_tracker.lock().status(),
                 Some(crate::session::goal_tracker::GoalStatus::Active),
