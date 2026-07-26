@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-26
+
 ### Added
 
 - Remote ACP background terminal tasks now persist their cumulative output

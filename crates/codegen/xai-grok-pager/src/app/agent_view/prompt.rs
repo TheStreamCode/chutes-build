@@ -761,7 +761,8 @@ impl AgentView {
         }
 
         // This bare Esc is now owned by the policy: every path below consumes the
-        // event (mid-turn swallow / arm-clear / arm-rewind / idle swallow). Disarm
+        // event (mode-aware mid-turn cancel/navigation, arm-clear, arm-rewind,
+        // or idle swallow). Disarm
         // the Esc→d flight-recorder combo here, uniformly — the `0-esc-d` block
         // set `esc_pressed_at` on this same press, but since the policy is
         // handling the Esc, a following `d` is the user's text, not a dump.
@@ -787,7 +788,7 @@ impl AgentView {
         // keys — clearing a draft the reader has scrolled past would be a
         // surprising cross-pane side effect. REWIND requires an EMPTY prompt
         // (checked below), so there is no draft to clobber or silently stash and
-        // it may arm from EITHER pane. The mid-turn swallow / cancel-retry
+        // it may arm from EITHER pane. The mid-turn mode policy / cancel-retry
         // (above) stays cross-pane; any other idle Esc swallows (below).
         let has_content = !self.prompt.text().is_empty() || !self.prompt.images.is_empty();
 

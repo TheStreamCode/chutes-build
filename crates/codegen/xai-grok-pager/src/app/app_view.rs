@@ -7475,16 +7475,17 @@ pub(crate) mod tests {
         );
     }
     #[test]
-    fn esc_from_prompt_pane_running_turn_is_swallowed() {
+    fn esc_from_vim_prompt_pane_running_turn_is_swallowed() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
             matches!(outcome, InputOutcome::Changed),
-            "1× Esc while running must swallow (not cancel), got {outcome:?}"
+            "fullscreen vim Esc while running must navigate, not cancel, got {outcome:?}"
         );
         assert!(app.pending_action.is_none());
         assert!(app.agents[&id].cancel_trigger_hint.is_none());
@@ -7514,41 +7515,43 @@ pub(crate) mod tests {
         );
     }
     #[test]
-    fn esc_from_prompt_pane_running_turn_with_draft_is_swallowed_not_clear() {
+    fn esc_from_vim_prompt_pane_running_turn_with_draft_is_swallowed_not_clear() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = crate::views::agent::ActivePane::Prompt;
         agent.prompt.textarea.set_text("draft while streaming");
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
             matches!(outcome, InputOutcome::Changed),
-            "mid-turn Esc with draft must swallow, got {outcome:?}"
+            "fullscreen vim Esc with a draft must navigate, got {outcome:?}"
         );
         assert!(app.pending_action.is_none());
         assert!(
             !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn"
+            "fullscreen vim Esc must not cancel mid-turn"
         );
         assert_eq!(
             app.agents[&id].prompt.textarea.text(),
             "draft while streaming",
-            "mid-turn Esc must not clear the draft or arm idle clear"
+            "fullscreen vim Esc must not clear the draft or arm idle clear"
         );
         assert!(app.agents[&id].session.state.is_turn_running());
     }
     #[test]
-    fn esc_from_scrollback_pane_running_turn_is_swallowed() {
+    fn esc_from_vim_scrollback_pane_running_turn_is_swallowed() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = crate::views::agent::ActivePane::Scrollback;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
             matches!(outcome, InputOutcome::Changed),
-            "1× Esc from scrollback while running must swallow, got {outcome:?}"
+            "fullscreen vim Esc from scrollback must navigate, got {outcome:?}"
         );
         assert!(app.pending_action.is_none());
         assert!(app.agents[&id].cancel_trigger_hint.is_none());
@@ -7645,11 +7648,12 @@ pub(crate) mod tests {
         );
     }
     #[test]
-    fn mouse_send_retires_armed_clear_so_next_esc_swallows() {
+    fn mouse_send_retires_armed_clear_so_next_esc_cancels_turn() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         {
             let agent = app.agents.get_mut(&id).unwrap();
+            agent.vim_mode = false;
             agent.active_pane = crate::views::agent::ActivePane::Prompt;
             agent.prompt.textarea.set_text("draft to clear");
         }
@@ -7666,28 +7670,28 @@ pub(crate) mod tests {
         app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "Esc after a mouse-send must swallow mid-turn, got {outcome:?}",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "Esc after a mouse-send must cancel the running turn, got {outcome:?}",
         );
         assert!(
             !matches!(outcome, InputOutcome::Action(Action::ClearPrompt)),
             "the retired ClearPrompt arm must not fire",
         );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
         );
-        assert!(app.agents[&id].cancel_trigger_hint.is_none());
         assert!(app.pending_action.is_none());
     }
     /// Arm an idle-Esc `ClearPrompt`, submit via `text`-carrying `action` (a
     /// turn-start path with no intervening key), assert the arm was retired, then
-    /// with the turn running assert the next Esc swallows (never the stale clear).
+    /// with the turn running assert the next Esc cancels (never the stale clear).
     fn assert_submit_path_retires_clear_arm(action: Action) {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         {
             let agent = app.agents.get_mut(&id).unwrap();
+            agent.vim_mode = false;
             agent.active_pane = crate::views::agent::ActivePane::Prompt;
             agent.prompt.textarea.set_text("draft to clear");
         }
@@ -7705,22 +7709,21 @@ pub(crate) mod tests {
         app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "Esc after a non-keyed submit must swallow mid-turn, got {outcome:?}",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "Esc after a non-keyed submit must cancel the running turn, got {outcome:?}",
         );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
         );
-        assert!(app.agents[&id].cancel_trigger_hint.is_none());
         assert!(app.pending_action.is_none());
     }
     #[test]
-    fn submit_follow_up_retires_armed_clear_so_next_esc_swallows() {
+    fn submit_follow_up_retires_armed_clear_so_next_esc_cancels_turn() {
         assert_submit_path_retires_clear_arm(Action::SubmitFollowUp("follow up".into()));
     }
     #[test]
-    fn slash_preserving_send_retires_armed_clear_so_next_esc_swallows() {
+    fn slash_preserving_send_retires_armed_clear_so_next_esc_cancels_turn() {
         assert_submit_path_retires_clear_arm(Action::SendSlashCommandPreservingDraft(
             "/compact".into(),
         ));
@@ -7731,6 +7734,7 @@ pub(crate) mod tests {
         let id = super::super::agent::AgentId(0);
         {
             let agent = app.agents.get_mut(&id).unwrap();
+            agent.vim_mode = false;
             agent.active_pane = crate::views::agent::ActivePane::Prompt;
             agent.prompt.textarea.set_text("draft to clear");
         }
@@ -7743,18 +7747,17 @@ pub(crate) mod tests {
         app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "Esc on a busy agent must swallow, not fire the stale clear arm, got {outcome:?}",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "Esc on a busy agent must cancel, not fire the stale clear arm, got {outcome:?}",
         );
         assert!(
             !matches!(outcome, InputOutcome::Action(Action::ClearPrompt)),
             "the stale ClearPrompt arm must not fire on a running turn",
         );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
         );
-        assert!(app.agents[&id].cancel_trigger_hint.is_none());
         assert!(
             app.pending_action.is_none(),
             "the stale arm must be dropped"
@@ -7766,6 +7769,7 @@ pub(crate) mod tests {
         let id = super::super::agent::AgentId(0);
         {
             let agent = app.agents.get_mut(&id).unwrap();
+            agent.vim_mode = false;
             agent.active_pane = crate::views::agent::ActivePane::Prompt;
             agent
                 .scrollback
@@ -7782,12 +7786,12 @@ pub(crate) mod tests {
         app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "Esc on a busy agent must swallow, not fire the stale rewind arm, got {outcome:?}",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "Esc on a busy agent must cancel, not fire the stale rewind arm, got {outcome:?}",
         );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
         );
         assert!(
             app.pending_action.is_none(),
@@ -7813,14 +7817,15 @@ pub(crate) mod tests {
         let mut app = test_app_with_agent();
         {
             let agent = app.agents.get_mut(&id).unwrap();
+            agent.vim_mode = false;
             agent.session.state = AgentState::TurnRunning;
             agent.active_pane = crate::views::agent::ActivePane::Prompt;
         }
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(matches!(outcome, InputOutcome::Changed));
+        assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
         assert!(
             app.agents[&id].esc_pressed_at.is_none(),
-            "mid-turn swallow Esc must disarm the Esc→d combo",
+            "mid-turn cancel Esc must disarm the Esc→d combo",
         );
     }
     #[test]
@@ -9219,6 +9224,7 @@ pub(crate) mod tests {
             d.attached_agent = Some(id);
         }
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = false;
         agent.active_pane = crate::app::agent_view::AgentPane::Prompt;
         assert!(agent.prompt.text().is_empty());
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
@@ -9257,12 +9263,11 @@ pub(crate) mod tests {
             "second Esc with no /btw must back out to the dashboard, got {second:?}",
         );
     }
-    /// Regression: in an overlay, a bare Esc while a turn is
-    /// RUNNING must swallow (matching full-screen), NOT detach to the dashboard
-    /// and NOT cancel. The empty-prompt back-out is idle-gated, so Esc falls
-    /// through to `try_handle_esc_policy` → mid-turn swallow.
+    /// Regression: in an overlay, a bare Esc while a turn is RUNNING must
+    /// cancel the turn, not detach to the dashboard. The empty-prompt back-out
+    /// is idle-gated, so Esc falls through to the non-vim cancellation policy.
     #[test]
-    fn overlay_esc_running_turn_empty_prompt_swallows_not_backout() {
+    fn overlay_esc_running_turn_empty_prompt_cancels_not_backout() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         app.active_view = ActiveView::Agent(id);
@@ -9271,31 +9276,30 @@ pub(crate) mod tests {
             d.attached_agent = Some(id);
         }
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = false;
         agent.active_pane = crate::app::agent_view::AgentPane::Prompt;
         agent.session.state = AgentState::TurnRunning;
         assert!(agent.prompt.text().is_empty());
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "running-turn overlay Esc (empty prompt) must swallow, not detach/cancel, got {outcome:?}",
-        );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "running-turn overlay Esc (empty prompt) must cancel, not detach, got {outcome:?}",
         );
         assert!(
             !matches!(outcome, InputOutcome::Action(Action::DashboardOverlayExit)),
             "Esc must not detach mid-turn",
         );
-        assert!(app.agents[&id].cancel_trigger_hint.is_none());
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
+        );
         assert!(app.pending_action.is_none());
     }
-    /// Regression: in an overlay, a bare Esc from the
-    /// (neutral) bare-scrollback pane while a turn is RUNNING must swallow, NOT
-    /// detach — the neutral back-out is idle-gated. The fixture is otherwise
-    /// neutral (so the gate, not a missing-neutral, is what suppresses detach).
+    /// Regression: in an overlay, a bare Esc from the neutral bare-scrollback
+    /// pane while a turn is RUNNING must cancel, not detach. The neutral
+    /// back-out remains idle-gated.
     #[test]
-    fn overlay_esc_running_turn_scrollback_swallows_not_backout() {
+    fn overlay_esc_running_turn_scrollback_cancels_not_backout() {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
         app.active_view = ActiveView::Agent(id);
@@ -9304,24 +9308,24 @@ pub(crate) mod tests {
             d.attached_agent = Some(id);
         }
         let agent = app.agents.get_mut(&id).unwrap();
+        agent.vim_mode = false;
         agent.active_pane = crate::app::agent_view::AgentPane::Scrollback;
         agent.session.state = AgentState::TurnRunning;
         assert!(agent.is_bare_scrollback() && agent.no_input_overlay_pending());
         assert!(agent.no_esc_consumer_pending());
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "running-turn overlay Esc (scrollback) must swallow, not detach/cancel, got {outcome:?}",
-        );
-        assert!(
-            !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-            "Esc must not cancel mid-turn",
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "running-turn overlay Esc (scrollback) must cancel, not detach, got {outcome:?}",
         );
         assert!(
             !matches!(outcome, InputOutcome::Action(Action::DashboardOverlayExit)),
             "Esc must not detach mid-turn",
         );
-        assert!(app.agents[&id].cancel_trigger_hint.is_none());
+        assert_eq!(
+            app.agents[&id].cancel_trigger_hint,
+            Some(crate::app::actions::CancelTrigger::Esc)
+        );
     }
     /// Overlay + TurnCancelling: Esc retries cancel (does not detach).
     #[test]
