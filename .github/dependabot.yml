@@ -1,5 +1,7 @@
 version: 2
 updates:
+  # Majors are deliberately left out of every group: they stay individual pull
+  # requests so a breaking bump is never bundled with routine ones.
   - package-ecosystem: cargo
     directory: /
     schedule:
@@ -8,6 +10,11 @@ updates:
     labels:
       - dependencies
       - rust
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -16,6 +23,17 @@ updates:
     labels:
       - dependencies
       - npm
+    groups:
+      npm-development:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      npm-production:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -24,3 +42,8 @@ updates:
     labels:
       - dependencies
       - ci
+    groups:
+      github-actions:
+        update-types:
+          - minor
+          - patch
