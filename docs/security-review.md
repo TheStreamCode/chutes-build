@@ -99,6 +99,45 @@ font stacks, plus a build-only Quick XML version used by Wayland protocol
 generation. These exceptions remain visible in CI and must be revisited during
 dependency or upstream synchronization.
 
+## Static analysis triage
+
+CodeQL default setup reports 309 open alerts against the workspace as of
+2026-08-01: 287 `rust/cleartext-logging`, 17 `rust/cleartext-transmission`,
+4 `rust/hard-coded-cryptographic-value`, and 1
+`rust/uncontrolled-allocation-size`. None is dismissed, so a later true positive
+in the same query stays visible. The categories below record why the current
+set does not describe a reachable defect.
+
+- `rust/hard-coded-cryptographic-value` (reported critical) matches literal
+  `"nonce123"` and `TEST_NONCE` fixtures. All four sit in test-only code: the
+  `#[cfg(test)] mod tests` block of `auth/oidc/protocol.rs` and the
+  `#[cfg(test)]`-gated `auth/oidc/test_helpers.rs`. The shipped authorize flow
+  derives its nonce at runtime.
+- `rust/cleartext-logging` is dominated by pager dispatch test modules and by
+  CLI/session code that prints or traces a local session identifier. Session
+  identifiers are local correlation values, not credentials, and the shared
+  log/trace sanitizer already redacts real secret shapes.
+- `rust/cleartext-transmission` flags `reqwest` calls whose URL or body carries
+  a session identifier. The Chutes-owned clients in `chutes-build-core`
+  construct their endpoints through `validate_endpoint_url`, which rejects
+  non-HTTPS schemes and untrusted hosts, and resolve DNS through
+  `SsrfSafeResolver`. The remaining hits are on the retained upstream backend,
+  feedback, and session-registry clients, which are unreachable in this
+  product: `REMOTE_SESSION_REGISTRY` is `false`, so agent initialization forces
+  `StorageMode::Local` and the only caller that computes `needs_remote` always
+  resolves it to `false`; `REMOTE_FEEDBACK` and `REMOTE_SESSION_SHARING` gate
+  their handlers to `method_not_found`.
+- `rust/uncontrolled-allocation-size` is `ptyctl`'s scrollback reader reserving
+  `count.min(history_size())` lines, bounded by the terminal's own buffer.
+
+`chutes-build serve` deliberately prints its generated server key to the
+operator's stderr so the WebSocket URL can be copied. That is interactive
+startup output, not persisted logging.
+
+Re-triage this list whenever the CodeQL query pack, the flagged files, or the
+product policy constants change. A new alert outside these categories is a
+release blocker until it is analysed.
+
 ## Residual trust boundaries
 
 Chutes Build intentionally executes commands, modifies files, invokes hosted

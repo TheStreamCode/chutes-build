@@ -6,6 +6,16 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Documentation
+
+- Recorded the CodeQL static-analysis triage in the security review: current
+  alert counts, the disposition of each query, and the reachability argument
+  showing the retained upstream backend client cannot run while
+  `REMOTE_SESSION_REGISTRY` is `false`.
+- Documented the pinned Rust/Node toolchain, the single supported package
+  manager, the artifacts the project actually produces, the protected assets
+  and generated files, and the repository-visibility rules in `AGENTS.md`.
+
 ## [0.4.2] - 2026-08-01
 
 ### Added
