@@ -185,6 +185,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
@@ -214,6 +215,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn omits_session_id_when_none() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
@@ -235,6 +237,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn kills_on_timeout() {
         let start = Instant::now();
         execute_hook(
@@ -252,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn handles_failed_shell_command_gracefully() {
         execute_hook(
             "/nonexistent/path/binary",
@@ -263,6 +267,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn handles_nonzero_exit_gracefully() {
         execute_hook(
             "exit 1",
@@ -274,6 +279,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
@@ -291,6 +297,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn run_hook_spawns_thread_without_panic() {
         let hook = NotificationHook {
             command: "exit 0".into(),
@@ -303,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn timeout_clamped_to_minimum_one_second() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
@@ -332,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn run_hook_passes_correct_env_via_thread() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");

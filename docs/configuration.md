@@ -16,6 +16,11 @@ project memory uses `memories.md`.
 
 Chutes Build does not combine the default user state with a custom state root.
 
+Environment variables are read from the process environment; Chutes Build does
+not load `.env` files automatically. Local `.env` variants are ignored by Git.
+Use the environment-management mechanism provided by your shell, CI platform,
+or secret manager, and never commit real credentials.
+
 ## Authentication and model routing
 
 | Variable | Purpose |

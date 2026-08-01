@@ -29,11 +29,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   history.
 - Empty Enter no longer silently approves a plan while the revision prompt is
   focused; revision notes are required, with `a` as the explicit approve key.
+- Notification-hook tests that launch external shells are serialized, avoiding
+  Windows CI failures caused by concurrent PowerShell startup contention.
 
 ### Security
 
 - Documented and aligned repository security controls for SHA-pinned Actions,
   read-only workflow tokens, and reviewed security-update PRs.
+- Updated vulnerable transitive `rand` and AWS SDK lockfile entries to their
+  first compatible patched releases.
 
 ## [0.4.1] - 2026-07-26
 

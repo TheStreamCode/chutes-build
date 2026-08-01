@@ -29,6 +29,9 @@ binary. Update them with the matching public guide whenever behavior changes.
   ownership boundaries, and retained upstream infrastructure.
 - [Security review](security-review.md) — implemented controls, accepted
   dependency exceptions, residual boundaries, and release gates.
+- [Code and security audit (2026-08-01)](code-review-2026-08-01.md) — dated
+  findings across architecture, correctness, security, performance,
+  maintainability, dependencies, and repository operations.
 - [Releasing](releasing.md) — repository protection, version alignment,
   packaging, verification, and manual npm publication.
 - [npm distribution](../npm/README.md) — launcher/native package boundaries,

@@ -33,7 +33,8 @@
   },
   "scripts": {
     "test": "node --test npm/tests/*.test.cjs",
-    "verify:release": "node npm/scripts/verify-release.mjs"
+    "verify:release": "node npm/scripts/verify-release.mjs",
+    "check": "npm test && npm run verify:release && npm pack --dry-run"
   },
   "optionalDependencies": {
     "chutes-build-darwin-arm64": "0.4.2",

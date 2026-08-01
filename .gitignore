@@ -1,5 +1,7 @@
 /target
 /output
+/dist
+/staging
 /.playwright-cli
 /node_modules
 /coverage

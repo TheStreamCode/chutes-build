@@ -1,6 +1,9 @@
 # Security review
 
-Review date: 2026-07-26
+Review date: 2026-08-01
+
+The latest repository-wide findings and disposition are recorded in the
+[2026-08-01 code and security audit](code-review-2026-08-01.md).
 
 This review covers the public Chutes Build source tree, local agent/runtime
 boundaries, Chutes and third-party network clients, browser automation, media
