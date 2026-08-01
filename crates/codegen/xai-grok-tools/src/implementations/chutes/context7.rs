@@ -206,7 +206,7 @@ mod tests {
         assert!(
             reject_sensitive(
                 "tokio",
-                "see aws AKIAABCDEFGHIJKLMNOP for setup",
+                "see aws AKIAABCDEFGHIJKLMNOP for setup", // gitleaks:allow
                 "context7_search"
             )
             .is_err()

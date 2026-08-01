@@ -61,9 +61,9 @@ mod tests {
     #[test]
     fn catches_secret_shapes_the_local_markers_alone_would_miss() {
         for (line, label) in [
-            ("aws AKIAABCDEFGHIJKLMNOP", "aws access key"),
+            ("aws AKIAABCDEFGHIJKLMNOP", "aws access key"), // gitleaks:allow
             (
-                "token ghp_0123456789abcdefghijABCDEFGHIJ012345",
+                "token ghp_0123456789abcdefghijABCDEFGHIJ012345", // gitleaks:allow
                 "github pat",
             ),
             (

@@ -6,6 +6,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the pinned `actions/checkout` workflow dependency to `v7.0.1`,
+  including its Git argument escaping and pull-request safety fixes.
+
+### Security
+
+- Marked the three synthetic secret-detection fixtures explicitly so both
+  worktree and full-history Gitleaks scans pass without weakening real-secret
+  detection.
+
 ### Documentation
 
 - Recorded the CodeQL static-analysis triage in the security review: current
