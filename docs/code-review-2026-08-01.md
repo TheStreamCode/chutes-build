@@ -13,6 +13,8 @@ Five low-severity transitive alerts have compatible lockfile updates in this
 review. Two low-severity `lru` alerts remain because the only published fix is
 outside the version range accepted by `ratatui 0.29` and `aws-sdk-s3 1.112`.
 They require coordinated dependency migrations and are not silently suppressed.
+The direct `xai-grok-workspace` library suite also has 45 pre-existing Windows
+portability/isolation failures that are not exercised by the current CI matrix.
 
 ## Scope and method
 
@@ -103,17 +105,43 @@ configuration guidance now makes that boundary explicit.
 
 The first post-review Windows CI run passed 7,245 pager tests but failed two
 notification-hook tests when several tests launched PowerShell concurrently and
-two output files were not created within five seconds. A follow-up run with
-serialized shell tests reduced this to the synchronous environment-dump case.
-Linux, macOS, and a full local Windows run passed, isolating the issue to test
-process/timing behavior rather than product logic.
+two output files were not created within five seconds. Serializing shell tests
+removed one failure; a later run exposed a separate race where the asynchronous
+test's five-second polling deadline competed with the hook's own five-second
+process timeout. Linux, macOS, and a full local Windows run passed, isolating
+the issue to test process/timing behavior rather than product logic.
 
 Notification-hook tests that launch external shells now share a `serial_test`
-group (`crates/codegen/xai-grok-pager/src/notifications/hooks.rs:186`). The
-session-omission case inspects the constructed child environment directly and
-the runtime explicitly removes a stale parent `CHUTES_BUILD_SESSION_ID` when an
-event has no owning session. Hook concurrency and timeout behavior are
-otherwise unchanged.
+group (`crates/codegen/xai-grok-pager/src/notifications/hooks.rs:193`). The
+asynchronous case joins its private worker handle before reading output, while
+production remains fire-and-forget. The session-omission case inspects the
+constructed child environment directly and the runtime explicitly removes a
+stale parent `CHUTES_BUILD_SESSION_ID` when an event has no owning session.
+Hook concurrency and timeout behavior are otherwise unchanged.
+
+### CR-009 — Low — resolved — Rust 1.94 lint compatibility
+
+An all-target Clippy pass found one redundant Windows exception-code cast, two
+`Option<char>` unwraps after explicit presence checks, two simplifiable
+workspace-classifier expressions, and one final redundant return in a guarded
+Windows file-open branch. They were replaced with equivalent typed and
+pattern-based expressions; crash metadata, PTY rendering, workspace
+classification, and file containment behavior are unchanged.
+
+### CR-010 — Medium — accepted temporarily — workspace tests on Windows
+
+A direct serial Windows run of the upstream-derived `xai-grok-workspace`
+library suite completed 1,384 tests but failed 45 and ignored one. The failures
+cluster around Unix-form absolute-path fixtures, CRLF-sensitive Git assertions,
+pidfile semantics, and tests that observe ambient HOME/configuration state.
+They reproduce without test concurrency and are outside the Chutes-owned CI
+gate; the five `foreign_sessions::capability` tests covering the file-open
+branch changed in this review pass on Windows.
+
+Fixing this safely requires isolating process-global environment fixtures and
+converting platform-specific expectations throughout the upstream workspace
+crate. That coordinated test-infrastructure change is intentionally deferred
+instead of weakening assertions or broadly editing imported behavior.
 
 ## Architecture, performance, and maintainability assessment
 
@@ -144,7 +172,9 @@ target-specific workspace risks false positives.
    OAuth/SSO-disabled builds, MSRV, binary size, and cold compile time.
 3. Add an explicitly pinned unused-dependency tool only after establishing a
    checked-in allowlist for target-, feature-, build-, and fuzz-only crates.
-4. Run publishing-disabled release assembly for `0.4.2`; publish npm packages
+4. Make the `xai-grok-workspace` suite hermetic on Windows, then add it as a
+   dedicated CI job or split it into stable platform-specific shards.
+5. Run publishing-disabled release assembly for `0.4.2`; publish npm packages
    and create a GitHub release only with explicit maintainer authorization.
 
 ## Verification record

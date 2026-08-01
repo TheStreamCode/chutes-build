@@ -31,6 +31,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   focused; revision notes are required, with `a` as the explicit approve key.
 - Notification-hook tests that launch external shells are serialized, avoiding
   Windows CI failures caused by concurrent PowerShell startup contention.
+- The asynchronous notification-hook test now joins its worker before checking
+  output, removing a race with slow PowerShell startup on loaded CI runners.
+- Removed Rust 1.94 Clippy warnings in the Windows crash handler, PTY text
+  rendering, and workspace utilities without changing their behavior.
 - Notification events without an owning session explicitly remove any stale
   `CHUTES_BUILD_SESSION_ID` inherited from the parent process.
 

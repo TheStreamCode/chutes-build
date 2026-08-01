@@ -95,7 +95,7 @@ fn execute_hook(
     }
 }
 
-pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
+fn spawn_hook(hook: &NotificationHook, event: &NotificationEvent) -> std::thread::JoinHandle<()> {
     let command = hook.command.clone();
     let event_str: &'static str = event.kind.as_str();
     let message = event.body.clone();
@@ -110,7 +110,14 @@ pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
             session_id.as_deref(),
             timeout,
         );
-    });
+    })
+}
+
+pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
+    // Notification hooks are intentionally fire-and-forget in production.
+    // Keeping the handle available in the private helper lets tests wait for
+    // the worker deterministically without changing the public behavior.
+    drop(spawn_hook(hook, event));
 }
 
 #[cfg(test)]
@@ -342,21 +349,12 @@ mod tests {
             timeout_secs: 5,
         };
         let event = test_event();
-        run_hook(&hook, &event);
+        spawn_hook(&hook, &event)
+            .join()
+            .expect("notification hook worker should not panic");
 
-        // Poll for the output file instead of a fixed sleep — the spawned
-        // thread + fork/exec may take variable time on loaded systems.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let content = loop {
-            if let Ok(c) = std::fs::read_to_string(&out) {
-                break c;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "hook did not produce output file within 5s"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        };
+        let content = std::fs::read_to_string(&out)
+            .expect("notification hook should produce the environment output file");
         assert!(content.contains("CHUTES_BUILD_EVENT=Turn complete"));
         assert!(content.contains("CHUTES_BUILD_MESSAGE=test body payload"));
         assert!(content.contains("CHUTES_BUILD_SESSION_ID=test-session-123"));
