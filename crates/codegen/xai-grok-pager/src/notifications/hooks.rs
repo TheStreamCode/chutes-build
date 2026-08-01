@@ -4,6 +4,22 @@ use std::time::Duration;
 use crate::notifications::NotificationEvent;
 use crate::notifications::config::NotificationHook;
 
+fn configure_hook_environment(
+    cmd: &mut Command,
+    event_str: &str,
+    message: &str,
+    session_id: Option<&str>,
+) {
+    cmd.env("CHUTES_BUILD_EVENT", event_str)
+        .env("CHUTES_BUILD_MESSAGE", message)
+        // Do not let a parent process leak a stale session ID into events that
+        // intentionally have no owning session.
+        .env_remove("CHUTES_BUILD_SESSION_ID");
+    if let Some(sid) = session_id {
+        cmd.env("CHUTES_BUILD_SESSION_ID", sid);
+    }
+}
+
 fn execute_hook(
     command: &str,
     event_str: &str,
@@ -30,14 +46,10 @@ fn execute_hook(
         command_process
     };
 
-    cmd.env("CHUTES_BUILD_EVENT", event_str)
-        .env("CHUTES_BUILD_MESSAGE", message)
-        .stdin(Stdio::null())
+    configure_hook_environment(&mut cmd, event_str, message, session_id);
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(sid) = session_id {
-        cmd.env("CHUTES_BUILD_SESSION_ID", sid);
-    }
 
     // Create a new process group so we can kill the entire tree on timeout,
     // preventing orphaned subprocesses from accumulating.
@@ -139,20 +151,6 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn dump_env_command(out: &Path) -> String {
-        format!(
-            "Get-ChildItem Env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)\" }} | \
-             Set-Content -LiteralPath {}",
-            quote_path(out)
-        )
-    }
-
-    #[cfg(not(windows))]
-    fn dump_env_command(out: &Path) -> String {
-        format!("env > {}", quote_path(out))
-    }
-
-    #[cfg(windows)]
     fn sleep_command(seconds: u64) -> String {
         format!("Start-Sleep -Seconds {seconds}")
     }
@@ -215,25 +213,18 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
-    fn omits_session_id_when_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("env.txt");
-        let command = dump_env_command(&out);
+    fn removes_inherited_session_id_when_none() {
+        let mut cmd = Command::new("unused");
+        cmd.env("CHUTES_BUILD_SESSION_ID", "stale-parent-session");
 
-        execute_hook(
-            &command,
-            "Turn complete",
-            "msg",
-            None,
-            Duration::from_secs(5),
-        );
+        configure_hook_environment(&mut cmd, "Turn complete", "msg", None);
 
-        let content = std::fs::read_to_string(&out).unwrap();
-        assert!(
-            !content.contains("CHUTES_BUILD_SESSION_ID"),
-            "CHUTES_BUILD_SESSION_ID should not be set: {content}"
-        );
+        let session_id = cmd
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("CHUTES_BUILD_SESSION_ID"))
+            .expect("session ID must have an explicit environment disposition")
+            .1;
+        assert_eq!(session_id, None);
     }
 
     #[test]

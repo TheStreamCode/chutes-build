@@ -31,6 +31,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   focused; revision notes are required, with `a` as the explicit approve key.
 - Notification-hook tests that launch external shells are serialized, avoiding
   Windows CI failures caused by concurrent PowerShell startup contention.
+- Notification events without an owning session explicitly remove any stale
+  `CHUTES_BUILD_SESSION_ID` inherited from the parent process.
 
 ### Security
 

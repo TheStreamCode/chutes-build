@@ -99,17 +99,21 @@ Rust output, npm archives, and release `dist`/`staging` directories. The runtime
 reads the process environment and does not imply automatic dotenv loading;
 configuration guidance now makes that boundary explicit.
 
-### CR-008 — Low — resolved — Windows hook-test contention
+### CR-008 — Low — resolved — hook-test contention and environment isolation
 
 The first post-review Windows CI run passed 7,245 pager tests but failed two
 notification-hook tests when several tests launched PowerShell concurrently and
-two output files were not created within five seconds. Linux, macOS, and a full
-local Windows run passed, isolating the issue to test-process contention.
+two output files were not created within five seconds. A follow-up run with
+serialized shell tests reduced this to the synchronous environment-dump case.
+Linux, macOS, and a full local Windows run passed, isolating the issue to test
+process/timing behavior rather than product logic.
 
-All notification-hook tests now share a `serial_test` group
-(`crates/codegen/xai-grok-pager/src/notifications/hooks.rs:187`). This changes
-test scheduling only; runtime hook concurrency and timeout behavior are
-unchanged.
+Notification-hook tests that launch external shells now share a `serial_test`
+group (`crates/codegen/xai-grok-pager/src/notifications/hooks.rs:186`). The
+session-omission case inspects the constructed child environment directly and
+the runtime explicitly removes a stale parent `CHUTES_BUILD_SESSION_ID` when an
+event has no owning session. Hook concurrency and timeout behavior are
+otherwise unchanged.
 
 ## Architecture, performance, and maintainability assessment
 
