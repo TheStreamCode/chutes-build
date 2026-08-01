@@ -37,6 +37,32 @@ test('release manifests use one version', () => {
   assert.match(result.stdout, /4 Cargo packages and 6 native npm packages/);
 });
 
+test('launcher package ships public policies without lifecycle scripts', async () => {
+  const manifest = JSON.parse(
+    await readFile(path.join(repositoryRoot, 'package.json'), 'utf8')
+  );
+  const expectedFiles = [
+    'npm/bin',
+    'README.md',
+    'CHANGELOG.md',
+    'SECURITY.md',
+    'PRIVACY.md',
+    'LICENSE',
+    'NOTICE'
+  ];
+
+  for (const expectedFile of expectedFiles) {
+    assert.ok(
+      manifest.files.includes(expectedFile),
+      `launcher package must include ${expectedFile}`
+    );
+  }
+  for (const lifecycle of ['preinstall', 'install', 'postinstall']) {
+    assert.equal(manifest.scripts?.[lifecycle], undefined);
+  }
+  assert.equal(manifest.publishConfig?.access, 'public');
+});
+
 test('platform package carries public project metadata', async (context) => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), 'chutes-build-package-test-')

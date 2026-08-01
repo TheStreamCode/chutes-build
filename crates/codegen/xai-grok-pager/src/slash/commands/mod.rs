@@ -250,13 +250,17 @@ mod tests {
         assert!(reg.get("welcome").is_some());
         assert!(reg.get("show-plan").is_some());
         assert!(reg.get("plan-view").is_some());
+        assert!(reg.get("undo").is_some());
     }
     #[test]
-    fn alias_resolves_to_same_command() {
+    fn aliases_resolve_to_same_command() {
         let reg = CommandRegistry::new(builtin_commands());
         let exit_cmd = reg.get("exit").unwrap();
         let quit_cmd = reg.get("quit").unwrap();
         assert_eq!(exit_cmd.name(), quit_cmd.name());
+        let rewind = reg.get("rewind").unwrap();
+        assert_eq!(reg.get("undo").unwrap().name(), rewind.name());
+        assert_eq!(reg.get("undo").unwrap().usage(), rewind.usage());
     }
     #[test]
     fn exit_returns_quit_action() {

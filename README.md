@@ -148,6 +148,8 @@ set. See the [CLI reference](docs/cli-reference.md) and
 - [CLI reference](docs/cli-reference.md) and
   [slash commands](docs/slash-commands.md) — public command surfaces.
 - [Architecture](docs/ARCHITECTURE.md) — runtime layers and ownership map.
+- [npm distribution](npm/README.md) and [release procedure](docs/releasing.md)
+  — launcher contents, native packages, verification, and publication order.
 - [Privacy](PRIVACY.md), [security policy](SECURITY.md), and
   [security review](docs/security-review.md) — operational trust boundaries.
 - [Documentation index](docs/README.md) — complete user, maintainer, and design
@@ -174,11 +176,12 @@ The executable is `target\release\chutes-build.exe` on Windows and
 
 | Path | Ownership |
 | --- | --- |
+| `AGENTS.md` | Repository-wide guidance and verification contract for coding agents. |
 | `crates/chutes-build-core/` | Chutes routing, endpoint policy, catalog, reasoning, account, media, privacy, and product policy. |
 | `crates/codegen/` | Retained and adapted upstream runtime crates. Keep crate names stable to make upstream review practical. |
 | `npm/` | Native launcher, platform-package assembly, and npm verification. |
 | `docs/` | Public technical references, maintainer procedures, and design records. |
-| `.github/workflows/` | CI, dependency review, upstream monitoring, and release packaging. |
+| `.github/workflows/` | CI, security policy checks, upstream monitoring, and release packaging. |
 | `prod/` and `third_party/` | Shared protocol sources and retained attribution/material from upstream. |
 
 The root `Cargo.toml` is generated and treated as read-only. Make dependency
@@ -193,8 +196,9 @@ are reviewed and ported selectively; they are never merged or released
 automatically. See [Upstream synchronization](docs/upstream-sync.md).
 
 Issues and focused pull requests are welcome. Read
-[CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
-and [SECURITY.md](SECURITY.md) before contributing.
+[CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md),
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and [SECURITY.md](SECURITY.md) before
+contributing.
 
 Apache-2.0 licensing and attribution are documented in [LICENSE](LICENSE),
 [NOTICE](NOTICE), and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

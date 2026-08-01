@@ -31,6 +31,8 @@ binary. Update them with the matching public guide whenever behavior changes.
   dependency exceptions, residual boundaries, and release gates.
 - [Releasing](releasing.md) — repository protection, version alignment,
   packaging, verification, and manual npm publication.
+- [npm distribution](../npm/README.md) — launcher/native package boundaries,
+  archive contents, local verification, and publication safeguards.
 - [Upstream synchronization](upstream-sync.md) — detection, classification,
   selective porting, verification, and baseline updates.
 - [Contributing](../CONTRIBUTING.md) — development workflow and pull-request

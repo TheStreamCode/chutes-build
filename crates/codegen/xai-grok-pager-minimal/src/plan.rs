@@ -180,7 +180,9 @@ pub fn render(
         PlanApprovalFocus::Prompt if has_content => {
             "enter request changes \u{00b7} tab plan \u{00b7} esc back"
         }
-        PlanApprovalFocus::Prompt => "enter approve \u{00b7} tab plan \u{00b7} esc back",
+        PlanApprovalFocus::Prompt => {
+            "type revision notes \u{00b7} a approve \u{00b7} tab plan \u{00b7} esc back"
+        }
         PlanApprovalFocus::Commenting => "enter save comment \u{00b7} esc cancel",
         PlanApprovalFocus::Preview => "a approve \u{00b7} s revise \u{00b7} q keep planning",
     };

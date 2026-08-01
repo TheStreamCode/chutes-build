@@ -84,9 +84,15 @@ Useful first commands:
 | `/usage` | Inspect available plan and quota windows. |
 | `/docs` | Open concise guides embedded in the application. |
 | `/settings` | Review interface and runtime preferences. |
+| `/rewind` or `/undo` | Rewind the current session to a previous turn. |
+| `/plan` | Enter plan mode before implementation. |
 
 `Auto (Chutes Router)` is selected by default when no model preference exists.
 Use `chutes-build models --json` when scripts need the resolved catalog.
+
+When revising a proposed plan, type revision notes and press Enter to request
+changes. An empty Enter does not approve the plan; press `a` explicitly when
+the revision prompt is empty and the plan is ready to implement.
 
 ## Safe operating habits
 

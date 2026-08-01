@@ -72,8 +72,13 @@ user chooses to invoke.
 - Each native npm archive is built on its target architecture, executed with
   `--version`, accompanied by a SHA-256 sidecar, re-verified after artifact
   download, and assembled with the launcher for a final smoke test.
-- Dependabot auto-merge is limited to patch releases. Minor and major updates
-  remain open for human review, including pre-1.0 dependencies.
+- Dependabot version-update PRs are disabled to avoid automated dependency
+  churn in the large generated workspace. Security alerts and automated
+  security fixes remain enabled; security PRs require the normal review and CI
+  gates.
+- GitHub Actions are pinned to full commit SHAs, default to read-only token
+  permissions, and cannot approve pull requests. The Windows job does not
+  disable host malware protection.
 - Upstream baselines advance only after selected ports pass the required local
   or CI gates. A timeout is inconclusive, not a successful review.
 

@@ -55,3 +55,28 @@ git diff --stat "$baseline..upstream/main"
 ```
 
 Fetching is read-only; do not merge until the review scope is understood.
+
+## Review record: 2026-08-01
+
+Reviewed upstream `main` through `a4221165824e5b1f5c4c10b7459f65e78dd6448d`
+(`0.2.117`). Upstream still publishes no GitHub releases or tags, so the
+versioned changelogs and `main` commits were the authoritative review inputs.
+
+Ported selectively:
+
+- `0.2.115`: deliver the repeated-tool-call stationarity reminder only after
+  the preceding tool results are committed, preventing duplicate tool results
+  from corrupting chat history;
+- `0.2.116`: accept `/undo` as an alias for `/rewind`; and
+- `0.2.117`: require revision notes before Enter requests plan changes, with an
+  explicit `a` shortcut for approval.
+
+Already covered by Chutes-specific code: Windows external-auth shell handling
+uses the platform-aware command builder and retains its dedicated tests.
+
+Deferred because they are coupled to newer upstream runtime/configuration
+surfaces and need a separate Chutes compatibility review: MCP enable/disable
+persistence, streaming JSON events, additional CA-bundle handling, background
+subagent cancellation, ACP task lifecycle changes, terminal resize behavior,
+and session cold-start work. No upstream identity, billing, telemetry, or
+enterprise-only behavior was imported.

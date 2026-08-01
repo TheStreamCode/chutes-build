@@ -10,10 +10,12 @@ Configure the public GitHub repository with:
 - `main` as the default branch;
 - private vulnerability reporting enabled;
 - branch protection requiring the secrets/dependency, Linux Rust, Windows
-  Rust, and npm checks;
-- an `npm-release` environment with required reviewer approval;
+  Rust, macOS Rust, and npm checks;
+- full commit SHA pinning for every GitHub Action;
+- an `npm-release` environment used only by the publish job, with required
+  reviewer approval when repository policy supports it;
 - an `NPM_TOKEN` environment secret limited to publishing the Chutes Build npm
-  packages; and
+  packages, with OIDC enabled for npm provenance attestations; and
 - Actions permissions restricted to read-only by default.
 
 Recommended repository topics are `chutes`, `coding-agent`, `cli`, `rust`,
@@ -38,6 +40,11 @@ Review `CHANGELOG.md`, `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES`, and the npm
 package contents before continuing. Run Gitleaks against both the working tree
 and complete Git history. Never place a Chutes API key in release configuration
 or CI.
+
+The root launcher archive must contain `README.md`, `CHANGELOG.md`,
+`SECURITY.md`, `PRIVACY.md`, `LICENSE`, `NOTICE`, and `npm/bin/`. It must not
+define install or post-install lifecycle scripts. Verify the exact file list
+with `npm pack --dry-run` before starting the release workflow.
 
 Validate relative Markdown links and changed workflow YAML. The root README,
 public guides, embedded `/docs` guides, privacy/security documents, and current

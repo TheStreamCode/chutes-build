@@ -6,6 +6,35 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-01
+
+### Added
+
+- `/undo` is accepted as an alias for `/rewind`.
+- Added repository-wide coding-agent guidance and editor defaults.
+- The npm launcher archive now includes the changelog and security policy.
+
+### Changed
+
+- Reviewed Grok Build upstream through `0.2.117` and recorded the selective
+  port and deferral decisions.
+- Removed the orphaned Dependabot auto-merge workflow after automated version
+  update PRs were disabled.
+- The Windows CI job no longer disables real-time malware protection.
+
+### Fixed
+
+- Repeated-tool-call reminders are injected only after the preceding tool
+  results are committed, preventing duplicate results from corrupting session
+  history.
+- Empty Enter no longer silently approves a plan while the revision prompt is
+  focused; revision notes are required, with `a` as the explicit approve key.
+
+### Security
+
+- Documented and aligned repository security controls for SHA-pinned Actions,
+  read-only workflow tokens, and reviewed security-update PRs.
+
 ## [0.4.1] - 2026-07-26
 
 ### Added

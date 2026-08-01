@@ -18,7 +18,7 @@ may add more commands at runtime.
 | `/history` | Search prompt history |
 | `/find` | Search conversation scrollback |
 | `/jump` | Jump to a turn |
-| `/rewind` | Rewind to a previous turn |
+| `/rewind` (`/undo`) | Rewind to a previous turn |
 | `/recap` | Summarize the session so far |
 | `/compact` | Compact conversation history |
 | `/context` | View context usage |

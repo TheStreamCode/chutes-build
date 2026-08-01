@@ -3,6 +3,9 @@
 Thank you for improving Chutes Build. Focused issues and pull requests are
 welcome.
 
+Repository-wide product invariants, upstream-port rules, and the complete local
+verification matrix are maintained in [AGENTS.md](AGENTS.md).
+
 ## Before opening a change
 
 1. Search existing issues and pull requests.
