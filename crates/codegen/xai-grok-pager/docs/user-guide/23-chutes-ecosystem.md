@@ -38,9 +38,14 @@ the image itself is never added to the conversation. Billed against the
 account's subscription quota like any other official Chutes model call, never
 the separate marketplace/wallet balance used by third-party chutes.
 
-Use the native media tools for generation and editing. Always call
-`describe_media_model` before `generate_media`, because each public chute can
-expose different cords and schemas.
+Use the native media tools for generation and editing. `generate_media` is
+self-contained: it resolves the model name against the catalog, selects the
+cord for the requested kind, and places `prompt` into the text field that cord
+declares, so `{model, kind, prompt}` is a complete call. Because each public
+chute exposes different cords and schemas, payloads are validated locally
+first; a mismatch reports the fields that cord accepts, and
+`describe_media_model` remains available when an exact schema is needed up
+front.
 
 Generated files are saved inside the workspace and returned as typed media
 artifacts rather than path text. Supported terminals keep inline image/video

@@ -9,17 +9,33 @@ metadata:
 
 # Chutes Media
 
-Use the native Chutes tools as a schema-first workflow:
+`generate_media` is self-contained. It resolves the model name against the
+catalog, picks the cord for the requested kind, and places `prompt` into
+whatever field that cord declares for free text. One call is the normal case:
 
-1. Call `list_media_models` with the requested media kind and a focused query.
-2. Select the best model for the user's constraints, not merely the first result.
-3. Call `describe_media_model` and inspect its callable cords and exact input schema.
-4. Call `generate_media` with that model, media kind, and only supported parameters.
-5. Report the workspace-relative output path and any material model limitation.
+```
+generate_media { model: "FLUX.1-schnell", kind: "image", prompt: "..." }
+```
 
-Never guess a model slug, cord, parameter name, duration, aspect ratio, or source
-asset field. For edits, pass workspace files only through fields declared by the
-selected model schema. Chutes Build encodes those assets locally before the
+1. Call `generate_media` with the model, the media kind, and the prompt.
+2. Report the workspace-relative output path and any material model limitation.
+
+Add `params` only for settings the user actually asked for (size, steps,
+duration, voice) or to pass a source asset. A wrong field name is caught
+locally: the error lists the fields that cord accepts, so correct the call and
+retry rather than starting the workflow over.
+
+Reach for the other two tools when they earn their round-trip:
+
+- `list_media_models` — the user has not named a model, or you need to compare
+  candidates against stated constraints. Pass a `kind` and a focused `query`.
+- `describe_media_model` — you need exact field names or value ranges before
+  committing to an expensive video or multi-shot run, or an error told you the
+  schema disagrees.
+
+Do not invent durations, aspect ratios, or source-asset field names; those come
+from the schema, not from habit. For edits, reference workspace files through a
+field the model declares — Chutes Build encodes those assets locally before the
 request and saves generated files with a provenance sidecar by default.
 
 ## Choosing the right medium

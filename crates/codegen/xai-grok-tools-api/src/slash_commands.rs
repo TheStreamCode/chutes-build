@@ -65,12 +65,14 @@ pub fn imagine_usage_message() -> &'static str {
 /// Build the model instruction that `/imagine` expands into for `prompt`.
 pub fn imagine_instruction(prompt: &str) -> String {
     format!(
-        "Use the Chutes media workflow for the user's image request. \
-         Call list_media_models with kind=image, choose the best matching model, \
-         call describe_media_model to obtain its exact schema, then call \
-         generate_media with kind=image. Preserve the user's prompt verbatim in \
-         the model's prompt field and do not invent unsupported parameters. After \
-         generation, briefly acknowledge the result and mention the saved path.\n\n\
+        "Handle the user's image request with generate_media, in one call: pass \
+         kind=image, a model suited to the request, and the user's prompt \
+         verbatim. generate_media resolves the model name and the cord's own \
+         prompt field itself, so list_media_models is only for picking between \
+         candidates and describe_media_model only for an exact schema. Do not \
+         invent unsupported parameters; if a call reports a schema mismatch, it \
+         names the accepted fields — correct it and retry. After generation, \
+         briefly acknowledge the result and mention the saved path.\n\n\
          Prompt: {prompt}"
     )
 }
@@ -98,10 +100,13 @@ const IMAGINE_VIDEO_SKILL: &str = "\
 Unless the user asks for a long video, multiple scenes, or a multi-shot sequence, \
 generate **one** video:
 
-1. Call `list_media_models` with `kind=video` and choose the best model for the request.
-2. Call `describe_media_model` and follow its exact cord schema.
-3. Call `generate_media` with `kind=video`, preserving the user's prompt and attaching \
-workspace image references only when the selected schema supports them.
+1. Call `generate_media` with `kind=video`, a model suited to the request, and the \
+user's prompt. It resolves the model name and the cord's own prompt field itself.
+2. Use `list_media_models` only to pick between candidate models, and \
+`describe_media_model` only when you need exact field names or ranges before \
+committing to the run — a schema mismatch is reported with the accepted fields, so \
+correct and retry rather than restarting the workflow.
+3. Attach workspace image references only through fields the model's schema declares.
 4. After completion, mention the saved file path.
 
 ## Longer / multi-shot videos

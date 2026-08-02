@@ -51,12 +51,21 @@ pub struct DescribeMediaModelInput {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct GenerateMediaInput {
-    /// Chute id, slug, or model name.
+    /// Chute id, slug, or model name. A plain name is resolved against the
+    /// public catalog, so `list_media_models` is not required first.
     pub model: String,
     /// Expected output family.
     pub kind: MediaKind,
-    /// Cord payload. Workspace file paths in non-text fields are encoded as base64.
-    pub params: serde_json::Value,
+    /// Text prompt. Placed into the cord's own prompt field (`prompt`, `text`,
+    /// `lyrics`, ... — whichever it declares), so a plain
+    /// `{model, kind, prompt}` call works without inspecting the schema first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Extra cord payload fields, merged over `prompt`. Only needed for
+    /// non-default settings (size, steps, voice, input assets, ...).
+    /// Workspace file paths in non-text fields are encoded as base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
     /// Optional cord name or public path. The primary POST cord is selected by default.
     pub cord: Option<String>,
     /// Relative output directory within the current workspace.
@@ -217,7 +226,7 @@ impl crate::types::tool_metadata::ToolMetadata for GenerateMediaTool {
     }
 
     fn description_template(&self) -> &str {
-        "Generate or edit image, video, music, or speech with a selected Chutes model. Call describe_media_model first. Outputs and a provenance sidecar are saved only inside the current workspace."
+        "Generate or edit image, video, music, or speech with a Chutes model. Self-contained: `{model, kind, prompt}` is enough — the model name is resolved against the catalog, the cord is selected, and the prompt is placed into the field that cord declares. Add `params` only for non-default settings (size, steps, voice) or to pass a workspace file as an input asset. Call describe_media_model only when a call reports a schema mismatch or you need an exact field name. Outputs and a provenance sidecar are saved only inside the current workspace."
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -260,19 +269,35 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
         let cwd = resources.lock().await.require::<Cwd>()?.0.clone();
         let client = ChutesMediaClient::from_env()
             .map_err(|error| execution_error("generate_media", error))?;
-        let detail = client
-            .describe(input.model.trim())
+        let (detail, resolved_model) = resolve_model_detail(&client, input.model.trim())
             .await
             .map_err(|error| execution_error("generate_media", error))?;
         let cord = select_cord(&detail, input.kind, input.cord.as_deref())
             .map_err(|error| execution_error("generate_media", error))?;
         let invoke_base = invoke_base_url(&detail)
             .ok_or_else(|| execution_error("generate_media", "model has no invocation URL"))?;
-        let mut params = input
-            .params
-            .as_object()
-            .cloned()
-            .ok_or_else(|| execution_error("generate_media", "params must be a JSON object"))?;
+        let mut params = match input.params {
+            Some(serde_json::Value::Object(params)) => params,
+            None | Some(serde_json::Value::Null) => serde_json::Map::new(),
+            Some(_) => {
+                return Err(execution_error(
+                    "generate_media",
+                    "params must be a JSON object",
+                ));
+            }
+        };
+        if let Some(prompt) = input.prompt.as_deref() {
+            apply_prompt(&cord.schema, &mut params, prompt);
+        }
+        if params.is_empty() {
+            return Err(execution_error(
+                "generate_media",
+                format!(
+                    "nothing to send: provide `prompt` (or `params`). {}",
+                    describe_schema(&cord.schema)
+                ),
+            ));
+        }
         validate_schema_fields(
             &cord.schema,
             &params,
@@ -284,12 +309,12 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             .map_err(|error| execution_error("generate_media", error))?;
 
         if env_flag_default("CHUTES_WARMUP", true) {
-            let _ = client.warmup(input.model.trim()).await;
+            let _ = client.warmup(&resolved_model).await;
         }
         let url = format!("{}{}", invoke_base.trim_end_matches('/'), cord.path);
         let response = invoke_with_cold_start_retry(
             &client,
-            input.model.trim(),
+            &resolved_model,
             &url,
             &cord.method,
             &serde_json::Value::Object(params),
@@ -333,7 +358,7 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
         let provenance = if env_flag_default("CHUTES_PROVENANCE", true) {
             let provenance = serde_json::json!({
                 "provider": "chutes",
-                "model": &input.model,
+                "model": &resolved_model,
                 "kind": input.kind.as_str(),
                 "cord": cord.path,
                 "content_type": &media.content_type,
@@ -370,7 +395,7 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             byte_len,
             provenance_path: sidecar,
             provider: "chutes".to_owned(),
-            model: input.model,
+            model: resolved_model,
             cost: media.cost,
         }))
     }
@@ -472,6 +497,187 @@ fn parse_cords(value: &serde_json::Value) -> Vec<Cord> {
         .collect()
 }
 
+/// Field names cords use for their main free-text input, most specific first.
+/// `apply_prompt` picks the first one the cord actually declares, so callers
+/// pass `prompt` and the tool adapts to `text` (speech) or `lyrics` (music)
+/// without a describe round-trip.
+const PROMPT_FIELDS: &[&str] = &[
+    "prompt",
+    "text",
+    "text_prompt",
+    "prompt_text",
+    "input_text",
+    "lyrics",
+    "description",
+    "query",
+];
+
+/// Fetch a model's detail, accepting a plain catalog name where the API
+/// expects an id or slug.
+///
+/// `describe` is a keyed lookup, so a human-facing name ("FLUX.1 schnell")
+/// 404s and the caller has to run `list_media_models` first. On failure this
+/// searches the catalog once and retries with the record's own slug/id;
+/// returns the identifier that resolved, for warmup and provenance.
+async fn resolve_model_detail(
+    client: &ChutesMediaClient,
+    model: &str,
+) -> Result<(serde_json::Value, String), String> {
+    if model.is_empty() {
+        return Err("model must not be empty".to_owned());
+    }
+    let direct = client.describe(model).await;
+    if let Ok(detail) = direct {
+        return Ok((detail, model.to_owned()));
+    }
+    let catalog = client.list().await.map_err(|error| {
+        format!("model `{model}` was not found and the catalog lookup failed: {error}")
+    })?;
+    let records = catalog_records(&catalog);
+    let wanted = normalize_model_key(model);
+    let matched = records
+        .iter()
+        .find(|record| {
+            ["slug", "name", "chute_id", "id"].iter().any(|field| {
+                first_string(record, &[*field])
+                    .is_some_and(|value| normalize_model_key(&value) == wanted)
+            })
+        })
+        .or_else(|| {
+            records.iter().find(|record| {
+                ["slug", "name"].iter().any(|field| {
+                    first_string(record, &[*field])
+                        .is_some_and(|value| normalize_model_key(&value).contains(&wanted))
+                })
+            })
+        });
+    let Some(record) = matched else {
+        let mut candidates: Vec<String> = records
+            .iter()
+            .filter_map(|record| first_string(record, &["slug", "name"]))
+            .take(15)
+            .collect();
+        candidates.sort();
+        return Err(format!(
+            "model `{model}` was not found in the Chutes catalog. Known models include: {}. \
+             Use list_media_models with a `query` to search the full catalog.",
+            candidates.join(", ")
+        ));
+    };
+    let identifier = first_string(record, &["slug", "chute_id", "id", "name"])
+        .ok_or_else(|| format!("catalog entry for `{model}` has no usable identifier"))?;
+    let detail = client.describe(&identifier).await.map_err(|error| {
+        format!("model `{model}` resolved to `{identifier}` but describe failed: {error}")
+    })?;
+    Ok((detail, identifier))
+}
+
+/// Lowercase alphanumerics only, so "FLUX.1 schnell", "flux-1-schnell" and
+/// "FLUX.1-schnell" all compare equal.
+fn normalize_model_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Place `prompt` into the field this cord declares for free text, leaving an
+/// explicit `params` entry untouched.
+///
+/// With no published schema it falls back to `prompt`, the overwhelmingly
+/// common field name. When a schema exists but declares no text field, nothing
+/// is inserted: guessing would trip unknown-field validation, whereas the
+/// resulting error names the fields the cord does accept.
+fn apply_prompt(
+    schema: &Option<serde_json::Value>,
+    params: &mut serde_json::Map<String, serde_json::Value>,
+    prompt: &str,
+) {
+    let Some((container, field)) = prompt_target(schema) else {
+        if schema.is_none() {
+            params
+                .entry("prompt")
+                .or_insert_with(|| serde_json::Value::String(prompt.to_owned()));
+        }
+        return;
+    };
+    let slot = match container {
+        Some(wrapper) => {
+            let entry = params
+                .entry(wrapper)
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            match entry.as_object_mut() {
+                Some(map) => map,
+                // The caller passed a non-object under the wrapper key; leave
+                // it alone and let schema validation report it.
+                None => return,
+            }
+        }
+        None => params,
+    };
+    slot.entry(field)
+        .or_insert_with(|| serde_json::Value::String(prompt.to_owned()));
+}
+
+/// Locate the prompt field as `(wrapper, field)`, descending one level into a
+/// single-object wrapper (the `args` shape some cords require).
+fn prompt_target(schema: &Option<serde_json::Value>) -> Option<(Option<String>, String)> {
+    let properties = schema.as_ref()?.get("properties")?.as_object()?;
+    if let Some(field) = first_prompt_field(properties) {
+        return Some((None, field));
+    }
+    properties.iter().find_map(|(key, value)| {
+        let nested = value.get("properties")?.as_object()?;
+        first_prompt_field(nested).map(|field| (Some(key.clone()), field))
+    })
+}
+
+fn first_prompt_field(properties: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    PROMPT_FIELDS.iter().find_map(|candidate| {
+        properties
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(candidate))
+            .cloned()
+    })
+}
+
+/// One-line rendering of a cord's accepted fields, for error messages.
+///
+/// Errors carry this inline so a mismatch is fixable on the next call rather
+/// than costing a `describe_media_model` round-trip first.
+fn describe_schema(schema: &Option<serde_json::Value>) -> String {
+    let Some(properties) = schema
+        .as_ref()
+        .and_then(|schema| schema.get("properties"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return "This cord publishes no input schema; call describe_media_model for its cords."
+            .to_owned();
+    };
+    let required: Vec<&str> = schema
+        .as_ref()
+        .and_then(|schema| schema.get("required"))
+        .and_then(serde_json::Value::as_array)
+        .map(|items| items.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let fields: Vec<String> = properties
+        .iter()
+        .map(|(name, spec)| {
+            let ty = spec
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("any");
+            if required.contains(&name.as_str()) {
+                format!("{name}: {ty} (required)")
+            } else {
+                format!("{name}: {ty}")
+            }
+        })
+        .collect();
+    format!("Cord accepts: {}.", fields.join(", "))
+}
+
 fn select_cord(
     detail: &serde_json::Value,
     kind: MediaKind,
@@ -538,12 +744,12 @@ fn validate_schema_fields(
     params: &serde_json::Map<String, serde_json::Value>,
     allow_unknown: bool,
 ) -> Result<(), String> {
-    let Some(schema) = schema.as_ref() else {
+    let Some(published) = schema.as_ref() else {
         return Ok(());
     };
-    let mut schema = schema.clone();
-    close_object_schemas(&mut schema, !allow_unknown);
-    let validator = jsonschema::validator_for(&schema)
+    let mut closed = published.clone();
+    close_object_schemas(&mut closed, !allow_unknown);
+    let validator = jsonschema::validator_for(&closed)
         .map_err(|error| format!("cord input_schema is not a valid JSON Schema: {error}"))?;
     let instance = serde_json::Value::Object(params.clone());
     let errors: Vec<String> = validator
@@ -561,12 +767,13 @@ fn validate_schema_fields(
         Ok(())
     } else {
         Err(format!(
-            "params do not match the cord's input schema: {}. Call describe_media_model again to see the exact schema{}",
+            "params do not match the cord's input schema: {}. {} Retry with corrected params{}",
             errors.join("; "),
+            describe_schema(schema),
             if allow_unknown {
                 ""
             } else {
-                ", or set CHUTES_ALLOW_UNKNOWN_PARAMS=1 to bypass unknown-field checks"
+                "; set CHUTES_ALLOW_UNKNOWN_PARAMS=1 to bypass unknown-field checks"
             }
         ))
     }
@@ -1156,6 +1363,118 @@ mod tests {
         static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
         let _guard = LOCK.lock().await;
         f().await
+    }
+
+    /// A caller that passes only `prompt` must produce a payload the cord
+    /// accepts, whatever that cord calls its text field — that is what lets
+    /// `{model, kind, prompt}` work without a describe round-trip first.
+    #[test]
+    fn prompt_lands_in_the_field_the_cord_declares() {
+        let cases = [
+            (
+                serde_json::json!({"properties": {"prompt": {"type": "string"}}}),
+                "prompt",
+            ),
+            (
+                serde_json::json!({"properties": {"text": {"type": "string"}}}),
+                "text",
+            ),
+            (
+                serde_json::json!({"properties": {"lyrics": {"type": "string"}}}),
+                "lyrics",
+            ),
+        ];
+        for (schema, expected) in cases {
+            let mut params = serde_json::Map::new();
+            apply_prompt(&Some(schema), &mut params, "a red bicycle");
+            assert_eq!(
+                params.get(expected).and_then(serde_json::Value::as_str),
+                Some("a red bicycle"),
+                "prompt should land in `{expected}`: {params:?}"
+            );
+            assert_eq!(params.len(), 1, "no other field should be invented");
+        }
+    }
+
+    /// Some cords nest their inputs under a wrapper object; the prompt has to
+    /// follow it there instead of landing at the top level and failing
+    /// validation.
+    #[test]
+    fn prompt_descends_into_a_wrapper_object() {
+        let schema = serde_json::json!({
+            "properties": {"args": {"type": "object", "properties": {"prompt": {"type": "string"}}}}
+        });
+        let mut params = serde_json::Map::new();
+        apply_prompt(&Some(schema), &mut params, "a blue door");
+        assert_eq!(
+            serde_json::Value::Object(params)
+                .pointer("/args/prompt")
+                .and_then(serde_json::Value::as_str),
+            Some("a blue door")
+        );
+    }
+
+    #[test]
+    fn explicit_params_win_over_the_prompt_shorthand() {
+        let schema = serde_json::json!({"properties": {"prompt": {"type": "string"}}});
+        let mut params = serde_json::Map::new();
+        params.insert("prompt".to_owned(), serde_json::json!("explicit"));
+        apply_prompt(&Some(schema), &mut params, "shorthand");
+        assert_eq!(
+            params.get("prompt").and_then(serde_json::Value::as_str),
+            Some("explicit")
+        );
+    }
+
+    /// Guessing `prompt` against a schema that has no text field would trip
+    /// unknown-field validation; staying out of the way lets the caller get an
+    /// error that names the real fields instead.
+    #[test]
+    fn no_prompt_field_means_no_guess() {
+        let schema = serde_json::json!({"properties": {"image_b64": {"type": "string"}}});
+        let mut params = serde_json::Map::new();
+        apply_prompt(&Some(schema), &mut params, "ignored");
+        assert!(params.is_empty(), "should not invent a field: {params:?}");
+
+        let mut params = serde_json::Map::new();
+        apply_prompt(&None, &mut params, "kept");
+        assert_eq!(
+            params.get("prompt").and_then(serde_json::Value::as_str),
+            Some("kept"),
+            "with no schema, `prompt` is the safe default"
+        );
+    }
+
+    /// The schema-mismatch error is the model's only feedback channel; if it
+    /// does not carry the accepted fields, the fix costs another
+    /// `describe_media_model` call.
+    #[test]
+    fn schema_mismatch_error_names_the_accepted_fields() {
+        let schema = Some(serde_json::json!({
+            "type": "object",
+            "properties": {"prompt": {"type": "string"}, "steps": {"type": "integer"}},
+            "required": ["prompt"],
+        }));
+        let mut params = serde_json::Map::new();
+        params.insert("promt".to_owned(), serde_json::json!("typo"));
+        let error = validate_schema_fields(&schema, &params, false)
+            .expect_err("a typo'd field must be rejected");
+        assert!(error.contains("prompt: string (required)"), "{error}");
+        assert!(error.contains("steps: integer"), "{error}");
+        assert!(
+            !error.contains("Call describe_media_model again"),
+            "the error should be self-sufficient: {error}"
+        );
+    }
+
+    #[test]
+    fn model_keys_compare_across_punctuation_and_case() {
+        assert_eq!(normalize_model_key("FLUX.1-schnell"), "flux1schnell");
+        assert_eq!(normalize_model_key("FLUX.1 schnell"), "flux1schnell");
+        assert_ne!(
+            normalize_model_key("flux-dev"),
+            normalize_model_key("flux-pro")
+        );
     }
 
     #[test]

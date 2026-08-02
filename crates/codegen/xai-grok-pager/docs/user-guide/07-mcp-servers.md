@@ -7,6 +7,9 @@ write, or contact external services according to their own implementation.
 The core Chutes media workflow is built in natively. Image generation/editing,
 video, music, and speech use `list_media_models`, `describe_media_model`, and
 `generate_media`; a separate `chutes-media-mcp` Node process is not required.
+`generate_media` is self-contained — it resolves the model name and the cord's
+own prompt field — so the other two tools are for choosing between models and
+inspecting an exact schema, not mandatory preliminaries.
 
 The native implementation retains schema validation, optional warmup, cold
 start retry, workspace-bounded output, and provenance sidecars. Compatible
