@@ -73,23 +73,41 @@ mod tests {
                 .map(|(i, &b)| b ^ seed.wrapping_add(i as u8))
                 .collect()
         }
-        let base_raw = include_bytes!("../../templates/prompt.md");
-        let apply_patch_raw = include_bytes!("../../templates/apply_patch_prompt.md");
-        let subagent_raw = include_bytes!("../../templates/subagent_prompt.md");
+        /// Fold CRLF to LF, matching `read_normalized` in the generator.
+        ///
+        /// `include_bytes!` yields whatever line endings the checkout produced,
+        /// so comparing raw bytes made this test pass only on the platform the
+        /// arrays happened to be generated on.
+        fn normalized(raw: &[u8]) -> Vec<u8> {
+            let mut out = Vec::with_capacity(raw.len());
+            let mut i = 0;
+            while i < raw.len() {
+                if raw[i] == b'\r' && raw.get(i + 1) == Some(&b'\n') {
+                    i += 1;
+                    continue;
+                }
+                out.push(raw[i]);
+                i += 1;
+            }
+            out
+        }
+        let base_raw = normalized(include_bytes!("../../templates/prompt.md"));
+        let apply_patch_raw = normalized(include_bytes!("../../templates/apply_patch_prompt.md"));
+        let subagent_raw = normalized(include_bytes!("../../templates/subagent_prompt.md"));
 
         assert_eq!(
             BASE_PROMPT_ENC,
-            &xor_encrypt(base_raw, PROMPT_SEEDS[0]),
+            &xor_encrypt(&base_raw, PROMPT_SEEDS[0]),
             "prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
         assert_eq!(
             CODEX_PROMPT_ENC,
-            &xor_encrypt(apply_patch_raw, PROMPT_SEEDS[1]),
+            &xor_encrypt(&apply_patch_raw, PROMPT_SEEDS[1]),
             "apply_patch_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
         assert_eq!(
             SUBAGENT_PROMPT_ENC,
-            &xor_encrypt(subagent_raw, PROMPT_SEEDS[2]),
+            &xor_encrypt(&subagent_raw, PROMPT_SEEDS[2]),
             "subagent_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
     }
