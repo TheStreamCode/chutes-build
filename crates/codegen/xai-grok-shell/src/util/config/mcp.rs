@@ -574,47 +574,94 @@ pub fn collect_mcp_setup_configs(
 
 pub const MANAGED_GATEWAY_DISABLED_CONNECTORS_KEY: &str = "__managed_gateway_connectors";
 
+/// Read the TOML table at `path`, apply `f`, and write it back only if the
+/// result differs.
+///
+/// Shared by every config mutation below, which previously each did their own
+/// read-modify-write with three problems:
+///
+/// - they parsed with `unwrap_or(empty table)`, so a config that failed to
+///   parse — one stray syntax error — was silently replaced by just the keys
+///   the caller was persisting, discarding the rest of the user's settings;
+/// - they took no lock, so two concurrent saves each wrote a full file built
+///   from their own stale read, and the later write erased the earlier one;
+/// - they staged through a fixed `<name>.toml.tmp`, which two writers collide
+///   on, and the rename dropped the original file's permissions.
+///
+/// Unparseable input is now an error, the user-config write lock covers the
+/// whole cycle, and the write goes through [`super::persist::atomic_write_string`].
+async fn write_toml_table_if_changed(
+    path: &std::path::Path,
+    f: impl FnOnce(&mut TomlMap<String, TomlValue>) -> Result<()>,
+) -> Result<bool> {
+    let is_user_config = path == config_path().as_path();
+    // Held for the whole read-modify-write, not just the write.
+    let _guard = if is_user_config {
+        Some(super::persist::lock_config_writes().await)
+    } else {
+        None
+    };
+
+    let original = match tokio::fs::read_to_string(path).await {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(anyhow::anyhow!("failed to read {}: {e}", path.display())),
+    };
+    let mut root: TomlValue = if original.trim().is_empty() {
+        TomlValue::Table(TomlMap::new())
+    } else {
+        toml::from_str(&original).map_err(|e| {
+            anyhow::anyhow!(
+                "refusing to rewrite {}: it is not valid TOML ({e}). \
+                 Fix or move the file, then retry.",
+                path.display()
+            )
+        })?
+    };
+    let table = root
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    f(table)?;
+
+    let updated = toml::to_string_pretty(&root)?;
+    if updated == original {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    super::persist::atomic_write_string(path, &updated)?;
+    Ok(true)
+}
+
 /// Persist `disabled_tools` for a server under `[disabled_mcp_tools]` in config.toml.
 ///
 /// Uses a dedicated top-level section (not `[mcp_servers]`) to avoid creating
 /// incomplete server entries that fail to deserialize for managed servers.
 pub async fn save_mcp_disabled_tools(server_name: &str, disabled_tools: &[String]) -> Result<()> {
-    let path = config_path();
-    let mut root: TomlValue = match tokio::fs::read_to_string(&path).await {
-        Ok(s) => toml::from_str(&s).unwrap_or(TomlValue::Table(TomlMap::new())),
-        Err(_) => TomlValue::Table(TomlMap::new()),
-    };
-    let table = root
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    write_toml_table_if_changed(&config_path(), |table| {
+        let section = table
+            .entry("disabled_mcp_tools")
+            .or_insert_with(|| TomlValue::Table(TomlMap::new()))
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("disabled_mcp_tools is not a table"))?;
 
-    let section = table
-        .entry("disabled_mcp_tools")
-        .or_insert_with(|| TomlValue::Table(TomlMap::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("disabled_mcp_tools is not a table"))?;
-
-    if disabled_tools.is_empty() {
-        section.remove(server_name);
-        if section.is_empty() {
-            table.remove("disabled_mcp_tools");
+        if disabled_tools.is_empty() {
+            section.remove(server_name);
+            if section.is_empty() {
+                table.remove("disabled_mcp_tools");
+            }
+        } else {
+            let arr = disabled_tools
+                .iter()
+                .map(|s| TomlValue::String(s.clone()))
+                .collect();
+            section.insert(server_name.to_string(), TomlValue::Array(arr));
         }
-    } else {
-        let arr = disabled_tools
-            .iter()
-            .map(|s| TomlValue::String(s.clone()))
-            .collect();
-        section.insert(server_name.to_string(), TomlValue::Array(arr));
-    }
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    let tmp = path.with_extension("toml.tmp");
-    if let Some(parent) = path.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    tokio::fs::write(&tmp, &toml_str).await?;
-    tokio::fs::rename(&tmp, &path).await?;
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map(|_| ())
 }
 
 /// Persist the enabled/disabled state for a single MCP server.
@@ -623,50 +670,37 @@ pub async fn save_mcp_disabled_tools(server_name: &str, disabled_tools: &[String
 /// For local servers that have a `[mcp_servers.X]` entry, also sets/clears
 /// the `enabled` field so `to_acp_mcp_server()` respects it at load time.
 pub async fn save_mcp_server_enabled(server_name: &str, enabled: bool) -> Result<()> {
-    let path = config_path();
-    let mut root: TomlValue = match tokio::fs::read_to_string(&path).await {
-        Ok(s) => toml::from_str(&s).unwrap_or(TomlValue::Table(TomlMap::new())),
-        Err(_) => TomlValue::Table(TomlMap::new()),
-    };
-    let table = root
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    write_toml_table_if_changed(&config_path(), |table| {
+        // Update the `disabled_mcp_servers` list (source of truth for all servers).
+        let mut disabled_list: Vec<String> = table
+            .get("disabled_mcp_servers")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
 
-    // Update the `disabled_mcp_servers` list (source of truth for all servers).
-    let mut disabled_list: Vec<String> = table
-        .get("disabled_mcp_servers")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
+        if enabled {
+            disabled_list.retain(|n| n != server_name);
+        } else if !disabled_list.contains(&server_name.to_string()) {
+            disabled_list.push(server_name.to_string());
+        }
 
-    if enabled {
-        disabled_list.retain(|n| n != server_name);
-    } else if !disabled_list.contains(&server_name.to_string()) {
-        disabled_list.push(server_name.to_string());
-    }
-
-    if disabled_list.is_empty() {
-        table.remove("disabled_mcp_servers");
-    } else {
-        let arr = disabled_list
-            .iter()
-            .map(|s| TomlValue::String(s.clone()))
-            .collect();
-        table.insert("disabled_mcp_servers".to_string(), TomlValue::Array(arr));
-    }
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    let tmp = path.with_extension("toml.tmp");
-    if let Some(parent) = path.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    tokio::fs::write(&tmp, &toml_str).await?;
-    tokio::fs::rename(&tmp, &path).await?;
-    Ok(())
+        if disabled_list.is_empty() {
+            table.remove("disabled_mcp_servers");
+        } else {
+            let arr = disabled_list
+                .iter()
+                .map(|s| TomlValue::String(s.clone()))
+                .collect();
+            table.insert("disabled_mcp_servers".to_string(), TomlValue::Array(arr));
+        }
+        Ok(())
+    })
+    .await
+    .map(|_| ())
 }
 
 /// Upsert an MCP server entry in `~/.chutes-build/config.toml`.
@@ -687,43 +721,31 @@ pub async fn save_mcp_server_config_at(
     server_name: &str,
     config: &McpServerConfig,
 ) -> Result<()> {
-    let mut root: TomlValue = match tokio::fs::read_to_string(&path).await {
-        Ok(s) => toml::from_str(&s).unwrap_or(TomlValue::Table(TomlMap::new())),
-        Err(_) => TomlValue::Table(TomlMap::new()),
-    };
-    let table = root
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    write_toml_table_if_changed(path, |table| {
+        let servers = table
+            .entry("mcp_servers")
+            .or_insert_with(|| TomlValue::Table(TomlMap::new()))
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("mcp_servers is not a table"))?;
 
-    let servers = table
-        .entry("mcp_servers")
-        .or_insert_with(|| TomlValue::Table(TomlMap::new()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("mcp_servers is not a table"))?;
+        let serialized = toml::Value::try_from(config)
+            .map_err(|e| anyhow::anyhow!("failed to serialize MCP server config: {e}"))?;
+        servers.insert(server_name.to_string(), serialized);
 
-    let serialized = toml::Value::try_from(config)
-        .map_err(|e| anyhow::anyhow!("failed to serialize MCP server config: {e}"))?;
-    servers.insert(server_name.to_string(), serialized);
-
-    // Ensure the server isn't in the disabled list.
-    if let Some(arr) = table
-        .get_mut("disabled_mcp_servers")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|v| v.as_str() != Some(server_name));
-        if arr.is_empty() {
-            table.remove("disabled_mcp_servers");
+        // Ensure the server isn't in the disabled list.
+        if let Some(arr) = table
+            .get_mut("disabled_mcp_servers")
+            .and_then(|v| v.as_array_mut())
+        {
+            arr.retain(|v| v.as_str() != Some(server_name));
+            if arr.is_empty() {
+                table.remove("disabled_mcp_servers");
+            }
         }
-    }
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    let tmp = path.with_extension("toml.tmp");
-    if let Some(parent) = path.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    tokio::fs::write(&tmp, &toml_str).await?;
-    tokio::fs::rename(&tmp, &path).await?;
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map(|_| ())
 }
 
 /// Delete an MCP server entry from `~/.chutes-build/config.toml`.
@@ -744,62 +766,55 @@ pub async fn delete_mcp_server_config_at(
     path: &std::path::Path,
     server_name: &str,
 ) -> Result<bool> {
-    let mut root: TomlValue = match tokio::fs::read_to_string(&path).await {
-        Ok(s) => toml::from_str(&s).unwrap_or(TomlValue::Table(TomlMap::new())),
-        Err(_) => return Ok(false),
-    };
-    let table = root
-        .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    let mut existed = false;
+    write_toml_table_if_changed(path, |table| {
+        existed = table
+            .get_mut("mcp_servers")
+            .and_then(|v| v.as_table_mut())
+            .and_then(|servers| servers.remove(server_name))
+            .is_some();
 
-    let existed = table
-        .get_mut("mcp_servers")
-        .and_then(|v| v.as_table_mut())
-        .and_then(|servers| servers.remove(server_name))
-        .is_some();
+        if !existed {
+            return Ok(());
+        }
+
+        // Clean up empty mcp_servers table.
+        if table
+            .get("mcp_servers")
+            .and_then(|v| v.as_table())
+            .is_some_and(|t| t.is_empty())
+        {
+            table.remove("mcp_servers");
+        }
+
+        // Remove from disabled_mcp_servers list.
+        if let Some(arr) = table
+            .get_mut("disabled_mcp_servers")
+            .and_then(|v| v.as_array_mut())
+        {
+            arr.retain(|v| v.as_str() != Some(server_name));
+            if arr.is_empty() {
+                table.remove("disabled_mcp_servers");
+            }
+        }
+
+        // Remove disabled_mcp_tools entry.
+        if let Some(section) = table
+            .get_mut("disabled_mcp_tools")
+            .and_then(|v| v.as_table_mut())
+        {
+            section.remove(server_name);
+            if section.is_empty() {
+                table.remove("disabled_mcp_tools");
+            }
+        }
+        Ok(())
+    })
+    .await?;
 
     if !existed {
         return Ok(false);
     }
-
-    // Clean up empty mcp_servers table.
-    if table
-        .get("mcp_servers")
-        .and_then(|v| v.as_table())
-        .is_some_and(|t| t.is_empty())
-    {
-        table.remove("mcp_servers");
-    }
-
-    // Remove from disabled_mcp_servers list.
-    if let Some(arr) = table
-        .get_mut("disabled_mcp_servers")
-        .and_then(|v| v.as_array_mut())
-    {
-        arr.retain(|v| v.as_str() != Some(server_name));
-        if arr.is_empty() {
-            table.remove("disabled_mcp_servers");
-        }
-    }
-
-    // Remove disabled_mcp_tools entry.
-    if let Some(section) = table
-        .get_mut("disabled_mcp_tools")
-        .and_then(|v| v.as_table_mut())
-    {
-        section.remove(server_name);
-        if section.is_empty() {
-            table.remove("disabled_mcp_tools");
-        }
-    }
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    let tmp = path.with_extension("toml.tmp");
-    if let Some(parent) = path.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    tokio::fs::write(&tmp, &toml_str).await?;
-    tokio::fs::rename(&tmp, &path).await?;
 
     // Clean up OAuth credentials for the deleted server.
     if let Ok(mut cred_store) = xai_grok_mcp::credentials::McpCredentialStore::load_default() {
@@ -1919,6 +1934,86 @@ enabled = false
                 tmp.path().join("a").join(".mcp.json"),
                 nested.join(".mcp.json"),
             ]
+        );
+    }
+
+    fn stdio_server_config(command: &str) -> McpServerConfig {
+        McpServerConfig {
+            transport: McpServerTransportConfig::Stdio {
+                command: command.to_owned(),
+                args: Vec::new(),
+                env: None,
+                cwd: None,
+            },
+            enabled: true,
+            oauth: None,
+            setup: None,
+            startup_timeout_sec: None,
+            tool_timeout_sec: None,
+            tool_timeouts: None,
+            expose_image_base64: None,
+        }
+    }
+
+    /// A config the TOML parser rejects must be left alone. These writers used
+    /// to fall back to an empty table, so one stray syntax error turned the
+    /// next MCP save into a full rewrite that dropped every other setting the
+    /// user had.
+    #[tokio::test]
+    async fn a_config_that_fails_to_parse_is_never_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let broken = "model = \"kimi\"\n[mcp_servers\nbroken = true\n";
+        std::fs::write(&path, broken).unwrap();
+
+        let save =
+            save_mcp_server_config_at(&path, "acme", &stdio_server_config("acme-server")).await;
+        assert!(save.is_err(), "an unparseable config must not be rewritten");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            broken,
+            "the original file must survive untouched"
+        );
+
+        let delete = delete_mcp_server_config_at(&path, "acme").await;
+        assert!(delete.is_err(), "delete must refuse it too");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+    }
+
+    /// Writing the same state twice must not touch the file, so unrelated
+    /// tooling watching config.toml does not see a phantom change.
+    #[tokio::test]
+    async fn an_unchanged_save_leaves_the_file_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let config = stdio_server_config("acme-server");
+
+        save_mcp_server_config_at(&path, "acme", &config)
+            .await
+            .unwrap();
+        let after_first = std::fs::read_to_string(&path).unwrap();
+        assert!(after_first.contains("acme-server"));
+
+        save_mcp_server_config_at(&path, "acme", &config)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after_first);
+    }
+
+    /// Deleting from a config that has no such server (or no file at all) is
+    /// still a no-op reporting `false`, not an error.
+    #[tokio::test]
+    async fn deleting_an_absent_server_reports_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("config.toml");
+        assert!(!delete_mcp_server_config_at(&missing, "acme").await.unwrap());
+
+        std::fs::write(&missing, "model = \"kimi\"\n").unwrap();
+        assert!(!delete_mcp_server_config_at(&missing, "acme").await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&missing).unwrap(),
+            "model = \"kimi\"\n",
+            "a no-op delete must not rewrite the file"
         );
     }
 

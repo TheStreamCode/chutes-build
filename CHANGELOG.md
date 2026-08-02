@@ -22,6 +22,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `browser click` now focuses the element before clicking, matching a real
   pointer click. Without it a click on a field left focus on the body, so a
   following `key` went nowhere.
+- Saving MCP settings no longer discards the rest of `config.toml`. Every MCP
+  writer parsed the file with a fallback to an empty table, so one syntax error
+  turned the next save into a full rewrite containing only what that call was
+  persisting. Unparseable configs are now refused, the user-config write lock
+  covers the whole read-modify-write so concurrent saves cannot erase each
+  other, and writes go through the shared atomic helper instead of a fixed
+  temporary filename two writers could collide on. Ported from upstream.
 
 ## [0.4.3] - 2026-08-02
 
