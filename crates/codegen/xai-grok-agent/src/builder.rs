@@ -160,6 +160,27 @@ fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::Too
             .push((&grok_build::AskUserQuestionTool).into());
     }
 }
+/// Add a session-level optional tool unless the agent's declared toolset
+/// already lists it.
+///
+/// These injections layer on top of `definition.tool_config`, so a curated
+/// toolset that already names one of them (the advisor declares
+/// `memory_search`, `memory_get` and `web_fetch`) would otherwise receive a
+/// second entry with the same id. Both entries resolve to the same
+/// client-facing name and `validate_config` rejects the whole toolset with
+/// `duplicate client_name`, so the agent fails to build at all.
+fn push_session_tool(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+    tool: xai_grok_tools::registry::types::ToolConfig,
+) {
+    if !tool_config
+        .tools
+        .iter()
+        .any(|existing| existing.id == tool.id)
+    {
+        tool_config.tools.push(tool);
+    }
+}
 /// Ensure the Chutes-native ecosystem tools are available to default agents.
 fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
     use xai_grok_tools::implementations::chutes;
@@ -900,25 +921,25 @@ impl AgentBuilder {
         if definition.inject_default_tools {
             if self.memory_backend.is_some() {
                 use xai_grok_tools::implementations::memory;
-                tool_config
-                    .tools
-                    .push((&memory::search_tool::MemorySearchImpl).into());
-                tool_config
-                    .tools
-                    .push((&memory::get_tool::MemoryGetImpl).into());
+                push_session_tool(
+                    &mut tool_config,
+                    (&memory::search_tool::MemorySearchImpl).into(),
+                );
+                push_session_tool(&mut tool_config, (&memory::get_tool::MemoryGetImpl).into());
             }
             if self.web_search_config.is_enabled() {
                 use xai_grok_tools::implementations::grok_build;
-                tool_config.tools.push((&grok_build::WebSearchTool).into());
+                push_session_tool(&mut tool_config, (&grok_build::WebSearchTool).into());
             }
             if self.web_fetch_config.is_enabled() {
                 use xai_grok_tools::implementations::grok_build;
-                tool_config.tools.push((&grok_build::WebFetchTool).into());
+                push_session_tool(&mut tool_config, (&grok_build::WebFetchTool).into());
             }
             if self.lsp.is_some() {
-                tool_config
-                    .tools
-                    .push((&xai_grok_tools::implementations::grok_build::LspTool).into());
+                push_session_tool(
+                    &mut tool_config,
+                    (&xai_grok_tools::implementations::grok_build::LspTool).into(),
+                );
             }
             let has_write_tool = tool_config
                 .tools
@@ -1929,6 +1950,93 @@ mod tests {
                     "expected InvalidConfig, got: {err:?}"
                 )
             }
+        }
+    }
+    /// The advisor declares `memory_search`, `memory_get` and `web_fetch` in its
+    /// curated toolset but leaves `inject_default_tools` at its default, so it is
+    /// the one builtin where session-level injection overlaps the declared list.
+    /// A second entry for the same id resolves to the same client-facing name and
+    /// `validate_config` rejects the whole toolset with `duplicate client_name`,
+    /// which made `/advisor` fail to spawn on every attempt.
+    #[tokio::test]
+    async fn advisor_builds_with_memory_and_web_fetch_enabled() {
+        use xai_grok_tools::computer::local::LocalTerminalBackend;
+        use xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig;
+        use xai_grok_tools::notification::ToolNotificationHandle;
+        use xai_grok_tools::types::memory_backend::{MemoryBackend, MemorySearchResult};
+        type BackendError = Box<dyn std::error::Error + Send + Sync>;
+        struct StubMemory;
+        #[async_trait::async_trait]
+        impl MemoryBackend for StubMemory {
+            async fn search(
+                &self,
+                _query: &str,
+                _max_results: usize,
+                _min_score: f64,
+            ) -> Result<Vec<MemorySearchResult>, BackendError> {
+                Ok(vec![])
+            }
+            fn get(
+                &self,
+                _path: &str,
+                _from: Option<usize>,
+                _lines: Option<usize>,
+            ) -> Result<String, BackendError> {
+                Ok(String::new())
+            }
+            fn total_chunks(&self) -> Result<usize, BackendError> {
+                Ok(0)
+            }
+        }
+        let profile = crate::config::AgentDefinition::advisor();
+        assert!(
+            profile.inject_default_tools,
+            "test premise: the advisor takes session-level tool injection"
+        );
+        for id in [
+            "ChutesBuild:memory_search",
+            "ChutesBuild:memory_get",
+            "ChutesBuild:web_fetch",
+        ] {
+            assert!(
+                profile.tool_config.tools.iter().any(|tc| tc.id == id),
+                "test premise: the advisor pre-declares {id}"
+            );
+        }
+        let agent = AgentBuilder::new(
+            std::env::temp_dir(),
+            Arc::new(LocalTerminalBackend::new()),
+            ToolNotificationHandle::noop(),
+        )
+        .from_definition(profile)
+        .with_memory_backend(Arc::new(StubMemory))
+        .with_web_fetch_config(WebFetchConfig::Enabled {
+            params: Default::default(),
+        })
+        .build()
+        .await
+        .expect("advisor must build when memory and web_fetch are enabled");
+        let mut names: Vec<String> = agent
+            .tool_definitions()
+            .await
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect();
+        names.sort();
+        let duplicates: Vec<&String> = names
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| &pair[0])
+            .collect();
+        assert!(
+            duplicates.is_empty(),
+            "advisor toolset must not advertise a name twice: {duplicates:?}"
+        );
+        for expected in ["memory_search", "memory_get", "web_fetch"] {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "advisor must still expose {expected}: {names:?}"
+            );
         }
     }
     /// The ask_user_question params merge must run after `ensure_plan_mode_tools`:
