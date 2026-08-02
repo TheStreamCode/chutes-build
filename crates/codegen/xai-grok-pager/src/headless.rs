@@ -323,6 +323,38 @@ fn apply_agent_flag(agent: &Option<String>, config: &mut xai_grok_shell::agent::
 
 // ── Emitter ──────────────────────────────────────────────────────────────
 
+/// Something headless has to report, stated independently of how it is
+/// rendered.
+///
+/// Every output format is a projection of this one stream. Before, each site
+/// matched on [`OutputFormat`] and wrote its own line, so the formats were
+/// defined by a dozen scattered `match` arms and adding one meant revisiting
+/// all of them. Producers now describe *what happened* and
+/// [`HeadlessEmitter::emit`] is the only place that decides how it is
+/// serialized.
+enum HeadlessEvent<'a> {
+    /// A chunk of the agent's reply.
+    TextChunk(&'a str),
+    /// A chunk of the agent's reasoning.
+    ThoughtChunk(&'a str),
+    /// The turn stopped because it hit the turn limit.
+    MaxTurnsReached,
+    AutoCompactStarted {
+        percentage: u8,
+    },
+    AutoCompactCompleted,
+    AutoCompactFailed {
+        error: &'a str,
+    },
+    AutoCompactCancelled,
+    AutoContinueCompleted {
+        total_tokens: u64,
+    },
+    ImageCompressed {
+        message: &'a str,
+    },
+}
+
 struct HeadlessEmitter {
     format: OutputFormat,
     parse_structured_output: bool,
@@ -368,35 +400,114 @@ impl HeadlessEmitter {
         self.usage = meta.get("usage").cloned();
     }
 
-    fn on_text_chunk(&mut self, text: &str) {
-        match self.format {
-            OutputFormat::Plain => {
-                use std::io::Write as _;
-                print!("{text}");
-                let _ = std::io::stdout().flush();
-            }
-            OutputFormat::StreamingJson => {
-                println!("{}", serde_json::json!({"type":"text","data": text}));
-                if self.parse_structured_output {
+    /// Render one event in the active output format. The single place that
+    /// decides what each format puts on stdout.
+    fn emit(&mut self, event: HeadlessEvent<'_>) {
+        match event {
+            HeadlessEvent::TextChunk(text) => match self.format {
+                OutputFormat::Plain => {
+                    use std::io::Write as _;
+                    print!("{text}");
+                    let _ = std::io::stdout().flush();
+                }
+                OutputFormat::StreamingJson => {
+                    println!("{}", serde_json::json!({"type":"text","data": text}));
+                    if self.parse_structured_output {
+                        self.text_buffer.push_str(text);
+                    }
+                }
+                OutputFormat::Json => {
                     self.text_buffer.push_str(text);
                 }
-            }
-            OutputFormat::Json => {
-                self.text_buffer.push_str(text);
-            }
+            },
+            HeadlessEvent::ThoughtChunk(text) => match self.format {
+                OutputFormat::Plain => { /* no-op */ }
+                OutputFormat::StreamingJson => {
+                    println!("{}", serde_json::json!({"type":"thought","data": text}));
+                }
+                OutputFormat::Json => {
+                    self.thought_buffer.push_str(text);
+                }
+            },
+            HeadlessEvent::MaxTurnsReached => match self.format {
+                OutputFormat::Plain => eprintln!("Max turns reached"),
+                OutputFormat::StreamingJson => {
+                    println!("{}", serde_json::json!({"type": "max_turns_reached"}));
+                }
+                // Conveyed by stopReason in the final JSON.
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::AutoCompactStarted { percentage } => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "auto_compact_started", "percentage": percentage})
+                    );
+                }
+                OutputFormat::Plain => {
+                    eprintln!("Auto-compacting conversation ({percentage}% full)...");
+                }
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::AutoCompactCompleted => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!("{}", serde_json::json!({"type": "auto_compact_completed"}));
+                }
+                OutputFormat::Plain => eprintln!("Conversation compacted."),
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::AutoCompactFailed { error } => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "auto_compact_failed", "error": error})
+                    );
+                }
+                OutputFormat::Plain => {
+                    if error.trim().is_empty() {
+                        eprintln!("Auto-compact failed.");
+                    } else {
+                        eprintln!("Auto-compact failed: {error}");
+                    }
+                }
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::AutoCompactCancelled => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!("{}", serde_json::json!({"type": "auto_compact_cancelled"}));
+                }
+                OutputFormat::Plain => eprintln!("Auto-compact cancelled."),
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::AutoContinueCompleted { total_tokens } => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "auto_continue_completed", "total_tokens": total_tokens})
+                    );
+                }
+                OutputFormat::Plain => eprintln!("Resumed after compaction."),
+                OutputFormat::Json => {}
+            },
+            HeadlessEvent::ImageCompressed { message } => match self.format {
+                OutputFormat::StreamingJson => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"type": "image_compressed", "message": message})
+                    );
+                }
+                OutputFormat::Plain => eprintln!("{message}"),
+                OutputFormat::Json => {}
+            },
         }
     }
 
+    fn on_text_chunk(&mut self, text: &str) {
+        self.emit(HeadlessEvent::TextChunk(text));
+    }
+
     fn on_thought_chunk(&mut self, text: &str) {
-        match self.format {
-            OutputFormat::Plain => { /* no-op */ }
-            OutputFormat::StreamingJson => {
-                println!("{}", serde_json::json!({"type":"thought","data": text}));
-            }
-            OutputFormat::Json => {
-                self.thought_buffer.push_str(text);
-            }
-        }
+        self.emit(HeadlessEvent::ThoughtChunk(text));
     }
 
     fn attach_structured_output(&self, target: &mut serde_json::Value) {
@@ -1317,7 +1428,6 @@ pub async fn run_single_turn(
                     t_prompt,
                     &mut ttf_logged,
                     options.yolo,
-                    options.output_format,
                     &mut pending_bg,
                     &mut completed_before_bg,
                 );
@@ -1374,7 +1484,6 @@ pub async fn run_single_turn(
                     t_prompt,
                     &mut ttf_logged,
                     options.yolo,
-                    options.output_format,
                     &mut pending_bg,
                     &mut completed_before_bg,
                 );
@@ -1390,7 +1499,6 @@ pub async fn run_single_turn(
                         t_prompt,
                         &mut ttf_logged,
                         options.yolo,
-                        options.output_format,
                         &mut pending_bg,
                         &mut completed_before_bg,
                     )
@@ -1417,7 +1525,6 @@ pub async fn run_single_turn(
             t_prompt,
             &mut ttf_logged,
             options.yolo,
-            options.output_format,
             &mut pending_bg,
             &mut completed_before_bg,
         );
@@ -1466,13 +1573,7 @@ pub async fn run_single_turn(
                 .and_then(|v| v.as_str())
                 == Some("max_turns_reached");
             if is_max_turns {
-                match emitter.format {
-                    OutputFormat::Plain => eprintln!("Max turns reached"),
-                    OutputFormat::StreamingJson => {
-                        println!("{}", serde_json::json!({"type": "max_turns_reached"}))
-                    }
-                    OutputFormat::Json => {} // conveyed by stopReason in the final JSON
-                }
+                emitter.emit(HeadlessEvent::MaxTurnsReached);
                 emitter.on_end(&stop_reason, sid, rid);
                 anyhow::bail!("max turns reached");
             }
@@ -1623,7 +1724,6 @@ async fn drain_acp_with_grace(
     t_prompt: Instant,
     ttf_logged: &mut bool,
     yolo: bool,
-    output_format: OutputFormat,
     pending_bg: &mut HashSet<String>,
     completed_before_bg: &mut HashSet<String>,
 ) {
@@ -1636,7 +1736,6 @@ async fn drain_acp_with_grace(
                 t_prompt,
                 ttf_logged,
                 yolo,
-                output_format,
                 pending_bg,
                 completed_before_bg,
             );
@@ -1655,7 +1754,6 @@ async fn drain_acp_with_grace(
                     t_prompt,
                     ttf_logged,
                     yolo,
-                    output_format,
                     pending_bg,
                     completed_before_bg,
                 );
@@ -1677,7 +1775,6 @@ fn handle_headless_acp_message(
     t_prompt: Instant,
     ttf_logged: &mut bool,
     yolo: bool,
-    output_format: OutputFormat,
     pending_bg: &mut HashSet<String>,
     completed_before_bg: &mut HashSet<String>,
 ) {
@@ -1736,7 +1833,7 @@ fn handle_headless_acp_message(
             }
         }
         AcpClientMessageBox::ExtNotification(notif) => {
-            let event = handle_ext_notification(&notif, output_format);
+            let event = handle_ext_notification(&notif, emitter);
             let _ = notif.response_tx.send(Ok(()));
             track_background_lifecycle(event, pending_bg, completed_before_bg);
         }
@@ -1775,7 +1872,7 @@ enum ExtEvent {
 
 fn handle_ext_notification(
     notif: &xai_acp_lib::AcpArgsBox<acp::ExtNotification>,
-    format: OutputFormat,
+    emitter: &mut HeadlessEmitter,
 ) -> ExtEvent {
     let method = notif.request.method.as_ref();
 
@@ -1883,68 +1980,24 @@ fn handle_ext_notification(
     };
 
     match xai_notif.update {
-        XaiUpdate::AutoCompactStarted { percentage } => match format {
-            OutputFormat::StreamingJson => {
-                println!(
-                    "{}",
-                    serde_json::json!({"type": "auto_compact_started", "percentage": percentage})
-                );
-            }
-            OutputFormat::Plain => {
-                eprintln!("Auto-compacting conversation ({percentage}% full)...");
-            }
-            OutputFormat::Json => {}
-        },
-        XaiUpdate::AutoCompactCompleted {} => match format {
-            OutputFormat::StreamingJson => {
-                println!("{}", serde_json::json!({"type": "auto_compact_completed"}));
-            }
-            OutputFormat::Plain => eprintln!("Conversation compacted."),
-            OutputFormat::Json => {}
-        },
-        XaiUpdate::AutoCompactFailed { error } => match format {
-            OutputFormat::StreamingJson => {
-                println!(
-                    "{}",
-                    serde_json::json!({"type": "auto_compact_failed", "error": error})
-                );
-            }
-            OutputFormat::Plain => {
-                if error.trim().is_empty() {
-                    eprintln!("Auto-compact failed.");
-                } else {
-                    eprintln!("Auto-compact failed: {error}");
-                }
-            }
-            OutputFormat::Json => {}
-        },
-        XaiUpdate::AutoCompactCancelled {} => match format {
-            OutputFormat::StreamingJson => {
-                println!("{}", serde_json::json!({"type": "auto_compact_cancelled"}));
-            }
-            OutputFormat::Plain => eprintln!("Auto-compact cancelled."),
-            OutputFormat::Json => {}
-        },
-        XaiUpdate::AutoContinueCompleted { total_tokens } => match format {
-            OutputFormat::StreamingJson => {
-                println!(
-                    "{}",
-                    serde_json::json!({"type": "auto_continue_completed", "total_tokens": total_tokens})
-                );
-            }
-            OutputFormat::Plain => eprintln!("Resumed after compaction."),
-            OutputFormat::Json => {}
-        },
-        XaiUpdate::ImageCompressed { message } => match format {
-            OutputFormat::StreamingJson => {
-                println!(
-                    "{}",
-                    serde_json::json!({"type": "image_compressed", "message": message})
-                );
-            }
-            OutputFormat::Plain => eprintln!("{message}"),
-            OutputFormat::Json => {}
-        },
+        XaiUpdate::AutoCompactStarted { percentage } => {
+            emitter.emit(HeadlessEvent::AutoCompactStarted { percentage });
+        }
+        XaiUpdate::AutoCompactCompleted {} => {
+            emitter.emit(HeadlessEvent::AutoCompactCompleted);
+        }
+        XaiUpdate::AutoCompactFailed { error } => {
+            emitter.emit(HeadlessEvent::AutoCompactFailed { error: &error });
+        }
+        XaiUpdate::AutoCompactCancelled {} => {
+            emitter.emit(HeadlessEvent::AutoCompactCancelled);
+        }
+        XaiUpdate::AutoContinueCompleted { total_tokens } => {
+            emitter.emit(HeadlessEvent::AutoContinueCompleted { total_tokens });
+        }
+        XaiUpdate::ImageCompressed { message } => {
+            emitter.emit(HeadlessEvent::ImageCompressed { message: &message });
+        }
         XaiUpdate::SubagentSpawned { subagent_id } => {
             return ExtEvent::SubagentSpawned { subagent_id };
         }
@@ -2242,7 +2295,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            handle_ext_notification(&notif, OutputFormat::Plain),
+            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
             ExtEvent::TaskBackgrounded { task_id, is_monitor: false } if task_id == "task-abc"
         ));
     }
@@ -2258,7 +2311,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            handle_ext_notification(&notif, OutputFormat::Plain),
+            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
             ExtEvent::TaskBackgrounded { task_id, is_monitor: true } if task_id == "mon-1"
         ));
     }
@@ -2278,7 +2331,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            handle_ext_notification(&notif, OutputFormat::Plain),
+            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
             ExtEvent::TaskCompleted { task_id } if task_id == "task-abc"
         ));
     }
@@ -2297,7 +2350,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            handle_ext_notification(&spawned, OutputFormat::Plain),
+            handle_ext_notification(&spawned, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
             ExtEvent::SubagentSpawned { subagent_id } if subagent_id == "sub-1"
         ));
         let finished = make_ext_notif(
@@ -2313,7 +2366,7 @@ mod tests {
             }),
         );
         assert!(matches!(
-            handle_ext_notification(&finished, OutputFormat::Plain),
+            handle_ext_notification(&finished, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
             ExtEvent::SubagentFinished { subagent_id } if subagent_id == "sub-1"
         ));
     }
@@ -2335,7 +2388,10 @@ mod tests {
         }
         .boxed();
         assert!(matches!(
-            handle_ext_notification(&notif, OutputFormat::Plain),
+            handle_ext_notification(
+                &notif,
+                &mut HeadlessEmitter::new(OutputFormat::Plain, false)
+            ),
             ExtEvent::None
         ));
     }
