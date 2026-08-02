@@ -93,10 +93,13 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                 rewind_if_pristine: false,
             }];
         }
-        if !agent.session.state.is_turn_running() {
+        if !agent.session.state.is_turn_running() && !agent.session.state.is_compact_running() {
             return vec![];
         }
-        if let Some(stop) = resolved_pref {
+        if agent.session.state.is_compact_running() {
+            // No subagent picker for `/compact` — just stop the generation.
+            resolved_pref.or(Some(true))
+        } else if let Some(stop) = resolved_pref {
             Some(stop)
         } else {
             // Check all running subagents, not just those from the current turn.
@@ -183,6 +186,25 @@ pub(super) fn do_cancel_turn(app: &mut AppView, cancel_subagents: bool) -> Vec<E
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
+    if agent.session.state.is_compact_running() {
+        // `/compact` is a command, not a turn, so the rewind path below does
+        // not apply: there is no in-flight prompt to restore. Mark it
+        // cancelling and send the same cancel the server understands.
+        agent.session.cancel_compact_command();
+        agent.cancel_turn_view = None;
+        agent.cancel_turn_buttons.clear();
+        drain_permission_queue(agent);
+        let Some(session_id) = agent.session.session_id.clone() else {
+            return vec![];
+        };
+        agent.clear_send_now_expectation();
+        return vec![Effect::CancelTurn {
+            session_id,
+            cancel_subagents,
+            trigger: agent.cancel_trigger_hint.take(),
+            rewind_if_pristine: false,
+        }];
+    }
     if !agent.session.state.is_turn_running() {
         return vec![];
     }

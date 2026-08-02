@@ -16,12 +16,23 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Documented desktop control as an opt-in MCP integration, including what
   enabling it gives away, since no built-in tool captures the screen or
   synthesizes input.
+- `CHUTES_EXTRA_CA_BUNDLE` adds extra TLS roots from a PEM bundle, for networks
+  where a proxy terminates TLS with its own root. Opt-in and additive: unset by
+  default, never replaces the built-in roots, and never disables verification.
+  A bundle that is oversized, unreadable, or unparseable is reported and
+  ignored instead of breaking every request. Ported from upstream, reworked to
+  use reqwest's own PEM bundle parsing rather than adding a crate to the
+  generated workspace root.
 
 ### Fixed
 
 - `browser click` now focuses the element before clicking, matching a real
   pointer click. Without it a click on a field left focus on the body, so a
   following `key` went nowhere.
+- Cancelling now stops an in-flight `/compact`. Compaction runs as a command
+  rather than a turn, so the cancel path returned early and left a long
+  compaction running with no way to stop it. Other commands are unaffected.
+  Ported from upstream.
 - Saving MCP settings no longer discards the rest of `config.toml`. Every MCP
   writer parsed the file with a fallback to an empty table, so one syntax error
   turned the next save into a full rewrite containing only what that call was

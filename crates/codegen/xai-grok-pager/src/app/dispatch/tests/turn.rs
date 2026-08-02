@@ -195,6 +195,46 @@ fn cancel_turn_without_subagents_cancels_immediately() {
     assert!(app.agents[&id].session.state.is_cancelling());
 }
 
+/// `/compact` runs as a command, not a turn, so the cancel path used to return
+/// early and leave a long compaction running with no way to stop it.
+#[test]
+fn cancel_stops_an_in_flight_compaction() {
+    use crate::app::agent::AgentCommand;
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.state = AgentState::CommandRunning {
+        command: AgentCommand::Compact,
+        started_at: std::time::Instant::now(),
+    };
+
+    let effects = dispatch(Action::CancelTurn, &mut app);
+
+    assert_eq!(effects.len(), 1, "expected one cancel effect: {effects:?}");
+    assert!(matches!(&effects[0], Effect::CancelTurn { .. }));
+    assert!(
+        app.agents[&id].session.state.is_cancelling(),
+        "the compaction must be marked cancelling"
+    );
+}
+
+/// Only `/compact` is stoppable this way; other commands keep the previous
+/// behavior of ignoring a turn cancel.
+#[test]
+fn cancel_leaves_other_running_commands_alone() {
+    use crate::app::agent::AgentCommand;
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.state = AgentState::CommandRunning {
+        command: AgentCommand::CreateWorktree,
+        started_at: std::time::Instant::now(),
+    };
+
+    let effects = dispatch(Action::CancelTurn, &mut app);
+
+    assert!(effects.is_empty(), "expected no effect: {effects:?}");
+    assert!(!app.agents[&id].session.state.is_cancelling());
+}
+
 #[test]
 fn cancel_turn_forwards_trigger_hint_to_effect() {
     // The key/mouse producer sets `cancel_trigger_hint` (here ESC) before

@@ -30,6 +30,10 @@ use std::sync::OnceLock;
 
 use xai_grok_workspace::permission::ClientType;
 
+pub mod extra_ca;
+
+use extra_ca::{with_extra_roots, with_extra_roots_blocking};
+
 /// Startup span timer, local to this crate.
 ///
 /// Replaces `xai_grok_shell::instrumentation_timer!`, which cannot be referenced
@@ -284,7 +288,7 @@ pub fn shared_client() -> reqwest::Client {
     CLIENT
         .get_or_init(|| {
             let _timer = startup_timer!("startup.http_client_build");
-            reqwest::Client::builder()
+            with_extra_roots(reqwest::Client::builder())
                 .connect_timeout(std::time::Duration::from_secs(30))
                 .user_agent(process_user_agent_string())
                 .pool_idle_timeout(std::time::Duration::from_secs(30))
@@ -326,7 +330,7 @@ pub fn shared_upload_client() -> reqwest::Client {
     static UPLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     UPLOAD_CLIENT
         .get_or_init(|| {
-            reqwest::Client::builder()
+            with_extra_roots(reqwest::Client::builder())
                 // Force HTTP/1.1: batch_upload multipart bodies are silently
                 // dropped when an HTTP/2 connection degrades (GOAWAY, flow-control
                 // exhaustion). Because all streams share one connection, a single
@@ -348,7 +352,7 @@ pub fn shared_upload_client() -> reqwest::Client {
 /// connect timeout (callers bound each request with their own total timeout). The retry escape
 /// policy that reaches for this client to dodge a poisoned pool lives on `send_with_retry_escaping_pool`.
 pub(crate) fn fresh_http1_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    with_extra_roots(reqwest::Client::builder())
         .http1_only()
         .pool_max_idle_per_host(0)
         .user_agent(process_user_agent_string())
@@ -493,7 +497,7 @@ pub fn shared_blocking_client() -> reqwest::blocking::Client {
     BLOCKING_CLIENT
         .get_or_init(|| {
             let _timer = startup_timer!("startup.http_blocking_client_build");
-            reqwest::blocking::Client::builder()
+            with_extra_roots_blocking(reqwest::blocking::Client::builder())
                 .connect_timeout(std::time::Duration::from_secs(30))
                 .timeout(std::time::Duration::from_secs(30))
                 .user_agent(process_user_agent_string())

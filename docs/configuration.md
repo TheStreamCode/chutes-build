@@ -40,6 +40,20 @@ Ambient Chutes credentials are never inherited by arbitrary custom inference
 or catalog endpoints. Custom models must declare their own `api_key` or
 `env_key`.
 
+### Corporate TLS interception
+
+| Variable | Purpose |
+| --- | --- |
+| `CHUTES_EXTRA_CA_BUNDLE` | Path to a PEM bundle of extra TLS roots to trust. |
+
+Set this on networks where a proxy terminates TLS with its own root, which
+otherwise fails verification and leaves Chutes Build unable to connect. The
+certificates are **added** to the built-in roots — they never replace them, and
+this is not a way to skip verification. Unset by default (no file is read). The
+bundle is capped at 1 MiB; if it cannot be read or parsed, the CLI logs a
+warning and continues with the default trust store rather than failing every
+request.
+
 Endpoint overrides fail closed unless they use an allowlisted Chutes HTTPS host
 with no URL credentials and the default port. Local forks may set
 `CHUTES_ALLOW_INSECURE_ENDPOINTS=1`, which relaxes endpoint/DNS trust checks but
