@@ -6,6 +6,23 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The `browser` tool gained the actions its workflow was missing: `wait`
+  (until a selector is visible or page text appears), `key` (`Enter`, `Tab`,
+  `Escape`, arrows, `Home`/`End`, `PageUp`/`PageDown`), `scroll`, `select`,
+  `back`, `reload`, `text` (full visible page text), and `console` / `network`,
+  which report the session's browser logs, uncaught errors, and requests.
+- Documented desktop control as an opt-in MCP integration, including what
+  enabling it gives away, since no built-in tool captures the screen or
+  synthesizes input.
+
+### Fixed
+
+- `browser click` now focuses the element before clicking, matching a real
+  pointer click. Without it a click on a field left focus on the body, so a
+  following `key` went nowhere.
+
 ## [0.4.3] - 2026-08-02
 
 ### Fixed

@@ -72,6 +72,16 @@ never receive `CONTEXT7_API_KEY`. Browser automation uses a temporary profile,
 loopback DevTools, disabled sync/background updates, and workspace-only
 screenshot destinations.
 
+The `browser` tool drives that session through the DevTools protocol. Reading
+actions: `snapshot` (interactive elements with indices), `text` (full visible
+text), `screenshot`, `console` (logs and uncaught errors), `network` (requests,
+responses, failures). Acting actions: `navigate`, `click`, `type`, `select`,
+`key` (`Enter`, `Tab`, `Escape`, arrows, `Home`/`End`, `PageUp`/`PageDown`),
+`scroll`, `wait` (until a selector is visible or page text appears), `back`,
+`reload`, `close`. Elements are addressed by CSS selector or by the index from
+`snapshot`. The console and network logs cover the whole session and retain
+their most recent 200 entries each.
+
 ## Media and voice
 
 | Variable | Default and purpose |
