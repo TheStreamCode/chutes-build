@@ -6,8 +6,30 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-02
+
+### Fixed
+
+- `/advisor` now spawns. Its curated toolset already declares `memory_search`,
+  `memory_get` and `web_fetch`, and session-level injection appended a second
+  copy of each; both entries resolved to one client-facing name, so toolset
+  validation rejected the agent with `duplicate client_name` on every attempt.
+  Injection now skips tools the agent already declares.
+- Bundled skills cited tool names the model is never shown (`task` is exposed
+  as `spawn_subagent`, `run_in_background` as `background`), sending it after
+  tools absent from its schema. Names corrected in `/best-of-n` and
+  `/check-work`, with a test tying skill text to the advertised names.
+
 ### Changed
 
+- `generate_media` is self-contained: it resolves a plain model name against
+  the catalog and places the new top-level `prompt` into whatever text field
+  the selected cord declares, so `{model, kind, prompt}` is a complete call.
+  `params` is now optional and only needed for non-default settings or input
+  assets, and schema-mismatch errors list the accepted fields instead of
+  directing the caller back to `describe_media_model`. The `/imagine`,
+  `/imagine-video` and `imagine` skill instructions no longer mandate the
+  three-call list → describe → generate sequence.
 - Updated the pinned `actions/checkout` workflow dependency to `v7.0.1`,
   including its Git argument escaping and pull-request safety fixes.
 
@@ -26,6 +48,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Documented the pinned Rust/Node toolchain, the single supported package
   manager, the artifacts the project actually produces, the protected assets
   and generated files, and the repository-visibility rules in `AGENTS.md`.
+- Described the advisor's actual read-only toolset and the `/advisor` controls
+  in the subagents guide, and recorded the self-contained `generate_media`
+  workflow in the Chutes ecosystem and MCP guides.
 
 ## [0.4.2] - 2026-08-01
 
