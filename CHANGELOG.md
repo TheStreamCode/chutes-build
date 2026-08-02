@@ -19,6 +19,19 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as `spawn_subagent`, `run_in_background` as `background`), sending it after
   tools absent from its schema. Names corrected in `/best-of-n` and
   `/check-work`, with a test tying skill text to the advertised names.
+- Repaired the nine stale `xai-grok-agent` tests: two asserted behavior the
+  code no longer has (retired `grok_*` toolset presets, `web_search` before it
+  became a default-on native provider), three compared prompt budgets against
+  raw `include_str!` output that a CRLF checkout inflates, two compared paths
+  with hardcoded forward slashes, and two staged a fake home through `$HOME`,
+  which `dirs::home_dir` honours only on Unix. The two home-dependent rules are
+  now split into injectable helpers covered on every platform, and their
+  environment-driven integration tests are marked Unix-only.
+
+### Added
+
+- The CI Rust job now runs the `xai-grok-agent` library tests and the bundled
+  skill checks, which were previously never executed by any workflow.
 
 ### Changed
 

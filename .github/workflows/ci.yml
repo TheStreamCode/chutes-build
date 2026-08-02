@@ -98,6 +98,10 @@ jobs:
           cargo test -p xai-grok-pager --test settings_e2e --locked
       - name: Test authentication and session integration
         run: "cargo test -p xai-grok-shell --lib auth:: --locked"
+      - name: Test agent construction and bundled skills
+        run: |
+          cargo test -p xai-grok-agent --lib --locked
+          cargo test -p xai-grok-shell --lib builtin:: --locked
       - name: Test Chutes-native tools
         run: "cargo test -p xai-grok-tools --lib implementations::chutes:: --locked"
       - name: Clippy (Chutes-owned packages)

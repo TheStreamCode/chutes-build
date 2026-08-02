@@ -2458,6 +2458,11 @@ mod tests {
             "Edit must be excluded; got: {names:?}"
         );
     }
+    /// An allowlist entry does not conjure a tool the builder was not configured
+    /// to register: `web_fetch` defaults to `Disabled`, so naming it changes
+    /// nothing. `web_search` is the contrast — `WebSearchConfig` defaults to the
+    /// native provider, so it is registered on its own merits, not because the
+    /// allowlist asked for it.
     #[tokio::test]
     async fn registered_but_absent_web_tools_do_not_fall_back() {
         let tools = vec![
@@ -2474,9 +2479,10 @@ mod tests {
             .iter()
             .map(|d| d.function.name.clone())
             .collect();
-        for absent in ["web_search", "web_fetch"] {
-            assert!(!names.contains(&absent.to_string()), "got: {names:?}");
-        }
+        assert!(
+            !names.contains(&"web_fetch".to_string()),
+            "web_fetch is disabled by default and the allowlist must not add it; got: {names:?}"
+        );
         for kept in ["read_file", "grep", "list_dir"] {
             assert!(names.contains(&kept.to_string()), "got: {names:?}");
         }

@@ -170,8 +170,17 @@ impl TrustStore {
         let Some(home) = dirs::home_dir() else {
             return false;
         };
+        Self::is_config_path_auto_trusted_in(plugin_root, &home)
+    }
+
+    /// [`is_config_path_auto_trusted`] against an explicit home directory.
+    ///
+    /// Split out so the rule itself is testable: `dirs::home_dir` reads `$HOME`
+    /// only on Unix — on Windows it queries the shell for the real profile
+    /// path, so a test cannot redirect it with an environment variable.
+    pub(crate) fn is_config_path_auto_trusted_in(plugin_root: &Path, home: &Path) -> bool {
         match dunce::canonicalize(plugin_root) {
-            Ok(canonical) => canonical.starts_with(&home),
+            Ok(canonical) => canonical.starts_with(home),
             Err(_) => false,
         }
     }
@@ -317,10 +326,32 @@ mod tests {
 
     #[test]
     fn config_path_auto_trust_under_home() {
-        // This test checks the logic but can't easily mock $HOME.
-        // We verify the function exists and returns a boolean.
+        // A path that cannot be canonicalized is never auto-trusted, whatever
+        // the real home happens to be.
         let result = TrustStore::is_config_path_auto_trusted(Path::new("/nonexistent/path"));
-        assert!(!result); // nonexistent path can't be canonicalized
+        assert!(!result);
+    }
+
+    /// The under-home rule itself, against an injected home so it runs on every
+    /// platform (`dirs::home_dir` cannot be redirected on Windows).
+    #[test]
+    fn config_path_auto_trust_follows_the_injected_home() {
+        let home = tempfile::tempdir().unwrap();
+        let home_path = dunce::canonicalize(home.path()).unwrap();
+        let inside = home_path.join("plugins").join("demo");
+        std::fs::create_dir_all(&inside).unwrap();
+        assert!(
+            TrustStore::is_config_path_auto_trusted_in(&inside, &home_path),
+            "a plugin under the home directory is auto-trusted"
+        );
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join("demo");
+        std::fs::create_dir_all(&outside).unwrap();
+        assert!(
+            !TrustStore::is_config_path_auto_trusted_in(&outside, &home_path),
+            "a plugin outside the home directory requires explicit trust"
+        );
     }
 
     #[test]

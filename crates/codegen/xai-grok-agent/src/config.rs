@@ -1710,22 +1710,31 @@ impl AgentDefinition {
 mod tests {
     use super::*;
     /// Native presets only.
+    ///
+    /// The `grok_*` spellings were dropped with the rebrand: `native_toolset_presets`
+    /// lists `chutes-*` names, and nothing registers the old ones, so they resolve
+    /// only if a caller registers them itself. Both halves are asserted so a
+    /// reintroduced alias is a deliberate change rather than a silent one.
     #[test]
     fn toolset_for_preset_resolves_known_names() {
         for name in [
             "chutes-build",
-            "grok_build",
             "chutes-build-concise",
             "chutes-build-plan",
             "codex",
             "explore",
             "plan",
             "chutes-computer",
-            "grok_computer",
         ] {
             assert!(
                 toolset_for_preset(name).is_some(),
                 "preset `{name}` should resolve"
+            );
+        }
+        for retired in ["grok_build", "grok_computer"] {
+            assert!(
+                toolset_for_preset(retired).is_none(),
+                "pre-rebrand preset `{retired}` is no longer native"
             );
         }
         assert!(toolset_for_preset("does-not-exist").is_none());

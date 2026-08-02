@@ -88,8 +88,17 @@ fn is_home_dir(path: &Path) -> bool {
     let Some(home) = dirs::home_dir() else {
         return false;
     };
+    is_home_dir_in(path, &home)
+}
+
+/// [`is_home_dir`] against an explicit home directory.
+///
+/// Split out so the comparison is testable: `dirs::home_dir` reads `$HOME` only
+/// on Unix — on Windows it queries the shell for the real profile path, so a
+/// test cannot redirect it with an environment variable.
+fn is_home_dir_in(path: &Path, home: &Path) -> bool {
     let canon = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    canon(path) == canon(&home)
+    canon(path) == canon(home)
 }
 
 /// Existing `<dir>/<subdir>` directories under each dir of a precomputed
@@ -181,6 +190,12 @@ mod tests {
         }
     }
 
+    /// Unix-only: the guard resolves the home through `dirs::home_dir`, which
+    /// reads `$HOME` only on Unix — on Windows it queries the real user
+    /// profile, so setting the variable cannot stage a fake home. The
+    /// comparison itself is covered on every platform by
+    /// `home_dir_guard_matches_the_injected_home`.
+    #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn resolve_treats_home_git_repo_as_no_repo() {
@@ -198,6 +213,25 @@ mod tests {
         let chain = RepoDirChain::resolve(&sub);
         assert_eq!(chain.git_root, None, "a home-dir git root must be dropped");
         assert_eq!(chain.dirs, vec![sub]);
+    }
+
+    /// The home comparison behind that guard, against an injected home so it
+    /// runs on every platform.
+    #[test]
+    fn home_dir_guard_matches_the_injected_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = dunce::canonicalize(tmp.path()).unwrap();
+        let sub = home.join("proj");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        assert!(
+            is_home_dir_in(&home, &home),
+            "the home directory itself is the guarded root"
+        );
+        assert!(
+            !is_home_dir_in(&sub, &home),
+            "a subdirectory of home is not the home root"
+        );
     }
 
     #[test]

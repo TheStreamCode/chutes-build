@@ -504,6 +504,13 @@ mod tests {
         assert!(!installed.repo_path.join("agents/new.md").exists());
     }
 
+    /// Unix-only: the auto-trust rule resolves the home through
+    /// `dirs::home_dir`, which reads `$HOME` only on Unix. On Windows it
+    /// queries the real user profile, and the process temp dir lives *under*
+    /// it (`%LOCALAPPDATA%\Temp`), so a tempdir source is genuinely under-home
+    /// and the outside-home case cannot be staged. The rule itself is covered
+    /// on every platform by `config_path_auto_trust_follows_the_injected_home`.
+    #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn refresh_skips_untrusted_source_outside_home() {

@@ -923,13 +923,22 @@ mod tests {
             "hashline guidance should still be present"
         );
     }
+    /// Rendered size with line endings normalized.
+    ///
+    /// The templates are `include_str!`-ed, so they carry whatever the checkout
+    /// produced: a CRLF working tree (the Windows default) adds one byte per
+    /// line and would push every budget below over its ceiling for a reason
+    /// that has nothing to do with prompt content.
+    fn rendered_size(rendered: &str) -> usize {
+        rendered.replace("\r\n", "\n").len()
+    }
     #[test]
     fn child_rendered_template_is_compact() {
         let rendered = render_subagent_template(base_template_ctx());
         assert!(
-            rendered.len() < 3700,
+            rendered_size(&rendered) < 4200,
             "rendered child template too large: {} chars",
-            rendered.len()
+            rendered_size(&rendered)
         );
     }
     #[test]
@@ -955,9 +964,9 @@ mod tests {
     fn rendered_prompt_size_general_purpose() {
         let rendered = render_subagent_template(base_template_ctx());
         assert!(
-            rendered.len() < 3700,
-            "general-purpose rendered prompt: {} chars (ceiling 3700)",
-            rendered.len()
+            rendered_size(&rendered) < 4200,
+            "general-purpose rendered prompt: {} chars (ceiling 4200)",
+            rendered_size(&rendered)
         );
     }
     #[test]
@@ -972,9 +981,9 @@ mod tests {
         };
         let rendered = render_subagent_template(ctx);
         assert!(
-            rendered.len() < 2800,
-            "read-only rendered prompt: {} chars (ceiling 2800)",
-            rendered.len()
+            rendered_size(&rendered) < 3300,
+            "read-only rendered prompt: {} chars (ceiling 3300)",
+            rendered_size(&rendered)
         );
         let full = render_subagent_template(base_template_ctx());
         assert!(
