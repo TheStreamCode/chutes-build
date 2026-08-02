@@ -199,6 +199,57 @@ fn remove_legacy_skills(
 mod tests {
     use super::*;
 
+    /// Skills instruct the model to call tools by name, but several default
+    /// tools are advertised under a renamed client-facing name (`task` is
+    /// exposed as `spawn_subagent`, `run_in_background` as `background`, ...).
+    /// A skill naming the canonical id sends the model after a tool that is
+    /// not in its schema, which it can only discover by failing a call.
+    /// Backtick-quoted spans are the tool/param citations; surrounding prose
+    /// ("the task description") is untouched.
+    #[test]
+    fn bundled_skills_cite_only_client_facing_tool_names() {
+        let toolset = xai_grok_agent::config::AgentDefinition::default_grok_build().tool_config;
+        let mut renames: Vec<(String, String)> = Vec::new();
+        for tool in &toolset.tools {
+            let canonical = tool.id.rsplit(':').next().unwrap_or(&tool.id).to_owned();
+            let exposed = tool.resolve_client_name(&canonical);
+            if exposed != canonical {
+                renames.push((canonical, exposed));
+            }
+            for (from, to) in tool.params_name_overrides.iter().flatten() {
+                if from != to {
+                    renames.push((from.clone(), to.clone()));
+                }
+            }
+        }
+        assert!(
+            !renames.is_empty(),
+            "test premise: the default toolset renames at least one tool or param"
+        );
+        let skills = [
+            ("help", HELP_SKILL_MD),
+            ("create-skill", CREATE_SKILL_MD),
+            ("code-review", CODE_REVIEW_SKILL_MD),
+            ("imagine", IMAGINE_SKILL_MD),
+            ("check-work", CHECK_SKILL_MD),
+            ("best-of-n", BEST_OF_N_SKILL_MD),
+        ];
+        let mut offenders: Vec<String> = Vec::new();
+        for (skill, body) in skills {
+            for (canonical, exposed) in &renames {
+                if body.contains(&format!("`{canonical}`")) {
+                    offenders.push(format!(
+                        "{skill} cites `{canonical}` (exposed as `{exposed}`)"
+                    ));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "bundled skills must cite the names the model actually sees: {offenders:?}"
+        );
+    }
+
     #[test]
     fn version_bump_re_extracts_all_files() {
         let tmp = tempfile::tempdir().unwrap();

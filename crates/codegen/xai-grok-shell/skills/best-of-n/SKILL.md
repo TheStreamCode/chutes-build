@@ -31,16 +31,17 @@ Examples:
    the **task description**.
 
 2. Spawn **N** subagents in a single message (parallel tool calls). Use the
-   `task` tool for each with:
+   `spawn_subagent` tool for each with:
    - `subagent_type`: `"general-purpose"`
    - `isolation`: `"worktree"`
-   - `run_in_background`: `true`
+   - `background`: `true`
    - `description`: `"Candidate <number>"`
    - `prompt`: the task description, plus
      `"You are candidate <number> of <N> independent implementations. Implement the task fully. When done, summarize your approach and the changes you made."`
 
-3. Wait for all candidates to complete using `get_task_output` with `block: true`
-   or `wait_tasks` with `mode: "wait_all"`.
+3. Wait for all candidates to complete using
+   `get_command_or_subagent_output` with `block: true`, or
+   `wait_commands_or_subagents` with `mode: "wait_all"`.
 
 4. Evaluate and pick the winner using the criteria below.
 

@@ -32,10 +32,10 @@ Determine which mode you are in before proceeding:
 
 ## Steps
 
-1. Call the `task` tool with:
+1. Call the `spawn_subagent` tool with:
    - `description`: must start with `"[checking my work]"` followed by a short label
    - `subagent_type`: `"general-purpose"`
-   - `run_in_background`: `false`
+   - `background`: `false`
    - `prompt`: copy the **VERIFIER PROMPT** section below verbatim. If a focus
      area was specified by the user, append this to the prompt:
      ```
