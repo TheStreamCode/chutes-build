@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-03
+
 ### Added
 
 - The `browser` tool gained the actions its workflow was missing: `wait`
@@ -47,11 +49,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   covers the whole read-modify-write so concurrent saves cannot erase each
   other, and writes go through the shared atomic helper instead of a fixed
   temporary filename two writers could collide on. Ported from upstream.
-
-## [0.4.3] - 2026-08-02
-
-### Fixed
-
+- The encrypted prompt templates no longer depend on how the repository was
+  checked out. Generator and staleness test compared raw `include_str!` bytes,
+  so arrays built on a CRLF working tree matched only on Windows; both sides
+  now fold line endings first, which also makes the decrypted prompt
+  byte-identical on every platform.
+- Two pager tests no longer depend on the machine they run on: one budgeted its
+  wait in poll counts rather than elapsed time, and two built past instants by
+  subtracting more than the machine's uptime, which panics on a recently booted
+  box or a fresh CI runner.
 - `/advisor` now spawns. Its curated toolset already declares `memory_search`,
   `memory_get` and `web_fetch`, and session-level injection appended a second
   copy of each; both entries resolved to one client-facing name, so toolset
@@ -69,9 +75,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which `dirs::home_dir` honours only on Unix. The two home-dependent rules are
   now split into injectable helpers covered on every platform, and their
   environment-driven integration tests are marked Unix-only.
-
-### Added
-
 - The CI Rust job now runs the `xai-grok-agent` library tests and the bundled
   skill checks, which were previously never executed by any workflow.
 
@@ -106,6 +109,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Described the advisor's actual read-only toolset and the `/advisor` controls
   in the subagents guide, and recorded the self-contained `generate_media`
   workflow in the Chutes ecosystem and MCP guides.
+- Listed the browser tool's full action set — what each reading action reports
+  and how elements are addressed — in the web and browser guide, and documented
+  `CHUTES_EXTRA_CA_BUNDLE` alongside the endpoint settings.
+- Documented both headless streaming formats and what each line carries in the
+  CLI reference, and noted in the slash-command list that `/compact` can now be
+  stopped while it runs.
 
 ## [0.4.2] - 2026-08-01
 

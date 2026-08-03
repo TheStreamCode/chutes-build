@@ -20,7 +20,7 @@ may add more commands at runtime.
 | `/jump` | Jump to a turn |
 | `/rewind` (`/undo`) | Rewind to a previous turn |
 | `/recap` | Summarize the session so far |
-| `/compact` | Compact conversation history |
+| `/compact` | Compact conversation history (stoppable while it runs) |
 | `/context` | View context usage |
 | `/expand` | Reprint the last collapsed block in full |
 | `/copy` | Copy the latest or selected response |
