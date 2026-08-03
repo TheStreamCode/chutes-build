@@ -36,8 +36,13 @@ pub enum OutputFormat {
     #[default]
     Plain,
     Json,
+    /// NDJSON of the agent's native ACP session updates.
     #[value(name = "streaming-json")]
     StreamingJson,
+    /// NDJSON in the Anthropic Messages API wire format, for tooling written
+    /// against that shape.
+    #[value(name = "streaming-messages-json")]
+    StreamingMessagesJson,
 }
 
 pub fn parse_json_schema(input: &str) -> anyhow::Result<serde_json::Value> {
@@ -337,6 +342,20 @@ enum HeadlessEvent<'a> {
     TextChunk(&'a str),
     /// A chunk of the agent's reasoning.
     ThoughtChunk(&'a str),
+    /// The agent started a tool call.
+    ToolCall {
+        id: &'a str,
+        title: &'a str,
+        kind: &'a str,
+        status: &'a str,
+        input: Option<&'a serde_json::Value>,
+    },
+    /// A tool call changed status, produced output, or both.
+    ToolCallUpdate {
+        id: &'a str,
+        status: Option<&'a str>,
+        output: Option<&'a serde_json::Value>,
+    },
     /// The turn stopped because it hit the turn limit.
     MaxTurnsReached,
     AutoCompactStarted {
@@ -355,6 +374,30 @@ enum HeadlessEvent<'a> {
     },
 }
 
+/// Assembles the Messages API wire format.
+///
+/// That format is message-shaped, not chunk-shaped: an `assistant` line carries
+/// a whole message whose `content[]` holds the text, thinking and `tool_use`
+/// blocks it produced, and each tool's output comes back as a `user` line with
+/// a matching `tool_result`. So the chunks are accumulated here and flushed
+/// when the message ends — when a tool reports its result, or when the turn
+/// does.
+#[derive(Default)]
+struct MessagesState {
+    session_id: String,
+    model: String,
+    cwd: String,
+    /// Advertised by `AvailableCommandsUpdate`; reported in the `system` line.
+    tools: Vec<String>,
+    slash_commands: Vec<String>,
+    init_emitted: bool,
+    text: String,
+    thinking: String,
+    /// `tool_use` blocks for the message being assembled, in call order.
+    pending_tools: Vec<serde_json::Value>,
+    message_seq: u64,
+}
+
 struct HeadlessEmitter {
     format: OutputFormat,
     parse_structured_output: bool,
@@ -365,6 +408,8 @@ struct HeadlessEmitter {
     structured_output: Option<Result<serde_json::Value, String>>,
     /// From `_meta.usage`, projected onto the final result when present.
     usage: Option<serde_json::Value>,
+    /// Only populated for [`OutputFormat::StreamingMessagesJson`].
+    messages: MessagesState,
 }
 
 impl HeadlessEmitter {
@@ -376,7 +421,142 @@ impl HeadlessEmitter {
             thought_buffer: String::new(),
             structured_output: None,
             usage: None,
+            messages: MessagesState::default(),
         }
+    }
+
+    /// Session identity for the Messages wire format. Ignored by every other
+    /// format, which carries these fields on the final line instead.
+    fn set_messages_context(&mut self, session_id: &str, model: &str, cwd: &str) {
+        if self.format != OutputFormat::StreamingMessagesJson {
+            return;
+        }
+        self.messages.session_id = session_id.to_owned();
+        self.messages.model = model.to_owned();
+        self.messages.cwd = cwd.to_owned();
+    }
+
+    /// Record the tool and command names the session advertised, for the
+    /// `system` line.
+    fn set_available(&mut self, tools: Vec<String>, slash_commands: Vec<String>) {
+        if self.format != OutputFormat::StreamingMessagesJson {
+            return;
+        }
+        if !tools.is_empty() {
+            self.messages.tools = tools;
+        }
+        if !slash_commands.is_empty() {
+            self.messages.slash_commands = slash_commands;
+        }
+    }
+
+    /// The `system`/`init` line, or `None` if it has already been emitted.
+    /// Split from the printing so the shape can be asserted in tests.
+    fn messages_init_line(&mut self) -> Option<serde_json::Value> {
+        if self.messages.init_emitted {
+            return None;
+        }
+        self.messages.init_emitted = true;
+        Some(serde_json::json!({
+            "type": "system",
+            "subtype": "init",
+            "session_id": self.messages.session_id,
+            "model": self.messages.model,
+            "cwd": self.messages.cwd,
+            "tools": self.messages.tools,
+            "slash_commands": self.messages.slash_commands,
+            "uuid": uuid::Uuid::new_v4().to_string(),
+        }))
+    }
+
+    /// Emit the `system`/`init` line once, before the first assistant message.
+    fn emit_messages_init(&mut self) {
+        if let Some(line) = self.messages_init_line() {
+            println!("{line}");
+        }
+    }
+
+    /// Flush the message being assembled as one `assistant` line.
+    ///
+    /// `stop_reason` is `None` for a message that ends because a tool ran: the
+    /// turn is not over, and reporting `end_turn` there would tell a consumer
+    /// the assistant was finished.
+    fn flush_messages_assistant(&mut self, stop_reason: Option<&str>) {
+        let init = self.messages_init_line();
+        let Some(line) = self.messages_assistant_line(stop_reason) else {
+            // Nothing to flush; an init produced here would be emitted by the
+            // next line that needs it, so put it back.
+            if init.is_some() {
+                self.messages.init_emitted = false;
+            }
+            return;
+        };
+        if let Some(init) = init {
+            println!("{init}");
+        }
+        println!("{line}");
+    }
+
+    /// The `assistant` line for the message being assembled, or `None` when
+    /// there is nothing to report. Clears the accumulated state.
+    fn messages_assistant_line(&mut self, stop_reason: Option<&str>) -> Option<serde_json::Value> {
+        if self.messages.text.is_empty()
+            && self.messages.thinking.is_empty()
+            && self.messages.pending_tools.is_empty()
+        {
+            return None;
+        }
+        let mut content: Vec<serde_json::Value> = Vec::new();
+        if !self.messages.thinking.is_empty() {
+            content.push(serde_json::json!({
+                "type": "thinking",
+                "thinking": std::mem::take(&mut self.messages.thinking),
+                "signature": "",
+            }));
+        }
+        if !self.messages.text.is_empty() {
+            content.push(serde_json::json!({
+                "type": "text",
+                "text": std::mem::take(&mut self.messages.text),
+            }));
+        }
+        content.append(&mut self.messages.pending_tools);
+        self.messages.message_seq += 1;
+        Some(serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": format!("msg_{:012}", self.messages.message_seq),
+                "type": "message",
+                "role": "assistant",
+                "model": self.messages.model,
+                "content": content,
+                "stop_reason": stop_reason,
+                "stop_sequence": serde_json::Value::Null,
+                "usage": self.messages_usage(),
+            },
+            "parent_tool_use_id": serde_json::Value::Null,
+            "session_id": self.messages.session_id,
+            "uuid": uuid::Uuid::new_v4().to_string(),
+        }))
+    }
+
+    /// `message.usage`, projected from the shell's `_meta.usage` when it has
+    /// arrived. Zeros before then rather than a missing field, which the wire
+    /// format requires to be present.
+    fn messages_usage(&self) -> serde_json::Value {
+        let get = |key: &str| -> u64 {
+            self.usage
+                .as_ref()
+                .and_then(|usage| usage.get(key))
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0)
+        };
+        serde_json::json!({
+            "input_tokens": get("input_tokens"),
+            "output_tokens": get("output_tokens"),
+            "cache_read_input_tokens": get("cache_read_input_tokens"),
+            "cache_creation_input_tokens": get("cache_creation_input_tokens"),
+        })
     }
 
     /// Read structured output from the prompt-response `_meta` — the same
@@ -419,6 +599,12 @@ impl HeadlessEmitter {
                 OutputFormat::Json => {
                     self.text_buffer.push_str(text);
                 }
+                OutputFormat::StreamingMessagesJson => {
+                    self.messages.text.push_str(text);
+                    if self.parse_structured_output {
+                        self.text_buffer.push_str(text);
+                    }
+                }
             },
             HeadlessEvent::ThoughtChunk(text) => match self.format {
                 OutputFormat::Plain => { /* no-op */ }
@@ -428,6 +614,95 @@ impl HeadlessEmitter {
                 OutputFormat::Json => {
                     self.thought_buffer.push_str(text);
                 }
+                OutputFormat::StreamingMessagesJson => {
+                    self.messages.thinking.push_str(text);
+                }
+            },
+            HeadlessEvent::ToolCall {
+                id,
+                title,
+                kind,
+                status,
+                input,
+            } => match self.format {
+                // Plain output is the agent's prose; tool activity is chatter
+                // there, and Json reports only the final result.
+                OutputFormat::Plain | OutputFormat::Json => {}
+                OutputFormat::StreamingJson => {
+                    let mut line = serde_json::json!({
+                        "type": "tool_call",
+                        "id": id,
+                        "title": title,
+                        "kind": kind,
+                        "status": status,
+                    });
+                    if let Some(input) = input
+                        && let Some(map) = line.as_object_mut()
+                    {
+                        map.insert("input".to_owned(), input.clone());
+                    }
+                    println!("{line}");
+                }
+                OutputFormat::StreamingMessagesJson => {
+                    // Held until the message is flushed: `tool_use` is a block
+                    // inside the assistant message, not a line of its own.
+                    self.messages.pending_tools.push(serde_json::json!({
+                        "type": "tool_use",
+                        "id": id,
+                        "name": title,
+                        "input": input.cloned().unwrap_or(serde_json::json!({})),
+                    }));
+                }
+            },
+            HeadlessEvent::ToolCallUpdate { id, status, output } => match self.format {
+                OutputFormat::Plain | OutputFormat::Json => {}
+                OutputFormat::StreamingJson => {
+                    let mut line = serde_json::json!({"type": "tool_call_update", "id": id});
+                    if let Some(map) = line.as_object_mut() {
+                        if let Some(status) = status {
+                            map.insert("status".to_owned(), serde_json::json!(status));
+                        }
+                        if let Some(output) = output {
+                            map.insert("output".to_owned(), output.clone());
+                        }
+                    }
+                    println!("{line}");
+                }
+                OutputFormat::StreamingMessagesJson => {
+                    // A terminal status closes the assistant message that
+                    // requested the tool, then reports the result as the `user`
+                    // turn the wire format expects.
+                    let finished = matches!(status, Some("completed") | Some("failed"));
+                    if !finished {
+                        return;
+                    }
+                    self.flush_messages_assistant(None);
+                    self.emit_messages_init();
+                    let content = output
+                        .map(|value| match value {
+                            serde_json::Value::String(text) => text.clone(),
+                            other => other.to_string(),
+                        })
+                        .unwrap_or_default();
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "type": "user",
+                            "message": {
+                                "role": "user",
+                                "content": [{
+                                    "type": "tool_result",
+                                    "tool_use_id": id,
+                                    "content": content,
+                                    "is_error": status == Some("failed"),
+                                }],
+                            },
+                            "parent_tool_use_id": serde_json::Value::Null,
+                            "session_id": self.messages.session_id,
+                            "uuid": uuid::Uuid::new_v4().to_string(),
+                        })
+                    );
+                }
             },
             HeadlessEvent::MaxTurnsReached => match self.format {
                 OutputFormat::Plain => eprintln!("Max turns reached"),
@@ -435,7 +710,9 @@ impl HeadlessEmitter {
                     println!("{}", serde_json::json!({"type": "max_turns_reached"}));
                 }
                 // Conveyed by stopReason in the final JSON.
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::AutoCompactStarted { percentage } => match self.format {
                 OutputFormat::StreamingJson => {
@@ -447,14 +724,18 @@ impl HeadlessEmitter {
                 OutputFormat::Plain => {
                     eprintln!("Auto-compacting conversation ({percentage}% full)...");
                 }
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::AutoCompactCompleted => match self.format {
                 OutputFormat::StreamingJson => {
                     println!("{}", serde_json::json!({"type": "auto_compact_completed"}));
                 }
                 OutputFormat::Plain => eprintln!("Conversation compacted."),
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::AutoCompactFailed { error } => match self.format {
                 OutputFormat::StreamingJson => {
@@ -470,14 +751,18 @@ impl HeadlessEmitter {
                         eprintln!("Auto-compact failed: {error}");
                     }
                 }
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::AutoCompactCancelled => match self.format {
                 OutputFormat::StreamingJson => {
                     println!("{}", serde_json::json!({"type": "auto_compact_cancelled"}));
                 }
                 OutputFormat::Plain => eprintln!("Auto-compact cancelled."),
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::AutoContinueCompleted { total_tokens } => match self.format {
                 OutputFormat::StreamingJson => {
@@ -487,7 +772,9 @@ impl HeadlessEmitter {
                     );
                 }
                 OutputFormat::Plain => eprintln!("Resumed after compaction."),
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
             HeadlessEvent::ImageCompressed { message } => match self.format {
                 OutputFormat::StreamingJson => {
@@ -497,7 +784,9 @@ impl HeadlessEmitter {
                     );
                 }
                 OutputFormat::Plain => eprintln!("{message}"),
-                OutputFormat::Json => {}
+                // The Messages wire format has no line for session-lifecycle
+                // notices; inventing one would break consumers of the real format.
+                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
             },
         }
     }
@@ -580,6 +869,27 @@ impl HeadlessEmitter {
                     serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
                 );
             }
+            OutputFormat::StreamingMessagesJson => {
+                if self.messages.session_id.is_empty() {
+                    self.messages.session_id = session_id.to_owned();
+                }
+                // Close the message still being assembled; this one really is
+                // the end of the turn, so it carries the stop reason.
+                self.flush_messages_assistant(Some(stop_reason));
+                self.emit_messages_init();
+                let mut result = serde_json::json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": false,
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "stop_reason": stop_reason,
+                    "usage": self.messages_usage(),
+                    "uuid": uuid::Uuid::new_v4().to_string(),
+                });
+                self.attach_structured_output(&mut result);
+                println!("{result}");
+            }
         }
     }
 
@@ -593,7 +903,49 @@ impl HeadlessEmitter {
                 }
                 println!("{err}");
             }
+            OutputFormat::StreamingMessagesJson => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "type": "result",
+                        "subtype": "error_during_execution",
+                        "is_error": true,
+                        "result": message,
+                        "session_id": self.messages.session_id,
+                        "usage": self.messages_usage(),
+                        "uuid": uuid::Uuid::new_v4().to_string(),
+                    })
+                );
+            }
         }
+    }
+}
+
+/// Stable wire name for an ACP tool kind. Spelled out rather than derived from
+/// `Debug` so the emitted stream is a contract, not a rename away from breaking.
+fn tool_kind_name(kind: acp::ToolKind) -> &'static str {
+    match kind {
+        acp::ToolKind::Read => "read",
+        acp::ToolKind::Edit => "edit",
+        acp::ToolKind::Delete => "delete",
+        acp::ToolKind::Move => "move",
+        acp::ToolKind::Search => "search",
+        acp::ToolKind::Execute => "execute",
+        acp::ToolKind::Think => "think",
+        acp::ToolKind::Fetch => "fetch",
+        acp::ToolKind::SwitchMode => "switch_mode",
+        _ => "other",
+    }
+}
+
+/// Stable wire name for an ACP tool-call status.
+fn tool_status_name(status: acp::ToolCallStatus) -> &'static str {
+    match status {
+        acp::ToolCallStatus::Pending => "pending",
+        acp::ToolCallStatus::InProgress => "in_progress",
+        acp::ToolCallStatus::Completed => "completed",
+        acp::ToolCallStatus::Failed => "failed",
+        _ => "unknown",
     }
 }
 
@@ -1326,6 +1678,13 @@ pub async fn run_single_turn(
         session_id = %session_id.0,
         "headless: open_session complete"
     );
+    // The Messages wire format stamps session identity on every line, so it
+    // needs these before the first chunk arrives, not at the end of the turn.
+    emitter.set_messages_context(
+        session_id.0.as_ref(),
+        options.model.as_deref().unwrap_or_default(),
+        &cwd.display().to_string(),
+    );
 
     // Debug: track headless sessions in active_sessions.json when env var is set.
     let track_active = std::env::var("CHUTES_BUILD_TRACK_HEADLESS").is_ok();
@@ -1807,6 +2166,44 @@ fn handle_headless_acp_message(
                         emitter.on_thought_chunk(&text.text);
                     }
                 }
+                acp::SessionUpdate::AvailableCommandsUpdate(update) => {
+                    // The only place the session advertises what it can do;
+                    // the Messages `system` line reports both lists.
+                    let tools = update
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.get("tools"))
+                        .and_then(serde_json::Value::as_array)
+                        .map(|tools| {
+                            tools
+                                .iter()
+                                .filter_map(|tool| tool.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let commands = update
+                        .available_commands
+                        .iter()
+                        .map(|command| command.name.clone())
+                        .collect();
+                    emitter.set_available(tools, commands);
+                }
+                acp::SessionUpdate::ToolCall(tc) => {
+                    emitter.emit(HeadlessEvent::ToolCall {
+                        id: tc.tool_call_id.0.as_ref(),
+                        title: &tc.title,
+                        kind: tool_kind_name(tc.kind),
+                        status: tool_status_name(tc.status),
+                        input: tc.raw_input.as_ref(),
+                    });
+                }
+                acp::SessionUpdate::ToolCallUpdate(tcu) => {
+                    emitter.emit(HeadlessEvent::ToolCallUpdate {
+                        id: tcu.tool_call_id.0.as_ref(),
+                        status: tcu.fields.status.map(tool_status_name),
+                        output: tcu.fields.raw_output.as_ref(),
+                    });
+                }
                 _ => {}
             }
             let _ = boxed.response_tx.send(Ok(()));
@@ -2011,6 +2408,132 @@ fn handle_ext_notification(
 
 #[cfg(test)]
 mod tests {
+    use super::{HeadlessEmitter, HeadlessEvent, OutputFormat};
+
+    fn messages_emitter() -> HeadlessEmitter {
+        let mut emitter = HeadlessEmitter::new(OutputFormat::StreamingMessagesJson, false);
+        emitter.set_messages_context("sess-1", "kimi-k2.6", "/workspace");
+        emitter
+    }
+
+    /// The `system`/`init` line carries session identity and what the session
+    /// advertised, and is emitted exactly once.
+    #[test]
+    fn messages_init_reports_session_identity_once() {
+        let mut emitter = messages_emitter();
+        emitter.set_available(vec!["read_file".into()], vec!["compact".into()]);
+        let init = emitter.messages_init_line().expect("first call emits init");
+        assert_eq!(init["type"], serde_json::json!("system"));
+        assert_eq!(init["subtype"], serde_json::json!("init"));
+        assert_eq!(init["session_id"], serde_json::json!("sess-1"));
+        assert_eq!(init["model"], serde_json::json!("kimi-k2.6"));
+        assert_eq!(init["cwd"], serde_json::json!("/workspace"));
+        assert_eq!(init["tools"], serde_json::json!(["read_file"]));
+        assert_eq!(init["slash_commands"], serde_json::json!(["compact"]));
+        assert!(
+            emitter.messages_init_line().is_none(),
+            "init must not repeat"
+        );
+    }
+
+    /// Thinking, text and tool_use ride in one assistant message, in that
+    /// order, and the accumulated state is cleared afterwards.
+    #[test]
+    fn assistant_message_carries_thinking_text_and_tool_use() {
+        let mut emitter = messages_emitter();
+        emitter.emit(HeadlessEvent::ThoughtChunk("weighing options"));
+        emitter.emit(HeadlessEvent::TextChunk("Reading the file"));
+        emitter.emit(HeadlessEvent::ToolCall {
+            id: "call-1",
+            title: "read_file",
+            kind: "read",
+            status: "pending",
+            input: Some(&serde_json::json!({"path": "a.rs"})),
+        });
+
+        let line = emitter
+            .messages_assistant_line(None)
+            .expect("a message was assembled");
+        assert_eq!(line["type"], serde_json::json!("assistant"));
+        assert_eq!(line["session_id"], serde_json::json!("sess-1"));
+        let content = line["message"]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], serde_json::json!("thinking"));
+        assert_eq!(
+            content[0]["thinking"],
+            serde_json::json!("weighing options")
+        );
+        assert_eq!(content[1]["type"], serde_json::json!("text"));
+        assert_eq!(content[1]["text"], serde_json::json!("Reading the file"));
+        assert_eq!(content[2]["type"], serde_json::json!("tool_use"));
+        assert_eq!(content[2]["id"], serde_json::json!("call-1"));
+        assert_eq!(content[2]["name"], serde_json::json!("read_file"));
+        assert_eq!(content[2]["input"], serde_json::json!({"path": "a.rs"}));
+        // A message ended by a tool has no stop reason: the turn continues.
+        assert_eq!(line["message"]["stop_reason"], serde_json::Value::Null);
+        assert!(
+            emitter.messages_assistant_line(None).is_none(),
+            "flushing must clear the accumulated message"
+        );
+    }
+
+    /// `usage` is always present, even before the shell reports any.
+    #[test]
+    fn assistant_message_always_reports_usage_fields() {
+        let mut emitter = messages_emitter();
+        emitter.emit(HeadlessEvent::TextChunk("hi"));
+        let line = emitter.messages_assistant_line(Some("end_turn")).unwrap();
+        let usage = &line["message"]["usage"];
+        for field in [
+            "input_tokens",
+            "output_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ] {
+            assert_eq!(usage[field], serde_json::json!(0), "{field}");
+        }
+        assert_eq!(
+            line["message"]["stop_reason"],
+            serde_json::json!("end_turn")
+        );
+    }
+
+    /// Only a terminal tool status closes the message; a pending or in-progress
+    /// update must not split it.
+    #[test]
+    fn only_a_finished_tool_closes_the_message() {
+        let mut emitter = messages_emitter();
+        emitter.emit(HeadlessEvent::TextChunk("working"));
+        emitter.emit(HeadlessEvent::ToolCallUpdate {
+            id: "call-1",
+            status: Some("in_progress"),
+            output: None,
+        });
+        assert!(
+            emitter
+                .messages_assistant_line(None)
+                .expect("message still open")["message"]["content"]
+                .as_array()
+                .is_some_and(|content| !content.is_empty()),
+            "an in-progress update must leave the message intact"
+        );
+    }
+
+    /// Session-lifecycle notices have no Messages equivalent, so they must not
+    /// invent a line or disturb the message being assembled.
+    #[test]
+    fn lifecycle_notices_do_not_touch_the_messages_stream() {
+        let mut emitter = messages_emitter();
+        emitter.emit(HeadlessEvent::TextChunk("kept"));
+        emitter.emit(HeadlessEvent::AutoCompactStarted { percentage: 91 });
+        emitter.emit(HeadlessEvent::AutoCompactCompleted);
+        emitter.emit(HeadlessEvent::MaxTurnsReached);
+        let line = emitter.messages_assistant_line(None).unwrap();
+        assert_eq!(
+            line["message"]["content"][0]["text"],
+            serde_json::json!("kept")
+        );
+    }
+
     #[test]
     fn lifecycle_tracking_is_independent_of_wait_flag() {
         let mut pending = std::collections::HashSet::new();

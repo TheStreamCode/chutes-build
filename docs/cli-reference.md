@@ -19,7 +19,16 @@ Use one of these mutually exclusive inputs for a non-interactive turn:
 - `--prompt-file <PATH>`
 - `--prompt-json <JSON>`
 
-Headless output supports `--output-format plain|json|streaming-json`.
+Headless output supports
+`--output-format plain|json|streaming-json|streaming-messages-json`.
+`streaming-json` emits NDJSON of the agent's native events: `text`, `thought`,
+`tool_call`, `tool_call_update`, the session-lifecycle notices, and a final
+`end`. `streaming-messages-json` emits NDJSON in the Anthropic Messages API
+shape instead — a `system`/`init` line, `assistant` lines whose `content[]`
+holds thinking, text and `tool_use` blocks, `user` lines carrying each
+`tool_result`, and a final `result` — for tooling written against that format.
+Session-lifecycle notices have no counterpart there and are omitted rather
+than invented.
 `--json-schema <SCHEMA>` selects JSON output and constrains the model response.
 `--max-turns`, `--best-of-n 2..10`, `--check`, `--agents`, `--tools`, and
 `--disallowed-tools` are headless-only. `--no-plan` is interactive-only.

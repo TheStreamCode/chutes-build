@@ -16,6 +16,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Documented desktop control as an opt-in MCP integration, including what
   enabling it gives away, since no built-in tool captures the screen or
   synthesizes input.
+- `--output-format streaming-messages-json` emits headless output in the
+  Anthropic Messages API wire shape: a `system`/`init` line, `assistant` lines
+  whose `content[]` carries thinking, text and `tool_use` blocks, `user` lines
+  carrying each `tool_result`, and a final `result`. Ported from upstream.
+- `streaming-json` now reports tool activity as `tool_call` and
+  `tool_call_update` lines. The headless runner ignored ACP tool-call updates
+  entirely, so a consumer could see the agent's prose but never what it did.
 - `CHUTES_EXTRA_CA_BUNDLE` adds extra TLS roots from a PEM bundle, for networks
   where a proxy terminates TLS with its own root. Opt-in and additive: unset by
   default, never replaces the built-in roots, and never disables verification.
