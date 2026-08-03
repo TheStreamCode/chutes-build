@@ -5634,11 +5634,15 @@ pub(crate) mod tests {
             app.needs_animation(),
             "an open prompt history overlay must request animation ticks"
         );
-        // Generous budget (~10s): the history daemon runs on a background
-        // thread that a loaded CI runner may not schedule promptly, and this
-        // is polling for delivery, not timing behavior under test.
+        // Wait on a wall-clock deadline, not a poll count. The history daemon
+        // runs on a background thread that a loaded CI runner may not schedule
+        // promptly, and a fixed number of polls says nothing about how much
+        // real time it grants — that budget flaked on CI. What is under test is
+        // that `tick()` eventually delivers, not how quickly; the loop exits as
+        // soon as it does, so the generous deadline costs nothing when healthy.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let mut delivered = false;
-        for _ in 0..10_000 {
+        while std::time::Instant::now() < deadline {
             if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
                 delivered = true;
                 break;

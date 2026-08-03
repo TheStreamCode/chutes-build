@@ -1822,7 +1822,13 @@ fn build_rows_idle_anchor_is_frozen_last_active_at() {
     let mut app = test_app_with_agent();
     mark_agent_nonempty(&mut app, AgentId(0));
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let anchor = std::time::Instant::now() - std::time::Duration::from_secs(300);
+    // Same boot-relative limit as `build_rows_working_anchor_is_turn_started_at`:
+    // never subtract more than the machine may have been up for.
+    let now = std::time::Instant::now();
+    let Some(anchor) = now.checked_sub(std::time::Duration::from_secs(60)) else {
+        eprintln!("skipped: needs at least 60s of uptime to stage a frozen anchor");
+        return;
+    };
     agent.last_active_at = Some(anchor);
     agent.turn_started_at = None;
     agent.session.state = crate::app::agent::AgentState::Idle;
@@ -1839,8 +1845,8 @@ fn build_rows_idle_anchor_is_frozen_last_active_at() {
     assert_eq!(row1.state, crate::views::dashboard::RowState::Idle);
     let elapsed1 = row1.last_change_at.elapsed().unwrap_or_default();
     assert!(
-        elapsed1 >= std::time::Duration::from_secs(299),
-        "expected >= 299s, got {elapsed1:?}",
+        elapsed1 >= std::time::Duration::from_secs(59),
+        "expected >= 59s, got {elapsed1:?}",
     );
     let rows2 = build_rows(
         &app.agents,
@@ -1853,7 +1859,7 @@ fn build_rows_idle_anchor_is_frozen_last_active_at() {
     );
     let elapsed2 = rows2[0].last_change_at.elapsed().unwrap_or_default();
     assert!(
-        elapsed2 >= std::time::Duration::from_secs(299),
+        elapsed2 >= std::time::Duration::from_secs(59),
         "idle anchor must stay frozen across rebuilds, got {elapsed2:?}",
     );
 }
@@ -1865,8 +1871,22 @@ fn build_rows_working_anchor_is_turn_started_at() {
     use crate::views::dashboard::build_rows;
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    let turn_start = std::time::Instant::now() - std::time::Duration::from_secs(5);
-    let stale = std::time::Instant::now() - std::time::Duration::from_secs(600);
+    // `Instant` counts from boot, so subtracting more than the machine's
+    // uptime panics with "overflow when subtracting duration from instant".
+    // The old 600s offset did exactly that on a box (or CI runner) booted less
+    // than ten minutes earlier. 60s is still far outside the 30s window the
+    // assertion allows, so it separates the two anchors just as well while
+    // being expressible almost immediately after boot.
+    let now = std::time::Instant::now();
+    let turn_start = now
+        .checked_sub(std::time::Duration::from_secs(5))
+        .unwrap_or(now);
+    let Some(stale) = now.checked_sub(std::time::Duration::from_secs(60)) else {
+        // Under a minute of uptime the two anchors cannot be told apart, so the
+        // test would pass vacuously. Say so instead of asserting nothing.
+        eprintln!("skipped: needs at least 60s of uptime to stage a stale anchor");
+        return;
+    };
     agent.turn_started_at = Some(turn_start);
     agent.last_active_at = Some(stale);
     agent.session.state = crate::app::agent::AgentState::TurnRunning;
