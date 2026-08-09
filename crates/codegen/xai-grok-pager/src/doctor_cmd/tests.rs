@@ -241,7 +241,7 @@ fn fake_standalone_facts_compose_through_shared_view() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with(snapshot);
+    let report = collect_report_with_voice(snapshot, false);
 
     assert_eq!(report.issue_count(), 1);
     assert!(
@@ -280,7 +280,7 @@ fn standalone_wayland_missing_is_issue_but_no_seats_or_errors_are_not() {
             false,
             RuntimeEvidence::Available(ColorLevel::TrueColor),
         );
-        let report = collect_report_with(snapshot);
+        let report = collect_report_with_voice(snapshot, false);
         let has_issue = report
             .findings
             .iter()
@@ -394,7 +394,7 @@ fn standalone_runtime_and_tmux_are_unavailable_without_false_wezterm_finding() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with(snapshot);
+    let report = collect_report_with_voice(snapshot, false);
 
     assert!(report.findings.iter().all(|finding| {
         finding.id != DiagnosticId::new("terminal", "wezterm-kitty")

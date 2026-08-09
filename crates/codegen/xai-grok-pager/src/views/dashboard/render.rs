@@ -8861,9 +8861,18 @@ mod tests {
             None,
         );
         let content = buf_to_text(&buf);
+        // macOS calls the key Option, and `input::key` prints `Opt+` there on
+        // purpose — so the expected label follows the platform rather than
+        // hard-coding one spelling. Loosening this to accept any of the three
+        // would also pass if the renderer picked the wrong one.
+        let alt = if cfg!(target_os = "macos") {
+            "Opt"
+        } else {
+            "Alt"
+        };
         assert!(
-            content.contains("Shift+Enter:send") || content.contains("Alt+Enter:send"),
-            "multiline footer must advertise Shift/Alt+Enter as send, got: {content:?}",
+            content.contains("Shift+Enter:send") || content.contains(&format!("{alt}+Enter:send")),
+            "multiline footer must advertise Shift/{alt}+Enter as send, got: {content:?}",
         );
         // Bare Enter:send would appear as "  Enter:send" (footer pad); the
         // modified chords contain the substring "Enter:send" so avoid that.
@@ -8898,9 +8907,16 @@ mod tests {
             None,
         );
         let content = buf_to_text(&buf);
+        // See the sibling test: `Opt` on macOS, `Alt` elsewhere.
+        let alt = if cfg!(target_os = "macos") {
+            "Opt"
+        } else {
+            "Alt"
+        };
         assert!(
-            content.contains("Shift+Enter:create") || content.contains("Alt+Enter:create"),
-            "multiline empty footer must advertise Shift/Alt+Enter as create, got: {content:?}",
+            content.contains("Shift+Enter:create")
+                || content.contains(&format!("{alt}+Enter:create")),
+            "multiline empty footer must advertise Shift/{alt}+Enter as create, got: {content:?}",
         );
         assert!(
             !content.contains("  Enter:create"),

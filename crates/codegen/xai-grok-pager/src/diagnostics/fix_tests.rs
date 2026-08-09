@@ -1062,9 +1062,13 @@ fn configured_report_reaches_pass_state_only_for_exact_managed_alias() {
 fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     let temp = tempfile::tempdir().unwrap();
     let capture = temp.path().join("capture");
-    let grok = temp.path().join("grok");
+    // Named for the command the aliases below actually invoke. It used to be
+    // `grok`, which the rebrand left alone (bare `grok` is ambiguous, so
+    // `scripts/rebrand.py` never rewrites it) while rewriting the alias to
+    // `chutes-build` — so the shell found no such command and exited non-zero.
+    let stub = temp.path().join("chutes-build");
     std::fs::write(
-        &grok,
+        &stub,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
             capture.display()
@@ -1072,7 +1076,7 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&grok, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     if let Some(bash) = find_on_path("bash") {
         let rc = temp.path().join("bashrc");

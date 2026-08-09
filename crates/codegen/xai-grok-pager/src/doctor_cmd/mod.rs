@@ -81,8 +81,23 @@ fn configured_report_for_terminal(
 fn collect_report_with(
     snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
 ) -> DiagnosticReport {
+    collect_report_with_voice(snapshot, true)
+}
+
+/// `collect_report_with`, with the live microphone probe's *finding* under the
+/// caller's control.
+///
+/// `apply_voice_probe` queries the real audio device, so whether it adds a finding
+/// depends on the host: a CI runner has no microphone, a laptop does. Tests that
+/// compose synthetic facts and then assert on `issue_count()` were therefore
+/// asserting about the machine they ran on — green here, red on Linux CI. Production
+/// passes `true`; the facts are still recorded either way.
+fn collect_report_with_voice(
+    snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
+    emit_voice_issue: bool,
+) -> DiagnosticReport {
     let mut report = crate::diagnostics::view(snapshot.into());
-    crate::diagnostics::apply_voice_probe(&mut report, true);
+    crate::diagnostics::apply_voice_probe(&mut report, emit_voice_issue);
     report
 }
 
