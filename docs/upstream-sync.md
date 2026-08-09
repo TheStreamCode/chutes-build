@@ -128,6 +128,41 @@ should be made before the first sync lands. If the linear-history rule is kept
 instead, the honest thing is to say so in this document and go back to
 cherry-picking with eyes open, rather than discover it at the next sync.
 
+### What actually happened, 2026-08-09
+
+The linear-history rule was kept, and 1.0.0 landed as **one squash commit**
+(`2ece18b`) whose parent is the previous `main` and whose tree is the re-based tree.
+Relaxing the rule to push a merge was the other option and was not taken.
+
+So the warning above now applies to this repository as it stands: `main`'s history
+does not contain upstream's commits, and `git merge upstream/main` run *on `main`*
+would compute its base at the 2026-07-17 fork point and replay everything as
+conflicts.
+
+**The model still composes, on one condition: never merge upstream into `main`.**
+Merge it into a branch that carries upstream's history, and let `main` receive the
+squash:
+
+```sh
+# The integration branch already contains upstream's history. Do not delete it.
+git checkout rebase/upstream-1.0.0
+git merge upstream/main          # merge base is correct here
+#   ... resolve the Chutes seams, run the gate, then land the tree on main:
+tree=$(git rev-parse rebase/upstream-1.0.0^{tree})
+commit=$(git commit-tree "$tree" -p origin/main -F message.txt)
+git push origin "$commit:refs/heads/main"
+```
+
+`rebase/upstream-1.0.0` is pushed and is that branch today. Renaming it to something
+durable — `integration/upstream` — would say what it is for, but it must not be
+deleted as a stale feature branch: it is the only place upstream's history is
+reachable from, and deleting it puts the next sync back at the fork point.
+
+Two things follow. `main` is a squash-only release branch, and its commits will not
+correspond one-to-one with the work; `CHANGELOG.md` and this file are the record
+instead. And the choice is still open: relaxing linear history removes the whole
+dance, at the cost of merge commits in `main`.
+
 ## Recording a sync
 
 Update `.github/upstream.json` (`lastReviewedCommit`, `lastReviewedVersion`,
