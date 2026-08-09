@@ -608,6 +608,35 @@ tool invocable.
   debug, so that crate's non-`auth::` tests are unmeasured here. `agent::config`
   and `remote::client` were checked per-module and pass.
 
+### The Windows CI job crashes, and it is not a test failure
+
+`Rust quality (Windows)` is red on `main` since 1.0.0 landed. The pager test binary
+**exits with `0xc0000005`** — an access violation — after roughly 3868 of ~8200
+tests, so `cargo test` reports no failure list at all: the process dies mid-run.
+`Rust quality (Windows)` was green on the 0.4.x tree, so this arrives with upstream
+1.0.0's code; it is not something the re-base introduced into it.
+
+Ruled out, so nobody repeats the work:
+
+- **The escape sequences immediately before the crash are innocuous.** The log shows
+  Kitty graphics deletes (`_Ga=d,d=i,…`) and OSC 12 cursor colours. Both are
+  pure string construction plus a locked-stderr write — `terminal::image::clear_kitty_image`
+  and `theme::apply_cursor_color`. They are interleaved output from a parallel run,
+  not the fault.
+- **Not the PTY tests.** Every test in `pty_wrap.rs` is `#[cfg(unix)]`.
+- **Not `SetConsoleCtrlHandler`.** That FFI lives in the production
+  `screen_mode_relaunch` path, not in a test.
+
+To localise it, dispatch the workflow with the Windows job running single-threaded
+(`RUST_TEST_THREADS=1`). With one thread the harness prints each test's name *before*
+running it, so the last name in the log is the one that died — which a parallel run
+cannot tell you. Do that before guessing at the 56 `unsafe` blocks in the pager.
+
+Three `doctor_cmd` tests also fail on Windows — `non_tty_without_yes_fails_safely_before_write`,
+`fix_preview_contains_exact_change_and_caveats`, `decline_is_success_and_does_not_write`.
+They fail on this machine too, and failed before the re-base, so they are a separate,
+smaller problem from the crash.
+
 The seams in `agent/{config,init,models}.rs` and `extensions/billing.rs` are
 applied, and the memory store now writes every path through
 `write_secure_file` / `ensure_owner_only_permissions` (three of the four paths
