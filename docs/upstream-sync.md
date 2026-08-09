@@ -616,6 +616,14 @@ tests, so `cargo test` reports no failure list at all: the process dies mid-run.
 `Rust quality (Windows)` was green on the 0.4.x tree, so this arrives with upstream
 1.0.0's code; it is not something the re-base introduced into it.
 
+**The `git2` 0.20.4 bump is excluded, by experiment rather than by argument.** Every
+Windows run between the landing commit and that bump was cancelled by a later push,
+so the timeline alone could not separate them — and the crash sits at the boundary of
+`git_info`, which is the module that calls libgit2, with the bump carrying five
+libgit2 patch releases. Dispatching CI on the landing commit (`2ece18b`, `git2
+0.20.2`) reproduced it exactly: same `0xc0000005`, same step, 3868 tests reported
+against 3869 and 3871 on the bumped runs. Nothing to look for in libgit2.
+
 Ruled out, so nobody repeats the work:
 
 - **The escape sequences immediately before the crash are innocuous.** The log shows
