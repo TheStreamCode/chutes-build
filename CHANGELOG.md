@@ -129,6 +129,16 @@ no client ID that could serve anyone but its owner.
   first-launch section of the getting-started guide, `docs/getting-started.md` and
   the README. `docs/getting-started.md` had also described a "bundled client ID"
   that no longer exists.
+- **`jsonwebtoken` had no provider to sign or verify with.** It picks one from cargo
+  features, and this graph enables both: the shell declares `rust_crypto`, while
+  `xai-file-utils` -> `gcloud-storage` -> `gcloud-auth` enables `jwt-aws-lc-rs`. Cargo
+  unifies features across the graph, so neither can be turned off from here, and with
+  both on the crate refuses to choose — every signature operation panics. Production
+  survived on placement alone: `run_login_flow_with_config` installed a provider and
+  is the only entry to the one function that verifies an id_token, which holds exactly
+  until a second verification path appears. The install now sits at each point of use,
+  behind a `OnceLock`, so the library is correct by construction; 23 auth tests that
+  had been failing on Linux CI depend on it too.
 - **Six example keys read `CHUTES_API_KEY="xai-..."`** — upstream's prefix, left
   behind when the rebrand renamed the variable but not its value. A Chutes key is
   `cpk_`-prefixed, which the redactor already knew and the docs did not.

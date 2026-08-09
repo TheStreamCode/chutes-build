@@ -1030,6 +1030,7 @@ mod tests {
     fn peek_access_token_principal_matrix() {
         ensure_crypto_provider();
         fn make_jwt(claims: serde_json::Value) -> String {
+            crate::auth::ensure_crypto_provider();
             let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
             jsonwebtoken::encode(
                 &header,
@@ -1072,6 +1073,7 @@ mod tests {
     fn peek_access_token_principal_id_does_not_require_type() {
         ensure_crypto_provider();
         fn make_jwt(claims: serde_json::Value) -> String {
+            crate::auth::ensure_crypto_provider();
             jsonwebtoken::encode(
                 &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
                 &claims,

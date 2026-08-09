@@ -648,6 +648,7 @@ pub(crate) mod tests {
     /// Team access token carrying `principal_id` (signature irrelevant — only
     /// the principal claims are peeked).
     fn team_access_token(principal_id: &str) -> super::TokenOk {
+        crate::auth::ensure_crypto_provider();
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
         let claims = serde_json::json!({
             "sub": "user-42",
