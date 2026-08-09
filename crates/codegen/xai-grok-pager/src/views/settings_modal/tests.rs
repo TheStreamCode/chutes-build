@@ -8085,6 +8085,11 @@ fn locked_row_footer_drops_the_keys_it_refuses() {
 /// value + chevron.
 #[test]
 fn locked_coding_data_sharing_row_renders_locked_value_without_chevron() {
+    // Hold the theme still: this compares rendered output against
+    // `Theme::current()`, and the `set_theme` tests flip the process-global through
+    // `Theme::apply_kind`. Without the guard the two can disagree mid-test — seen
+    // once as an 80th failure against a steady 79.
+    let _theme_guard = crate::theme::cache::pin_theme();
     let area = Rect {
         x: 0,
         y: 0,

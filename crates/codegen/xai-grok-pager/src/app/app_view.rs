@@ -6485,8 +6485,15 @@ pub(crate) mod tests {
             app.needs_animation(),
             "an open prompt history overlay must request animation ticks"
         );
+        // Wait against the clock, not an iteration count. The daemon runs on
+        // another thread, and a one-second budget — which 1000 x 1 ms was — is
+        // sized for an idle machine: this failed on a loaded CI runner while
+        // passing locally and on the previous run. Ten seconds still fails if the
+        // daemon never delivers, so the assertion keeps its meaning, and the loop
+        // exits the moment it does.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut delivered = false;
-        for _ in 0..1000 {
+        while std::time::Instant::now() < deadline {
             if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
                 delivered = true;
                 break;
