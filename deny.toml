@@ -22,6 +22,15 @@ ignore = [
     { id = "RUSTSEC-2026-0192", reason = "Transitive font parser used by the current PDF rendering stack; no maintained compatible replacement is currently available." },
     { id = "RUSTSEC-2026-0206", reason = "Transitive text shaping dependency of the current PDF rendering stack; no maintained compatible replacement is currently available." },
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
+    # Arrived with the 1.0.0 re-base. None has a patched release, so none can be
+    # closed by a bump. Each reason is a reachability check that was run: `grep`
+    # the tree for the affected API, and where the answer is "we never call it",
+    # say so rather than asserting the crate is fine.
+    { id = "RUSTSEC-2026-0190", reason = "Unsoundness in anyhow's Error::downcast_mut(). We never call it: the three downcast_mut call sites in this tree are std::any::Any on Box<dyn Any> inside typed maps (xai-grok-tools resources, xai-tool-types ext), not anyhow::Error. No patched release exists." },
+    { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch dereferences an invalid pointer in the fmt::Pointer impl for Atomic and Shared. Reachable only by formatting one of those with {:p}; there is no {:p} anywhere in this tree, and the two crates depending on crossbeam (xai-codebase-graph, xai-fast-worktree) name neither type. No patched release exists." },
+    { id = "RUSTSEC-2026-0183", reason = "Potential UB in git2's Remote::list(). Zero call sites in this tree. No patched release exists; 0.20.4 does not fix it." },
+    { id = "RUSTSEC-2026-0184", reason = "Potential UB in git2 with a Signature from a buffer-created BlameHunk. We call no git2 blame API — the four 'blame' matches are a test name, a comment, and two string literals naming the `git blame` subcommand in permission policy. No patched release exists." },
+    { id = "RUSTSEC-2026-0097", reason = "rand is unsound when a custom logger itself calls rand::rng(), which re-enters the thread RNG. Our logging stack does not: xai-grok-telemetry and xai-grok-shared do not depend on rand, and no tracing layer references it. The two rand::rng() calls in this tree pick a random announcement index in the pager. No patched release exists." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
 ]
 
@@ -66,7 +75,19 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/helix-editor/nucleo.git"]
+allow-git = [
+  "https://github.com/helix-editor/nucleo.git",
+  # Upstream's own fork of async-openai, pinned to a revision, and the client the
+  # sampler speaks to Chutes' OpenAI-compatible inference API through. It carries
+  # patches for tool types the published crate cannot deserialize, so the crates.io
+  # release is not a drop-in substitute.
+  #
+  # This is a supply-chain decision, and worth naming as one: `our-forks` is an
+  # organisation this project does not control. What limits the exposure is the
+  # `rev` pin in the root manifest — the revision cannot change under us, and
+  # `Cargo.lock` records its hash. Re-examine on any change to that pin.
+  "https://github.com/our-forks/async-openai.git",
+]
 
 [sources.allow-org]
 github = []
