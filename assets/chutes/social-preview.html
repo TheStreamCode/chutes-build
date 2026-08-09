@@ -1,0 +1,137 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Chutes Build — social preview</title>
+<style>
+  /* Source for assets/chutes/social-preview.png, the 1280x640 card GitHub shows
+     when a repository link is shared. Rendered by scripts/social_preview.py.
+
+     Designed rather than composed: a terminal product's card should look like the
+     terminal, so the type is monospace throughout and the only ornament is a prompt
+     rule and the real command you would type. No stock imagery, no gradient mesh,
+     nothing that would age badly or promise a look the product does not have. */
+
+  :root {
+    --bg: #0d1117;         /* GitHub's dark canvas, so the card sits on its own ground */
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --dim: #484f58;
+    --accent: #3ddc97;     /* the Chutes green from the TUI splash */
+    --rule: #21262d;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1280px;
+    height: 640px;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", ui-monospace, monospace;
+    font-variant-ligatures: none;
+    /* A very slight vignette keeps the flat background from reading as a mistake
+       at large sizes, without becoming a "designed gradient". */
+    background-image: radial-gradient(120% 90% at 20% 0%, #12181f 0%, var(--bg) 60%);
+    display: flex;
+    flex-direction: column;
+    padding: 0 84px 44px;
+  }
+
+  /* Takes the space the footer does not, and centres itself in it. Expressed as
+     layout rather than as a padding constant, so it stays balanced if any line
+     above changes height. */
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  /* Top hairline: the one piece of chrome, in the product's accent. */
+  .rule-top {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent) 0%, #2ea8ff 100%);
+  }
+
+  .prompt {
+    color: var(--dim);
+    font-size: 26px;
+    letter-spacing: 0.02em;
+    margin-bottom: 18px;
+  }
+  .prompt .caret { color: var(--accent); }
+  .prompt .cmd { color: var(--muted); }
+
+  h1 {
+    font-size: 82px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  h1 .dot { color: var(--accent); }
+
+  .tagline {
+    margin-top: 22px;
+    font-size: 29px;
+    color: var(--muted);
+    letter-spacing: -0.01em;
+  }
+
+  /* The differentiators, as a row of terminal-ish chips. Each is enforced at
+     compile time, not a marketing claim — see PRIVACY.md. */
+  .traits {
+    margin-top: 40px;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .trait {
+    font-size: 21px;
+    color: var(--fg);
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    padding: 10px 16px;
+    background: #11161d;
+    white-space: nowrap;
+  }
+  .trait .no { color: var(--accent); font-weight: 700; }
+
+  .foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 20px;
+    color: var(--dim);
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+  }
+  .foot .right { color: var(--muted); }
+</style>
+
+<div class="rule-top"></div>
+
+<div class="content">
+<div class="prompt"><span class="caret">❯</span> <span class="cmd">npm i -g chutes-build</span></div>
+
+<h1>Chutes Build<span class="dot">.</span></h1>
+
+<p class="tagline">Terminal AI coding agent for the Chutes ecosystem</p>
+
+<div class="traits">
+  <span class="trait"><span class="no">no</span> telemetry</span>
+  <span class="trait"><span class="no">no</span> phone-home</span>
+  <span class="trait"><span class="no">no</span> self-update</span>
+  <span class="trait">Apache-2.0</span>
+  <span class="trait">Rust</span>
+</div>
+</div>
+
+<div class="foot">
+  <span>github.com/TheStreamCode/chutes-build</span>
+  <span class="right">a fork of xai-org/grok-build</span>
+</div>

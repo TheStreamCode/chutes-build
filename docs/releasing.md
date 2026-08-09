@@ -104,11 +104,15 @@ One thing stays manual because GitHub exposes no API for it: the **social previe
 the 1280x640 card shown when a repository link is shared to Slack, X or Discord.
 Without one, GitHub renders a generic auto-card.
 
-`python scripts/social_preview.py` builds `assets/chutes/social-preview.png` from
-the terminal screenshot already in the tree; upload it at **Settings -> General ->
-Social preview**. Re-run the script whenever the screenshot is re-shot — it crops to
-the splash's content by scanning for the panel's empty interior, so it survives a
-differently sized capture.
+The card is designed in CSS — `assets/chutes/social-preview.html` — and rendered by
+`python scripts/social_preview.py`, which serves it on loopback and screenshots it at
+1280x640 with `playwright-cli`. Edit the HTML, re-run the script, upload the PNG at
+**Settings -> General -> Social preview**.
+
+Designed rather than assembled from bitmaps for two reasons: real typography, and a
+layout that stays balanced when a line changes — the footer sits in the flow and the
+content centres in what is left, rather than against a padding constant that has to
+be re-guessed. And the card is reviewable as a diff.
 
 > [!IMPORTANT]
 > `assets/chutes/screenshot/chutes-build.png` is **stale**: it reads

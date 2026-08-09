@@ -18,3 +18,6 @@ CUsers*env.txt
 # Python bytecode from the rebrand/sweep scripts.
 __pycache__/
 *.pyc
+
+# playwright-cli scratch (snapshots, console logs) from scripts/social_preview.py
+.playwright-cli/
