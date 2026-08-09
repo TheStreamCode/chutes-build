@@ -1,13 +1,23 @@
-# Synthetic fixtures inherited from the reviewed upstream history.
+# Findings that exist only in **history**: the value appears in an old commit from
+# before upstream annotated the line with `// gitleaks:allow`. The tree is clean at
+# these paths today, so there is nothing to annotate and nothing to allowlist by
+# value — only the commit can be named.
+#
+# These SHAs are in published history that will not be rewritten, so unlike the
+# entries this file used to hold, they do not go stale at the next upstream re-base.
+# Anything present in the **working tree** belongs in `.gitleaks.toml` instead, or
+# in an inline `// gitleaks:allow` where upstream owns the line.
+#
+# Every entry is a synthetic detector fixture — an AWS prefix followed by the
+# alphabet, a GitHub PAT prefix followed by digits, the canonical jwt.io example
+# token, and a bare `CHUTES_API_KEY=` with no value. None can authenticate anything.
+
+# Redactor fixtures, before the inline annotations were added.
 c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:generic-api-key:389
 c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-secrets/src/sanitizer.rs:jwt:457
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-shell/tests/test_built_binary_e2e.rs:generic-api-key:1173
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-telemetry/src/otel_layer/redact.rs:generic-api-key:513
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-telemetry/src/external/tests.rs:generic-api-key:532
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-tools/src/implementations/web_search/types.rs:generic-api-key:79
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:255
-c68e39f60462f28d9be5e683d9cbe2c57b1a5027:crates/codegen/xai-grok-workspace/src/hub_auth.rs:generic-api-key:301
-07b6400464f2a030cc2fc27e7b30538d36d5967d:crates/codegen/xai-grok-workspace/src/permission/bash_command_splitting.rs:generic-api-key:1401
-25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/codegen/xai-grok-tools/src/implementations/chutes/context7.rs:aws-access-token:209
-25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:github-pat:66
 25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:aws-access-token:64
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/chutes-build-core/src/privacy.rs:github-pat:66
+25f966f8beac1d0b0f62fbfc6ea36696bfb38b22:crates/codegen/xai-grok-tools/src/implementations/chutes/context7.rs:aws-access-token:209
+
+# The bare environment-variable name in a command-splitting test — no value at all.
+07b6400464f2a030cc2fc27e7b30538d36d5967d:crates/codegen/xai-grok-workspace/src/permission/bash_command_splitting.rs:generic-api-key:1401

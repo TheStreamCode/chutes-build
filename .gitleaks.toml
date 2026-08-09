@@ -2,10 +2,41 @@
 useDefault = true
 
 [allowlist]
-description = "Generated and version-control directories are not source inputs"
+description = "Generated directories, and the synthetic fixtures inherited from upstream"
+
 paths = [
   '''(^|[\\/])\.git([\\/]|$)''',
   '''(^|[\\/])node_modules([\\/]|$)''',
   '''(^|[\\/])output([\\/]|$)''',
   '''(^|[\\/])target([\\/]|$)''',
+]
+
+# Allowlisted by **value**, not by commit SHA.
+#
+# `.gitleaksignore` pinned these six findings as `<sha>:<path>:<rule>:<line>`, which
+# is exact but does not survive a history rewrite — and this repository's upstream
+# model is a re-base, so every sync moves them. Landing 1.0.0 invalidated all twelve
+# entries at once and turned a green scan red on fixtures that had already been
+# reviewed twice.
+#
+# Matching the literal instead is precise and stable. Each of these is a fixture
+# whose entire purpose is to be detected: `sk-CANARY…` exists so a test can assert
+# the redactor rewrites it, and a scanner finding it is the fixture working. None is
+# a credential, and none is long-lived — they are compile-time literals in test code.
+#
+# Adding an entry here is a security decision. Read the line first, satisfy yourself
+# that the value cannot authenticate against anything, and match it exactly: a loose
+# pattern here silences real keys.
+regexes = [
+  # Redaction canaries in xai-grok-telemetry: `external/tests.rs` and
+  # `otel_layer/redact.rs` both assert this string is scrubbed.
+  '''sk-CANARYabcdefghij1234567890''',
+  # `xai-grok-tools` web-search config default in a unit test.
+  '''secret-key-12345''',
+  # `xai-grok-workspace::hub_auth` token fixtures: a real ES256 JWT header followed
+  # by the words "test" and "tok". Anchored to those two suffixes so an actual JWT
+  # with this header is still reported.
+  '''eyJhbGciOiJFUzI1NiJ9\.(test|tok)\b''',
+  # `xai-grok-shell` built-binary e2e: a hard-coded UUID used as an auth id.
+  '''3C41A7D9-6B58-4E2F-A0D3-5F8C1B7E0A02''',
 ]
