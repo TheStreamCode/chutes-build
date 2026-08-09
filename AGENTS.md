@@ -33,8 +33,9 @@ there is an explicit migration or upstream-sync reason.
 
 ## Toolchain and package manager
 
-- Rust is pinned by `rust-toolchain.toml` (currently `1.94.1`, with `rustfmt`
-  and `clippy`). Do not bypass the pin with an ad-hoc `+toolchain` override.
+- Rust is pinned by `rust-toolchain.toml` (currently `1.94.0`, with `rustfmt`
+  and `clippy`). Do not bypass the pin with an ad-hoc `+toolchain` override, and
+  do not restate the version anywhere else — read it from the file.
 - Node.js `>=18` is the supported floor (`package.json` `engines`); CI and the
   release workflow run Node 22.
 - `npm` is the only package manager for the launcher. Do not add a second
@@ -49,8 +50,13 @@ there is an explicit migration or upstream-sync reason.
 
 ## Assets and generated files
 
-- `assets/chutes/screenshot/chutes-build.png` is the README screenshot. Do not
-  replace, recolor, resize, or re-encode it.
+- `assets/chutes/screenshot/chutes-build.png` is the README screenshot and the
+  source of the social-preview card. Agents must not recolor, resize, re-encode or
+  retouch it — a doctored screenshot misrepresents the product. Replacing it with a
+  **fresh capture** is a maintainer decision, and one that is currently pending: the
+  image reads "Chutes Build Beta 0.1.0", while `views/welcome` has a test asserting
+  the badge must not contain "Beta". After any re-capture, run
+  `python scripts/social_preview.py` and re-upload the card.
 - `docs/ascii-logo-concepts.html` and `docs/chutes-build-promo.html` are design
   sources, not runtime dependencies.
 - The root `Cargo.toml`, `Cargo.lock`, `THIRD-PARTY-NOTICES`, and `SOURCE_REV`
@@ -124,6 +130,16 @@ procedure and its rationale are in `docs/upstream-sync.md`; the short version:
   contracts. Record decisions in `docs/upstream-sync.md` and user-visible changes
   in `CHANGELOG.md`.
 - Advance `.github/upstream.json` only after the gate and those checks pass.
+
+> [!IMPORTANT]
+> **Always pass `--repo TheStreamCode/chutes-build` to `gh`.** It infers the
+> repository from the current branch's tracking remote, and a re-base branch tracks
+> `upstream/main` — so a bare `gh run list`, `gh release list` or `gh pr list`
+> silently queries **xai-org/grok-build** and returns their state, or nothing. That
+> mistake has already produced two wrong conclusions ("no workflow has ever run"
+> when 247 had; "no releases exist" when three did) and one near-miss, where only
+> `--verify-tag` stopped `gh release create` from publishing releases on upstream's
+> repository.
 
 ## Documentation
 

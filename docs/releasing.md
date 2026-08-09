@@ -80,14 +80,16 @@ do not reuse an already published version.
 
 ### Why the release is not a manual step any more
 
-It used to be step 8 — "create the matching tag and GitHub release" — and it was
-skipped for v0.4.1, v0.4.2 and v0.4.3: three tags pushed with no release behind
-them, while the README sent people to an empty Releases page for binaries. A manual
-step that is skipped every time is not a procedure.
+The releases for v0.4.1, v0.4.2 and v0.4.3 exist and carry real notes. What none of
+them carries is a **binary**: zero assets on all three, while the README says "take
+a binary from [Releases]". Anyone who does not use npm has had nowhere to download
+this program from, and the download page looked like it should work.
 
-The `github-release` job runs after `publish-npm` in the same workflow, so the
-documented order is preserved — npm first, tag and release last — but it cannot be
-forgotten. It refuses to publish if any of the six platform executables is missing,
+Attaching assets by hand, to a release created by hand, after a workflow that
+already built exactly those files, is three chances to forget. The `github-release`
+job runs after `publish-npm` in the same workflow, so the documented order is
+preserved — npm first, tag and release last — and the assets come from the run that
+built them. It refuses to publish if any of the six platform executables is missing,
 because a partial release is worse than none: the download page still looks
 complete. Release notes come from `npm/scripts/changelog-notes.mjs`, which slices
 this version's `CHANGELOG.md` section and exits non-zero if the section is absent or
@@ -113,5 +115,7 @@ differently sized capture.
 > "Chutes Build Beta 0.1.0". The product no longer labels itself Beta — there is a
 > test in `views/welcome` asserting the version badge must not contain "Beta" — and
 > the version is no longer 0.1.0. That screenshot is the README hero image and the
-> source of the social card, so both currently misdescribe the build. Re-shoot it
-> from a release binary and re-run the script.
+> source of the social card, so both currently misdescribe the build. Re-capturing it
+> is a maintainer decision — `AGENTS.md` bars agents from touching the asset, and
+> rightly so, since a retouched screenshot would misrepresent the product. After a
+> fresh capture, re-run the script and re-upload the card.
