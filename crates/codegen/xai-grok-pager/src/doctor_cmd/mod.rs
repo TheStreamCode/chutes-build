@@ -84,20 +84,28 @@ fn collect_report_with(
     collect_report_with_voice(snapshot, true)
 }
 
-/// `collect_report_with`, with the live microphone probe's *finding* under the
-/// caller's control.
+/// `collect_report_with`, with the live microphone probe under the caller's control.
 ///
-/// `apply_voice_probe` queries the real audio device, so whether it adds a finding
-/// depends on the host: a CI runner has no microphone, a laptop does. Tests that
-/// compose synthetic facts and then assert on `issue_count()` were therefore
-/// asserting about the machine they ran on — green here, red on Linux CI. Production
-/// passes `true`; the facts are still recorded either way.
+/// `apply_voice_probe` queries the real audio device, and on a host without one that
+/// is not merely inaccurate — it is fatal. On Linux CI the missing device adds a
+/// finding, so tests asserting on `issue_count()` were asserting about the machine
+/// they ran on. On a Windows runner the *second* call in a process exits
+/// `0xc0000005`: `standalone_runtime_and_tmux_are_unavailable_without_false_wezterm_finding`
+/// killed the whole test binary after
+/// `fake_standalone_facts_compose_through_shared_view` had already probed once,
+/// which is the signature of a COM/WASAPI enumeration bug on a device-less host.
+///
+/// So `probe_voice: false` skips the probe entirely rather than only hiding its
+/// finding — which is what the tests want anyway, since they inject every other fact
+/// they name. Production passes `true` and is unchanged; `doctor` probes once.
 fn collect_report_with_voice(
     snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
-    emit_voice_issue: bool,
+    probe_voice: bool,
 ) -> DiagnosticReport {
     let mut report = crate::diagnostics::view(snapshot.into());
-    crate::diagnostics::apply_voice_probe(&mut report, emit_voice_issue);
+    if probe_voice {
+        crate::diagnostics::apply_voice_probe(&mut report, true);
+    }
     report
 }
 
