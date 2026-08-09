@@ -269,6 +269,38 @@ forward, wants rustc 1.94.1 against this repo's 1.94.0 pin, and still leaves
 `ratatui 0.29` as a source. `docs/code-review-2026-08-01.md` CR-003 records the
 evidence and what closing it would actually cost.
 
+### Repository and CI
+
+Landing the re-base exposed two checks that had never run against this tree, both
+broken by the re-base itself rather than by anything in it:
+
+- **The secrets scan pinned its allowlist to commit SHAs.** `.gitleaksignore` listed
+  twelve reviewed fixtures as `<sha>:<path>:<rule>:<line>`; the re-base moved every
+  one into a new commit and all twelve went stale together. Since this project tracks
+  upstream by re-basing, that mechanism was guaranteed to break at every sync. Six
+  fixtures are now allowlisted **by value** in `.gitleaks.toml`, which survives a
+  rewrite, and six that exist only in old commits — from before upstream annotated
+  the lines — keep SHA pins, in published history that will not move. Verified three
+  ways: clean tree, clean 159-commit history, and a probe proving a realistic `ghp_`
+  token and a real ES256 JWT sharing the fixtures' own header are still reported.
+- **`cargo deny` had been skipped every run**, because gitleaks failed before it in
+  the same job. It reported an undeclared git source — `our-forks/async-openai`,
+  upstream's fork and the client the sampler uses for Chutes' OpenAI-compatible API —
+  and five advisories, none with a patched release. Each is now ignored with a
+  reachability check that was run rather than assumed: no `{:p}` anywhere for the
+  crossbeam-epoch formatting bug, zero `git2::Remote::list` call sites, and a logging
+  stack that does not depend on `rand` for the re-entrancy advisory.
+
+- `git2` 0.20.4 for the `Buf` dereference advisory, carrying libgit2 1.9.1 -> 1.9.6.
+  Its two other advisories have no fixed release yet.
+- Releases now carry the six platform executables. All three existing releases have
+  notes and **zero assets**, while the README said "take a binary from Releases" —
+  so anyone not using npm had nowhere to download this program from. The workflow
+  attaches them from the run that built them, and refuses to publish if one is
+  missing.
+- A social-preview card, three README badges, and the release notes taken from this
+  file rather than written twice.
+
 ### Documentation
 
 The documentation was audited against the code rather than proofread, which is a

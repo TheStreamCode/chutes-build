@@ -62,9 +62,12 @@ npm i -g chutes-build
 chutes-build --version
 ```
 
-Or take a binary from
-[Releases](https://github.com/TheStreamCode/chutes-build/releases), or build from
-source below.
+Or build from source below.
+
+From 1.0.0 on, each
+[release](https://github.com/TheStreamCode/chutes-build/releases) also carries the
+six platform executables as downloadable assets. Earlier releases (0.4.x) carry
+release notes only — npm is the way to install those.
 
 There is no self-update: `chutes-build` never contacts an update server, and the
 `update` subcommand reports where to get a newer version rather than fetching one.
