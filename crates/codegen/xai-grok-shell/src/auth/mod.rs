@@ -23,6 +23,32 @@ pub(crate) use api_key_probe::{
     DEFAULT_PROBE_TIMEOUT, first_party_env_key_allows_advertise, should_probe_first_party_env_key,
 };
 pub use auth_provider::{AuthProviderConfig, AuthProviderRef};
+
+/// Install `jsonwebtoken`'s crypto provider, once per process.
+///
+/// `jsonwebtoken` 10 picks its provider from cargo features, and this dependency
+/// graph enables **both**: this crate asks for `rust_crypto`, while
+/// `xai-file-utils` -> `gcloud-storage` -> `gcloud-auth` enables `jwt-aws-lc-rs`.
+/// Cargo unifies features across the graph, so no manifest change here can undo
+/// that. With both enabled the crate refuses to choose one and any signature
+/// operation panics with "Could not automatically determine the process-level
+/// CryptoProvider from jsonwebtoken crate features".
+///
+/// `rust_crypto` is the deliberate choice — it is what this crate declares — so
+/// that is what gets installed. Called at the point of use rather than only at the
+/// login entry point, so a future second verification path cannot reintroduce the
+/// panic, and so tests that exercise `oidc::protocol` directly do not depend on
+/// which test happened to run first.
+pub(crate) fn ensure_crypto_provider() {
+    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    ONCE.get_or_init(|| {
+        // `Err` means another provider was already installed — fine either way.
+        let _ = jsonwebtoken::crypto::CryptoProvider::install_default(
+            &jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER,
+        );
+    });
+}
+
 pub(crate) use auth_provider::{
     PROVIDER_TIMEOUT_CEILING_SECS, PROVIDER_TOKEN_EXPIRY_SKEW_SECS, ProviderRefreshOutcome,
 };

@@ -658,6 +658,9 @@ pub(super) async fn validate_and_extract_user_info(
     expected_client_id: &str,
     expected_nonce: &str,
 ) -> anyhow::Result<OidcUserInfo> {
+    // Both jsonwebtoken providers are enabled in this graph; without an explicit
+    // choice every signature operation panics. See `auth::ensure_crypto_provider`.
+    crate::auth::ensure_crypto_provider();
     let header = jsonwebtoken::decode_header(token)?;
     let kid = header
         .kid
