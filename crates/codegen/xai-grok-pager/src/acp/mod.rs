@@ -8,6 +8,14 @@ pub mod meta;
 pub mod model_state;
 pub mod spawn;
 pub mod tracker;
+mod version_mismatch;
+
+pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_banner};
+
+use xai_grok_telemetry::startup;
+pub use xai_grok_telemetry::startup::{
+    AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer,
+};
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
@@ -60,6 +68,9 @@ pub struct AcpConnection {
     pub auth_methods: Vec<acp::AuthMethod>,
     /// Cancellation token to stop the agent.
     pub cancel: CancellationToken,
+    /// In-process agent worker thread (`connect` only). Join after cancel so
+    /// session actors can flush SessionEnd hooks. `None` in leader mode.
+    pub agent_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
     /// ACP-advertised slash commands parsed from `InitializeResponse.meta.availableCommands`.
     /// Seeded into every new `AgentSession` so autocomplete has shell builtins
     /// and skills immediately, before any `AvailableCommandsUpdate` arrives.
@@ -86,7 +97,7 @@ pub struct AcpConnection {
     /// resolved by the shell (remote settings / config / env; default OFF) and
     /// advertised in `InitializeResponse.meta.sessionRecap`. The client gates
     /// its automatic away-recap poll and the manual `/recap` on this so a
-    /// disabled feature produces zero `chutes.build/recap` traffic. Defaults to `false`
+    /// disabled feature produces zero `chutes.ai/recap` traffic. Defaults to `false`
     /// when absent (e.g. an older shell that predates the feature).
     pub session_recap_available: bool,
     /// `AuthManager` for pager-side authenticated channels (voice STT/TTS).
@@ -146,11 +157,8 @@ pub struct ConnectFlags {
 }
 
 /// Connect to an agent: spawn, initialize, authenticate.
-///
-/// This is the main entry point for establishing an ACP connection.
-/// After this returns, the agent is ready to create sessions and receive prompts.
 pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<AcpConnection> {
-    // Load agent config from disk
+    startup::enter(StartupPhase::LoadConfig);
     let raw_config = xai_grok_shell::config::load_effective_config()
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
     let mut agent_config = AgentConfig::new_from_toml_cfg(&raw_config)
@@ -159,7 +167,6 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
     agent_config.resolve_runtime_fields(&xai_grok_shell::agent::config::RuntimeResolutionContext {
         raw_config: &raw_config,
         remote_settings: flags.remote_settings.as_ref(),
-        cwd: None,
         is_headless: false,
         cli_subagents: Some(flags.subagents),
         cli_web_search_model: None,
@@ -188,13 +195,12 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
 
     apply_config_writes(&flags);
 
-    // Spawn the agent
     let memory_config = agent_config.memory_config.clone();
     let spawned = spawn::spawn_grok_shell(agent_config, cancel, memory_config).await?;
     let auth_manager = spawned.auth_manager.clone();
     let (tx, rx) = (spawned.channel.tx, spawned.channel.rx);
 
-    // Initialize
+    startup::enter(StartupPhase::AcpInitialize);
     let (
         models,
         is_grok_shell,
@@ -209,8 +215,9 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
     let (needs_login, login_label, login_method_id, auth_start_mode) =
         startup_auth_metadata(&auth_methods);
 
+    startup::enter(StartupPhase::EagerAuth);
     let (needs_login, login_label, login_method_id, auth_start_mode, auth_meta) =
-        eager_auth_or_login_fallback(
+        bounded_eager_auth(
             &tx,
             &auth_methods,
             default_auth_method_id.as_ref(),
@@ -228,6 +235,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         is_grok_shell,
         auth_methods,
         cancel: spawned.cancel,
+        agent_thread: Some(spawned.thread_handle),
         available_commands,
         needs_login,
         login_label,
@@ -262,6 +270,9 @@ pub async fn connect_via_leader(
 
     apply_config_writes(&flags);
 
+    startup::enter(StartupPhase::LoadConfig);
+    // The leader path never runs the managed-policy sync in this process.
+    startup::set_auth_mode(xai_grok_shell::managed_config::classify_auth_mode());
     let mut agent_config = AgentConfig::new_from_toml_cfg(raw_config)
         .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
     // resolve_telemetry_mode reads remote_settings.
@@ -284,6 +295,7 @@ pub async fn connect_via_leader(
         fs_write: flags.fs_write,
     };
 
+    startup::enter(StartupPhase::LeaderConnect);
     let conn = connect_or_spawn(
         client_type,
         ClientMode::Stdio,
@@ -308,6 +320,7 @@ pub async fn connect_via_leader(
     )?;
     let (tx, rx) = (bridge.channel.tx, bridge.channel.rx);
 
+    startup::enter(StartupPhase::AcpInitialize);
     let (
         models,
         is_grok_shell,
@@ -321,8 +334,9 @@ pub async fn connect_via_leader(
     let (needs_login, login_label, login_method_id, auth_start_mode) =
         startup_auth_metadata(&auth_methods);
 
+    startup::enter(StartupPhase::EagerAuth);
     let (needs_login, login_label, login_method_id, auth_start_mode, auth_meta) =
-        eager_auth_or_login_fallback(
+        bounded_eager_auth(
             &tx,
             &auth_methods,
             default_auth_method_id.as_ref(),
@@ -354,6 +368,7 @@ pub async fn connect_via_leader(
         is_grok_shell,
         auth_methods,
         cancel: bridge.cancel,
+        agent_thread: None,
         available_commands,
         needs_login,
         login_label,
@@ -706,6 +721,49 @@ async fn eager_auth_or_login_fallback(
     }
 }
 
+/// [`eager_auth_or_login_fallback`] bounded by `STARTUP_AUTH_REFRESH_TIMEOUT`,
+/// so a hung agent cannot gate the first draw. On timeout the inputs pass
+/// through unchanged and the agent finishes authentication in the background.
+async fn bounded_eager_auth(
+    tx: &AcpAgentTx,
+    auth_methods: &[acp::AuthMethod],
+    default_auth_method_id: Option<&acp::AuthMethodId>,
+    needs_login: bool,
+    login_label: Option<String>,
+    login_method_id: Option<acp::AuthMethodId>,
+    auth_start_mode: AuthStartMode,
+) -> (
+    bool,
+    Option<String>,
+    Option<acp::AuthMethodId>,
+    AuthStartMode,
+    Option<serde_json::Value>,
+) {
+    match tokio::time::timeout(
+        xai_grok_shell::http::STARTUP_AUTH_REFRESH_TIMEOUT,
+        eager_auth_or_login_fallback(
+            tx,
+            auth_methods,
+            default_auth_method_id,
+            needs_login,
+            login_label.clone(),
+            login_method_id.clone(),
+            auth_start_mode,
+        ),
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(_) => (
+            needs_login,
+            login_label,
+            login_method_id,
+            auth_start_mode,
+            None,
+        ),
+    }
+}
+
 /// Authenticate with the agent using the agent's chosen default method.
 ///
 /// Prefer `defaultAuthMethodId` from initialize meta when present and listed.
@@ -947,12 +1005,12 @@ mod tests {
     #[test]
     fn startup_auth_xai_api_key_not_first_still_requires_login() {
         use xai_grok_shell::agent::auth_method::{
-            CHUTES_API_KEY_METHOD_ID, CHUTES_BUILD_COM_METHOD_ID,
+            CHUTES_BUILD_COM_METHOD_ID, XAI_API_KEY_METHOD_ID,
         };
 
         let methods = vec![
-            make_auth_method(CHUTES_BUILD_COM_METHOD_ID, "Grok", None),
-            make_auth_method(CHUTES_API_KEY_METHOD_ID, "chutes.api_key", None),
+            make_auth_method(CHUTES_BUILD_COM_METHOD_ID, "Chutes Build", None),
+            make_auth_method(XAI_API_KEY_METHOD_ID, "chutes.api_key", None),
         ];
         let (needs, _, _, _) = startup_auth_metadata(&methods);
         assert!(

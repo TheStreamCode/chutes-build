@@ -3,7 +3,7 @@ license = "Apache-2.0"
 edition.workspace = true
 name = "xai-grok-announcements"
 version = "0.1.0"
-description = "Shared announcement types, persistence, and formatting for Grok CLI apps"
+description = "Shared announcement types, persistence, and formatting for Chutes Build CLI apps"
 
 [features]
 # TS bindings generation only (grok-desktop consumes the committed output);

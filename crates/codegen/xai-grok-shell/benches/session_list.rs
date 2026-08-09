@@ -488,6 +488,10 @@ fn write_summary(
             id: acp::SessionId::new(session_id),
             cwd: cwd.to_owned(),
         },
+        cwd_generation: 0,
+        previous_cwd: None,
+        pending_cwd_switch_reminder: None,
+        cwd_switch_bookkeeping_generation: 0,
         session_summary: format!("Deterministic benchmark session {ordinal}"),
         created_at: active_at - ChronoDuration::minutes(5),
         updated_at: active_at,
@@ -519,6 +523,8 @@ fn write_summary(
         agent_name: Some("benchmark-agent".to_owned()),
         sandbox_profile: Some("workspace".to_owned()),
         reasoning_effort: None,
+        last_turn_summary: None,
+        last_turn_summary_prompt_id: None,
     };
     let summary_path = session_dir.join("summary.json");
     let bytes = serde_json::to_vec_pretty(&summary).expect("serialize summary");

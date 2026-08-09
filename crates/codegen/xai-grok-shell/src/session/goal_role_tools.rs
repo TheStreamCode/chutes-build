@@ -18,8 +18,6 @@ use xai_grok_tools::types::tool::ToolKind;
 /// Resolved client-facing tool names for a role's prompt placeholders.
 ///
 /// Built parent-side from the role's resolved toolset, with one literal
-/// fallback per kind (mirroring the `unwrap_or_else(|| "update_goal".into())`
-/// pattern in `resolve_goal_tool_names`). An explicit `{model, agent_type}`
 /// role draws its names from the `describe_subagent_type` summary (so a
 /// `name_override` is reflected); an inherit / fail-open role draws them from
 /// the parent tool bridge. `{TOOLSET_TOOLS}` enumerates the role's toolset for
@@ -162,7 +160,6 @@ impl RoleToolNames {
     /// template does not contain is a no-op, so all three role templates share
     /// one call even though each names only the subset it uses.
     pub(crate) fn apply(&self, template: &str) -> String {
-        let template = template.replace("\r\n", "\n");
         let resolve = |token: &str| -> Option<&str> {
             Some(match token {
                 "READ_TOOL" => self.read.as_str(),
@@ -177,7 +174,7 @@ impl RoleToolNames {
             })
         };
         let mut out = String::with_capacity(template.len() + 64);
-        let mut rest = template.as_str();
+        let mut rest = template;
         while let Some(open) = rest.find('{') {
             out.push_str(&rest[..open]);
             let after = &rest[open + 1..];

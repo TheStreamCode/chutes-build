@@ -311,6 +311,11 @@ pub struct ScheduledTaskFired {
     pub human_schedule: String,
     /// RFC3339 timestamp of next fire (for live countdown viz).
     pub next_fire_at: Option<String>,
+    pub subagent_id: Option<String>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub generation: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub revision: u64,
 }
 
 /// Notification that a scheduled task was removed (deleted, expired, or one-shot completed).
@@ -318,6 +323,10 @@ pub struct ScheduledTaskFired {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScheduledTaskRemoved {
     pub task_id: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub generation: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub revision: u64,
 }
 
 /// Notification that a scheduled task was created and should appear in the tasks pane.
@@ -332,6 +341,10 @@ pub struct ScheduledTaskCreated {
     pub human_schedule: String,
     /// RFC3339 timestamp of next fire (for live countdown viz).
     pub next_fire_at: Option<String>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub generation: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub revision: u64,
 }
 
 /// A streaming event from a Monitor tool background process.
@@ -351,6 +364,21 @@ pub struct MonitorEvent {
     pub raw_text: String,
     /// Session that owns the monitor task (from the task snapshot). `None` for
     /// legacy backends. The bridge drops events whose owner isn't its session.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub owner_session_id: Option<String>,
+}
+
+/// A background subagent reached a terminal state while the parent held a handle.
+#[derive(Debug, Clone, PartialEq, Eq, schemars::JsonSchema)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SubagentCompleted {
+    pub subagent_id: String,
+    pub subagent_type: String,
+    pub description: String,
+    pub status: String,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub error: Option<String>,
+    pub duration_ms: u64,
     #[cfg_attr(feature = "serde", serde(default))]
     pub owner_session_id: Option<String>,
 }
@@ -384,6 +412,9 @@ pub enum ToolNotification {
     /// Task completed notification which sends the exit code as well and notifies any client
     /// about the task being finished status
     TaskCompleted(TaskSnapshot),
+
+    /// A background subagent reached a terminal state.
+    SubagentCompleted(SubagentCompleted),
 
     /// The agent requested to enter plan mode.
     /// Consumers (gateway, TUI) use this to transition the client into
@@ -467,6 +498,7 @@ notification_variants! {
     BashExecutionFailed => BashExecutionFailed,
     FileWritten => FileWritten,
     TaskCompleted => TaskSnapshot,
+    SubagentCompleted => SubagentCompleted,
     PlanModeEntered => PlanModeEntered,
     PlanModeExited => PlanModeExited,
     UserQuestionAsked => UserQuestionAsked,
@@ -603,5 +635,22 @@ mod tests {
             }
             other => panic!("expected BashOutputChunk, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn scheduler_lifecycle_versions_default_for_legacy_json_and_round_trip() {
+        let legacy: ScheduledTaskRemoved =
+            serde_json::from_value(serde_json::json!({ "task_id": "loop-1" })).unwrap();
+        assert_eq!(legacy.generation, "");
+        assert_eq!(legacy.revision, 0);
+
+        let current = ScheduledTaskRemoved {
+            task_id: "loop-1".into(),
+            generation: "019b0000-0000-7000-8000-000000000000".into(),
+            revision: 7,
+        };
+        let round_trip: ScheduledTaskRemoved =
+            serde_json::from_value(serde_json::to_value(&current).unwrap()).unwrap();
+        assert_eq!(round_trip, current);
     }
 }

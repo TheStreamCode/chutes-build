@@ -3,7 +3,7 @@ license = "Apache-2.0"
 name = "xai-grok-config"
 version = "0.1.0"
 edition.workspace = true
-description = "Shared config loading for Grok — grok_home, effective config (requirements > user > managed), TOML merge"
+description = "Shared config loading for Chutes Build — grok_home, effective config (requirements > user > managed), TOML merge"
 
 [dependencies]
 base64 = { workspace = true }

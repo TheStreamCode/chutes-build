@@ -4,6 +4,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 
 use super::TOOL_HEADER_RANGE;
+use crate::appearance::AppearanceConfig;
 use crate::appearance::ExecuteHeaderStyle;
 use crate::render::wrapping::word_wrap_lines_with_joiners;
 use crate::scrollback::block::BlockContent;
@@ -305,7 +306,7 @@ impl ExecuteToolCallBlock {
         };
         let mut spans = vec![Span::styled("Run ", label_style)];
         if self.bash_mode {
-            // Same style as session event messages (e.g. "Worked for 2.3s.")
+            // Same style as session event messages (e.g. "Worked for 2.3s")
             spans.push(Span::styled("(user) ", theme.muted()));
         }
         // Single ratatui Line — never pass raw newlines (callers that need
@@ -579,10 +580,13 @@ impl ExecuteToolCallBlock {
                                 .with_joiner(joiner.clone()),
                         );
                     }
-                    // Ellipsis (non-selectable, breaks range continuity)
+                    let hidden = total - threshold;
                     lines.push(
-                        BlockLine::separator(Line::from(Span::styled("\u{2026}", theme.muted())))
-                            .with_panel_background(theme.bg_dark),
+                        BlockLine::separator(Line::from(Span::styled(
+                            format!("\u{2026} +{hidden} lines"),
+                            theme.muted(),
+                        )))
+                        .with_panel_background(theme.bg_dark),
                     );
                     // Last M lines: range base + 1 (distinct from first chunk)
                     for (wrapped_line, joiner) in
@@ -704,7 +708,7 @@ impl BlockContent for ExecuteToolCallBlock {
         }
     }
 
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         false
     }
 

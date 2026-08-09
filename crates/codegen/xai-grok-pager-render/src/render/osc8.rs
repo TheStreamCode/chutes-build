@@ -163,7 +163,7 @@ fn link_finder() -> &'static LinkFinder {
     })
 }
 
-/// One path segment without spaces (`main.rs`, `.chutes-build`, `@scope`). Leading `.`
+/// One path segment without spaces (`main.rs`, `.grok`, `@scope`). Leading `.`
 /// matches dot-directories and `%` matches percent-encoded segments — grok
 /// session media lives under `~/.chutes-build/sessions/%2F…/images/1.jpg`.
 const PATH_SEGMENT: &str = r"[a-zA-Z0-9_@.%][a-zA-Z0-9._+@%\-]*";
@@ -1253,7 +1253,7 @@ mod tests {
 
     #[test]
     fn scan_detects_grok_session_media_path() {
-        // Dot-directory (`.chutes-build`), percent-encoded session segment, and a
+        // Dot-directory (`.grok`), percent-encoded session segment, and a
         // trailing sentence period — the shape of `image_gen` output prose.
         let line =
             make_line("Saved to /Users/alice/.chutes-build/sessions/%2Fabc/00000000/images/1.jpg.");

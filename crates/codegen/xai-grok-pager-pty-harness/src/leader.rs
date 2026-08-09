@@ -38,7 +38,7 @@ impl LeaderCluster {
         // One shared CHUTES_BUILD_HOME => one leader; the socket lives beneath it so
         // every client (sharing the same env) elects/attaches to the same one.
         let grok_home = content.home().join(".chutes-build");
-        std::fs::create_dir_all(&grok_home).context("create grok home")?;
+        std::fs::create_dir_all(&grok_home).context("create Chutes Build home")?;
         let socket = grok_home.join("leader-e2e.sock");
         let binary = pager_binary().context("resolve pager binary")?;
         Ok(Self {

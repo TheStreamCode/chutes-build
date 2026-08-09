@@ -208,14 +208,13 @@ impl StickyHeaderLayout {
         Some(pushed_visible + gap_after_pushed)
     }
 
-    /// Screen row where the gap after header is (for selection corners).
-    /// Returns None if no header.
+    /// Screen row of the gap after a pinned header (selection corners, the
+    /// ▲ response-top indicator). `None` without a pinned header: a
+    /// push-only header renders no gap after it (see
+    /// [`Self::header_screen_rows`]), so this row would point at content.
     pub fn gap_row(&self) -> Option<u16> {
-        if self.has_header() {
-            Some(self.header_content_height())
-        } else {
-            None
-        }
+        self.pinned?;
+        Some(self.header_content_height())
     }
 
     /// Screen row where pushed header starts (always 0 if present).

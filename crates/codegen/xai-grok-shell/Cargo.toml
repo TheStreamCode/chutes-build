@@ -1,13 +1,22 @@
 [package]
 license = "Apache-2.0"
 name = "xai-grok-shell"
-version = "0.4.3"
+version = "1.0.0"
 edition.workspace = true
 
 [features]
 default = []
-unstable = []
-default-bazel = []
+dhat-heap = ["dep:dhat"]
+# Session synthesis + in-process e2e harness (`session::testkit`) for soak,
+# load, and bench tests. Off by default; the tests/benches that use it declare
+# it via `required-features`.
+test-support = []
+# Local Computer Hub workspace_server (own/attach + crash-restart). Requires
+local-workspace = []
+default-bazel = [
+    "local-workspace",
+    "test-support",
+]
 
 [dependencies]
 chutes-build-core = { path = "../../chutes-build-core" }
@@ -41,7 +50,6 @@ regex = { workspace = true }
 xai-grok-mcp = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "blocking"] }
 reqwest-middleware = { workspace = true }
-rpassword = { workspace = true }
 # rusqlite 0.37 + bundled = self-contained SQLite (>= 3.50.2) with FTS5.
 # Bumped from 0.32 to resolve CVE-2025-29087, CVE-2025-3277, CVE-2025-6965.
 # sqlite-vec is C ABI, not Rust-version dependent — any rusqlite with `bundled` works.
@@ -98,7 +106,7 @@ futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
 gcloud-storage = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = [
+git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
 notify = { workspace = true }
@@ -108,8 +116,13 @@ arc-swap = { workspace = true }
 infer = "0.15"
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 moka = { workspace = true, features = ["future"] }
+dhat = { workspace = true, optional = true }
 base64 = { workspace = true }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+# `constant_time::verify_slices_are_equal` for the `agent serve` token. Already in
+# this crate's normal build graph via aws-config, so promoting it from
+# dev-dependencies adds nothing to the build.
+ring = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
 shlex = { workspace = true }
@@ -131,12 +144,14 @@ xai-interjection-core = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-chat-state = { path = "../xai-chat-state" }
 xai-grok-compaction = { path = "../../common/xai-grok-compaction" }
+xai-grok-extra-ca = { workspace = true }
 xai-grok-sampler = { path = "../xai-grok-sampler" }
 xai-sqlite-journal = { workspace = true }
 xai-token-estimation = { workspace = true }
 xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-grok-tools = { path = "../xai-grok-tools" }
 xai-tty-utils = { workspace = true }
+xai-workflow = { path = "../xai-workflow" }
 xai-system-power = { workspace = true }
 xai-grok-workspace = { workspace = true }
 xai-grok-subagent-resolution = { path = "../xai-grok-subagent-resolution" }
@@ -183,12 +198,14 @@ windows = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+# Pre-main unified-log redirect (`test_support::redirect_unified_log_for_tests`).
+ctor = { workspace = true }
 filetime = { workspace = true }
+pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 xai-grok-memory = { workspace = true, features = ["test-support"] }
 xai-grok-workspace = { workspace = true, features = ["test-support"] }
 xai-grok-config = { workspace = true, features = [] }
-ring = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 rsa = { workspace = true }
@@ -210,6 +227,39 @@ workspace = true
 [[bench]]
 name = "session_list"
 harness = false
+
+[[bench]]
+name = "fork_copy"
+harness = false
+required-features = ["test-support"]
+
+[[bench]]
+name = "skills_watcher_startup"
+harness = false
+
+[[test]]
+name = "test_leader_soak"
+required-features = ["test-support"]
+
+[[test]]
+name = "test_session_load_memory"
+required-features = ["test-support"]
+
+[[test]]
+name = "test_fork_copy_memory"
+required-features = ["test-support"]
+
+[[test]]
+name = "session_fork_replay_memory"
+required-features = ["test-support"]
+
+[[test]]
+name = "session_load_perf"
+required-features = ["test-support"]
+
+[[test]]
+name = "testkit_synth_roundtrip"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

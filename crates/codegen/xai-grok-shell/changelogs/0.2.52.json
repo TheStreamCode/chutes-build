@@ -96,7 +96,7 @@
   },
   {
     "category": "features",
-    "description": "**Grok** can now export usage metrics and events to your own OpenTelemetry collector when enabled.",
+    "description": "**Chutes Build** can now export usage metrics and events to your own OpenTelemetry collector when enabled.",
     "breaking_change": false
   },
   {

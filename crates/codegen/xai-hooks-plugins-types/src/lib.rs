@@ -1,6 +1,6 @@
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!
-//! This crate defines the wire format for `chutes.build/hooks/*` and `chutes.build/plugins/*`
+//! This crate defines the wire format for `chutes.ai/hooks/*` and `chutes.ai/plugins/*`
 //! ACP extension methods. It is dependency-free (only `serde`) so both
 //! `xai-grok-shell` and `xai-grok-pager` can depend on it without pulling
 //! in domain logic.
@@ -56,7 +56,7 @@ pub enum PluginOrigin {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         marketplace: Option<String>,
     },
-    /// Grok's install registry (marketplace or direct git/local install).
+    /// Chutes Build's install registry (marketplace or direct git/local install).
     MarketplaceInstall {
         /// Marketplace source display name (None for direct installs).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,7 +207,7 @@ pub struct HookInfo {
     pub disabled: bool,
 }
 
-/// Response for `chutes.build/hooks/list`.
+/// Response for `chutes.ai/hooks/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksListResponse {
@@ -274,7 +274,7 @@ pub struct PluginInfo {
     pub conflict: Option<String>,
 }
 
-/// Response for `chutes.build/plugins/list`.
+/// Response for `chutes.ai/plugins/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsListResponse {
@@ -332,7 +332,7 @@ pub struct McpServerInfo {
     pub config_source: Option<String>,
 }
 
-/// Response for `chutes.build/mcp/list` as consumed by the pager.
+/// Response for `chutes.ai/mcp/list` as consumed by the pager.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServersListResponse {
@@ -513,7 +513,7 @@ impl PluginComponents {
 // Action types
 // ---------------------------------------------------------------------------
 
-/// Request wrapper for `chutes.build/hooks/action`.
+/// Request wrapper for `chutes.ai/hooks/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksActionRequest {
@@ -552,7 +552,7 @@ pub enum HooksAction {
     },
 }
 
-/// Request wrapper for `chutes.build/plugins/action`.
+/// Request wrapper for `chutes.ai/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsActionRequest {
@@ -593,7 +593,7 @@ pub enum PluginsAction {
     },
 }
 
-/// Shared action response for both `chutes.build/hooks/action` and `chutes.build/plugins/action`.
+/// Shared action response for both `chutes.ai/hooks/action` and `chutes.ai/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionOutcome {
@@ -1094,10 +1094,10 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Marketplace types (wire format for chutes.build/marketplace/* ACP endpoints)
+// Marketplace types (wire format for chutes.ai/marketplace/* ACP endpoints)
 // ---------------------------------------------------------------------------
 
-/// Response for `chutes.build/marketplace/list`.
+/// Response for `chutes.ai/marketplace/list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceListResponse {
@@ -1170,7 +1170,7 @@ pub struct MarketplacePluginEntry {
     pub remote_subdir: Option<String>,
 }
 
-/// Request wrapper for `chutes.build/marketplace/action`.
+/// Request wrapper for `chutes.ai/marketplace/action`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceActionRequest {

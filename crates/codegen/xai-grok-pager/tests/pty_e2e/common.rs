@@ -3,11 +3,11 @@
 //! Individual test modules import via `use super::common::*`.
 
 pub(crate) use serde_json::json;
-pub(crate) use std::path::Path;
+pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::time::{Duration, Instant};
 pub(crate) use xai_grok_pager_pty_harness::{
-    ContentController, InferenceEndpoint, InferenceRequestMatcher, MockModel, PtyHarness,
-    ScriptedResponse, SseEvent, keys, oauth_env_for_pager, pager_binary, seed_fake_oauth, sse,
+    AgentTurnExpectation, ContentController, EnvOp, MockModel, PtyExitPoll, PtyHarness,
+    ScriptedResponse, SseEvent, keys, oauth_credential_ops, pager_binary, seed_fake_oauth, sse,
     wait_for_labels_absent, wait_for_model_via_new_sessions,
 };
 
@@ -21,6 +21,18 @@ pub(crate) const DEFAULT_COLS: u16 = 120;
 /// Default wait-for-welcome timeout. The pager spawns a child shell agent,
 /// which can take a few seconds on cold build directories.
 pub(crate) const WELCOME_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Wait budget for a `--continue` / resume to replay the prior transcript back
+/// into scrollback. Resume is strictly heavier than a cold start: it runs
+/// `session/load` (MCP startup, git chores, a full `updates.jsonl` replay, and
+/// session spawn) on the agent's single-threaded runtime, and the client-side
+/// `acp_send` has no timeout — so under the fully-parallel pty_e2e suite the
+/// starved agent thread can push this well past the 20s `WELCOME_TIMEOUT`
+/// (leaving the "Loading session…" placeholder up). A prior 60s budget still
+/// timed out under CI load with the same stuck-loading signature; match
+/// [`WRAP_TIMEOUT`] (120s) for the same contention reason, not because resume
+/// is slow when run alone.
+pub(crate) const RESUME_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Substring we wait for on the welcome screen. Matches the menu label `"Quit"`
 /// (`render_welcome_done` / gate menus); case-sensitive, so it does **not**
@@ -61,13 +73,8 @@ pub(crate) fn wipe_substantial_draft(harness: &mut PtyHarness) {
     harness.inject_keys(b"\x15").expect("Ctrl+U kill-to-BOL");
 }
 
-/// Content env plus the contextual-hints opt-in. The feature ships default-OFF,
-/// so the undo tip (a contextual hint) only fires when explicitly enabled.
-pub(crate) fn contextual_hints_env(content: &ContentController) -> Vec<(String, String)> {
-    let mut env = content.env_for_pager();
-    env.push(("CHUTES_BUILD_CONTEXTUAL_HINTS".into(), "1".into()));
-    env
-}
+/// Contextual-hints opt-in. The feature ships default-OFF.
+pub(crate) const CONTEXTUAL_HINTS_ENV: &[(&str, &str)] = &[("CHUTES_BUILD_CONTEXTUAL_HINTS", "1")];
 
 /// Collect short OSC 8 payloads for assertion failure messages.
 pub(crate) fn osc8_snippets(raw: &str) -> String {
@@ -132,7 +139,7 @@ pub(crate) fn tall_response(sentinel: &str, rows: usize) -> String {
 }
 
 // ── Fake session-auth (OAuth) seeding ───────────────────────────────────
-// `seed_fake_oauth` / `oauth_env_for_pager` live in
+// `seed_fake_oauth` / `oauth_credential_ops` live in
 // `xai_grok_pager_pty_harness::flows` (re-exported above).
 
 /// Spawn a pager with fake session (OAuth) auth and a 1s announcements poll,
@@ -154,19 +161,21 @@ pub(crate) fn spawn_polling_session_with_env(
     extra_env: &[(&str, &str)],
 ) -> PtyHarness {
     seed_fake_oauth(content, oauth_user);
-    let env = oauth_env_for_pager(content);
-    let mut env_refs: Vec<(&str, &str)> =
-        env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    env_refs.push(("CHUTES_BUILD_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS", "1"));
-    env_refs.extend_from_slice(extra_env);
+    let mut overrides = Vec::from(oauth_credential_ops());
+    overrides.push(EnvOp::set(
+        "CHUTES_BUILD_ANNOUNCEMENTS_REFRESH_INTERVAL_SECS",
+        "1",
+    ));
+    overrides.extend(extra_env.iter().map(|(key, value)| EnvOp::set(key, value)));
 
     let binary = pager_binary().expect("resolve pager binary");
-    let mut harness = PtyHarness::new_in_dir(
+    let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
+        content,
         &[],
-        &env_refs,
+        &overrides,
         Some(content.home()),
     )
     .expect("spawn pager with polling session auth");
@@ -213,22 +222,16 @@ pub(crate) fn git_repo_with_mcp_json() -> tempfile::TempDir {
     repo
 }
 
-/// Env for a folder-trust run: the mock-server env plus a simulated release stamp
-/// (`CHUTES_BUILD_TEST_VERSION`) and an explicit `CHUTES_BUILD_FOLDER_TRUST` — `1` when `feature_on`,
-/// else `0` (an explicit opt-out that overrides the now-on default). HOME/CHUTES_BUILD_HOME
-/// point at the isolated temp home, so the trust store starts empty.
-pub(crate) fn trust_env(content: &ContentController, feature_on: bool) -> Vec<(String, String)> {
-    let mut env = content.env_for_pager();
-    // A self-built (unstamped) grok auto-trusts and never prompts; simulate a
-    // release build so the folder-trust feature is actually evaluated here. The
-    // feature-off case below then exercises the TRUE feature-off path, not
-    // auto-trust.
-    env.push(("CHUTES_BUILD_TEST_VERSION".into(), "0.0.0-sim".into()));
-    // Set CHUTES_BUILD_FOLDER_TRUST explicitly: the default is on, so `0` is the opt-out
-    // that exercises the feature-off path rather than relying on an absent var.
-    let folder_trust = if feature_on { "1" } else { "0" };
-    env.push(("CHUTES_BUILD_FOLDER_TRUST".into(), folder_trust.into()));
-    env
+/// Explicit overrides for a folder-trust run. A self-built grok auto-trusts,
+/// so `CHUTES_BUILD_TEST_VERSION` simulates a release; the gate is pinned both ways.
+pub(crate) fn trust_env(feature_on: bool) -> [(&'static str, &'static str); 2] {
+    [
+        ("CHUTES_BUILD_TEST_VERSION", "0.0.0-sim"),
+        (
+            "CHUTES_BUILD_FOLDER_TRUST",
+            if feature_on { "1" } else { "0" },
+        ),
+    ]
 }
 
 /// Whether the isolated trust store has recorded a grant for `repo`'s workspace.
@@ -261,7 +264,7 @@ pub(crate) fn turn_sentinel(n: u8) -> String {
 /// Seeded server name; it only renders once the MCP list fetch resolves.
 pub(crate) const MCP_TEST_SERVER: &str = "ptytestmcp";
 
-/// Budget for session creation plus the `chutes.build/mcp/list` round-trip.
+/// Budget for session creation plus the `chutes.ai/mcp/list` round-trip.
 pub(crate) const MCP_MENU_LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Configured servers list with a status badge even when never connected.
@@ -440,20 +443,18 @@ pub(crate) fn seed_keep_text_selection_config(content: &ContentController) {
     .expect("write config.toml");
 }
 
-/// Content env plus opt-in enablement env (belt-and-suspenders with config seed).
-pub(crate) fn mouse_toggle_env(content: &ContentController) -> Vec<(String, String)> {
-    let mut env = content.env_for_pager();
-    env.push(("CHUTES_BUILD_MOUSE_REPORTING_TOGGLE".into(), "true".into()));
-    env
-}
-
-/// Spawn pager with content + mouse-toggle env (same base as `spawn_with_content`,
-/// but forwards the extra enablement env that `spawn_with_content` alone omits).
+/// Spawn pager with the mouse-toggle opt-in after the sandbox baseline.
 pub(crate) fn spawn_mouse_toggle_pager(content: &ContentController) -> PtyHarness {
     let binary = pager_binary().expect("resolve pager binary");
-    let env = mouse_toggle_env(content);
-    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &[], &env_refs).expect("spawn pager")
+    PtyHarness::spawn_with_content_env_ops(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        content,
+        &[],
+        &[EnvOp::set("CHUTES_BUILD_MOUSE_REPORTING_TOGGLE", "true")],
+    )
+    .expect("spawn pager")
 }
 
 /// Inject keys one byte at a time with a short drain between each so the pager
@@ -476,13 +477,16 @@ pub(crate) const ESC_DOUBLE_PRESS_ENV: &str = "CHUTES_BUILD_ESC_DOUBLE_PRESS_MS"
 /// Spawn the pager with [`ESC_DOUBLE_PRESS_ENV`] set to the 60s cap.
 pub(crate) fn spawn_esc_double_press_pager(content: &ContentController) -> PtyHarness {
     let binary = pager_binary().expect("resolve pager binary");
-    let mut env = content.env_for_pager();
-    env.push((
-        ESC_DOUBLE_PRESS_ENV.to_string(),
-        xai_grok_pager::app::app_view::ESC_DOUBLE_PRESS_TEST_MS.to_string(),
-    ));
-    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &[], &env_refs).expect("spawn pager")
+    let value = xai_grok_pager::app::app_view::ESC_DOUBLE_PRESS_TEST_MS.to_string();
+    PtyHarness::spawn_with_content_env_ops(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        content,
+        &[],
+        &[EnvOp::set(ESC_DOUBLE_PRESS_ENV, value.as_str())],
+    )
+    .expect("spawn pager")
 }
 
 /// Reach an agent session with scrollback content, then focus scrollback (Tab).
@@ -501,8 +505,8 @@ pub(crate) async fn drive_to_scrollback_with_turn(
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("turn rendered");
     // Leave the prompt so scrollback-only Ctrl+R can fire (unbound on the prompt).
-    // Tab is the leave-prompt / focus-scrollback key (Esc is clear/rewind idle /
-    // mid-turn swallow).
+    // Tab is the leave-prompt / focus-scrollback key (Esc is reserved for the
+    // cancel / clear / rewind policy).
     harness.inject_keys(b"\t").expect("focus scrollback (tab)");
     harness.update(Duration::from_millis(500));
     // Footer shows "Space:prompt" when scrollback owns keys (prompt is not focused).
@@ -582,11 +586,6 @@ pub(crate) fn responses_api_tool_call_events(
     events
 }
 
-/// Chat Completions SSE stream with a single tool_call (fallback endpoint).
-pub(crate) fn chat_completions_tool_call_events(name: &str, arguments: &str) -> Vec<SseEvent> {
-    chat_completions_tool_call_events_with_id("call_read_hdr", name, arguments)
-}
-
 /// [`chat_completions_tool_call_events`] with an explicit `tool_call` id, for
 /// tests scripting several calls into ONE conversation (a reused id would
 /// alias distinct calls in history and confuse dangling-call bookkeeping).
@@ -635,100 +634,6 @@ pub(crate) fn chat_completions_tool_call_events_with_id(
                     "prompt_tokens": 10,
                     "completion_tokens": 20,
                     "total_tokens": 30
-                }
-            })
-            .to_string(),
-        ),
-        SseEvent::data("[DONE]".to_string()),
-    ]
-}
-
-/// Responses API SSE stream that emits a single assistant text message —
-/// the FIFO counterpart of `set_response` for tests scripting DISTINCT text
-/// replies per turn (e.g. one per auto-wake).
-pub(crate) fn responses_api_message_events(text: &str) -> Vec<SseEvent> {
-    vec![
-        SseEvent::data(
-            json!({
-                "type": "response.created",
-                "sequence_number": 0,
-                "response": {
-                    "id": "resp_text",
-                    "object": "response",
-                    "created_at": 1234567890,
-                    "model": "test-model",
-                    "status": "in_progress",
-                    "output": []
-                }
-            })
-            .to_string(),
-        ),
-        SseEvent::data(
-            json!({
-                "type": "response.output_text.delta",
-                "sequence_number": 1,
-                "item_id": "item_text",
-                "output_index": 0,
-                "content_index": 0,
-                "delta": text
-            })
-            .to_string(),
-        ),
-        SseEvent::data(
-            json!({
-                "type": "response.completed",
-                "sequence_number": 2,
-                "response": {
-                    "id": "resp_text",
-                    "object": "response",
-                    "created_at": 1234567890,
-                    "model": "test-model",
-                    "status": "completed",
-                    "output": [{
-                        "type": "message",
-                        "id": "msg_text",
-                        "role": "assistant",
-                        "status": "completed",
-                        "content": [{
-                            "type": "output_text",
-                            "text": text,
-                            "annotations": []
-                        }]
-                    }],
-                    "usage": {
-                        "input_tokens": 10,
-                        "output_tokens": 10,
-                        "total_tokens": 20,
-                        "input_tokens_details": { "cached_tokens": 0 },
-                        "output_tokens_details": { "reasoning_tokens": 0 }
-                    }
-                }
-            })
-            .to_string(),
-        ),
-        SseEvent::data("[DONE]".to_string()),
-    ]
-}
-
-/// Chat Completions SSE stream with a single assistant text message
-/// (fallback endpoint counterpart of [`responses_api_message_events`]).
-pub(crate) fn chat_completions_message_events(text: &str) -> Vec<SseEvent> {
-    vec![
-        SseEvent::data(
-            json!({
-                "id": "chatcmpl-text",
-                "object": "chat.completion.chunk",
-                "created": 1234567890,
-                "model": "test-model",
-                "choices": [{
-                    "index": 0,
-                    "delta": { "role": "assistant", "content": text },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 10,
-                    "total_tokens": 20
                 }
             })
             .to_string(),
@@ -820,22 +725,20 @@ pub(crate) fn locate_screen_text(screen: &str, needle: &str) -> Option<(u16, u16
     None
 }
 
-/// Queue one scripted tool-call turn on both inference endpoints (only the
-/// endpoint the agent actually uses drains its FIFO; the other stays parked).
-pub(crate) fn enqueue_tool_turn(
+/// Register one named scripted tool-call turn on both inference endpoints.
+pub(crate) fn expect_tool_turn(
     content: &ContentController,
     call_id: &str,
     name: &str,
     args: String,
-) {
-    content.enqueue_response(
-        "/v1/responses",
+) -> AgentTurnExpectation {
+    content.expect_agent_turn_with_responses(
+        format!("tool turn {call_id}"),
         ScriptedResponse::sse(responses_api_tool_call_events(call_id, name, &args)),
-    );
-    content.enqueue_response(
-        "/v1/chat/completions",
-        ScriptedResponse::sse(chat_completions_tool_call_events(name, &args)),
-    );
+        ScriptedResponse::sse(chat_completions_tool_call_events_with_id(
+            call_id, name, &args,
+        )),
+    )
 }
 
 /// Responses API SSE stream whose `response.completed` output carries one
@@ -974,7 +877,7 @@ pub(crate) fn chat_completions_parallel_tool_call_events(
 }
 
 /// Queue one scripted turn with parallel tool calls on both inference
-/// endpoints (see [`enqueue_tool_turn`]).
+/// endpoints (see [`expect_tool_turn`]).
 pub(crate) fn enqueue_parallel_tool_turn(
     content: &ContentController,
     calls: &[(&str, &str, String)],
@@ -991,23 +894,15 @@ pub(crate) fn enqueue_parallel_tool_turn(
 
 /// Seed a target file under the isolated HOME and queue a scripted `read_file`
 /// tool call (Responses + Chat Completions) so the pager renders a Read header.
-pub(crate) fn seed_read_file_tool_call(content: &ContentController, abs_path: &Path) {
+pub(crate) fn seed_read_file_tool_call(
+    content: &ContentController,
+    abs_path: &Path,
+) -> AgentTurnExpectation {
     let args = json!({ "target_file": abs_path.to_string_lossy() }).to_string();
-    // Prefer Responses API (primary agent path); also queue Chat Completions.
-    content.enqueue_response(
-        "/v1/responses",
-        ScriptedResponse::sse(responses_api_tool_call_events(
-            "call_read_hdr",
-            "read_file",
-            &args,
-        )),
-    );
-    content.enqueue_response(
-        "/v1/chat/completions",
-        ScriptedResponse::sse(chat_completions_tool_call_events("read_file", &args)),
-    );
+    let turn = expect_tool_turn(content, "call_read_hdr", "read_file", args);
     // Follow-up turn after tool result: plain completion so the session settles.
     content.set_response(READ_HDR_SENTINEL);
+    turn
 }
 
 // ── Minimal (scrollback-native) mode e2e helpers ────────────────────────
@@ -1027,6 +922,63 @@ pub(crate) const MINIMAL_IDLE_SENTINEL: &str = "minimal · /help";
 /// reverse-command segment.
 pub(crate) const MINIMAL_SWITCH_BACK_IDLE_SENTINEL: &str =
     "minimal · /fullscreen to go back · /help";
+
+/// Header of minimal's parked plan-approval controls strip.
+pub(crate) const PLAN_PARKED_SENTINEL: &str = "Plan ready for review";
+
+/// A plan body the `exit_plan_mode` tool will read off disk. Every step carries
+/// a unique `{tag}{NNN}` sentinel, because a truncated plan still contains its
+/// head and would pass a plain substring check.
+pub(crate) fn plan_body(tag: &str, lines: usize) -> String {
+    let mut s = format!("# {tag} Plan\n\n");
+    for i in 0..lines {
+        s.push_str(&format!("- {tag}{i:03} step of the plan\n"));
+    }
+    s
+}
+
+/// Steps of a [`plan_body`] missing from everything the user could reach by
+/// scrolling: native scrollback plus the visible screen.
+pub(crate) fn plan_lines_missing(harness: &mut PtyHarness, tag: &str, lines: usize) -> Vec<usize> {
+    let full = harness.full_text();
+    (0..lines)
+        .filter(|i| !full.contains(&format!("{tag}{i:03}")))
+        .collect()
+}
+
+/// Steps of a [`plan_body`] that appear more than once — the print-once guard.
+pub(crate) fn plan_lines_duplicated(
+    harness: &mut PtyHarness,
+    tag: &str,
+    lines: usize,
+) -> Vec<usize> {
+    let full = harness.full_text();
+    (0..lines)
+        .filter(|i| full.matches(&format!("{tag}{i:03}")).count() > 1)
+        .collect()
+}
+
+/// Locate `<grok_home>/sessions/<encoded cwd>/<session id>/`, where the shell
+/// keeps the session's `plan.md`. Polls: the first turn creates it
+/// asynchronously.
+pub(crate) fn session_dir(content: &ContentController, harness: &mut PtyHarness) -> PathBuf {
+    let sessions = content.home().join(".chutes-build").join("sessions");
+    for _ in 0..100 {
+        if let Ok(outer) = std::fs::read_dir(&sessions) {
+            for cwd_dir in outer.flatten() {
+                if let Ok(inner) = std::fs::read_dir(cwd_dir.path()) {
+                    for entry in inner.flatten() {
+                        if entry.path().is_dir() {
+                            return entry.path();
+                        }
+                    }
+                }
+            }
+        }
+        harness.update(Duration::from_millis(100));
+    }
+    panic!("no session dir under {}", sessions.display());
+}
 
 /// Spawn the pager in minimal mode against `content` at the default size.
 pub(crate) fn spawn_minimal(content: &ContentController) -> PtyHarness {
@@ -1088,13 +1040,56 @@ pub(crate) fn wait_minimal_ready(harness: &mut PtyHarness) {
 
 /// Quit minimal cleanly. The prompt is always focused (a bare `q` would type
 /// into it), so quit is Ctrl+Q pressed twice (it requires confirmation). Falls
-/// back to the harness kill path if the chord doesn't take.
+/// back to the harness kill path if the chord doesn't take. Give the confirm
+/// chord and process exit enough time under suite load so a SIGKILL does not
+/// cut off the agent mid-`updates.jsonl` flush (which breaks a subsequent
+/// `--continue` resume).
 pub(crate) fn quit_minimal(harness: &mut PtyHarness) {
     let _ = harness.inject_keys(b"\x11"); // Ctrl+Q — arms the confirm
-    harness.update(Duration::from_millis(80));
+    harness.update(Duration::from_millis(200));
     let _ = harness.inject_keys(b"\x11"); // Ctrl+Q — confirms
-    if harness.wait_exit_code(Duration::from_secs(5)).is_none() {
-        let _ = harness.quit(); // kill fallback
+    match harness
+        .wait_exit_code(Duration::from_secs(15))
+        .expect("wait for minimal pager exit")
+    {
+        PtyExitPoll::Running => harness.quit().expect("kill minimal pager after timeout"),
+        PtyExitPoll::Exited(_) | PtyExitPoll::PendingStatus => {}
+    }
+}
+
+const EXIT_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+fn resolve_exit_status_poll<T, E>(
+    poll: Result<PtyExitPoll<T>, E>,
+    deadline_reached: bool,
+) -> Result<Option<PtyExitPoll<T>>, E> {
+    match poll? {
+        PtyExitPoll::Exited(code) => Ok(Some(PtyExitPoll::Exited(code))),
+        state if deadline_reached => Ok(Some(state)),
+        PtyExitPoll::Running | PtyExitPoll::PendingStatus => Ok(None),
+    }
+}
+
+/// Wait for a concrete exit status while preserving the typed deadline state.
+pub(crate) fn wait_for_exit_status(
+    harness: &mut PtyHarness,
+    timeout: Duration,
+) -> anyhow::Result<PtyExitPoll<u32>> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(state) = resolve_exit_status_poll(
+            harness.wait_exit_code(Duration::ZERO),
+            Instant::now() >= deadline,
+        )? {
+            return Ok(state);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        harness.update(EXIT_STATUS_POLL_INTERVAL.min(remaining));
+        let sleep_for =
+            Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now()));
+        if !sleep_for.is_zero() {
+            std::thread::sleep(sleep_for);
+        }
     }
 }
 
@@ -1110,7 +1105,7 @@ pub(crate) const WRAP_TIMEOUT: Duration = Duration::from_secs(120);
 const WRAP_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Run `chutes-build wrap <wrap_args...>` to completion inside a PTY with an isolated
-/// `CHUTES_BUILD_HOME`, returning the exit code (`None` if it never exited within
+/// `CHUTES_BUILD_HOME`, returning the exit code (`None` only while still running at
 /// [`WRAP_TIMEOUT`]) and everything the wrap PTY emitted. `extra_env` is where
 /// tests pin `SHELL`; wrap needs no mock content — it dispatches in `main`
 /// before auth/network/sandbox.
@@ -1137,17 +1132,30 @@ pub(crate) fn run_wrap_driving(
     let mut env: Vec<(&str, &str)> = vec![("CHUTES_BUILD_HOME", &home_str), ("NO_COLOR", "1")];
     env.extend_from_slice(extra_env);
 
-    let mut harness = PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &args, &env)
-        .expect("spawn chutes-build wrap");
+    let mut harness =
+        PtyHarness::new_inherited_env(&binary, DEFAULT_ROWS, DEFAULT_COLS, &args, &env, None)
+            .expect("spawn chutes-build wrap");
 
     drive(&mut harness);
 
-    let code = harness
-        .wait_for_exit_and_drain(WRAP_TIMEOUT, WRAP_DRAIN_TIMEOUT)
-        .ok();
-    if code.is_none() {
-        let _ = harness.quit(); // kill a hung child so the suite doesn't leak it
-    }
+    let code = match wait_for_exit_status(&mut harness, WRAP_TIMEOUT) {
+        Ok(PtyExitPoll::Exited(code)) => {
+            harness.update(WRAP_DRAIN_TIMEOUT);
+            Some(code)
+        }
+        Ok(PtyExitPoll::Running) => {
+            harness
+                .quit()
+                .expect("kill chutes-build wrap after timeout");
+            None
+        }
+        Ok(PtyExitPoll::PendingStatus) => {
+            panic!(
+                "chutes-build wrap exited but portable status remained unavailable for {WRAP_TIMEOUT:?}"
+            )
+        }
+        Err(error) => panic!("poll chutes-build wrap exit: {error:#}"),
+    };
 
     let raw = String::from_utf8_lossy(harness.raw_output()).into_owned();
     (code, raw)
@@ -1253,6 +1261,34 @@ pub(crate) fn write_cast_if_requested(harness: &PtyHarness, file_name: &str) {
     }
 }
 
+/// Dump the current screen (plain text and HTML) into
+/// `$CHUTES_BUILD_PTY_CAST_DIR/<file_stem>.{txt,html}` when the env var is set.
+/// Failures are logged, never fatal — same opt-in as
+/// [`write_cast_if_requested`].
+pub(crate) fn write_screen_dump_if_requested(harness: &PtyHarness, file_stem: &str) {
+    let Ok(dir) = std::env::var("CHUTES_BUILD_PTY_CAST_DIR") else {
+        return;
+    };
+    if dir.is_empty() {
+        return;
+    }
+    let dir = std::path::PathBuf::from(dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("failed to create dump dir {}: {e}", dir.display());
+        return;
+    }
+    for (ext, body) in [
+        ("txt", harness.screen_contents()),
+        ("html", harness.screen_html()),
+    ] {
+        let path = dir.join(format!("{file_stem}.{ext}"));
+        match std::fs::write(&path, body) {
+            Ok(()) => eprintln!("wrote screen dump: {}", path.display()),
+            Err(e) => eprintln!("failed to write screen dump {}: {e}", path.display()),
+        }
+    }
+}
+
 // ── Clipboard paste e2e tests ───────────────────────────────────────────
 
 /// Serialized `content` of every user message across recorded requests, in
@@ -1294,3 +1330,36 @@ pub(crate) use xai_grok_pager_pty_harness::host_clipboard::{
 // this and SKIP instead of failing on environment.
 #[cfg(target_os = "windows")]
 pub(crate) use xai_grok_pager_pty_harness::host_clipboard::clipboard_roundtrip_works;
+
+#[cfg(test)]
+mod exit_status_wait_policy_tests {
+    use super::*;
+
+    #[test]
+    fn waits_for_running_and_pending_until_deadline_and_propagates_errors() {
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Ok(PtyExitPoll::Exited(2)), false),
+            Ok(Some(PtyExitPoll::Exited(2)))
+        );
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Ok(PtyExitPoll::Running), false),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Ok(PtyExitPoll::PendingStatus), false),
+            Ok(None)
+        );
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Ok(PtyExitPoll::Running), true),
+            Ok(Some(PtyExitPoll::Running))
+        );
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Ok(PtyExitPoll::PendingStatus), true),
+            Ok(Some(PtyExitPoll::PendingStatus))
+        );
+        assert_eq!(
+            resolve_exit_status_poll::<u32, &'static str>(Err("poll failed"), true),
+            Err("poll failed")
+        );
+    }
+}

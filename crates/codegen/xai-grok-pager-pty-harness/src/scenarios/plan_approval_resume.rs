@@ -2,7 +2,7 @@
 //!
 //! When `exit_plan_mode` is parked and the user quits, the shell persists
 //! `awaiting_plan_approval = true` in `plan_mode.json`. On `--continue` the
-//! shell re-issues the `chutes.build/exit_plan_mode` reverse-request — a real live ACP
+//! shell re-issues the `chutes.ai/exit_plan_mode` reverse-request — a real live ACP
 //! waiter — so the pager re-shows approval chrome through its normal path with
 //! no pager-side disk logic. Approving then leaves plan mode and starts the
 //! implement turn.
@@ -41,13 +41,14 @@ pub async fn assert_plan_approval_restored_after_resume() -> Result<()> {
     let content = ContentController::start()
         .await
         .context("start ContentController")?;
-    // One response per agent turn (FIFO, 2+-tool requests only — aux requests
-    // never steal one). Turn 1 is consumed by the first pager; turn 2 by the
-    // implement turn the shell starts after approval.
-    content.set_turns([
+    let mut setup_turn = content.expect_agent_turn(
+        "initial plan-drafting turn",
         format!("{SETUP_SENTINEL}: drafted a plan for the user to review."),
+    );
+    let mut implement_turn = content.expect_agent_turn(
+        "implementation after approval",
         format!("{IMPLEMENT_SENTINEL}: implementing the approved plan."),
-    ]);
+    );
 
     let project = tempfile::tempdir().context("project dir")?;
     std::fs::create_dir_all(project.path().join(".git")).context("create .git")?;
@@ -69,6 +70,9 @@ pub async fn assert_plan_approval_restored_after_resume() -> Result<()> {
     first
         .wait_for_text(SETUP_SENTINEL, Duration::from_secs(30))
         .context("setup turn rendered")?;
+    tokio::time::timeout(Duration::from_secs(10), setup_turn.wait_satisfied())
+        .await
+        .context("setup turn expectation timeout")?;
 
     // Quit and reap BEFORE seeding so the still-live shell cannot re-persist
     // and clobber the seeded state.
@@ -121,6 +125,9 @@ pub async fn assert_plan_approval_restored_after_resume() -> Result<()> {
     resumed
         .wait_for_text(IMPLEMENT_SENTINEL, Duration::from_secs(30))
         .context("approve must leave plan mode and start the implement turn")?;
+    tokio::time::timeout(Duration::from_secs(10), implement_turn.wait_satisfied())
+        .await
+        .context("implement turn expectation timeout")?;
 
     resumed.quit().context("quit resumed pager")?;
     Ok(())

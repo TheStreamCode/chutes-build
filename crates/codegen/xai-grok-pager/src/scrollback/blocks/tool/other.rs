@@ -2,6 +2,7 @@
 
 use ratatui::text::{Line, Span};
 
+use crate::appearance::AppearanceConfig;
 use crate::render::wrapping::word_wrap_lines;
 use crate::scrollback::block::BlockContent;
 use crate::scrollback::types::{
@@ -28,10 +29,6 @@ pub struct OtherToolCallBlock {
     image_refs: Vec<crate::prompt_images::ScrollbackImageRef>,
     /// Video references detected in the tool output.
     video_refs: Vec<crate::prompt_images::ScrollbackVideoRef>,
-    /// Audio artifact path supplied by typed tool output.
-    audio_ref: Option<std::path::PathBuf>,
-    /// Future/unknown artifact path with a native-open fallback.
-    file_ref: Option<std::path::PathBuf>,
 }
 
 impl OtherToolCallBlock {
@@ -50,8 +47,6 @@ impl OtherToolCallBlock {
             elapsed_ms: None,
             image_refs: Vec::new(),
             video_refs: Vec::new(),
-            audio_ref: None,
-            file_ref: None,
         }
     }
 
@@ -71,8 +66,6 @@ impl OtherToolCallBlock {
     pub fn set_output_text(&mut self, text: String) {
         self.image_refs = crate::prompt_images::extract_image_refs(&text);
         self.video_refs = crate::prompt_images::extract_video_refs(&text);
-        self.audio_ref = None;
-        self.file_ref = None;
         self.output = Some(text);
     }
 
@@ -91,42 +84,6 @@ impl OtherToolCallBlock {
         self
     }
 
-    /// Attach a provider-neutral typed media artifact without scraping the
-    /// human-readable tool result.
-    pub fn with_media_artifact(
-        mut self,
-        artifact: xai_grok_tools::types::output::MediaArtifact,
-    ) -> Self {
-        use xai_grok_tools::types::output::MediaArtifactKind;
-        match artifact.kind {
-            MediaArtifactKind::Image => {
-                if let Some(reference) =
-                    crate::prompt_images::ScrollbackImageRef::from_path(artifact.path)
-                {
-                    self.image_refs = vec![reference];
-                }
-            }
-            MediaArtifactKind::Video => {
-                if let Some(reference) =
-                    crate::prompt_images::ScrollbackVideoRef::from_path(artifact.path)
-                {
-                    self.video_refs = vec![reference];
-                }
-            }
-            MediaArtifactKind::Audio | MediaArtifactKind::Music | MediaArtifactKind::Speech => {
-                if artifact.path.is_file() {
-                    self.audio_ref = Some(artifact.path);
-                }
-            }
-            MediaArtifactKind::Document | MediaArtifactKind::Unknown => {
-                if artifact.path.is_file() {
-                    self.file_ref = Some(artifact.path);
-                }
-            }
-        }
-        self
-    }
-
     /// Check if successful (no error).
     pub fn is_success(&self) -> bool {
         self.error.is_none()
@@ -140,12 +97,6 @@ impl OtherToolCallBlock {
         }
         if let Some(vid) = self.video_refs.first() {
             return Some(vid.path.clone());
-        }
-        if let Some(audio) = &self.audio_ref {
-            return Some(audio.clone());
-        }
-        if let Some(file) = &self.file_ref {
-            return Some(file.clone());
         }
         None
     }
@@ -270,28 +221,11 @@ impl BlockContent for OtherToolCallBlock {
 
             // No inline graphics: centered "[Open]" button between blank
             // spacers (its click target is registered in render.rs).
-            if let Some((_, kind)) = self.inline_open_button() {
-                // Image/video previews render inline only on terminals with
-                // Kitty-protocol support; without that this is the only
-                // preview a user gets. Say so explicitly instead of letting
-                // "no picture appeared" read as a failure.
-                if matches!(
-                    kind,
-                    crate::scrollback::block::MediaButtonKind::Image
-                        | crate::scrollback::block::MediaButtonKind::Video
-                ) {
-                    lines.push(
-                        Line::from(Span::styled(
-                            "Inline preview isn't supported in this terminal — open the file to view it.",
-                            ratatui::style::Style::default().fg(theme.gray_dim),
-                        ))
-                        .into(),
-                    );
-                }
-                let label = crate::scrollback::render::media_open_button_label(kind);
+            if let Some((_, is_video)) = self.inline_open_button() {
+                let label = crate::scrollback::render::media_open_button_label(is_video);
                 let col = crate::scrollback::render::media_open_button_col(
                     ctx.content_width() as u16,
-                    kind,
+                    is_video,
                 );
                 let open_line = Line::from(vec![
                     Span::raw(" ".repeat(col as usize)),
@@ -303,11 +237,6 @@ impl BlockContent for OtherToolCallBlock {
                     ),
                 ]);
                 lines.push(Line::from("").into());
-                if matches!(kind, crate::scrollback::block::MediaButtonKind::Audio) {
-                    // Reserved for the lazy waveform. The draw layer paints it
-                    // only after the user starts playback and analysis finishes.
-                    lines.push(Line::from("").into());
-                }
                 lines.push(open_line.into());
                 lines.push(Line::from("").into());
             }
@@ -405,7 +334,7 @@ impl BlockContent for OtherToolCallBlock {
         }
     }
 
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         false
     }
 
@@ -482,29 +411,17 @@ impl BlockContent for OtherToolCallBlock {
         None
     }
 
-    fn inline_open_button(
-        &self,
-    ) -> Option<(
-        std::path::PathBuf,
-        crate::scrollback::block::MediaButtonKind,
-    )> {
-        use crate::scrollback::block::MediaButtonKind;
-        if let Some(audio) = &self.audio_ref {
-            return Some((audio.clone(), MediaButtonKind::Audio));
-        }
-        if let Some(file) = &self.file_ref {
-            return Some((file.clone(), MediaButtonKind::File));
-        }
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
         // Only used when there is no inline-graphics overlay to host the button
         // row. When the overlay is active it draws its own button row instead.
         if crate::terminal::image::scrollback_inline_overlay_active() {
             return None;
         }
         if let Some(img) = self.image_refs.first() {
-            return Some((img.path.clone(), MediaButtonKind::Image));
+            return Some((img.path.clone(), false));
         }
         if let Some(vid) = self.video_refs.first() {
-            return Some((vid.path.clone(), MediaButtonKind::Video));
+            return Some((vid.path.clone(), true));
         }
         None
     }

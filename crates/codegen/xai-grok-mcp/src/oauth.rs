@@ -22,11 +22,27 @@ use crate::rmcp::transport::auth::{AuthorizationManager, OAuthClientConfig};
 /// Client name advertised to MCP servers during Dynamic Client Registration
 /// (RFC 7591). Surfaces as the application name on third-party OAuth consent
 /// screens (e.g. Linear, GitHub), so keep this human-recognizable.
-const MCP_OAUTH_CLIENT_NAME: &str = "Grok";
+const MCP_OAUTH_CLIENT_NAME: &str = "Chutes Build";
 
 /// How often the interactive OAuth flow polls the credential store to detect
 /// a login completed in another window or process.
 const CREDENTIAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Overall budget for one interactive browser consent flow (waiting for the
+/// loopback callback / disk poll after opening the browser). Mirrors the main
+/// chutes.ai login's 10-minute callback budget. Without a bound, an abandoned
+/// browser tab left the leader parked in its `select!` forever — holding both
+/// the in-process watch channel and the cross-process `mcp_auth_*.lock`, so
+/// every other session blocked indefinitely on the same server's auth.
+const BROWSER_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// How long a follower waits for the cross-process auth lock before giving up
+/// on dedup and proceeding with its own flow. Slightly above
+/// [`BROWSER_AUTH_TIMEOUT`] so a legitimately-slow leader (user reading the
+/// consent screen) finishes first and the follower reuses its token.
+#[cfg(unix)]
+const AUTH_LOCK_WAIT: std::time::Duration =
+    BROWSER_AUTH_TIMEOUT.saturating_add(std::time::Duration::from_secs(60));
 
 // ---------------------------------------------------------------------------
 // Two-layer dedup: prevents duplicate browser tabs both within one process
@@ -185,31 +201,49 @@ async fn authenticate_with_fs_lock(
         }
     };
 
+    // Bounded, non-blocking poll instead of an unbounded `flock(LOCK_EX)`:
+    // the leader can legitimately hold this lock for minutes (user consent),
+    // but an abandoned/wedged leader must not park followers forever. On
+    // timeout we fall back to running our own flow (same as lock-acquisition
+    // failure), which the token-changed re-check below keeps from producing a
+    // duplicate consent when the leader did finish.
     let lock_file = tokio::task::spawn_blocking(move || {
         use std::os::unix::io::AsRawFd;
         let fd = lock_file.as_raw_fd();
+        let deadline = std::time::Instant::now() + AUTH_LOCK_WAIT;
         loop {
-            if unsafe { libc::flock(fd, libc::LOCK_EX) } == 0 {
+            if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
                 return Some(lock_file);
             }
             let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::Interrupted {
-                continue;
+            match err.kind() {
+                std::io::ErrorKind::Interrupted => continue,
+                std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        return None;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                _ => return None,
             }
-            return None;
         }
     })
     .await
     .ok()
     .flatten();
 
-    let Some(_lock_guard) = lock_file else {
-        tracing::warn!("Failed to acquire auth lock; proceeding without cross-process dedup");
-        return run_browser_auth_flow(server_name, server_url, auth_manager, byo_config).await;
-    };
+    if lock_file.is_none() {
+        tracing::warn!("Timed out waiting for auth lock; re-checking the store before a new flow");
+    }
+    // On timeout: proceed unlocked; the token-changed re-check below
+    // dedups a leader that finished just past our deadline.
+    let _lock_guard = lock_file;
 
-    // We hold the lock. Reload from disk and check if another process
-    // wrote a DIFFERENT token while we waited (not just any token).
+    // Reload from disk and check whether another process wrote a DIFFERENT
+    // token while we waited (not just any token). This runs on the timeout
+    // path too: a leader whose token exchange finished just past our deadline
+    // has already written fresh tokens, and opening a second consent browser
+    // would be strictly worse than this unlocked best-effort read.
     {
         let mut mgr = auth_manager.lock().await;
         if let Ok(true) = mgr.initialize_from_store().await {
@@ -412,15 +446,20 @@ async fn run_browser_auth_flow(
     tokio::select! {
         result = callback_rx => {
             callback_server.abort();
-            let (code, csrf_state) = result
+            let callback = result
                 .map_err(|_| "Callback channel dropped".to_string())?
                 .map_err(|e| format!("OAuth callback failed: {e}"))?;
 
             // 6. Exchange code for tokens (auto-persists via CredentialStore).
+            // Pass RFC 9207 `iss` when present (required if the AS advertises it).
             let mgr = auth_manager.lock().await;
-            mgr.exchange_code_for_token(&code, &csrf_state)
-                .await
-                .map_err(|e| format!("Token exchange failed: {e}"))?;
+            mgr.exchange_code_for_token_with_issuer(
+                &callback.code,
+                &callback.state,
+                callback.issuer.as_deref(),
+            )
+            .await
+            .map_err(|e| format!("Token exchange failed: {e}"))?;
 
             tracing::info!(server = server_name, "MCP OAuth authentication successful");
         }
@@ -430,6 +469,22 @@ async fn run_browser_auth_flow(
                 server = server_name,
                 "Fresh tokens detected on disk from another auth flow; skipping callback wait"
             );
+        }
+        // Abandoned consent: bound the wait so this leader releases the
+        // in-process watch and the cross-process `mcp_auth_*.lock` instead of
+        // wedging every future auth attempt for this server (see
+        // `BROWSER_AUTH_TIMEOUT`).
+        _ = tokio::time::sleep(BROWSER_AUTH_TIMEOUT) => {
+            callback_server.abort();
+            tracing::warn!(
+                server = server_name,
+                timeout_secs = BROWSER_AUTH_TIMEOUT.as_secs(),
+                "OAuth consent timed out (browser flow abandoned?)"
+            );
+            return Err(format!(
+                "OAuth consent timed out after {}s; re-run authentication to try again",
+                BROWSER_AUTH_TIMEOUT.as_secs()
+            ));
         }
     }
 
@@ -444,22 +499,54 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Start a loopback HTTP server for the OAuth callback.
-///
-/// Returns the server task handle (for cleanup) and a oneshot receiver
-/// that resolves with `(code, state)` when the callback arrives.
-///
-/// The caller is responsible for aborting the server handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OAuthCallbackPayload {
+    code: String,
+    state: String,
+    /// RFC 9207 `iss` (optional; required when the AS advertises support).
+    issuer: Option<String>,
+}
+
+fn parse_oauth_callback_params(
+    params: &HashMap<String, String>,
+) -> Result<OAuthCallbackPayload, String> {
+    if let Some(error) = params.get("error") {
+        let desc = params
+            .get("error_description")
+            .cloned()
+            .unwrap_or_else(|| "Unknown error".to_string());
+        return Err(format!("OAuth error: {error} - {desc}"));
+    }
+    let code = params
+        .get("code")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .ok_or_else(|| "Missing authorization code".to_string())?;
+    let state = params
+        .get("state")
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .ok_or_else(|| "Missing state parameter".to_string())?;
+    let issuer = params.get("iss").cloned();
+    Ok(OAuthCallbackPayload {
+        code,
+        state,
+        issuer,
+    })
+}
+
+/// Loopback OAuth callback server. Returns (server task, oneshot for payload).
+/// Caller must abort the server task.
 #[allow(clippy::type_complexity)]
 fn start_oauth_callback_server(
     listener: tokio::net::TcpListener,
 ) -> (
     tokio::task::JoinHandle<()>,
-    oneshot::Receiver<Result<(String, String), String>>,
+    oneshot::Receiver<Result<OAuthCallbackPayload, String>>,
 ) {
     use axum::{Router, extract::Query, response::Html, routing::get};
 
-    let (tx, rx) = oneshot::channel::<Result<(String, String), String>>();
+    let (tx, rx) = oneshot::channel::<Result<OAuthCallbackPayload, String>>();
     let tx = Arc::new(tokio::sync::Mutex::new(Some(tx)));
 
     let handler = {
@@ -467,19 +554,7 @@ fn start_oauth_callback_server(
         move |Query(params): Query<HashMap<String, String>>| {
             let tx = tx.clone();
             async move {
-                let result = if let Some(error) = params.get("error") {
-                    let desc = params
-                        .get("error_description")
-                        .cloned()
-                        .unwrap_or_else(|| "Unknown error".to_string());
-                    Err(format!("OAuth error: {error} - {desc}"))
-                } else {
-                    match (params.get("code"), params.get("state")) {
-                        (Some(code), Some(state)) => Ok((code.clone(), state.clone())),
-                        (None, _) => Err("Missing authorization code".to_string()),
-                        (_, None) => Err("Missing state parameter".to_string()),
-                    }
-                };
+                let result = parse_oauth_callback_params(&params);
 
                 let html = match &result {
                     Ok(_) => {
@@ -519,4 +594,165 @@ fn start_oauth_callback_server(
     });
 
     (server, rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rmcp::transport::auth::{
+        AuthorizationManager, AuthorizationMetadata, OAuthClientConfig,
+    };
+
+    const TEST_ISSUER: &str = "https://auth.example.com";
+
+    fn params(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn callback_parses_code_state_and_rfc9207_iss() {
+        let p = params(&[
+            ("code", "auth-code"),
+            ("state", "csrf"),
+            ("iss", TEST_ISSUER),
+        ]);
+        let got = parse_oauth_callback_params(&p).unwrap();
+        assert_eq!(got.code, "auth-code");
+        assert_eq!(got.state, "csrf");
+        assert_eq!(got.issuer.as_deref(), Some(TEST_ISSUER));
+    }
+
+    #[test]
+    fn callback_issuer_optional_for_legacy_servers() {
+        let p = params(&[("code", "c"), ("state", "s")]);
+        let got = parse_oauth_callback_params(&p).unwrap();
+        assert!(got.issuer.is_none());
+    }
+
+    #[test]
+    fn callback_requires_code_and_state() {
+        assert!(parse_oauth_callback_params(&params(&[("state", "s")])).is_err());
+        assert!(parse_oauth_callback_params(&params(&[("code", "c")])).is_err());
+    }
+
+    #[test]
+    fn callback_surfaces_oauth_error() {
+        let p = params(&[
+            ("error", "access_denied"),
+            ("error_description", "user said no"),
+        ]);
+        let err = parse_oauth_callback_params(&p).unwrap_err();
+        assert!(err.contains("access_denied"));
+        assert!(err.contains("user said no"));
+    }
+
+    fn require_iss_metadata(token_endpoint: String) -> AuthorizationMetadata {
+        // non_exhaustive: build via Default.
+        let mut meta = AuthorizationMetadata::default();
+        meta.authorization_endpoint = "https://auth.example.com/authorize".to_string();
+        meta.token_endpoint = token_endpoint;
+        meta.issuer = Some(TEST_ISSUER.to_string());
+        meta.additional_fields.insert(
+            "authorization_response_iss_parameter_supported".to_string(),
+            serde_json::json!(true),
+        );
+        meta
+    }
+
+    async fn manager_ready_for_exchange(token_endpoint: String) -> (AuthorizationManager, String) {
+        let mut mgr = AuthorizationManager::new("http://localhost/mcp")
+            .await
+            .unwrap();
+        mgr.set_metadata(require_iss_metadata(token_endpoint));
+        mgr.configure_client(
+            OAuthClientConfig::new("grok-test-client", "http://127.0.0.1:0/callback")
+                .with_application_type("native"),
+        )
+        .unwrap();
+        let auth_url = mgr.get_authorization_url(&[]).await.unwrap();
+        let state = url::Url::parse(&auth_url)
+            .unwrap()
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .expect("auth URL must include state")
+            .1
+            .into_owned();
+        (mgr, state)
+    }
+
+    async fn start_mock_token_endpoint() -> String {
+        use axum::{Router, body::Body, http::Response, routing::post};
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"access_token":"at-ok","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-ok"}"#,
+                    ))
+                    .unwrap()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/token")
+    }
+
+    #[tokio::test]
+    async fn after_fix_passes_iss_and_token_exchange_succeeds() {
+        let token_ep = start_mock_token_endpoint().await;
+        let (mgr, state) = manager_ready_for_exchange(token_ep).await;
+
+        let callback = parse_oauth_callback_params(&params(&[
+            ("code", "auth-code"),
+            ("state", &state),
+            ("iss", TEST_ISSUER),
+        ]))
+        .unwrap();
+
+        let token = mgr
+            .exchange_code_for_token_with_issuer(
+                &callback.code,
+                &callback.state,
+                callback.issuer.as_deref(),
+            )
+            .await
+            .expect("with_issuer must succeed when callback iss matches AS");
+
+        use oauth2::TokenResponse as _;
+        assert_eq!(token.access_token().secret(), "at-ok");
+    }
+
+    #[tokio::test]
+    async fn callback_http_server_forwards_iss_query_param() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (server, rx) = start_oauth_callback_server(listener);
+
+        let url = format!(
+            "http://{addr}/callback?code=c1&state=s1&iss={}",
+            urlencoding_encode(TEST_ISSUER)
+        );
+        let resp = reqwest::get(&url).await.unwrap();
+        assert!(resp.status().is_success());
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("Authorization Complete"));
+
+        let payload = rx.await.unwrap().unwrap();
+        assert_eq!(payload.code, "c1");
+        assert_eq!(payload.state, "s1");
+        assert_eq!(payload.issuer.as_deref(), Some(TEST_ISSUER));
+        server.abort();
+    }
+
+    fn urlencoding_encode(s: &str) -> String {
+        s.replace(':', "%3A").replace('/', "%2F")
+    }
 }

@@ -3,10 +3,10 @@ use std::path::Path;
 use xai_grok_workspace::session::git::VcsKind;
 
 // Re-export from xai-chat-state — canonical definition lives there.
-pub use xai_chat_state::compaction_utils::extract_user_query;
+pub(crate) use xai_chat_state::compaction_utils::extract_user_query;
 
 /// Wraps the user query properly
-pub fn user_query(user_message: String) -> String {
+pub(crate) fn user_query(user_message: String) -> String {
     format!(
         r#"<user_query>
 {user_message}
@@ -19,7 +19,7 @@ pub fn user_query(user_message: String) -> String {
 /// When `None`, values are read from the local machine. When `Some`,
 /// the provided values are used (e.g. from a remote workspace via
 /// `workspace.info` RPC).
-pub struct UserInfoOverride {
+pub(crate) struct UserInfoOverride {
     pub os: String,
     pub shell: String,
     pub cwd: String,
@@ -30,7 +30,7 @@ pub struct UserInfoOverride {
 /// Intentionally excludes workspace snapshot and git status.
 /// When `override_info` is provided, uses remote workspace info instead
 /// of local machine introspection.
-pub fn construct_user_message_minimal(
+pub(crate) fn construct_user_message_minimal(
     working_directory: &Path,
     override_info: Option<&UserInfoOverride>,
 ) -> String {
@@ -46,25 +46,20 @@ pub fn construct_user_message_minimal(
             )
         }
     };
-    // Local date and time, captured when the prefix is built. Re-stamped on
-    // compaction and on resume (build_user_message_prefix), so it stays current
-    // across long sessions.
-    let now = chrono::Local::now();
-    let today = now.format("%Y-%m-%d");
-    let local_time = now.format("%H:%M:%S");
-    let timezone = now.format("%:z (%Z)");
+    let today = chrono::Local::now().format("%Y-%m-%d");
     format!(
         r#"<user_info>
 OS Version: {os}
 Shell: {shell}
 Workspace Path: {cwd}
-Today's date: {today}
-Local time: {local_time}
-Time zone: {timezone}
+{USER_INFO_DATE_MARKER} {today}
 Note: Prefer using relative paths over absolute paths as tool call args when possible.
 </user_info>"#,
     )
 }
+
+/// Date label in the `<user_info>` prefix; `spawn::resumed_prefix_carries_fallback_date` scans for it.
+pub(crate) const USER_INFO_DATE_MARKER: &str = "Today's date:";
 
 /// Resolve a display string for the user's shell.
 ///
@@ -85,7 +80,7 @@ fn resolve_shell_display() -> String {
     }
 }
 
-pub fn format_vcs_status_block(status: &str, vcs_kind: VcsKind) -> String {
+pub(crate) fn format_vcs_status_block(status: &str, vcs_kind: VcsKind) -> String {
     let (tag, description) = if vcs_kind.is_jj() {
         (
             "jj_status",
@@ -105,30 +100,53 @@ pub fn format_vcs_status_block(status: &str, vcs_kind: VcsKind) -> String {
 }
 
 /// Compute the VCS status block (without the `<user_info>` wrapper).
-pub async fn compute_vcs_status_block(
+pub(crate) async fn compute_vcs_status_block(
     working_directory: &Path,
     vcs_kind: VcsKind,
 ) -> Option<String> {
-    use xai_grok_workspace::file_system::{git_status, jj_status};
+    use xai_grok_workspace::file_system::{git_status_short, jj_status};
 
     if matches!(vcs_kind, VcsKind::None) {
         return None;
     }
-    let _timer = crate::instrumentation_timer!("session.user_prefix.vcs_status");
-    let timeout = std::time::Duration::from_secs(2);
+    let mut timer = crate::instrumentation_timer!("session.user_prefix.vcs_status");
+    timer.with_field("vcs", if vcs_kind.is_jj() { "jj" } else { "git" });
+    timer.with_field(
+        "status_mode",
+        if vcs_kind.is_jj() {
+            "jj"
+        } else {
+            "short_untracked_normal"
+        },
+    );
+    timer.with_field("timeout_ms", 5_000_u64);
+    let timeout = std::time::Duration::from_secs(5);
     let result = if vcs_kind.is_jj() {
         tokio::time::timeout(timeout, jj_status(working_directory)).await
     } else {
-        tokio::time::timeout(timeout, git_status(working_directory)).await
+        tokio::time::timeout(timeout, git_status_short(working_directory)).await
     };
     match result {
-        Ok(Ok(status)) => Some(format_vcs_status_block(&status, vcs_kind)),
+        Ok(Ok(status)) => {
+            timer.with_field("outcome", "success");
+            timer.with_field("output_bytes", status.len() as u64);
+            let status = if vcs_kind.is_jj() {
+                Some(status)
+            } else {
+                xai_grok_agent::prompt::user_message::normalize_git_status(&status)
+            };
+            status.map(|status| format_vcs_status_block(&status, vcs_kind))
+        }
         Ok(Err(e)) => {
+            timer.with_field("outcome", "error");
+            timer.with_field("output_bytes", 0_u64);
             tracing::warn!("user prefix VCS status failed: {e}");
             None
         }
         Err(_) => {
-            tracing::warn!(vcs = ?vcs_kind, "user prefix VCS status timed out after 2s");
+            timer.with_field("outcome", "timeout");
+            timer.with_field("output_bytes", 0_u64);
+            tracing::warn!(vcs = ?vcs_kind, "user prefix VCS status timed out after 5s");
             None
         }
     }
@@ -139,7 +157,7 @@ pub async fn compute_vcs_status_block(
 /// When `override_info` is provided, uses remote workspace info and
 /// `vcs_status_override` (pre-fetched from the remote workspace) instead
 /// of local introspection.
-pub async fn construct_user_message(
+pub(crate) async fn construct_user_message(
     working_directory: &Path,
     vcs_kind: VcsKind,
     override_info: Option<&UserInfoOverride>,
@@ -171,7 +189,6 @@ mod tests {
     use super::*;
     use xai_grok_workspace::file_system::FsError;
 
-    /// Verify that construct_user_message completes within the 2s git_status
     /// timeout even when pointed at a non-existent directory (git commands
     /// fail instantly → no timeout path exercised, but validates the happy
     /// path doesn't regress).
@@ -200,13 +217,5 @@ mod tests {
             user_info = format!("{user_info}\n<git_status>{git_status}</git_status>");
         }
         assert!(!user_info.contains("<git_status>"));
-    }
-
-    #[test]
-    fn minimal_message_includes_local_clock_context() {
-        let message = construct_user_message_minimal(Path::new("."), None);
-        assert!(message.contains("Today's date:"));
-        assert!(message.contains("Local time:"));
-        assert!(message.contains("Time zone:"));
     }
 }

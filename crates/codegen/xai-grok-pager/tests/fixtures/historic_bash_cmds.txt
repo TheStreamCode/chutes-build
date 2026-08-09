@@ -41,10 +41,10 @@ cd /tmp && sleep 1 && timeout 30 cargo check 2>&1 | tail -50
 python3 -c 'print("hello && world | not pipe")' && echo ok
 ### END
 ### CMD 11
-cd /tmp/compaction-repro && GROK_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless2.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless2.log
+cd /tmp/compaction-repro && CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless2.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless2.log
 ### END
 ### CMD 12
-cd /tmp/compaction-repro && GROK_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --always-approve --no-leader > /tmp/compaction-repro/headless1.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless1.log
+cd /tmp/compaction-repro && CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --always-approve --no-leader > /tmp/compaction-repro/headless1.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless1.log
 ### END
 ### CMD 13
 cd /Users/alice/Documents/code/project && DYLD_INSERT_LIBRARIES=/opt/homebrew/opt/libfaketime/lib/faketime/libfaketime.1.dylib FAKETIME="@2026-06-11 23:58:30" FAKETIME_DONT_FAKE_MONOTONIC=1 /tmp/pager-under-test-dr --no-leader --always-approve 2>/tmp/ftroll.err
@@ -74,16 +74,16 @@ curl -LsSf "http://file-server.example.internal/cicd/example/install.sh?nocache"
 cat ~/.chutes-build/config.toml | grep composer
 ### END
 ### CMD 22
-GROK_DEBUG_CONTEXT_WINDOW=100000 GROK_AUTO_COMPACT_THRESHOLD_PERCENT=5 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'reply with exactly: again' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless5.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless5.log
+CHUTES_BUILD_DEBUG_CONTEXT_WINDOW=100000 CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=5 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'reply with exactly: again' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless5.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless5.log
 ### END
 ### CMD 23
-GROK_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'now reply with exactly: done' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless3.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless3.log
+CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'now reply with exactly: done' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless3.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless3.log
 ### END
 ### CMD 24
-GROK_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'reply with exactly: final' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless4.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless4.log
+CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -r 019e0000-0000-7000-8000-000000000001 -p 'reply with exactly: final' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless4.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless4.log
 ### END
 ### CMD 25
-GROK_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless1.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless1.log
+CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT=1 /tmp/pager-under-test -p 'reply with exactly: ok' --model example-model --always-approve --no-leader > /tmp/compaction-repro/headless1.log 2>&1; echo EXIT=$? >> /tmp/compaction-repro/headless1.log
 ### END
 ### CMD 26
 cd /Users/alice/Documents/code/project-wt/fix-prompt-wheel-history && \\

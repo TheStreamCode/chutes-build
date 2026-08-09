@@ -71,7 +71,7 @@ fn parse_pasted_input(input: &str) -> Result<Callback, OidcError> {
 /// Render a styled callback page shown in the browser after the OAuth redirect.
 pub(crate) fn callback_page(title: &str, message: &str, is_success: bool) -> String {
     let icon = if is_success {
-        // Grok logo
+        // Chutes Build logo
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 33 33"><path fill="currentColor" d="m13.237 21.04 11.082-8.19c.543-.4 1.32-.244 1.578.38 1.363 3.288.754 7.241-1.957 9.955-2.71 2.714-6.482 3.31-9.93 1.954l-3.765 1.745c5.401 3.697 11.96 2.782 16.059-1.324 3.251-3.255 4.258-7.692 3.317-11.693l.008.009c-1.365-5.878.336-8.227 3.82-13.031q.123-.17.247-.345l-4.585 4.59v-.014L13.234 21.044M10.95 23.031c-3.877-3.707-3.208-9.446.1-12.755 2.446-2.449 6.454-3.448 9.952-1.979L24.76 6.56c-.677-.49-1.545-1.017-2.54-1.387A12.465 12.465 0 0 0 8.675 7.901c-3.519 3.523-4.625 8.94-2.725 13.561 1.42 3.454-.907 5.898-3.251 8.364-.83.874-1.664 1.749-2.335 2.674l10.583-9.466"/></svg>"#
     } else {
         // X circle
@@ -387,17 +387,11 @@ pub async fn run_login_flow_with_config(
     let state = uuid::Uuid::now_v7().to_string();
     let nonce = uuid::Uuid::now_v7().to_string();
 
-    // In local-dev mode, and for the built-in "Sign in with Chutes" app, use a
-    // fixed callback port so the redirect_uri is stable and matches the exact
-    // value pre-registered with the OAuth2 provider (Chutes validates
-    // `redirect_uri` by exact match, with no wildcard/any-port loopback
-    // support documented). Enterprise OIDC providers the user configures
-    // themselves get a random OS-assigned port, since their app registration
-    // is outside our control.
+    // In local-dev mode, use a fixed callback port so the redirect_uri is stable
+    // and can be pre-registered with the local OAuth2 provider. In production the
+    // OS picks a random available port.
     let callback_port: u16 = if super::super::config::use_local_auth() {
         56121
-    } else if super::super::config::is_xai_oauth2_issuer(&oidc.issuer) {
-        8765
     } else {
         0
     };
@@ -433,7 +427,7 @@ pub async fn run_login_flow_with_config(
         // No client UI — print to stderr.
         eprintln!();
         let provider_label = if oidc.issuer == super::super::config::XAI_OAUTH2_ISSUER {
-            "Grok".to_owned()
+            "Chutes Build".to_owned()
         } else {
             oidc.issuer.clone()
         };

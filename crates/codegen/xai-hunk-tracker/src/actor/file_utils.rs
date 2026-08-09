@@ -317,8 +317,10 @@ mod tests {
         assert!(matches!(state, FileContentState::TooLarge { .. }));
     }
 
-    #[tokio::test]
+    // `std::os::unix::fs::symlink` needs a cfg: on Windows the symlink API
+    // lives elsewhere and requires privileges.
     #[cfg(unix)]
+    #[tokio::test]
     async fn test_read_file_bounded_symlink() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("real.txt");

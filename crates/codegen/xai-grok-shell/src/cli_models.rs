@@ -26,7 +26,7 @@ impl AuthStatus {
     /// [`crate::agent::auth_method::should_advertise_xai_api_key`] so
     /// `disable_api_key_auth` is honored.
     pub fn resolve(agent_config: &AgentConfig) -> Self {
-        if crate::agent::auth_method::has_xai_api_key_env() {
+        if crate::agent::auth_method::has_chutes_api_key_env() {
             return Self::ApiKey;
         }
         if agent_config.create_auth_manager().current().is_some() {

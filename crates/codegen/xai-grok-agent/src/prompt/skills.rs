@@ -168,7 +168,7 @@ pub fn collect_skill_config_dirs(
     };
 
     // Vendor dirs (`.claude`/`.cursor`) are gated by the resolved compat
-    // config; `.chutes-build` and `.agents` are always present. When all cells are on
+    // config; `.grok` and `.agents` are always present. When all cells are on
     // this list equals the historical `[".chutes-build", ".agents", ".claude", ".cursor"]`.
     let config_dir_names = compat.skill_config_dirs();
 
@@ -199,7 +199,7 @@ pub fn collect_skill_config_dirs(
         }
     }
 
-    // Priority 3: Global user dirs. `.chutes-build` comes from `grok_home` (which may
+    // Priority 3: Global user dirs. `.grok` comes from `grok_home` (which may
     // be overridden), so it's handled separately; `.agents` is always added,
     // while `.claude`/`.cursor` are gated by the skills compat cells.
     try_add(grok_home);
@@ -260,7 +260,7 @@ fn scope_for_config_dir(dir: &Path, cwd: Option<&Path>, git_root: Option<&Path>)
 /// Collect paths into `out`, deduplicating by canonical path.
 ///
 /// Skill/command discovery does **not** consult `.gitignore`. Auto-discovery
-/// only visits known config roots (`.chutes-build`, `.agents`, `.claude`, `.cursor`),
+/// only visits known config roots (`.grok`, `.agents`, `.claude`, `.cursor`),
 /// which teams often gitignore as local-only config while still expecting them
 /// to load. Hiding a skill uses `[skills] ignore` in config, not repo ignore
 /// rules. AGENTS.md discovery still honors gitignore — that is content, not
@@ -961,8 +961,8 @@ mod tests {
         let paths = find_skill_paths(&grok_dir);
         assert_eq!(paths.len(), 2);
 
-        // Normalize separators so the assertions hold on Windows, where
-        // `Path::display` emits backslashes.
+        // Compared with forward slashes: the assertion is about which directory
+        // the file sits in, not about the platform's separator.
         let path_strs: Vec<String> = paths
             .iter()
             .map(|p| p.display().to_string().replace('\\', "/"))
@@ -2603,7 +2603,7 @@ mod tests {
 
     #[test]
     fn dedupe_same_scope_cross_harness_loser_resurfaces() {
-        // A `.claude` skill claiming a `.chutes-build`-owned name (both User scope)
+        // A `.claude` skill claiming a `.grok`-owned name (both User scope)
         // was silently hidden before; it now re-keys to its dir basename.
         let out = dedupe_skills(vec![
             named_skill(
@@ -2724,14 +2724,14 @@ mod tests {
             .find(|s| s.name == "zz-copyfix-japandi2")
             .unwrap();
         assert_eq!(rekeyed.display_name.as_deref(), Some("zz-copyfix-japandi"));
-        // `path` is a plain String built from a native path, so compare with
-        // forward slashes — on Windows it is spelled with backslashes.
+        // `path` is a `String`, so this is a byte comparison — normalise the
+        // separator instead of asserting the platform's.
         assert!(
             rekeyed
                 .path
                 .replace('\\', "/")
                 .ends_with("zz-copyfix-japandi2/SKILL.md"),
-            "unexpected rekeyed path: {}",
+            "unexpected path: {}",
             rekeyed.path
         );
     }

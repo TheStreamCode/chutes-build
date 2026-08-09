@@ -3,7 +3,7 @@
 //! Budgeting math in the shared engine needs a *trusted* token count, but the
 //! two harnesses disagree on how to produce one:
 //!
-//! - Grok chat has a real tokenizer (`TextTokenizer` / `ImageTokenizer`) and
+//! - Chutes Build chat has a real tokenizer (`TextTokenizer` / `ImageTokenizer`) and
 //!   counts whole turns via `GrokTurn::get_num_tokens`.
 //! - grok-build estimates with `bytes / 4`.
 //!
@@ -13,7 +13,7 @@
 //!
 //! There is intentionally **no** blanket `Arc` forwarding here: each harness
 //! implements the counter directly for the item type its algorithms run on
-//! (Grok chat: `ItemTokenCounter<Arc<GrokTurn>>`), so exactly one mechanism
+//! (Chutes Build chat: `ItemTokenCounter<Arc<GrokTurn>>`), so exactly one mechanism
 //! is in play.
 
 /// Counts tokens for a single conversation item on behalf of the shared

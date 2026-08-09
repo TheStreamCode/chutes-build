@@ -1,4 +1,4 @@
-//! Shared announcement types, persistence, and formatting for Grok CLI apps.
+//! Shared announcement types, persistence, and formatting for Chutes Build CLI apps.
 //!
 //! This crate provides the common logic used by `xai-grok-shell` and
 //! `xai-grok-pager` for handling announcements (banner notifications).
@@ -54,7 +54,7 @@ pub struct AnnouncementCta {
     pub caption: Option<String>,
 }
 
-/// Payload for `chutes.build/announcements/update` ACP notification.
+/// Payload for `chutes.ai/announcements/update` ACP notification.
 // Name predates the method rename to `.../update`; renaming would churn the pager consumer.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -303,12 +303,12 @@ mod tests {
     #[test]
     fn cta_parses_nested_partial_and_absent() {
         let full: RemoteAnnouncement = serde_json::from_str(
-            r#"{"id":"p","severity":"promo","cta":{"label":"View Chutes pricing","url":"https://chutes.ai/pricing","caption":"or use Ctrl+O"}}"#,
+            r#"{"id":"p","severity":"promo","cta":{"label":"Get SuperGrok","url":"https://chutes.ai/grok","caption":"or use Ctrl+O"}}"#,
         )
         .unwrap();
         let cta = full.cta.as_ref().expect("cta present");
-        assert_eq!(cta.label.as_deref(), Some("View Chutes pricing"));
-        assert_eq!(cta.url.as_deref(), Some("https://chutes.ai/pricing"));
+        assert_eq!(cta.label.as_deref(), Some("Get SuperGrok"));
+        assert_eq!(cta.url.as_deref(), Some("https://chutes.ai/grok"));
         assert_eq!(cta.caption.as_deref(), Some("or use Ctrl+O"));
 
         let partial: RemoteAnnouncement =

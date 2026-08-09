@@ -1,26 +1,26 @@
-//! Canonical external-settings tool name ↔ Grok tool correspondence: one table
+//! Canonical external-settings tool name ↔ Chutes Build tool correspondence: one table
 //! replacing two that drifted apart.
 //!
 //! Two consumers read it independently. The hook matcher (`xai-grok-hooks`) needs the
-//! Grok tool **names** an external settings term maps to (and the reverse, for regex
+//! Chutes Build tool **names** an external settings term maps to (and the reverse, for regex
 //! matchers); the agent builder (`xai-grok-agent`) needs the [`ToolKind`] a `tools:`
 //! allowlist entry resolves to. A row may carry a kind without names (`PowerShell`
 //! shares `Execute`, with no distinct tool) or names without a kind (e.g.
 //! `Agent`/`ExitPlanMode`/`Cron*` are matchable but not allowlist-resolvable).
 //!
-//! The `chutes-build` names are test-checked against the live registry.
+//! The `grok` names are test-checked against the live registry.
 
 use super::tool::ToolKind;
 use ToolKind::*;
 
-/// One Claude tool's correspondence to Grok, read via the accessor functions below.
+/// One Claude tool's correspondence to Chutes Build, read via the accessor functions below.
 struct ClaudeTool {
     claude: &'static str,
-    /// Grok [`ToolKind`] for allowlist resolution; `None` for names that are matchable
+    /// Chutes Build [`ToolKind`] for allowlist resolution; `None` for names that are matchable
     /// (spawn/plan-mode directives) but must not resolve an allowlist.
     kind: Option<ToolKind>,
-    /// Grok tool names this Claude tool maps to (empty when there is no direct
-    /// Grok tool — the entry then only contributes a `kind`).
+    /// Chutes Build tool names this Claude tool maps to (empty when there is no direct
+    /// Chutes Build tool — the entry then only contributes a `kind`).
     grok: &'static [&'static str],
 }
 
@@ -79,7 +79,7 @@ const CLAUDE_TOOLS: &[ClaudeTool] = &[
     match_only("ListMcpResourcesTool", &["ListMcpResources"]),                        // cursor preset
 ];
 
-/// The Grok [`ToolKind`] a Claude allowlist entry resolves to, if any.
+/// The Chutes Build [`ToolKind`] a Claude allowlist entry resolves to, if any.
 pub fn kind_for(claude: &str) -> Option<ToolKind> {
     CLAUDE_TOOLS
         .iter()
@@ -87,7 +87,7 @@ pub fn kind_for(claude: &str) -> Option<ToolKind> {
         .and_then(|t| t.kind)
 }
 
-/// The Grok tool names a Claude matcher term fires on.
+/// The Chutes Build tool names a Claude matcher term fires on.
 pub fn grok_names_for(claude: &str) -> impl Iterator<Item = &'static str> {
     CLAUDE_TOOLS
         .iter()
@@ -106,7 +106,7 @@ pub fn claude_names_for(grok_name: &str) -> impl Iterator<Item = &'static str> +
         .map(|t| t.claude)
 }
 
-/// Every distinct Grok name the table references, for the `xai-grok-agent` drift-check
+/// Every distinct Chutes Build name the table references, for the `xai-grok-agent` drift-check
 /// test that asserts each is a real client tool name.
 pub fn grok_names() -> impl Iterator<Item = &'static str> {
     let mut seen = std::collections::HashSet::new();
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn every_row_contributes() {
-        // A row with neither a kind nor a Grok name is dead weight (and signals a typo).
+        // A row with neither a kind nor a Chutes Build name is dead weight (and signals a typo).
         for t in CLAUDE_TOOLS {
             assert!(
                 t.kind.is_some() || !t.grok.is_empty(),

@@ -10,14 +10,18 @@ use xai_grok_shell::env::GrokBuildEnvironment;
 use xai_grok_shell::util::grok_home::grok_home;
 
 const TTL_SECONDS_BEFORE_AUTO_UPDATE: Duration = Duration::from_secs(60 * 30);
-const NPM_PACKAGE: &str = "chutes-build";
+pub(crate) const NPM_PACKAGE: &str = "chutes-build";
 pub const GH_RELEASE_REPO: &str = "TheStreamCode/chutes-build";
 
 /// Fail-closed endpoint retained for compatibility with the inherited updater.
+/// Chutes Build does not self-update; the caller stays so upstream merges land
+/// cleanly, and the request fails locally instead of reaching a network.
 pub(crate) const CLI_BASE_URL_PRIMARY: &str = "http://127.0.0.1:9/updates";
 
-/// Fallback CLI base URL: direct GCS, used when the primary is unreachable
-/// (Cloudflare outage, regional CF egress issue, DNS hijack, etc.).
+/// The fallback is deadened for the same reason. It pointed at a GCS bucket that
+/// does not exist, so `update --check` made a real request to
+/// `storage.googleapis.com` and reported `NoSuchBucket` — a network call on a
+/// path that should never leave the machine.
 pub(crate) const CLI_BASE_URL_FALLBACK: &str = "http://127.0.0.1:9/updates";
 
 /// CLI base URLs in preference order. Callers (channel-pointer fetch, binary
@@ -31,7 +35,7 @@ pub(crate) const CLI_BASE_URLS: &[&str] = &[CLI_BASE_URL_PRIMARY, CLI_BASE_URL_F
 /// about the `GrokBuildEnvironment` enum directly.
 #[derive(Debug, Clone)]
 pub struct UpdateConfig {
-    /// Chat API proxy base URL (versioned `https://cli-chat-proxy.chutes-build.com/v1` endpoint).
+    /// Chat API proxy base URL (versioned `https://cli-chat-proxy.chutes.ai/v1` endpoint).
     pub proxy_base_url: String,
     /// Auth scope key for `~/.chutes-build/auth.json`.
     pub auth_scope: String,
@@ -457,7 +461,7 @@ pub fn installed_on_disk_version() -> Option<String> {
 /// `grok-0.1.150-alpha.1`): everything between the `{bin_prefix}-` prefix
 /// and the first platform-OS component is the version, validated as semver
 /// so unknown layouts (`grok-latest`, `grok-pager-*` when `bin_prefix` is
-/// `chutes-build`) return `None` instead of garbage.
+/// `grok`) return `None` instead of garbage.
 ///
 /// Shared by the disk-version probe above and `cleanup_old_downloads` in
 /// `auto_update` — keep it the single place that understands this naming.

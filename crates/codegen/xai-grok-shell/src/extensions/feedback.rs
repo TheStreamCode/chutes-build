@@ -1,4 +1,4 @@
-//! `chutes.build/feedback`, `chutes.build/feedback/dismiss`, `chutes.build/btw`, and `chutes.build/review/*`
+//! `chutes.ai/feedback`, `chutes.ai/feedback/dismiss`, `chutes.ai/btw`, and `chutes.ai/review/*`
 //! extension handlers.
 //!
 //! - `feedback`/`feedback/dismiss`: persist user ratings/text locally and
@@ -18,7 +18,7 @@ use crate::agent::MvpAgent;
 use crate::session::persistence::{LocalFeedbackEntry, UserFeedbackEntry};
 use crate::session::{
     ClientFeedbackInput, CommentDeleteRequest, CommentDeleteResponse, CommentRequest,
-    CommentResponse, FeedbackRequestDismiss, FeedbackResponse, SessionCommand,
+    CommentResponse, FeedbackRequestDismiss, FeedbackResponse, SessionCommand, SideQuestionError,
 };
 use crate::upload::gcs::WithAuth as _;
 use xai_file_utils::gcs::upload_bytes;
@@ -43,7 +43,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     }
 }
 
-/// Handle `chutes.build/btw` -- a side question that doesn't interrupt the current turn.
+/// Handle `chutes.ai/btw` -- a side question that doesn't interrupt the current turn.
 async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -54,10 +54,7 @@ async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 
     let req: BtwRequest = parse_params(args)?;
     let sid: acp::SessionId = req.session_id.clone().into();
-    let session_handle = {
-        let sessions = agent.sessions.borrow();
-        sessions.get(&sid).cloned()
-    };
+    let session_handle = agent.resident_handle(&sid);
     let Some(session) = session_handle else {
         return Err(
             acp::Error::invalid_params().data(format!("session not found: {}", req.session_id))
@@ -75,7 +72,20 @@ async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         Ok(answer) => super::to_ext_response(Ok(serde_json::json!({
             "answer": answer,
         }))),
-        Err(e) => Err(acp::Error::internal_error().data(e)),
+        // Model errors take the canonical mapping: overload gets its short
+        // display copy there, rate limits keep the typed code + upgrade
+        // copy, auth failures surface as auth_required.
+        Err(SideQuestionError::Sampling(e)) => {
+            Err(crate::sampling::error::map_sampling_err_to_acp(e))
+        }
+        // Non-model failures are already readable sentences. Set `message`
+        // and leave `data` unset — `Display` appends JSON-encoded `data`,
+        // and `internal_error().data(e)` rendered as `Internal error: "…"`,
+        // which made capacity failures look like client bugs in the TUI.
+        Err(e) => Err(acp::Error::new(
+            acp::ErrorCode::InternalError.into(),
+            e.to_string(),
+        )),
     }
 }
 
@@ -120,7 +130,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                 };
 
             let session_id = acp::SessionId::new(feedback_input.session_id.clone());
-            let session_handle = agent.sessions.borrow().get(&session_id).cloned();
+            let session_handle = agent.resident_handle(&session_id);
 
             let (model_id, model_metadata) = if let Some(ref session) = session_handle {
                 let (tx1, rx1) = tokio::sync::oneshot::channel();
@@ -150,12 +160,6 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                 turn_number,
             );
             let turn_number = submission.turn_number;
-
-            if let Some(user_meta) =
-                crate::agent::mvp_agent::parse_json_object_env("CHUTES_BUILD_USER_METADATA")
-            {
-                submission.merge_metadata(user_meta);
-            }
 
             // Enrich with session context for Slack notifications (best-effort).
             if let Some(ref session_handle) = session_handle {
@@ -212,23 +216,6 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                 );
             }
 
-            // Point to the per-turn unified log already uploaded by
-            // complete_prompt_trace. Only set the URL when trace uploads
-            // are active — otherwise the cloud storage object won't exist.
-            if agent.trace_upload_config().await.is_some()
-                && let Some(tn) = turn_number
-            {
-                let bucket_url = {
-                    let cfg = agent.cfg.borrow();
-                    cfg.endpoints.resolve_trace_bucket_url().map(|r| r.value)
-                };
-                submission.unified_log_url = crate::upload::gcs::unified_log_url(
-                    bucket_url.as_deref(),
-                    &feedback_input.session_id,
-                    tn,
-                );
-            }
-
             let telemetry_enabled = {
                 let cfg = agent.cfg.borrow();
                 cfg.is_telemetry_enabled()
@@ -243,12 +230,22 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                     "no feedback client available (missing proxy credentials); feedback saved locally only"
                 );
             }
+            // Read the live feedback.user config (the session-actor path uses its
+            // spawn-time snapshot); both dedupe through the same process-wide
+            // identity cache, so a stable config resolves identically either way.
+            // Clone out so the RefCell borrow doesn't span an await.
+            let user_cfg = agent.cfg.borrow().feedback.user.clone();
+            let author_identity =
+                crate::util::user_identity::cached_identity(user_cfg.as_ref()).await;
             let outcome = crate::session::feedback_manager::submit_feedback_workflow(
                 &mut submission,
                 client.as_ref(),
                 session_handle.as_ref().map(|h| &h.persistence_tx),
-                feedback_input.is_solicited(),
-                telemetry_enabled,
+                crate::session::feedback_manager::SubmitFeedbackOptions {
+                    solicited: feedback_input.is_solicited(),
+                    telemetry_enabled,
+                    author_identity,
+                },
             )
             .await;
 
@@ -307,7 +304,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
             // Persist dismiss locally; flushed before storage CopyFile by the persistence actor.
             {
                 let session_id = acp::SessionId::new(dismiss_input.session_id.clone());
-                if let Some(session_handle) = agent.sessions.borrow().get(&session_id) {
+                if let Some(session_handle) = agent.resident_handle(&session_id) {
                     session_handle.persist_feedback(LocalFeedbackEntry::UserFeedback(
                         UserFeedbackEntry {
                             submitted_at: chrono::Utc::now(),
@@ -360,8 +357,8 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
 /// Record inline code review events.
 ///
 /// Methods:
-/// - `chutes.build/review/comment`: record a new inline code comment to cloud storage
-/// - `chutes.build/review/comment/delete`: record a tombstone event for a deleted comment
+/// - `chutes.ai/review/comment`: record a new inline code comment to cloud storage
+/// - `chutes.ai/review/comment/delete`: record a tombstone event for a deleted comment
 async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/review/comment" => {

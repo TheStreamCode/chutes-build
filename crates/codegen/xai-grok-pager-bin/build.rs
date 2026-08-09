@@ -3,12 +3,6 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=CHUTES_BUILD_VERSION");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        // Clap builds a large command graph during early startup. Reserve a
-        // practical main-thread stack on Windows, whose executable default is
-        // otherwise too small for the complete CLI surface.
-        println!("cargo:rustc-link-arg=/STACK:8388608");
-    }
 
     let commit = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])

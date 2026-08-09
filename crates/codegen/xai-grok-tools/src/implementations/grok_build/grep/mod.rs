@@ -93,16 +93,13 @@ pub struct GrepSearchInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<usize>,
 
-    #[schemars(
-        rename = "-i",
-        description = "Case insensitive search (rg -i). Defaults to false."
-    )]
+    #[schemars(rename = "-i", description = "Case insensitive search (rg -i).")]
     #[serde(
         rename = "-i",
         default,
-        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool"
+        deserialize_with = "crate::types::schema::deserialize_lenient_bool"
     )]
-    pub case_insensitive: Option<bool>,
+    pub case_insensitive: bool,
 
     #[schemars(
         description = "File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than glob for standard file types."
@@ -117,14 +114,13 @@ pub struct GrepSearchInput {
     pub head_limit: Option<usize>,
 
     #[schemars(
-        description = "Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false."
+        description = "Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall)."
     )]
     #[serde(
         default,
-        deserialize_with = "crate::types::schema::deserialize_lenient_option_bool",
-        skip_serializing_if = "Option::is_none"
+        deserialize_with = "crate::types::schema::deserialize_lenient_bool"
     )]
-    pub multiline: Option<bool>,
+    pub multiline: bool,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -190,6 +186,20 @@ fn grep_timeout() -> Duration {
     Duration::from_secs(grep_timeout_secs(xai_tty_utils::is_wsl()))
 }
 
+/// Reap an already-killed `rg`, waiting at most
+/// [`xai_tty_utils::KILL_REAP_TIMEOUT`]; on expiry the corpse is abandoned to
+/// tokio's orphan reaper (see the constant's docs for the D-state rationale).
+async fn reap_killed_rg(child: &mut Child) -> Option<std::process::ExitStatus> {
+    let status = xai_tty_utils::reap_killed_bounded(child, xai_tty_utils::KILL_REAP_TIMEOUT).await;
+    if status.is_none() {
+        tracing::warn!(
+            reap_timeout_secs = xai_tty_utils::KILL_REAP_TIMEOUT.as_secs(),
+            "killed rg not reaped (bound expired — likely uninterruptible kernel I/O — or wait failed); abandoning"
+        );
+    }
+    status
+}
+
 /// Resolve the effective line/entry budget for this call.
 ///
 /// Always returns a finite limit so we can stop reading (and kill `rg`) once
@@ -242,16 +252,16 @@ impl crate::types::tool_metadata::ToolMetadata for GrepTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {
         r#"Search file contents with regular expressions (ripgrep).
 
 - Full regex syntax, so escape literal special characters: `functionCall\(`, or `interface\{\}` to find interface{} in Go.
-- Pass the pattern as a raw regex string — no surrounding quotes.
+- Pass ${{ params.search.pattern }} as a raw regex string — no surrounding quotes.
 - Respects .gitignore unless you pass a broad glob like '--glob *'.
-- Only filter by 'type' or 'glob' when you are sure of the file type; import paths may not match source file types (.js vs .ts).
+- Only filter by '${{ params.search.type }}' or '${{ params.search.glob }}' when you are sure of the file type; import paths may not match source file types (.js vs .ts).
 - Output is ripgrep-style: ':' marks match lines, '-' marks context lines, grouped by file. Large results are capped and report "at least" counts."#
     }
 }
@@ -270,7 +280,7 @@ impl xai_tool_runtime::Tool for GrepTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "grep",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
@@ -395,18 +405,19 @@ impl xai_tool_runtime::Tool for GrepTool {
                 tracing::Span::current().record("wall_ms", started.elapsed().as_millis() as u64);
                 tracing::warn!(timeout_secs = timeout.as_secs(), "grep timed out");
                 let _ = child.start_kill();
-                let _ = child.wait().await;
+                reap_killed_rg(&mut child).await;
                 return Ok(grep_timeout_output(timeout.as_secs()));
             }
         };
 
-        // `rg` was already killed inside the timeout block when `stdout_truncated`
-        // (before the stderr drain); just reap it here.
-        let status = child.wait().await.ok();
+        // Truncated output means `rg` was already killed above — bounded reap,
+        // and the exit code is defined as 0. A natural EOF means rg is exiting,
+        // so the plain wait is prompt.
         let exit_code = if stdout_truncated {
+            reap_killed_rg(&mut child).await;
             0
         } else {
-            status.and_then(|s| s.code()).unwrap_or(-1)
+            child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1)
         };
 
         tracing::Span::current().record("early_kill", stdout_truncated);
@@ -574,7 +585,7 @@ fn grep_progress_stream(
                 tracing::warn!(timeout_secs = secs, "grep timed out");
             });
             let _ = child.start_kill();
-            let _ = child.wait().await;
+            reap_killed_rg(&mut child).await;
             // Timeout: finalize what was read (marked truncated) plus an
             // explicit notice, so the stream isn't contradicted; with
             // nothing streamed, fall back to the timeout-only card.
@@ -625,11 +636,14 @@ fn grep_progress_stream(
             .await;
         }
 
-        let status = child.wait().await.ok();
+        // Truncated output means `rg` was already killed above — bounded reap,
+        // and the exit code is defined as 0. A natural EOF means rg is exiting,
+        // so the plain wait is prompt.
         let exit_code = if stdout_truncated {
+            reap_killed_rg(&mut child).await;
             0
         } else {
-            status.and_then(|s| s.code()).unwrap_or(-1)
+            child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1)
         };
 
         let wall_ms = stream_started.elapsed().as_millis() as u64;
@@ -766,7 +780,7 @@ async fn prepare_grep(
         .arg("1000")
         .arg("--max-columns-preview");
 
-    if input.case_insensitive.unwrap_or(false) {
+    if input.case_insensitive {
         cmd.arg("--ignore-case");
     }
 
@@ -792,7 +806,7 @@ async fn prepare_grep(
         cmd.arg("--type").arg(t);
     }
 
-    if input.multiline.unwrap_or(false) {
+    if input.multiline {
         cmd.arg("-U").arg("--multiline-dotall");
     }
 
@@ -830,6 +844,9 @@ async fn prepare_grep(
     crate::util::detach_command(&mut cmd);
     cmd.stdin(Stdio::null());
 
+    #[allow(clippy::disallowed_methods)]
+    // search helper; killed and reaped with a bound on timeout/truncation,
+    // abandoned to the orphan reaper if unreapable (D-state)
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -1483,11 +1500,53 @@ mod tests {
             before_context: None,
             after_context: None,
             context: None,
-            case_insensitive: None,
+            case_insensitive: false,
             r#type: None,
             head_limit: None,
-            multiline: None,
+            multiline: false,
         }
+    }
+
+    /// Boolean flags must be non-optional in the model-facing schema so the
+    /// default is unambiguous (`false`, not `null` + "Default: false" prose).
+    #[test]
+    fn grep_bool_flags_schema_is_plain_boolean_with_default_false() {
+        let schema = serde_json::to_value(schemars::schema_for!(GrepSearchInput)).unwrap();
+        let props = &schema["properties"];
+
+        // Field is renamed to "-i" for the model-facing name.
+        let case = &props["-i"];
+        assert_eq!(case["type"], "boolean", "case_insensitive schema: {case}");
+        assert_eq!(case["default"], false, "case_insensitive schema: {case}");
+        assert!(
+            case.get("anyOf").is_none(),
+            "must not use nullable anyOf: {case}"
+        );
+
+        let multi = &props["multiline"];
+        assert_eq!(multi["type"], "boolean", "multiline schema: {multi}");
+        assert_eq!(multi["default"], false, "multiline schema: {multi}");
+        assert!(
+            multi.get("anyOf").is_none(),
+            "must not use nullable anyOf: {multi}"
+        );
+    }
+
+    #[test]
+    fn grep_bool_flags_deserialize_missing_and_null_as_false() {
+        let missing: GrepSearchInput = serde_json::from_str(r#"{"pattern":"foo"}"#).unwrap();
+        assert!(!missing.case_insensitive);
+        assert!(!missing.multiline);
+
+        let nulls: GrepSearchInput =
+            serde_json::from_str(r#"{"pattern":"foo","-i":null,"multiline":null}"#).unwrap();
+        assert!(!nulls.case_insensitive);
+        assert!(!nulls.multiline);
+
+        let truths: GrepSearchInput =
+            serde_json::from_str(r#"{"pattern":"foo","-i":"yes","multiline":1}"#).unwrap();
+        assert!(truths.case_insensitive);
+        assert!(truths.multiline);
     }
 
     #[test]
@@ -1637,6 +1696,39 @@ mod tests {
         assert_eq!(xai_tool_runtime::Tool::id(&tool).as_str(), "grep");
         assert!(tool.description_template().contains("ripgrep"));
         assert!(tool.description_template().contains("regex"));
+    }
+
+    #[test]
+    fn description_template_tracks_renamed_search_params() {
+        use crate::types::template_renderer::TemplateRenderer;
+        use crate::types::tool::ToolKind;
+        use crate::types::tool_metadata::ToolMetadata;
+        use std::collections::HashMap;
+
+        let tools = HashMap::from([(ToolKind::Search, "grep".to_string())]);
+        let params = HashMap::from([(
+            ToolKind::Search,
+            HashMap::from([
+                ("pattern".to_string(), "query".to_string()),
+                ("type".to_string(), "filetype".to_string()),
+                ("glob".to_string(), "include".to_string()),
+            ]),
+        )]);
+        let rendered = TemplateRenderer::new(tools, params)
+            .render(ToolMetadata::description_template(&GrepTool))
+            .unwrap();
+        assert!(
+            rendered.contains("Pass query as a raw regex")
+                && rendered.contains("'filetype'")
+                && rendered.contains("'include'"),
+            "renamed search params must appear:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("Pass pattern as")
+                && !rendered.contains("'type'")
+                && !rendered.contains("'glob'"),
+            "canonical search param names must not remain after rename:\n{rendered}"
+        );
     }
 
     #[tokio::test]
@@ -2016,10 +2108,10 @@ mod tests {
                     before_context: None,
                     after_context: None,
                     context: None,
-                    case_insensitive: None,
+                    case_insensitive: false,
                     r#type: None,
                     head_limit: None,
-                    multiline: None,
+                    multiline: false,
                 }
             },
         )
@@ -2054,10 +2146,10 @@ mod tests {
                     before_context: None,
                     after_context: None,
                     context: None,
-                    case_insensitive: None,
+                    case_insensitive: false,
                     r#type: None,
                     head_limit: None,
-                    multiline: None,
+                    multiline: false,
                 }
             },
         )
@@ -2090,10 +2182,10 @@ mod tests {
                 before_context: None,
                 after_context: None,
                 context: None,
-                case_insensitive: None,
+                case_insensitive: false,
                 r#type: None,
                 head_limit: None,
-                multiline: None,
+                multiline: false,
             },
         )
         .await

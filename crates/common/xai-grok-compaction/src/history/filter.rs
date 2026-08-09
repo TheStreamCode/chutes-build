@@ -1,7 +1,7 @@
 //! Item filtering and user-query extraction for history compaction —
 //! generic over [`CompactionItem`] / [`CompactionItemBuilder`].
 //!
-//! Behavior is byte-for-byte identical for Grok chat (`T = Arc<GrokTurn>`).
+//! Behavior is byte-for-byte identical for Chutes Build chat (`T = Arc<GrokTurn>`).
 
 use tracing::info;
 

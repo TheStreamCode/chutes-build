@@ -30,7 +30,7 @@ use tokio::sync::Mutex;
 
 use crate::session::checkpoint::RewindCheckpoint;
 
-/// Directory (under `<cwd>/.chutes-build`) holding every session's checkpoint store.
+/// Directory (under `<cwd>/.grok`) holding every session's checkpoint store.
 const STORE_SUBDIR: &str = "rewind-checkpoints";
 
 /// Default cap on retained checkpoints per session. Bounds on-disk and in-memory

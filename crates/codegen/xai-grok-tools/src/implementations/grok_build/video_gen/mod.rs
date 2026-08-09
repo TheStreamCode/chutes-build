@@ -59,11 +59,7 @@ pub use xai_grok_tools_api::slash_commands::{
     imagine_video_usage_message,
 };
 
-// Matches IMAGE_GEN_TOOL_NAME/IMAGE_TO_VIDEO_TOOL_NAME (xai-grok-tools-api):
-// this legacy tool is retired and its "name" now points at its replacement,
-// the native generate_media tool, rather than a tool id that was never
-// registered in the toolset.
-pub const REFERENCE_TO_VIDEO_TOOL_NAME: &str = "generate_media";
+pub const REFERENCE_TO_VIDEO_TOOL_NAME: &str = "reference_to_video";
 
 #[derive(Clone, Deserialize, PartialEq, Eq)]
 pub struct S3AccessCredentials {
@@ -205,23 +201,26 @@ impl VideoGenClient {
             Ok::<(), xai_tool_runtime::ToolError>(())
         })?;
 
-        let http = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            .map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Failed to build HTTP client: {e}"
-                ))
-            })?;
+        let http = xai_grok_extra_ca::with_extra_root_certificates(
+            reqwest::Client::builder().default_headers(headers),
+        )
+        .build()
+        .map_err(|e| {
+            xai_tool_runtime::ToolError::invalid_arguments(format!(
+                "Failed to build HTTP client: {e}"
+            ))
+        })?;
 
-        let download_http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| {
-                xai_tool_runtime::ToolError::invalid_arguments(format!(
-                    "Failed to build download client: {e}"
-                ))
-            })?;
+        let download_http = xai_grok_extra_ca::with_extra_root_certificates(
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS)),
+        )
+        .build()
+        .map_err(|e| {
+            xai_tool_runtime::ToolError::invalid_arguments(format!(
+                "Failed to build download client: {e}"
+            ))
+        })?;
 
         Ok(Self {
             http,
@@ -695,6 +694,16 @@ impl VideoGenConfig {
     pub fn is_enabled(&self) -> bool {
         matches!(self, Self::Enabled { .. })
     }
+
+    /// Stamp [`super::image_gen::SESSION_ID_HEADER`] onto `extra_headers`.
+    /// A caller-provided value is never overwritten. No-op when `Disabled`.
+    pub fn stamp_session_id_header(&mut self, session_id: &str) {
+        if let Self::Enabled { extra_headers, .. } = self {
+            extra_headers
+                .entry(super::image_gen::SESSION_ID_HEADER.to_string())
+                .or_insert_with(|| session_id.to_string());
+        }
+    }
 }
 
 /// Prose returned to the model (as a normal, successful tool result) when a
@@ -979,7 +988,7 @@ impl crate::types::tool_metadata::ToolMetadata for ImageToVideoTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {
@@ -1005,7 +1014,7 @@ impl xai_tool_runtime::Tool for ImageToVideoTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             IMAGE_TO_VIDEO_TOOL_NAME,
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
@@ -1075,7 +1084,7 @@ impl crate::types::tool_metadata::ToolMetadata for ReferenceToVideoTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {
@@ -1101,7 +1110,7 @@ impl xai_tool_runtime::Tool for ReferenceToVideoTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             REFERENCE_TO_VIDEO_TOOL_NAME,
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 

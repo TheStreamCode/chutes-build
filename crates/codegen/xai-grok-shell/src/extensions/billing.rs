@@ -71,7 +71,7 @@ pub struct BillingPeriodUsage {
     pub total_used: Option<Cent>,
 }
 
-/// Current billing configuration for Grok Build coding credits.
+/// Current billing configuration for Chutes Build coding credits.
 ///
 /// Carries both the newer credits-config fields (`credit_usage_percent`,
 /// `current_period`) and the deprecated `GrokBuildBillingConfig` fields

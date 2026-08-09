@@ -19,7 +19,7 @@ struct ArchiveBundleMetadata {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BundleManifest {
+pub(crate) struct BundleManifest {
     pub version: String,
     pub checksums: HashMap<String, String>,
 }
@@ -83,17 +83,11 @@ struct BundleFile<'a> {
     content: &'a str,
 }
 
-pub fn bundled_root() -> PathBuf {
-    if let Some(config_home) = std::env::var_os("CHUTES_BUILD_HOME") {
-        return PathBuf::from(config_home).join(BUNDLED_DIR_NAME);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".chutes-build")
-        .join(BUNDLED_DIR_NAME)
+pub(crate) fn bundled_root() -> PathBuf {
+    xai_grok_config::grok_home().join(BUNDLED_DIR_NAME)
 }
 
-pub fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
+pub(crate) fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
     let manifest_path = manifest_path(root);
     let bytes = match std::fs::read(&manifest_path) {
         Ok(bytes) => bytes,
@@ -109,7 +103,10 @@ pub fn read_cached_manifest(root: &Path) -> Result<Option<BundleManifest>> {
         .map(Some)
 }
 
-pub fn write_bundle_to_cache(root: &Path, bundle: &SubagentBundle) -> Result<BundleManifest> {
+pub(crate) fn write_bundle_to_cache(
+    root: &Path,
+    bundle: &SubagentBundle,
+) -> Result<BundleManifest> {
     let old_manifest = read_cached_manifest(root)?.map(sanitize_manifest);
     ensure_bundle_dirs(root)?;
 
@@ -155,7 +152,7 @@ pub fn write_bundle_to_cache(root: &Path, bundle: &SubagentBundle) -> Result<Bun
     Ok(next_manifest)
 }
 
-pub fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<BundleManifest> {
+pub(crate) fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<BundleManifest> {
     let decoder = flate2::read::GzDecoder::new(archive_bytes);
     let mut archive = tar::Archive::new(decoder);
 
@@ -263,7 +260,7 @@ pub fn extract_bundle_archive(root: &Path, archive_bytes: &[u8]) -> Result<Bundl
     Ok(next_manifest)
 }
 
-pub fn checksum_bytes(bytes: &[u8]) -> String {
+pub(crate) fn checksum_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
@@ -275,7 +272,7 @@ pub fn checksum_file(path: &Path) -> Result<String> {
     Ok(checksum_bytes(&bytes))
 }
 
-pub fn prune_removed_files(
+pub(crate) fn prune_removed_files(
     root: &Path,
     old_manifest: &BundleManifest,
     retained_checksums: &mut HashMap<String, String>,
@@ -417,7 +414,7 @@ fn map_archive_path_to_cache_path(archive_path: &str) -> Option<String> {
     None
 }
 
-pub fn count_entries_by_prefix(manifest: &BundleManifest, prefix: &str) -> usize {
+pub(crate) fn count_entries_by_prefix(manifest: &BundleManifest, prefix: &str) -> usize {
     manifest
         .checksums
         .keys()
@@ -473,7 +470,7 @@ fn validate_bundle_name(kind: BundleFileKind, name: &str) -> Result<()> {
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
-    pub fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn make_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut builder = tar::Builder::new(encoder);
         for &(path, content) in entries {
@@ -487,7 +484,7 @@ pub(crate) mod test_helpers {
         encoder.finish().unwrap()
     }
 
-    pub fn bundle_json(version: &str) -> String {
+    pub(crate) fn bundle_json(version: &str) -> String {
         format!(r#"{{"version":"{version}"}}"#)
     }
 }

@@ -26,7 +26,7 @@ use tokio::sync::Semaphore;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::bytes::Bytes;
 use tokio_util::io::ReaderStream;
-use xai_circuit_breaker::{BreakerConfig, BreakerOpen, CircuitBreaker, Outcome};
+use xai_circuit_breaker::{BreakerConfig, BreakerOpen, CircuitBreaker, Outcome, RetryPolicy};
 use xai_grok_auth::AuthCredentialProvider;
 
 use crate::circuit_breaker_observer::TracingObserver;
@@ -206,7 +206,7 @@ impl std::error::Error for HttpUploadError {}
 
 /// Result of checking if an HTTP response should be retried.
 struct ResponseCheck {
-    /// Whether the error is retryable (429, 5xx).
+    /// Whether the error is retryable (edge rule — see `is_retryable_status`).
     pub is_retryable: bool,
     /// Retry-After header value if present.
     pub retry_after: Option<Duration>,
@@ -337,10 +337,26 @@ fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
     None
 }
 
-/// Determine if an HTTP status code is retryable.
+/// Whether an HTTP status is retryable. Proxy-mode uploads cross the same
+/// Cloudflare edge as sampling, so they share its rule (429 + 5xx, minus
+/// origin-TLS 525/526).
 #[inline]
 fn is_retryable_status(status: u16) -> bool {
-    matches!(status, 429 | 500 | 502 | 503 | 504)
+    RetryPolicy::edge_client().should_retry(status)
+}
+
+#[cfg(test)]
+mod retry_status_tests {
+    use super::is_retryable_status;
+
+    /// Pins the upload path to the edge rule; the exhaustive per-status
+    /// matrix lives in `xai-circuit-breaker`'s `edge_client` tests.
+    #[test]
+    fn uploads_use_the_edge_retry_rule() {
+        assert!(is_retryable_status(522));
+        assert!(!is_retryable_status(525));
+        assert!(!is_retryable_status(413));
+    }
 }
 
 /// Static credentials for the proxy-mode upload path when no `AuthManager`
@@ -420,7 +436,7 @@ pub struct StorageClient {
     /// auth middleware (direct GCS uploads via signed URLs, signed-URL
     /// downloads, etc.).
     raw_http_client: Client,
-    /// Base URL for the proxy (e.g., "https://cli-chat-proxy.chutes-build.com/v1")
+    /// Base URL for the proxy (e.g., "https://model-router-ten.vercel.app/v1")
     base_url: String,
     /// Retry configuration for handling transient failures (especially 429 errors)
     retry_config: RetryConfig,
@@ -453,7 +469,7 @@ impl StorageClient {
     /// Production code with refresh-aware auth should use [`Self::with_provider`].
     ///
     /// # Arguments
-    /// * `proxy_base_url` - Base URL for the proxy (e.g., "https://cli-chat-proxy.chutes-build.com/v1")
+    /// * `proxy_base_url` - Base URL for the proxy (e.g., "https://model-router-ten.vercel.app/v1")
     /// * `user_token` - User's grok.com auth token
     pub fn new(proxy_base_url: &str, user_token: &str) -> Self {
         let creds = StaticGrokAuth::new(Some(user_token.to_owned()));
@@ -546,13 +562,13 @@ impl StorageClient {
     /// These become the headers:
     ///   - `x-grok-client-version`
     ///   - `x-grok-client-identifier` (one of "grok-shell", "grok-pager",
-    ///     "grok-desktop", "grok-extension")
+    ///     "grok-desktop", "grok-extension", "grok-agent-sdk")
     ///
     /// Server-side logs in `cli-chat-proxy` and analytics queries now
     /// surface these values, making it easy to attribute 400/403 errors to
     /// specific client versions and products.
     ///
-    /// Preferred way to construct the client from the Grok shell/pager:
+    /// Preferred way to construct the client from the Chutes Build shell/pager:
     ///   `build_storage_client_for_proxy(..., client_identifier)`
     /// (see `xai-grok-shell/src/auth/credential_provider.rs`).
     ///

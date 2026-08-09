@@ -34,24 +34,29 @@ mod paste_ctrl_v_text_echoes_fast_windows;
 use common::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; exercises real copy output and /terminal-setup"]
+#[ignore = "PTY e2e; exercises real copy output and /doctor"]
 async fn unknown_ssh_clipboard_delivery_is_unverified() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!(
         "{MOCK_RESPONSE_SENTINEL} clipboard delivery sentinel"
     ));
     let binary = pager_binary().expect("resolve pager binary");
-    let mut env = content.env_for_pager();
-    env.push((
-        "SSH_CONNECTION".into(),
-        "scripted-test 1 127.0.0.1 2".into(),
-    ));
-    let env_refs: Vec<(&str, &str)> = env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect();
-    let mut harness = PtyHarness::new_in_dir(&binary, 60, 80, &[], &env_refs, Some(content.home()))
-        .expect("spawn pager");
+    let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
+        &binary,
+        60,
+        80,
+        &content,
+        &[],
+        &[
+            EnvOp::set("SSH_CONNECTION", "scripted-test 1 127.0.0.1 2"),
+            // Model the no-wrap-sink path even when the parent test process was
+            // launched under `chutes-build wrap`.
+            EnvOp::remove("CHUTES_BUILD_OSC52_SINK"),
+            EnvOp::remove("LC_CHUTES_BUILD_OSC52_SINK"),
+        ],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
 
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
@@ -92,15 +97,13 @@ async fn unknown_ssh_clipboard_delivery_is_unverified() {
     assert!(!harness.contains_text("Copy failed"));
     assert!(!harness.contains_text("Copied!"));
 
+    harness.inject_keys(b"/doctor\r").expect("run /doctor");
     harness
-        .inject_keys(b"/terminal-setup\r")
-        .expect("run /terminal-setup");
+        .wait_for_text("clipboard.delivery-unverified", Duration::from_secs(10))
+        .expect("named clipboard finding");
     harness
-        .wait_for_text("status       unverified", Duration::from_secs(10))
-        .expect("unverified clipboard status");
-    harness
-        .wait_for_text("chutes-build wrap <ssh command>", Duration::from_secs(10))
-        .expect("wrapped SSH guidance");
+        .wait_for_text("chutes-build wrap ssh <host>", Duration::from_secs(10))
+        .expect("doctor-owned wrapped SSH guidance");
     assert!(!harness.contains_text("Copy failed"));
     assert!(!harness.contains_text("panicked"));
 

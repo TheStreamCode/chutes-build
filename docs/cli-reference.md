@@ -102,6 +102,8 @@ their version-specific value syntax.
 | `agent` | Run without the TUI | `stdio`, `headless`, `serve`, `leader`; `--reauth`, `--model`, `--effort`, `--always-approve`, `--agent-profile`, repeatable `--plugin-dir`, `--leader`/`--no-leader` |
 | `completions <SHELL>` | Generate completion script | `bash`, `elvish`, `fish`, `powershell`, `zsh` |
 | `dashboard` | Open the local agent dashboard | Respects the dashboard configuration |
+| `doctor` | Check terminal, clipboard, colour, and input support | `--json`; starts no session |
+| `du` (`disk-usage`) | Report what the state root uses on disk | `--json` |
 | `export <SESSION_ID> [OUTPUT]` | Export a local transcript as Markdown | `--clipboard` conflicts with an output path |
 | `inspect` | Show resolved configuration | `--json` |
 | `leader` | Manage local shared leader processes | `list [--json]`, `info [--pid PID] [--json]`, `kill` |
@@ -112,13 +114,17 @@ their version-specific value syntax.
 | `models` | List the resolved model catalog | `--json` |
 | `plugin` | Manage plugins and marketplaces | `list`, `install`, `uninstall`, `update`, `enable`, `disable`, `details`, `validate`, `tag`, `marketplace` |
 | `sessions` | Manage the local session registry | `list`, `search`, `delete` |
+| `setup` | Fetch and install managed configuration | `--json` prints it instead of writing; the endpoint is a closed loopback port in this build, so it fails locally rather than reaching a server |
 | `trace <SESSION_ID>` | Create a local trace archive | `--output`, `--json`; remote upload is not available |
+| `update` | Report where to get a newer version | `--check`, `--json`. Installs nothing: self-update is compiled out and the update endpoints are closed loopback ports |
 | `version` (`v`) | Print version/channel information | `--json` |
 | `worktree` | Manage tracked git worktrees | `list`, `show`, `rm`, `gc`, `db` |
 | `wrap <CMD>...` | Forward OSC 52 clipboard writes from a local PTY | Pass the wrapped command and arguments verbatim |
 
-The inherited remote session/share/update/workspace-exposure commands are not
-part of the Chutes Build CLI.
+The inherited remote session/share and workspace-exposure commands are not part of
+the Chutes Build CLI. `update` and `setup` are present but cannot reach a server:
+their endpoints are closed loopback ports, so they fail locally and instantly
+rather than being silently absent. `trace` writes an archive and never uploads.
 
 ## Agent server
 

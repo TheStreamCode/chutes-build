@@ -1,23 +1,20 @@
 /target
-/output
-/dist
-/staging
-/.playwright-cli
-/node_modules
-/coverage
-/*.tgz
-/.chutes-build
-/sessions
-/traces
-/memories.md
-.env
-.env.*
-!.env.example
-*.pem
-*.p12
-*.pfx
-*.log
-*.tmp
 **/*.rs.bk
 .DS_Store
-Thumbs.db
+
+# Generated media, traces and local diagnostics. `AGENTS.md` forbids committing
+# these; the re-base branch had 42 of them tracked, including a latency log that
+# contained a live Chutes API key.
+/output
+
+# Stray `env` dumps from the notification-hook tests. The tests interpolated an
+# unquoted Windows path into `sh -c`, so the redirect landed in the crate root
+# under a mangled name — and `env` prints the whole environment, API key
+# included. The tests are fixed; this is the second line of defence, because a
+# `git add -A` should never be able to sweep up a credential.
+CUsers*env.txt
+*AppDataLocalTemp*
+
+# Python bytecode from the rebrand/sweep scripts.
+__pycache__/
+*.pyc

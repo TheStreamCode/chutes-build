@@ -4,6 +4,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 
 use super::TOOL_HEADER_RANGE;
+use crate::appearance::AppearanceConfig;
 use crate::render::line_utils::truncate_str;
 use crate::scrollback::block::BlockContent;
 use crate::scrollback::types::{
@@ -268,7 +269,7 @@ impl BlockContent for MemorySearchToolCallBlock {
         }
     }
 
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         false
     }
 
@@ -304,14 +305,14 @@ fn shorten_path(path: &str) -> &str {
     let memory_root = xai_grok_config::grok_home().join("memory");
     let memory_prefix = memory_root.display().to_string();
     if let Some(rest) = path.strip_prefix(&memory_prefix) {
-        let rest = rest.trim_start_matches(['/', '\\']);
-        if let Some(after_slash) = rest.find(['/', '\\']) {
+        let rest = rest.strip_prefix('/').unwrap_or(rest);
+        if let Some(after_slash) = rest.find('/') {
             return &rest[after_slash + 1..];
         }
         return rest;
     }
     // Fallback: strip to filename
-    path.rsplit(['/', '\\']).next().unwrap_or(path)
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
@@ -398,7 +399,7 @@ mod tests {
         let output = r#"Found 1 memory result(s):
 
 ### Result 1 (score: 0.72, source: global)
-**File:** /root/.chutes-build/memory/memories.md (lines 0-10)
+**File:** /root/.chutes-build/memory/MEMORY.md (lines 0-10)
 ```
 ## Project Conventions
 * Always use graphite for PRs
@@ -408,7 +409,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!((results[0].score - 0.72).abs() < 0.01);
         assert_eq!(results[0].source, "global");
-        assert_eq!(results[0].path, "/root/.chutes-build/memory/memories.md");
+        assert_eq!(results[0].path, "/root/.chutes-build/memory/MEMORY.md");
         assert_eq!(results[0].start_line, 0);
         assert_eq!(results[0].end_line, 10);
         assert!(results[0].snippet.contains("graphite"));
@@ -419,7 +420,7 @@ mod tests {
         let output = r#"Found 2 memory result(s):
 
 ### Result 1 (score: 0.85, source: workspace)
-**File:** /root/.chutes-build/memory/ws/memories.md (lines 1-5)
+**File:** /root/.chutes-build/memory/ws/MEMORY.md (lines 1-5)
 ```
 workspace content
 ```
@@ -447,18 +448,15 @@ session content
 
     #[test]
     fn shorten_memory_path() {
-        // Paths under the configured grok memory root keep one trailing segment group.
+        // Paths under the configured chutes-build memory root keep one trailing segment group.
         let memory_root = xai_grok_config::grok_home().join("memory");
         let session = memory_root.join("xai-50aa78f0/sessions/2026-05-01.md");
-        let top = memory_root.join("memories.md");
+        let top = memory_root.join("MEMORY.md");
         assert_eq!(
             shorten_path(session.to_str().expect("utf8 path")),
             "sessions/2026-05-01.md"
         );
-        assert_eq!(
-            shorten_path(top.to_str().expect("utf8 path")),
-            "memories.md"
-        );
+        assert_eq!(shorten_path(top.to_str().expect("utf8 path")), "MEMORY.md");
         // Outside the memory root falls back to the filename.
         assert_eq!(shorten_path("/some/other/path.md"), "path.md");
     }

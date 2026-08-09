@@ -1,4 +1,7 @@
-//! Local changelog cache support. Remote changelog fetching is disabled.
+//! Changelog fetching from CDN with local disk cache.
+//!
+//! Both markdown (`*.external.md`) and JSON (`*.external.json`) changelogs
+//! are published per-version to the CDN at `chutes.ai/cli/changelogs/`.
 //!
 //! `ChangelogManager::fetch()` retrieves both formats in parallel and
 //! returns a `Changelog` with optional markdown + structured entries.
@@ -98,7 +101,7 @@ impl ChangelogManager {
     pub fn fetch(&self) -> Changelog {
         // Always re-resolve from env so a caller holding an older manager
         // (or OnceLock lag) still reads the live harness home.
-        Self::from_env_home().fetch_with(true, CHANGELOG_BASE)
+        Self::from_env_home().fetch_with(changelog_offline(), CHANGELOG_BASE)
     }
 
     /// Fetch using this manager's already-resolved cache paths, an explicit
@@ -193,6 +196,12 @@ impl ChangelogManager {
         }
         read_cache(cache_path)
     }
+}
+
+/// When set, `ChangelogManager::fetch` skips the CDN and only reads disk cache.
+/// Used by PTY harness tests that seed `CHANGELOG.{md,json}` under a temp home.
+fn changelog_offline() -> bool {
+    std::env::var_os("CHUTES_BUILD_CHANGELOG_OFFLINE").is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 fn read_cache(path: &std::path::Path) -> Option<String> {

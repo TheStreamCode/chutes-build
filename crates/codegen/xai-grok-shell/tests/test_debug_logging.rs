@@ -76,7 +76,12 @@ fn debug_cmd(
     home: &Path,
     workdir: &Path,
     extra: &[&str],
-) -> tokio::process::Command {
+) -> (tokio::process::Command, TestSandbox) {
+    let mut sandbox = TestSandbox::builder().mock_url(server.url()).build();
+    sandbox
+        .set_env("HOME", home)
+        .set_env("USERPROFILE", home)
+        .set_env("CHUTES_BUILD_HOME", home.join(".chutes-build"));
     let mut cmd = tokio::process::Command::new(grok_binary());
     cmd.args(["-p", "say hi", "--yolo", "--output-format", "json"])
         .args(extra)
@@ -87,14 +92,8 @@ fn debug_cmd(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    xai_grok_test_support::env::test_env_cmd_tokio(&mut cmd, &server.url(), home);
-    // Pin the home location and drop inherited firehose toggles for determinism.
-    cmd.env("CHUTES_BUILD_HOME", home.join(".chutes-build"));
-    cmd.env_remove("CHUTES_BUILD_DEBUG_LOG");
-    cmd.env_remove("CHUTES_BUILD_LOG_FILE");
-    cmd.env_remove("CHUTES_BUILD_LOG_SAMPLING");
-    cmd.env_remove("CHUTES_BUILD_HOOKS_LOG");
-    cmd
+    sandbox.apply_to_tokio_command(&mut cmd);
+    (cmd, sandbox)
 }
 
 /// Poll up to 50×100ms for the per-session firehose at `path` to become non-empty
@@ -142,10 +141,10 @@ async fn debug_flag_enables_firehose_without_crashing() {
     let workdir = git_workdir();
     let home = TempDir::new().expect("create temp home");
 
-    let cmd = debug_cmd(&server, home.path(), workdir.path(), &["--debug"]);
-    let result = run_headless_with_cmd(cmd).await;
+    let (cmd, sandbox) = debug_cmd(&server, home.path(), workdir.workspace(), &["--debug"]);
+    let result = run_headless_in_sandbox(cmd, sandbox).await;
 
-    assert_headless_success(&result, "grok --debug headless", Some(&server));
+    assert_headless_success(&result, "chutes-build --debug headless", Some(&server));
     assert_no_crashes(&result.stderr);
 }
 
@@ -159,8 +158,8 @@ async fn no_debug_flag_writes_no_debug_dir() {
     let workdir = git_workdir();
     let home = TempDir::new().expect("create temp home");
 
-    let cmd = debug_cmd(&server, home.path(), workdir.path(), &[]);
-    let result = run_headless_with_cmd(cmd).await;
+    let (cmd, sandbox) = debug_cmd(&server, home.path(), workdir.workspace(), &[]);
+    let result = run_headless_in_sandbox(cmd, sandbox).await;
 
     assert_headless_success(&result, "grok headless (no --debug)", Some(&server));
     assert!(
@@ -182,22 +181,16 @@ async fn agent_session_writes_named_session_file() {
             .await
             .expect("start mock server");
         let workdir = git_workdir();
-        let home = TempDir::new().expect("create temp home");
-        let grok_home = home.path().join(".chutes-build");
-        let grok_home_str = grok_home.to_string_lossy().into_owned();
+        let mut sandbox = TestSandbox::new();
+        sandbox.set_env("CHUTES_BUILD_DEBUG_LOG", "1");
+        let grok_home = sandbox.grok_home().to_path_buf();
 
-        let client = GrokStdioClient::spawn_with_home_and_env(
-            &server,
-            workdir.path(),
-            home,
-            &[
-                ("CHUTES_BUILD_DEBUG_LOG", "1"),
-                ("CHUTES_BUILD_HOME", &grok_home_str),
-            ],
-        )
-        .await;
+        let client =
+            GrokStdioClient::spawn_with_sandbox(&server, workdir.workspace(), sandbox).await;
         client.initialize_with_timeout().await;
-        let session_id = client.create_session_with_timeout(workdir.path()).await;
+        let session_id = client
+            .create_session_with_timeout(workdir.workspace())
+            .await;
         // New session ids are UUID v7 (filesystem-safe), so the firehose file is
         // named verbatim `<sessionId>.txt`.
         let sid = session_id.0.to_string();
@@ -234,24 +227,25 @@ async fn debug_flag_master_switch_enables_firehose() {
             .await
             .expect("start mock server");
         let workdir = git_workdir();
-        let home = TempDir::new().expect("create temp home");
-        let grok_home = home.path().join(".chutes-build");
-        let grok_home_str = grok_home.to_string_lossy().into_owned();
+        let sandbox = TestSandbox::new();
+        let grok_home = sandbox.grok_home().to_path_buf();
 
         // Drive `chutes-build --debug agent stdio`: the master switch (which runs before
         // the agent dispatch) must be what enables the firehose — NOT a direct
-        // CHUTES_BUILD_DEBUG_LOG env. The spawn helper clears inherited firehose toggles,
-        // so the `--debug` flag is the only thing that can enable logging here.
-        let client = GrokStdioClient::spawn_with_home_env_and_args(
+        // CHUTES_BUILD_DEBUG_LOG env. The sandbox baseline excludes inherited firehose
+        // toggles, so the `--debug` flag is the only thing enabling logging here.
+        let client = GrokStdioClient::spawn_with_sandbox_env_and_args(
             &server,
-            workdir.path(),
-            home,
-            &[("CHUTES_BUILD_HOME", &grok_home_str)],
+            workdir.workspace(),
+            sandbox,
+            &[],
             &["--debug"],
         )
         .await;
         client.initialize_with_timeout().await;
-        let session_id = client.create_session_with_timeout(workdir.path()).await;
+        let session_id = client
+            .create_session_with_timeout(workdir.workspace())
+            .await;
         let sid = session_id.0.to_string();
         let _ = client.prompt_with_timeout(&session_id, "say hi").await;
 
@@ -287,15 +281,15 @@ async fn debug_file_flag_writes_single_file_and_bypasses_routing() {
     let explicit = home.path().join("explicit-firehose.txt");
     let explicit_str = explicit.to_string_lossy().into_owned();
 
-    let cmd = debug_cmd(
+    let (cmd, sandbox) = debug_cmd(
         &server,
         home.path(),
-        workdir.path(),
+        workdir.workspace(),
         &["--debug-file", &explicit_str],
     );
-    let result = run_headless_with_cmd(cmd).await;
+    let result = run_headless_in_sandbox(cmd, sandbox).await;
 
-    assert_headless_success(&result, "grok --debug-file", Some(&server));
+    assert_headless_success(&result, "chutes-build --debug-file", Some(&server));
     assert_no_crashes(&result.stderr);
     assert!(
         explicit.exists(),
@@ -321,9 +315,9 @@ async fn grok_log_file_explicit_path_is_written() {
     let home = TempDir::new().expect("create temp home");
     let custom = home.path().join("custom-log-file.log");
 
-    let mut cmd = debug_cmd(&server, home.path(), workdir.path(), &[]);
-    cmd.env("CHUTES_BUILD_LOG_FILE", &custom);
-    let result = run_headless_with_cmd(cmd).await;
+    let (cmd, mut sandbox) = debug_cmd(&server, home.path(), workdir.workspace(), &[]);
+    sandbox.set_env("CHUTES_BUILD_LOG_FILE", &custom);
+    let result = run_headless_in_sandbox(cmd, sandbox).await;
 
     assert_headless_success(&result, "grok CHUTES_BUILD_LOG_FILE=path", Some(&server));
     assert_no_crashes(&result.stderr);

@@ -72,7 +72,7 @@ impl SlashCommand for ModelCommand {
 
         // Prefer an exact full-string catalog match first. Model display names
         // often contain spaces ("Grok 4.5"); if we split on the last token
-        // first, a shorter catalog entry ("Grok") would steal the prefix and
+        // first, a shorter catalog entry ("Chutes Build") would steal the prefix and
         // treat "4.5" as an effort level.
         if let Some(id) = ctx.models.resolve_by_name_or_id(trimmed) {
             return CommandResult::Action(Action::SetDefaultModel(id));
@@ -150,10 +150,7 @@ fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::Mod
 
 /// One row per logical model. Reasoning models get a trailing space in
 /// `insert_text` so the prompt widget chains into the effort sub-menu.
-///
-/// `pub(crate)` so `/advisor`'s model picker can reuse the same catalog
-/// rows instead of duplicating the display/match-text formatting.
-pub(crate) fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
+pub(super) fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     for (id, info) in &models.available {
@@ -244,6 +241,8 @@ mod tests {
             session_id: None,
             bundle_state: &EMPTY_BUNDLE,
             screen_mode: crate::app::ScreenMode::Inline,
+            billing_surface_visible: true,
+            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -279,6 +278,9 @@ mod tests {
             models: &state,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();
@@ -309,6 +311,9 @@ mod tests {
             models: &state,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // Args query has a trailing space -> effort phase. Items come out
@@ -338,6 +343,9 @@ mod tests {
             models: &state,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // Still in effort phase; matcher upstream narrows to high / xhigh.
@@ -356,6 +364,9 @@ mod tests {
             models: &state,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         // No trailing space, user is still typing the model name.
@@ -415,10 +426,10 @@ mod tests {
 
     #[test]
     fn run_prefers_full_multi_word_model_name_over_prefix_plus_effort() {
-        // Catalog has both "Grok" (reasoning) and "Grok 4.5". `/model Grok 4.5`
-        // must select the full name, not treat "4.5" as an effort on "Grok".
+        // Catalog has both "Chutes Build" (reasoning) and "Grok 4.5". `/model Grok 4.5`
+        // must select the full name, not treat "4.5" as an effort on "Chutes Build".
         let mut state = ModelState::default();
-        let (short_id, short_info) = model_with_reasoning("grok", "Grok");
+        let (short_id, short_info) = model_with_reasoning("grok", "Chutes Build");
         let (long_id, long_info) = model_with_reasoning("grok-4.5", "Grok 4.5");
         state.available.insert(short_id, short_info);
         state.available.insert(long_id.clone(), long_info);

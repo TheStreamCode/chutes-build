@@ -36,7 +36,7 @@
   },
   {
     "category": "fixes",
-    "description": "**grok --minimal** now supports native drag-select on classic Windows conhost terminals.",
+    "description": "**chutes-build --minimal** now supports native drag-select on classic Windows conhost terminals.",
     "breaking_change": false
   },
   {

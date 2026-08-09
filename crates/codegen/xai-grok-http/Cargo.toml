@@ -11,6 +11,7 @@ reqwest-middleware = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 xai-grok-auth = { workspace = true, features = ["middleware"] }
+xai-grok-extra-ca = { workspace = true }
 xai-grok-sampler = { path = "../xai-grok-sampler" }
 xai-grok-telemetry = { workspace = true }
 xai-grok-version = { workspace = true }
@@ -18,6 +19,3 @@ xai-grok-workspace = { workspace = true }
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tempfile = { workspace = true }

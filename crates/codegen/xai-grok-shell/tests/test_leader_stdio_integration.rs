@@ -1216,7 +1216,7 @@ async fn test_two_clients_session_isolation() {
 
 /// Multi-client model switch: when one TUI client switches models on a
 /// session shared with another TUI client, the leader must fan the
-/// `chutes.build/session_notification` (carrying the `ModelChanged` update) out
+/// `chutes.ai/session_notification` (carrying the `ModelChanged` update) out
 /// to **every** subscriber of that session — not just the invoker — so
 /// the follower client mirrors the new model in its UI.
 ///
@@ -1798,7 +1798,7 @@ async fn test_session_ownership_cleanup_on_disconnect() {
     let eviction_json: serde_json::Value = serde_json::from_str(&eviction).unwrap();
     assert_eq!(
         eviction_json["method"],
-        "chutes.build/internal/evict_sessions"
+        "_chutes.build/internal/evict_sessions"
     );
 
     // Connect a NEW client — server should still be running
@@ -2025,7 +2025,7 @@ async fn test_code_nav_capability_injected_into_session_load() {
     cancel.cancel();
 }
 
-/// Verify that an `chutes.build/code/status` extension request is forwarded to the
+/// Verify that an `chutes.ai/code/status` extension request is forwarded to the
 /// agent with the correct method, sessionId, and cwd in the params.
 ///
 /// This tests the routing boundary between leader and agent for the
@@ -2047,7 +2047,7 @@ async fn test_code_status_ext_request_forwarded_to_agent() {
     .await
     .unwrap();
 
-    // Send chutes.build/code/status with a sessionId — the leader must forward it to the agent.
+    // Send chutes.ai/code/status with a sessionId — the leader must forward it to the agent.
     let status_req = r#"{"jsonrpc":"2.0","id":42,"method":"extensions/ext","params":{"method":"chutes.build/code/status","params":{"sessionId":"sess-web-1","cwd":"/repo"}}}"#;
     web_client.send(status_req.to_string()).unwrap();
 
@@ -2343,7 +2343,7 @@ async fn test_connect_waits_for_leader_ready() {
 
 // ── Version mismatch notification ────────────────────────────────────
 
-/// Integration test: a connected client receives `chutes.build/leader/version_mismatch`
+/// Integration test: a connected client receives `chutes.ai/leader/version_mismatch`
 /// when its `client_version` differs from the leader's version.
 ///
 /// Uses `leader_version_override` so the test bypasses the `"unknown"` constant
@@ -2832,7 +2832,7 @@ async fn test_leader_code_nav_isolation_end_to_end() {
         serde_json::json!(false)
     );
 
-    // Web client sends chutes.build/code/status (the primary non-starting code-nav call).
+    // Web client sends chutes.ai/code/status (the primary non-starting code-nav call).
     let status_with_session = r#"{"jsonrpc":"2.0","id":10,"method":"extensions/ext","params":{"method":"chutes.build/code/status","params":{"sessionId":"web-session","cwd":"/repo"}}}"#;
     web_client.send(status_with_session.to_string()).unwrap();
 
@@ -3219,7 +3219,10 @@ async fn test_sever_mid_rpc_orphans_response_and_replay_recovers() {
     // signal that the server processed the disconnect.
     let evict = acp_rx.recv().await.unwrap();
     let evict_json: serde_json::Value = serde_json::from_str(&evict).unwrap();
-    assert_eq!(evict_json["method"], "chutes.build/internal/evict_sessions");
+    assert_eq!(
+        evict_json["method"],
+        "_chutes.build/internal/evict_sessions"
+    );
 
     // The agent completes the turn anyway: durable terminal notification plus
     // the RPC response addressed to the dead client.

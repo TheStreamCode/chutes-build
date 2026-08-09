@@ -1,10 +1,10 @@
 //! Interactive folder-trust prompt: a dormant agent→GUI-client ACP round-trip
-//! (`chutes.build/folder_trust/request`) that asks a GUI client (grok-desktop) to decide
+//! (`chutes.ai/folder_trust/request`) that asks a GUI client (grok-desktop) to decide
 //! trust for an untrusted-with-configs workspace, then grants + reloads the
 //! now-trusted project servers without a restart.
 //!
 //! DORMANT in production: it only fires when the connected client advertised
-//! `chutes.build/folderTrust.interactive` AND the folder-trust feature flag is on AND the
+//! `chutes.ai/folderTrust.interactive` AND the folder-trust feature flag is on AND the
 //! verdict is [`xai_grok_workspace::folder_trust::TrustOutcome::Prompt`]. No
 //! client advertises the capability until the desktop UI ships — so this is
 //! inert by default even with the feature flag on. The TUI/headless clients never
@@ -29,7 +29,7 @@ use super::*;
 /// the whole connection lifetime.
 const TRUST_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// ACP `chutes.build/folder_trust/request` payload (agent → GUI client). Serialized as
+/// ACP `chutes.ai/folder_trust/request` payload (agent → GUI client). Serialized as
 /// `camelCase` for the ACP JSON-RPC wire format.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,14 +62,14 @@ pub(crate) enum FolderTrustOutcome {
     Reject,
 }
 
-/// ACP `chutes.build/folder_trust/request` response (GUI client → agent).
+/// ACP `chutes.ai/folder_trust/request` response (GUI client → agent).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(crate) struct FolderTrustResponse {
     pub outcome: FolderTrustOutcome,
 }
 
 impl MvpAgent {
-    /// Parse the `chutes.build/folderTrust.interactive` capability from an initialize
+    /// Parse the `chutes.ai/folderTrust.interactive` capability from an initialize
     /// request. Returns `false` if absent or not `true`. Mirrors
     /// [`Self::parse_code_nav_capability`].
     pub(crate) fn parse_interactive_trust_capability(init: &acp::InitializeRequest) -> bool {
@@ -84,7 +84,7 @@ impl MvpAgent {
 
     /// Ask a GUI client to decide trust for `session_id`'s workspace, then grant
     /// + reload on accept. DORMANT no-op unless the client advertised
-    /// `chutes.build/folderTrust.interactive` AND [`folder_trust::prompt_warranted`]
+    /// `chutes.ai/folderTrust.interactive` AND [`folder_trust::prompt_warranted`]
     /// (feature on + untrusted + repo configs present).
     ///
     /// Non-blocking: the session was already created with project servers GATED
@@ -130,19 +130,16 @@ impl MvpAgent {
         // over-exposed). Re-querying at grant time would need the `sessions` map
         // (a non-`Rc` `RefCell` field) shared into the detached task, which isn't
         // available here; the fail-safe stale-session window is accepted instead.
-        let targets: Vec<ReloadTarget> = self
-            .sessions
-            .borrow()
-            .values()
-            .filter(|h| {
-                xai_grok_workspace::trust::workspace_key(std::path::Path::new(&h.info.cwd)) == key
-            })
-            .map(|h| ReloadTarget {
-                cmd_tx: h.cmd_tx.clone(),
-                initial_client_mcp_servers: h.initial_client_mcp_servers.clone(),
-                cwd: PathBuf::from(&h.info.cwd),
-            })
-            .collect();
+        let mut targets = Vec::new();
+        self.session_registry.for_each_resident(|_, h| {
+            if xai_grok_workspace::trust::workspace_key(std::path::Path::new(&h.info.cwd)) == key {
+                targets.push(ReloadTarget {
+                    cmd_tx: h.cmd_tx.clone(),
+                    initial_client_mcp_servers: h.initial_client_mcp_servers.clone(),
+                    cwd: PathBuf::from(&h.info.cwd),
+                });
+            }
+        });
         if targets.is_empty() {
             prompted.borrow_mut().remove(&key);
             return;
@@ -333,20 +330,14 @@ async fn reload_project_servers_after_grant(ctx: ReloadAfterGrant<'_>) {
         // MCP: `merge_managed_mcp_servers` re-reads disk + runs
         // `filter_untrusted_project_mcp`, which now KEEPS project servers because
         // the cached verdict was flipped to trusted (same workspace key).
-        let merged = crate::session::managed_mcp::merge_managed_mcp_servers(
-            target.initial_client_mcp_servers,
+        let _ = crate::session::managed_mcp::merge_and_send_managed_mcp_update(
+            &target.cmd_tx,
             session_cwd,
+            target.initial_client_mcp_servers,
             &managed,
             plugin_snapshot.as_deref(),
             ctx.compat,
         );
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let _ = target
-            .cmd_tx
-            .send(crate::session::SessionCommand::UpdateMcpServers {
-                mcp_servers: merged,
-                respond_to: tx,
-            });
         // Plugins (+ plugin-contributed hooks) built for this session's own cwd
         // on the folder-trust verdict (mirrors `broadcast_plugin_registry_to_sessions`);
         // the grant + resolve_and_record above flipped the cached verdict to trusted.

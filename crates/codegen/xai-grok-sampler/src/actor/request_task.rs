@@ -9,7 +9,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use xai_grok_sampling_types::{
-    ConversationRequest, ConversationResponse, EmptyResponseContext, SamplingError,
+    ConversationRequest, ConversationResponse, EmptyResponseContext, SamplingError, SentCredential,
     error::Result as SamplingResult,
 };
 
@@ -482,36 +482,29 @@ async fn run_one_attempt(
 ) -> AttemptOutcome {
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
-            let setup_started = Instant::now();
             let (raw, metadata) = match client.conversation_stream(request).await {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };
-            let setup_elapsed = setup_started.elapsed();
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_chat_completions(teed, metadata, request_id.clone(), idle_timeout);
-            with_stream_setup_latency(
-                drive_l2(
-                    l2,
-                    request_id,
-                    event_tx,
-                    cancel_token,
-                    captured,
-                    None,
-                    output_observed,
-                )
-                .await,
-                setup_elapsed,
+            drive_l2(
+                l2,
+                request_id,
+                event_tx,
+                cancel_token,
+                captured,
+                None,
+                output_observed,
             )
+            .await
         }
         ApiBackend::Responses => {
-            let setup_started = Instant::now();
             let (raw, metadata, doom_loop) =
                 match client.conversation_stream_responses(request).await {
                     Ok(parts) => parts,
                     Err(e) => return AttemptOutcome::InitFailed { error: e },
                 };
-            let setup_elapsed = setup_started.elapsed();
             if doom_check.is_none()
                 && let Some(collector) = &doom_loop
             {
@@ -526,54 +519,36 @@ async fn run_one_attempt(
                 doom_loop,
                 Arc::clone(&output_observed),
             );
-            with_stream_setup_latency(
-                drive_l2(
-                    l2,
-                    request_id,
-                    event_tx,
-                    cancel_token,
-                    captured,
-                    doom_check,
-                    output_observed,
-                )
-                .await,
-                setup_elapsed,
+            drive_l2(
+                l2,
+                request_id,
+                event_tx,
+                cancel_token,
+                captured,
+                doom_check,
+                output_observed,
             )
+            .await
         }
         ApiBackend::Messages => {
-            let setup_started = Instant::now();
             let (raw, metadata) = match client.conversation_stream_messages(request).await {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };
-            let setup_elapsed = setup_started.elapsed();
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_messages(teed, metadata, request_id.clone(), idle_timeout);
-            with_stream_setup_latency(
-                drive_l2(
-                    l2,
-                    request_id,
-                    event_tx,
-                    cancel_token,
-                    captured,
-                    None,
-                    output_observed,
-                )
-                .await,
-                setup_elapsed,
+            drive_l2(
+                l2,
+                request_id,
+                event_tx,
+                cancel_token,
+                captured,
+                None,
+                output_observed,
             )
+            .await
         }
     }
-}
-
-fn with_stream_setup_latency(
-    mut outcome: AttemptOutcome,
-    setup_elapsed: Duration,
-) -> AttemptOutcome {
-    if let AttemptOutcome::Completed { metrics, .. } = &mut outcome {
-        metrics.include_stream_setup_latency(setup_elapsed);
-    }
-    outcome
 }
 
 /// Captured-error cell shared between the tee adapter and the
@@ -717,7 +692,10 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
                 .find_map(|tok| tok.strip_suffix('s').and_then(|n| n.parse::<u64>().ok()))
                 .unwrap_or(0),
         },
-        SamplingErrorKind::Auth => SamplingError::Auth(info.message.clone()),
+        SamplingErrorKind::Auth => SamplingError::Auth {
+            message: info.message.clone(),
+            credential: info.credential,
+        },
         // Must stay Serialization: EventStreamError is retryable, and a
         // response-parse failure is deterministic on retry. `info.message`
         // is the variant's rendered Display, so rebuild via the constructor
@@ -736,7 +714,7 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
                 message: info.message.clone(),
                 model_metadata: info.model_metadata.clone(),
                 retry_after_secs: info.retry_after_secs,
-                should_retry: None,
+                should_retry: info.should_retry,
             }
         }
         SamplingErrorKind::EmptyResponse => {
@@ -847,10 +825,12 @@ fn handle_cancellation(
         message: "request cancelled".to_string(),
         is_retryable: false,
         retry_after_secs: None,
+        should_retry: None,
         model_metadata: None,
         empty_response_context: None,
         doom_loop_triggers: None,
         doom_loop_aborted_at_chunk: None,
+        credential: SentCredential::Unknown,
     };
     let _ = event_tx.send(SamplingEvent::Failed {
         request_id: request_id.clone(),
@@ -858,7 +838,7 @@ fn handle_cancellation(
     });
     send_completion(
         completion_tx,
-        Err(SamplingError::Auth("request cancelled".to_string())),
+        Err(SamplingError::auth_unknown("request cancelled")),
     );
 }
 
@@ -884,10 +864,12 @@ mod tests {
             message: "inference idle timeout after 240s with no chunks".to_string(),
             is_retryable: false,
             retry_after_secs: None,
+            should_retry: None,
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);
         match err {
@@ -904,18 +886,24 @@ mod tests {
             message: "boom".to_string(),
             is_retryable: true,
             retry_after_secs: None,
+            should_retry: Some(false),
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);
         match err {
             SamplingError::Api {
-                status, message, ..
+                status,
+                message,
+                should_retry,
+                ..
             } => {
                 assert_eq!(status.as_u16(), 500);
                 assert_eq!(message, "boom");
+                assert_eq!(should_retry, Some(false), "server veto must survive");
             }
             other => panic!("expected Api, got {other:?}"),
         }
@@ -929,10 +917,12 @@ mod tests {
             message: "slow down".to_string(),
             is_retryable: true,
             retry_after_secs: Some(7),
+            should_retry: None,
             model_metadata: None,
             empty_response_context: None,
             doom_loop_triggers: None,
             doom_loop_aborted_at_chunk: None,
+            credential: SentCredential::Unknown,
         };
         let err = synthesize_from_info(&info);
         match err {

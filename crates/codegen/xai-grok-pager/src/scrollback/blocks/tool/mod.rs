@@ -36,6 +36,7 @@ pub use use_tool::UseToolCallBlock;
 pub use web_fetch::WebFetchToolCallBlock;
 pub use web_search::WebSearchToolCallBlock;
 
+use crate::appearance::AppearanceConfig;
 use crate::scrollback::block::{BlockContent, join_searchable};
 use crate::scrollback::types::{
     AccentStyle, BlockBackground, BlockContext, BlockOutput, DisplayMode,
@@ -228,8 +229,8 @@ impl BlockContent for ToolCallBlock {
         delegate_tool!(self, background(ctx))
     }
 
-    fn has_vpad(&self, ctx: &BlockContext) -> bool {
-        delegate_tool!(self, has_vpad(ctx))
+    fn has_vpad_for(&self, appearance: &AppearanceConfig) -> bool {
+        delegate_tool!(self, has_vpad_for(appearance))
     }
 
     fn has_raw_mode(&self) -> bool {
@@ -286,12 +287,7 @@ impl BlockContent for ToolCallBlock {
         delegate_tool!(self, inline_media())
     }
 
-    fn inline_open_button(
-        &self,
-    ) -> Option<(
-        std::path::PathBuf,
-        crate::scrollback::block::MediaButtonKind,
-    )> {
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
         delegate_tool!(self, inline_open_button())
     }
 
@@ -344,6 +340,25 @@ impl ToolCallBlock {
             }
             // Variant mismatch (shouldn't happen in practice) — skip.
             _ => {}
+        }
+    }
+
+    /// Whether the tool call finished without an error.
+    pub fn is_success(&self) -> bool {
+        match self {
+            ToolCallBlock::Execute(b) => b.is_success(),
+            ToolCallBlock::Read(b) => b.is_success(),
+            ToolCallBlock::Edit(b) => b.is_success(),
+            ToolCallBlock::Search(b) => b.is_success(),
+            ToolCallBlock::ListDir(b) => b.is_success(),
+            ToolCallBlock::WebFetch(b) => b.is_success(),
+            ToolCallBlock::WebSearch(b) => b.is_success(),
+            ToolCallBlock::IntegrationSearch(b) => b.is_success(),
+            ToolCallBlock::UseTool(b) => b.is_success(),
+            ToolCallBlock::MemorySearch(b) => b.is_success(),
+            ToolCallBlock::Skill(b) => b.is_success(),
+            ToolCallBlock::Other(b) => b.is_success(),
+            ToolCallBlock::Lifecycle(_) => true,
         }
     }
 

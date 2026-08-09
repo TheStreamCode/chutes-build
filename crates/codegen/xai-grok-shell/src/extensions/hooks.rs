@@ -1,4 +1,4 @@
-//! `chutes.build/hooks/*` extension handlers.
+//! `chutes.ai/hooks/*` extension handlers.
 //!
 //! The file-hook list/action endpoints for the pager's hooks modal, plus the
 //! client-registered hook wire types and `parse_client_hooks`.
@@ -21,7 +21,7 @@ struct ListRequest {
     session_id: String,
 }
 
-pub fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> HookInfo {
+pub(crate) fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> HookInfo {
     use xai_grok_hooks::event::HookEventName;
 
     let event = match spec.event {
@@ -76,7 +76,7 @@ pub fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> HookInfo {
     }
 }
 
-// Wire types for client-registered hooks (`chutes.build/hooks/run`); the gate that uses
+// Wire types for client-registered hooks (`chutes.ai/hooks/run`); the gate that uses
 // them lives in `session::acp_session::hooks`.
 
 /// A matcher group from the client's registration: `{ matcher, hookCallbackIds, timeout }`.
@@ -88,16 +88,15 @@ pub struct ClientHookGroup {
     /// `None` (wire `null`, `""`, or `"*"`) matches every tool.
     pub matcher: Option<HookMatcher>,
     pub callback_ids: Vec<String>,
-    /// Per-group reply deadline for the `PreToolUse` gate (wire value in seconds). `None`
-    /// falls back to the default gate timeout.
+    /// Per-group gate reply deadline (wire seconds); `None` uses the default.
     pub timeout: Option<std::time::Duration>,
 }
 
-pub type ClientHooks = HashMap<HookEventName, Vec<ClientHookGroup>>;
+pub(crate) type ClientHooks = HashMap<HookEventName, Vec<ClientHookGroup>>;
 
 /// One hook dispatched to a client callback: the shared [`HookEventEnvelope`]
 /// (flattened, camelCase) plus the `hookCallbackId` it targets. The same shape is sent
-/// for both the `chutes.build/hooks/run` request (gate) and the `chutes.build/hooks/event` notification
+/// for both the `chutes.ai/hooks/run` request (gate) and the `chutes.ai/hooks/event` notification
 /// (observe-only), so the client decodes one payload for every hook.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,27 +106,44 @@ pub(crate) struct ClientHookDispatch<'a> {
     pub envelope: &'a HookEventEnvelope,
 }
 
-/// Only `Deny` blocks the tool; every other value proceeds (fail-open).
+pub(crate) const ADVERTISED_BLOCKING_EVENTS: &[xai_grok_hooks::event::HookEventName] = &[
+    xai_grok_hooks::event::HookEventName::PreToolUse,
+    xai_grok_hooks::event::HookEventName::Stop,
+    xai_grok_hooks::event::HookEventName::SubagentStop,
+];
+
+pub(crate) const ADVERTISED_DECISIONS: &[&str] = &["deny", "block"];
+
+pub(crate) const ADVERTISED_STOP_SIGNALS: &[&str] =
+    &["continue", "stopReason", "additionalContext"];
+
+/// Only `Deny` blocks; every other value proceeds (fail-open).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ClientHookDecision {
     #[default]
     Continue,
+    #[serde(alias = "block")]
     Deny,
     #[serde(other)]
     Other,
 }
 
-/// Response payload for `chutes.build/hooks/run` (client to agent). `Default` (used on
+/// Response payload for `chutes.ai/hooks/run` (client to agent). `Default` (used on
 /// timeout, transport error, or a malformed reply) proceeds.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ClientHookResponse {
     #[serde(default)]
     pub decision: ClientHookDecision,
-    /// Deny reason surfaced to the model/user; consumed only when `decision` is `Deny`.
-    #[serde(default)]
+    #[serde(default, alias = "reason")]
     pub system_message: Option<String>,
+    #[serde(default, rename = "continue")]
+    pub continue_: Option<bool>,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub additional_context: Option<String>,
 }
 
 /// Parse client hooks from `session/new` `_meta["chutes.build/hooks"]`, shaped
@@ -146,7 +162,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     for (event_name, value) in map {
         let de = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(event_name);
         let Ok(event) = HookEventName::deserialize(de) else {
-            tracing::warn!(event = %event_name, "ignoring unknown chutes.build/hooks event");
+            tracing::warn!(event = %event_name, "ignoring unknown chutes.ai/hooks event");
             continue;
         };
         let Some(array) = value.as_array() else {
@@ -167,7 +183,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
 }
 
 /// Hooks to apply on a `load_session` reconnect: `Some` (possibly empty, an explicit
-/// clear) when the request meta carries `chutes.build/hooks`, else `None` so a reconnect that
+/// clear) when the request meta carries `chutes.ai/hooks`, else `None` so a reconnect that
 /// omits the key leaves the live registrations from `session/new` untouched.
 pub(crate) fn reconnect_client_hooks(meta: Option<&acp::Meta>) -> Option<ClientHooks> {
     meta.and_then(|m| m.get("chutes.build/hooks"))
@@ -191,17 +207,15 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
     }
 
     let group = WireGroup::deserialize(value)
-        .inspect_err(
-            |err| tracing::warn!(%event, %err, "ignoring malformed chutes.build/hooks group"),
-        )
+        .inspect_err(|err| tracing::warn!(%event, %err, "ignoring malformed chutes.ai/hooks group"))
         .ok()?;
     if group.hook_callback_ids.is_empty() {
-        tracing::warn!(%event, "ignoring chutes.build/hooks group with no hookCallbackIds");
+        tracing::warn!(%event, "ignoring chutes.ai/hooks group with no hookCallbackIds");
         return None;
     }
     // Drop a non-finite/non-positive timeout (fall back to the default gate timeout) and
     // cap it so a client can't make a tool hang on the gate for an unbounded time.
-    const MAX_HOOK_TIMEOUT_SECS: f64 = 300.0;
+    const MAX_HOOK_TIMEOUT_SECS: f64 = 600.0;
     let timeout = group
         .timeout
         .filter(|s| s.is_finite() && *s > 0.0)
@@ -210,10 +224,18 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
         // Match-all tokens map to no matcher (group always fires). `HookMatcher::new`
         // also treats these as match-all; short-circuiting here keeps the intent explicit.
         None | Some("") | Some("*") => None,
+        // Same policy as file hooks (`MatcherPolicy::Ignored`): warn and drop
+        // the matcher rather than let the registration appear scoped.
+        Some(pattern)
+            if event.traits().matcher == xai_grok_hooks::event::MatcherPolicy::Ignored =>
+        {
+            tracing::warn!(%event, pattern, "matcher on a {event} hook group is ignored (this event always fires)");
+            None
+        }
         Some(pattern) => match HookMatcher::new(pattern) {
             Ok(matcher) => Some(matcher),
             Err(err) => {
-                tracing::warn!(%event, pattern, %err, "ignoring chutes.build/hooks group with invalid matcher");
+                tracing::warn!(%event, pattern, %err, "ignoring chutes.ai/hooks group with invalid matcher");
                 return None;
             }
         },
@@ -270,7 +292,7 @@ mod tests {
         HookSpec {
             name: "test:pre_tool_use[0].hooks[0]".to_string(),
             event: HookEventName::PreToolUse,
-            handler_type: "command".to_string(),
+            handler_type: xai_grok_hooks::config::HandlerType::Command,
             configured_matcher: None,
             matcher: None,
             enabled: true,
@@ -281,6 +303,7 @@ mod tests {
             timeout_ms: 5000,
             source_dir: PathBuf::from("/tmp"),
             extra_env: HashMap::new(),
+            layer: xai_grok_hooks::config::HookProvenance::File,
         }
     }
 
@@ -382,7 +405,7 @@ mod tests {
         assert_eq!(groups[0].timeout, Some(std::time::Duration::from_secs(5)));
         assert_eq!(groups[1].timeout, None); // non-positive -> default
         assert_eq!(groups[2].timeout, None); // absent -> default
-        assert_eq!(groups[3].timeout, Some(std::time::Duration::from_secs(300))); // capped
+        assert_eq!(groups[3].timeout, Some(std::time::Duration::from_secs(600))); // capped
     }
 
     /// A registration under the `SubagentEnd` alias must land on the canonical
@@ -397,7 +420,7 @@ mod tests {
         assert!(!hooks.contains_key(&HookEventName::SubagentEnd));
     }
 
-    /// Reconnect refresh applies hooks only when the load meta carries `chutes.build/hooks`:
+    /// Reconnect refresh applies hooks only when the load meta carries `chutes.ai/hooks`:
     /// an absent key returns `None` (don't wipe `session/new` registrations); a present
     /// key returns `Some` (an empty object is an explicit clear).
     #[test]
@@ -438,6 +461,66 @@ mod tests {
             ClientHookResponse::default().decision,
             ClientHookDecision::Continue
         );
+
+        let stop: ClientHookResponse = serde_json::from_str(
+            r#"{"continue":false,"stopReason":"budget","additionalContext":"ctx"}"#,
+        )
+        .unwrap();
+        assert_eq!(stop.decision, ClientHookDecision::Continue);
+        assert_eq!(stop.continue_, Some(false));
+        assert_eq!(stop.stop_reason.as_deref(), Some("budget"));
+        assert_eq!(stop.additional_context.as_deref(), Some("ctx"));
+
+        // Literal stop-hook output parses on the raw wire: `block` aliases
+        // `deny` and `reason` aliases `systemMessage`.
+        let blocked: ClientHookResponse =
+            serde_json::from_str(r#"{"decision":"block","reason":"run the tests"}"#).unwrap();
+        assert_eq!(blocked.decision, ClientHookDecision::Deny);
+        assert_eq!(blocked.system_message.as_deref(), Some("run the tests"));
+    }
+
+    #[test]
+    fn advertised_blocking_events_are_gates() {
+        use xai_grok_hooks::event::GateKind;
+        for event in ADVERTISED_BLOCKING_EVENTS {
+            assert_ne!(
+                event.traits().gate,
+                GateKind::Observe,
+                "advertised blocking event {event:?} has no decision gate"
+            );
+        }
+    }
+
+    #[test]
+    fn advertised_capabilities_match_response_parser() {
+        for decision in ADVERTISED_DECISIONS {
+            let parsed: ClientHookDecision =
+                serde_json::from_value(serde_json::json!(decision)).unwrap();
+            assert_eq!(
+                parsed,
+                ClientHookDecision::Deny,
+                "advertised decision {decision:?} must parse as a blocking decision"
+            );
+        }
+
+        let signal_values = serde_json::json!({
+            "continue": false,
+            "stopReason": "r",
+            "additionalContext": "c",
+        });
+        for signal in ADVERTISED_STOP_SIGNALS {
+            let response: ClientHookResponse = serde_json::from_value(
+                serde_json::json!({ *signal: signal_values[*signal].clone() }),
+            )
+            .unwrap();
+            let captured = match *signal {
+                "continue" => response.continue_ == Some(false),
+                "stopReason" => response.stop_reason.as_deref() == Some("r"),
+                "additionalContext" => response.additional_context.as_deref() == Some("c"),
+                other => panic!("unknown advertised stop signal {other:?}"),
+            };
+            assert!(captured, "advertised stop signal {signal:?} was not parsed");
+        }
     }
 
     /// The callback id sits beside the flattened envelope (camelCase keys,
@@ -455,12 +538,12 @@ mod tests {
             transcript_path: None,
             client_identifier: None,
             prompt_id: None,
+            permission_mode: Some("default".into()),
             payload: HookPayload::PreToolUse {
                 tool_name: "run_terminal_command".into(),
                 tool_use_id: "call_1".into(),
                 tool_input: serde_json::json!({ "command": "ls" }),
                 tool_input_truncated: true,
-                permission_mode: None,
                 subagent_type: None,
             },
         };
@@ -477,5 +560,6 @@ mod tests {
         assert_eq!(value["toolName"], "run_terminal_command");
         assert_eq!(value["toolInput"]["command"], "ls");
         assert_eq!(value["toolInputTruncated"], true);
+        assert_eq!(value["permissionMode"], "default");
     }
 }

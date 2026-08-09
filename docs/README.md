@@ -36,8 +36,15 @@ binary. Update them with the matching public guide whenever behavior changes.
   packaging, verification, and manual npm publication.
 - [npm distribution](../npm/README.md) — launcher/native package boundaries,
   archive contents, local verification, and publication safeguards.
-- [Upstream synchronization](upstream-sync.md) — detection, classification,
-  selective porting, verification, and baseline updates.
+- [Upstream synchronization](upstream-sync.md) — the merge procedure, the Chutes
+  seams a merge is expected to conflict in, the deliberate divergences, the
+  verification that follows, and a record of each sync. Since the 1.0.0 re-base
+  this is a merge, not a selective port.
+- Two scripts serve that procedure: `scripts/rebrand.py` re-applies the product
+  identity and fails loudly on anything it does not recognise, and
+  `scripts/seam_sweep.py` compares the values a previous release shipped against
+  the current tree — because a constant whose value came from upstream compiles
+  fine and its tests assert against the constant.
 - [Contributing](../CONTRIBUTING.md) — development workflow and pull-request
   expectations.
 

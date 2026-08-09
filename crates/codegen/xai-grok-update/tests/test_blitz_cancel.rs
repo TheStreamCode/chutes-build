@@ -45,7 +45,7 @@ fn large_good_artifact() -> Vec<u8> {
 }
 
 /// Seed a previous-good versioned binary + both managed symlinks
-/// (`chutes-build` and `agent` — see `swap_managed_bin_links`). Returns the
+/// (`grok` and `agent` — see `swap_managed_bin_links`). Returns the
 /// absolute path of the seeded binary.
 fn seed_previous_good(home: &Path, version: &str, platform: &str) -> PathBuf {
     let downloads = home.join("downloads");
@@ -66,7 +66,7 @@ fn seed_previous_good(home: &Path, version: &str, platform: &str) -> PathBuf {
     dunce::canonicalize(&prev).unwrap()
 }
 
-/// What the active `chutes-build` should resolve to after an install attempt.
+/// What the active `grok` should resolve to after an install attempt.
 #[derive(Clone, Copy, PartialEq)]
 enum Expect {
     /// The new version was installed and activated.
@@ -78,7 +78,7 @@ enum Expect {
 /// THE invariant. Re-resolves the on-disk symlink and RE-EXECUTES the resolved
 /// binary; never inspects a harness-held value. Guarantees the active managed
 /// link is always runnable and is never a `.tmp` or a partial file. Applied
-/// to both `chutes-build` and `agent` — `swap_managed_bin_links` moves them together.
+/// to both `grok` and `agent` — `swap_managed_bin_links` moves them together.
 fn assert_invariant(home: &Path, prev_good: &Path, new_binary: &Path, expect: Expect) {
     for name in ["grok", "agent"] {
         assert_link_invariant(home, name, prev_good, new_binary, expect);
@@ -289,7 +289,12 @@ async fn smoke_test_rejects_garbage_and_keeps_previous_good() {
     server.set_mode(Mode::Garbage);
     let base = server.uri();
     let result = install_internal_from_base(Some("0.1.181"), &cfg, &base).await;
-    assert!(result.is_err(), "garbage artifact must not install");
+    let err = result.expect_err("garbage artifact must not install");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("failed to run") || msg.contains("could not start"),
+        "smoke failure should be specific, got: {msg}"
+    );
 
     let new_binary = home
         .join("downloads")

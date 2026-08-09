@@ -14,3 +14,6 @@ pub use media::{
     ListMediaModelsInput, ListMediaModelsTool,
 };
 pub use ocr::{OcrPageInput, OcrPageTool};
+/// Canonical tool name, shared with the pager so `/imagine` and
+/// `/imagine-video` gate on the tool that actually exists here.
+pub use xai_grok_tools_api::slash_commands::GENERATE_MEDIA_TOOL_NAME;

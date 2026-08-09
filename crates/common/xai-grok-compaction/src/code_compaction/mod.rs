@@ -5,7 +5,7 @@
 //! strategy). This module groups that subsystem — generic over the engine's
 //! [`CompactionItem`](crate::item::CompactionItem) /
 //! [`CompactionItemFactory`](crate::item::CompactionItemFactory) seams — so it
-//! can be reused as a unit by grok-build, separate from Grok chat's
+//! can be reused as a unit by grok-build, separate from Chutes Build chat's
 //! [`intra_compaction`](crate::intra_compaction) (tail-keep, per-step) and
 //! [`inter_compaction`](crate::inter_compaction) (chunked, between-turn).
 //!

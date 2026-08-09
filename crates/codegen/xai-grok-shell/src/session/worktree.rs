@@ -74,7 +74,7 @@ async fn cleanup_worktree_on_failure(source_cwd: &str, worktree_path: &str) {
         .is_some_and(|root| xai_grok_workspace::session::git::detect_vcs_kind(&root).is_jj());
     if is_jj {
         if let Err(e) = remove_jj_workspace(worktree_path).await {
-            tracing::warn!(error = % e, "failed to clean up jj workspace after failure");
+            tracing::warn!(error = %e, "failed to clean up jj workspace after failure");
         }
     } else {
         let wt_path = wt.to_path_buf();
@@ -83,21 +83,20 @@ async fn cleanup_worktree_on_failure(source_cwd: &str, worktree_path: &str) {
         {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => {
-                tracing::warn!(
-                    error = % e, "fast remove_worktree failed during cleanup, trying rm"
-                );
+                tracing::warn!(error = %e, "fast remove_worktree failed during cleanup, trying rm");
                 let _ = tokio::fs::remove_dir_all(wt).await;
             }
             Err(e) => {
-                tracing::warn!(
-                    error = % e,
-                    "remove_worktree task panicked during cleanup, trying rm"
-                );
+                tracing::warn!(error = %e, "remove_worktree task panicked during cleanup, trying rm");
                 let _ = tokio::fs::remove_dir_all(wt).await;
             }
         }
         if let Ok(root) = find_git_root_from_path(std::path::Path::new(source_cwd)) {
-            let _ = xai_grok_workspace::session::git::git_cli(&root, &["worktree", "prune"]).await;
+            let wt_path = wt.to_path_buf();
+            let _ = tokio::task::spawn_blocking(move || {
+                xai_fast_worktree::remove_stale_worktree_registration(&root, &wt_path)
+            })
+            .await;
         }
     }
 }
@@ -147,7 +146,7 @@ pub(crate) fn build_worktree_restore_outcome(
 use crate::session::persistence::{ResolvedLocalSession, resolve_local_session_for_repo};
 /// Combined backend helper: resolve a session across all worktree roots
 /// belonging to the same repo as `current_cwd`.
-pub fn resolve_session_repo_wide(
+pub(crate) fn resolve_session_repo_wide(
     session_id: &str,
     current_cwd: &std::path::Path,
 ) -> Result<Option<ResolvedLocalSession>> {
@@ -155,12 +154,19 @@ pub fn resolve_session_repo_wide(
     let refs: Vec<&str> = candidates.iter().map(String::as_str).collect();
     Ok(resolve_local_session_for_repo(session_id, &refs))
 }
+/// Whether remote worktree resume should fetch/apply the repository snapshot.
+pub(crate) fn remote_worktree_restores_codebase(
+    restore_code: Option<bool>,
+    restore_code_default: bool,
+) -> bool {
+    restore_code.unwrap_or(restore_code_default)
+}
 /// Orchestrate the full "resume session in worktree" flow.
 ///
 /// Shell-side orchestration: composes client ops (session persistence,
 /// auth, registry) with server ops (worktree creation, git, fetch+extract)
 /// dispatched through `WorkspaceOps`.
-pub async fn resume_session_in_worktree(
+pub(crate) async fn resume_session_in_worktree(
     req: &ResumeSessionInWorktreeRequest,
     ops: &xai_grok_workspace::WorkspaceOps,
     worktree_type_default: ShellWorktreeType,
@@ -171,17 +177,21 @@ pub async fn resume_session_in_worktree(
 ) -> Result<ResumeSessionInWorktreeResponse> {
     use xai_grok_workspace::session::git::effective_worktree_path;
     tracing::info!(
-        target : WORKTREE_LOG, session_id = % req.session_id, restore_code = ? req
-        .restore_code, restore_code_default, effective_restore_code = req.restore_code
-        .unwrap_or(restore_code_default),
+        target: WORKTREE_LOG,
+        session_id = %req.session_id,
+        restore_code = ?req.restore_code,
+        restore_code_default,
+        effective_restore_code = req.restore_code.unwrap_or(restore_code_default),
         "RESTORE_CODE_DEBUG: resume_session_in_worktree entry"
     );
     let cwd_path = std::path::Path::new(req.source_cwd.as_str());
     let local_resolution = resolve_session_repo_wide(&req.session_id, cwd_path);
     if let Ok(Some(resolved)) = local_resolution {
         tracing::info!(
-            target : WORKTREE_LOG, session_id = % req.session_id, resolved_cwd = %
-            resolved.cwd, kind = ? resolved.resolution_kind,
+            target: WORKTREE_LOG,
+            session_id = %req.session_id,
+            resolved_cwd = %resolved.cwd,
+            kind = ?resolved.resolution_kind,
             "RESUME_LOCAL_RESOLVED: session found via repo-wide lookup"
         );
         return resume_local_session_in_worktree(
@@ -205,7 +215,7 @@ pub async fn resume_session_in_worktree(
         )
     })?;
     tracing::info!(
-        session_id = % req.session_id,
+        session_id = %req.session_id,
         "Restoring remote session: creating worktree first to keep source clean"
     );
     let worktree_type = req
@@ -224,6 +234,7 @@ pub async fn resume_session_in_worktree(
         .await
         .context("fetching session record for remote restore")?;
     let turn = crate::session::restore::resolve_restore_turn(&record, None);
+    let restore_code = remote_worktree_restores_codebase(req.restore_code, restore_code_default);
     let memory_dl_future = crate::session::restore::download_to_tempfile(
         client,
         &req.session_id,
@@ -235,7 +246,10 @@ pub async fn resume_session_in_worktree(
             "session-state archive restore unavailable in this build"
         ))
     };
-    let (memory_dl, state_dl) = tokio::join!(memory_dl_future, state_dl_future);
+    let (memory_dl, state_dl) = {
+        let _ = restore_code;
+        tokio::join!(memory_dl_future, state_dl_future)
+    };
     let codebase_ok = false;
     let _memory_result =
         crate::session::restore::apply_memory_download(memory_dl, &wt_resp.worktree_path).await;
@@ -249,7 +263,7 @@ pub async fn resume_session_in_worktree(
     if session_state_result.is_skipped() {
         cleanup_worktree_on_failure(&req.source_cwd, &wt_resp.worktree_path).await;
         anyhow::bail!(
-            "Session {} restored codebase but session-state archive was unavailable -- \
+            "Session {} session-state archive was unavailable -- \
              conversation history cannot be recovered. Retry in a few moments.",
             req.session_id,
         );
@@ -309,10 +323,13 @@ async fn resume_local_session_in_worktree(
     )
     .await?;
     tracing::info!(
-        target : WORKTREE_LOG, restore_code = ? req.restore_code, restore_code_default,
-        effective = req.restore_code.unwrap_or(restore_code_default), git_ref = req
-        .git_ref.as_deref(), resolved_session_id, worktree_path = % wt_resp
-        .worktree_path,
+        target: WORKTREE_LOG,
+        restore_code = ?req.restore_code,
+        restore_code_default,
+        effective = req.restore_code.unwrap_or(restore_code_default),
+        git_ref = req.git_ref.as_deref(),
+        resolved_session_id,
+        worktree_path = %wt_resp.worktree_path,
         "RESTORE_CODE_DEBUG: resume_local_session_in_worktree, about to check restore_code"
     );
     let mut decision = WorktreeRestoreDecision {
@@ -345,8 +362,9 @@ async fn resume_local_session_in_worktree(
                 })
                 .and_then(|s| s.head_commit);
             tracing::info!(
-                target : WORKTREE_LOG, head_commit = ? head_commit, summary_path = %
-                summary_path.display(),
+                target: WORKTREE_LOG,
+                head_commit = ?head_commit,
+                summary_path = %summary_path.display(),
                 "RESTORE_CODE_DEBUG: loaded head_commit from summary"
             );
             let outcome = checkout_persisted_head_in_worktree(
@@ -412,7 +430,7 @@ async fn resume_local_session_in_worktree(
 /// Orchestrate session rehydration: recreate the git worktree at the exact
 /// path and restore all session state using the original session ID.
 ///
-pub async fn rehydrate_session_in_worktree(
+pub(crate) async fn rehydrate_session_in_worktree(
     req: &RehydrateSessionRequest,
     #[allow(unused_variables)] ops: &xai_grok_workspace::WorkspaceOps,
     registry_client: Option<&crate::agent::session_registry_client::SessionRegistryClient>,
@@ -433,7 +451,8 @@ pub async fn rehydrate_session_in_worktree(
         .exists();
     if worktree_path.exists() && session_summary_exists {
         tracing::info!(
-            session_id = % req.session_id, worktree_path = % worktree_path_str,
+            session_id = %req.session_id,
+            worktree_path = %worktree_path_str,
             "rehydrate: worktree and session state already exist, skipping"
         );
         return Ok(RehydrateSessionResponse {
@@ -447,10 +466,7 @@ pub async fn rehydrate_session_in_worktree(
         });
     }
     if !worktree_path.exists() {
-        tracing::info!(
-            session_id = % req.session_id, % worktree_path_str,
-            "rehydrate: creating worktree"
-        );
+        tracing::info!(session_id = %req.session_id, %worktree_path_str, "rehydrate: creating worktree");
         if let Some(parent) = worktree_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -891,6 +907,13 @@ mod tests {
             LocalSessionResolutionKind::SameRepoDifferentCwd
         );
     }
+    #[test]
+    fn remote_worktree_codebase_follows_request_then_default() {
+        assert!(!remote_worktree_restores_codebase(Some(false), true));
+        assert!(!remote_worktree_restores_codebase(None, false));
+        assert!(remote_worktree_restores_codebase(None, true));
+        assert!(remote_worktree_restores_codebase(Some(true), false));
+    }
     #[tokio::test]
     async fn resume_in_worktree_falls_through_to_remote_when_not_found_locally() {
         let req = ResumeSessionInWorktreeRequest {
@@ -1148,7 +1171,7 @@ mod tests {
             .unwrap();
         let list_out = String::from_utf8_lossy(&stash_list.stdout).into_owned();
         assert!(
-            list_out.contains("grok: pre-restore-code sess-dirty-wt"),
+            list_out.contains("chutes-build: pre-restore-code sess-dirty-wt"),
             "stash list missing session label: {list_out}"
         );
     }

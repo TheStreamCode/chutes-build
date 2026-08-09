@@ -1,4 +1,4 @@
-//! Installed Chutes Build CLI version, lockstepped with shipping binaries.
+//! Installed chutes-build CLI version, lockstepped with shipping binaries.
 
 use semver::Version;
 

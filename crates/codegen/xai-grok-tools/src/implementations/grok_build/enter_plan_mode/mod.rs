@@ -48,7 +48,7 @@ impl crate::types::tool_metadata::ToolMetadata for EnterPlanModeTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn emitted_notifications(&self) -> &'static [&'static str] {
@@ -86,7 +86,7 @@ impl xai_tool_runtime::Tool for EnterPlanModeTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "enter_plan_mode",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
@@ -121,17 +121,22 @@ impl xai_tool_runtime::Tool for EnterPlanModeTool {
             let (seed_target, plan_file_path) = resolve_plan_file_path(&res);
 
             // Resolve client-facing tool names via TemplateRenderer.
+            // Presence-aware lookups (not template renders): a missing kind
+            // renders as empty-`Ok`, so a `Result` fallback never fires.
             let hints = if let Some(renderer) = res.get::<TemplateRenderer>() {
                 EnterPlanModeToolHints {
                     ask_user: renderer
-                        .render("${{ tools.by_kind.ask_user }}")
-                        .unwrap_or_else(|_| "ask_user_question".to_owned()),
+                        .tool_for_kind(crate::types::tool::ToolKind::AskUser)
+                        .unwrap_or("ask_user_question")
+                        .to_owned(),
                     exit_plan: renderer
-                        .render("${{ tools.by_kind.exit_plan }}")
-                        .unwrap_or_else(|_| "exit_plan_mode".to_owned()),
+                        .tool_for_kind(crate::types::tool::ToolKind::ExitPlan)
+                        .unwrap_or("exit_plan_mode")
+                        .to_owned(),
                     task: renderer
-                        .render("${{ tools.by_kind.task }}")
-                        .unwrap_or_default(),
+                        .tool_for_kind(crate::types::tool::ToolKind::Task)
+                        .unwrap_or_default()
+                        .to_owned(),
                 }
             } else {
                 EnterPlanModeToolHints::default()
@@ -613,9 +618,8 @@ mod tests {
 
     #[tokio::test]
     async fn falls_back_to_cwd_when_no_plan_file_path_resource() {
-        let cwd = PathBuf::from("/workspace/my-project");
         let mut resources = Resources::new();
-        resources.insert(Cwd(cwd.clone()));
+        resources.insert(Cwd(PathBuf::from("/workspace/my-project")));
         let shared = resources.into_shared();
 
         let result = xai_tool_runtime::Tool::run(
@@ -629,14 +633,10 @@ mod tests {
         let EnterPlanModeOutput::Entered {
             ref plan_file_path, ..
         } = result;
-        // Built the same way production resolves it (join component-by-
-        // component) rather than a hardcoded forward-slash literal, so this
-        // assertion reflects the host's real path-separator behavior instead
-        // of assuming Unix.
-        let expected = crate::types::resources::PLAN_FILE_RELATIVE_PATH
-            .split('/')
-            .fold(cwd, |acc, segment| acc.join(segment));
-        assert_eq!(plan_file_path, &expected.display().to_string());
+        assert_eq!(
+            plan_file_path,
+            "/workspace/my-project/.chutes-build/plan.md"
+        );
     }
 
     #[tokio::test]

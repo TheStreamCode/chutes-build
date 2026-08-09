@@ -37,7 +37,7 @@ impl CompactionTarget {
 }
 
 /// Minimal interface the compaction orchestrator needs from the agent's
-/// stream processor. Implemented by Grok chat's
+/// stream processor. Implemented by Chutes Build chat's
 /// `StreamProcessor` (`Item = Arc<GrokTurn>`).
 ///
 /// Two read-views are exposed:

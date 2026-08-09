@@ -50,7 +50,7 @@ may add more commands at runtime.
 
 | Command | Purpose |
 | --- | --- |
-| `/login` | Open OAuth/API-key authentication |
+| `/login` | Choose how to authenticate: browser login or API key |
 | `/apikey` | Enter a Chutes API key directly |
 | `/logout` | Clear the cached credential |
 | `/usage` | View Chutes usage; `/usage manage` opens the Chutes usage page |

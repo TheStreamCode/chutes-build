@@ -37,9 +37,15 @@ cargo deny --locked check advisories licenses bans sources
 ```
 
 Review `CHANGELOG.md`, `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES`, and the npm
-package contents before continuing. Run Gitleaks against both the working tree
-and complete Git history. Never place a Chutes API key in release configuration
-or CI.
+package contents before continuing. Never place a Chutes API key in release
+configuration or CI.
+
+**Run Gitleaks against both the working tree and the complete Git history**, not
+just the diff. This is not a formality: two live API keys reached seven commits on
+the re-base branch, from a test that shelled out to `env` and a `git add -A` that
+swept up the result. The history was purged before anything was pushed; a scan of
+the diff alone would not have found them, because by then they were in earlier
+commits. See the leak record in `docs/upstream-sync.md`.
 
 The root launcher archive must contain `README.md`, `CHANGELOG.md`,
 `SECURITY.md`, `PRIVACY.md`, `LICENSE`, `NOTICE`, and `npm/bin/`. It must not
@@ -61,11 +67,51 @@ CLI behavior must agree before a release candidate is packaged.
 5. Approve the protected `npm-release` environment after reviewing the run.
 6. Confirm all six native packages were published before the root
    `chutes-build` launcher.
-7. Install the published version on at least Windows and one Unix platform,
-   then verify `chutes-build --version` and a non-billable startup path.
-8. Create the matching `v<version>` Git tag and GitHub release only after npm
-   installation is verified.
+7. The same run then creates the `v<version>` tag and the GitHub release, with
+   the notes taken from this version's `CHANGELOG.md` section and every asset
+   attached: the six platform executables, the six npm archives, and their
+   checksum sidecars. Nothing to do by hand.
+8. Install the published version on at least Windows and one Unix platform, then
+   verify `chutes-build --version` and a non-billable startup path.
 
 The workflow publishes native packages first because the root launcher depends
 on them as optional dependencies. A failed or partial run must be investigated;
 do not reuse an already published version.
+
+### Why the release is not a manual step any more
+
+It used to be step 8 — "create the matching tag and GitHub release" — and it was
+skipped for v0.4.1, v0.4.2 and v0.4.3: three tags pushed with no release behind
+them, while the README sent people to an empty Releases page for binaries. A manual
+step that is skipped every time is not a procedure.
+
+The `github-release` job runs after `publish-npm` in the same workflow, so the
+documented order is preserved — npm first, tag and release last — but it cannot be
+forgotten. It refuses to publish if any of the six platform executables is missing,
+because a partial release is worse than none: the download page still looks
+complete. Release notes come from `npm/scripts/changelog-notes.mjs`, which slices
+this version's `CHANGELOG.md` section and exits non-zero if the section is absent or
+empty, so a release cannot ship with blank notes.
+
+Assets are the bare executables as well as the npm archives. Someone downloading
+from a release wants something they can run, not a tarball to unpack.
+
+## Repository presentation
+
+One thing stays manual because GitHub exposes no API for it: the **social preview**,
+the 1280x640 card shown when a repository link is shared to Slack, X or Discord.
+Without one, GitHub renders a generic auto-card.
+
+`python scripts/social_preview.py` builds `assets/chutes/social-preview.png` from
+the terminal screenshot already in the tree; upload it at **Settings -> General ->
+Social preview**. Re-run the script whenever the screenshot is re-shot — it crops to
+the splash's content by scanning for the panel's empty interior, so it survives a
+differently sized capture.
+
+> [!IMPORTANT]
+> `assets/chutes/screenshot/chutes-build.png` is **stale**: it reads
+> "Chutes Build Beta 0.1.0". The product no longer labels itself Beta — there is a
+> test in `views/welcome` asserting the version badge must not contain "Beta" — and
+> the version is no longer 0.1.0. That screenshot is the README hero image and the
+> source of the social card, so both currently misdescribe the build. Re-shoot it
+> from a release binary and re-run the script.

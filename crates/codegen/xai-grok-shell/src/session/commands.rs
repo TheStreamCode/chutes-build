@@ -15,16 +15,30 @@ pub struct CancellationContext {
     pub tool_name: Option<String>,
     pub reason: Option<String>,
     pub hook_name: Option<String>,
-    /// What triggered the cancel (`"send_now"`, `"esc"`, `"ctrl_c"`); surfaced
-    /// as `cancelTrigger` on the `PromptResponse`/`TurnCompleted` `_meta`.
-    /// `None` for graceful in-turn cancels and older clients.
+    /// What triggered the cancel (e.g. `"send_now"`, `"esc"`, `"mouse"`);
+    /// surfaced as `cancelTrigger` on the turn-end `_meta`.
     pub trigger: Option<String>,
+}
+/// Failure surface of a `/btw` side question. Kept typed until the ACP
+/// boundary so `handle_btw` can route model errors through the canonical
+/// [`map_sampling_err_to_acp`](crate::sampling::error::map_sampling_err_to_acp)
+/// (typed rate-limit / auth codes) instead of a flattened string.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SideQuestionError {
+    #[error("side question model call failed: {0}")]
+    Sampling(#[from] xai_grok_sampling_types::SamplingError),
+    #[error("failed to prepare client: {0}")]
+    PrepareClient(String),
+    #[error("No response from model")]
+    EmptyResponse,
 }
 /// Prompt completion kind returned to the ACP layer.
 #[derive(Debug, Clone)]
 pub enum PromptCompletionKind {
     Completed,
-    /// Silent EndTurn after repeated identical tool-call thrash.
+    /// Silent EndTurn after stationarity/true-noop thrash. Distinct from
+    /// Completed so goal continuation is not re-queued under an active goal.
     StationarityEnded,
     Cancelled {
         category: Option<xai_file_utils::events::types::CancellationCategory>,
@@ -42,7 +56,7 @@ pub enum PromptCompletionKind {
     /// every attached leader-mode client the *running* turn ended) and the
     /// roster `Idle` delta (which would flip the dashboard off `Working` while
     /// the real turn is still in flight) must be skipped. See
-    /// `MvpAgent::prompt`'s short-circuit and `respond_removed_queued_prompt`.
+    /// `MvpAgent::prompt`'s short-circuit and `respond_removed_prompt`.
     RemovedFromQueue,
 }
 /// Successful prompt/turn payload returned to the ACP layer and trace uploaders.
@@ -57,10 +71,11 @@ pub struct PromptTurnOk {
     /// `Some(Err)` carries a parse/validation error message.
     pub structured_output: Option<Result<serde_json::Value, String>>,
     pub usage: Option<crate::extensions::notification::PromptUsage>,
+    pub tool_overrides: Option<xai_grok_sampling_types::ToolOverrides>,
 }
 /// Result of a prompt turn, containing the stop reason, accumulated token count,
 /// and an optional turn-end signals snapshot (for trace metadata enrichment).
-pub type PromptTurnResult = Result<PromptTurnOk, acp::Error>;
+pub(crate) type PromptTurnResult = Result<PromptTurnOk, acp::Error>;
 /// Convenience: successful end-of-turn result.
 pub(crate) fn ok_end_turn(tokens: u64, snapshot: Option<TurnDeltaSnapshot>) -> PromptTurnResult {
     Ok(PromptTurnOk {
@@ -70,6 +85,7 @@ pub(crate) fn ok_end_turn(tokens: u64, snapshot: Option<TurnDeltaSnapshot>) -> P
         completion_kind: PromptCompletionKind::Completed,
         structured_output: None,
         usage: None,
+        tool_overrides: None,
     })
 }
 /// Pre-parsed prompt metadata sent back to the caller after `parse_prompt`.
@@ -96,14 +112,81 @@ pub enum NotificationPriority {
 #[derive(Debug, Clone)]
 pub enum NotificationSource {
     MonitorEvent { task_id: String },
+    MonitorCompleted { task_id: String },
     BashTaskCompleted { task_id: String },
 }
 impl NotificationSource {
     pub fn task_id(&self) -> &str {
         match self {
-            Self::MonitorEvent { task_id } | Self::BashTaskCompleted { task_id } => task_id,
+            Self::MonitorEvent { task_id }
+            | Self::MonitorCompleted { task_id }
+            | Self::BashTaskCompleted { task_id } => task_id,
         }
     }
+}
+#[derive(Debug)]
+pub struct TaskWakeFallback {
+    pub prompt_id: String,
+    pub prompt_blocks: Vec<acp::ContentBlock>,
+    pub source: NotificationSource,
+}
+#[derive(Debug)]
+pub struct TaskWakeAdmission {
+    pub respond_to: oneshot::Sender<bool>,
+    pub fallback: TaskWakeFallback,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownKind {
+    /// Running work survives (idle unload, process quiesce, subagent teardown).
+    Graceful,
+    CancelRunningTurn,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancelTrigger {
+    Esc,
+    CtrlC,
+    SendNow,
+    Shutdown,
+    SessionClose,
+    SessionDelete,
+    Client(String),
+}
+impl CancelTrigger {
+    /// Parse a client's `_meta.cancelTrigger`. Internal spellings land in
+    /// [`Self::Client`], so a client-supplied string never maps to an
+    /// internal trigger.
+    pub fn from_client(s: &str) -> Self {
+        match s {
+            "esc" => Self::Esc,
+            "ctrl_c" => Self::CtrlC,
+            other => Self::Client(other.to_string()),
+        }
+    }
+    /// Stop gesture (Esc/Ctrl+C/`Client`); unrecognized wire names fail closed.
+    pub fn is_stop_gesture(&self) -> bool {
+        matches!(self, Self::Esc | Self::CtrlC | Self::Client(_))
+    }
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Esc => "esc",
+            Self::CtrlC => "ctrl_c",
+            Self::SendNow => "send_now",
+            Self::Shutdown => "shutdown",
+            Self::SessionClose => "session_close",
+            Self::SessionDelete => "session_delete",
+            Self::Client(s) => s,
+        }
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct CancelOptions {
+    pub cancel_subagents: bool,
+    pub kill_background_tasks: bool,
+    pub rewind_if_no_output: bool,
+    /// [`CancelTrigger::is_stop_gesture`] arms the task-wake barrier.
+    pub trigger: Option<CancelTrigger>,
+    /// Drives the cancel-rate metric.
+    pub user_initiated: bool,
 }
 pub enum SessionCommand {
     Initialize {
@@ -121,6 +204,15 @@ pub enum SessionCommand {
     /// reverse-request so the client re-shows approval chrome over a real live
     /// waiter. Fire-and-forget; the actor spawns the round-trip + decision.
     RestorePlanApproval,
+    GetToolOverrides {
+        respond_to: oneshot::Sender<Option<xai_grok_sampling_types::ToolOverrides>>,
+    },
+    /// Establish the per-turn tool-overrides state before the first prompt runs. Sent once by
+    /// `handle_subagent_request` ahead of the child's first `Prompt`, so a spawned subagent's
+    /// inherited cutoff is applied and published (for its own subagents to read) before any turn.
+    SetToolOverrides {
+        overrides: xai_grok_sampling_types::ToolOverrides,
+    },
     Prompt {
         prompt_id: String,
         prompt_blocks: Vec<acp::ContentBlock>,
@@ -144,6 +236,9 @@ pub enum SessionCommand {
         /// Also derived server-side during an interruptible wait (see
         /// [`SessionActor::queue_input`]).
         send_now: bool,
+        /// Actor-authoritative admission and deferred fallback for terminal task wakes.
+        admission: Option<TaskWakeAdmission>,
+        tool_overrides_update: Option<xai_grok_sampling_types::ToolOverridesUpdate>,
         respond_to: oneshot::Sender<PromptTurnResult>,
         /// Optional oneshot fired after the user message has been appended to
         /// chat history and a persistence flush barrier has completed, before
@@ -273,7 +368,7 @@ pub enum SessionCommand {
         request: RewindRequest,
         respond_to: oneshot::Sender<anyhow::Result<RewindResponse>>,
     },
-    /// Out-of-band history repair (`chutes.build/session/repair`): fix tool-pairing
+    /// Out-of-band history repair (`chutes.ai/session/repair`): fix tool-pairing
     /// violations (orphaned/displaced `ToolResult`s, duplicates, unanswered
     /// calls) that would otherwise 400 on every request. `dry_run` only
     /// reports. Refused while a turn is in flight.
@@ -343,10 +438,10 @@ pub enum SessionCommand {
     /// Flush the replay buffer and persistence, then signal completion.
     /// Used during reconnect to ensure all buffered content is persisted before replay.
     FlushComplete {
-        respond_to: oneshot::Sender<()>,
+        respond_to: oneshot::Sender<std::io::Result<()>>,
     },
     /// Update MCP servers for an existing session (used during reconnect or
-    /// mid-session via the `chutes.build/session/update_mcp_servers` extension method).
+    /// mid-session via the `chutes.ai/session/update_mcp_servers` extension method).
     /// This replaces the current MCP server configuration and triggers re-initialization.
     ///
     /// The caller is notified via `respond_to` once MCP re-initialization
@@ -354,6 +449,13 @@ pub enum SessionCommand {
     UpdateMcpServers {
         mcp_servers: Vec<acp::McpServer>,
         respond_to: oneshot::Sender<Result<(), acp::Error>>,
+    },
+    /// Re-apply per-attachment policy (MCP init strategy, delivery tools)
+    /// from a resident `session/load` whose request carried explicit
+    /// `startupHints`. Spawn-time structural hints are NOT touched. Sent
+    /// fire-and-forget alongside `UpdateMcpServers` on the reconnect rail.
+    UpdateAttachPolicy {
+        startup_hints: Box<crate::session::StartupHints>,
     },
     /// Toggle an MCP server on/off within the session actor's event loop.
     /// Atomic read-modify-write avoids TOCTOU races with background config
@@ -475,7 +577,7 @@ pub enum SessionCommand {
         action: xai_hooks_plugins_types::PluginsAction,
         respond_to: oneshot::Sender<xai_hooks_plugins_types::ActionOutcome>,
     },
-    /// This session's plugin registry, as served by `chutes.build/plugins/list`.
+    /// This session's plugin registry, as served by `chutes.ai/plugins/list`.
     PluginsList {
         respond_to:
             oneshot::Sender<Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>>,
@@ -538,7 +640,7 @@ pub enum SessionCommand {
     },
     /// Replace the text of a queued (not-yet-running) prompt in place
     /// (server-side LWW). Last write wins via the actor's
-    /// serialized mailbox; the rebroadcast of `chutes.build/queue/changed` is the
+    /// serialized mailbox; the rebroadcast of `chutes.ai/queue/changed` is the
     /// truth signal for every attached client. The original `owner`
     /// attribution is preserved; `editor` is recorded as the most recent
     /// editor (for future "alice edited this" UX). A missing id, or an id
@@ -548,6 +650,15 @@ pub enum SessionCommand {
         new_text: String,
         editor: Option<String>,
     },
+    /// Hold a queued prompt out of combine-on-promote while a client edits it
+    /// in the composer. Released via [`Self::ReleaseCombineEdit`].
+    HoldCombineEdit {
+        id: String,
+    },
+    /// Release a previous [`Self::HoldCombineEdit`].
+    ReleaseCombineEdit {
+        id: String,
+    },
     /// Atomically interject a queued (not-yet-running) prompt into the running
     /// turn: the actor removes it from `pending_inputs` and pushes
     /// its text into `pending_interjections` in a single mailbox op, so the
@@ -556,7 +667,7 @@ pub enum SessionCommand {
     /// like [`RemoveQueuedPrompt`]. A benign no-op (the prompt stays queued and
     /// runs normally) when no turn is running, the id names the running turn, is
     /// stale/already-drained, or `owner` doesn't match. The rebroadcast of
-    /// `chutes.build/queue/changed` is the truth signal for every attached client.
+    /// `chutes.ai/queue/changed` is the truth signal for every attached client.
     InterjectQueuedPrompt {
         id: String,
         expected_version: u64,
@@ -567,24 +678,8 @@ pub enum SessionCommand {
         /// no-ops the whole thing, edited text included).
         new_text: Option<String>,
     },
-    /// Cancel the running turn. `kill_background_tasks` distinguishes a hard
-    /// teardown (subagent shutdown — drains the whole queue) from a normal
-    /// interactive cancel (Ctrl+C — preserves the queued prompts so the next
-    /// one auto-runs). On an interactive cancel only the running turn (the front
-    /// of `pending_inputs`) is torn down; the follow-up `maybe_start_running_task`
-    /// promotes the new front so the user's next queued prompt auto-runs.
-    Cancel {
-        cancel_subagents: bool,
-        kill_background_tasks: bool,
-        rewind_if_pristine: bool,
-        /// Free-form discriminator for *what* triggered the cancel, taken from
-        /// the `session/cancel` request `_meta.cancelTrigger` (e.g. `"esc"`,
-        /// `"ctrl_c"`). `None` for older clients and programmatic teardowns
-        /// (subagent shutdown). Recorded in the `mid_turn_abort` turn-end's
-        /// `cancellation_context` JSON; the category stays `MidTurnAbort`.
-        trigger: Option<String>,
-    },
-    Shutdown,
+    Cancel(CancelOptions),
+    Shutdown(ShutdownKind),
     /// Force-trigger a feedback request notification for local client testing.
     /// Bypasses all heuristics, sampling, and cooldown checks.
     TriggerTestFeedback {
@@ -597,6 +692,12 @@ pub enum SessionCommand {
     /// files and is included in GCS CopyFile snapshots.
     PersistFeedback(Box<crate::session::persistence::LocalFeedbackEntry>),
     AdvertiseCommands,
+    GetWorkflowCatalogState {
+        respond_to: oneshot::Sender<(bool, bool)>,
+    },
+    ListAvailableCommands {
+        respond_to: oneshot::Sender<crate::session::slash_commands::ListCommandsResponse>,
+    },
     /// Re-discover skills from disk, update the SkillManager baseline,
     /// and re-advertise slash commands to the client.
     ReloadSkills,
@@ -624,7 +725,7 @@ pub enum SessionCommand {
     /// tool-free model call, and returns the response text.
     SideQuestion {
         question: String,
-        respond_to: oneshot::Sender<Result<String, String>>,
+        respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
     },
     /// Generate a session recap (a short "where was I" summary) and broadcast
     /// it to clients via `SessionUpdate::SessionRecap`.
@@ -676,7 +777,7 @@ pub enum SessionCommand {
     Interject {
         text: String,
         /// Client-minted id echoed back on the broadcast
-        /// `chutes.build/session/interjection` so the originating pager can dedup its
+        /// `chutes.ai/session/interjection` so the originating pager can dedup its
         /// optimistic local block. `None` from older clients.
         id: Option<String>,
         /// Pasted images riding along with the interjection. Empty from
@@ -691,6 +792,10 @@ pub enum SessionCommand {
     GoalSummaryTurn {
         /// Short instruction appended as a verbatim user message.
         prompt_text: String,
+    },
+    WorkflowCompletionTurn {
+        run_id: String,
+        revision: u64,
     },
     /// Take turn messages from the chat state actor (proxied from mvp_agent).
     TakeTurnMessages {
@@ -732,4 +837,19 @@ pub enum SessionCommand {
         commit: Option<String>,
         branch: Option<String>,
     },
+}
+#[cfg(test)]
+mod cancel_trigger_tests {
+    use super::CancelTrigger;
+    #[test]
+    fn only_stop_gestures_arm_the_wake_barrier() {
+        assert!(!CancelTrigger::SendNow.is_stop_gesture());
+        assert!(!CancelTrigger::SessionDelete.is_stop_gesture());
+        assert!(!CancelTrigger::Shutdown.is_stop_gesture());
+        assert!(!CancelTrigger::SessionClose.is_stop_gesture());
+        assert!(CancelTrigger::Esc.is_stop_gesture());
+        assert!(CancelTrigger::CtrlC.is_stop_gesture());
+        assert!(CancelTrigger::from_client("mouse").is_stop_gesture());
+        assert!(CancelTrigger::from_client("some_future_gesture").is_stop_gesture());
+    }
 }

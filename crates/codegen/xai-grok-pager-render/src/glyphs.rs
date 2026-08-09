@@ -47,24 +47,6 @@ pub fn record_dot(filled: bool) -> &'static str {
     }
 }
 
-/// One column of the voice-recording wave animation. `level` is `0..=8`
-/// (0 = flat/silent, 8 = tallest). Eighth-block glyphs (`▁▂▃▄▅▆▇█`)
-/// normally, a plain ASCII ramp on legacy ConHost (no eighth-block glyphs
-/// in the raster font). Always 1 column wide.
-pub fn wave_bar(level: u8) -> &'static str {
-    const ASCII: [&str; 9] = [" ", ".", ".", ":", ":", "+", "+", "#", "#"];
-    const UNICODE: [&str; 9] = [
-        " ", "\u{2581}", "\u{2582}", "\u{2583}", "\u{2584}", "\u{2585}", "\u{2586}", "\u{2587}",
-        "\u{2588}",
-    ];
-    let level = (level as usize).min(8);
-    if is_legacy_windows_console() {
-        ASCII[level]
-    } else {
-        UNICODE[level]
-    }
-}
-
 /// `"❙"` normally, `"|"` on legacy ConHost. Always 1 column wide.
 pub fn collapsed_accent() -> &'static str {
     if is_legacy_windows_console() {
@@ -153,7 +135,7 @@ pub fn token_arrow() -> &'static str {
 /// U+25CE BULLSEYE, U+25C9 FISHEYE, U+25CE BULLSEYE) normally; a 1-column
 /// dot pulse (`·`, `○`, `•`, `○`) on legacy ConHost.
 ///
-/// Animates the "watching · N monitors" cue in the turn-status line: a
+/// Animates the "N monitors still running" cue in the turn-status line: a
 /// concentric circle that breathes open → shut like a scanning scope. Of
 /// the fancy frames only the white circle `○` (U+25CB, CP437 `0x09`) is
 /// part of CP437 — the bullseye `◎` and fisheye `◉` live in the Geometric
@@ -500,6 +482,21 @@ pub fn legacy_glyph_fallback(s: &str) -> Cow<'_, str> {
     Cow::Owned(to_legacy_glyphs(s))
 }
 
+/// Single-row toast sinks: glyph fallback, then map control chars to spaces.
+/// Borrows when the input is already clean (common path).
+pub fn sanitize_toast_message(msg: &str) -> Cow<'_, str> {
+    let glyph = legacy_glyph_fallback(msg);
+    if !glyph.chars().any(char::is_control) {
+        return glyph;
+    }
+    Cow::Owned(
+        glyph
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect(),
+    )
+}
+
 /// Pure glyph → legacy-safe mapping behind [`legacy_glyph_fallback`], split
 /// out so tests can exercise the substitution without faking the host probe.
 /// `√` matches [`check_mark`]'s fallback; `x` matches [`ballot_x`]'s.
@@ -576,7 +573,6 @@ fn decide_legacy_windows_console(host: HostOs, brand: TerminalName) -> bool {
             | TerminalName::Alacritty
             | TerminalName::Ghostty
             | TerminalName::Rio
-            | TerminalName::WarpTerminal
             | TerminalName::GrokDesktop
     )
 }
@@ -602,17 +598,6 @@ mod tests {
         assert_eq!(record_dot(false).width(), 1);
         assert_eq!("\u{25C9}".width(), 1); // ◉ FISHEYE
         assert_eq!("\u{25CE}".width(), 1); // ◎ BULLSEYE
-    }
-
-    // Every wave-bar level must be exactly 1 column so a row of bars lines
-    // up regardless of level, and out-of-range levels must clamp instead
-    // of panicking.
-    #[test]
-    fn wave_bar_levels_are_one_column_and_clamp() {
-        for level in 0..=255u8 {
-            assert_eq!(wave_bar(level).width(), 1, "level {level}");
-        }
-        assert_eq!(wave_bar(8), wave_bar(255));
     }
 
     #[test]
@@ -769,6 +754,22 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_toast_message_borrows_when_clean() {
+        assert!(!is_legacy_windows_console());
+        assert!(matches!(
+            sanitize_toast_message("plain toast"),
+            Cow::Borrowed("plain toast")
+        ));
+    }
+
+    #[test]
+    fn sanitize_toast_message_maps_controls_to_spaces() {
+        let out = sanitize_toast_message("a\nb\tc");
+        assert_eq!(out.as_ref(), "a b c");
+        assert!(!out.chars().any(char::is_control));
+    }
+
+    #[test]
     fn forced_legacy_console_override_parses_known_values() {
         assert_eq!(parse_forced_legacy_console(Some("1")), Some(true));
         assert_eq!(parse_forced_legacy_console(Some("true")), Some(true));
@@ -831,7 +832,6 @@ mod tests {
             TerminalName::Alacritty,
             TerminalName::Ghostty,
             TerminalName::Rio,
-            TerminalName::WarpTerminal,
             TerminalName::GrokDesktop,
         ] {
             assert!(!decide_legacy_windows_console(HostOs::Windows, brand));
@@ -846,6 +846,7 @@ mod tests {
             TerminalName::AppleTerminal,
             TerminalName::Vte,
             TerminalName::Iterm2,
+            TerminalName::WarpTerminal,
         ] {
             assert!(decide_legacy_windows_console(HostOs::Windows, brand));
         }

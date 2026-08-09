@@ -31,7 +31,7 @@ pub struct LlmCompactionOutput {
 /// [`Self::Start`], [`Self::EmptyResponse`]) so the shared retry policy can
 /// classify without string matching. [`Self::Other`] remains for samplers
 /// that only surface an opaque error; the orchestrator falls back to
-/// matching the literal messages produced by the Grok chat sampler —
+/// matching the literal messages produced by the Chutes Build chat sampler —
 /// keep those literals in sync (the `compaction_sample_error_to_intra*`
 /// tests guard the mapping).
 #[derive(Debug)]

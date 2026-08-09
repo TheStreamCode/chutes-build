@@ -1,7 +1,7 @@
-//! `/recap` -- summarize the session so far ("where was I").
+//! `/recap` (alias `/summarize`) -- summarize the session so far ("where was I").
 //!
 //! Returns `CommandResult::Action(Action::SendRecap { auto: false })` so the
-//! dispatch layer fires it as an ACP ext method (`chutes.build/recap`) that bypasses
+//! dispatch layer fires it as an ACP ext method (`chutes.ai/recap`) that bypasses
 //! the prompt queue. The recap arrives asynchronously as a scrollback line and
 //! is never added to the model conversation.
 
@@ -13,6 +13,10 @@ pub struct RecapCommand;
 impl SlashCommand for RecapCommand {
     fn name(&self) -> &str {
         "recap"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["summarize"]
     }
 
     fn description(&self) -> &str {

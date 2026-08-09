@@ -19,13 +19,13 @@
 
 /// Harness-agnostic role of a single conversation item.
 ///
-/// This is the common denominator of `GrokRole` (Grok chat) and the
+/// This is the common denominator of `GrokRole` (Chutes Build chat) and the
 /// `ConversationItem` variants (grok-build).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionRole {
     /// System prompt.
     System,
-    /// Developer prompt (Grok chat) — maps to System on harnesses without a
+    /// Developer prompt (Chutes Build chat) — maps to System on harnesses without a
     /// distinct developer role.
     Developer,
     /// A user message.
@@ -51,7 +51,7 @@ pub struct CompactionFileRef {
 /// compaction algorithms.
 ///
 /// Implementors:
-/// - Grok chat: `GrokTurn`
+/// - Chutes Build chat: `GrokTurn`
 /// - grok-build: `ConversationItem`
 pub trait CompactionItem {
     /// The harness-agnostic role of this item.
@@ -60,7 +60,7 @@ pub trait CompactionItem {
     /// The item's text content, if any. Tool results and assistant tool-only
     /// turns may have no text.
     ///
-    /// Returns an owned `String` because some harnesses (Grok chat's
+    /// Returns an owned `String` because some harnesses (Chutes Build chat's
     /// `GrokTurn`) compute the flattened text on demand rather than storing a
     /// borrowable slice.
     fn text(&self) -> Option<String>;
@@ -75,7 +75,7 @@ pub trait CompactionItem {
     /// `false` for all non-assistant items.
     fn has_tool_requests(&self) -> bool;
 
-    /// Whether this item carries a *prior compaction summary* (Grok chat: a
+    /// Whether this item carries a *prior compaction summary* (Chutes Build chat: a
     /// `Developer` turn with `DeveloperPromptCategory::ConversationCompaction`).
     ///
     /// The basic history filter keeps such items so earlier summaries get
@@ -103,19 +103,31 @@ pub trait CompactionItem {
 /// through generics, never as `dyn`.
 pub trait CompactionItemBuilder: CompactionItem + Clone {
     /// Construct the item that carries a compaction summary back into the
-    /// conversation (Grok chat: a `Developer` turn with category
+    /// conversation (Chutes Build chat: a `Developer` turn with category
     /// `ConversationCompaction`). The result must satisfy
     /// `is_compaction_summary() == true`.
     fn compaction_summary_item(text: String) -> Self;
 
     /// Rebuild this item keeping only user-visible content, dropping tool
-    /// requests/results (Grok chat: keep only `Channel` contents of an
+    /// requests/results (Chutes Build chat: keep only `Channel` contents of an
     /// assistant turn). Returns `None` when nothing visible remains.
     ///
     /// Only meaningful for `Assistant` items; the shared filters never call
     /// it for other roles, but implementations should return
     /// `Some(self.clone())` for them to keep the contract total.
     fn strip_tool_content(&self) -> Option<Self>;
+
+    /// Truncate this item's payload for **summarizer input** to roughly
+    /// `max_tokens` (grok-build style: `max_bytes = max_tokens * 4`, prefix
+    /// clip). Used by FullReplace fit for oversized tool results and
+    /// emergency tail shrink. Default: clone unchanged.
+    ///
+    /// Prefer tool-result text; keep structural fields (ids, names). Drop
+    /// large sidecars when present.
+    fn truncate_payload_for_compaction(&self, max_tokens: u32) -> Self {
+        let _ = max_tokens;
+        self.clone()
+    }
 }
 
 /// Write seam for the full-replace **assembler**
@@ -124,9 +136,9 @@ pub trait CompactionItemBuilder: CompactionItem + Clone {
 /// history.
 ///
 /// This is a sibling of [`CompactionItemBuilder`], not a part of it, on
-/// purpose. `CompactionItemBuilder` is already implemented by Grok chat's
+/// purpose. `CompactionItemBuilder` is already implemented by Chutes Build chat's
 /// `GrokTurn`; adding these constructors to it as required methods would break
-/// that impl. They are also grok-build-specific (Grok chat's tail-keep path
+/// that impl. They are also grok-build-specific (Chutes Build chat's tail-keep path
 /// has no `user_meta` / `project_instructions` / `system_reminder` carrier
 /// concept), so they live in their own seam that only the full-replace
 /// assembler depends on.
@@ -148,7 +160,7 @@ pub trait CompactionItemFactory: Sized {
 }
 
 /// Forward [`CompactionItem`] through shared references so the algorithms can
-/// operate over `&[Arc<T>]` (Grok chat stores turns as `Arc<GrokTurn>`).
+/// operate over `&[Arc<T>]` (Chutes Build chat stores turns as `Arc<GrokTurn>`).
 impl<T: CompactionItem + ?Sized> CompactionItem for std::sync::Arc<T> {
     fn role(&self) -> CompactionRole {
         (**self).role()
@@ -179,5 +191,8 @@ impl<T: CompactionItemBuilder> CompactionItemBuilder for std::sync::Arc<T> {
     }
     fn strip_tool_content(&self) -> Option<Self> {
         (**self).strip_tool_content().map(std::sync::Arc::new)
+    }
+    fn truncate_payload_for_compaction(&self, max_tokens: u32) -> Self {
+        std::sync::Arc::new((**self).truncate_payload_for_compaction(max_tokens))
     }
 }

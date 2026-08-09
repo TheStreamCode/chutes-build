@@ -71,7 +71,7 @@
   },
   {
     "category": "features",
-    "description": "**grok sessions delete <id>** command now lets you permanently remove a session from the CLI.",
+    "description": "**chutes-build sessions delete <id>** command now lets you permanently remove a session from the CLI.",
     "breaking_change": false
   },
   {
@@ -81,7 +81,7 @@
   },
   {
     "category": "fixes",
-    "description": "Session lists (welcome screen, /resume, grok sessions list) are now sorted by the same activity time shown in the UI.",
+    "description": "Session lists (welcome screen, /resume, chutes-build sessions list) are now sorted by the same activity time shown in the UI.",
     "breaking_change": false
   },
   {

@@ -1,14 +1,14 @@
-//! In-process SDK MCP servers over the ACP reverse channel (`chutes.build/mcp/sdk_call`).
+//! In-process SDK MCP servers over the ACP reverse channel (`chutes.ai/mcp/sdk_call`).
 //!
 //! The official `grok-agent-sdk` lets a host define in-process tools (`@tool` /
 //! `create_sdk_mcp_server`). When `transport="acp"`, the SDK registers them in
 //! `session/new` `_meta["chutes.build/mcp/servers"] = [{ "name", "serverId" }]` and the agent
 //! invokes their tools by sending each MCP JSON-RPC message back to the client as a
-//! reverse `chutes.build/mcp/sdk_call` request — handled here by [`GatewayAcpInvoker`].
+//! reverse `chutes.ai/mcp/sdk_call` request — handled here by [`GatewayAcpInvoker`].
 //!
-//! NOTE: the *reverse* route (agent -> client, `chutes.build/mcp/sdk_call`) invokes a tool that
+//! NOTE: the *reverse* route (agent -> client, `chutes.ai/mcp/sdk_call`) invokes a tool that
 //! lives in the SDK's process. It is the zero-IPC mirror of the *forward* route (client
-//! -> agent, `chutes.build/mcp/call` in `extensions::mcp`), which invokes a tool on a server the
+//! -> agent, `chutes.ai/mcp/call` in `extensions::mcp`), which invokes a tool on a server the
 //! AGENT is connected to. They use distinct method strings and sit on opposite request
 //! handlers, so they never collide.
 
@@ -25,7 +25,7 @@ use xai_grok_mcp::wire;
 /// serde-checked, not hand-read); entries missing `name`/`serverId` are skipped with a
 /// warning. A name seen twice keeps the first (server names are the tool namespace, so a
 /// duplicate would otherwise silently shadow). Absent meta yields none.
-pub fn parse_acp_mcp_servers(meta: Option<&acp::Meta>) -> Vec<AcpServerEntry> {
+pub(crate) fn parse_acp_mcp_servers(meta: Option<&acp::Meta>) -> Vec<AcpServerEntry> {
     let Some(array) = meta
         .and_then(|m| m.get(wire::MCP_SERVERS))
         .and_then(|v| v.as_array())
@@ -38,12 +38,12 @@ pub fn parse_acp_mcp_servers(meta: Option<&acp::Meta>) -> Vec<AcpServerEntry> {
         let server: AcpServerEntry = match serde_json::from_value(entry.clone()) {
             Ok(server) => server,
             Err(err) => {
-                tracing::warn!(entry = %entry, %err, "ignoring malformed chutes.build/mcp/servers entry");
+                tracing::warn!(entry = %entry, %err, "ignoring malformed chutes.ai/mcp/servers entry");
                 continue;
             }
         };
         if !seen.insert(server.name.clone()) {
-            tracing::warn!(name = %server.name, "ignoring duplicate chutes.build/mcp/servers entry");
+            tracing::warn!(name = %server.name, "ignoring duplicate chutes.ai/mcp/servers entry");
             continue;
         }
         servers.push(server);
@@ -53,22 +53,22 @@ pub fn parse_acp_mcp_servers(meta: Option<&acp::Meta>) -> Vec<AcpServerEntry> {
 
 /// Reverse-RPC invoker for in-process SDK MCP servers.
 ///
-/// Each [`invoke`](AcpReverseInvoker::invoke) sends one `chutes.build/mcp/sdk_call` reverse request
+/// Each [`invoke`](AcpReverseInvoker::invoke) sends one `chutes.ai/mcp/sdk_call` reverse request
 /// straight through the gateway. `AcpAgentGatewaySender::send` returns a `Send` future
 /// (unlike the `?Send` `acp::Client::ext_method` trait method), so the rmcp transport's
 /// `Send` invoker bound is satisfied with no relay task. Calls are independent and may
 /// run concurrently — the gateway serializes them onto the session's message channel.
-pub struct GatewayAcpInvoker {
+pub(crate) struct GatewayAcpInvoker {
     gateway: AcpAgentGatewaySender,
 }
 
 impl GatewayAcpInvoker {
-    pub fn new(gateway: AcpAgentGatewaySender) -> Self {
+    pub(crate) fn new(gateway: AcpAgentGatewaySender) -> Self {
         Self { gateway }
     }
 }
 
-/// Reverse `chutes.build/mcp/sdk_call` params. Declares the on-wire field names once (mirrors
+/// Reverse `chutes.ai/mcp/sdk_call` params. Declares the on-wire field names once (mirrors
 /// the forward side's typed `McpCallRequest`) so the `serverId` literal isn't hand-spelled.
 #[derive(serde::Serialize)]
 struct SdkCallParams<'a> {

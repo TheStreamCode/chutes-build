@@ -53,8 +53,7 @@ pub(crate) fn subagent_template() -> Zeroizing<String> {
 
 /// The compact system prompt used after conversation compaction.
 pub const COMPACT_SYSTEM_PROMPT: &str = "You are an AI coding agent. You operate in a workspace with a provided codebase.\n\n\
-     Your main goal is to complete the user's request, denoted within the <user_query> tag.\n\n\
-     For every Chutes-related question or factual claim, consult both https://chutes.ai/docs and https://chutes.ai/news before answering. Treat relevant official Chutes pages as primary authority. If they do not cover the claim or cannot be reached, say that it was not verified. Never send credentials, private code, prompts, or repository contents to external retrieval services.";
+     Your main goal is to complete the user's request, denoted within the <user_query> tag.";
 
 #[cfg(test)]
 mod tests {
@@ -73,41 +72,23 @@ mod tests {
                 .map(|(i, &b)| b ^ seed.wrapping_add(i as u8))
                 .collect()
         }
-        /// Fold CRLF to LF, matching `read_normalized` in the generator.
-        ///
-        /// `include_bytes!` yields whatever line endings the checkout produced,
-        /// so comparing raw bytes made this test pass only on the platform the
-        /// arrays happened to be generated on.
-        fn normalized(raw: &[u8]) -> Vec<u8> {
-            let mut out = Vec::with_capacity(raw.len());
-            let mut i = 0;
-            while i < raw.len() {
-                if raw[i] == b'\r' && raw.get(i + 1) == Some(&b'\n') {
-                    i += 1;
-                    continue;
-                }
-                out.push(raw[i]);
-                i += 1;
-            }
-            out
-        }
-        let base_raw = normalized(include_bytes!("../../templates/prompt.md"));
-        let apply_patch_raw = normalized(include_bytes!("../../templates/apply_patch_prompt.md"));
-        let subagent_raw = normalized(include_bytes!("../../templates/subagent_prompt.md"));
+        let base_raw = include_bytes!("../../templates/prompt.md");
+        let apply_patch_raw = include_bytes!("../../templates/apply_patch_prompt.md");
+        let subagent_raw = include_bytes!("../../templates/subagent_prompt.md");
 
         assert_eq!(
             BASE_PROMPT_ENC,
-            &xor_encrypt(&base_raw, PROMPT_SEEDS[0]),
+            &xor_encrypt(base_raw, PROMPT_SEEDS[0]),
             "prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
         assert_eq!(
             CODEX_PROMPT_ENC,
-            &xor_encrypt(&apply_patch_raw, PROMPT_SEEDS[1]),
+            &xor_encrypt(apply_patch_raw, PROMPT_SEEDS[1]),
             "apply_patch_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
         assert_eq!(
             SUBAGENT_PROMPT_ENC,
-            &xor_encrypt(&subagent_raw, PROMPT_SEEDS[2]),
+            &xor_encrypt(subagent_raw, PROMPT_SEEDS[2]),
             "subagent_prompt.md encrypted bytes are stale — run scripts/encrypt_templates.py"
         );
     }
@@ -391,48 +372,11 @@ mod tests {
     }
 
     #[test]
-    fn chutes_questions_require_official_docs_and_news() {
-        for (label, prompt) in [
-            (
-                "base",
-                render_base(&default_renderer(), &default_placeholders()),
-            ),
-            (
-                "subagent",
-                render_subagent(&default_renderer(), &default_placeholders()),
-            ),
-            (
-                "apply-patch",
-                render_apply_patch(&default_renderer(), &default_placeholders()),
-            ),
-            ("compact", COMPACT_SYSTEM_PROMPT.to_owned()),
-        ] {
-            assert!(
-                prompt.contains("https://chutes.ai/docs"),
-                "{label} prompt must require official Chutes docs"
-            );
-            assert!(
-                prompt.contains("https://chutes.ai/news"),
-                "{label} prompt must require official Chutes news"
-            );
-            assert!(
-                prompt.contains("primary authority"),
-                "{label} prompt must define official-source precedence"
-            );
-            assert!(
-                prompt.contains("not verified"),
-                "{label} prompt must disclose unverifiable claims"
-            );
-        }
-    }
-
-    #[test]
     fn test_compact_prompt_matches_expected() {
         assert_eq!(
             COMPACT_SYSTEM_PROMPT,
             "You are an AI coding agent. You operate in a workspace with a provided codebase.\n\n\
-             Your main goal is to complete the user's request, denoted within the <user_query> tag.\n\n\
-             For every Chutes-related question or factual claim, consult both https://chutes.ai/docs and https://chutes.ai/news before answering. Treat relevant official Chutes pages as primary authority. If they do not cover the claim or cannot be reached, say that it was not verified. Never send credentials, private code, prompts, or repository contents to external retrieval services.",
+             Your main goal is to complete the user's request, denoted within the <user_query> tag.",
         );
     }
 

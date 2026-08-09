@@ -19,7 +19,9 @@ pub enum ProtocolError {
     ConnectionClosed,
 }
 
-pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>, ProtocolError> {
+pub(crate) async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<Vec<u8>, ProtocolError> {
     let mut len_buf = [0u8; 4];
     match reader.read_exact(&mut len_buf).await {
         Ok(_) => {}
@@ -39,7 +41,7 @@ pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>,
     Ok(buf)
 }
 
-pub async fn write_frame<W: AsyncWrite + Unpin>(
+pub(crate) async fn write_frame<W: AsyncWrite + Unpin>(
     writer: &mut W,
     data: &[u8],
 ) -> Result<(), ProtocolError> {
@@ -111,7 +113,7 @@ pub enum ClientMode {
     /// Headless mode (chutes-build agent, chutes-build agent headless) - uses websocket relay.
     /// Leader connects to websocket relay once and forwards messages.
     Headless,
-    /// Stdio mode (chutes-build agent stdio, grok -p) - uses local IPC.
+    /// Stdio mode (chutes-build agent stdio, chutes-build -p) - uses local IPC.
     /// Client sends/receives ACP messages directly via IPC.
     Stdio,
 }
@@ -146,7 +148,7 @@ pub struct ClientCapabilities {
     #[serde(default)]
     pub client_version: Option<String>,
 
-    /// Whether this client has advertised `chutes.build/codeNavigation.enabled`.
+    /// Whether this client has advertised `chutes.ai/codeNavigation.enabled`.
     /// When true, the leader injects `codeNavEnabled: true` into `session/new`
     /// and `session/load` requests so the agent can gate code-nav startup on a
     /// per-client basis rather than reading from shared last-initialized state.
@@ -389,6 +391,71 @@ pub enum ServerMessage {
     /// finishes initialising. The client should treat this as the signal that
     /// ACP traffic will now be forwarded correctly.
     LeaderReady,
+}
+
+/// Extension methods injected into the agent, named as the agent matches them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::EnumIter)]
+pub(crate) enum InternalMethod {
+    AuthCleared,
+    EvictSessions,
+    ReloadAllMcpServers,
+    ReloadModels,
+    ReloadModelsCache,
+    ReloadProjectMcpServers,
+    ReloadSkills,
+    ReloadWorkflows,
+}
+
+impl InternalMethod {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::AuthCleared => "chutes.build/internal/auth_cleared",
+            Self::EvictSessions => "chutes.build/internal/evict_sessions",
+            Self::ReloadAllMcpServers => "chutes.build/internal/reload_all_mcp_servers",
+            Self::ReloadModels => "chutes.build/internal/reload_models",
+            Self::ReloadModelsCache => "chutes.build/internal/reload_models_cache",
+            Self::ReloadProjectMcpServers => "chutes.build/internal/reload_project_mcp_servers",
+            Self::ReloadSkills => "chutes.build/internal/reload_skills",
+            Self::ReloadWorkflows => "chutes.build/internal/reload_workflows",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        use strum::IntoEnumIterator;
+
+        Self::iter().find(|method| method.name() == name)
+    }
+
+    /// The decoder routes a custom method to `ext_method` / `ext_notification`
+    /// only when it carries the `_` prefix, and rejects the bare name.
+    fn wire_name(self) -> String {
+        format!("_{}", self.name())
+    }
+}
+
+/// Not newline-terminated: the `acp_tx` forwarding loop appends the terminator.
+pub(crate) fn internal_notification(method: InternalMethod, params: serde_json::Value) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method.wire_name(),
+        "params": params,
+    })
+    .to_string()
+}
+
+/// Newline-terminated for direct injection.
+pub(crate) fn internal_request_line(
+    id: &str,
+    method: InternalMethod,
+    params: serde_json::Value,
+) -> String {
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method.wire_name(),
+        "params": params,
+    });
+    format!("{msg}\n")
 }
 
 #[cfg(test)]
@@ -713,6 +780,25 @@ mod tests {
                 assert_eq!(delay_ms, 2000);
             }
             _ => panic!("Expected ShuttingDown, got {:?}", received),
+        }
+    }
+
+    #[test]
+    fn every_internal_method_carries_the_routable_prefix() {
+        use strum::IntoEnumIterator;
+
+        for method in InternalMethod::iter() {
+            for line in [
+                internal_notification(method, serde_json::json!({})),
+                internal_request_line("id", method, serde_json::json!({})),
+            ] {
+                let json: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+                assert_eq!(
+                    json["method"].as_str().and_then(|m| m.strip_prefix('_')),
+                    Some(method.name()),
+                    "unroutable wire method: {line}"
+                );
+            }
         }
     }
 

@@ -23,7 +23,7 @@ manifests, local configuration and credential boundaries, tests, documentation,
 release assembly, GitHub Actions, repository rules, security settings, and the
 selective upstream-sync policy. It combined source review, dependency-tree and
 GitHub alert inspection, release-package inspection, formatting/lint/test/build
-gates, secret scanning, and comparison with upstream Grok Build through
+gates, secret scanning, and comparison with upstream Chutes Build through
 `0.2.117`.
 
 Generated or upstream-derived code was reviewed as part of the executable trust
@@ -58,16 +58,38 @@ root `Cargo.lock`. They were updated to the first patched compatible releases:
 These are lockfile-only patch updates within existing manifest constraints. The
 resolved graph remains validated with `--locked`.
 
-### CR-003 — Low — accepted temporarily — `lru` soundness advisory
+### CR-003 — Low — closed as not-used — `lru` soundness advisory
 
-`lru 0.12.5` is reachable through both `ratatui 0.29` and
-`aws-sdk-s3 1.112`; the independent Markdown fuzz lock reaches it through
-`ratatui 0.29`. GHSA-rhfx-m35p-ff5j affects `lru >=0.9,<0.16.3` and describes
-an `IterMut` Stacked Borrows violation. The available fixed release is
-`0.16.3`, outside both transitive semver ranges.
+`lru 0.12.5` is reachable through both `ratatui 0.29` and `aws-sdk-s3`; the
+independent Markdown fuzz lock reaches it through `ratatui 0.29`.
+GHSA-rhfx-m35p-ff5j affects `lru >=0.9,<0.16.3` and describes an **`IterMut`**
+Stacked Borrows violation. The fixed release is `0.16.3`, outside both transitive
+semver ranges — and `lru 0.16.3` is already in the tree, pulled by `ratatui-core`,
+so the graph carries both.
 
-No direct Chutes Build call to the affected iterator was identified. The alert
-is low severity, remains visible in GitHub, and is not added to an ignore list.
+**The affected API is not reachable.** Chutes Build never calls `lru` directly, so
+the question is whether the two crates holding an `LruCache` iterate it mutably.
+Neither does:
+
+- `ratatui 0.29` uses `lru` in exactly one place — `layout/layout.rs`, a
+  `LruCache<(Rect, Layout), (Segments, Spacers)>` memoizing layout solves through
+  `get`/`put`. Its six `iter_mut()` call sites are all on `Vec<Span>` / `Vec<Line>`
+  in `text/`, not on the cache.
+- `aws-sdk-s3` uses `LruCache` in `s3_express.rs` for credentials and contains no
+  `iter_mut()` call anywhere in the crate.
+
+**The obvious fix does not work.** `aws-sdk-s3 1.141.0` does require `lru 0.16.3`,
+but taking it pulls the whole aws-smithy stack forward (17 crates updated, 6 added),
+which requires rustc 1.94.1 against this repo's 1.94.0 pin — and it still would not
+close the advisory, because `ratatui 0.29` remains a source. Closing it properly
+means migrating to ratatui 0.30+ (the `ratatui-core` split) across six of our
+crates: `xai-grok-pager`, `-pager-minimal`, `-pager-render`, `-markdown`,
+`xai-ratatui-inline`, and `xai-ratatui-textarea`. That is a framework migration, not
+a security patch, and the risk it would retire is zero.
+
+The Dependabot alerts are dismissed as `not_used` with this reasoning rather than
+suppressed in an ignore list, so a future advisory on a *reachable* `lru` API still
+surfaces.
 A proper fix requires testing the coordinated `ratatui 0.30` and current AWS
 SDK migrations; applying either as an unreviewed lockfile substitution would be
 unsafe and potentially breaking.
@@ -147,7 +169,7 @@ instead of weakening assertions or broadly editing imported behavior.
 
 The product-specific shell, pager, tools, authentication, configuration, and
 packaging layers have clear ownership boundaries. The retained upstream crate
-layout is large but deliberate: preserving it keeps selective Grok Build ports
+layout is large but deliberate: preserving it keeps selective Chutes Build ports
 reviewable. Chutes-specific product invariants are centralized in policy and
 configuration paths rather than scattered release-time patches.
 

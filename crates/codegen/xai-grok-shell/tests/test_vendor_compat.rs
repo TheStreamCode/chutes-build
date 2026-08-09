@@ -1,12 +1,12 @@
 //! Vendor-compatibility end-to-end tests.
 //!
 //! Each test builds a fake `$HOME` containing skills/rules/AGENTS.md under the
-//! `.chutes-build`, `.cursor`, and `.claude` vendor dirs, spawns a real `chutes-build agent
+//! `.grok`, `.cursor`, and `.claude` vendor dirs, spawns a real `chutes-build agent
 //! stdio` process against the mock inference server (toggling the
-//! `CHUTES_BUILD_<VENDOR>_<SURFACE>_ENABLED` env vars via `cmd.env`), sends one prompt,
+//! `GROK_<VENDOR>_<SURFACE>_ENABLED` env vars via `cmd.env`), sends one prompt,
 //! and asserts on the full inference request bodies:
 //!
-//! - the Grok-native skill is always present regardless of toggles
+//! - the Chutes Build-native skill is always present regardless of toggles
 //! - each of the 6 (vendor x surface) cells toggles independently
 //! - a vendor-shipped default skill (`shell`) under `~/.cursor` is always
 //!   dropped by the denylist
@@ -104,12 +104,15 @@ async fn run_scenario(env: &[(&str, &str)]) -> String {
         .await
         .expect("start mock server");
     let workdir = git_workdir();
-    let home = tempfile::TempDir::new().expect("create temp home");
-    seed_fixtures(home.path(), workdir.path());
+    let mut sandbox = TestSandbox::new();
+    seed_fixtures(sandbox.home(), workdir.workspace());
+    sandbox.extend_env(env.iter().copied());
 
-    let client = GrokStdioClient::spawn_with_home_and_env(&server, workdir.path(), home, env).await;
+    let client = GrokStdioClient::spawn_with_sandbox(&server, workdir.workspace(), sandbox).await;
     client.initialize_with_timeout().await;
-    let session_id = client.create_session_with_timeout(workdir.path()).await;
+    let session_id = client
+        .create_session_with_timeout(workdir.workspace())
+        .await;
     let _ = client.prompt_with_timeout(&session_id, "hello").await;
 
     let bodies: Vec<String> = server

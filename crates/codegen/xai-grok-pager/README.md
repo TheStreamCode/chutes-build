@@ -1,4 +1,4 @@
-# Chutes Build TUI
+# xai-grok-pager
 
 Terminal UI (TUI) for Chutes Build. Provides the interactive full-screen interface
 including the scrollback view, prompt input, session management, and all modal
@@ -42,8 +42,7 @@ src/
 | `Ctrl+P` or `?` | Agent screen | Open command palette |
 | `Ctrl+L` | Any (non–VS Code family) | Open plugins/hooks modal; on VS Code / Cursor / Windsurf / Zed use `/plugins` or `/hooks` (`Ctrl+L` is mid-turn interject) |
 | `Tab` | Prompt | Switch to scrollback |
-| `Esc` | Turn running, non-vim or minimal mode | Cancel the turn and preserve the queued draft |
-| `Esc` | Turn running, fullscreen vim mode | Keep vim navigation semantics; use `Ctrl+C` to cancel |
+| `Esc` | Turn running | Cancel — in minimal mode or with vim scrollback mode off (the default). Fullscreen vim mode: no-op (use `Ctrl+C`) |
 | `Esc` `Esc` | Idle, non-empty prompt | Clear prompt (within 800ms; first press shows hint) |
 | `Esc` `Esc` | Idle, empty prompt + messages | Open rewind picker (silent first press) |
 | `Ctrl+M` | Prompt | Toggle multiline mode |
@@ -53,9 +52,15 @@ src/
 | `!` | Prompt (empty) | Enter bash mode |
 | `Ctrl+C` | Prompt (with text) | Clear prompt (even while turn running) |
 | `Ctrl+C` | Prompt (empty) + turn running | Cancel running turn |
+| `Ctrl+B` | Agent screen + foreground command running | Send the command to the background |
+| `Ctrl+G` | Agent screen (full TUI) | Toggle the tasks pane |
+| `Ctrl+G` | Ordinary composer (minimal mode) | Edit the draft externally; use the command-palette entry if the chord is reserved |
 
 ## Docs
 
-The maintained in-app guides live in `docs/user-guide/` and are embedded into
-the binary. Repository-level architecture and privacy documentation live at the
-workspace root.
+- [Terminal Support & Troubleshooting](docs/user-guide/21-terminal-support.md) — tmux/SSH truecolor, clipboard, mouse, diagnostics, `/doctor`
+- [Hooks & Plugins Guide](docs/hooks-and-plugins.md) — managing hooks, plugins, and marketplace sources
+- [Custom Hooks Guide](docs/custom-hooks.md) — creating, configuring, and writing your own hooks
+- [Hook Examples](../xai-grok-hooks/examples/README.md) — sample hooks for common workflows
+- [Hooks Crate (`xai-grok-hooks`)](../xai-grok-hooks/) — hook runtime, event types, and execution engine
+- [Plugin Marketplace Crate (`xai-chutes-build-plugin-marketplace`)](../xai-chutes-build-plugin-marketplace/) — marketplace source loading, scanning, and install

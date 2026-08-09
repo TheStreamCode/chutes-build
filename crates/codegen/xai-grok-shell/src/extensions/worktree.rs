@@ -1,4 +1,4 @@
-//! Handler for chutes.build/git/worktree/* extension methods.
+//! Handler for chutes.ai/git/worktree/* extension methods.
 
 use agent_client_protocol as acp;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
@@ -72,13 +72,13 @@ pub struct ListWorktreeRequest {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ShowWorktreeRequest {
+pub(crate) struct ShowWorktreeRequest {
     pub id_or_path: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GcWorktreeRequest {
+pub(crate) struct GcWorktreeRequest {
     #[serde(default)]
     pub dry_run: bool,
     /// Duration string like "7d", "24h", "30m", "60s".
@@ -96,14 +96,14 @@ pub struct WorktreeDbPathResponse {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolveLocalForWorktreeResumeRequest {
+pub(crate) struct ResolveLocalForWorktreeResumeRequest {
     pub session_id: String,
     pub cwd: String,
 }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ResolveLocalForWorktreeResumeResponse {
+pub(crate) struct ResolveLocalForWorktreeResumeResponse {
     pub found: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_session_id: Option<String>,

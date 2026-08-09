@@ -68,6 +68,190 @@ fn bash_item(id: &str, owner: &str, command: &str) -> InputItem {
     item
 }
 
+#[test]
+fn combine_front_merges_consecutive_plain_prompts() {
+    use crate::session::commands::{PromptCompletionKind, PromptTurnOk};
+
+    let (p1, _) = user_item_with_rx("p1", "A");
+    let (p2, rx2) = user_item_with_rx("p2", "A");
+    let (p3, rx3) = user_item_with_rx("p3", "A");
+    let mut pending = std::collections::VecDeque::from([p1, p2, p3]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].prompt_id, "p1");
+    let combined = "text for p1\n\ntext for p2\n\ntext for p3";
+    assert_eq!(
+        SessionActor::queue_text_from_blocks(&pending[0].prompt_blocks),
+        combined
+    );
+    assert_eq!(
+        pending[0].queue_meta.as_ref().map(|m| m.text.as_str()),
+        Some(combined)
+    );
+    assert_eq!(
+        pending[0]
+            .queue_meta
+            .as_ref()
+            .and_then(|m| m.combined_texts.as_ref())
+            .map(|v| v.as_slice()),
+        Some(
+            [
+                "text for p1".to_string(),
+                "text for p2".to_string(),
+                "text for p3".to_string()
+            ]
+            .as_slice()
+        )
+    );
+    // Content-block meta for echo/replay multi-bubble paint.
+    let segs = pending[0]
+        .prompt_blocks
+        .first()
+        .and_then(|b| match b {
+            acp::ContentBlock::Text(t) => t.meta.as_ref(),
+            _ => None,
+        })
+        .and_then(|m| m.get(crate::session::prompt_queue::COMBINED_DISPLAY_TEXTS_META))
+        .and_then(|v| v.as_array())
+        .expect("combinedDisplayTexts stamped");
+    assert_eq!(
+        segs.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(),
+        ["text for p1", "text for p2", "text for p3"]
+    );
+    for mut rx in [rx2, rx3] {
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(Ok(PromptTurnOk {
+                completion_kind: PromptCompletionKind::RemovedFromQueue,
+                ..
+            }))
+        ));
+    }
+}
+
+#[test]
+fn combine_front_stops_at_bash() {
+    let mut pending = std::collections::VecDeque::from([
+        user_item("p1", "A"),
+        user_item("p2", "A"),
+        bash_item("bash1", "A", "ls"),
+        user_item("p3", "A"),
+    ]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(pending.len(), 3);
+    assert_eq!(
+        SessionActor::queue_text_from_blocks(&pending[0].prompt_blocks),
+        "text for p1\n\ntext for p2"
+    );
+    assert_eq!(pending[1].prompt_id, "bash1");
+    assert_eq!(pending[2].prompt_id, "p3");
+}
+
+#[test]
+fn combine_front_noop_when_ineligible() {
+    let mut single = std::collections::VecDeque::from([user_item("only", "A")]);
+    SessionActor::combine_front_pending_inputs(&mut single, &[]);
+    assert_eq!(single.len(), 1);
+
+    let mut bash_front =
+        std::collections::VecDeque::from([bash_item("b", "A", "pwd"), user_item("p", "A")]);
+    SessionActor::combine_front_pending_inputs(&mut bash_front, &[]);
+    assert_eq!(bash_front.len(), 2);
+    assert_eq!(bash_front[0].prompt_id, "b");
+}
+
+#[test]
+fn combine_front_skips_client_expanded_skill() {
+    let mut skill = user_item("skill", "A");
+    skill.prompt_blocks = vec![acp::ContentBlock::Text(
+        acp::TextContent::new("# expanded skill body".to_string()).meta(
+            serde_json::json!({ "displayText": "/commit fix" })
+                .as_object()
+                .cloned(),
+        ),
+    )];
+    let mut pending = std::collections::VecDeque::from([skill, user_item("follow", "A")]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(
+        pending.len(),
+        2,
+        "displayText front must not absorb followers"
+    );
+}
+
+#[test]
+fn combine_front_skips_edit_hold() {
+    let (p1, _) = user_item_with_rx("p1", "A");
+    let (p2, mut rx2) = user_item_with_rx("p2", "A");
+    let (p3, _) = user_item_with_rx("p3", "A");
+    let mut pending = std::collections::VecDeque::from([p1, p2, p3]);
+    SessionActor::combine_front_pending_inputs(&mut pending, &["p2"]);
+    assert_eq!(pending.len(), 3, "edit-hold follower must not be absorbed");
+    assert!(rx2.try_recv().is_err(), "held row must stay queued");
+}
+
+fn x_search_cutoff_update() -> xai_grok_sampling_types::ToolOverridesUpdate {
+    xai_grok_sampling_types::ToolOverridesUpdate {
+        x_search: Some(Some(xai_grok_sampling_types::XSearchOptions {
+            date_bound: Some(
+                xai_grok_sampling_types::SearchDateBound::new(None, Some("2024-03-15".to_string()))
+                    .unwrap(),
+            ),
+        })),
+        web_search: None,
+    }
+}
+
+#[test]
+fn combine_front_stops_at_a_per_turn_override_follower() {
+    // A follower carrying an override pins its own bound, so it stops the run and keeps its row.
+    let (p1, _) = user_item_with_rx("p1", "A");
+    let (mut p2, mut rx2) = user_item_with_rx("p2", "A");
+    p2.tool_overrides_update = Some(x_search_cutoff_update());
+    let (p3, _) = user_item_with_rx("p3", "A");
+    let mut pending = std::collections::VecDeque::from([p1, p2, p3]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(
+        pending.len(),
+        3,
+        "an override-bearing follower must not be absorbed"
+    );
+    assert_eq!(pending[0].prompt_id, "p1");
+    assert_eq!(pending[1].prompt_id, "p2");
+    assert_eq!(pending[2].prompt_id, "p3");
+    assert!(
+        rx2.try_recv().is_err(),
+        "the pinned follower must stay queued"
+    );
+}
+
+#[test]
+fn combine_front_noop_when_front_carries_a_per_turn_override() {
+    // An override-bearing front pins its own bound, so it must run alone rather than absorb a
+    // follower into its turn under that bound.
+    let mut front = user_item("p1", "A");
+    front.tool_overrides_update = Some(x_search_cutoff_update());
+    let mut pending = std::collections::VecDeque::from([front, user_item("p2", "A")]);
+
+    SessionActor::combine_front_pending_inputs(&mut pending, &[]);
+
+    assert_eq!(
+        pending.len(),
+        2,
+        "an override-bearing front must not absorb followers"
+    );
+    assert_eq!(pending[0].prompt_id, "p1");
+    assert_eq!(pending[1].prompt_id, "p2");
+}
+
 /// Two prompts arrive (serialized by the actor mailbox → FIFO); the agent
 /// drains the front; an edit against the already-drained item is a benign
 /// no-op that re-broadcasts the current queue; a stale-version edit is also
@@ -245,6 +429,130 @@ async fn edit_queued_prompt_replaces_text_and_bumps_version() {
             assert_eq!(wire[0].version, 1);
             assert_eq!(wire[0].owner.as_deref(), Some("alice"));
             assert_eq!(wire[0].last_editor.as_deref(), Some("bob"));
+        })
+        .await;
+}
+
+/// Applying a queued edit clears that row's combine hold with the new text, so
+/// combine can't merge it on stale text before the edit lands. See
+/// pager `exit_editing_mode_keeping_hold` for the race this closes.
+#[tokio::test]
+async fn edit_queued_prompt_clears_combine_hold() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("p1", "alice"));
+                state.combine_edit_holds.insert("p1".to_string());
+            }
+
+            actor
+                .handle_edit_queued_prompt("p1", "edited".into(), Some("bob"))
+                .await;
+
+            let state = actor.state.lock().await;
+            assert!(
+                !state.combine_edit_holds.contains("p1"),
+                "applying the edit must clear the combine hold for that row"
+            );
+            let item = state
+                .pending_inputs
+                .iter()
+                .find(|i| i.queue_meta.as_ref().is_some_and(|m| m.id == "p1"))
+                .expect("p1 still in queue");
+            assert_eq!(item.queue_meta.as_ref().unwrap().text, "edited");
+        })
+        .await;
+}
+
+/// End-to-end for the hold race: after an edit clears the hold, combine merges
+/// using the edited text (not the pre-edit value). The edited follower is
+/// absorbed into the front as `RemovedFromQueue` only after contributing the
+/// new text — the race this closes dropped the edit by merging on stale text.
+#[tokio::test]
+async fn edit_then_combine_uses_edited_text() {
+    use crate::session::commands::{PromptCompletionKind, PromptTurnOk};
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (p1, mut p1_rx) = user_item_with_rx("p1", "alice");
+            let (p2, mut p2_rx) = user_item_with_rx("p2", "alice");
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(p1);
+                state.pending_inputs.push_back(p2);
+                // Follower under edit: skip_ids only gate followers.
+                state.combine_edit_holds.insert("p2".to_string());
+            }
+
+            // While held, combine must not absorb the follower.
+            {
+                let mut state = actor.state.lock().await;
+                SessionActor::combine_front_pending_inputs(&mut state.pending_inputs, &["p2"]);
+                assert_eq!(
+                    state.pending_inputs.len(),
+                    2,
+                    "held follower must not be absorbed"
+                );
+                assert!(p2_rx.try_recv().is_err(), "held row must stay queued");
+            }
+
+            actor
+                .handle_edit_queued_prompt("p2", "edited follower".into(), Some("bob"))
+                .await;
+
+            // Edit cleared the hold under the same lock; combine now merges with
+            // the new text. The front survives; the follower is absorbed.
+            {
+                let mut state = actor.state.lock().await;
+                assert!(
+                    !state.combine_edit_holds.contains("p2"),
+                    "edit must clear the hold before combine can absorb the row"
+                );
+                // Row still present with edited text before combine runs.
+                let edited_text = state
+                    .pending_inputs
+                    .iter()
+                    .find(|i| i.prompt_id == "p2")
+                    .and_then(|i| i.queue_meta.as_ref().map(|m| m.text.clone()))
+                    .expect("edited row still queued after edit");
+                assert_eq!(edited_text, "edited follower");
+
+                SessionActor::combine_front_pending_inputs(&mut state.pending_inputs, &[]);
+
+                assert_eq!(state.pending_inputs.len(), 1);
+                assert_eq!(state.pending_inputs[0].prompt_id, "p1");
+                let combined = "text for p1\n\nedited follower";
+                assert_eq!(
+                    SessionActor::queue_text_from_blocks(&state.pending_inputs[0].prompt_blocks),
+                    combined,
+                    "merge must use the post-edit text, not the pre-edit value"
+                );
+                assert_eq!(
+                    state.pending_inputs[0]
+                        .queue_meta
+                        .as_ref()
+                        .map(|m| m.text.as_str()),
+                    Some(combined)
+                );
+            }
+
+            assert!(
+                p1_rx.try_recv().is_err(),
+                "front must remain queued after absorbing the follower"
+            );
+            // Absorbed after contributing the edited text (not with stale pre-edit text).
+            assert!(matches!(
+                p2_rx.try_recv(),
+                Ok(Ok(PromptTurnOk {
+                    completion_kind: PromptCompletionKind::RemovedFromQueue,
+                    ..
+                }))
+            ));
         })
         .await;
 }
@@ -444,7 +752,7 @@ async fn interject_queued_prompt_noop_without_running_turn() {
             }
             // current_prompt_id is None → no turn running.
 
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 0, None, None)
                 .await;
 
@@ -480,7 +788,7 @@ async fn interject_queued_prompt_stale_version_noop() {
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
             // Version 99 != live version 0 → no-op.
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 99, None, None)
                 .await;
 
@@ -517,10 +825,16 @@ async fn interject_after_cancel_does_nothing_and_keeps_prompt_queued() {
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
-            actor.cancel_running_task(true, false, false, None).await;
+            let _ = actor
+                .cancel_running_task(crate::session::CancelOptions {
+                    cancel_subagents: true,
+                    user_initiated: true,
+                    ..Default::default()
+                })
+                .await;
 
             // p1 would start next; the interject lands in the gap where no turn runs yet.
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 0, None, None)
                 .await;
 
@@ -569,7 +883,7 @@ async fn interject_queued_prompt_with_new_text_no_running_turn_saves_edit() {
             }
             // current_prompt_id is None → no turn running.
 
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 0, None, Some("EDITED text"))
                 .await;
 
@@ -599,7 +913,7 @@ async fn interject_queued_prompt_with_new_text_no_running_turn_saves_edit() {
 
             // Stale version gets NO fallback even without a running turn —
             // a concurrent edit won and losing ours is correct LWW.
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 99, None, Some("LOSER edit"))
                 .await;
             let state = actor.state.lock().await;
@@ -715,7 +1029,7 @@ async fn interject_queued_bash_row_noop_keeps_row_queued() {
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 0, None, None)
                 .await;
 
@@ -761,7 +1075,7 @@ async fn interject_queued_bash_row_with_new_text_saves_edit() {
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 0, None, Some("ls -la"))
                 .await;
 
@@ -793,7 +1107,7 @@ async fn interject_queued_prompt_with_new_text_stale_version_full_noop() {
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
-            actor
+            let _ = actor
                 .handle_interject_queued_prompt("p1", 99, None, Some("EDITED text"))
                 .await;
 
@@ -822,6 +1136,7 @@ async fn queue_input_send_now_inserts_behind_running_front_and_requests_cancel()
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("running", "A"));
                 state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
                 state.pending_inputs.push_back(user_item("held", "A"));
             }
             *actor
@@ -831,21 +1146,14 @@ async fn queue_input_send_now_inserts_behind_running_front_and_requests_cancel()
 
             let (respond_to, _prx) = oneshot::channel();
             let cancel = actor
-                .queue_input(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("now"))],
-                    "d-now".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    /* send_now */ true,
-                    respond_to,
-                    None,
-                    None,
-                )
+                .queue_input(QueueInputRequest {
+                    send_now: true,
+                    ..queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new("now"))],
+                        "d-now",
+                        respond_to,
+                    )
+                })
                 .await;
             assert!(cancel, "send-now behind a running turn must cancel it");
 
@@ -891,21 +1199,14 @@ async fn queue_input_stacked_send_now_prompts_insert_fifo_during_goal_turn() {
             for id in ["sn-1", "sn-2"] {
                 let (respond_to, _prx) = oneshot::channel();
                 let cancel = actor
-                    .queue_input(
-                        vec![acp::ContentBlock::Text(acp::TextContent::new(id))],
-                        id.to_string(),
-                        PromptMode::Agent,
-                        None,
-                        None,
-                        None,
-                        None,
-                        false,
-                        None,
-                        /* send_now */ true,
-                        respond_to,
-                        None,
-                        None,
-                    )
+                    .queue_input(QueueInputRequest {
+                        send_now: true,
+                        ..queue_input_request(
+                            vec![acp::ContentBlock::Text(acp::TextContent::new(id))],
+                            id,
+                            respond_to,
+                        )
+                    })
                     .await;
                 assert!(!cancel, "goal turns promote send-now but never cancel");
             }
@@ -943,45 +1244,22 @@ async fn queue_input_auto_send_now_only_inside_wait_window() {
 
             let (respond_to, _p1) = oneshot::channel();
             let cancel = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("early"))],
-                    "pre-wait".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "pre-wait",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(!cancel, "pre-wait rows must not cancel the turn");
 
-            actor
-                .tool_context
-                .blocking_wait_depth
-                .store(1, std::sync::atomic::Ordering::SeqCst);
+            actor.tool_context.blocking_wait_depth.set_depth_for_test(1);
             let (respond_to, _p2) = oneshot::channel();
             let cancel = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("mid-wait"))],
-                    "d-mid".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "d-mid",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(
                 !cancel,
@@ -1013,33 +1291,21 @@ async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("running", "A"));
                 state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
             }
             *actor
                 .current_prompt_id
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
-            actor
-                .tool_context
-                .blocking_wait_depth
-                .store(1, std::sync::atomic::Ordering::SeqCst);
+            actor.tool_context.blocking_wait_depth.set_depth_for_test(1);
 
             let (respond_to, _p) = oneshot::channel();
             let cancel = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("first"))],
-                    "first".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "first",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(cancel, "first prompt during empty-held wait must cancel");
 
@@ -1062,21 +1328,11 @@ async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {
             drop(state);
             let (respond_to, _p2) = oneshot::channel();
             let cancel2 = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("second"))],
-                    "second".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "second",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(!cancel2, "second prompt with held row must not cancel");
             let state = actor.state.lock().await;
@@ -1101,8 +1357,6 @@ async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {
 /// A foreground subagent await (its `BlockingWaitGuard`) opens the same send-now window.
 #[tokio::test]
 async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
-    use std::sync::atomic::Ordering;
-
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1111,6 +1365,7 @@ async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("running", "A"));
                 state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
             }
             *actor
                 .current_prompt_id
@@ -1118,32 +1373,22 @@ async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
 
             let depth = actor.tool_context.blocking_wait_depth.clone();
-            assert_eq!(depth.load(Ordering::SeqCst), 0, "no wait window yet");
+            assert_eq!(depth.depth(), 0, "no wait window yet");
 
             let wait_guard = crate::tools::tool_context::BlockingWaitGuard::enter(depth.clone());
             assert_eq!(
-                depth.load(Ordering::SeqCst),
+                depth.depth(),
                 1,
                 "a foreground subagent await must raise blocking_wait_depth"
             );
 
             let (respond_to, _p1) = oneshot::channel();
             let cancel = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("preempt"))],
-                    "during-await".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "during-await",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(
                 cancel,
@@ -1152,28 +1397,18 @@ async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
 
             drop(wait_guard);
             assert_eq!(
-                depth.load(Ordering::SeqCst),
+                depth.depth(),
                 0,
                 "guard drop must restore blocking_wait_depth"
             );
 
             let (respond_to, _p2) = oneshot::channel();
             let cancel = actor
-                .queue_input(
+                .queue_input(queue_input_request(
                     vec![acp::ContentBlock::Text(acp::TextContent::new("later"))],
-                    "after-await".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    false,
+                    "after-await",
                     respond_to,
-                    None,
-                    None,
-                )
+                ))
                 .await;
             assert!(
                 !cancel,
@@ -1211,28 +1446,18 @@ async fn queue_input_send_now_exempts_synthetic_and_goal_turns() {
                 .current_prompt_id
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
-            actor
-                .tool_context
-                .blocking_wait_depth
-                .store(1, std::sync::atomic::Ordering::SeqCst);
+            actor.tool_context.blocking_wait_depth.set_depth_for_test(1);
 
             let (respond_to, _p1) = oneshot::channel();
             let cancel = actor
-                .queue_input(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("done"))],
-                    "task-completed-bg1".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    true,
-                    None,
-                    false,
-                    respond_to,
-                    None,
-                    None,
-                )
+                .queue_input(QueueInputRequest {
+                    verbatim: true,
+                    ..queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new("done"))],
+                        "task-completed-bg1",
+                        respond_to,
+                    )
+                })
                 .await;
             assert!(!cancel, "synthetic prompts must never cancel the turn");
 
@@ -1242,21 +1467,14 @@ async fn queue_input_send_now_exempts_synthetic_and_goal_turns() {
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             let (respond_to, _p2) = oneshot::channel();
             let cancel = actor
-                .queue_input(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("nudge"))],
-                    "d-goal".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    true,
-                    respond_to,
-                    None,
-                    None,
-                )
+                .queue_input(QueueInputRequest {
+                    send_now: true,
+                    ..queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new("nudge"))],
+                        "d-goal",
+                        respond_to,
+                    )
+                })
                 .await;
             assert!(!cancel, "goal turns must not be cancelled by send-now");
             let state = actor.state.lock().await;
@@ -1281,6 +1499,7 @@ async fn queue_send_now_promotes_row_and_requests_cancel() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("running", "A"));
                 state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
                 state.pending_inputs.push_back(user_item("held", "A"));
                 state.pending_inputs.push_back(bash_item("b1", "A", "ls"));
             }
@@ -1360,6 +1579,7 @@ async fn queue_input_send_now_pins_front_on_running_task_identity() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_item("finished", "A"));
                 state.running_task = Some(running_task_stub("finished"));
+                state.front_message_committed = true;
             }
             // Completion-race window: current_prompt_id cleared, front finished but unpopped.
             *actor
@@ -1369,21 +1589,14 @@ async fn queue_input_send_now_pins_front_on_running_task_identity() {
 
             let (respond_to, _prx) = oneshot::channel();
             let cancel = actor
-                .queue_input(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("now"))],
-                    "d-now".to_string(),
-                    PromptMode::Agent,
-                    None,
-                    None,
-                    None,
-                    None,
-                    false,
-                    None,
-                    /* send_now */ true,
-                    respond_to,
-                    None,
-                    None,
-                )
+                .queue_input(QueueInputRequest {
+                    send_now: true,
+                    ..queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new("now"))],
+                        "d-now",
+                        respond_to,
+                    )
+                })
                 .await;
             assert!(
                 cancel,
@@ -1432,6 +1645,7 @@ async fn stale_completion_does_not_clear_promoted_turns_running_task() {
                         completion_kind: crate::session::commands::PromptCompletionKind::Completed,
                         structured_output: None,
                         usage: None,
+                        tool_overrides: None,
                     }),
                 )
                 .await;
@@ -1454,6 +1668,654 @@ async fn stale_completion_does_not_clear_promoted_turns_running_task() {
                     .as_deref(),
                 Some("promoted"),
                 "stale completion must not clear the promoted turn's prompt id"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn tool_overrides_update_applies_at_promotion_never_at_enqueue() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let options = xai_grok_sampling_types::XSearchOptions {
+                date_bound: Some(
+                    xai_grok_sampling_types::SearchDateBound::new(
+                        None,
+                        Some("2024-03-15".to_string()),
+                    )
+                    .unwrap(),
+                ),
+            };
+            // A per-turn update that SETS the x_search override to `options`.
+            let set_update = || xai_grok_sampling_types::ToolOverridesUpdate {
+                x_search: Some(Some(options.clone())),
+                web_search: None,
+            };
+            let expected = xai_grok_sampling_types::ToolOverrides {
+                x_search: Some(options.clone()),
+                web_search: None,
+            };
+
+            let (mut item, prompt_rx) = user_item_with_rx("p1", "alice");
+            item.tool_overrides_update = Some(set_update());
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(item);
+            }
+            assert_eq!(
+                *actor.tool_overrides.borrow(),
+                None,
+                "an enqueued update must not rebind the session before its turn starts"
+            );
+
+            actor.handle_remove_queued_prompt("p1", 0, None).await;
+            assert_eq!(
+                *actor.tool_overrides.borrow(),
+                None,
+                "a removed prompt's update must never apply"
+            );
+            let removed = prompt_rx.await.expect("removed prompt resolves its RPC");
+            assert!(
+                matches!(
+                    removed,
+                    Ok(crate::session::commands::PromptTurnOk {
+                        completion_kind: PromptCompletionKind::RemovedFromQueue,
+                        tool_overrides: None,
+                        ..
+                    })
+                ),
+                "the removal response echoes the session's standing overrides (none)"
+            );
+
+            let (mut promoted, _promoted_rx) = user_item_with_rx("p2", "alice");
+            promoted.tool_overrides_update = Some(set_update());
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(promoted);
+            }
+            let (completion_tx, _completion_rx) = tokio::sync::mpsc::unbounded_channel();
+            actor.clone().maybe_start_running_task(completion_tx).await;
+            assert_eq!(
+                actor.tool_overrides.borrow().as_ref(),
+                Some(&expected),
+                "promotion applies the front prompt's update to the session override"
+            );
+            assert_eq!(
+                actor
+                    .resolved_tool_overrides
+                    .load_full()
+                    .map(|o| (*o).clone()),
+                Some(expected.clone()),
+                "promotion also republishes the configured cutoff into the cell subagents inherit"
+            );
+
+            actor.apply_tool_overrides_update(None);
+            assert_eq!(
+                actor.tool_overrides.borrow().as_ref(),
+                Some(&expected),
+                "a prompt with no update leaves the sticky override in place"
+            );
+            actor.apply_tool_overrides_update(Some(xai_grok_sampling_types::ToolOverridesUpdate {
+                x_search: Some(None),
+                web_search: None,
+            }));
+            assert_eq!(
+                *actor.tool_overrides.borrow(),
+                None,
+                "an explicit clear removes the override"
+            );
+            assert!(
+                actor.resolved_tool_overrides.load().is_none(),
+                "clearing the override republishes an empty configured cutoff to the shared cell"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn effective_tool_overrides_echoes_and_gates_on_backend_search() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            // Backend search on, with a bare (unbounded) x_search hosted tool.
+            *actor.agent.borrow_mut() =
+                test_agent_backend_search(vec![xai_grok_sampling_types::HostedTool::XSearch {
+                    options: None,
+                }])
+                .await;
+            actor.supports_backend_search.set(true);
+            assert!(
+                actor.backend_search_active(),
+                "fixture must actually reach the enabled-backend-search path"
+            );
+
+            // A standing per-turn cutoff (toDate only).
+            let options = xai_grok_sampling_types::XSearchOptions {
+                date_bound: Some(
+                    xai_grok_sampling_types::SearchDateBound::new(
+                        None,
+                        Some("2024-03-15".to_string()),
+                    )
+                    .unwrap(),
+                ),
+            };
+            let expected = xai_grok_sampling_types::ToolOverrides {
+                x_search: Some(options.clone()),
+                web_search: None,
+            };
+            *actor.tool_overrides.borrow_mut() = Some(expected.clone());
+
+            assert_eq!(
+                actor.effective_tool_overrides(),
+                Some(expected.clone()),
+                "backend search on ⇒ the applied cutoff echoes back for attestation"
+            );
+            assert_eq!(
+                actor.effective_hosted_tools(),
+                vec![xai_grok_sampling_types::HostedTool::XSearch {
+                    options: Some(options.clone()),
+                }],
+                "the wire's XSearch entry carries exactly the bound the echo attests (wire == echo)"
+            );
+
+            actor.supports_backend_search.set(false);
+            assert!(
+                actor.tool_overrides.borrow().is_some(),
+                "the standing override is unchanged — only per-model support flipped"
+            );
+            assert_eq!(
+                actor.effective_tool_overrides(),
+                None,
+                "backend search off ⇒ echo is None: never attest a cutoff the wire never carried"
+            );
+        })
+        .await;
+}
+
+/// An agent rebuild (model switch) swaps the definition seed, so it must republish the cutoff cell;
+/// the fixture keeps `supports_backend_search == false` to also pin that publishing isn't gated on
+/// the parent's own search.
+#[tokio::test]
+async fn agent_rebuild_republishes_the_configured_cutoff() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            assert!(
+                !actor.backend_search_active(),
+                "fixture must exercise the not-gated-on-backend-search path",
+            );
+            assert!(
+                actor.resolved_tool_overrides.load().is_none(),
+                "the default definition seeds no cutoff",
+            );
+
+            let seed = xai_grok_sampling_types::ToolOverrides {
+                x_search: Some(xai_grok_sampling_types::XSearchOptions {
+                    date_bound: Some(
+                        xai_grok_sampling_types::SearchDateBound::new(
+                            None,
+                            Some("2020-01-01".to_string()),
+                        )
+                        .unwrap(),
+                    ),
+                }),
+                web_search: None,
+            };
+            let mut seeded = xai_grok_agent::AgentDefinition::default_grok_build();
+            seeded.tool_overrides = Some(seed.clone());
+            actor
+                .handle_rebuild_agent_for_definition(seeded)
+                .await
+                .expect("zero-turn rebuild should succeed");
+            assert_eq!(
+                actor
+                    .resolved_tool_overrides
+                    .load_full()
+                    .map(|o| (*o).clone()),
+                Some(seed),
+                "rebuild must republish the new definition seed for subagent inheritance",
+            );
+
+            // Rebuilding to a seedless definition must clear the cell; a stale bound is a divergence.
+            actor
+                .handle_rebuild_agent_for_definition(
+                    xai_grok_agent::AgentDefinition::default_grok_build(),
+                )
+                .await
+                .expect("second rebuild should succeed");
+            assert!(
+                actor.resolved_tool_overrides.load().is_none(),
+                "rebuild to a seedless definition must not leave a stale cutoff",
+            );
+        })
+        .await;
+}
+
+/// A spawned subagent is seeded via `SetToolOverrides` before its first prompt. The seed must
+/// publish the inheritance cell immediately, with no turn run, so the child's own subagents read
+/// the inherited cutoff regardless of turn timing.
+#[tokio::test]
+async fn set_tool_overrides_publishes_the_inheritance_cell_before_any_turn() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            assert!(actor.resolved_tool_overrides.load().is_none());
+            let cutoff = xai_grok_sampling_types::ToolOverrides {
+                x_search: Some(xai_grok_sampling_types::XSearchOptions {
+                    date_bound: Some(
+                        xai_grok_sampling_types::SearchDateBound::new(
+                            None,
+                            Some("2020-01-01".to_string()),
+                        )
+                        .unwrap(),
+                    ),
+                }),
+                web_search: None,
+            };
+            actor.set_tool_overrides(cutoff.clone());
+            assert_eq!(
+                actor
+                    .resolved_tool_overrides
+                    .load_full()
+                    .map(|o| (*o).clone()),
+                Some(cutoff),
+                "seeding must publish the inheritance cell before any turn runs",
+            );
+        })
+        .await;
+}
+
+/// Queue a plain-text send-now prompt, returning the shell's cancel decision.
+async fn queue_text_send_now(actor: &SessionActor, id: &str) -> bool {
+    let (respond_to, _rx) = oneshot::channel();
+    actor
+        .queue_input(QueueInputRequest {
+            send_now: true,
+            ..queue_input_request(
+                vec![acp::ContentBlock::Text(acp::TextContent::new(id))],
+                id,
+                respond_to,
+            )
+        })
+        .await
+}
+
+/// Repeated "Enter to send now" used to cancel the just-promoted previous
+/// prompt before it made a model call, invisibly destroying its message.
+#[tokio::test(flavor = "current_thread")]
+async fn queue_send_now_never_cancels_uncommitted_front() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (mut m1, _m1_rx) = user_item_with_rx("m1", "client");
+            m1.send_now = true;
+            let m2 = user_item("m2", "client");
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(m1);
+                state.pending_inputs.push_back(m2);
+                state.running_task = Some(running_task_stub("m1"));
+                state.front_message_committed = false;
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("m1".into());
+
+            let cancel = actor
+                .handle_interject_queued_prompt("m2", 0, Some("client"), None)
+                .await;
+            assert!(!cancel, "an uncommitted front must not be cancelled");
+            let state = actor.state.lock().await;
+            let order: Vec<&str> = state
+                .pending_inputs
+                .iter()
+                .map(|i| i.prompt_id.as_str())
+                .collect();
+            assert_eq!(order, vec!["m1", "m2"], "m2 promotes right behind m1");
+        })
+        .await;
+}
+
+/// An explicit send-now against an uncommitted front queues behind it instead
+/// of cancelling it; a committed front still cancels.
+#[tokio::test(flavor = "current_thread")]
+async fn queue_input_send_now_spares_uncommitted_front() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (m1, _m1_rx) = user_item_with_rx("m1", "client");
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(m1);
+                state.running_task = Some(running_task_stub("m1"));
+                state.front_message_committed = false;
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("m1".into());
+
+            assert!(
+                !queue_text_send_now(&actor, "sn-2").await,
+                "an explicit send-now must not cancel an uncommitted front"
+            );
+            {
+                let state = actor.state.lock().await;
+                let order: Vec<&str> = state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect();
+                assert_eq!(order, vec!["m1", "sn-2"], "FIFO behind the front");
+            }
+
+            actor.state.lock().await.front_message_committed = true;
+            assert!(
+                queue_text_send_now(&actor, "sn-3").await,
+                "a committed front still cancels"
+            );
+        })
+        .await;
+}
+
+/// A buffered interjection survives a send-now cancel as a front-queued
+/// prompt turn instead of being cleared.
+#[tokio::test(flavor = "current_thread")]
+async fn send_now_cancel_flushes_buffered_interjections_as_prompts() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (wait_turn, mut wait_rx) = user_item_with_rx("wait-turn", "client");
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(wait_turn);
+                state.running_task = Some(running_task_stub("wait-turn"));
+                state.front_message_committed = true;
+                let mut item = user_item("sn-1", "client");
+                item.send_now = true;
+                state.pending_inputs.insert(1, item);
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("wait-turn".into());
+            actor.pending_interjections.push(PendingInterjection {
+                text: "buffered steer".to_string(),
+                attachments: vec![],
+            });
+
+            let mut replay_buffer = ReplayBuffer::new(None);
+            actor.cancel_turn_for_send_now(&mut replay_buffer).await;
+
+            assert!(
+                matches!(
+                    wait_rx.try_recv(),
+                    Ok(Ok(crate::session::commands::PromptTurnOk {
+                        stop_reason: acp::StopReason::Cancelled,
+                        ..
+                    }))
+                ),
+                "the running turn itself is cancelled (send-now semantics)"
+            );
+            assert!(actor.pending_interjections.is_empty());
+            let state = actor.state.lock().await;
+            let texts: Vec<String> = state
+                .pending_inputs
+                .iter()
+                .map(|i| match i.prompt_blocks.first() {
+                    Some(acp::ContentBlock::Text(t)) => t.text.clone(),
+                    other => panic!("expected text block, got {other:?}"),
+                })
+                .collect();
+            assert_eq!(
+                texts,
+                vec!["buffered steer".to_string(), "text for sn-1".to_string()],
+                "the interjection runs next, ahead of the send-now prompt"
+            );
+            assert!(
+                is_interject_fallback(&state.pending_inputs[0].prompt_id),
+                "converted interjections use the persist-only fallback prefix"
+            );
+        })
+        .await;
+}
+
+/// Welds `state.rewindable` to its real arm (promoter) and disarm (first
+/// update) sites so moving either fails the suite.
+#[tokio::test(flavor = "current_thread")]
+async fn promoter_arms_rewind_window_and_first_update_disarms_it() {
+    fn agent_msg_update(text: &str) -> acp::SessionUpdate {
+        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(acp::ContentBlock::Text(
+            acp::TextContent::new(text.to_string()),
+        )))
+    }
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("m1", "client"));
+            }
+            let (completion_tx, _completion_rx) = tokio::sync::mpsc::unbounded_channel();
+            actor.clone().maybe_start_running_task(completion_tx).await;
+
+            // Race-free: the promoter spawned the task last and nothing has awaited since.
+            {
+                let state = actor.state.try_lock().expect("no await since promote");
+                assert_eq!(state.running_prompt_id(), Some("m1"));
+                assert!(
+                    state.rewindable,
+                    "the promoter must arm the first-output window"
+                );
+            }
+
+            actor
+                .send_update(agent_msg_update("first delta"), Some(1))
+                .await;
+            assert!(
+                !actor.state.try_lock().expect("uncontended").rewindable,
+                "the first outbound update must disarm the first-output window"
+            );
+        })
+        .await;
+}
+
+/// Welds the flag to the real promoter and commit sites so moving either
+/// fails the suite.
+#[tokio::test(flavor = "current_thread")]
+async fn promoter_clears_committed_flag_and_handle_prompt_sets_it() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let actor = actor_with_persistence_drain().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.front_message_committed = true;
+                state.pending_inputs.push_back(user_item("m1", "client"));
+            }
+            let (completion_tx, _completion_rx) = tokio::sync::mpsc::unbounded_channel();
+            actor.clone().maybe_start_running_task(completion_tx).await;
+
+            // Abort the turn unpolled: polling `handle_prompt` here overflows
+            // the default 2 MB test-thread stack in debug builds.
+            {
+                let state = actor.state.try_lock().expect("no await since promote");
+                assert_eq!(state.running_prompt_id(), Some("m1"));
+                assert!(
+                    !state.front_message_committed,
+                    "the promoter must clear the committed flag"
+                );
+                if let Some(task) = state.running_task.as_ref() {
+                    task.handle.abort();
+                }
+            }
+
+            // The persist ack resolves after the history commit, so the flag is set once it fires.
+            let actor_for_prompt = actor.clone();
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            let prompt_task = tokio::task::spawn_local(async move {
+                actor_for_prompt
+                    .handle_prompt(
+                        "m2",
+                        vec![acp::ContentBlock::Text(acp::TextContent::new("hello"))],
+                        PromptMode::Agent,
+                        /* trace_gcs_config */ None,
+                        /* artifact_tracker */ None,
+                        /* client_identifier */ None,
+                        /* screen_mode */ None,
+                        /* verbatim */ true,
+                        /* json_schema */ None,
+                        Some(ack_tx),
+                        /* parsed_prompt_tx */ None,
+                    )
+                    .await
+            });
+            assert!(ack_rx.await.is_ok(), "persist ack should resolve");
+            assert!(
+                actor.state.lock().await.front_message_committed,
+                "handle_prompt must set the committed flag at the history commit"
+            );
+            prompt_task.abort();
+        })
+        .await;
+}
+
+/// A terminal whose commands never finish, holding a bash turn mid-run.
+struct NeverFinishesTerminal;
+
+#[async_trait::async_trait]
+impl crate::terminal::AsyncTerminalRunner for NeverFinishesTerminal {
+    async fn run(
+        &self,
+        _request: crate::terminal::runner::TerminalRunRequest,
+    ) -> Result<crate::terminal::runner::TerminalRunResult, crate::terminal::runner::TerminalError>
+    {
+        std::future::pending().await
+    }
+}
+
+/// The bash path must set the committed flag before running the command, or a
+/// send-now during a long command would queue behind it forever.
+#[tokio::test(flavor = "current_thread")]
+async fn bash_turn_sets_committed_flag_before_running_the_command() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let (actor, _ev) = create_test_actor_with_terminal(
+                0,
+                256_000,
+                85,
+                gateway_tx,
+                persistence_tx,
+                std::sync::Arc::new(NeverFinishesTerminal),
+            )
+            .await;
+            let actor = std::sync::Arc::new(actor);
+            actor.state.lock().await.front_message_committed = false;
+
+            let bash_actor = actor.clone();
+            let bash_turn = tokio::task::spawn_local(async move {
+                bash_actor
+                    .handle_direct_bash_command(
+                        "bash-1",
+                        "sleep 30".to_string(),
+                        &[acp::ContentBlock::Text(acp::TextContent::new("!sleep 30"))],
+                    )
+                    .await
+            });
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !actor.state.lock().await.front_message_committed {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the bash path must mark the commit before the command finishes"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert!(
+                !bash_turn.is_finished(),
+                "the command never finishes, so the flag was set mid-run"
+            );
+            bash_turn.abort();
+        })
+        .await;
+}
+
+/// Builtin turns carry no user message; they commit at intake so a send-now
+/// can cancel a long-running builtin like `/compact`.
+#[tokio::test(flavor = "current_thread")]
+async fn builtin_turn_commits_immediately() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            actor.state.lock().await.front_message_committed = false;
+
+            let _ = actor
+                .execute_builtin_slash_command(BuiltinAction::ContextInfo)
+                .await;
+
+            assert!(
+                actor.state.lock().await.front_message_committed,
+                "a builtin turn must commit at intake"
+            );
+        })
+        .await;
+}
+
+/// `rewindIfPristine` must not pop a promoted interjection-fallback front —
+/// it is not the prompt the client rewound; it takes the normal cancel.
+#[tokio::test(flavor = "current_thread")]
+async fn rewind_if_pristine_never_pops_an_interjection_fallback_front() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let (item, mut rx) =
+                input_with_origin_rx("interject-fallback-1", crate::session::PromptOrigin::User);
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(item);
+                state.running_task = Some(running_task_stub("interject-fallback-1"));
+                state.rewindable = true;
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("interject-fallback-1".into());
+
+            let _ = actor
+                .cancel_running_task(crate::session::CancelOptions {
+                    rewind_if_no_output: true,
+                    trigger: Some(crate::session::CancelTrigger::Esc),
+                    user_initiated: true,
+                    ..Default::default()
+                })
+                .await;
+
+            assert!(
+                matches!(
+                    rx.try_recv(),
+                    Ok(Ok(crate::session::commands::PromptTurnOk {
+                        completion_kind: PromptCompletionKind::Cancelled { .. },
+                        ..
+                    }))
+                ),
+                "a fallback front resolves through the normal cancel, never the rewind pop"
             );
         })
         .await;

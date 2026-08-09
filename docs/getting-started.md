@@ -50,23 +50,22 @@ Avoid command-line arguments for secrets because process listings and shell
 history may expose them. `login --api-key-stdin` is intended only for protected
 automation.
 
-### Browser OAuth
+### Browser OAuth (opt-in)
 
-Press `l` or run `/login` to start OAuth 2.0 Authorization Code + PKCE. Chutes'
-current Sign in with Chutes documentation provisions a client ID and client
-secret for registered applications. Chutes Build never persists a configured
-client secret; it reads credentials from the environment for token exchange
-and refresh:
+Browser login requires an OAuth application registered in your own Chutes account
+area; there is no bundled client ID, because one app cannot sign in on behalf of
+other accounts. Register the app, then give Chutes Build its client ID:
 
 ```powershell
 $env:CHUTES_BUILD_OAUTH2_CLIENT_ID = "cid_..."
-$env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."
+$env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."   # only for a confidential app
 chutes-build
 ```
 
-The bundled client ID may depend on provider-side registration state. If it is
-rejected with `invalid_client`, use an API key or register a dedicated Chutes
-OAuth application and provide both values above.
+With those set, press `l` or run `/login` to start OAuth 2.0 Authorization Code +
+PKCE. Chutes Build never persists a configured client secret; it reads it from the
+environment for token exchange and refresh. Without a client ID configured there is
+no OAuth method to offer, and `login` says so instead of opening a browser.
 
 ## First session
 
@@ -121,7 +120,7 @@ Headless-only controls such as `--max-turns`, `--tools`,
 | Problem | Check |
 | --- | --- |
 | Command not found | Confirm the npm global bin directory is on `PATH`, or try `npx chutes-build`. |
-| `invalid_client` during OAuth | Use an API key or configure a registered OAuth client ID and secret. |
+| `invalid_client` during OAuth | The client ID is not a valid app on the issuer. Re-check the registration in your Chutes account area, or just use an API key. |
 | Empty or stale model list | Confirm the credential and network access, then rerun `chutes-build models`. |
 | Browser unavailable | Install Chrome/Edge or set `CHUTES_BROWSER_EXECUTABLE`. |
 | Video inspection unavailable | Install FFmpeg or set `CHUTES_FFMPEG_EXECUTABLE`, then restart the process. |

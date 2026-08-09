@@ -20,7 +20,7 @@ use xai_hunk_tracker::HunkTrackerHandle;
 /// (demoted to `Dormant`) instead of lingering as a roster zombie. This is the
 /// data source the roster/dashboard reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionLiveState {
+pub(crate) enum SessionLiveState {
     /// Resident actor, a turn is currently running.
     Working,
     /// Resident actor, no turn in flight.
@@ -33,7 +33,13 @@ pub enum SessionLiveState {
     /// marker. Harmless to reap — the conversation persists and demotes to
     /// `Dormant` on the next disk scan.
     DeadFailed,
+    /// A load or resume is building the actor.
+    Attaching,
 }
+/// `_meta` key carrying [`SessionHandle::scheduler_background_loops`] on the
+/// `session/new` and `session/load` responses. Defined here so the shell that
+/// publishes it and the clients that read it share one spelling.
+pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.build/schedulerBackgroundLoops";
 /// Handle for interacting with a session actor.
 /// Note: Permission event receivers are returned separately from `spawn_session_actor`
 /// and should be stored/managed by the caller.
@@ -58,6 +64,9 @@ pub struct SessionHandle {
     /// Resolved turn limit for this session; lets a spawned subagent inherit
     /// the parent's limit. `None` = unlimited.
     pub max_turns: Option<usize>,
+    /// Configured cutoff a subagent inherits, published by the session actor. `None` when unset.
+    pub resolved_tool_overrides:
+        std::sync::Arc<arc_swap::ArcSwapOption<xai_grok_sampling_types::ToolOverrides>>,
     /// Handle to the hunk tracker for this session
     pub hunk_tracker_handle: HunkTrackerHandle,
     /// Actor-based chat state handle — lets callers inspect final conversation state.
@@ -77,8 +86,10 @@ pub struct SessionHandle {
     /// This is fine for forks that happen immediately after spawn, but callers
     /// that need the latest MCP state should query the session actor via command.
     pub mcp_servers: Vec<acp::McpServer>,
-    /// Original client-provided MCP servers (pre-merge). Used by plugin
-    /// reload to re-compute the merged MCP server list.
+    /// Client-provided MCP servers after vendor `mcps` kill-switch admission
+    /// (still pre-merge with disk/plugins/managed). Hot-reloads re-merge from
+    /// this seed so disabled-vendor servers rejected at ingress cannot reappear
+    /// merely because on-disk attribution vanished mid-session.
     pub initial_client_mcp_servers: Vec<acp::McpServer>,
     /// Stable display path for forked sessions (original project path).
     ///
@@ -105,6 +116,14 @@ pub struct SessionHandle {
     /// Per-session tracking prevents cross-client contamination in leader mode
     /// where `MvpAgent.current_model_id` is shared mutable state.
     pub model_id: acp::ModelId,
+    /// Whether this session's scheduled fires run as detached background
+    /// subagents. Copied from the value the spawn resolved for the session's
+    /// [`AgentRebuildSpec`](crate::session::agent_rebuild::AgentRebuildSpec), so
+    /// it is pinned for the session's whole life exactly like the fire side.
+    /// Published to clients on the `session/new` / `session/load` response so
+    /// they describe the fires this session will actually get rather than
+    /// re-resolving a setting that may have flipped since spawn.
+    pub scheduler_background_loops: bool,
     pub reasoning_effort: Option<ReasoningEffort>,
     /// YOLO (auto-approve) mode for this session.
     /// Per-session tracking prevents cross-client contamination in leader mode
@@ -115,7 +134,7 @@ pub struct SessionHandle {
     /// client behaviors like yolo broadcasts.
     pub origin_client: Option<crate::http::OriginClientInfo>,
     /// Whether the client that created this session advertised
-    /// `chutes.build/codeNavigation.enabled`.  Stored per-session so that in leader
+    /// `chutes.ai/codeNavigation.enabled`.  Stored per-session so that in leader
     /// mode a later `initialize()` from a different client cannot retroactively
     /// change code-nav eligibility for already-running sessions.
     pub code_nav_enabled: bool,
@@ -124,13 +143,13 @@ pub struct SessionHandle {
     /// env gate). Stored per-session so subagents inherit it at spawn.
     pub ask_user_question_enabled: bool,
     /// Plan mode tracker — shared with the session actor via Arc.
-    /// Exposed so the `chutes.build/toggle_plan_mode` handler can toggle plan mode
+    /// Exposed so the `chutes.ai/toggle_plan_mode` handler can toggle plan mode
     /// without going through the session command channel.
     pub plan_mode: std::sync::Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
     /// Debug flag: when set to `true`, the next turn unconditionally triggers
     /// auto-compaction regardless of context window usage. Consumed (reset to
     /// `false`) atomically on use via `compare_exchange`.
-    /// Set via `chutes.build/debug/arm_auto_compact`.
+    /// Set via `chutes.ai/debug/arm_auto_compact`.
     pub force_compact: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub permission_handle: xai_grok_workspace::permission::PermissionHandle,
     /// The parent SessionActor's live `Auth401AttributionCallback`
@@ -180,7 +199,7 @@ impl SessionHandle {
     }
     /// Move a foreground bash command to background by tool_call_id.
     /// Returns `true` if a matching foreground process was found and unblocked.
-    pub async fn background_foreground_command(&self, tool_call_id: &str) -> bool {
+    pub(crate) async fn background_foreground_command(&self, tool_call_id: &str) -> bool {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -196,7 +215,7 @@ impl SessionHandle {
     }
     /// Kill a background task by task_id.
     /// Routes through the session actor to the ToolBridge's TerminalBackend.
-    pub async fn kill_background_task(
+    pub(crate) async fn kill_background_task(
         &self,
         task_id: &str,
     ) -> Result<xai_grok_tools::types::KillOutcome, String> {
@@ -213,7 +232,7 @@ impl SessionHandle {
         }
         rx.await.unwrap_or(Err("session actor died".to_string()))
     }
-    pub async fn delete_scheduled_task(&self, task_id: &str) -> Result<bool, String> {
+    pub(crate) async fn delete_scheduled_task(&self, task_id: &str) -> Result<bool, String> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -258,7 +277,9 @@ impl SessionHandle {
         rx.await.unwrap_or(None)
     }
     /// Get hooks list for the pager modal.
-    pub async fn get_hooks_list(&self) -> Option<xai_hooks_plugins_types::HooksListResponse> {
+    pub(crate) async fn get_hooks_list(
+        &self,
+    ) -> Option<xai_hooks_plugins_types::HooksListResponse> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -270,7 +291,7 @@ impl SessionHandle {
         rx.await.ok()
     }
     /// Execute a hooks management action from the pager modal.
-    pub async fn execute_hooks_action(
+    pub(crate) async fn execute_hooks_action(
         &self,
         action: xai_hooks_plugins_types::HooksAction,
     ) -> Option<xai_hooks_plugins_types::ActionOutcome> {
@@ -288,7 +309,7 @@ impl SessionHandle {
         rx.await.ok()
     }
     /// Execute a plugins management action from the pager modal.
-    pub async fn execute_plugins_action(
+    pub(crate) async fn execute_plugins_action(
         &self,
         action: xai_hooks_plugins_types::PluginsAction,
     ) -> Option<xai_hooks_plugins_types::ActionOutcome> {
@@ -306,7 +327,7 @@ impl SessionHandle {
         rx.await.ok()
     }
     /// This session's plugin registry, including plugins loaded via `_meta.pluginDirs`.
-    pub async fn plugins_list(
+    pub(crate) async fn plugins_list(
         &self,
     ) -> Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>> {
         let (tx, rx) = oneshot::channel();
@@ -320,7 +341,9 @@ impl SessionHandle {
         rx.await.ok().flatten()
     }
     /// Snapshot the session's live MCP client pool for subagent inheritance.
-    pub async fn snapshot_mcp_pool(&self) -> Option<crate::session::mcp_servers::SharedMcpPool> {
+    pub(crate) async fn snapshot_mcp_pool(
+        &self,
+    ) -> Option<crate::session::mcp_servers::SharedMcpPool> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
             .send(SessionCommand::SnapshotMcpPool { respond_to: tx })
@@ -370,11 +393,36 @@ impl SessionHandle {
             Vec::new()
         })
     }
+    pub(crate) async fn workflow_catalog_state(&self) -> (bool, bool) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .cmd_tx
+            .send(SessionCommand::GetWorkflowCatalogState { respond_to: tx })
+            .is_err()
+        {
+            return (false, false);
+        }
+        rx.await.unwrap_or((false, false))
+    }
+    pub(crate) async fn list_available_commands(
+        &self,
+    ) -> crate::session::slash_commands::ListCommandsResponse {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .cmd_tx
+            .send(SessionCommand::ListAvailableCommands { respond_to: tx })
+            .is_err()
+        {
+            return crate::session::slash_commands::ListCommandsResponse::default();
+        }
+        rx.await
+            .unwrap_or_else(|_| crate::session::slash_commands::ListCommandsResponse::default())
+    }
     /// Replace the live session's client-registered hooks (see `SessionCommand::SetClientHooks`).
     pub(crate) fn set_client_hooks(&self, hooks: crate::extensions::hooks::ClientHooks) {
         let _ = self.cmd_tx.send(SessionCommand::SetClientHooks { hooks });
     }
-    pub async fn get_mcp_status(&self) -> crate::extensions::mcp::McpStatusSnapshot {
+    pub(crate) async fn get_mcp_status(&self) -> crate::extensions::mcp::McpStatusSnapshot {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -385,7 +433,7 @@ impl SessionHandle {
         }
         rx.await.unwrap_or_default()
     }
-    pub async fn toggle_mcp_server(
+    pub(crate) async fn toggle_mcp_server(
         &self,
         server_name: String,
         enabled: bool,
@@ -407,7 +455,7 @@ impl SessionHandle {
         rx.await
             .map_err(|_| agent_client_protocol::Error::internal_error().data("session closed"))?
     }
-    pub async fn toggle_mcp_tool(
+    pub(crate) async fn toggle_mcp_tool(
         &self,
         server_name: String,
         tool_name: String,
@@ -416,7 +464,7 @@ impl SessionHandle {
         self.toggle_mcp_tool_with_source(server_name, tool_name, enabled, false)
             .await
     }
-    pub async fn toggle_managed_gateway_tool(
+    pub(crate) async fn toggle_managed_gateway_tool(
         &self,
         server_name: String,
         tool_name: String,
@@ -449,7 +497,9 @@ impl SessionHandle {
         rx.await
             .map_err(|_| agent_client_protocol::Error::internal_error().data("session closed"))?
     }
-    pub async fn managed_gateway_disabled_tool_names(&self) -> HashMap<String, HashSet<String>> {
+    pub(crate) async fn managed_gateway_disabled_tool_names(
+        &self,
+    ) -> HashMap<String, HashSet<String>> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -460,7 +510,7 @@ impl SessionHandle {
         }
         rx.await.unwrap_or_default()
     }
-    pub async fn retry_auth_required_servers(&self) {
+    pub(crate) async fn retry_auth_required_servers(&self) {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -495,7 +545,7 @@ impl SessionHandle {
         rx.await
             .unwrap_or_else(|_| Err("session closed".to_string()))
     }
-    pub async fn read_mcp_resource(
+    pub(crate) async fn read_mcp_resource(
         &self,
         server_name: String,
         uri: String,
@@ -515,7 +565,7 @@ impl SessionHandle {
         rx.await
             .unwrap_or_else(|_| Err("session closed".to_string()))
     }
-    pub async fn mcp_auth_status(&self) -> Vec<crate::extensions::mcp::McpAuthStatusEntry> {
+    pub(crate) async fn mcp_auth_status(&self) -> Vec<crate::extensions::mcp::McpAuthStatusEntry> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -526,7 +576,7 @@ impl SessionHandle {
         }
         rx.await.unwrap_or_default()
     }
-    pub async fn mcp_auth_trigger(&self, server_name: String) -> Result<(), String> {
+    pub(crate) async fn mcp_auth_trigger(&self, server_name: String) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -543,20 +593,20 @@ impl SessionHandle {
     }
     /// Emit a PluginUpdatesInstalled notification to the session.
     /// Fire-and-forget — no response expected.
-    pub async fn notify_plugin_updates(&self, updates: Vec<(String, String, String)>) {
+    pub(crate) async fn notify_plugin_updates(&self, updates: Vec<(String, String, String)>) {
         let _ = self
             .cmd_tx
             .send(SessionCommand::NotifyPluginUpdates { updates });
     }
     /// Send a feedback entry to the persistence actor; logs on a closed channel.
-    pub fn persist_feedback(&self, entry: LocalFeedbackEntry) {
+    pub(crate) fn persist_feedback(&self, entry: LocalFeedbackEntry) {
         if self
             .persistence_tx
             .send(PersistenceMsg::Feedback(entry))
             .is_err()
         {
             tracing::warn!(
-                session_id = % self.info.id.0,
+                session_id = %self.info.id.0,
                 "feedback persistence channel closed; entry dropped",
             );
         }

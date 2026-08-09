@@ -45,10 +45,23 @@ pub fn browser_open_likely_available() -> bool {
     browser_open_likely_available_from_env(&env)
 }
 
-/// User-facing copy when the browser opener cannot run. Includes the full
-/// URL on its own line so it is easy to select/copy in the TUI.
+const BROWSER_UNAVAILABLE_NOTICE: &str = "Could not open a browser. Open this URL manually";
+
+/// Multi-line copy for agent scrollback: notice, then the full URL alone
+/// so it is easy to select/copy in the TUI.
 pub fn browser_unavailable_message(url: &str) -> String {
-    format!("Could not open a browser. Open this URL manually:\n{url}")
+    format!("{BROWSER_UNAVAILABLE_NOTICE}:\n{url}")
+}
+
+/// Single-line welcome toast: URL first so prefix truncation keeps the
+/// destination. `copied` is true only when clipboard delivery reported
+/// success — never claim a copy that did not happen.
+pub fn browser_unavailable_line(url: &str, copied: bool) -> String {
+    if copied {
+        format!("{url} — {BROWSER_UNAVAILABLE_NOTICE} (URL copied)")
+    } else {
+        format!("{url} — {BROWSER_UNAVAILABLE_NOTICE}")
+    }
 }
 
 /// Open a URL in the system's default browser/handler.
@@ -59,10 +72,12 @@ pub fn browser_unavailable_message(url: &str) -> String {
 ///
 /// Returns `true` when the opener was launched (or the test seam recorded
 /// the URL). Returns `false` when the environment looks headless or spawn
-/// fails — callers should show [`browser_unavailable_message`].
+/// fails — callers should surface the URL via [`browser_unavailable_message`]
+/// (scrollback) or [`browser_unavailable_line`] (welcome toast).
 ///
 /// **Callers handling untrusted input** should call [`is_safe_to_open`]
 /// first, or use [`open_url_if_safe`] / [`try_open_url`] which combine both.
+#[allow(clippy::disallowed_methods)] // fire and forget; the child is reaped when this process exits
 pub fn open_url(url: &str) -> bool {
     // Test seam: PTY e2e must observe the open without launching a real
     // browser. When set, append the URL to the file and skip the OS opener.
@@ -156,6 +171,7 @@ fn build_open_path_command(path: &std::path::Path) -> std::process::Command {
 ///   expansion corrupts the percent-encoded session-directory segment in
 ///   imagine media paths (e.g. `…\C%3A%5CUsers…`).
 /// - **macOS / Linux**: `open` / `xdg-open` open the file in its default app.
+#[allow(clippy::disallowed_methods)] // fire and forget; the child is reaped when this process exits
 pub fn open_path(path: &std::path::Path) -> bool {
     // Never launch a real GUI app in tests.
     #[cfg(test)]
@@ -189,6 +205,7 @@ pub fn open_path(path: &std::path::Path) -> bool {
 /// Prefer the on-disk path as-is. When the file is missing, open the parent
 /// folder (no `/select`) so the user lands near the media instead of Home.
 #[cfg(all(not(test), target_os = "windows"))]
+#[allow(clippy::disallowed_methods)] // fire and forget; the child is reaped when this process exits
 fn reveal_in_explorer(path: &std::path::Path) -> bool {
     use std::os::windows::process::CommandExt;
 
@@ -292,7 +309,7 @@ pub fn try_open_url(url: &str, filter: SchemeFilter) -> OpenUrlResult {
 /// to opener input from untrusted sources.
 ///
 /// Used by the SuperGrok upsell flow to attribute clicks to `referrer=grok-build`,
-/// matching the OAuth consent screen and chutes.build/cli marketing links regardless of
+/// matching the OAuth consent screen and chutes.ai/cli marketing links regardless of
 /// what the remote settings `gate_url` value happens to be.
 pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(url) else {
@@ -310,6 +327,8 @@ pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
 mod tests {
     use super::*;
 
+    // `build_open_path_command` is `cfg(not(windows))` — Windows reveals paths
+    // through `reveal_in_explorer` instead.
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn open_path_command_passes_path_as_a_single_arg() {
@@ -460,43 +479,39 @@ mod tests {
 
     #[test]
     fn ensure_query_param_appends_when_missing() {
-        let out = ensure_query_param("https://chutes.ai/pricing", "referrer", "chutes-build");
-        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes-build");
+        let out = ensure_query_param("https://chutes.ai/supergrok", "referrer", "grok-build");
+        assert_eq!(out, "https://chutes.ai/supergrok?referrer=grok-build");
     }
 
     #[test]
     fn ensure_query_param_preserves_existing_value() {
         let out = ensure_query_param(
-            "https://chutes.ai/pricing?referrer=other",
+            "https://chutes.ai/supergrok?referrer=other",
             "referrer",
             "grok-build",
         );
-        assert_eq!(out, "https://chutes.ai/pricing?referrer=other");
+        assert_eq!(out, "https://chutes.ai/supergrok?referrer=other");
     }
 
     #[test]
     fn ensure_query_param_keeps_other_query_pairs() {
         let out = ensure_query_param(
-            "https://chutes.ai/pricing?plan=pro",
+            "https://chutes.ai/supergrok?heavy=1",
             "referrer",
             "grok-build",
         );
         assert_eq!(
             out,
-            "https://chutes.ai/pricing?plan=pro&referrer=chutes-build"
+            "https://chutes.ai/supergrok?heavy=1&referrer=grok-build"
         );
     }
 
     #[test]
     fn ensure_query_param_preserves_fragment() {
         // The current remote settings value uses a hash fragment for client-side
-        // A fragment must remain intact while the query parameter is added.
-        let out = ensure_query_param(
-            "https://chutes.ai/pricing#plans",
-            "referrer",
-            "chutes-build",
-        );
-        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes-build#plans");
+        // routing (`chutes.ai/#supergrok`); we still want the referrer attached.
+        let out = ensure_query_param("https://chutes.ai/#supergrok", "referrer", "grok-build");
+        assert_eq!(out, "https://chutes.ai/?referrer=grok-build#supergrok");
     }
 
     #[test]
@@ -507,8 +522,15 @@ mod tests {
 
     #[test]
     fn ensure_query_param_url_encodes_value() {
-        let out = ensure_query_param("https://chutes.ai/pricing", "referrer", "chutes build");
-        assert_eq!(out, "https://chutes.ai/pricing?referrer=chutes+build");
+        let out = ensure_query_param(
+            "https://chutes.ai/supergrok",
+            "referrer",
+            "chutes-build build",
+        );
+        assert_eq!(
+            out,
+            "https://chutes.ai/supergrok?referrer=chutes-build+build"
+        );
     }
 
     #[test]
@@ -573,12 +595,35 @@ mod tests {
 
     #[test]
     fn browser_unavailable_message_includes_full_url() {
-        let url = "https://chutes.ai/pricing?referrer=chutes-build";
-        let msg = browser_unavailable_message(url);
-        assert!(msg.contains("Could not open a browser"));
-        assert!(msg.contains(url));
-        // URL on its own line for easy select/copy in the TUI.
-        assert!(msg.lines().any(|l| l == url));
+        let url = "https://chutes.ai/supergrok?referrer=grok-build";
+        assert_eq!(
+            browser_unavailable_message(url),
+            format!("{BROWSER_UNAVAILABLE_NOTICE}:\n{url}")
+        );
+    }
+
+    #[test]
+    fn browser_unavailable_line_is_url_first_single_line() {
+        let url = "https://chutes.ai/supergrok?referrer=grok-build";
+        let plain = browser_unavailable_line(url, false);
+        assert!(plain.starts_with(url), "{plain}");
+        assert!(!plain.contains('\n'), "{plain}");
+        assert!(
+            !plain.to_ascii_lowercase().contains("copied"),
+            "must not claim copy on failure: {plain}"
+        );
+        assert!(
+            plain.contains(BROWSER_UNAVAILABLE_NOTICE),
+            "shares notice stem with multi-line form: {plain}"
+        );
+
+        let with_copy = browser_unavailable_line(url, true);
+        assert!(with_copy.starts_with(url), "{with_copy}");
+        assert!(!with_copy.contains('\n'), "{with_copy}");
+        assert!(
+            with_copy.contains("URL copied"),
+            "copy claim only when copied=true: {with_copy}"
+        );
     }
 
     #[test]

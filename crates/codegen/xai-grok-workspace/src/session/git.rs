@@ -1,18 +1,19 @@
 //! Git operations: CLI for simple actions (stage, commit, push); git2 for structured data (status, diffs).
 #![allow(dead_code)]
+pub use crate::restore_fetch::git_object_exists;
 use anyhow::Result;
 use git2::{DiffOptions, Repository, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use url::Url;
 pub use xai_grok_workspace_types::rpc::git::{
-    ChangeType, CommitData, CommitResult, DiscardScope, GitBranchEntry, GitBranchListData,
-    GitDiffsData, GitError, GitFileChange, GitInfoData, GitReadFile, GitReadFilesData,
-    GitStatusData, StageData, VcsKind,
+    ChangeType, CheckoutCommitResponse, CommitData, CommitOutcome, CommitResult, DiscardScope,
+    GitBranchEntry, GitBranchListData, GitCommitReq, GitDiffsData, GitError, GitFileChange,
+    GitInfoData, GitReadFile, GitReadFilesData, GitStatusData, GitSyncBaseOutcome,
+    GitSyncBaseResult, PushStatus, StageData, VcsKind,
 };
 pub const ERROR_CODE_DIFF_SIZE_EXCEEDED: &str = "DIFF_SIZE_EXCEEDED";
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,9 +55,6 @@ pub struct DiffSizeExceededFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_lines: Option<u64>,
 }
-/// Cache for git status results to avoid redundant expensive computations.
-/// Cache is invalidated after TTL or when commit hash changes.
-pub const GIT_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 /// Run a git CLI command and return stdout on success, or error with stderr.
 ///
 /// All invocations use `--no-optional-locks` to prevent background stat-cache
@@ -65,7 +63,7 @@ pub const GIT_STATUS_CACHE_TTL: Duration = Duration::from_secs(2);
 /// *required* for the requested operation (e.g. `git add`, `git commit`) are
 /// unaffected.  See `git(1)` and `GIT_OPTIONAL_LOCKS`.
 pub async fn git_cli(cwd: &Path, args: &[&str]) -> Result<String> {
-    tracing::debug!(cwd = % cwd.display(), args = ? args, "git_cli");
+    tracing::debug!(cwd = %cwd.display(), args = ?args, "git_cli");
     let mut cmd = Command::new("git");
     cmd.current_dir(cwd).arg("--no-optional-locks");
     for &(key, val) in xai_tty_utils::GIT_AUTH_SUPPRESSION_ENVS.iter() {
@@ -78,7 +76,9 @@ pub async fn git_cli(cwd: &Path, args: &[&str]) -> Result<String> {
         Ok(o) => o,
         Err(e) => {
             tracing::error!(
-                error = % e, error_kind = ? e.kind(), cwd = % cwd.display(),
+                error = %e,
+                error_kind = ?e.kind(),
+                cwd = %cwd.display(),
                 "git_cli: Command::output() FAILED (spawn error)"
             );
             return Err(e.into());
@@ -91,7 +91,7 @@ pub async fn git_cli(cwd: &Path, args: &[&str]) -> Result<String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let code = output.status.code();
-        tracing::debug!(exit_code = ? code, stderr = % stderr, "git_cli failed");
+        tracing::debug!(exit_code = ?code, stderr = %stderr, "git_cli failed");
         Err(anyhow::anyhow!(
             "{}",
             if stderr.is_empty() {
@@ -101,6 +101,14 @@ pub async fn git_cli(cwd: &Path, args: &[&str]) -> Result<String> {
             }
         ))
     }
+}
+/// Mutating [`git_cli`]: bump the gate epoch after the attempt. Failed
+/// commands can still change the repo (`pull --rebase` conflicts, partial
+/// checkout); skipping invalidate would keep pre-mutation snapshots.
+async fn git_cli_mut(cwd: &Path, args: &[&str]) -> Result<String> {
+    let result = git_cli(cwd, args).await;
+    super::git_gate::invalidate(cwd);
+    result
 }
 /// Run a jj CLI command and return stdout on success, or error with stderr.
 ///
@@ -119,7 +127,7 @@ pub async fn jj_cli_mut(cwd: &Path, args: &[&str]) -> Result<String> {
     jj_cli_inner(cwd, args, false).await
 }
 async fn jj_cli_inner(cwd: &Path, args: &[&str], ignore_wc: bool) -> Result<String> {
-    tracing::debug!(cwd = % cwd.display(), args = ? args, ignore_wc, "jj_cli");
+    tracing::debug!(cwd = %cwd.display(), args = ?args, ignore_wc, "jj_cli");
     let mut cmd = Command::new("jj");
     cmd.current_dir(cwd)
         .stderr(std::process::Stdio::piped())
@@ -132,7 +140,9 @@ async fn jj_cli_inner(cwd: &Path, args: &[&str], ignore_wc: bool) -> Result<Stri
         Ok(o) => o,
         Err(e) => {
             tracing::error!(
-                error = % e, error_kind = ? e.kind(), cwd = % cwd.display(),
+                error = %e,
+                error_kind = ?e.kind(),
+                cwd = %cwd.display(),
                 "jj_cli_inner: Command::output() FAILED (spawn error)"
             );
             return Err(e.into());
@@ -142,13 +152,20 @@ async fn jj_cli_inner(cwd: &Path, args: &[&str], ignore_wc: bool) -> Result<Stri
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !stderr.is_empty() {
-            tracing::warn!(cwd = % cwd.display(), "jj_cli success with stderr warnings");
+            tracing::warn!(
+                cwd = %cwd.display(),
+                "jj_cli success with stderr warnings"
+            );
         }
         tracing::debug!(exit_code = 0, stdout_len = stdout.len(), "jj_cli success");
         Ok(stdout)
     } else {
         let code = output.status.code();
-        tracing::warn!(cwd = % cwd.display(), exit_code = ? code, "jj_cli FAILED");
+        tracing::warn!(
+            cwd = %cwd.display(),
+            exit_code = ?code,
+            "jj_cli FAILED"
+        );
         Err(anyhow::anyhow!(
             "{}",
             if stderr.is_empty() {
@@ -299,9 +316,9 @@ pub fn resolve_normalized_remote_urls(cwd: &Path) -> Vec<String> {
     };
     let mut urls = Vec::new();
     if let Ok(names) = repo.remotes() {
-        for name in names.iter().filter_map(|name| name.ok().flatten()) {
+        for name in names.iter().flatten() {
             if let Ok(remote) = repo.find_remote(name)
-                && let Ok(raw) = remote.url()
+                && let Some(raw) = remote.url()
                 && let Some(n) = normalize_repo_url(raw)
             {
                 urls.push(n);
@@ -343,9 +360,9 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
     };
     let mut remotes = BTreeSet::new();
     if let Ok(remote_names) = repo.remotes() {
-        for name in remote_names.iter().filter_map(|name| name.ok().flatten()) {
+        for name in remote_names.iter().flatten() {
             if let Ok(remote) = repo.find_remote(name)
-                && let Ok(url) = remote.url()
+                && let Some(url) = remote.url()
             {
                 remotes.insert(strip_url_credentials(url));
             }
@@ -358,7 +375,6 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
         .map(|c| c.id().to_string());
     let head_branch = head_ref.as_ref().and_then(|h| {
         h.shorthand()
-            .ok()
             .filter(|s| *s != "HEAD")
             .map(|s| s.to_string())
     });
@@ -522,9 +538,9 @@ pub async fn checkout_branch(git_root: &Path, branch: &str, create: bool) -> Res
         );
     }
     if create {
-        git_cli(git_root, &["checkout", "-b", branch]).await?;
+        git_cli_mut(git_root, &["checkout", "-b", branch]).await?;
     } else {
-        git_cli(git_root, &["checkout", branch]).await?;
+        git_cli_mut(git_root, &["checkout", branch]).await?;
     }
     Ok(())
 }
@@ -541,7 +557,7 @@ async fn get_remote_url(cwd: &Path) -> Option<String> {
 fn compute_ahead_behind(repo: &Repository) -> Option<(usize, usize)> {
     let head = repo.head().ok()?;
     let local_oid = head.target()?;
-    let branch_name = head.shorthand().ok()?;
+    let branch_name = head.shorthand()?;
     let local_branch = repo
         .find_branch(branch_name, git2::BranchType::Local)
         .ok()?;
@@ -778,7 +794,7 @@ fn collect_diff_stats(
     }
     DiffStatsResult { stats, paths }
 }
-/// Payload for the `chutes.build/git_head_changed` ACP extension notification.
+/// Payload for the `chutes.ai/git_head_changed` ACP extension notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitHeadChanged {
@@ -800,12 +816,12 @@ pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
         let current_branch = repo
             .head()
             .ok()
-            .and_then(|h| h.shorthand().ok().map(String::from));
+            .and_then(|h| h.shorthand().map(String::from));
         let mut remotes_set = BTreeSet::new();
         if let Ok(remote_names) = repo.remotes() {
-            for name in remote_names.iter().filter_map(|name| name.ok().flatten()) {
+            for name in remote_names.iter().flatten() {
                 if let Ok(remote) = repo.find_remote(name)
-                    && let Ok(url) = remote.url()
+                    && let Some(url) = remote.url()
                 {
                     remotes_set.insert(url.to_string());
                 }
@@ -828,9 +844,14 @@ pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
 /// Priority:
 /// 1. `refs/remotes/origin/HEAD` symbolic ref (set by `git clone` or
 ///    `git remote set-head origin --auto`).
-/// 2. `init.defaultBranch` git config value (user/system preference).
+/// 2. A unique remote-tracking `origin/main` or `origin/master`
+///    (hand-added remotes never get `origin/HEAD`).
+/// 3. `init.defaultBranch` git config value (user/system preference).
 fn detect_default_branch(repo: &Repository) -> Option<String> {
     if let Some(branch) = detect_remote_default_branch(repo) {
+        return Some(branch);
+    }
+    if let Some(branch) = guess_default_from_remote_tracking(repo) {
         return Some(branch);
     }
     if let Ok(config) = repo.config()
@@ -840,19 +861,30 @@ fn detect_default_branch(repo: &Repository) -> Option<String> {
     }
     None
 }
+/// `None` when both exist — a wrong guess would make clients treat the
+/// real default branch as a feature branch (and poll PR status on it).
+fn guess_default_from_remote_tracking(repo: &Repository) -> Option<String> {
+    let has = |name: &str| {
+        repo.find_branch(&format!("origin/{name}"), git2::BranchType::Remote)
+            .is_ok()
+    };
+    match (has("main"), has("master")) {
+        (true, false) => Some("main".to_string()),
+        (false, true) => Some("master".to_string()),
+        _ => None,
+    }
+}
 /// Resolve `refs/remotes/origin/HEAD` to the remote's default branch name.
 fn detect_remote_default_branch(repo: &Repository) -> Option<String> {
     let reference = repo.find_reference("refs/remotes/origin/HEAD").ok()?;
     let prefix = "refs/remotes/origin/";
     if let Ok(resolved) = reference.resolve()
-        && let Some(branch) = resolved.name().ok().and_then(|n| n.strip_prefix(prefix))
+        && let Some(branch) = resolved.name().and_then(|n| n.strip_prefix(prefix))
     {
         return Some(branch.to_string());
     }
     reference
         .symbolic_target()
-        .ok()
-        .flatten()
         .and_then(|t| t.strip_prefix(prefix))
         .map(|b| b.to_string())
 }
@@ -867,16 +899,14 @@ pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
         let current_branch = repo
             .head()
             .ok()
-            .and_then(|h| h.shorthand().ok().map(String::from));
+            .and_then(|h| h.shorthand().map(String::from));
         let mut branches = Vec::new();
         for result in repo.branches(None)? {
             let (branch, branch_type) = result?;
             let Some(name) = branch.name()?.map(String::from) else {
                 continue;
             };
-            if branch.get().symbolic_target().ok().flatten().is_some()
-                && branch_type == git2::BranchType::Remote
-            {
+            if branch.get().symbolic_target().is_some() && branch_type == git2::BranchType::Remote {
                 continue;
             }
             let is_remote = branch_type == git2::BranchType::Remote;
@@ -1164,9 +1194,7 @@ async fn status_via_cli(
     let root = root_res.ok().map(|s| s.trim_end_matches('/').to_string());
     let git_dir = git_dir_res.ok();
     let common_dir = common_dir_res.ok();
-    let is_worktree = matches!(
-        (& git_dir, & common_dir), (Some(gd), Some(cd)) if gd != cd
-    );
+    let is_worktree = matches!((&git_dir, &common_dir), (Some(gd), Some(cd)) if gd != cd);
     let main_root = if is_worktree {
         common_dir.and_then(|d| {
             let p = PathBuf::from(&d);
@@ -1214,12 +1242,49 @@ async fn status_via_cli(
         unstaged,
     };
     tracing::debug!(
-        root = ? data.root, branch = ? data.branch, staged = data.staged.len(), unstaged
-        = data.unstaged.len(), elapsed = ? start.elapsed(), "git.status (CLI fallback)"
+        root = ?data.root,
+        branch = ?data.branch,
+        staged = data.staged.len(),
+        unstaged = data.unstaged.len(),
+        elapsed = ?start.elapsed(),
+        "git.status (CLI fallback)"
     );
     Ok(data)
 }
 pub async fn status(
+    git_root: &Path,
+    include_untracked: bool,
+    include_stats: bool,
+    ignore_submodules: bool,
+    include_patches: bool,
+) -> Result<GitStatusData> {
+    let git_root_buf = git_root.to_path_buf();
+    super::git_gate::shared()
+        .run(
+            git_root,
+            super::git_gate::FlightOp::Status {
+                include_untracked,
+                include_stats,
+                ignore_submodules,
+                include_patches,
+            },
+            move || {
+                let git_root = git_root_buf.clone();
+                async move {
+                    status_ungated(
+                        &git_root,
+                        include_untracked,
+                        include_stats,
+                        ignore_submodules,
+                        include_patches,
+                    )
+                    .await
+                }
+            },
+        )
+        .await
+}
+async fn status_ungated(
     git_root: &Path,
     include_untracked: bool,
     include_stats: bool,
@@ -1350,14 +1415,19 @@ pub async fn status(
     let libgit2_err = match &result {
         Ok(data) => {
             tracing::debug!(
-                root = ? data.root, branch = ? data.branch, staged = data.staged.len(),
-                unstaged = data.unstaged.len(), elapsed = ? start.elapsed(), "git.status"
+                root = ?data.root,
+                branch = ?data.branch,
+                staged = data.staged.len(),
+                unstaged = data.unstaged.len(),
+                elapsed = ?start.elapsed(),
+                "git.status"
             );
             return result;
         }
         Err(e) => {
             tracing::warn!(
-                error = % e, elapsed = ? start.elapsed(),
+                error = %e,
+                elapsed = ?start.elapsed(),
                 "git.status: libgit2 failed, falling back to CLI"
             );
             e.to_string()
@@ -1436,17 +1506,66 @@ pub async fn read_files(
     match &result {
         Ok(data) => {
             tracing::debug!(
-                files = data.files.len(), errors = data.errors.len(), elapsed = ? start
-                .elapsed(), "git.files"
+                files = data.files.len(),
+                errors = data.errors.len(),
+                elapsed = ?start.elapsed(),
+                "git.files"
             )
         }
         Err(e) => {
-            tracing::debug!(error = % e, elapsed = ? start.elapsed(), "git.files failed")
+            tracing::debug!(error = %e, elapsed = ?start.elapsed(), "git.files failed")
         }
     }
     result
 }
 pub async fn diffs(
+    git_root: &Path,
+    paths: Option<&[String]>,
+    from: &str,
+    to: &str,
+    include_patch: bool,
+    include_content: bool,
+    merge_base: bool,
+) -> Result<GitDiffsData> {
+    let git_root_buf = git_root.to_path_buf();
+    let paths_buf = paths.map(|p| p.to_vec());
+    let from_owned = from.to_string();
+    let to_owned = to.to_string();
+    let mut key_paths = paths_buf.clone().unwrap_or_default();
+    key_paths.sort();
+    super::git_gate::shared()
+        .run(
+            git_root,
+            super::git_gate::FlightOp::Diff {
+                from: from_owned.clone(),
+                to: to_owned.clone(),
+                merge_base,
+                include_patch,
+                include_content,
+                paths: key_paths,
+            },
+            move || {
+                let git_root = git_root_buf.clone();
+                let paths = paths_buf.clone();
+                let from = from_owned.clone();
+                let to = to_owned.clone();
+                async move {
+                    diffs_ungated(
+                        &git_root,
+                        paths.as_deref(),
+                        &from,
+                        &to,
+                        include_patch,
+                        include_content,
+                        merge_base,
+                    )
+                    .await
+                }
+            },
+        )
+        .await
+}
+async fn diffs_ungated(
     git_root: &Path,
     paths: Option<&[String]>,
     from: &str,
@@ -1470,7 +1589,8 @@ pub async fn diffs(
                 Some(oid) => oid.to_string(),
                 None => {
                     tracing::warn!(
-                        from = % from, to = % to,
+                        from = %from,
+                        to = %to,
                         "git.diffs: could not compute merge-base, falling back to direct diff"
                     );
                     from.clone()
@@ -1552,12 +1672,10 @@ pub async fn diffs(
     .await?;
     match &result {
         Ok(data) => {
-            tracing::debug!(
-                files = data.files.len(), elapsed = ? start.elapsed(), "git.diffs"
-            )
+            tracing::debug!(files = data.files.len(), elapsed = ?start.elapsed(), "git.diffs")
         }
         Err(e) => {
-            tracing::debug!(error = % e, elapsed = ? start.elapsed(), "git.diffs failed")
+            tracing::debug!(error = %e, elapsed = ?start.elapsed(), "git.diffs failed")
         }
     }
     result
@@ -1607,15 +1725,13 @@ pub async fn stage(git_root: &Path, paths: Option<Vec<String>>) -> Result<StageD
     let start = std::time::Instant::now();
     let paths_to_stage = paths.unwrap_or_default();
     let result = if paths_to_stage.is_empty() {
-        git_cli(git_root, &["add", "-A"]).await
+        git_cli_mut(git_root, &["add", "-A"]).await
     } else {
         let mut args = vec!["add", "--"];
         args.extend(paths_to_stage.iter().map(String::as_str));
-        git_cli(git_root, &args).await
+        git_cli_mut(git_root, &args).await
     };
-    tracing::debug!(
-        paths = paths_to_stage.len(), elapsed = ? start.elapsed(), "git.stage"
-    );
+    tracing::debug!(paths = paths_to_stage.len(), elapsed = ?start.elapsed(), "git.stage");
     result.map(|_| StageData {
         paths: paths_to_stage,
     })
@@ -1626,13 +1742,14 @@ pub async fn unstage(git_root: &Path, paths: Option<Vec<String>>) -> Result<()> 
         Some(p) if !p.is_empty() => {
             let mut args = vec!["reset", "HEAD", "--"];
             args.extend(p.iter().map(String::as_str));
-            git_cli(git_root, &args).await
+            git_cli_mut(git_root, &args).await
         }
-        _ => git_cli(git_root, &["reset", "HEAD"]).await,
+        _ => git_cli_mut(git_root, &["reset", "HEAD"]).await,
     };
     tracing::debug!(
-        paths = paths.as_ref().map(| v | v.len()).unwrap_or(0), elapsed = ? start
-        .elapsed(), "git.unstage"
+        paths = paths.as_ref().map(|v| v.len()).unwrap_or(0),
+        elapsed = ?start.elapsed(),
+        "git.unstage"
     );
     result.map(|_| ())
 }
@@ -1655,7 +1772,7 @@ pub async fn discard(
             args.push("--");
             args.extend(&path_refs);
         }
-        git_cli(git_root, &args).await?;
+        git_cli_mut(git_root, &args).await?;
     }
     if matches!(scope, DiscardScope::Working | DiscardScope::Both) {
         let mut args = vec!["checkout"];
@@ -1665,7 +1782,7 @@ pub async fn discard(
             args.push("--");
             args.extend(&path_refs);
         }
-        let result = git_cli(git_root, &args).await;
+        let result = git_cli_mut(git_root, &args).await;
         if !include_untracked {
             result?;
         }
@@ -1676,9 +1793,9 @@ pub async fn discard(
             args.push("--");
             args.extend(&path_refs);
         }
-        git_cli(git_root, &args).await?;
+        git_cli_mut(git_root, &args).await?;
     }
-    tracing::debug!(paths = path_refs.len(), elapsed = ? start.elapsed(), "git.discard");
+    tracing::debug!(paths = path_refs.len(), elapsed = ?start.elapsed(), "git.discard");
     Ok(())
 }
 pub async fn stash(git_root: &Path, include_untracked: bool) -> Result<()> {
@@ -1687,8 +1804,8 @@ pub async fn stash(git_root: &Path, include_untracked: bool) -> Result<()> {
     if include_untracked {
         args.push("--include-untracked");
     }
-    git_cli(git_root, &args).await?;
-    tracing::debug!(include_untracked, elapsed = ? start.elapsed(), "git.stash");
+    git_cli_mut(git_root, &args).await?;
+    tracing::debug!(include_untracked, elapsed = ?start.elapsed(), "git.stash");
     Ok(())
 }
 /// Tracing target used by all `--restore-code` log lines that are NOT
@@ -1700,7 +1817,8 @@ pub const RESTORE_CODE_LOG: &str = "xai_restore_code";
 /// future refactor cannot silently downgrade one site to `debug!`.
 pub fn warn_registry_disabled_restore(session_id: &str) {
     tracing::warn!(
-        target : RESTORE_CODE_LOG, session_id,
+        target: RESTORE_CODE_LOG,
+        session_id,
         "session registry disabled — staged/unstaged/untracked will not be restored"
     );
 }
@@ -1783,18 +1901,21 @@ pub async fn stash_before_destructive_op(
     }
     if let Some(reason) = in_progress_state_reason(git_root) {
         tracing::warn!(
-            target : RESTORE_CODE_LOG, path = % git_root.display(), label, session_id,
-            reason = % reason,
+            target: RESTORE_CODE_LOG,
+            path = %git_root.display(),
+            label,
+            session_id,
+            reason = %reason,
             "stash_before_destructive_op: skipping stash (in-progress operation detected)"
         );
         return StashOutcome::Skipped(reason);
     }
     let message = format!(
-        "grok: pre-{label} {} {}",
+        "chutes-build: pre-{label} {} {}",
         session_id,
         chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ")
     );
-    if let Err(e) = git_cli(
+    if let Err(e) = git_cli_mut(
         git_root,
         &["stash", "push", "--include-untracked", "-m", &message],
     )
@@ -1802,8 +1923,11 @@ pub async fn stash_before_destructive_op(
     {
         let reason = format!("git stash failed: {e}");
         tracing::warn!(
-            target : RESTORE_CODE_LOG, path = % git_root.display(), label, session_id,
-            error = % e,
+            target: RESTORE_CODE_LOG,
+            path = %git_root.display(),
+            label,
+            session_id,
+            error = %e,
             "stash_before_destructive_op: stash failed, continuing without stash"
         );
         return StashOutcome::Skipped(reason);
@@ -1812,8 +1936,11 @@ pub async fn stash_before_destructive_op(
         Ok(s) if !s.trim().is_empty() => {
             let stash_ref = s.trim().to_owned();
             tracing::info!(
-                target : RESTORE_CODE_LOG, path = % git_root.display(), label,
-                session_id, stash_ref = % stash_ref,
+                target: RESTORE_CODE_LOG,
+                path = %git_root.display(),
+                label,
+                session_id,
+                stash_ref = %stash_ref,
                 "stash_before_destructive_op: dirty state stashed"
             );
             StashOutcome::Stashed(stash_ref)
@@ -1821,7 +1948,9 @@ pub async fn stash_before_destructive_op(
         _ => {
             let reason = "git rev-parse stash@{0} returned empty or failed".to_owned();
             tracing::warn!(
-                target : RESTORE_CODE_LOG, path = % git_root.display(), label,
+                target: RESTORE_CODE_LOG,
+                path = %git_root.display(),
+                label,
                 session_id,
                 "stash_before_destructive_op: could not capture stash ref after push"
             );
@@ -1837,6 +1966,10 @@ pub async fn stash_before_destructive_op(
 /// after this call returned, including the no-op early-return where HEAD
 /// was already at the target. Callers should rely on this flag when
 /// gating user-visible "restored" banners.
+///
+/// If a fetch is required it runs on `spawn_blocking` and is **not** cancelled
+/// when this future is dropped. The helper still kills the git process group
+/// when [`crate::restore_fetch::RESTORE_FETCH_BUDGET`] elapses.
 pub async fn checkout_session_commit(
     git_root: &Path,
     target_sha: &str,
@@ -1847,7 +1980,8 @@ pub async fn checkout_session_commit(
         && current.trim() == target_sha
     {
         tracing::debug!(
-            path = % git_root.display(), commit = % target_sha,
+            path = %git_root.display(),
+            commit = %target_sha,
             "checkout_session_commit: already at target commit"
         );
         return CheckoutSessionOutcome {
@@ -1869,44 +2003,256 @@ pub async fn checkout_session_commit(
         stash_ref,
         stash_skipped_reason,
     };
-    if git_cli(git_root, &["checkout", target_sha]).await.is_ok() {
+    if git_cli_mut(git_root, &["checkout", target_sha])
+        .await
+        .is_ok()
+    {
         tracing::info!(
-            path = % git_root.display(), commit = % target_sha, stash_ref = ? outcome
-            .stash_ref, "checkout_session_commit: checked out session HEAD"
+            path = %git_root.display(),
+            commit = %target_sha,
+            stash_ref = ?outcome.stash_ref,
+            "checkout_session_commit: checked out session HEAD"
         );
         outcome.checked_out = true;
         return outcome;
     }
-    tracing::info!(
-        path = % git_root.display(), commit = % target_sha,
-        "checkout_session_commit: local checkout failed, fetching from origin"
-    );
-    if git_cli(git_root, &["fetch", "origin"]).await.is_err() {
+    if !crate::restore_fetch::is_full_object_id(target_sha) {
         tracing::warn!(
-            path = % git_root.display(), commit = % target_sha,
-            "checkout_session_commit: fetch failed, giving up"
+            path = %git_root.display(),
+            commit = %target_sha,
+            "checkout_session_commit: refusing non-oid fetch refspec, giving up"
         );
         return outcome;
     }
-    if git_cli(git_root, &["checkout", target_sha]).await.is_ok() {
+    if git_cli(git_root, &["cat-file", "-t", target_sha])
+        .await
+        .is_ok()
+    {
+        tracing::warn!(
+            path = %git_root.display(),
+            commit = %target_sha,
+            "checkout_session_commit: checkout failed with object already local; not fetching"
+        );
+        return outcome;
+    }
+    tracing::info!(
+        path = %git_root.display(),
+        commit = %target_sha,
+        "checkout_session_commit: fetching missing session HEAD from origin"
+    );
+    match fetch_missing_commit(git_root, target_sha).await {
+        AsyncFetchOutcome::Completed(Ok(fetch_outcome)) => {
+            tracing::info!(
+                path = %git_root.display(),
+                commit = %target_sha,
+                ?fetch_outcome,
+                "checkout_session_commit: targeted fetch finished"
+            );
+        }
+        AsyncFetchOutcome::Completed(Err(e)) => {
+            tracing::warn!(
+                path = %git_root.display(),
+                commit = %target_sha,
+                error = %e,
+                "checkout_session_commit: fetch failed, giving up"
+            );
+            return outcome;
+        }
+        AsyncFetchOutcome::Abandoned => {
+            tracing::warn!(
+                path = %git_root.display(),
+                commit = %target_sha,
+                "checkout_session_commit: fetch join timed out; not checking out while fetch may still run"
+            );
+            return outcome;
+        }
+    }
+    if git_cli_mut(git_root, &["checkout", target_sha])
+        .await
+        .is_ok()
+    {
         tracing::info!(
-            path = % git_root.display(), commit = % target_sha, stash_ref = ? outcome
-            .stash_ref, "checkout_session_commit: checked out after fetch"
+            path = %git_root.display(),
+            commit = %target_sha,
+            stash_ref = ?outcome.stash_ref,
+            "checkout_session_commit: checked out after fetch"
         );
         outcome.checked_out = true;
         return outcome;
     }
     tracing::warn!(
-        path = % git_root.display(), commit = % target_sha,
+        path = %git_root.display(),
+        commit = %target_sha,
         "checkout_session_commit: checkout still failed after fetch, giving up"
     );
     outcome
 }
+#[derive(Debug)]
+pub(crate) enum AsyncFetchOutcome {
+    Completed(anyhow::Result<crate::restore_fetch::FetchCommitOutcome>),
+    Abandoned,
+}
+pub(crate) async fn fetch_missing_commit(git_root: &Path, oid: &str) -> AsyncFetchOutcome {
+    spawn_targeted_fetch(git_root, oid, FetchKind::CommitOidOnly).await
+}
+pub(crate) async fn fetch_checkout_target(git_root: &Path, target: &str) -> AsyncFetchOutcome {
+    spawn_targeted_fetch(git_root, target, FetchKind::CheckoutRef).await
+}
+#[derive(Clone, Copy)]
+enum FetchKind {
+    CommitOidOnly,
+    CheckoutRef,
+}
+async fn spawn_targeted_fetch(git_root: &Path, spec: &str, kind: FetchKind) -> AsyncFetchOutcome {
+    let fetch_root = git_root.to_path_buf();
+    let fetch_spec = spec.to_owned();
+    match tokio::time::timeout(
+        crate::restore_fetch::RESTORE_FETCH_BUDGET + crate::restore_fetch::RESTORE_FETCH_JOIN_SLACK,
+        tokio::task::spawn_blocking(move || match kind {
+            FetchKind::CheckoutRef => {
+                crate::restore_fetch::fetch_checkout_target_if_missing(&fetch_root, &fetch_spec)
+            }
+            FetchKind::CommitOidOnly => {
+                crate::restore_fetch::fetch_commit_if_missing(&fetch_root, &fetch_spec)
+            }
+        }),
+    )
+    .await
+    {
+        Err(_) => AsyncFetchOutcome::Abandoned,
+        Ok(Err(e)) => {
+            AsyncFetchOutcome::Completed(Err(anyhow::anyhow!("targeted fetch task failed: {e}")))
+        }
+        Ok(Ok(result)) => AsyncFetchOutcome::Completed(result),
+    }
+}
+/// Checkout `head_commit` (full oid or simple ref), fetching from origin if needed.
+pub(crate) async fn checkout_commit_with_fetch(
+    git_root: &Path,
+    head_commit: &str,
+    stash_if_dirty: bool,
+) -> CheckoutCommitResponse {
+    if let Some(current) = get_current_commit(git_root).await
+        && current == head_commit
+    {
+        return CheckoutCommitResponse {
+            checked_out: true,
+            stashed: false,
+            fetched: false,
+            error: None,
+        };
+    }
+    let mut stashed = false;
+    if stash_if_dirty {
+        let status = git_cli(git_root, &["status", "--porcelain"]).await;
+        if let Ok(output) = &status
+            && !output.trim().is_empty()
+        {
+            let msg = format!("auto-stash before checkout {head_commit}");
+            if git_cli_mut(git_root, &["stash", "push", "-m", &msg])
+                .await
+                .is_ok()
+            {
+                stashed = true;
+            }
+        }
+    }
+    if git_cli_mut(git_root, &["checkout", head_commit])
+        .await
+        .is_ok()
+    {
+        return CheckoutCommitResponse {
+            checked_out: true,
+            stashed,
+            fetched: false,
+            error: None,
+        };
+    }
+    let fetched = match fetch_checkout_target(git_root, head_commit).await {
+        AsyncFetchOutcome::Completed(Ok(crate::restore_fetch::FetchCommitOutcome::Fetched)) => {
+            tracing::info!(
+                path = %git_root.display(),
+                target = %head_commit,
+                "checkout_commit_with_fetch: fetched target"
+            );
+            true
+        }
+        AsyncFetchOutcome::Completed(Ok(
+            crate::restore_fetch::FetchCommitOutcome::AlreadyPresent,
+        )) => false,
+        AsyncFetchOutcome::Completed(Ok(
+            crate::restore_fetch::FetchCommitOutcome::SkippedInvalidOid,
+        )) => {
+            return pop_checkout_auto_stash(
+                git_root,
+                stashed,
+                false,
+                format!("unsupported checkout target: {head_commit}"),
+            )
+            .await;
+        }
+        AsyncFetchOutcome::Completed(Err(e)) => {
+            tracing::warn!(
+                path = %git_root.display(),
+                target = %head_commit,
+                error = %e,
+                "checkout_commit_with_fetch: fetch failed"
+            );
+            if !crate::restore_fetch::is_safe_fetch_refspec(head_commit) {
+                return pop_checkout_auto_stash(git_root, stashed, false, e.to_string()).await;
+            }
+            false
+        }
+        AsyncFetchOutcome::Abandoned => {
+            tracing::warn!(
+                path = %git_root.display(),
+                target = %head_commit,
+                "checkout_commit_with_fetch: fetch join timed out; not checking out"
+            );
+            return pop_checkout_auto_stash(
+                git_root,
+                stashed,
+                false,
+                "targeted fetch timed out".to_owned(),
+            )
+            .await;
+        }
+    };
+    match git_cli_mut(git_root, &["checkout", head_commit]).await {
+        Ok(_) => CheckoutCommitResponse {
+            checked_out: true,
+            stashed,
+            fetched,
+            error: None,
+        },
+        Err(e) => pop_checkout_auto_stash(git_root, stashed, fetched, e.to_string()).await,
+    }
+}
+/// Restore a pre-checkout auto-stash on failure so callers that only inspect
+/// `error` are not left on a clean tree with a hidden stash entry.
+async fn pop_checkout_auto_stash(
+    git_root: &Path,
+    stashed: bool,
+    fetched: bool,
+    error: String,
+) -> CheckoutCommitResponse {
+    if stashed {
+        let _ = git_cli_mut(git_root, &["stash", "pop"]).await;
+    }
+    CheckoutCommitResponse {
+        checked_out: false,
+        stashed: false,
+        fetched,
+        error: Some(error),
+    }
+}
 /// Decide whether a `--restore-code` HEAD checkout is safe to run against
 /// `supplied_cwd`.
 ///
-/// The restore-code path runs `git fetch origin` + `git checkout <sha>`,
-/// which *detaches HEAD*. That is only acceptable in two situations:
+/// The restore-code path may run a targeted
+/// `git fetch --no-tags [--depth=1] origin <sha>` + `git checkout <sha>`,
+/// which *detaches HEAD*. `--depth=1` is only added when the repo is already
+/// shallow. That is only acceptable in two situations:
 ///
 /// 1. `supplied_cwd` is a grok-managed worktree (`~/.chutes-build/worktrees/...`).
 ///    These are disposable snapshots that exist precisely to carry a
@@ -2050,7 +2396,8 @@ async fn staged_paths(git_root: &Path) -> Option<Vec<PathBuf>> {
         Ok(out) => out,
         Err(e) => {
             tracing::warn!(
-                path = % git_root.display(), error = % e,
+                path = %git_root.display(),
+                error = %e,
                 "staged_paths: `git diff --cached` failed; skipping git-checkpoint \
                  capture for this turn rather than recording an empty staged set"
             );
@@ -2103,7 +2450,8 @@ pub async fn soft_restore_git_state(
 ) -> GitRestoreOutcome {
     let Some(git_root) = resolve_git_root(cwd).await else {
         tracing::warn!(
-            path = % cwd.display(), session_id,
+            path = %cwd.display(),
+            session_id,
             "soft_restore_git_state: aborting — could not resolve git repo root"
         );
         return GitRestoreOutcome {
@@ -2118,7 +2466,9 @@ pub async fn soft_restore_git_state(
         StashOutcome::Stashed(r) => Some(r),
         StashOutcome::Skipped(reason) => {
             tracing::warn!(
-                path = % git_root.display(), session_id, reason = % reason,
+                path = %git_root.display(),
+                session_id,
+                reason = %reason,
                 "soft_restore_git_state: aborting — dirty tree could not be stashed"
             );
             return GitRestoreOutcome {
@@ -2129,20 +2479,25 @@ pub async fn soft_restore_git_state(
             };
         }
     };
-    if let Err(e) = git_cli(&git_root, &["reset", "--soft", &git_ref.head]).await {
+    if let Err(e) = git_cli_mut(&git_root, &["reset", "--soft", &git_ref.head]).await {
         tracing::warn!(
-            path = % git_root.display(), session_id, commit = % git_ref.head, error = %
-            e, "soft_restore_git_state: reset --soft failed"
+            path = %git_root.display(),
+            session_id,
+            commit = %git_ref.head,
+            error = %e,
+            "soft_restore_git_state: reset --soft failed"
         );
         let stash_ref = match stash_ref {
-            Some(stash) => match git_cli(&git_root, &["stash", "pop"]).await {
+            Some(stash) => match git_cli_mut(&git_root, &["stash", "pop"]).await {
                 Ok(_) => None,
                 Err(pop_err) => {
                     tracing::warn!(
-                        path = % git_root.display(), session_id, stash_ref = % stash,
-                        error = % pop_err,
+                        path = %git_root.display(),
+                        session_id,
+                        stash_ref = %stash,
+                        error = %pop_err,
                         "soft_restore_git_state: could not restore stashed changes after a \
-                     failed reset; uncommitted work remains in the stash"
+                         failed reset; uncommitted work remains in the stash"
                     );
                     Some(stash)
                 }
@@ -2156,11 +2511,13 @@ pub async fn soft_restore_git_state(
             stash_ref,
         };
     }
-    let index_reset = match git_cli(&git_root, &["reset", "--quiet", "--", "."]).await {
+    let index_reset = match git_cli_mut(&git_root, &["reset", "--quiet", "--", "."]).await {
         Ok(_) => true,
         Err(e) => {
             tracing::warn!(
-                path = % git_root.display(), session_id, error = % e,
+                path = %git_root.display(),
+                session_id,
+                error = %e,
                 "soft_restore_git_state: `git reset -- .` (unstage) failed; staged path \
                  set may not match the recorded checkpoint"
             );
@@ -2168,8 +2525,11 @@ pub async fn soft_restore_git_state(
         }
     };
     tracing::info!(
-        path = % git_root.display(), session_id, commit = % git_ref.head, staged =
-        git_ref.staged.len(), stash_ref = ? stash_ref,
+        path = %git_root.display(),
+        session_id,
+        commit = %git_ref.head,
+        staged = git_ref.staged.len(),
+        stash_ref = ?stash_ref,
         "soft_restore_git_state: soft-restored HEAD and unstaged; staged paths re-applied post-FS-revert"
     );
     GitRestoreOutcome {
@@ -2190,7 +2550,8 @@ pub async fn restage_git_paths(cwd: &Path, git_ref: &GitStateRef, session_id: &s
     }
     let Some(git_root) = resolve_git_root(cwd).await else {
         tracing::warn!(
-            path = % cwd.display(), session_id,
+            path = %cwd.display(),
+            session_id,
             "restage_git_paths: could not resolve git repo root; staged path set not restored"
         );
         return false;
@@ -2203,17 +2564,19 @@ pub async fn restage_git_paths(cwd: &Path, git_ref: &GitStateRef, session_id: &s
     let mut batch_args: Vec<&str> = Vec::with_capacity(path_strs.len() + 2);
     batch_args.extend(["add", "--"]);
     batch_args.extend(path_strs.iter().map(String::as_str));
-    if git_cli(&git_root, &batch_args).await.is_ok() {
+    if git_cli_mut(&git_root, &batch_args).await.is_ok() {
         return true;
     }
     tracing::debug!(
-        path = % git_root.display(), session_id, total = git_ref.staged.len(),
+        path = %git_root.display(),
+        session_id,
+        total = git_ref.staged.len(),
         "restage_git_paths: batched `git add` failed; falling back to per-path best-effort"
     );
     let mut failed_adds = 0usize;
     for path in &git_ref.staged {
         let path_str = path.to_string_lossy();
-        if git_cli(&git_root, &["add", "--", path_str.as_ref()])
+        if git_cli_mut(&git_root, &["add", "--", path_str.as_ref()])
             .await
             .is_err()
         {
@@ -2222,74 +2585,307 @@ pub async fn restage_git_paths(cwd: &Path, git_ref: &GitStateRef, session_id: &s
     }
     if failed_adds > 0 {
         tracing::debug!(
-            path = % git_root.display(), session_id, failed_adds, total = git_ref.staged
-            .len(),
+            path = %git_root.display(),
+            session_id,
+            failed_adds,
+            total = git_ref.staged.len(),
             "restage_git_paths: some recorded staged paths could not be re-added \
              (typically removed during the turn; best-effort)"
         );
     }
     failed_adds == 0
 }
-pub async fn commit(
-    git_root: &Path,
-    message: &str,
-    amend: bool,
-    signoff: bool,
-    push: bool,
-    sync: bool,
-) -> Result<CommitResult> {
+/// Run a git CLI command returning `(success, combined stdout+stderr)` instead
+/// of collapsing failure into an error. `LC_ALL=C` pins git's message locale so
+/// callers can classify output (e.g. non-fast-forward push rejections) by
+/// string-match. Errors only on spawn failure.
+async fn git_cli_raw(cwd: &Path, args: &[&str]) -> Result<(bool, String)> {
+    tracing::debug!(cwd = %cwd.display(), args = ?args, "git_cli_raw");
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).arg("--no-optional-locks");
+    for &(key, val) in xai_tty_utils::GIT_AUTH_SUPPRESSION_ENVS.iter() {
+        cmd.env(key, val);
+    }
+    cmd.env("LC_ALL", "C");
+    cmd.stdin(std::process::Stdio::null());
+    xai_grok_tools::util::detach_command(&mut cmd);
+    cmd.envs(xai_grok_tools::util::pager_env());
+    let output = cmd.args(args).output().await?;
+    let mut combined = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&stderr);
+    }
+    Ok((output.status.success(), combined))
+}
+async fn git_cli_raw_mut(cwd: &Path, args: &[&str]) -> Result<(bool, String)> {
+    let result = git_cli_raw(cwd, args).await;
+    if result.is_ok() {
+        super::git_gate::invalidate(cwd);
+    }
+    result
+}
+/// Marker line guarding the default-exclude seed. Environments may pre-seed
+/// the same block at provision time under this marker; whichever side seeds
+/// first wins and the other becomes a no-op.
+const DEFAULT_EXCLUDES_MARKER: &str = "grok default excludes";
+/// Local-only default excludes (`.git/info/exclude` — never enters the repo's
+/// history) so `stage_all` can't sweep in dependency trees, build output, or
+/// env files. `git add -f` still overrides.
+const DEFAULT_EXCLUDES_BLOCK: &str = "\
+# grok default excludes (local-only; seeded by the workspace git_commit op)
+.chutes-build/
+node_modules/
+.env
+.env.*
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.cache/
+.parcel-cache/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pnpm-store/
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+";
+/// Seed [`DEFAULT_EXCLUDES_BLOCK`] into the repo's `info/exclude` unless the
+/// marker is already present. Resolves the real file via `--git-path` so
+/// gitfile and linked-worktree checkouts seed the common dir, not a dead
+/// `.git/info` path.
+async fn seed_default_excludes(git_root: &Path) -> Result<()> {
+    let exclude_rel = git_cli(git_root, &["rev-parse", "--git-path", "info/exclude"]).await?;
+    let exclude_path = {
+        let p = Path::new(&exclude_rel);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            git_root.join(p)
+        }
+    };
+    let existing = tokio::fs::read_to_string(&exclude_path)
+        .await
+        .unwrap_or_default();
+    if existing.contains(DEFAULT_EXCLUDES_MARKER) {
+        return Ok(());
+    }
+    if let Some(parent) = exclude_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(DEFAULT_EXCLUDES_BLOCK);
+    tokio::fs::write(&exclude_path, content).await?;
+    tracing::debug!(path = %exclude_path.display(), "seeded default git excludes");
+    Ok(())
+}
+/// Push HEAD to origin, classifying the failure mode. Never forces. Returns
+/// the combined output alongside the [`PushStatus`].
+async fn push_classified(git_root: &Path) -> Result<(PushStatus, String)> {
+    let (ok, out) = git_cli_raw_mut(git_root, &["push", "-u", "origin", "HEAD"]).await?;
+    if ok {
+        return Ok((PushStatus::Ok, out));
+    }
+    let lower = out.to_lowercase();
+    let status = if lower.contains("non-fast-forward") || lower.contains("fetch first") {
+        PushStatus::Conflict
+    } else {
+        PushStatus::Failed
+    };
+    Ok((status, out))
+}
+/// Refuse unless the workspace is on exactly `expected`. Detached HEAD
+/// reports "HEAD" and so never matches.
+async fn ensure_on_branch(git_root: &Path, expected: Option<&str>) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let current = git_cli(git_root, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+    anyhow::ensure!(
+        current == expected,
+        "workspace is on '{current}', expected '{expected}'"
+    );
+    Ok(())
+}
+pub async fn commit(git_root: &Path, req: &GitCommitReq) -> Result<CommitResult> {
     let start = std::time::Instant::now();
-    let mut args = vec!["commit", "-m", message];
-    if amend {
-        args.push("--amend");
+    ensure_on_branch(git_root, req.expected_branch.as_deref()).await?;
+    if req.seed_default_excludes {
+        seed_default_excludes(git_root).await?;
     }
-    if signoff {
-        args.push("--signoff");
+    if req.stage_all {
+        git_cli_mut(git_root, &["add", "-A"]).await?;
     }
-    git_cli(git_root, &args).await?;
-    let commit_hash = git_cli(git_root, &["rev-parse", "HEAD"]).await.ok();
-    let short_hash = commit_hash
-        .as_ref()
-        .and_then(|h| h.get(..7))
-        .unwrap_or("unknown");
-    let mut combined_output = format!("Committed: {}", short_hash);
+    let clean = req.stage_all
+        && !req.amend
+        && git_cli_raw(git_root, &["diff", "--cached", "--quiet"])
+            .await?
+            .0;
+    let mut combined_output;
+    if clean {
+        combined_output = "Nothing to commit; working tree clean".to_owned();
+    } else {
+        let mut args = vec!["commit", "-m", &req.message];
+        if req.amend {
+            args.push("--amend");
+        }
+        if req.signoff {
+            args.push("--signoff");
+        }
+        git_cli_mut(git_root, &args).await?;
+        combined_output = String::new();
+    }
+    let mut commit_hash = git_cli(git_root, &["rev-parse", "HEAD"]).await.ok();
+    if !clean {
+        let short_hash = commit_hash
+            .as_ref()
+            .and_then(|h| h.get(..7))
+            .unwrap_or("unknown");
+        combined_output = format!("Committed: {}", short_hash);
+    }
     let mut warning = None;
-    if sync {
-        match git_cli(git_root, &["pull", "--rebase"]).await {
+    let mut push_status = PushStatus::NotRequested;
+    if req.sync {
+        match git_cli_mut(git_root, &["pull", "--rebase"]).await {
             Ok(pull_out) => {
                 combined_output.push_str("\n--- Pull ---\n");
                 combined_output.push_str(&pull_out);
+                commit_hash = git_cli(git_root, &["rev-parse", "HEAD"]).await.ok();
             }
             Err(e) => {
                 warning = Some(format!("Couldn't pull the latest changes. {}", e));
+                push_status = PushStatus::Skipped;
             }
         }
     }
-    if warning.is_none() && (push || sync) {
-        match git_cli(git_root, &["push", "-u", "origin", "HEAD"]).await {
-            Ok(push_out) => {
+    if warning.is_none() && (req.push || req.sync) {
+        let (status, push_out) = push_classified(git_root).await?;
+        push_status = status;
+        match status {
+            PushStatus::Ok => {
                 combined_output.push_str("\n--- Push ---\n");
                 combined_output.push_str(&push_out);
             }
-            Err(e) => {
-                warning = Some(format!("Couldn't push your changes. {}", e));
+            _ => {
+                warning = Some(format!("Couldn't push your changes. {}", push_out));
             }
         }
     }
-    tracing::debug!(amend, push, sync, elapsed = ? start.elapsed(), "git.commit");
+    tracing::debug!(
+        amend = req.amend,
+        push = req.push,
+        sync = req.sync,
+        stage_all = req.stage_all,
+        clean,
+        push_status = ?push_status,
+        elapsed = ?start.elapsed(),
+        "git.commit"
+    );
     Ok(CommitResult {
         data: CommitData {
-            commit_hash,
+            commit_hash: commit_hash.clone(),
             output: Some(combined_output),
         },
         warning,
+        outcome: Some(CommitOutcome {
+            sha: commit_hash,
+            clean,
+            pushed: push_status == PushStatus::Ok,
+            push: push_status,
+        }),
     })
 }
+/// Merge the base branch into the current branch (`workspace.git_sync_base`).
+/// Merge, never rebase: conv-branch history must not be rewritten. On
+/// conflicts the merge is left in progress for resolution; `abort` rolls it
+/// back.
+pub async fn sync_base(
+    git_root: &Path,
+    base_ref: Option<&str>,
+    abort: bool,
+    expected_branch: Option<&str>,
+) -> Result<GitSyncBaseResult> {
+    async fn merge_in_progress(git_root: &Path) -> Result<bool> {
+        Ok(
+            git_cli_raw(git_root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+                .await?
+                .0,
+        )
+    }
+    if abort {
+        let (_ok, out) = git_cli_raw_mut(git_root, &["merge", "--abort"]).await?;
+        anyhow::ensure!(
+            !merge_in_progress(git_root).await?,
+            "merge --abort failed: {out}"
+        );
+        return Ok(GitSyncBaseResult {
+            outcome: GitSyncBaseOutcome::Aborted,
+        });
+    }
+    ensure_on_branch(git_root, expected_branch).await?;
+    anyhow::ensure!(
+        !merge_in_progress(git_root).await?,
+        "a merge is already in progress; resolve it or call again with abort"
+    );
+    let dirty = git_cli(git_root, &["status", "--porcelain"]).await?;
+    anyhow::ensure!(
+        dirty.is_empty(),
+        "working tree is not clean; commit or discard changes before syncing the base"
+    );
+    let base = base_ref.unwrap_or("HEAD");
+    let (fetched, fetch_out) = git_cli_raw_mut(git_root, &["fetch", "origin", base]).await?;
+    anyhow::ensure!(fetched, "fetch of base ref '{base}' failed: {fetch_out}");
+    if git_cli_raw(
+        git_root,
+        &["merge-base", "--is-ancestor", "FETCH_HEAD", "HEAD"],
+    )
+    .await?
+    .0
+    {
+        return Ok(GitSyncBaseResult {
+            outcome: GitSyncBaseOutcome::UpToDate,
+        });
+    }
+    let (merged, merge_out) =
+        git_cli_raw_mut(git_root, &["merge", "--no-edit", "FETCH_HEAD"]).await?;
+    if merged {
+        let sha = git_cli(git_root, &["rev-parse", "HEAD"]).await?;
+        return Ok(GitSyncBaseResult {
+            outcome: GitSyncBaseOutcome::Merged { sha },
+        });
+    }
+    if merge_in_progress(git_root).await? {
+        let files = git_cli(git_root, &["diff", "--name-only", "--diff-filter=U"])
+            .await?
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        return Ok(GitSyncBaseResult {
+            outcome: GitSyncBaseOutcome::Conflicts { files },
+        });
+    }
+    anyhow::bail!("merge of base ref '{base}' failed: {merge_out}")
+}
 pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result<()> {
-    let git_root = git_root.to_path_buf();
+    let git_root_buf = git_root.to_path_buf();
     let path = path.to_string();
     let content = content.to_string();
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let git_root = git_root_buf;
         let repo = Repository::open(&git_root)?;
         let work_dir = repo
             .workdir()
@@ -2333,7 +2929,9 @@ pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result
         index.write()?;
         Ok(())
     })
-    .await?
+    .await??;
+    super::git_gate::invalidate(git_root);
+    Ok(())
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2505,6 +3103,28 @@ mod tests {
             strip_url_credentials(url_with_creds),
             "https://github.com/xai-org/example.git"
         );
+    }
+    #[test]
+    fn detect_default_branch_falls_back_to_unique_remote_tracking_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+        repo.config()
+            .unwrap()
+            .set_str("init.defaultBranch", "trunk")
+            .unwrap();
+        let sig = git2::Signature::now("test", "test@test.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
+        repo.reference("refs/remotes/origin/main", oid, false, "test")
+            .unwrap();
+        assert_eq!(detect_default_branch(&repo).as_deref(), Some("main"));
+        repo.reference("refs/remotes/origin/master", oid, false, "test")
+            .unwrap();
+        assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
     }
     #[test]
     fn test_resolve_persisted_session_git_metadata_collects_sorted_unique_remotes() {
@@ -3529,7 +4149,7 @@ mod restore_code_tests {
         assert!(porcelain.trim().is_empty(), "got: {porcelain:?}");
         let list = git_cli(tmp.path(), &["stash", "list"]).await.unwrap();
         assert!(
-            list.contains("grok: pre-test sess-2"),
+            list.contains("chutes-build: pre-test sess-2"),
             "stash list missing session id: {list}"
         );
     }
@@ -3706,6 +4326,306 @@ mod restore_code_tests {
         let bogus = "0000000000000000000000000000000000000000";
         let outcome = checkout_session_commit(tmp.path(), bogus, true, "sess-bogus").await;
         assert!(!outcome.checked_out);
+    }
+    #[tokio::test]
+    async fn checkout_session_commit_refuses_non_oid_refspec() {
+        if bazel_skip("checkout_session_commit_refuses_non_oid_refspec") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        for bogus in ["origin/main", "abc1234"] {
+            let outcome = checkout_session_commit(tmp.path(), bogus, true, "sess-ref").await;
+            assert!(!outcome.checked_out, "{bogus}");
+            assert!(
+                !tmp.path().join(".git/FETCH_HEAD").exists(),
+                "must not fetch for non-oid {bogus}"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn checkout_session_commit_fetches_then_checks_out() {
+        if bazel_skip("checkout_session_commit_fetches_then_checks_out") {
+            return;
+        }
+        let upstream = tempfile::tempdir().unwrap();
+        init_repo_with_commit(upstream.path()).await;
+        let dest_root = tempfile::tempdir().unwrap();
+        let repo = dest_root.path().join("repo");
+        git_cli(
+            dest_root.path(),
+            &[
+                "clone",
+                "-q",
+                &upstream.path().to_string_lossy(),
+                &repo.to_string_lossy(),
+            ],
+        )
+        .await
+        .unwrap();
+        std::fs::write(upstream.path().join("two.txt"), "two\n").unwrap();
+        git_cli(upstream.path(), &["add", "."]).await.unwrap();
+        git_cli(upstream.path(), &["commit", "-q", "-m", "two"])
+            .await
+            .unwrap();
+        let second = git_cli(upstream.path(), &["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let second = second.trim().to_owned();
+        let outcome = checkout_session_commit(&repo, &second, true, "sess-fetch").await;
+        assert!(outcome.checked_out, "expected checkout after fetch");
+        let on_head = git_cli(&repo, &["rev-parse", "HEAD"]).await.unwrap();
+        assert_eq!(on_head.trim(), second);
+        assert_eq!(
+            git_cli(&repo, &["rev-parse", "--is-shallow-repository"])
+                .await
+                .unwrap()
+                .trim(),
+            "false"
+        );
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_already_on_target() {
+        if bazel_skip("checkout_commit_with_fetch_already_on_target") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let head = init_repo_with_commit(tmp.path()).await;
+        let response = checkout_commit_with_fetch(tmp.path(), &head, false).await;
+        assert_eq!(
+            (
+                response.checked_out,
+                response.fetched,
+                response.stashed,
+                response.error.is_none()
+            ),
+            (true, false, false, true)
+        );
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_rejects_unsafe_refspec() {
+        if bazel_skip("checkout_commit_with_fetch_rejects_unsafe_refspec") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let response = checkout_commit_with_fetch(tmp.path(), "foo:bar", false).await;
+        assert!(!response.checked_out);
+        assert!(!response.fetched);
+        let err = response.error.expect("error");
+        assert!(
+            err.contains("unsupported") || err.contains("refusing"),
+            "got: {err}"
+        );
+        assert!(!tmp.path().join(".git/FETCH_HEAD").exists());
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_fetches_branch_ref() {
+        if bazel_skip("checkout_commit_with_fetch_fetches_branch_ref") {
+            return;
+        }
+        let upstream = tempfile::tempdir().unwrap();
+        init_repo_with_commit(upstream.path()).await;
+        let dest_root = tempfile::tempdir().unwrap();
+        let repo = dest_root.path().join("repo");
+        git_cli(
+            dest_root.path(),
+            &[
+                "clone",
+                "-q",
+                &upstream.path().to_string_lossy(),
+                &repo.to_string_lossy(),
+            ],
+        )
+        .await
+        .unwrap();
+        git_cli(upstream.path(), &["checkout", "-q", "-b", "feature"])
+            .await
+            .unwrap();
+        std::fs::write(upstream.path().join("two.txt"), "two\n").unwrap();
+        git_cli(upstream.path(), &["add", "."]).await.unwrap();
+        git_cli(upstream.path(), &["commit", "-q", "-m", "two"])
+            .await
+            .unwrap();
+        let second = git_cli(upstream.path(), &["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let second = second.trim().to_owned();
+        let response = checkout_commit_with_fetch(&repo, "feature", false).await;
+        assert!(response.fetched, "error={:?}", response.error);
+        assert!(response.checked_out, "error={:?}", response.error);
+        let on_head = git_cli(&repo, &["rev-parse", "HEAD"]).await.unwrap();
+        assert_eq!(on_head.trim(), second);
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_fetches_origin_tracking_ref() {
+        if bazel_skip("checkout_commit_with_fetch_fetches_origin_tracking_ref") {
+            return;
+        }
+        let upstream = tempfile::tempdir().unwrap();
+        init_repo_with_commit(upstream.path()).await;
+        let dest_root = tempfile::tempdir().unwrap();
+        let repo = dest_root.path().join("repo");
+        git_cli(
+            dest_root.path(),
+            &[
+                "clone",
+                "-q",
+                &upstream.path().to_string_lossy(),
+                &repo.to_string_lossy(),
+            ],
+        )
+        .await
+        .unwrap();
+        git_cli(upstream.path(), &["checkout", "-q", "-b", "feature"])
+            .await
+            .unwrap();
+        std::fs::write(upstream.path().join("two.txt"), "two\n").unwrap();
+        git_cli(upstream.path(), &["add", "."]).await.unwrap();
+        git_cli(upstream.path(), &["commit", "-q", "-m", "two"])
+            .await
+            .unwrap();
+        let second = git_cli(upstream.path(), &["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let second = second.trim().to_owned();
+        let response = checkout_commit_with_fetch(&repo, "origin/feature", false).await;
+        assert!(response.fetched, "error={:?}", response.error);
+        assert!(response.checked_out, "error={:?}", response.error);
+        let on_head = git_cli(&repo, &["rev-parse", "HEAD"]).await.unwrap();
+        assert_eq!(on_head.trim(), second);
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_fetches_tag_ref() {
+        if bazel_skip("checkout_commit_with_fetch_fetches_tag_ref") {
+            return;
+        }
+        let upstream = tempfile::tempdir().unwrap();
+        init_repo_with_commit(upstream.path()).await;
+        git_cli(upstream.path(), &["tag", "v1.0.0"]).await.unwrap();
+        let tagged = git_cli(upstream.path(), &["rev-parse", "refs/tags/v1.0.0"])
+            .await
+            .unwrap();
+        let tagged = tagged.trim().to_owned();
+        git_cli(upstream.path(), &["checkout", "-q", "-b", "dev"])
+            .await
+            .unwrap();
+        std::fs::write(upstream.path().join("two.txt"), "two\n").unwrap();
+        git_cli(upstream.path(), &["add", "."]).await.unwrap();
+        git_cli(upstream.path(), &["commit", "-q", "-m", "two"])
+            .await
+            .unwrap();
+        let dest_root = tempfile::tempdir().unwrap();
+        let repo = dest_root.path().join("repo");
+        git_cli(
+            dest_root.path(),
+            &[
+                "clone",
+                "-q",
+                "--no-tags",
+                &upstream.path().to_string_lossy(),
+                &repo.to_string_lossy(),
+            ],
+        )
+        .await
+        .unwrap();
+        assert!(
+            git_cli(&repo, &["rev-parse", "refs/tags/v1.0.0"])
+                .await
+                .is_err()
+        );
+        let response = checkout_commit_with_fetch(&repo, "refs/tags/v1.0.0", false).await;
+        assert!(response.fetched, "error={:?}", response.error);
+        assert!(response.checked_out, "error={:?}", response.error);
+        let on_head = git_cli(&repo, &["rev-parse", "HEAD"]).await.unwrap();
+        assert_eq!(on_head.trim(), tagged);
+        let local_tag = git_cli(&repo, &["rev-parse", "refs/tags/v1.0.0"])
+            .await
+            .unwrap();
+        assert_eq!(local_tag.trim(), tagged);
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_rejects_abbreviated_sha() {
+        if bazel_skip("checkout_commit_with_fetch_rejects_abbreviated_sha") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let response = checkout_commit_with_fetch(tmp.path(), "abc1234f", false).await;
+        assert!(!response.checked_out);
+        assert!(!response.fetched);
+        let err = response.error.expect("error");
+        assert!(
+            err.contains("unsupported") || err.contains("refusing"),
+            "got: {err}"
+        );
+        assert!(!tmp.path().join(".git/FETCH_HEAD").exists());
+    }
+    #[tokio::test]
+    async fn checkout_commit_with_fetch_pops_stash_on_unsupported_target() {
+        if bazel_skip("checkout_commit_with_fetch_pops_stash_on_unsupported_target") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        std::fs::write(tmp.path().join("README.md"), "dirty edit\n").unwrap();
+        let response = checkout_commit_with_fetch(tmp.path(), "deadbeef", true).await;
+        assert!(!response.checked_out);
+        assert!(!response.stashed, "auto-stash must be popped on failure");
+        assert!(response.error.is_some());
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
+            "dirty edit\n"
+        );
+        let stash_list = git_cli(tmp.path(), &["stash", "list"]).await.unwrap();
+        assert!(
+            stash_list.trim().is_empty(),
+            "no leftover stash, got: {stash_list:?}"
+        );
+    }
+    #[tokio::test]
+    async fn pop_checkout_auto_stash_restores_dirty_tree() {
+        if bazel_skip("pop_checkout_auto_stash_restores_dirty_tree") {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        std::fs::write(tmp.path().join("README.md"), "dirty edit\n").unwrap();
+        git_cli(
+            tmp.path(),
+            &["stash", "push", "-m", "auto-stash before checkout deadbeef"],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
+            "hello\n"
+        );
+        let response = pop_checkout_auto_stash(
+            tmp.path(),
+            true,
+            false,
+            "targeted fetch timed out".to_owned(),
+        )
+        .await;
+        assert_eq!(
+            (
+                response.checked_out,
+                response.fetched,
+                response.stashed,
+                response.error.as_deref()
+            ),
+            (false, false, false, Some("targeted fetch timed out"))
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
+            "dirty edit\n"
+        );
+        let stash_list = git_cli(tmp.path(), &["stash", "list"]).await.unwrap();
+        assert!(
+            stash_list.trim().is_empty(),
+            "no leftover stash, got: {stash_list:?}"
+        );
     }
     #[tokio::test]
     async fn checkout_session_commit_dirty_during_merge_surfaces_skipped_reason() {
@@ -4161,5 +5081,418 @@ mod restore_code_tests {
             stash_list.trim().is_empty(),
             "no stash entry should remain after the pop, got: {stash_list:?}"
         );
+    }
+    fn skip_without_git_cli() -> bool {
+        std::env::var("BAZEL_TEST").is_ok()
+    }
+    /// `origin.git` (bare, HEAD → main) plus a work clone on `conv/t` forked
+    /// from a pushed `main`. Returns (tempdir, work path).
+    async fn conv_repo_with_origin() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("origin.git");
+        let work = tmp.path().join("work");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        git_cli(&bare, &["init", "--bare"]).await.unwrap();
+        git_cli(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"])
+            .await
+            .unwrap();
+        git_cli(&work, &["init", "-b", "main"]).await.unwrap();
+        configure_test_identity(&work).await;
+        std::fs::write(work.join("README.md"), "base\n").unwrap();
+        git_cli(&work, &["add", "-A"]).await.unwrap();
+        git_cli(&work, &["commit", "-m", "init"]).await.unwrap();
+        git_cli(&work, &["remote", "add", "origin", bare.to_str().unwrap()])
+            .await
+            .unwrap();
+        git_cli(&work, &["push", "-u", "origin", "main"])
+            .await
+            .unwrap();
+        git_cli(&work, &["checkout", "-b", "conv/t"]).await.unwrap();
+        (tmp, work)
+    }
+    async fn configure_test_identity(repo: &Path) {
+        git_cli(repo, &["config", "user.name", "test"])
+            .await
+            .unwrap();
+        git_cli(repo, &["config", "user.email", "test@test.com"])
+            .await
+            .unwrap();
+        git_cli(repo, &["config", "commit.gpgsign", "false"])
+            .await
+            .unwrap();
+    }
+    fn conv_commit_req(push: bool) -> GitCommitReq {
+        GitCommitReq {
+            message: "conv commit".to_owned(),
+            push,
+            stage_all: true,
+            seed_default_excludes: true,
+            expected_branch: Some("conv/t".to_owned()),
+            ..Default::default()
+        }
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn conv_commit_seeds_excludes_and_pushes() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        std::fs::create_dir_all(work.join("node_modules")).unwrap();
+        std::fs::write(work.join("node_modules/dep.js"), "x").unwrap();
+        std::fs::write(work.join(".env"), "SECRET=1").unwrap();
+        std::fs::write(work.join("src.txt"), "real").unwrap();
+        let res = commit(&work, &conv_commit_req(true)).await.unwrap();
+        let outcome = res.outcome.expect("git backend returns an outcome");
+        assert!(!outcome.clean);
+        assert!(outcome.pushed);
+        assert_eq!(outcome.push, PushStatus::Ok);
+        let sha = outcome.sha.expect("commit produced a HEAD");
+        let tree = git_cli(&work, &["ls-tree", "-r", "--name-only", "HEAD"])
+            .await
+            .unwrap();
+        assert!(tree.contains("src.txt"));
+        assert!(
+            !tree.contains(".env"),
+            "seeded excludes must hide .env: {tree}"
+        );
+        assert!(!tree.contains("node_modules"), "{tree}");
+        let remote_sha = git_cli(&work, &["rev-parse", "origin/conv/t"])
+            .await
+            .unwrap();
+        assert_eq!(remote_sha, sha);
+        let res2 = commit(&work, &conv_commit_req(true)).await.unwrap();
+        let outcome2 = res2.outcome.unwrap();
+        assert!(outcome2.clean);
+        assert_eq!(outcome2.sha.as_deref(), Some(sha.as_str()));
+        let exclude = git_cli(&work, &["rev-parse", "--git-path", "info/exclude"])
+            .await
+            .unwrap();
+        let content = std::fs::read_to_string(work.join(exclude)).unwrap();
+        assert_eq!(content.matches(DEFAULT_EXCLUDES_MARKER).count(), 1);
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn conv_commit_legacy_clean_tree_still_errors_without_stage_all() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        let req = GitCommitReq {
+            message: "nothing staged".to_owned(),
+            ..Default::default()
+        };
+        assert!(
+            commit(&work, &req).await.is_err(),
+            "legacy contract: committing with nothing staged errors"
+        );
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn conv_commit_refuses_wrong_branch() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        let mut req = conv_commit_req(false);
+        req.expected_branch = Some("conv/other".to_owned());
+        let err = commit(&work, &req).await.expect_err("wrong branch refused");
+        assert!(err.to_string().contains("expected 'conv/other'"), "{err}");
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn conv_commit_classifies_non_fast_forward_push_and_never_forces() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (tmp, work) = conv_repo_with_origin().await;
+        std::fs::write(work.join("a.txt"), "a").unwrap();
+        commit(&work, &conv_commit_req(true)).await.unwrap();
+        let work2 = tmp.path().join("work2");
+        git_cli(
+            tmp.path(),
+            &[
+                "clone",
+                "--branch",
+                "conv/t",
+                tmp.path().join("origin.git").to_str().unwrap(),
+                work2.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+        configure_test_identity(&work2).await;
+        std::fs::write(work2.join("b.txt"), "b").unwrap();
+        git_cli(&work2, &["add", "-A"]).await.unwrap();
+        git_cli(&work2, &["commit", "-m", "out of band"])
+            .await
+            .unwrap();
+        git_cli(&work2, &["push", "origin", "conv/t"])
+            .await
+            .unwrap();
+        let diverged_sha = git_cli(&work2, &["rev-parse", "HEAD"]).await.unwrap();
+        std::fs::write(work.join("c.txt"), "c").unwrap();
+        let res = commit(&work, &conv_commit_req(true)).await.unwrap();
+        let outcome = res.outcome.unwrap();
+        assert!(!outcome.clean);
+        assert!(!outcome.pushed);
+        assert_eq!(outcome.push, PushStatus::Conflict);
+        assert!(
+            res.warning.is_some(),
+            "push failure still surfaces a warning"
+        );
+        git_cli(&work, &["fetch", "origin", "conv/t"])
+            .await
+            .unwrap();
+        let remote_sha = git_cli(&work, &["rev-parse", "FETCH_HEAD"]).await.unwrap();
+        assert_eq!(remote_sha, diverged_sha);
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_rebase_reports_the_rewritten_head() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (tmp, work) = conv_repo_with_origin().await;
+        git_cli(&work, &["checkout", "main"]).await.unwrap();
+        let work2 = tmp.path().join("work2");
+        git_cli(
+            tmp.path(),
+            &[
+                "clone",
+                "--branch",
+                "main",
+                tmp.path().join("origin.git").to_str().unwrap(),
+                work2.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+        configure_test_identity(&work2).await;
+        std::fs::write(work2.join("base.txt"), "base").unwrap();
+        git_cli(&work2, &["add", "-A"]).await.unwrap();
+        git_cli(&work2, &["commit", "-m", "advance main"])
+            .await
+            .unwrap();
+        git_cli(&work2, &["push", "origin", "main"]).await.unwrap();
+        std::fs::write(work.join("local.txt"), "local").unwrap();
+        let req = GitCommitReq {
+            message: "local commit".to_owned(),
+            sync: true,
+            stage_all: true,
+            expected_branch: Some("main".to_owned()),
+            ..Default::default()
+        };
+        let res = commit(&work, &req).await.unwrap();
+        let outcome = res.outcome.unwrap();
+        assert!(outcome.pushed);
+        let head = git_cli(&work, &["rev-parse", "HEAD"]).await.unwrap();
+        assert_eq!(
+            outcome.sha.as_deref(),
+            Some(head.as_str()),
+            "sha must be the post-rebase HEAD"
+        );
+        assert_eq!(res.data.commit_hash.as_deref(), Some(head.as_str()));
+        let remote = git_cli(&work, &["rev-parse", "origin/main"]).await.unwrap();
+        assert_eq!(remote, head);
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_base_up_to_date_and_clean_merge() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (tmp, work) = conv_repo_with_origin().await;
+        std::fs::write(work.join("conv.txt"), "conv").unwrap();
+        commit(&work, &conv_commit_req(true)).await.unwrap();
+        for base in [Some("main"), None] {
+            let res = sync_base(&work, base, false, Some("conv/t")).await.unwrap();
+            assert_eq!(res.outcome, GitSyncBaseOutcome::UpToDate, "base={base:?}");
+        }
+        let work2 = tmp.path().join("work2");
+        git_cli(
+            tmp.path(),
+            &[
+                "clone",
+                "--branch",
+                "main",
+                tmp.path().join("origin.git").to_str().unwrap(),
+                work2.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+        configure_test_identity(&work2).await;
+        std::fs::write(work2.join("base.txt"), "base change").unwrap();
+        git_cli(&work2, &["add", "-A"]).await.unwrap();
+        git_cli(&work2, &["commit", "-m", "advance main"])
+            .await
+            .unwrap();
+        git_cli(&work2, &["push", "origin", "main"]).await.unwrap();
+        let res = sync_base(&work, Some("main"), false, Some("conv/t"))
+            .await
+            .unwrap();
+        match res.outcome {
+            GitSyncBaseOutcome::Merged { sha } => {
+                assert_eq!(sha, git_cli(&work, &["rev-parse", "HEAD"]).await.unwrap());
+                assert!(
+                    work.join("base.txt").exists(),
+                    "merge brought the base file in"
+                );
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_base_conflicts_left_in_progress_and_abort_rolls_back() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (tmp, work) = conv_repo_with_origin().await;
+        std::fs::write(work.join("README.md"), "conv version\n").unwrap();
+        commit(&work, &conv_commit_req(true)).await.unwrap();
+        let pre_merge_sha = git_cli(&work, &["rev-parse", "HEAD"]).await.unwrap();
+        let work2 = tmp.path().join("work2");
+        git_cli(
+            tmp.path(),
+            &[
+                "clone",
+                "--branch",
+                "main",
+                tmp.path().join("origin.git").to_str().unwrap(),
+                work2.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
+        configure_test_identity(&work2).await;
+        std::fs::write(work2.join("README.md"), "main version\n").unwrap();
+        git_cli(&work2, &["add", "-A"]).await.unwrap();
+        git_cli(&work2, &["commit", "-m", "conflicting base change"])
+            .await
+            .unwrap();
+        git_cli(&work2, &["push", "origin", "main"]).await.unwrap();
+        let res = sync_base(&work, Some("main"), false, Some("conv/t"))
+            .await
+            .unwrap();
+        match &res.outcome {
+            GitSyncBaseOutcome::Conflicts { files } => {
+                assert_eq!(files, &vec!["README.md".to_owned()]);
+            }
+            other => panic!("expected Conflicts, got {other:?}"),
+        }
+        assert!(
+            git_cli_raw(&work, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+                .await
+                .unwrap()
+                .0,
+            "conflicted merge must stay in progress"
+        );
+        assert!(
+            sync_base(&work, Some("main"), false, Some("conv/t"))
+                .await
+                .is_err()
+        );
+        let res = sync_base(&work, None, true, Some("not-the-branch"))
+            .await
+            .unwrap();
+        assert_eq!(res.outcome, GitSyncBaseOutcome::Aborted);
+        assert!(
+            !git_cli_raw(&work, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+                .await
+                .unwrap()
+                .0
+        );
+        assert_eq!(
+            git_cli(&work, &["rev-parse", "HEAD"]).await.unwrap(),
+            pre_merge_sha
+        );
+        assert_eq!(
+            std::fs::read_to_string(work.join("README.md")).unwrap(),
+            "conv version\n"
+        );
+        let res = sync_base(&work, None, true, None).await.unwrap();
+        assert_eq!(res.outcome, GitSyncBaseOutcome::Aborted);
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_base_refuses_wrong_branch() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        let err = sync_base(&work, Some("main"), false, Some("conv/other"))
+            .await
+            .expect_err("wrong branch refused");
+        assert!(err.to_string().contains("expected 'conv/other'"), "{err}");
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_pull_failure_reports_push_skipped() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        std::fs::write(work.join("local.txt"), "local").unwrap();
+        let req = GitCommitReq {
+            message: "local".to_owned(),
+            sync: true,
+            stage_all: true,
+            ..Default::default()
+        };
+        let res = commit(&work, &req).await.unwrap();
+        assert!(res.warning.is_some(), "pull failure surfaces a warning");
+        let outcome = res.outcome.unwrap();
+        assert!(!outcome.pushed);
+        assert_eq!(
+            outcome.push,
+            PushStatus::Skipped,
+            "an implied push skipped by a pull failure must not read as never-requested"
+        );
+    }
+    #[tokio::test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "test invokes git CLI which is not always available"
+    )]
+    async fn sync_base_refuses_dirty_tree() {
+        if skip_without_git_cli() {
+            return;
+        }
+        let (_tmp, work) = conv_repo_with_origin().await;
+        std::fs::write(work.join("dirty.txt"), "uncommitted").unwrap();
+        let err = sync_base(&work, Some("main"), false, Some("conv/t"))
+            .await
+            .expect_err("dirty tree refused");
+        assert!(err.to_string().contains("not clean"), "{err}");
     }
 }

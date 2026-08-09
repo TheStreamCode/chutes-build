@@ -1,9 +1,9 @@
 pub mod acp_types;
 pub mod announcement_state;
 pub mod commands;
-pub mod compaction_config;
+pub(crate) mod compaction_config;
 pub mod handle;
-pub mod memory_state;
+pub(crate) mod memory_state;
 pub mod merge;
 pub mod notifications;
 pub mod pending_interaction;
@@ -16,7 +16,7 @@ pub use self::fork::{ForkSessionRequest, ForkSessionResponse, fork_session};
 pub use self::handle::*;
 pub use self::persistence::{
     LocalFeedbackEntry, UserFeedbackEntry, find_local_child_for_remote, resolve_local_session,
-    resolve_local_session_any_cwd, session_exists_by_id, session_exists_for_cwd,
+    resolve_local_session_any_cwd, session_exists_for_cwd,
 };
 pub use self::result::{Empty, ExtMethodResult};
 pub use self::share::{ShareSessionRequest, ShareSessionResponse};
@@ -68,6 +68,9 @@ pub enum PromptOrigin {
         /// The subagent ID (without the `subagent-completed-` prefix).
         subagent_id: String,
     },
+    WorkflowCompleted {
+        completion_id: String,
+    },
     /// Server-initiated prompt from the idle-gated notification drain
     /// (`maybe_drain_notifications`). Batches one or more monitor-event
     /// or bash-task-completed notifications into a single turn while the
@@ -78,7 +81,6 @@ pub enum PromptOrigin {
     /// model can print a visible progress update.
     GoalSummary,
     /// Verification-stage nudge injected after the verification stage
-    /// rejects an `update_goal(completed: true)` attempt. Carries the "not yet
     /// achieved — keep working" system-reminder body alongside the
     /// path to the persisted details file. The variant name retains
     /// the `Classifier` prefix for wire stability.
@@ -101,6 +103,10 @@ impl PromptOrigin {
         } else if let Some(subagent_id) = prompt_id.strip_prefix("subagent-completed-") {
             Self::SubagentCompleted {
                 subagent_id: subagent_id.to_string(),
+            }
+        } else if let Some(completion_id) = prompt_id.strip_prefix("workflow-completed-") {
+            Self::WorkflowCompleted {
+                completion_id: completion_id.to_string(),
             }
         } else if prompt_id.starts_with("notifications-") {
             Self::NotificationDrain
@@ -131,17 +137,17 @@ impl PromptOrigin {
             Self::User | Self::SchedulerFired | Self::PlanResume => false,
             Self::TaskCompleted { .. }
             | Self::SubagentCompleted { .. }
+            | Self::WorkflowCompleted { .. }
             | Self::NotificationDrain
             | Self::GoalSummary
             | Self::GoalClassifierNudge => true,
         }
     }
-    /// If this is an auto-wake prompt, returns the inner completion ID
-    /// (task or subagent ID). Used to pre-mark reported completions.
     pub fn completion_id(&self) -> Option<&str> {
         match self {
             Self::TaskCompleted { task_id } => Some(task_id),
             Self::SubagentCompleted { subagent_id } => Some(subagent_id),
+            Self::WorkflowCompleted { completion_id } => Some(completion_id),
             Self::User
             | Self::NotificationDrain
             | Self::GoalSummary
@@ -248,6 +254,10 @@ mod tests {
         assert!(
             PromptOrigin::from_prompt_id("notifications-uuid").hide_user_echo_from_scrollback()
         );
+        assert!(
+            PromptOrigin::from_prompt_id("workflow-completed-wf-1-9")
+                .hide_user_echo_from_scrollback()
+        );
         assert!(PromptOrigin::from_prompt_id("goal-summary-1").hide_user_echo_from_scrollback());
         assert!(
             PromptOrigin::from_prompt_id("goal-classifier-nudge-1")
@@ -259,14 +269,14 @@ mod tests {
 /// Determines whether the session sends an initial file index to the client
 /// or just streams raw file events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
-pub enum ClientFsMode {
+pub(crate) enum ClientFsMode {
     #[default]
     Events,
     Index,
 }
 /// Client-side fs notification config: fs source settings + mode.
 #[derive(Debug, Clone, Default)]
-pub struct ClientFsConfig {
+pub(crate) struct ClientFsConfig {
     pub fs: FsConfig,
     pub mode: ClientFsMode,
 }
@@ -293,10 +303,10 @@ pub(crate) struct RegistryConfig {
     pub alpha_test_key: Option<String>,
 }
 pub mod acp_conversion;
-pub mod acp_mcp;
+pub(crate) mod acp_mcp;
 pub(crate) mod acp_session;
 pub(crate) mod agent_rebuild;
-pub mod chat_persistence;
+pub(crate) mod chat_persistence;
 pub(crate) mod events;
 pub mod export;
 pub mod feedback;
@@ -305,6 +315,7 @@ pub mod file_system;
 pub mod fork;
 pub(crate) mod fs_watch;
 pub(crate) mod goal_classifier;
+pub(crate) mod goal_evaluator;
 pub(crate) mod goal_next_step;
 pub(crate) mod goal_orchestrator;
 pub(crate) mod goal_planner;
@@ -316,14 +327,14 @@ pub mod goal_tracker;
 pub mod helpers;
 pub(crate) mod image_describe;
 pub(crate) mod image_normalize;
-pub mod inference_metrics;
+pub(crate) mod inference_metrics;
 pub use xai_grok_shared::session::info;
 pub mod managed_mcp;
 pub(crate) mod mcp_descriptors;
-pub mod mcp_dispatcher;
+pub(crate) mod mcp_dispatcher;
 #[cfg(test)]
 mod mcp_dispatcher_e2e_tests;
-pub mod mcp_restart;
+pub(crate) mod mcp_restart;
 pub mod mcp_servers;
 pub mod memory;
 pub(crate) mod normalize_cache;
@@ -340,14 +351,18 @@ pub mod restore;
 pub mod result;
 pub mod signals;
 pub(crate) mod slash_commands;
+pub use slash_commands::PAGER_COMMAND_KEYS;
 pub mod storage;
 pub(crate) mod streaming_capture;
 pub(crate) mod summary;
 pub(crate) mod telemetry;
+#[cfg(feature = "test-support")]
+pub mod testkit;
 pub mod tool_index;
 pub(crate) mod turn_completion;
 pub mod unified_list;
-mod user_message;
+pub(crate) mod user_message;
 pub(crate) mod wire_tags;
+pub(crate) mod workflow;
 pub mod worktree;
 pub mod worktree_pool;

@@ -10,6 +10,7 @@ fn args<'a>(
 ) -> PromptResponseMetaArgs<'a> {
     PromptResponseMetaArgs {
         session_id,
+        tool_overrides: None,
         prompt_id,
         total_tokens,
         model_id,
@@ -43,6 +44,7 @@ fn enriches_meta_with_camelcase_token_keys() {
         total_tokens: 1700,
         reasoning_tokens: 75,
         cached_prompt_tokens: 1000,
+        cache_creation_prompt_tokens: 0,
     };
     let meta = build_prompt_response_meta(PromptResponseMetaArgs {
         last_turn_usage: Some(&usage),
@@ -68,6 +70,7 @@ fn preserves_zero_token_values() {
         total_tokens: 110,
         reasoning_tokens: 0,
         cached_prompt_tokens: 0,
+        cache_creation_prompt_tokens: 0,
     };
     let meta = build_prompt_response_meta(PromptResponseMetaArgs {
         last_turn_usage: Some(&usage),
@@ -88,6 +91,7 @@ fn usage_object_lands_on_meta() {
             total_tokens: 999_999,
             reasoning_tokens: 0,
             cached_prompt_tokens: 0,
+            cache_creation_prompt_tokens: 0,
         },
         None,
         None,
@@ -117,6 +121,31 @@ fn cancel_trigger_lands_as_camelcase_meta_key() {
     // Absent for non-cancel completions — the key must not appear.
     let none = build_prompt_response_meta(args("s", "p", 0, "m"));
     assert!(none.get("cancelTrigger").is_none());
+}
+
+#[test]
+fn tool_overrides_land_as_camelcase_meta_key() {
+    let overrides = xai_grok_sampling_types::ToolOverrides {
+        x_search: Some(xai_grok_sampling_types::XSearchOptions {
+            date_bound: Some(
+                xai_grok_sampling_types::SearchDateBound::new(None, Some("2024-03-15".to_string()))
+                    .unwrap(),
+            ),
+        }),
+        web_search: None,
+    };
+    let meta = build_prompt_response_meta(PromptResponseMetaArgs {
+        tool_overrides: Some(overrides),
+        ..args("s", "p", 0, "m")
+    });
+    assert_eq!(
+        meta["toolOverrides"]["xSearch"]["dateBound"]["toDate"],
+        "2024-03-15"
+    );
+    assert!(meta["toolOverrides"].get("webSearch").is_none());
+
+    let none = build_prompt_response_meta(args("s", "p", 0, "m"));
+    assert!(none.get("toolOverrides").is_none());
 }
 
 #[test]

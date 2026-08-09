@@ -78,9 +78,10 @@ impl SessionActor {
         self.emit_transient_notification(notification);
     }
 
-    /// Emit `chutes.build/git_head_changed` after an edit/shell command that may have
-    /// moved HEAD (e.g. `git checkout`), so clients update their status bar
-    /// immediately rather than waiting for the debounced fs-watch refresh.
+    /// Emit `chutes.ai/git_head_changed` after an edit/shell command that may have
+    /// moved HEAD (e.g. `git checkout`, `git commit`), so clients update their
+    /// status bar and changes panel immediately rather than waiting for the
+    /// debounced fs-watch refresh.
     pub(super) async fn maybe_notify_git_branch(&self) {
         if !self.git_head_enabled {
             return;
@@ -88,15 +89,21 @@ impl SessionActor {
         let cwd = self.tool_context.cwd.as_path();
 
         // `get_worktree_info` doubles as the "in a git repo?" probe (None when not).
-        let (worktree_info, branch) = tokio::join!(
+        let (worktree_info, branch, commit) = tokio::join!(
             xai_grok_workspace::session::git::get_worktree_info(cwd),
             xai_grok_workspace::session::git::get_branch(cwd),
+            xai_grok_workspace::session::git::get_current_commit(cwd),
         );
         let Some((is_worktree, main_repo)) = worktree_info else {
             return;
         };
 
-        let dedup_key = git_head_dedup_key(branch.as_deref(), is_worktree, main_repo.as_deref());
+        let dedup_key = git_head_dedup_key(
+            branch.as_deref(),
+            is_worktree,
+            main_repo.as_deref(),
+            commit.as_deref(),
+        );
         {
             let mut last = self.last_reported_branch.lock();
             if last.as_deref() == Some(&dedup_key) {
@@ -135,6 +142,7 @@ impl SessionActor {
         let (respond_to, rx) = tokio::sync::oneshot::channel();
         if tx
             .send(SubagentEvent::Outstanding(SubagentOutstandingRequest {
+                parent_session_id: self.session_id_string(),
                 prompt_id: prompt_id.to_string(),
                 respond_to,
             }))
@@ -164,12 +172,25 @@ impl SessionActor {
         };
         let _ = tx.send(SubagentEvent::ClearUsageNotApplied(
             SubagentClearUsageNotAppliedRequest {
+                parent_session_id: self.session_id_string(),
                 prompt_id: prompt_id.to_string(),
             },
         ));
     }
 
-    pub(super) async fn handle_completion(&self, prompt_id: String, result: PromptTurnResult) {
+    /// Returns whether this handler OWNED the completion (it matched and
+    /// dequeued the front prompt). `false` means a stale completion for a
+    /// turn another path (e.g. Cancel) already finalized — callers must not
+    /// treat it as a turn ending now.
+    pub(super) async fn handle_completion(
+        &self,
+        prompt_id: String,
+        result: PromptTurnResult,
+    ) -> bool {
+        let result = result.map(|mut ok| {
+            ok.tool_overrides = self.effective_tool_overrides();
+            ok
+        });
         let became_idle = {
             let mut current_prompt_id = self
                 .current_prompt_id
@@ -208,7 +229,7 @@ impl SessionActor {
             .is_some_and(|input| input.prompt_id == prompt_id)
         {
             let Some(input) = state.pending_inputs.pop_front() else {
-                return;
+                return false;
             };
             owned_completion = true;
             let _ = input.respond_to.send(result.clone()).ok();
@@ -303,6 +324,7 @@ impl SessionActor {
             self.emit_turn_completed(prompt_id, &mapped, usage, cancel_trigger)
                 .await;
         }
+        owned_completion
     }
 
     /// Emit the durable, replayable `TurnCompleted` terminal — the single
@@ -340,17 +362,54 @@ impl SessionActor {
         .await;
     }
 
+    /// Telemetry error category; delegates to `stop_failure_error_type` so the
+    /// two classifications cannot drift.
     pub(super) fn classify_turn_error(err: &acp::Error) -> String {
-        match i32::from(err.code) {
-            crate::sampling::error::RATE_LIMITED_ERROR_CODE => "rate_limit",
-            -32000 => "auth",
-            -32600 => "invalid_request",
-            -32603 => "internal",
-            _ => "unknown",
+        use xai_grok_hooks::event::StopFailureKind as K;
+        match Self::stop_failure_error_type(err) {
+            K::RateLimit => "rate_limit",
+            K::AuthenticationFailed => "auth",
+            K::InvalidRequest => "invalid_request",
+            K::ServerError => "internal",
+            K::MaxOutputTokens => "max_tokens",
+            K::Unknown => "unknown",
         }
         .to_string()
     }
 
+    /// The `StopFailure` hook input's classified `error`. Structured markers win
+    /// over the JSON-RPC code because they are more specific; anything the
+    /// runtime cannot distinguish stays `Unknown`.
+    pub(super) fn stop_failure_error_type(
+        err: &acp::Error,
+    ) -> xai_grok_hooks::event::StopFailureKind {
+        use xai_grok_hooks::event::StopFailureKind as K;
+        if crate::sampling::error::stop_reason_for_turn_error(err) == "MaxTokens" {
+            return K::MaxOutputTokens;
+        }
+        // The data-carried HTTP status discriminates over the JSON-RPC code. 403
+        // is content-safety, not auth: it folds into `invalid_request` on the turn
+        // path (carries `http_status: 403`) and `server_error` on the setup path
+        // (no status, so `-32603` below).
+        match crate::sampling::error::http_status_from_error(err) {
+            Some(401) => return K::AuthenticationFailed,
+            Some(429) | Some(503) | Some(529) => return K::RateLimit,
+            Some(s) if (400..500).contains(&s) => return K::InvalidRequest,
+            Some(s) if s >= 500 => return K::ServerError,
+            _ => {}
+        }
+        match i32::from(err.code) {
+            crate::sampling::error::RATE_LIMITED_ERROR_CODE => K::RateLimit,
+            -32000 => K::AuthenticationFailed,
+            -32002 | -32600 | -32602 => K::InvalidRequest,
+            -32603 => K::ServerError,
+            _ => K::Unknown,
+        }
+    }
+
+    /// Whether a turn error is transient infra worth a goal retry. Keys on the
+    /// JSON-RPC code only (unlike `stop_failure_error_type`), so `-32603` counts
+    /// as infra.
     pub(super) fn is_infra_turn_error(err: &acp::Error) -> bool {
         matches!(
             i32::from(err.code),
@@ -358,11 +417,9 @@ impl SessionActor {
         )
     }
 
-    /// `(turn_succeeded, suppress_goal_continuation, infra_pause_message)` for
-    /// the completion handler. Stationarity is successful but must not reopen
-    /// the same loop through autonomous goal continuation.
-    /// `infra_pause_message` is extracted before `handle_completion` consumes
-    /// `result`.
+    /// `(turn_succeeded, suppress_goal_continuation, infra_pause_message)`.
+    /// StationarityEnded is success for the streak but skips GoalSummary re-queue.
+    /// `infra_pause_message` is extracted before `handle_completion` consumes `result`.
     pub(super) fn post_turn_goal_degradation_plan(
         result: &PromptTurnResult,
     ) -> (bool, bool, Option<String>) {
@@ -379,7 +436,10 @@ impl SessionActor {
                     | crate::session::commands::PromptCompletionKind::MaxTurnsReached { .. }
             )
         });
-        let turn_succeeded = result.is_ok() && !turn_cancelled;
+        let turn_succeeded = result
+            .as_ref()
+            .ok()
+            .is_some_and(|ok| !turn_cancelled && ok.stop_reason != acp::StopReason::Refusal);
         let infra_pause_message = result
             .as_ref()
             .err()
@@ -413,7 +473,7 @@ impl SessionActor {
     }
 
     /// Extract the best human-readable detail from an infra turn error.
-    fn turn_error_detail(err: &acp::Error) -> Option<String> {
+    pub(super) fn turn_error_detail(err: &acp::Error) -> Option<String> {
         err.data
             .as_ref()
             .and_then(crate::sampling::error::error_detail_from_data)

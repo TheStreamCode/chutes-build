@@ -5,6 +5,10 @@
     unreachable_code,
     dead_code
 )]
+#![warn(unreachable_pub)]
+#[cfg(all(test, feature = "dhat-heap"))]
+#[global_allocator]
+static DHAT_ALLOC: dhat::Alloc = dhat::Alloc;
 pub(crate) use xai_grok_telemetry::unified_log;
 pub use xai_tracing_macros::{teprintln, timed, tprintln};
 pub mod active_sessions;
@@ -38,6 +42,5 @@ pub mod terminal;
 pub(crate) mod test_support;
 pub mod tier;
 pub mod tools;
-pub mod trace_classifier;
 pub mod upload;
 pub mod util;

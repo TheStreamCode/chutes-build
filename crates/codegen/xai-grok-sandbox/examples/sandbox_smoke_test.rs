@@ -14,14 +14,13 @@
 //! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- read-only
 //! ```
 
-// Exercises Landlock (Linux) / Seatbelt (macOS) kernel enforcement and reads
-// libc error codes directly; there is no Windows equivalent to smoke-test.
-// A real `fn main` must still exist unconditionally -- `#![cfg(unix)]` at the
-// crate root would compile out the whole binary's content on Windows, and
-// Cargo still expects a `main` to link the example target either way.
+/// Sandbox enforcement is Unix-only: `libc` is a `cfg(unix)` dependency and
+/// `SandboxManager::support_info` does not exist elsewhere, so on Windows this
+/// example cannot compile — which is why `cargo check --all-targets` fails on a
+/// tree that is otherwise clean.
 #[cfg(not(unix))]
 fn main() {
-    eprintln!("sandbox_smoke_test is Unix-only (Landlock/Seatbelt); nothing to run here.");
+    eprintln!("sandbox enforcement is Unix-only; nothing to smoke-test on this platform");
 }
 
 #[cfg(unix)]
@@ -102,7 +101,7 @@ fn main() {
     let _ = std::fs::remove_file(&test_file);
 
     // Test 5: Write to /tmp (should work for workspace/strict, blocked for read-only)
-    let tmp_test = Path::new("/tmp/.chutes-build-sandbox-test");
+    let tmp_test = Path::new("/tmp/.grok-sandbox-test");
     test_write("Write to /tmp", tmp_test);
     let _ = std::fs::remove_file(tmp_test);
 

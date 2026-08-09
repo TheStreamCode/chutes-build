@@ -1,7 +1,7 @@
 //! `lsp` tool - code intelligence via language servers.
 //!
 //! Implementation is in `implementations::lsp`. This module provides the
-//! `LspTool` (Tool trait impl) under the `GrokBuild` namespace.
+//! `LspTool` (Tool trait impl) under the `ChutesBuild` namespace.
 
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ impl crate::types::tool_metadata::ToolMetadata for LspTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {
@@ -63,7 +63,7 @@ impl xai_tool_runtime::Tool for LspTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "lsp",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 

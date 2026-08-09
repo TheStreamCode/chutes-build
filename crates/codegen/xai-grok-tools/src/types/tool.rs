@@ -23,6 +23,7 @@ use crate::types::resources::SharedResources;
     Copy,
     PartialEq,
     Eq,
+    derive_more::Display,
     serde::Serialize,
     serde::Deserialize,
     schemars::JsonSchema,
@@ -30,26 +31,11 @@ use crate::types::resources::SharedResources;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ToolNamespace {
-    #[serde(
-        rename = "chutes_build",
-        alias = "grok_build",
-        alias = "GrokBuild",
-        alias = "ChutesBuild"
-    )]
-    GrokBuild,
-    #[serde(
-        rename = "chutes_build_concise",
-        alias = "grok_build_concise",
-        alias = "GrokBuildConcise",
-        alias = "ChutesBuildConcise"
-    )]
+    #[serde(alias = "ChutesBuild")]
+    ChutesBuild,
+    #[serde(alias = "GrokBuildConcise")]
     GrokBuildConcise,
-    #[serde(
-        rename = "chutes_build_hashline",
-        alias = "grok_build_hashline",
-        alias = "GrokBuildHashline",
-        alias = "ChutesBuildHashline"
-    )]
+    #[serde(alias = "GrokBuildHashline")]
     GrokBuildHashline,
     #[serde(alias = "Codex")]
     Codex,
@@ -57,19 +43,6 @@ pub enum ToolNamespace {
     OpenCode,
     #[serde(rename = "mcp", alias = "MCP")]
     MCP,
-}
-
-impl std::fmt::Display for ToolNamespace {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::GrokBuild => "ChutesBuild",
-            Self::GrokBuildConcise => "ChutesBuildConcise",
-            Self::GrokBuildHashline => "ChutesBuildHashline",
-            Self::Codex => "Codex",
-            Self::OpenCode => "OpenCode",
-            Self::MCP => "MCP",
-        })
-    }
 }
 /// Categorizes what a tool does at a high level.
 ///
@@ -127,6 +100,7 @@ pub enum ToolKind {
     UseTool,
     Monitor,
     GoalUpdate,
+    Workflow,
     #[serde(other)]
     Other,
 }

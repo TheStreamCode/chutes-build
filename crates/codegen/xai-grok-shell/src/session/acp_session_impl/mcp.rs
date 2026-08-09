@@ -77,11 +77,9 @@ impl SessionActor {
                 "managed reactive re-auth for '{server_name}' is in cooldown"
             ));
         }
+        tracing::info!(target: "metrics.mcp.managed.reauth.triggered", server = %server_name);
         tracing::info!(
-            target : "metrics.mcp.managed.reauth.triggered", server = % server_name
-        );
-        tracing::info!(
-            server = % server_name,
+            server = %server_name,
             "managed MCP auth rejection detected, attempting reactive re-fetch"
         );
         let scope = || {
@@ -99,12 +97,11 @@ impl SessionActor {
                     .await
                     .record_reauth_success(server_name);
                 tracing::info!(
-                    target : "metrics.mcp.managed.reauth.outcome", server = %
-                    server_name, result = "recovered",
+                    target: "metrics.mcp.managed.reauth.outcome",
+                    server = %server_name,
+                    result = "recovered",
                 );
-                tracing::info!(
-                    server = % server_name, "managed MCP reactive re-auth recovered"
-                );
+                tracing::info!(server = %server_name, "managed MCP reactive re-auth recovered");
                 crate::session::telemetry::emit_mcp_connection_span(
                     "connected",
                     server_name,
@@ -154,11 +151,11 @@ impl SessionActor {
                         &payload,
                     );
                     tracing::warn!(
-                        target : "metrics.mcp.managed.reauth.cooldown_terminal", server =
-                        % server_name,
+                        target: "metrics.mcp.managed.reauth.cooldown_terminal",
+                        server = %server_name,
                     );
                     tracing::warn!(
-                        server = % server_name,
+                        server = %server_name,
                         "managed MCP reactive re-auth exhausted; surfacing NeedsAuth"
                     );
                     crate::session::telemetry::emit_mcp_connection_span(
@@ -174,8 +171,9 @@ impl SessionActor {
                     self.refresh_mcp_snapshot_and_schedule_reminder().await;
                 }
                 tracing::info!(
-                    target : "metrics.mcp.managed.reauth.outcome", server = %
-                    server_name, result = if terminal { "failed" } else { "cooldown" },
+                    target: "metrics.mcp.managed.reauth.outcome",
+                    server = %server_name,
+                    result = if terminal { "failed" } else { "cooldown" },
                 );
                 Err(e)
             }
@@ -260,7 +258,8 @@ impl SessionActor {
                 .collect()
         };
         tracing::info!(
-            session_id = % self.session_info.id.0, count = shared_clients.len(),
+            session_id = %self.session_info.id.0,
+            count = shared_clients.len(),
             "Registering tools from shared MCP clients"
         );
         let mcp_state_arc = std::sync::Arc::clone(&self.mcp_state);
@@ -276,7 +275,8 @@ impl SessionActor {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::warn!(
-                        server = % server_name, error = % e,
+                        server = %server_name,
+                        error = %e,
                         "Failed to list tools from shared MCP client, skipping"
                     );
                     continue;
@@ -374,7 +374,7 @@ impl SessionActor {
             );
         }
     }
-    /// Emit per-server `chutes.build/mcp/tools_changed` notifications.
+    /// Emit per-server `chutes.ai/mcp/tools_changed` notifications.
     ///
     /// Each emission carries the owning
     /// `sessionId` so the pager can route via `find_session_match`
@@ -406,13 +406,13 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client (chutes.build/mcp/auth_trigger).
+    /// Handle explicit auth trigger from the client (chutes.ai/mcp/auth_trigger).
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server
     /// and registers its tools.
     pub(super) async fn handle_mcp_auth_trigger(&self, server_name: &str) -> Result<(), String> {
         if server_name.starts_with(crate::session::managed_mcp::MANAGED_MCP_PREFIX) {
-            return Err("Configure CHUTES_API_KEY or run `chutes-build login`".to_string());
+            return Err("To authenticate, visit chutes.ai".to_string());
         }
         let client = match self.mcp_state.lock().await.get_client(server_name).cloned() {
             Some(c) if c.has_auth() => c,
@@ -481,15 +481,18 @@ impl SessionActor {
             crate::util::config::load_mcp_servers_with_oauth(cwd, &self.rebuild_spec.compat);
         let byo_config = oauth_config_map.get(server_name).cloned();
         let event_writer = self.events.writer();
-        let mode = crate::session::mcp_servers::OauthInteractivity::Interactive;
+        let ctx = crate::session::mcp_servers::McpSpawnCtx::for_session(
+            session_id,
+            &event_writer,
+            crate::session::mcp_servers::OauthInteractivity::Interactive,
+            self.tool_context.process_scope.as_ref(),
+        );
         let new_client = crate::session::mcp_servers::start_mcp_server(
             server_config,
-            Some(session_id),
             Some(cwd),
             meta_config.as_ref(),
             byo_config.as_ref(),
-            &event_writer,
-            mode,
+            &ctx,
         )
         .await
         .map_err(|e| format!("Failed to prepare OAuth for '{}': {}", server_name, e))?;
@@ -552,7 +555,8 @@ impl SessionActor {
                 Ok(r) => r,
                 Err(e) => {
                     tracing::debug!(
-                        server = server_name.as_str(), % e,
+                        server = server_name.as_str(),
+                        %e,
                         "retry_auth_required: handshake still failing"
                     );
                     continue;
@@ -733,8 +737,10 @@ impl SessionActor {
             }
             self.push_system_reminder(&text);
             tracing::info!(
-                servers = server_summaries.len(), has_failed = failed_section.is_some(),
-                mode = ? self.mcp_reminder_mode, "Injected MCP server system-reminder"
+                servers = server_summaries.len(),
+                has_failed = failed_section.is_some(),
+                mode = ?self.mcp_reminder_mode,
+                "Injected MCP server system-reminder"
             );
         } else {
             tracing::debug!(
@@ -774,12 +780,12 @@ impl SessionActor {
     /// path.
     pub(crate) async fn is_stdio_server_configured(&self, server: &str) -> bool {
         let mcp_state = self.mcp_state.lock().await;
-        let is_stdio_in_configs = mcp_state.configs.iter().any(|c| {
-            matches!(
-                c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if name ==
-                server
-            )
-        });
+        let is_stdio_in_configs = mcp_state
+            .configs
+            .iter()
+            .any(|c| {
+                matches!(c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if name == server)
+            });
         if !is_stdio_in_configs {
             return false;
         }
@@ -798,12 +804,15 @@ impl SessionActor {
             return false;
         }
         let mcp_state = self.mcp_state.lock().await;
-        let is_http_in_configs = mcp_state.configs.iter().any(|c| {
-            matches!(
-                c, acp::McpServer::Http(acp::McpServerHttp { name, .. }) |
-                acp::McpServer::Sse(acp::McpServerSse { name, .. }) if name == server
+        let is_http_in_configs = mcp_state
+            .configs
+            .iter()
+            .any(|c| {
+                matches!(
+                c,
+                acp::McpServer::Http(acp::McpServerHttp { name, .. }) | acp::McpServer::Sse(acp::McpServerSse { name, .. }) if name == server
             )
-        });
+            });
         if !is_http_in_configs {
             return false;
         }
@@ -865,7 +874,8 @@ impl SessionActor {
             .unregister_tools_by_prefix(&prefix);
         if removed > 0 {
             tracing::info!(
-                server = % server, tools_removed = removed,
+                server = %server,
+                tools_removed = removed,
                 "unregistered tools for MCP server after auto-restart exhaustion",
             );
         }
@@ -952,10 +962,7 @@ impl SessionActor {
                 .configs
                 .iter()
                 .find(|c| {
-                    matches!(
-                        c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if
-                        name == server
-                    )
+                    matches!(c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if name == server)
                 })
                 .cloned()
                 .ok_or_else(|| format!("no stdio config entry for server '{server}'"))?;
@@ -969,15 +976,18 @@ impl SessionActor {
             crate::util::config::load_mcp_servers_with_oauth(cwd, &self.rebuild_spec.compat);
         let byo_config = oauth_config_map.get(server).cloned();
         let event_writer = self.events.writer();
-        let mode = OauthInteractivity::from_non_interactive(self.startup_hints.non_interactive);
+        let ctx = crate::session::mcp_servers::McpSpawnCtx::for_session(
+            session_id,
+            &event_writer,
+            OauthInteractivity::from_non_interactive(self.attach_non_interactive.get()),
+            self.tool_context.process_scope.as_ref(),
+        );
         let new_client = crate::session::mcp_servers::start_mcp_server(
             server_config.clone(),
-            Some(session_id),
             Some(cwd),
             meta_config.as_ref(),
             byo_config.as_ref(),
-            &event_writer,
-            mode,
+            &ctx,
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -997,10 +1007,7 @@ impl SessionActor {
                 .configs
                 .iter()
                 .find(|c| {
-                    matches!(
-                        c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if
-                        name == server
-                    )
+                    matches!(c, acp::McpServer::Stdio(acp::McpServerStdio { name, .. }) if name == server)
                 })
                 .cloned()
         };
@@ -1049,20 +1056,40 @@ impl SessionActor {
             return;
         }
         self.mcp_connecting_reminder_injected.set(true);
-        let mut text =
-            "MCP servers currently connecting (tools will become available shortly):\n".to_string();
-        for name in &connecting {
-            text.push_str(&format!("- {name}\n"));
-        }
-        text.push_str(
-            "\nDo not attempt to use tools from these servers yet. \
-             If the user's request likely requires one of these servers, \
-             mention that the server is still connecting and proceed with \
-             what you can do in the meantime.",
-        );
+        let delivery_tools = self.delivery_tools.borrow().clone();
+        let text = format_mcp_connecting_reminder(&connecting, &delivery_tools);
         self.push_system_reminder(&text);
         tracing::info!(
-            servers = ? connecting, "Injected MCP connecting system-reminder"
+            servers = ?connecting,
+            ?delivery_tools,
+            "Injected MCP connecting system-reminder"
+        );
+    }
+    /// Re-apply the attaching client's per-attachment policy. Sent by the
+    /// resident `session/load` rail when the request carries explicit
+    /// `startupHints`, so an actor spawned under one client's policy serves a
+    /// later-attaching client under *its* policy (a headless attachment gets
+    /// Blocking MCP init and its delivery-tool guidance even when the actor
+    /// was spawned by an interactive client, and vice versa). Only policy
+    /// fields are touched — structural spawn-time hints (subagent identity,
+    /// inherited prefix, preserved system head) stay frozen.
+    pub(super) fn apply_attach_policy(&self, hints: &crate::session::StartupHints) {
+        let strategy = hints.resolve_mcp_strategy();
+        let changed = self.mcp_strategy.get() != strategy
+            || self.attach_non_interactive.get() != hints.non_interactive
+            || *self.delivery_tools.borrow() != hints.delivery_tools;
+        self.mcp_strategy.set(strategy);
+        self.attach_non_interactive.set(hints.non_interactive);
+        *self.delivery_tools.borrow_mut() = hints.delivery_tools.clone();
+        if changed {
+            self.mcp_connecting_reminder_injected.set(false);
+        }
+        tracing::info!(
+            ?strategy,
+            non_interactive = hints.non_interactive,
+            delivery_tools = ?hints.delivery_tools,
+            changed,
+            "apply_attach_policy: updated per-attachment policy from session request startupHints"
         );
     }
     /// Ensure MCP tools are initialized (spawns processes and performs handshakes on first call)
@@ -1071,17 +1098,17 @@ impl SessionActor {
             let mut mcp_state = self.mcp_state.lock().await;
             if !mcp_state.try_start_init() {
                 tracing::debug!(
-                    session_id = % self.session_info.id.0,
+                    session_id = %self.session_info.id.0,
                     "ensure_mcp_tools_initialized: skipped (already initialized or in progress)"
                 );
                 return;
             }
             tracing::info!(
-                session_id = % self.session_info.id.0, config_count = mcp_state.configs
-                .len(), config_names = ? mcp_state.configs.iter().map(crate
-                ::session::mcp_servers::mcp_server_name).collect::< Vec < _ >> (),
-                existing_client_count = mcp_state.owned_clients.len() + mcp_state
-                .shared_clients.len(), generation = mcp_state.generation(),
+                session_id = %self.session_info.id.0,
+                config_count = mcp_state.configs.len(),
+                config_names = ?mcp_state.configs.iter().map(crate::session::mcp_servers::mcp_server_name).collect::<Vec<_>>(),
+                existing_client_count = mcp_state.owned_clients.len() + mcp_state.shared_clients.len(),
+                generation = mcp_state.generation(),
                 "ensure_mcp_tools_initialized: starting MCP init"
             );
             mcp_state.set_event_writer(self.events.writer());
@@ -1117,10 +1144,11 @@ impl SessionActor {
             drop(mcp_state);
             self.register_shared_client_tools().await;
             self.refresh_mcp_snapshot_and_schedule_reminder().await;
-            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!(
-                { "sessionId" : self.session_info.id.0.as_ref(), "mcpToolCount" :
-                0_u32, "elapsedMs" : 0_u64, }
-            )) {
+            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!({
+                "sessionId": self.session_info.id.0.as_ref(),
+                "mcpToolCount": 0_u32,
+                "elapsedMs": 0_u64,
+            })) {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
@@ -1167,16 +1195,17 @@ impl SessionActor {
                 .chain(acp_pending_names.iter().cloned())
                 .collect();
             for name in &names {
-                tracing::info!(server = % name, "Added server to handshaking set");
+                tracing::info!(server = %name, "Added server to handshaking set");
             }
             mcp_state.mark_servers_initializing(names);
         }
         self.mcp_connecting_reminder_injected.set(false);
         let init_total = (configs_to_start.len() + acp_pending_names.len()) as u32;
-        if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!(
-            { "total" : init_total, "connected" : 0, "sessionId" : self.session_info
-            .id.0.as_ref(), }
-        )) {
+        if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!({
+            "total": init_total,
+            "connected": 0,
+            "sessionId": self.session_info.id.0.as_ref(),
+        })) {
             self.notifications
                 .gateway
                 .forward_fire_and_forget(acp::ExtNotification::new(
@@ -1198,10 +1227,11 @@ impl SessionActor {
             drop(mcp_state);
             self.register_shared_client_tools().await;
             self.refresh_mcp_snapshot_and_schedule_reminder().await;
-            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!(
-                { "sessionId" : self.session_info.id.0.as_ref(), "mcpToolCount" :
-                0_u32, "elapsedMs" : 0_u64, }
-            )) {
+            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!({
+                "sessionId": self.session_info.id.0.as_ref(),
+                "mcpToolCount": 0_u32,
+                "elapsedMs": 0_u64,
+            })) {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
@@ -1219,7 +1249,7 @@ impl SessionActor {
             "Starting MCP initialization ({} new servers, {} already initialized, strategy: {:?})",
             configs_to_start.len(),
             existing_client_names.len(),
-            self.mcp_strategy
+            self.mcp_strategy.get()
         );
         let session_id = self.session_info.id.0.as_ref();
         tokio::task::yield_now().await;
@@ -1237,16 +1267,19 @@ impl SessionActor {
             &toml_mcp_names,
         );
         let spawn_writer = self.events.writer();
-        let mode = OauthInteractivity::from_non_interactive(self.startup_hints.non_interactive);
+        let ctx = crate::session::mcp_servers::McpSpawnCtx::for_session(
+            session_id,
+            &spawn_writer,
+            OauthInteractivity::from_non_interactive(self.attach_non_interactive.get()),
+            self.tool_context.process_scope.as_ref(),
+        );
         let mcp_results = build_pending_clients(
             &self.mcp_state,
             configs_to_start,
-            Some(session_id),
             Some(cwd),
             &meta_config_map,
             &oauth_config_map,
-            &spawn_writer,
-            mode,
+            &ctx,
         )
         .await;
         tokio::task::yield_now().await;
@@ -1355,7 +1388,7 @@ impl SessionActor {
             })
             .collect();
         let server_count = (mcp_server_configs.len() + acp_pending_names.len()) as u32;
-        let mcp_strategy = self.mcp_strategy;
+        let mcp_strategy = self.mcp_strategy.get();
         let is_reinit = !existing_client_names.is_empty();
         let event_writer = self.events.writer();
         let init_total_bg = init_total;
@@ -1418,9 +1451,12 @@ impl SessionActor {
                                 client.has_auth()
                             };
                             tracing::warn!(
-                                server = server_name.as_str(), elapsed_ms = server_start
-                                .elapsed().as_millis() as u64, timeout_sec, error = % e,
-                                needs_auth, "MCP server failed to initialize"
+                                server = server_name.as_str(),
+                                elapsed_ms = server_start.elapsed().as_millis() as u64,
+                                timeout_sec,
+                                error = %e,
+                                needs_auth,
+                                "MCP server failed to initialize"
                             );
                             Err((
                                 server_name,
@@ -1436,10 +1472,11 @@ impl SessionActor {
             let mut handle_results = Vec::with_capacity(futs.len());
             while let Some(result) = futs.next().await {
                 handle_results.push(result);
-                if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!(
-                    { "total" : init_total_bg, "connected" : handle_results.len() as
-                    u32, "sessionId" : session_id_owned.as_ref(), }
-                )) {
+                if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!({
+                    "total": init_total_bg,
+                    "connected": handle_results.len() as u32,
+                    "sessionId": session_id_owned.as_ref(),
+                })) {
                     gateway.forward_fire_and_forget(acp::ExtNotification::new(
                         crate::extensions::mcp::mcp_methods::INIT_PROGRESS,
                         params.into(),
@@ -1473,8 +1510,10 @@ impl SessionActor {
                     match result {
                         Ok((server_name, registrations, elapsed, timeout_sec)) => {
                             tracing::info!(
-                                server = % server_name, elapsed_ms = elapsed.as_millis() as
-                                u64, timeout_sec, tool_count = registrations.len(),
+                                server = %server_name,
+                                elapsed_ms = elapsed.as_millis() as u64,
+                                timeout_sec,
+                                tool_count = registrations.len(),
                                 "MCP handshake succeeded",
                             );
                             let tool_count = registrations.len() as u32;
@@ -1684,10 +1723,10 @@ impl SessionActor {
                 }
                 mcp_state.mark_all_servers_ready();
                 tracing::info!(
-                    session_id = % session_id_owned, inserted = ? inserted_names,
-                    total_clients = mcp_state.owned_clients.len() + mcp_state
-                    .shared_clients.len(), elapsed_ms = handshake_start.elapsed()
-                    .as_millis() as u64,
+                    session_id = %session_id_owned,
+                    inserted = ?inserted_names,
+                    total_clients = mcp_state.owned_clients.len() + mcp_state.shared_clients.len(),
+                    elapsed_ms = handshake_start.elapsed().as_millis() as u64,
                     "mcp_bg_handshake: clients inserted, calling notify_waiters"
                 );
                 mcp_handshakes_done.notify_waiters();
@@ -1722,7 +1761,8 @@ impl SessionActor {
                     Ok(r) => r,
                     Err(e) => {
                         tracing::warn!(
-                            server = % server_name, error = % e,
+                            server = %server_name,
+                            error = %e,
                             "Failed to list tools from shared MCP client in bg task"
                         );
                         continue;
@@ -1757,7 +1797,9 @@ impl SessionActor {
                             .await
                     {
                         tracing::warn!(
-                            server = % server_name, tool = % qualified_name, error = % e,
+                            server = %server_name,
+                            tool = %qualified_name,
+                            error = %e,
                             "Failed to register shared MCP tool"
                         );
                     }
@@ -1790,8 +1832,10 @@ impl SessionActor {
             let elapsed = handshake_start.elapsed();
             let elapsed_us = elapsed.as_micros() as u64;
             tracing::info!(
-                target : crate ::instrumentation::TARGET, event = "timing", name =
-                "session.mcp_handshakes_bg", elapsed_us,
+                target: crate::instrumentation::TARGET,
+                event = "timing",
+                name = "session.mcp_handshakes_bg",
+                elapsed_us,
             );
             tracing::info!("MCP background handshakes completed in {:?}", elapsed);
             let mcp_tool_count = tool_bridge
@@ -1800,10 +1844,11 @@ impl SessionActor {
                 .iter()
                 .filter(|t| t.function.name.contains("__"))
                 .count();
-            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!(
-                { "sessionId" : session_id_owned, "mcpToolCount" : mcp_tool_count,
-                "elapsedMs" : elapsed.as_millis() as u64, }
-            )) {
+            if let Ok(params) = serde_json::value::to_raw_value(&serde_json::json!({
+                "sessionId": session_id_owned,
+                "mcpToolCount": mcp_tool_count,
+                "elapsedMs": elapsed.as_millis() as u64,
+            })) {
                 gateway.forward_fire_and_forget(acp::ExtNotification::new(
                     "chutes.build/mcp_initialized",
                     params.into(),
@@ -1861,4 +1906,51 @@ pub(super) struct McpAnnouncementSnapshot {
     /// The announcement body: server listing plus the tool usage hint.
     pub(super) text: String,
     pub(super) server_count: usize,
+}
+/// Render the "MCP servers currently connecting" system reminder
+/// (pure rendering — see `maybe_inject_mcp_connecting_reminder`).
+///
+/// Sessions that declared `startupHints.deliveryTools` get different
+/// guidance. On surfaces that declare delivery tools the user sees output
+/// ONLY through those MCP tools (e.g. a message-posting tool), and the
+/// servers providing them are exactly the ones listed as still connecting.
+/// The default wording ("proceed with what you can do in the meantime")
+/// steers the model into answering in plain text and ending the turn, i.e.
+/// replying into a void on such surfaces. Keying on the explicit opt-in —
+/// not on `nonInteractive` — keeps the default for every other client
+/// (SDK/stdio consumers DO read plain-text responses; subagents report to
+/// their parent). Declaring sessions typically also run
+/// `McpInitStrategy::Blocking`, so handshakes are awaited at turn start and
+/// the servers are expected to become ready while the model works — the
+/// right guidance is to keep working and deliver through the tool, not to
+/// skip it.
+pub(super) fn format_mcp_connecting_reminder(
+    connecting: &[String],
+    delivery_tools: &[String],
+) -> String {
+    let mut text =
+        "MCP servers currently connecting (tools will become available shortly):\n".to_string();
+    for name in connecting {
+        text.push_str(&format!("- {name}\n"));
+    }
+    if delivery_tools.is_empty() {
+        text.push_str(
+            "\nDo not attempt to use tools from these servers yet. \
+             If the user's request likely requires one of these servers, \
+             mention that the server is still connecting and proceed with \
+             what you can do in the meantime.",
+        );
+    } else {
+        text.push_str(&format!(
+            "\nThese servers are being awaited and their tools are expected \
+             to become available as you work — use them normally, and if a \
+             call reports the tool as unavailable, retry it after your other \
+             work rather than giving up. User-visible output from this \
+             session is delivered ONLY through: {}. Do NOT end the turn \
+             without delivering your answer through the appropriate \
+             delivery tool.",
+            delivery_tools.join(", ")
+        ));
+    }
+    text
 }

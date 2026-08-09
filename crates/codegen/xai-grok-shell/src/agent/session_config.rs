@@ -14,7 +14,7 @@ pub(crate) const SELECTABLE_REASONING_EFFORTS: [ReasoningEffort; 5] = [
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionConfigOption {
+pub(crate) struct SessionConfigOption {
     pub id: String,
     pub category: String,
     pub label: String,
@@ -25,7 +25,7 @@ pub struct SessionConfigOption {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GrokSessionDetail {
+pub(crate) struct GrokSessionDetail {
     pub session_id: String,
     pub kind: String,
     pub cwd: String,
@@ -35,7 +35,7 @@ pub struct GrokSessionDetail {
 }
 
 impl GrokSessionDetail {
-    pub fn build(
+    pub(crate) fn build(
         session_id: String,
         cwd: String,
         current_model_id: String,
@@ -59,6 +59,7 @@ fn effort_label(effort: ReasoningEffort) -> String {
         ReasoningEffort::Medium => "Medium",
         ReasoningEffort::High => "High",
         ReasoningEffort::Xhigh => "X-High",
+        ReasoningEffort::Max => "Max",
     }
     .to_string()
 }
@@ -125,7 +126,7 @@ mod tests {
     #[test]
     fn options_have_one_selected_model_and_a_mode_per_effort() {
         let models = [
-            model("grok-build", "Grok Build"),
+            model("grok-build", "Chutes Build"),
             model("grok-4.5", "Grok 4.5"),
         ];
         let current = acp::ModelId::from("grok-build");
@@ -153,7 +154,7 @@ mod tests {
     #[test]
     fn none_effort_is_not_a_user_selectable_mode() {
         assert!(!SELECTABLE_REASONING_EFFORTS.contains(&ReasoningEffort::None));
-        let models = [model("grok-build", "Grok Build")];
+        let models = [model("grok-build", "Chutes Build")];
         let current = acp::ModelId::from("grok-build");
         let opts = build_session_config_options(
             &models,
@@ -168,7 +169,7 @@ mod tests {
 
     #[test]
     fn no_mode_options_when_model_lacks_effort_support() {
-        let models = [model("grok-build", "Grok Build")];
+        let models = [model("grok-build", "Chutes Build")];
         let current = acp::ModelId::from("grok-build");
         let opts = build_session_config_options(&models, &current, &[], None);
         assert_eq!(opts.len(), 1);
@@ -188,14 +189,14 @@ mod tests {
         let opt = SessionConfigOption {
             id: "grok-build".to_string(),
             category: "model".to_string(),
-            label: "Grok Build".to_string(),
+            label: "Chutes Build".to_string(),
             description: None,
             selected: true,
         };
         let v = serde_json::to_value(&opt).expect("serialize");
         assert_eq!(v["id"], "grok-build");
         assert_eq!(v["category"], "model");
-        assert_eq!(v["label"], "Grok Build");
+        assert_eq!(v["label"], "Chutes Build");
         assert_eq!(v["selected"], true);
         assert!(v.get("description").is_none());
     }

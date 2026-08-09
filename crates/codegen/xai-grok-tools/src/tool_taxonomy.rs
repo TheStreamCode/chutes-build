@@ -22,7 +22,7 @@ pub mod field {
     pub const PATTERN: &str = "pattern";
 }
 /// The single `_meta` key holding the canonical tool identity as one nested
-/// object (mirroring `chutes.build/mcp_tool`). Consumers deserialize it into
+/// object (mirroring `chutes.ai/mcp_tool`). Consumers deserialize it into
 /// [`CanonicalToolMeta`].
 pub const TOOL_META_KEY: &str = "chutes.build/tool";
 /// Version of the canonical tool `_meta` contract. Bump on any breaking change
@@ -33,7 +33,7 @@ impl ToolKind {
     /// function of the kind, so equivalent tools across toolsets share it
     /// (`read_file` and `Read` → `Read`; `run_terminal_cmd` and `Shell` →
     /// `Run Command`). Display only; the model's tool name is `name` in
-    /// `chutes.build/tool`. Exhaustive, so a new `ToolKind` must add a label to compile.
+    /// `chutes.ai/tool`. Exhaustive, so a new `ToolKind` must add a label to compile.
     pub fn presentation_name(self) -> &'static str {
         match self {
             ToolKind::Read => "Read",
@@ -68,6 +68,7 @@ impl ToolKind {
             ToolKind::UseTool => "Use Tool",
             ToolKind::Monitor => "Monitor",
             ToolKind::GoalUpdate => "Update Goal",
+            ToolKind::Workflow => "Workflow",
             ToolKind::Other => "Tool",
         }
     }
@@ -109,6 +110,7 @@ impl ToolKind {
             | ToolKind::UseTool
             | ToolKind::Monitor
             | ToolKind::GoalUpdate
+            | ToolKind::Workflow
             | ToolKind::Other => false,
         }
     }
@@ -124,13 +126,14 @@ impl schemars::JsonSchema for ToolKind {
             .filter_map(|v| v.as_str().map(|s| format!("`{s}`")))
             .collect::<Vec<_>>()
             .join(", ");
-        schemars::json_schema!(
-            { "type" : "string", "description" :
-            format!("Categorizes what a tool does at a high level. Open set — consumers must \
+        schemars::json_schema!({
+            "type": "string",
+            "description": format!(
+                "Categorizes what a tool does at a high level. Open set — consumers must \
                  tolerate unknown values (Rust deserializes them to `other` via \
-                 `#[serde(other)]`). Known values: {known}."),
-            }
-        )
+                 `#[serde(other)]`). Known values: {known}."
+            ),
+        })
     }
 }
 /// Canonical identity for a tool call, resolved from a tool's registered
@@ -184,7 +187,7 @@ pub struct ToolIdentity {
 ///   `namespace` is a closed enum (no `other` sink), so a new toolset fails
 ///   strict typed deserialization of the whole envelope — intentional, to force
 ///   typed consumers with exhaustive matches to update. Out-of-tree consumers
-///   should read `namespace` loosely (as a string) and, on any `chutes.build/tool`
+///   should read `namespace` loosely (as a string) and, on any `chutes.ai/tool`
 ///   parse failure, treat it as absent and fall back to `raw_input` + the ACP
 ///   `kind`. `version` bumps only on removal or meaning change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -217,7 +220,7 @@ impl CanonicalToolMeta {
         }
     }
     /// Attach under [`TOOL_META_KEY`], preserving existing `_meta` keys
-    /// (`bash_mode`, `backend`, `chutes.build/mcp_tool`, …).
+    /// (`bash_mode`, `backend`, `chutes.ai/mcp_tool`, …).
     pub fn merge_into(&self, existing: Option<serde_json::Value>) -> serde_json::Value {
         debug_assert!(
             matches!(existing, None | Some(serde_json::Value::Object(_))),
@@ -245,7 +248,7 @@ mod tests {
     fn identity(kind: ToolKind) -> ToolIdentity {
         ToolIdentity {
             tool_kind: kind,
-            namespace: ToolNamespace::GrokBuild,
+            namespace: ToolNamespace::ChutesBuild,
             presentation_name: kind.presentation_name(),
             read_only: kind.is_read_only(),
         }
@@ -264,9 +267,9 @@ mod tests {
         use strum::IntoEnumIterator;
         fn wire_and_pascal(ns: ToolNamespace) -> (&'static str, &'static str) {
             match ns {
-                ToolNamespace::GrokBuild => ("chutes_build", "GrokBuild"),
-                ToolNamespace::GrokBuildConcise => ("chutes_build_concise", "GrokBuildConcise"),
-                ToolNamespace::GrokBuildHashline => ("chutes_build_hashline", "GrokBuildHashline"),
+                ToolNamespace::ChutesBuild => ("grok_build", "ChutesBuild"),
+                ToolNamespace::GrokBuildConcise => ("grok_build_concise", "GrokBuildConcise"),
+                ToolNamespace::GrokBuildHashline => ("grok_build_hashline", "GrokBuildHashline"),
                 ToolNamespace::Codex => ("codex", "Codex"),
                 ToolNamespace::OpenCode => ("opencode", "OpenCode"),
                 ToolNamespace::MCP => ("mcp", "MCP"),
@@ -311,13 +314,13 @@ mod tests {
         let meta = CanonicalToolMeta::new(
             "read_file",
             &identity(ToolKind::Read),
-            Some(serde_json::json!({ "path" : "/a" })),
+            Some(serde_json::json!({ "path": "/a" })),
         );
         let t = serde_json::to_value(&meta).unwrap();
         assert_eq!(t["version"], serde_json::json!(TOOL_META_VERSION));
         assert_eq!(t["name"], "read_file");
         assert_eq!(t["kind"], "read");
-        assert_eq!(t["namespace"], "chutes_build");
+        assert_eq!(t["namespace"], "grok_build");
         assert_eq!(t["label"], "Read");
         assert_eq!(t["read_only"], true);
         assert_eq!(t["input"]["path"], "/a");
@@ -365,7 +368,7 @@ mod tests {
     #[test]
     fn merge_into_nests_under_one_key_and_preserves_existing() {
         let meta = CanonicalToolMeta::new("run_terminal_cmd", &identity(ToolKind::Execute), None);
-        let merged = meta.merge_into(Some(serde_json::json!({ "bash_mode" : true })));
+        let merged = meta.merge_into(Some(serde_json::json!({"bash_mode": true})));
         let o = merged.as_object().unwrap();
         assert_eq!(o["bash_mode"], true, "existing meta must be preserved");
         let t = &o[TOOL_META_KEY];

@@ -24,7 +24,7 @@ use xai_tool_types::{KillTaskOutput, TaskOutputOutput};
 /// directory (e.g., `/root/.chutes-build/worktrees/project/fork-019cb252-...`). The
 /// client UI should instead see the original project path (the `display_cwd`).
 #[derive(Clone, Debug)]
-pub struct PathRewriter {
+pub(crate) struct PathRewriter {
     /// The real worktree path (what tools actually see).
     real_cwd: String,
     /// The display path (what the client UI should see).
@@ -36,7 +36,7 @@ impl PathRewriter {
     ///
     /// Returns `None` if the paths are the same (no rewriting needed) or if
     /// `display_cwd` is not set.
-    pub fn new(real_cwd: &str, display_cwd: Option<&str>) -> Option<Self> {
+    pub(crate) fn new(real_cwd: &str, display_cwd: Option<&str>) -> Option<Self> {
         let display_cwd = display_cwd?;
         if real_cwd == display_cwd {
             return None;
@@ -50,9 +50,9 @@ impl PathRewriter {
     /// Rewrite all occurrences of the real worktree path with the display path.
     ///
     /// Handles both plain paths (e.g., `/root/.chutes-build/worktrees/project/fork-...`)
-    /// and URL-encoded paths (e.g., `%2Froot%2F.chutes-build%2Fworktrees%2F...`) that
+    /// and URL-encoded paths (e.g., `%2Froot%2F.grok%2Fworktrees%2F...`) that
     /// appear in session directory structures and `output_file` references.
-    pub fn rewrite(&self, text: &str) -> String {
+    pub(crate) fn rewrite(&self, text: &str) -> String {
         let plain = text.replace(&self.real_cwd, &self.display_cwd);
         // Also replace URL-encoded form — session directory paths use
         // urlencoding::encode(&cwd) as a path component, so background task
@@ -67,7 +67,7 @@ impl PathRewriter {
     }
 
     /// Rewrite a `PathBuf` if it starts with the real worktree path.
-    pub fn rewrite_path(&self, path: &Path) -> PathBuf {
+    pub(crate) fn rewrite_path(&self, path: &Path) -> PathBuf {
         match path.strip_prefix(&self.real_cwd) {
             Ok(relative) => PathBuf::from(&self.display_cwd).join(relative),
             Err(_) => path.to_path_buf(),
@@ -80,7 +80,7 @@ impl PathRewriter {
     /// paths embedded anywhere in the JSON tree without needing to walk the
     /// structure. Reuses `rewrite()` so both plain and encoded replacements
     /// are applied consistently.
-    pub fn rewrite_json(&self, value: serde_json::Value) -> serde_json::Value {
+    pub(crate) fn rewrite_json(&self, value: serde_json::Value) -> serde_json::Value {
         let serialized = value.to_string();
         let rewritten = self.rewrite(&serialized);
         if rewritten == serialized {
@@ -110,7 +110,7 @@ fn maybe_rewrite_path(rewriter: Option<&PathRewriter>, path: PathBuf) -> PathBuf
 ///
 /// Uses serde directly — ToolOutput derives Serialize with `#[serde(tag = "type")]`,
 /// so the JSON round-trips cleanly with the TUI's deserialization.
-pub fn raw_output_json(
+pub(crate) fn raw_output_json(
     output: &ToolOutput,
     rewriter: Option<&PathRewriter>,
 ) -> Option<serde_json::Value> {
@@ -129,7 +129,7 @@ pub fn raw_output_json(
 /// `tool_meta` is attached as `_meta` on the update for MCP tools that have
 /// MCP Apps UI metadata (e.g., `_meta.ui.resourceUri`). This allows clients
 /// to render interactive UIs without maintaining a separate metadata store.
-pub fn acp_tool_update(
+pub(crate) fn acp_tool_update(
     output: &ToolOutput,
     tool_call_id: &str,
     rewriter: Option<&PathRewriter>,
@@ -537,8 +537,7 @@ pub fn acp_tool_update(
         ToolOutput::ImageGen(_)
         | ToolOutput::ImageToVideo(_)
         | ToolOutput::ReferenceToVideo(_)
-        | ToolOutput::ImageEdit(_)
-        | ToolOutput::MediaArtifact(_) => Some(acp::ToolCallUpdate::new(
+        | ToolOutput::ImageEdit(_) => Some(acp::ToolCallUpdate::new(
             acp::ToolCallId::new(Arc::from(tool_call_id)),
             acp::ToolCallUpdateFields::new()
                 .status(Some(acp::ToolCallStatus::Completed))
@@ -620,6 +619,7 @@ pub fn acp_tool_update(
             ))
         }
         ToolOutput::UpdateGoal(_)
+        | ToolOutput::Workflow(_)
         | ToolOutput::Monitor(_)
         | ToolOutput::SchedulerCreate(_)
         | ToolOutput::SchedulerDelete(_)
@@ -644,7 +644,7 @@ pub fn acp_tool_update(
 /// This converts `xai-grok-tools`' TodoItem (which has `id`, `content: Option<String>`,
 /// `status: Option<String>`) to `acp::PlanEntry` (which has `content`, `priority`, `status`).
 /// The `id` is not directly represented in `PlanEntry` but the ordering is preserved.
-pub fn acp_plan_update(output: &ToolOutput) -> Option<acp::Plan> {
+pub(crate) fn acp_plan_update(output: &ToolOutput) -> Option<acp::Plan> {
     use crate::tools::todo::plan_entry_from_todo_item;
     use xai_grok_tools::types::output::TodoWriteOutput;
     match output {
@@ -1071,42 +1071,6 @@ mod tests {
         let raw = update.fields.raw_output.expect("raw_output");
         assert_eq!(raw["type"], "ImageToVideo");
         assert_eq!(raw["path"], "/tmp/session/videos/3.mp4");
-    }
-
-    #[test]
-    fn test_media_artifact_acp_update_keeps_rich_raw_output_and_compact_text() {
-        use xai_grok_tools::types::output::{MediaArtifact, MediaArtifactKind};
-
-        let output = ToolOutput::MediaArtifact(MediaArtifact {
-            schema_version: MediaArtifact::SCHEMA_VERSION,
-            kind: MediaArtifactKind::Speech,
-            path: PathBuf::from("/tmp/session/audio/voice.wav"),
-            mime_type: "audio/wav".into(),
-            byte_len: 1024,
-            provenance_path: Some(PathBuf::from(
-                "/tmp/session/audio/voice.wav.provenance.json",
-            )),
-            provider: "chutes".into(),
-            model: "voice-model".into(),
-            cost: Some(0.01),
-        });
-        let update = acp_tool_update(&output, "tc-audio", None, None).expect("update");
-        let content = update.fields.content.expect("content");
-        let text = match &content[0] {
-            acp::ToolCallContent::Content(acp::Content {
-                content: acp::ContentBlock::Text(t),
-                ..
-            }) => &t.text,
-            other => panic!("expected text content, got {other:?}"),
-        };
-        assert!(text.contains("Generated speech"));
-        assert!(!text.contains("voice-model"));
-
-        let raw = update.fields.raw_output.expect("raw_output");
-        assert_eq!(raw["type"], "MediaArtifact");
-        assert_eq!(raw["kind"], "speech");
-        assert_eq!(raw["model"], "voice-model");
-        assert_eq!(raw["byte_len"], 1024);
     }
 
     #[test]

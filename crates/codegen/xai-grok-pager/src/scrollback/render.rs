@@ -38,19 +38,18 @@ pub(crate) const GROUP_HEADER_RANGE_ID: u16 = u16::MAX;
 
 /// Label for the inline-media native-open text button (terminals without
 /// inline graphics). Graphics terminals use a shorter overlay `[Open]` instead.
-pub fn media_open_button_label(kind: super::block::MediaButtonKind) -> &'static str {
-    match kind {
-        super::block::MediaButtonKind::Image => "[Open Image]",
-        super::block::MediaButtonKind::Video => "[Open Video]",
-        super::block::MediaButtonKind::Audio => "[Play Audio]",
-        super::block::MediaButtonKind::File => "[Open File]",
+pub fn media_open_button_label(is_video: bool) -> &'static str {
+    if is_video {
+        "[Open Video]"
+    } else {
+        "[Open Image]"
     }
 }
 
 /// Centered left column for the `[Open]` text button. Shared by the renderer
 /// and the hit-area computation so the label and click target stay aligned.
-pub fn media_open_button_col(content_width: u16, kind: super::block::MediaButtonKind) -> u16 {
-    let label_w = media_open_button_label(kind).len() as u16;
+pub fn media_open_button_col(content_width: u16, is_video: bool) -> u16 {
+    let label_w = media_open_button_label(is_video).len() as u16;
     content_width.saturating_sub(label_w) / 2
 }
 
@@ -137,10 +136,6 @@ pub struct InlineMediaPlacement {
     /// for text-button placements (media on terminals without inline-graphics
     /// support; `full_rows` is 0). Used for click-to-open-natively hit testing.
     pub open_button_screen_rect: Option<ratatui::layout::Rect>,
-    /// Reserved waveform row for text-mode audio artifacts.
-    pub audio_waveform_screen_rect: Option<ratatui::layout::Rect>,
-    /// Text-mode button semantics. `None` for inline graphics placements.
-    pub text_button_kind: Option<super::block::MediaButtonKind>,
     /// Whether this placement reserves a trailing `[Open]/[Copy]` (or play)
     /// button row beneath the image. True for an overlay/image tool-media
     /// placement; false for the text-`[Open]` placement (terminals without
@@ -436,7 +431,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             None
         };
         let renderer = EntryRenderer::new(entry, theme)
-            .with_appearance(appearance.clone())
+            .with_appearance_ref(appearance)
             .with_tick(tick)
             .with_skip_rows(skip_rows)
             .with_groupable(entry.block.is_groupable())
@@ -778,8 +773,6 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                         top_crop_rows: top_crop,
                         filepath_screen_rect,
                         open_button_screen_rect: None,
-                        audio_waveform_screen_rect: None,
-                        text_button_kind: None,
                         has_button_row: true,
                     });
                 }
@@ -817,7 +810,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
         // Click targets for the text `[Open]` button + filepath of media blocks
         // without an inline overlay (terminals without inline-graphics support).
         if (!is_group_header || verb_expanded_slot)
-            && let Some((open_path, button_kind)) = entry.block.inline_open_button()
+            && let Some((open_path, is_video)) = entry.block.inline_open_button()
         {
             let content_lines = cached_output.lines.len();
             let viewport_bottom = viewport_start + viewport.height as usize;
@@ -845,17 +838,8 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             // Centered `[Open]` button → click-to-open. It is the second-to-last
             // content line (the last line is a blank spacer).
             let open_button_screen_rect = if content_lines >= 2 {
-                let is_audio = matches!(button_kind, super::block::MediaButtonKind::Audio);
-                let label_w = if is_audio {
-                    entry_content_area.width
-                } else {
-                    media_open_button_label(button_kind).len() as u16
-                };
-                let col = if is_audio {
-                    0
-                } else {
-                    media_open_button_col(content_width, button_kind)
-                };
+                let label_w = media_open_button_label(is_video).len() as u16;
+                let col = media_open_button_col(content_width, is_video);
                 let button_virtual_y = content_y_start + (content_lines - 2);
                 line_screen_rect(button_virtual_y, label_w).map(|mut rect| {
                     rect.x = rect.x.saturating_add(col);
@@ -864,29 +848,14 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             } else {
                 None
             };
-            let audio_waveform_screen_rect = if matches!(
-                button_kind,
-                super::block::MediaButtonKind::Audio
-            ) && content_lines >= 3
-            {
-                line_screen_rect(
-                    content_y_start + (content_lines - 3),
-                    entry_content_area.width,
-                )
-            } else {
-                None
-            };
 
-            if filepath_screen_rect.is_some()
-                || open_button_screen_rect.is_some()
-                || audio_waveform_screen_rect.is_some()
-            {
+            if filepath_screen_rect.is_some() || open_button_screen_rect.is_some() {
                 result.inline_media.push(InlineMediaPlacement {
                     info: crate::prompt_images::InlineMediaInfo {
                         path: open_path,
                         width: 0,
                         height: 0,
-                        is_video: matches!(button_kind, super::block::MediaButtonKind::Video),
+                        is_video,
                         alt_text: String::new(),
                     },
                     screen_rect: ratatui::layout::Rect {
@@ -899,8 +868,6 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                     top_crop_rows: 0,
                     filepath_screen_rect,
                     open_button_screen_rect,
-                    audio_waveform_screen_rect,
-                    text_button_kind: Some(button_kind),
                     // Text-button placement: the button is the text [Open] line
                     // (`open_button_screen_rect`), not an image-overlay row.
                     has_button_row: false,
@@ -1036,9 +1003,9 @@ pub(crate) fn map_hyperlinks_to_overlay(
 mod tests {
     use super::*;
     use crate::appearance::AppearanceConfig;
-    use crate::render::osc8::resolve_link_target;
-    #[cfg(not(windows))]
-    use crate::render::osc8::{LinkPresentation, resolve_link_target_for_context};
+    use crate::render::osc8::{
+        LinkPresentation, resolve_link_target, resolve_link_target_for_context,
+    };
     use crate::scrollback::RenderBlock;
     use crate::scrollback::block::BlockContent;
     use crate::scrollback::types::DisplayMode;
@@ -1074,7 +1041,7 @@ mod tests {
         let mut layouts: Vec<EntryLayoutInfo> = entries
             .iter()
             .map(|e| {
-                let renderer = EntryRenderer::new(e, &theme).with_appearance(appearance.clone());
+                let renderer = EntryRenderer::new(e, &theme).with_appearance_ref(appearance);
                 let height = renderer.desired_height(content_width);
                 EntryLayoutInfo {
                     height,
@@ -2633,7 +2600,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn markdown_wrapped_session_media_path_fully_linkified() {
         // Regression: imagine-tool prose whose long session path soft-wraps
         // across rows. The whole path must be clickable (one overlay region
@@ -2733,7 +2699,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn collapsed_block_header_file_path_is_scanned() {
         // File paths in the command header line should be linkified even
         // when the block is collapsed.
@@ -2864,7 +2829,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn collapse_header_entry_does_not_leak_links_but_visible_group_entries_do() {
         // Smallest shape the truncation fold can produce for an expanded
         // group: 3 entries, header count = group_len - 1 = 2.
@@ -3559,7 +3523,6 @@ mod tests {
     /// Collapsed Edit header: after bullet prepend the path is span 2, and the
     /// OSC8 overlay must cover path cols only (not the verb or bullet).
     #[test]
-    #[cfg(not(windows))]
     fn tool_header_link_target_overlay_covers_path_after_bullet() {
         use crate::appearance::ToolBullet;
         use crate::scrollback::types::{BlockContext, selectable_cols};
@@ -3663,7 +3626,6 @@ mod tests {
         );
     }
 
-    #[cfg(not(windows))]
     fn official_vscode_remote_context() -> crate::terminal::TerminalContext {
         crate::terminal::TerminalContext {
             brand: crate::terminal::TerminalName::VsCode,
@@ -3673,7 +3635,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(windows))]
     fn file_link_policy(
         link: &OverlayLink,
         terminal: &crate::terminal::TerminalContext,
@@ -3683,7 +3644,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn official_vscode_remote_delegates_scanned_absolute_path() {
         let path = "/worktree/src/main.rs";
         let entry = make_markdown_entry(path);
@@ -3709,7 +3669,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn official_vscode_remote_tool_headers_delegate_only_self_resolving_paint() {
         let cwd = std::path::PathBuf::from("/worktree");
         let target = "/worktree/src/nested/main.rs";
@@ -3815,7 +3774,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn basename_headers_stay_grok_owned_for_duplicate_and_outside_targets() {
         let cwd = std::path::PathBuf::from("/worktree");
         let terminal = official_vscode_remote_context();
@@ -3865,7 +3823,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn long_read_header_link_is_clipped_to_offset_content_area() {
         let path = "/outside/a/very/long/path/that/is/clipped/main.rs";
         let mut entry = ScrollbackEntry::new(RenderBlock::read(path, None));
@@ -3890,7 +3847,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
     fn explicit_tool_link_clips_before_u16_conversion() {
         let path = format!("/outside/{}.rs", "x".repeat(70_000));
         let mut entry = ScrollbackEntry::new(RenderBlock::read(path, None));

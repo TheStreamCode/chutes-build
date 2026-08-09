@@ -22,6 +22,9 @@ impl AgentView {
         self.prompt.prompt_suggestion_active = self.prompt_input_mode
             == super::PromptInputMode::Normal
             && matches!(self.prompt_mode, super::PromptMode::Normal)
+            // A card's inline editor borrows the composer to answer a question, and a guess at the next prompt to the model is not an
+            // answer. In the `/feedback` box it would also paint over the detail placeholder.
+            && self.question_view.is_none()
             && !self.session.state.is_busy();
     }
 
@@ -252,7 +255,7 @@ impl AgentView {
         ));
     }
 
-    /// Apply an `chutes.build/follow_ups` notification, keyed by `response_id`
+    /// Apply an `chutes.ai/follow_ups` notification, keyed by `response_id`
     /// (newest-response-wins).
     ///
     /// Monotonic accept-the-newer: a never-seen `response_id` is strictly newer
@@ -278,7 +281,7 @@ impl AgentView {
     }
 
     /// `apply_follow_ups` with the turn identity (`prompt_id`) the shell stamps
-    /// on each `chutes.build/follow_ups` notification (the same `promptId` it stamps on
+    /// on each `chutes.ai/follow_ups` notification (the same `promptId` it stamps on
     /// every `session/update`). The identity makes viewer-adoption dedup
     /// DETERMINISTIC:
     ///
@@ -286,7 +289,7 @@ impl AgentView {
     ///   `prompt_id` equals `session.current_prompt_id`) re-renders even when its
     ///   chips were cleared by turn adoption — so chips that were applied then
     ///   cleared reappear instead of being lost until reload.
-    /// - A buffer-replayed `chutes.build/follow_ups` for a PRIOR turn's `response_id`
+    /// - A buffer-replayed `chutes.ai/follow_ups` for a PRIOR turn's `response_id`
     ///   stays rejected by the seen-ring (its `prompt_id` is not the active one),
     ///   so stale chips are never revived on the new turn.
     ///
@@ -419,7 +422,7 @@ impl AgentView {
         true
     }
 
-    /// Buffer a stamped `chutes.build/follow_ups` for a turn that is not yet current,
+    /// Buffer a stamped `chutes.ai/follow_ups` for a turn that is not yet current,
     /// keyed by its `promptId`. A newer delivery for the same `promptId`
     /// overwrites the earlier one (keep the latest); the FIFO order list bounds
     /// the map to [`MAX_PENDING_FOLLOW_UPS`], evicting only the oldest entry.
@@ -449,7 +452,7 @@ impl AgentView {
         }
     }
 
-    /// Flush a buffered `chutes.build/follow_ups` for `prompt_id` (a turn that has just
+    /// Flush a buffered `chutes.ai/follow_ups` for `prompt_id` (a turn that has just
     /// become current). Renders the chips through [`apply_follow_ups_with_prompt`]
     /// — now that `current_prompt_id == prompt_id`, the stamped delivery is
     /// accepted as the active turn's. Returns whether chips were rendered. A
@@ -492,7 +495,7 @@ impl AgentView {
 
     /// Reload reset that PRESERVES the running turn's follow-ups for
     /// `keep_prompt_id` (the turn the load is about to adopt). On `SessionLoaded`
-    /// the running turn's `chutes.build/follow_ups` arrive on the ext channel DURING
+    /// the running turn's `chutes.ai/follow_ups` arrive on the ext channel DURING
     /// `loading_replay`; an unconditional reset would drop them before adoption
     /// could re-render them, so the chips would never appear unless the server
     /// resent them. The running turn's chips live in ONE of two places at reset
@@ -610,6 +613,43 @@ impl AgentView {
                     .to_string(),
                 plugin_relative_path,
             });
+    }
+}
+
+#[cfg(test)]
+mod prompt_suggestion_gate_tests {
+    use super::test_fixtures::make_agent;
+
+    /// A card's inline editor borrows the composer, so the next-prompt ghost must not paint into it. The `/feedback` box relies on this
+    /// for its placeholder; the old `~` mode got it from `PromptInputMode::Feedback`, which no longer exists.
+    #[test]
+    fn an_open_question_card_closes_the_suggestion_gate() {
+        use crate::views::prompt_widget::StashedPrompt;
+        use crate::views::question_view::QuestionViewState;
+        use xai_grok_tools::implementations::grok_build::ask_user_question::Question;
+
+        let mut agent = make_agent();
+        agent.refresh_prompt_suggestion_gate();
+        assert!(
+            agent.prompt.prompt_suggestion_active,
+            "an idle normal composer is the ghost's home"
+        );
+
+        agent.question_view = Some(QuestionViewState::new(
+            "gate-test".into(),
+            vec![Question {
+                question: "which one?".into(),
+                options: vec![],
+                multi_select: Some(false),
+                id: None,
+            }],
+            StashedPrompt::default(),
+        ));
+        agent.refresh_prompt_suggestion_gate();
+        assert!(
+            !agent.prompt.prompt_suggestion_active,
+            "a card owns the composer, so the ghost stays out of it"
+        );
     }
 }
 

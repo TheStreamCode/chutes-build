@@ -32,14 +32,29 @@ pub const LEGACY_CHUTES_API_KEY_ENV_VAR: &str = "CHUTES_BUILD_API_KEY";
 /// Read the API key from the environment.
 ///
 /// Checks `CHUTES_API_KEY` first, then falls back to the legacy
-/// `CHUTES_BUILD_API_KEY` for backward compatibility.
-pub fn read_xai_api_key_env() -> Result<String, std::env::VarError> {
-    std::env::var(CHUTES_API_KEY_ENV_VAR).or_else(|_| std::env::var(LEGACY_CHUTES_API_KEY_ENV_VAR))
+/// `CHUTES_BUILD_API_KEY` for backward compatibility. A variable set to blank
+/// counts as unset — matching the "first set, **non-blank** value wins" rule the
+/// per-model `env_key` list already follows. A CI job that exports
+/// `CHUTES_API_KEY` from a secret that does not exist would otherwise be told
+/// "You are using CHUTES_API_KEY" and then fail to authenticate, which sends the
+/// reader looking for a server problem.
+pub(crate) fn read_chutes_api_key_env() -> Result<String, std::env::VarError> {
+    let non_blank = |name: &str| {
+        std::env::var(name).and_then(|v| {
+            if v.trim().is_empty() {
+                Err(std::env::VarError::NotPresent)
+            } else {
+                Ok(v)
+            }
+        })
+    };
+    non_blank(CHUTES_API_KEY_ENV_VAR).or_else(|_| non_blank(LEGACY_CHUTES_API_KEY_ENV_VAR))
 }
 
-/// Returns `true` if either `CHUTES_API_KEY` or `CHUTES_BUILD_API_KEY` is set.
-pub fn has_xai_api_key_env() -> bool {
-    read_xai_api_key_env().is_ok()
+/// Returns `true` if either `CHUTES_API_KEY` or `CHUTES_BUILD_API_KEY` holds a
+/// non-blank value.
+pub fn has_chutes_api_key_env() -> bool {
+    read_chutes_api_key_env().is_ok()
 }
 
 /// Whether `chutes.api_key` should be advertised (and pushed FIRST) when building
@@ -60,14 +75,33 @@ pub fn has_xai_api_key_env() -> bool {
 /// `CHUTES_BUILD_DISABLE_API_KEY_AUTH`) is the admin kill switch: when true the
 /// method is never advertised, regardless of available credentials, so
 /// `CHUTES_API_KEY` can't bypass a deployment's forced IdP login.
-pub fn should_advertise_xai_api_key<'a, I>(disable_api_key_auth: bool, models: I) -> bool
+///
+/// Presence-only for the first-party env key (treats it as usable). Login
+/// paths that have run the validity probe should call
+/// [`should_advertise_xai_api_key_with_env_ok`] with the probe result instead.
+pub(crate) fn should_advertise_xai_api_key<'a, I>(disable_api_key_auth: bool, models: I) -> bool
+where
+    I: IntoIterator<Item = &'a ModelEntry>,
+{
+    should_advertise_xai_api_key_with_env_ok(disable_api_key_auth, models, true)
+}
+
+/// Single advertise policy for `chutes.api_key`: kill switch, BYOK, and first-party
+/// env gated by `first_party_env_ok` (probe result, or `true` for presence-only).
+/// BYOK still advertises without a probe.
+pub(crate) fn should_advertise_xai_api_key_with_env_ok<'a, I>(
+    disable_api_key_auth: bool,
+    models: I,
+    first_party_env_ok: bool,
+) -> bool
 where
     I: IntoIterator<Item = &'a ModelEntry>,
 {
     if disable_api_key_auth {
         return false;
     }
-    has_xai_api_key_env() || models.into_iter().any(ModelEntry::has_own_credentials)
+    let has_byok = models.into_iter().any(ModelEntry::has_own_credentials);
+    has_byok || (has_chutes_api_key_env() && first_party_env_ok)
 }
 
 /// Inputs to [`build_auth_methods`].
@@ -77,7 +111,9 @@ where
 /// (`AuthManager`). The list-construction logic itself is pure so it can be
 /// unit-tested without any of that machinery.
 pub struct AuthMethodsBuildInputs<'a> {
-    /// True if `chutes.api_key` should be advertised AT ALL. Caller computes via
+    /// True if `chutes.api_key` should be advertised AT ALL. Login/initialize
+    /// callers compute via [`should_advertise_xai_api_key_with_env_ok`] after
+    /// the validity probe; presence-only paths may use
     /// [`should_advertise_xai_api_key`]. When `preferred_method` is `Oidc`,
     /// this is ignored (API key is never advertised under that pin).
     pub has_external_api_key: bool,
@@ -181,7 +217,7 @@ fn build_pinned_api_key(has_external_api_key: bool) -> BuiltAuthMethods {
     }
     BuiltAuthMethods {
         methods: vec![xai_api_key_auth_method()],
-        default_auth_method_id: Some(acp::AuthMethodId::new(CHUTES_API_KEY_METHOD_ID)),
+        default_auth_method_id: Some(acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID)),
     }
 }
 
@@ -227,7 +263,7 @@ fn build_unpinned(
 
     if has_external_api_key {
         methods.push(xai_api_key_auth_method());
-        default_auth_method_id = Some(acp::AuthMethodId::new(CHUTES_API_KEY_METHOD_ID));
+        default_auth_method_id = Some(acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID));
     }
 
     if has_cached_token {
@@ -297,7 +333,7 @@ pub enum AuthMethodKind {
 impl AuthMethodKind {
     pub fn from_id(id: &acp::AuthMethodId) -> Self {
         match id.0.as_ref() {
-            CHUTES_API_KEY_METHOD_ID => Self::XaiApiKey,
+            XAI_API_KEY_METHOD_ID => Self::XaiApiKey,
             CACHED_TOKEN_AUTH_METHOD_ID => Self::CachedToken,
             CHUTES_BUILD_COM_METHOD_ID => Self::GrokCom,
             OIDC_METHOD_ID => Self::Oidc,
@@ -311,7 +347,7 @@ impl AuthMethodKind {
     }
 
     /// `true` for session-based methods (cached_token, grok.com, oidc).
-    pub fn is_session_based(self) -> bool {
+    pub(crate) fn is_session_based(self) -> bool {
         matches!(self, Self::CachedToken | Self::GrokCom | Self::Oidc)
     }
 
@@ -319,25 +355,17 @@ impl AuthMethodKind {
     pub fn needs_interactive_login(self) -> bool {
         matches!(self, Self::GrokCom | Self::Oidc)
     }
-
-    pub fn auth_error_message(self) -> &'static str {
-        if self.is_session_based() {
-            AUTH_ERROR_SESSION_EXPIRED
-        } else {
-            AUTH_ERROR_API_KEY
-        }
-    }
 }
 
 /// `true` for session-based ACP methods (cached_token, grok.com, oidc).
-pub fn is_session_based_method(method_id: &acp::AuthMethodId) -> bool {
+pub(crate) fn is_session_based_method(method_id: &acp::AuthMethodId) -> bool {
     AuthMethodKind::from_id(method_id).is_session_based()
 }
 
 /// Per-model BYOK status: whether the selected model carries its own
 /// `[model.*]` `api_key`/`env_key`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ModelByok {
+pub(crate) enum ModelByok {
     /// Model has its own per-model key (not refreshable).
     Byok,
     /// Model has no per-model key (session auth governs).
@@ -347,7 +375,7 @@ pub enum ModelByok {
 }
 
 impl ModelByok {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Byok => "byok",
             Self::NotByok => "not_byok",
@@ -374,7 +402,7 @@ impl ModelByok {
 /// where sending the session token cannot leak to a third-party BYOK
 /// endpoint. A definite `NotByok` always refreshes (it only ever routes to
 /// the session endpoint); a definite `Byok` never does.
-pub fn session_token_auth_gate(
+pub(crate) fn session_token_auth_gate(
     is_session_based_method: bool,
     model_byok: ModelByok,
     endpoint_is_first_party: bool,
@@ -390,8 +418,7 @@ pub fn session_token_auth_gate(
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =
     "Session expired. Run `chutes-build login` to re-authenticate.";
 
-pub const AUTH_ERROR_API_KEY: &str =
-    "Authentication failed. Set CHUTES_API_KEY or add api_key to ~/.chutes-build/config.toml.";
+pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `chutes-build login`, set CHUTES_API_KEY, or add api_key to ~/.chutes-build/config.toml.";
 
 /// Next ACP method id when `cached_token` cannot proceed (missing / expired /
 /// legacy WebLogin), or `None` when fallthrough is forbidden.
@@ -402,14 +429,14 @@ pub const AUTH_ERROR_API_KEY: &str =
 /// Pinned `oidc`: **no** fallthrough to api_key — return `None` so the caller
 /// fails auth. Pinned `api_key` should not reach this path (cached_token is
 /// not advertised).
-pub fn method_id_after_cached_token_unavailable(
+pub(crate) fn method_id_after_cached_token_unavailable(
     has_external_api_key: bool,
     preferred_method: Option<PreferredAuthMethod>,
 ) -> Option<&'static str> {
     match preferred_method {
         Some(PreferredAuthMethod::Oidc) | Some(PreferredAuthMethod::ApiKey) => None,
         None => Some(if has_external_api_key {
-            CHUTES_API_KEY_METHOD_ID
+            XAI_API_KEY_METHOD_ID
         } else {
             CHUTES_BUILD_COM_METHOD_ID
         }),
@@ -423,11 +450,11 @@ pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "preferred_method=api_key but no
 pub const PREFERRED_OIDC_UNAVAILABLE: &str =
     "preferred_method=oidc but no session is available. Run `chutes-build login` to authenticate.";
 
-pub const CHUTES_API_KEY_METHOD_ID: &str = "chutes.api_key";
-pub fn xai_api_key_auth_method() -> acp::AuthMethod {
+pub const XAI_API_KEY_METHOD_ID: &str = "chutes.api_key";
+pub(crate) fn xai_api_key_auth_method() -> acp::AuthMethod {
     acp::AuthMethod::Agent(
         acp::AuthMethodAgent::new(
-            acp::AuthMethodId::new(CHUTES_API_KEY_METHOD_ID),
+            acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID),
             "chutes.api_key".to_string(),
         )
         .description(Some(format!(
@@ -437,7 +464,7 @@ pub fn xai_api_key_auth_method() -> acp::AuthMethod {
 }
 
 pub const CACHED_TOKEN_AUTH_METHOD_ID: &str = "cached_token";
-pub fn cached_token_auth_method() -> acp::AuthMethod {
+pub(crate) fn cached_token_auth_method() -> acp::AuthMethod {
     acp::AuthMethod::Agent(
         acp::AuthMethodAgent::new(
             acp::AuthMethodId::new(CACHED_TOKEN_AUTH_METHOD_ID),
@@ -452,11 +479,11 @@ pub fn cached_token_auth_method() -> acp::AuthMethod {
 pub const CHUTES_BUILD_COM_METHOD_ID: &str = "grok.com";
 
 /// xAI OAuth2/OIDC auth. Method id `"grok.com"` kept for ACP wire-compat.
-pub fn grok_com_auth_method(
+pub(crate) fn grok_com_auth_method(
     label: Option<&str>,
     has_auth_provider_command: bool,
 ) -> acp::AuthMethod {
-    let name = label.unwrap_or("Chutes");
+    let name = label.unwrap_or("Chutes Build");
     let meta = if has_auth_provider_command {
         let mut m = acp::Meta::new();
         m.insert("external_provider".to_owned(), serde_json::json!(true));
@@ -475,7 +502,7 @@ pub fn grok_com_auth_method(
 }
 
 pub const OIDC_METHOD_ID: &str = "oidc";
-pub fn oidc_auth_method(issuer: &str, label: Option<&str>) -> acp::AuthMethod {
+pub(crate) fn oidc_auth_method(issuer: &str, label: Option<&str>) -> acp::AuthMethod {
     let name = label
         .map(|l| l.to_string())
         .unwrap_or_else(|| format!("Single sign-on ({})", issuer));
@@ -502,7 +529,7 @@ mod tests {
     fn after_cached_token_unavailable_prefers_api_key_when_advertiseable() {
         assert_eq!(
             method_id_after_cached_token_unavailable(true, None),
-            Some(CHUTES_API_KEY_METHOD_ID),
+            Some(XAI_API_KEY_METHOD_ID),
         );
     }
 
@@ -548,7 +575,7 @@ mod tests {
                 "{method_id}: wrapper must agree"
             );
         }
-        let api_id = acp::AuthMethodId::new(CHUTES_API_KEY_METHOD_ID);
+        let api_id = acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID);
         let api_kind = AuthMethodKind::from_id(&api_id);
         assert!(!api_kind.is_session_based());
         assert!(api_kind.is_api_key());
@@ -616,7 +643,7 @@ mod tests {
                 .default_auth_method_id
                 .as_ref()
                 .map(|id| id.0.as_ref()),
-            Some(CHUTES_API_KEY_METHOD_ID),
+            Some(XAI_API_KEY_METHOD_ID),
         );
         // Cross-check with the pager-side predicate: the first method must
         // not require interactive login, which is the exact condition the
@@ -765,6 +792,37 @@ mod tests {
     /// (which causes the pager to skip the login screen).
     ///
     /// This is the test that *would have caught* that regression -- if you mentally
+    /// A variable exported from a secret that does not exist arrives as the empty
+    /// string. Treating that as "set" tells the user they are using an API key and
+    /// then fails to authenticate — the least helpful pair of messages available.
+    #[test]
+    #[serial]
+    fn blank_api_key_env_counts_as_unset() {
+        let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
+
+        {
+            let _blank = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "");
+            assert!(!has_chutes_api_key_env(), "empty must not count as set");
+        }
+        {
+            let _spaces = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "   ");
+            assert!(
+                !has_chutes_api_key_env(),
+                "whitespace-only must not count as set"
+            );
+        }
+        {
+            let _real = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "cpk_example");
+            assert_eq!(read_chutes_api_key_env().as_deref(), Ok("cpk_example"));
+        }
+        {
+            // Blank primary must not shadow a usable legacy value.
+            let _blank = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "");
+            let _legacy_set = EnvGuard::set(LEGACY_CHUTES_API_KEY_ENV_VAR, "cpk_legacy");
+            assert_eq!(read_chutes_api_key_env().as_deref(), Ok("cpk_legacy"));
+        }
+    }
+
     /// re-introduce that bug (push chutes.api_key LAST when has_external_api_key
     /// && !global env var), this test fails because `first_kind` is no longer
     /// `XaiApiKey`.
@@ -899,6 +957,68 @@ mod tests {
         assert!(built.default_auth_method_id.is_none());
     }
 
+    #[test]
+    #[serial]
+    fn env_key_probe_unusable_suppresses_advertise_without_byok() {
+        let _set = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "xai-dead-key");
+        let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
+        let cfg = Config::default();
+        let models = resolve_model_list(&cfg, None);
+        assert!(
+            should_advertise_xai_api_key(false, models.values()),
+            "presence-only helper still sees the env key"
+        );
+        assert!(
+            !should_advertise_xai_api_key_with_env_ok(false, models.values(), false),
+            "probe-unusable env key alone must not advertise"
+        );
+        let built = build_auth_methods(AuthMethodsBuildInputs {
+            has_external_api_key: false,
+            ..default_inputs()
+        });
+        assert_eq!(first_kind(&built.methods), Some(AuthMethodKind::GrokCom));
+    }
+
+    #[test]
+    #[serial]
+    fn env_key_probe_ok_still_advertises() {
+        let _set = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "xai-live-key");
+        let cfg = Config::default();
+        let models = resolve_model_list(&cfg, None);
+        assert!(should_advertise_xai_api_key_with_env_ok(
+            false,
+            models.values(),
+            true
+        ));
+    }
+
+    #[test]
+    #[serial]
+    fn byok_advertises_even_when_env_probe_unusable() {
+        const TEST_ENV_VAR: &str = "TEST_BYOK_PROBE_INDEPENDENT_TOKEN";
+        let _unset = EnvGuard::unset(CHUTES_API_KEY_ENV_VAR);
+        let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
+        let _byok = EnvGuard::set(TEST_ENV_VAR, "enterprise-secret-token");
+
+        let dm = crate::models::default_model();
+        let toml: toml::Value = toml::from_str(&format!(
+            r#"
+            [model."{dm}"]
+            model = "{dm}"
+            base_url = "https://inference.example.com/v1"
+            context_window = 200000
+            env_key = "{TEST_ENV_VAR}"
+            "#,
+        ))
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&toml).expect("config should parse");
+        let models = resolve_model_list(&cfg, None);
+        assert!(
+            should_advertise_xai_api_key_with_env_ok(false, models.values(), false),
+            "BYOK must not depend on the first-party env probe"
+        );
+    }
+
     /// Legacy `CHUTES_BUILD_API_KEY` env var is accepted as a fallback
     /// when `CHUTES_API_KEY` is not set, ensuring existing deployments keep working.
     #[test]
@@ -906,8 +1026,8 @@ mod tests {
     fn legacy_env_var_fallback_advertises_xai_api_key() {
         let _unset_new = EnvGuard::unset(CHUTES_API_KEY_ENV_VAR);
         let _set_legacy = EnvGuard::set(LEGACY_CHUTES_API_KEY_ENV_VAR, "xai-legacy-key");
-        assert!(has_xai_api_key_env());
-        assert_eq!(read_xai_api_key_env().unwrap(), "xai-legacy-key");
+        assert!(has_chutes_api_key_env());
+        assert_eq!(read_chutes_api_key_env().unwrap(), "xai-legacy-key");
 
         let cfg = Config::default();
         let models = resolve_model_list(&cfg, None);
@@ -922,7 +1042,7 @@ mod tests {
     fn new_env_var_takes_precedence_over_legacy() {
         let _new = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, "new-key");
         let _legacy = EnvGuard::set(LEGACY_CHUTES_API_KEY_ENV_VAR, "old-key");
-        assert_eq!(read_xai_api_key_env().unwrap(), "new-key");
+        assert_eq!(read_chutes_api_key_env().unwrap(), "new-key");
     }
 
     // -- chutes-build login --legacy regression coverage ------------------------
@@ -1066,8 +1186,8 @@ mod tests {
             preferred_method: Some(PreferredAuthMethod::ApiKey),
             ..default_inputs()
         });
-        assert_eq!(method_ids(&built), vec![CHUTES_API_KEY_METHOD_ID]);
-        assert_eq!(default_id(&built), Some(CHUTES_API_KEY_METHOD_ID));
+        assert_eq!(method_ids(&built), vec![XAI_API_KEY_METHOD_ID]);
+        assert_eq!(default_id(&built), Some(XAI_API_KEY_METHOD_ID));
     }
 
     #[test]

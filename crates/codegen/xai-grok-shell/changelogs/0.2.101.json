@@ -21,7 +21,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Resume hint** after quitting minimal mode now prints the correct grok --minimal --resume command.",
+    "description": "**Resume hint** after quitting minimal mode now prints the correct chutes-build --minimal --resume command.",
     "breaking_change": false
   },
   {

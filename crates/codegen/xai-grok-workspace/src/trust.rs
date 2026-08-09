@@ -19,7 +19,7 @@
 //! is written atomically with owner-only (`0600`) permissions.
 //!
 //! The store is rooted at [`xai_grok_config::user_grok_home`] — the **Option**
-//! home that resolves to `None` (rather than a cwd-relative `./.chutes-build`) when
+//! home that resolves to `None` (rather than a cwd-relative `./.grok`) when
 //! neither `$CHUTES_BUILD_HOME` nor a home directory is set (e.g. a minimal container /
 //! CI). In that no-home environment [`TrustStore::load`] yields an **empty,
 //! trust-nothing** store that persists nothing, so a cloned repo can never ship
@@ -106,7 +106,7 @@ impl TrustStore {
     ///
     /// Resolves via [`xai_grok_config::user_grok_home`], never
     /// [`xai_grok_config::grok_home`], so it never falls back to a cwd-relative
-    /// `./.chutes-build` — that fallback would let an untrusted cloned repo's `.chutes-build`
+    /// `./.grok` — that fallback would let an untrusted cloned repo's `.grok`
     /// masquerade as the user-global store and self-trust the checkout.
     pub fn default_path() -> Option<PathBuf> {
         Self::default_path_in(xai_grok_config::user_grok_home())
@@ -252,7 +252,7 @@ impl TrustStore {
             tracing::warn!(
                 path = %canonical.display(),
                 trusted,
-                "folder trust: no user grok home resolved; trust decision not recorded"
+                "folder trust: no user Chutes Build home resolved; trust decision not recorded"
             );
             return Ok(());
         };
@@ -387,7 +387,7 @@ fn git_derived_workspace_key(cwd: &Path) -> PathBuf {
     // can't link) collapses onto its recorded source repo so trust is shared.
     if let Some(source_repo) = crate::worktree::source_repo_for_cwd(&cwd.to_string_lossy()) {
         // Key on the source repo's git ROOT so every worktree of one repo shares
-        // ONE key regardless of the subdir grok -w was launched from (parity with
+        // ONE key regardless of the subdir chutes-build -w was launched from (parity with
         // the git-topology branch below). Fall back to the recorded path when the
         // source repo is gone (deleted-source standalone worktrees still work).
         let root = git2::Repository::discover(&source_repo)
@@ -490,7 +490,7 @@ impl Drop for ExclusiveLock {
 /// path per line; each becomes a folder-trust grant so the unified gate honors
 /// prior decisions. The legacy file is then renamed to `*.migrated` so it is
 /// read only once. A no-op when the legacy file is absent/already migrated or no
-/// user grok home resolves.
+/// user Chutes Build home resolves.
 pub fn migrate_legacy_hook_trust() {
     // Local/dev builds do NO trust-store I/O: skip the load + legacy-file rename.
     if crate::folder_trust::folder_trust_inert() {
@@ -724,7 +724,7 @@ mod tests {
 
         // With NO resolvable home the path is `None` — never a synthesized
         // fallback. This is the regression guard that keeps the store off the
-        // cwd-relative `./.chutes-build` that grok_home() would invent, which is exactly
+        // cwd-relative `./.grok` that grok_home() would invent, which is exactly
         // how a cloned repo's own `<repo>/.chutes-build/trusted_folders.toml` could
         // masquerade as the user-global store and self-trust the checkout.
         assert_eq!(TrustStore::default_path_in(None), None);
@@ -746,7 +746,7 @@ mod tests {
         // Simulate the no-home environment where `default_path()` is `None`:
         // `load()` yields `empty()`, a store with no backing path. It must
         // trust nothing and silently no-op on writes — never touching a
-        // cwd-relative `./.chutes-build`.
+        // cwd-relative `./.grok`.
         let mut store = TrustStore::empty();
         assert!(store.is_empty());
 
@@ -1490,7 +1490,7 @@ mod tests {
         assert_eq!(
             workspace_key(&wt),
             expected,
-            "a standalone grok worktree must collapse onto its recorded source repo"
+            "a standalone chutes-build worktree must collapse onto its recorded source repo"
         );
         // A cwd nested below the worktree root collapses onto the same key (the
         // registry walk ascends to the registered worktree).

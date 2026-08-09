@@ -61,7 +61,7 @@
   },
   {
     "category": "features",
-    "description": "**How-to Guides** modal now shows a tip linking to Ask Grok above the footer shortcuts.",
+    "description": "**How-to Guides** modal now shows a tip linking to Ask Chutes Build above the footer shortcuts.",
     "breaking_change": false
   },
   {

@@ -1,7 +1,6 @@
 //! Transcript export, block copying, viewer/modal, and input-log dump dispatchers.
 
 use super::ctx::with_active_agent;
-use super::session::lifecycle::skip_picker_and_create_session;
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::app_view::{ActiveView, AppView};
@@ -51,8 +50,12 @@ pub(super) fn dispatch_copy_block_content(app: &mut AppView) {
     });
 }
 
-/// Copy the Nth most recent assistant message to the clipboard.
-pub(super) fn dispatch_copy_assistant_message(app: &mut AppView, n: usize) {
+/// Copy the Nth most recent assistant message to the clipboard, or to `file_path`.
+pub(super) fn dispatch_copy_assistant_message(
+    app: &mut AppView,
+    n: usize,
+    file_path: Option<std::path::PathBuf>,
+) {
     with_active_agent(app, |agent| {
         // Collect agent messages in reverse order (most recent first).
         let mut agent_messages: Vec<String> = Vec::new();
@@ -93,10 +96,49 @@ pub(super) fn dispatch_copy_assistant_message(app: &mut AppView, n: usize) {
         }
 
         let stats = crate::clipboard::clipboard_stats_suffix(text);
-        agent
-            .scrollback
-            .push_block(RenderBlock::system(format!("Copied to clipboard{stats}")));
-        agent.copy_to_clipboard(text);
+
+        if let Some(p) = file_path {
+            match crate::clipboard::write_text_to_copy_file(text, &p) {
+                Ok(path) => {
+                    agent.scrollback.push_block(RenderBlock::system(format!(
+                        "Copied to {}{stats}",
+                        path.display()
+                    )));
+                }
+                Err(e) => {
+                    agent
+                        .scrollback
+                        .push_block(RenderBlock::system(format!("Failed to write file: {e}")));
+                }
+            }
+            return;
+        }
+
+        let delivery = crate::clipboard::copy_text_or_file(text);
+        match &delivery {
+            crate::clipboard::CopyDelivery::Clipboard { file, .. } => {
+                let block_msg = match file {
+                    Some(path) => format!(
+                        "Copied to clipboard (also saved to {}){stats}",
+                        crate::clipboard::display_copy_path(path)
+                    ),
+                    None => format!("Copied to clipboard{stats}"),
+                };
+                agent.scrollback.push_block(RenderBlock::system(block_msg));
+            }
+            crate::clipboard::CopyDelivery::File { path } => {
+                agent.scrollback.push_block(RenderBlock::system(format!(
+                    "Clipboard unreachable — wrote {}{stats}",
+                    crate::clipboard::display_copy_path(path)
+                )));
+            }
+            crate::clipboard::CopyDelivery::Failed { .. } => {
+                agent
+                    .scrollback
+                    .push_block(RenderBlock::system(format!("Copy failed{stats}")));
+            }
+        }
+        agent.show_toast_ticks(delivery.toast_message().as_ref(), delivery.toast_ticks());
     });
 }
 
@@ -152,11 +194,28 @@ pub(super) fn dispatch_export_conversation(
         } else {
             // Clipboard path: stats block (like assistant copy) + route-aware toast
             // (like block content copy / selection). Good UX for a potentially large transcript.
+            // The scrollback line reflects where the copy actually landed —
+            // same pattern as /copy N — instead of claiming clipboard success
+            // when the delivery fell back to the backup file.
             let stats = crate::clipboard::clipboard_stats_suffix(&md);
-            agent.scrollback.push_block(RenderBlock::system(format!(
-                "Conversation copied to clipboard{stats}"
-            )));
-            agent.copy_to_clipboard(&md);
+            let delivery = agent.copy_to_clipboard(&md);
+            let block_msg = match &delivery {
+                crate::clipboard::CopyDelivery::Clipboard { file, .. } => match file {
+                    Some(path) => format!(
+                        "Conversation copied to clipboard (also saved to {}){stats}",
+                        crate::clipboard::display_copy_path(path)
+                    ),
+                    None => format!("Conversation copied to clipboard{stats}"),
+                },
+                crate::clipboard::CopyDelivery::File { path } => format!(
+                    "Clipboard unreachable — conversation written to {}{stats}",
+                    crate::clipboard::display_copy_path(path)
+                ),
+                crate::clipboard::CopyDelivery::Failed { .. } => {
+                    format!("Conversation copy failed{stats}")
+                }
+            };
+            agent.scrollback.push_block(RenderBlock::system(block_msg));
         }
     });
 }
@@ -231,13 +290,6 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
         let Some(entry) = agent.scrollback.entry(idx) else {
             return;
         };
-
-        if let Some((path, crate::scrollback::block::MediaButtonKind::Audio)) =
-            entry.block.inline_open_button()
-        {
-            agent.toggle_inline_audio_playback(&path);
-            return;
-        }
 
         // Block has images/media but terminal can't render pixels — toast and bail.
         let has_media =
@@ -340,19 +392,16 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
 /// session-ready handlers so they can't drift and leave a tab stuck on its
 /// initial `Loading` state.
 pub(super) fn extensions_modal_tab_fetches(
+    modal: &mut crate::views::extensions_modal::ExtensionsModalState,
     agent_id: AgentId,
     session_id: acp::SessionId,
 ) -> Vec<Effect> {
-    vec![
+    let mut effects = vec![
         Effect::FetchHooksList {
             agent_id,
             session_id: session_id.clone(),
         },
         Effect::FetchPluginsList {
-            agent_id,
-            session_id: session_id.clone(),
-        },
-        Effect::FetchMarketplaceList {
             agent_id,
             session_id: session_id.clone(),
         },
@@ -363,9 +412,73 @@ pub(super) fn extensions_modal_tab_fetches(
         },
         Effect::FetchSkillsList {
             agent_id,
-            session_id,
+            session_id: session_id.clone(),
         },
-    ]
+        Effect::FetchWorkflowsList {
+            agent_id,
+            session_id: session_id.clone(),
+        },
+    ];
+    push_marketplace_fetch(modal, &mut effects, agent_id, session_id);
+    effects
+}
+
+/// Push a marketplace list fetch, coalescing overlapping requests: while one
+/// is in flight, further requests fold into a single queued refetch that
+/// fires when the current response lands (see the field docs on
+/// `ExtensionsModalState`). The other tab fetches are cheap local reads and
+/// don't need this.
+pub(super) fn push_marketplace_fetch(
+    modal: &mut crate::views::extensions_modal::ExtensionsModalState,
+    effects: &mut Vec<Effect>,
+    agent_id: AgentId,
+    session_id: acp::SessionId,
+) {
+    if modal.marketplace_fetch_inflight {
+        modal.marketplace_refetch_queued = true;
+        return;
+    }
+    modal.marketplace_fetch_inflight = true;
+    effects.push(Effect::FetchMarketplaceList {
+        agent_id,
+        session_id,
+    });
+}
+
+/// Slash-command name for an extensions modal tab (toast when not on an agent).
+fn extensions_tab_slash_name(tab: crate::views::extensions_modal::ExtensionsTab) -> &'static str {
+    use crate::views::extensions_modal::ExtensionsTab;
+    match tab {
+        ExtensionsTab::Hooks => "hooks",
+        ExtensionsTab::Plugins => "plugins",
+        ExtensionsTab::Marketplace => "marketplace",
+        ExtensionsTab::Skills => "skills",
+        ExtensionsTab::McpServers => "mcps",
+    }
+}
+
+/// Slash-command name for the config-agents modal tab.
+fn config_agents_slash_name(tab: Option<crate::views::agents_modal::AgentsTab>) -> &'static str {
+    use crate::views::agents_modal::AgentsTab;
+    match tab {
+        Some(AgentsTab::Personas) => "personas",
+        Some(AgentsTab::Agents) | None => "config-agents",
+    }
+}
+
+/// Toast when a session-hosted modal is opened off the agent view.
+fn toast_session_only_slash(app: &mut AppView, name: &str) {
+    let msg = format!("/{name} only works in a session. Open an agent first.");
+    match app.active_view {
+        ActiveView::AgentDashboard => {
+            if let Some(d) = app.dashboard.as_mut() {
+                d.set_error_toast(&msg);
+            }
+        }
+        ActiveView::Welcome | ActiveView::Agent(_) => {
+            app.show_toast(&msg);
+        }
+    }
 }
 
 /// Open the hooks/plugins modal on the active agent view and fetch list data.
@@ -377,6 +490,7 @@ pub(super) fn dispatch_open_extensions_modal(
     use crate::views::extensions_modal::ExtensionsModalState;
 
     let ActiveView::Agent(id) = app.active_view else {
+        toast_session_only_slash(app, extensions_tab_slash_name(tab));
         return vec![];
     };
     let Some(agent) = app.agents.get_mut(&id) else {
@@ -394,13 +508,15 @@ pub(super) fn dispatch_open_extensions_modal(
     });
 
     let Some(session_id) = agent.session.session_id.clone() else {
-        // Tabs default to Loading; the fetch fires on SessionCreated. With a
-        // picker-deferred session nothing else would create one, so do it now.
+        // Tabs default to Loading; the fetch fires on SessionCreated.
         agent.pending_extensions_fetch = true;
-        return skip_picker_and_create_session(app, id);
+        return vec![];
     };
     agent.pending_extensions_fetch = false;
-    extensions_modal_tab_fetches(id, session_id)
+    let Some(modal) = agent.extensions_modal.as_mut() else {
+        return vec![];
+    };
+    extensions_modal_tab_fetches(modal, id, session_id)
 }
 
 /// Open the agents modal, showing all agent definitions.
@@ -411,6 +527,7 @@ pub(super) fn dispatch_open_config_agents_modal(
     use crate::views::agents_modal::{AgentsModalState, load_agent_toggle};
 
     let ActiveView::Agent(id) = app.active_view else {
+        toast_session_only_slash(app, config_agents_slash_name(initial_tab));
         return vec![];
     };
     let bundle = app.bundle_state.clone();
@@ -665,9 +782,18 @@ pub(super) fn handle_marketplace_list_loaded(
     result: Result<xai_hooks_plugins_types::MarketplaceListResponse, String>,
 ) -> Vec<Effect> {
     use crate::views::extensions_modal::TabDataState;
-    if let Some(agent) = app.agents.get_mut(&agent_id)
-        && let Some(ref mut modal) = agent.extensions_modal
-    {
+    let mut effects = Vec::new();
+    if let Some(agent) = app.agents.get_mut(&agent_id) {
+        let session_id = agent.session.session_id.clone();
+        let Some(ref mut modal) = agent.extensions_modal else {
+            return effects;
+        };
+        modal.marketplace_fetch_inflight = false;
+        if std::mem::take(&mut modal.marketplace_refetch_queued)
+            && let Some(session_id) = session_id
+        {
+            push_marketplace_fetch(modal, &mut effects, agent_id, session_id);
+        }
         modal.marketplace_data = match result {
             Ok(mut response) => {
                 response.sanitize();
@@ -676,21 +802,7 @@ pub(super) fn handle_marketplace_list_loaded(
                 // expand/collapse choices.
                 let is_first_load = matches!(modal.marketplace_data, TabDataState::Loading);
                 if is_first_load {
-                    // All sources start collapsed, so mark every plugin
-                    // index as collapsed using the same index math as
-                    // the renderer / navigation helpers.
-                    let mut idx = 0usize;
-                    for source in &response.sources {
-                        idx += 1; // header
-                        for _ in &source.plugins {
-                            modal.marketplace_collapsed.insert(idx);
-                            idx += 1;
-                        }
-                        // Empty / error sources still occupy at least 1 slot.
-                        if source.plugins.is_empty() {
-                            idx += 1;
-                        }
-                    }
+                    // All sources start collapsed.
                     modal.marketplace_collapsed_sources = (0..response.sources.len()).collect();
                 }
                 TabDataState::Loaded(response)
@@ -700,7 +812,7 @@ pub(super) fn handle_marketplace_list_loaded(
         modal.pending_action = None;
         modal.pending_entry_index = None;
     }
-    vec![]
+    effects
 }
 
 pub(super) fn handle_skills_toggle_done(
@@ -716,18 +828,15 @@ pub(super) fn handle_skills_toggle_done(
         modal.pending_entry_index = None;
         match result {
             Ok(skills) => {
-                let len = skills.len();
+                modal.seed_skills_groups_once(&skills);
                 modal.skills_data = TabDataState::Loaded(skills);
-                if len > 0 && modal.picker_state.selected >= len {
-                    modal.picker_state.selected = len.saturating_sub(1);
-                }
             }
             Err(e) => {
                 modal.modal_message = Some(crate::views::extensions_modal::ModalMessage::Error(e));
             }
         }
     }
-    // The toggle effect already called chutes.build/skills/refresh-baseline
+    // The toggle effect already called chutes.ai/skills/refresh-baseline
     // which triggers the session to reload skills and push an
     // AvailableCommandsUpdate notification with the updated list.
     vec![]

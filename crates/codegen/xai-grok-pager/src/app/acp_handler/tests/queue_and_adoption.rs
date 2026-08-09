@@ -2,7 +2,7 @@
     use super::*;
 
     /// The pager reconciles the authoritative shared prompt queue from the
-    /// `chutes.build/queue/changed` broadcast, and an empty broadcast clears it.
+    /// `chutes.ai/queue/changed` broadcast, and an empty broadcast clears it.
     #[test]
     fn queue_changed_reconciles_shared_queue() {
         let mut app = make_app_with_agent("sess-1");
@@ -328,6 +328,9 @@
             session_id: "sess-1".to_string(),
             entries: Vec::new(),
             running_prompt_id: Some("prompt-running".to_string()),
+            running_text: None,
+            running_kind: None,
+            running_combined_texts: None,
         };
         let raw = serde_json::value::to_raw_value(&shell_payload).unwrap();
         let json_str = raw.get().to_string();
@@ -412,10 +415,63 @@
         assert!(app.shared_prompt_queue("sess-1").is_none());
     }
 
+    #[test]
+    fn running_combined_texts_paints_one_bubble_per_segment() {
+        let mut app = make_app_with_agent("sess-1");
+        let id = AgentId(0);
+        let before = app.agents[&id].scrollback.len();
+        assert!(handle_queue_changed(
+            &queue_changed_running_ex(
+                "sess-1",
+                &[],
+                Some("p-combo"),
+                Some("first\n\nsecond"),
+                Some("prompt"),
+                Some(&["first", "second"]),
+            ),
+            &mut app,
+        ));
+        let agent = app.agents.get(&id).unwrap();
+        assert_eq!(agent.session.current_prompt_id.as_deref(), Some("p-combo"));
+        assert_eq!(agent.scrollback.len(), before + 2);
+        let texts: Vec<_> = (0..agent.scrollback.len())
+            .filter_map(|i| agent.scrollback.entry(i))
+            .filter_map(|e| match &e.block {
+                RenderBlock::UserPrompt(ub) => Some(ub.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["first", "second"]);
+    }
+
+    #[test]
+    fn running_text_without_segments_paints_single_bubble() {
+        let mut app = make_app_with_agent("sess-1");
+        let id = AgentId(0);
+        let before = app.agents[&id].scrollback.len();
+        assert!(handle_queue_changed(
+            &queue_changed_running_ex(
+                "sess-1",
+                &[],
+                Some("p-join"),
+                Some("first\n\nsecond"),
+                Some("prompt"),
+                None,
+            ),
+            &mut app,
+        ));
+        let agent = app.agents.get(&id).unwrap();
+        assert_eq!(agent.scrollback.len(), before + 1);
+        match &agent.scrollback.entry(before).unwrap().block {
+            RenderBlock::UserPrompt(ub) => assert_eq!(ub.text, "first\n\nsecond"),
+            other => panic!("expected user prompt, got {other:?}"),
+        }
+    }
+
     /// Regression: when the shell promotes
     /// a server-initiated / auto-wake prompt (synthetic id `task-completed-…`,
     /// injected when a background task finishes) to the running turn, it
-    /// broadcasts `chutes.build/queue/changed` with `runningPromptId` = that synthetic
+    /// broadcasts `chutes.ai/queue/changed` with `runningPromptId` = that synthetic
     /// id. The pager must NOT adopt it via the turn-start shim: those turns run
     /// inside the actor and emit no `prompt_complete` / `PromptResponse`, so
     /// `start_turn()` here would strand the pager on "Responding…" forever
@@ -986,6 +1042,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: Some("p-run".to_string()),
+                scheduler_background_loops: None,
             }),
             &mut app,
         );
@@ -1111,6 +1168,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: Some("task-completed-abc-123".to_string()),
+                scheduler_background_loops: None,
             }),
             &mut app,
         );
@@ -1151,6 +1209,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: Some(pid.to_string()),
+                scheduler_background_loops: None,
             }),
             &mut app,
         );
@@ -1188,6 +1247,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: Some("p-run".to_string()),
+                scheduler_background_loops: None,
             }),
             &mut app,
         );
@@ -1221,6 +1281,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: None,
+                scheduler_background_loops: None,
             }),
             &mut app,
         );
@@ -1430,8 +1491,12 @@
                 kind: "bash".to_string(),
                 text: "ls -la".to_string(),
                 position: 0,
+                combined_texts: None,
             }],
             running_prompt_id: None,
+            running_text: None,
+            running_kind: None,
+            running_combined_texts: None,
         };
         let json = serde_json::to_string(&shell).unwrap();
         let mirror: crate::app::prompt_queue::QueueChanged = serde_json::from_str(&json).unwrap();
@@ -1679,6 +1744,7 @@
             crate::app::acp_handler::PendingRunningAdoption {
                 prompt_id: "p1".to_string(),
                 text: Some("first".to_string()),
+                combined_texts: None,
                 kind: "prompt".to_string(),
                 turn_ended: false,
             },
@@ -1930,12 +1996,15 @@
         agent.last_applied_event_seq = Some(7);
         agent.last_applied_xai_event_seq = Some(8);
 
+        let epoch = agent.session_binding_epoch;
         agent.bind_session_id(acp::SessionId::new("sess-a"));
+        assert_eq!(agent.session_binding_epoch, epoch);
         assert_eq!(agent.last_seen_event_id.as_deref(), Some("sess-a-7"));
         assert_eq!(agent.last_applied_event_seq, Some(7));
         assert_eq!(agent.last_applied_xai_event_seq, Some(8));
 
         agent.bind_session_id(acp::SessionId::new("sess-b"));
+        assert_eq!(agent.session_binding_epoch, epoch.wrapping_add(1));
         assert_eq!(
             agent.session.session_id.as_ref().map(|s| s.0.as_ref()),
             Some("sess-b")
@@ -1946,6 +2015,18 @@
         );
         assert!(agent.last_applied_event_seq.is_none());
         assert!(agent.last_applied_xai_event_seq.is_none());
+    }
+
+    #[test]
+    fn session_binding_epoch_counts_bind_and_unbind_transitions() {
+        let mut agent = make_agent(None);
+        assert_eq!(agent.session_binding_epoch, 0);
+        agent.bind_session_id(acp::SessionId::new("a"));
+        assert_eq!(agent.session_binding_epoch, 1);
+        agent.unbind_session_id();
+        assert_eq!(agent.session_binding_epoch, 2);
+        agent.bind_session_id(acp::SessionId::new("a"));
+        assert_eq!(agent.session_binding_epoch, 3);
     }
 
     #[test]
@@ -2110,7 +2191,7 @@
     fn viewer_does_not_enter_turn_running_for_server_initiated_turn() {
         // A server-initiated / auto-wake turn (synthetic prompt id, e.g. a
         // background subagent or task completion: `task-completed-…`) runs inside
-        // the actor and emits NO `chutes.build/session/prompt_complete`. If a viewer
+        // the actor and emits NO `chutes.ai/session/prompt_complete`. If a viewer
         // entered TurnRunning for it, nothing would ever finish the turn and the
         // viewer would be stuck "Responding…" forever — exactly the bug where one
         // dashboard showed "Worked for" while the other was stuck responding.
@@ -2148,7 +2229,7 @@
     fn viewer_enters_turn_running_for_scheduler_fired_cron_turn() {
         // A `/loop` (scheduled-task) turn has a synthetic `scheduler-fired-…`
         // prompt id, but UNLIKE auto-wake turns it is client-driven via
-        // `MvpAgent::prompt()` and DOES emit `chutes.build/session/prompt_complete`. So a
+        // `MvpAgent::prompt()` and DOES emit `chutes.ai/session/prompt_complete`. So a
         // viewer MUST enter TurnRunning for it — otherwise the dashboard's
         // locally-tracked row for a running `/loop` session never shows Working.
         let mut app = make_app_with_agent("sess-view");
@@ -2190,7 +2271,7 @@
 
     #[test]
     fn viewer_prompt_complete_finishes_turn() {
-        // A viewer in TurnRunning receives chutes.build/session/prompt_complete for its
+        // A viewer in TurnRunning receives chutes.ai/session/prompt_complete for its
         // session -> finish_turn: state Idle, current_prompt_id cleared.
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
@@ -2326,7 +2407,10 @@
         let agent = app.agents.get(&AgentId(0)).unwrap();
         match last_session_event(&agent.scrollback) {
             Some(SessionEvent::TurnFailed { error, .. }) => {
-                assert_eq!(error, "boom", "agentResult must propagate into the marker")
+                assert_eq!(
+                    error, "Request failed \u{2014} boom. Try sending again.",
+                    "agentResult must propagate into the formatted marker"
+                )
             }
             other => panic!("expected TurnFailed marker, got {other:?}"),
         }
@@ -2450,6 +2534,7 @@
                 restore_summary: None,
                 restore_degree: None,
                 running_prompt_id: Some("p-run".to_string()),
+                scheduler_background_loops: None,
             }),
             &mut app,
         );

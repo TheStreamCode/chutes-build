@@ -87,7 +87,7 @@ pub enum PluginOrigin {
         /// Marketplace name from the `name@marketplace` JSON key, when present.
         marketplace: Option<String>,
     },
-    /// Grok's install registry (`~/.chutes-build/installed-plugins`).
+    /// Chutes Build's install registry (`~/.chutes-build/installed-plugins`).
     MarketplaceInstall {
         /// Marketplace source display name (None for direct git/local installs).
         source_name: Option<String>,
@@ -338,7 +338,7 @@ pub fn discover_plugins(
     }
 
     // 4-5. User plugins: $CHUTES_BUILD_HOME/plugins, legacy ~/.chutes-build/plugins, ~/.claude/plugins.
-    // Gate the chutes-build plugins dir on user_grok_home() so a project's .chutes-build/plugins
+    // Gate the grok plugins dir on user_grok_home() so a project's .chutes-build/plugins
     // is never scanned as user-global when no home resolves.
     let grok = xai_grok_config::user_grok_home();
     let plugin_dirs = user_plugin_dirs(dirs::home_dir().as_deref(), grok.as_deref());

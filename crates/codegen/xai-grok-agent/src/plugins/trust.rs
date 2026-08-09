@@ -163,26 +163,35 @@ impl TrustStore {
 
     /// Check whether a config-path plugin should be auto-trusted.
     ///
-    /// A `[plugins].paths` entry is auto-trusted if its canonicalized path
-    /// is under the user's home directory.  Otherwise it requires explicit
-    /// trust via `~/.chutes-build/trusted-plugins`.
+    /// A `[plugins].paths` entry is auto-trusted if its canonicalized path is
+    /// under the user's home directory and outside the system temp directory.
+    /// Otherwise it requires explicit trust via
+    /// `~/.chutes-build/trusted-plugins`.
     pub fn is_config_path_auto_trusted(plugin_root: &Path) -> bool {
         let Some(home) = dirs::home_dir() else {
             return false;
         };
-        Self::is_config_path_auto_trusted_in(plugin_root, &home)
+        Self::auto_trusted_under(plugin_root, &home, &std::env::temp_dir())
     }
 
-    /// [`is_config_path_auto_trusted`] against an explicit home directory.
+    /// The auto-trust policy, with both boundaries passed in.
     ///
-    /// Split out so the rule itself is testable: `dirs::home_dir` reads `$HOME`
-    /// only on Unix — on Windows it queries the shell for the real profile
-    /// path, so a test cannot redirect it with an environment variable.
-    pub(crate) fn is_config_path_auto_trusted_in(plugin_root: &Path, home: &Path) -> bool {
-        match dunce::canonicalize(plugin_root) {
-            Ok(canonical) => canonical.starts_with(home),
-            Err(_) => false,
+    /// Split from the lookup for two reasons. It is the only way to test the
+    /// policy on Windows, where `dirs::home_dir()` calls `known_folder_profile`
+    /// and cannot be redirected by setting `HOME`. And it makes the temp
+    /// exclusion visible: on Windows the system temp directory lives *under* the
+    /// home (`%USERPROFILE%\AppData\Local\Temp`), so "under home" alone
+    /// auto-trusted anything unpacked into temp — a directory the user never
+    /// chose to trust and any process running as them can rewrite.
+    fn auto_trusted_under(plugin_root: &Path, home: &Path, temp: &Path) -> bool {
+        let Ok(canonical) = dunce::canonicalize(plugin_root) else {
+            return false;
+        };
+        if !canonical.starts_with(home) {
+            return false;
         }
+        let temp_canonical = dunce::canonicalize(temp).unwrap_or_else(|_| temp.to_path_buf());
+        !canonical.starts_with(&temp_canonical)
     }
 
     // ── Internal ──────────────────────────────────────────────────────
@@ -327,30 +336,46 @@ mod tests {
     #[test]
     fn config_path_auto_trust_under_home() {
         // A path that cannot be canonicalized is never auto-trusted, whatever
-        // the real home happens to be.
+        // else is true. (The policy itself is covered below, with the home and
+        // temp boundaries passed in — the public entry point reads the real home
+        // through an API that cannot be redirected on Windows.)
         let result = TrustStore::is_config_path_auto_trusted(Path::new("/nonexistent/path"));
         assert!(!result);
     }
 
-    /// The under-home rule itself, against an injected home so it runs on every
-    /// platform (`dirs::home_dir` cannot be redirected on Windows).
+    /// The auto-trust policy, on every platform.
+    ///
+    /// The temp case is the one that mattered: on Windows the system temp
+    /// directory sits under the home, so "under home" alone auto-trusted anything
+    /// unpacked there. This test states the boundary in a way that holds
+    /// regardless of where the platform puts temp.
     #[test]
-    fn config_path_auto_trust_follows_the_injected_home() {
-        let home = tempfile::tempdir().unwrap();
-        let home_path = dunce::canonicalize(home.path()).unwrap();
-        let inside = home_path.join("plugins").join("demo");
-        std::fs::create_dir_all(&inside).unwrap();
-        assert!(
-            TrustStore::is_config_path_auto_trusted_in(&inside, &home_path),
-            "a plugin under the home directory is auto-trusted"
-        );
+    fn auto_trust_requires_home_and_excludes_temp() {
+        let root = tempfile::tempdir().unwrap();
+        let home = dunce::canonicalize(root.path()).unwrap();
+        let temp = home.join("AppData").join("Local").join("Temp");
 
-        let elsewhere = tempfile::tempdir().unwrap();
-        let outside = elsewhere.path().join("demo");
-        std::fs::create_dir_all(&outside).unwrap();
+        let inside = home.join("plugins").join("mine");
+        let unpacked = temp.join("downloaded-plugin");
+        let outside_root = tempfile::tempdir().unwrap();
+        let outside = dunce::canonicalize(outside_root.path())
+            .unwrap()
+            .join("elsewhere");
+        for dir in [&inside, &unpacked, &outside] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+
         assert!(
-            !TrustStore::is_config_path_auto_trusted_in(&outside, &home_path),
-            "a plugin outside the home directory requires explicit trust"
+            TrustStore::auto_trusted_under(&inside, &home, &temp),
+            "a plugin the user keeps in their home is auto-trusted"
+        );
+        assert!(
+            !TrustStore::auto_trusted_under(&unpacked, &home, &temp),
+            "temp is under the home on Windows; its contents are not trusted"
+        );
+        assert!(
+            !TrustStore::auto_trusted_under(&outside, &home, &temp),
+            "outside the home requires explicit trust"
         );
     }
 

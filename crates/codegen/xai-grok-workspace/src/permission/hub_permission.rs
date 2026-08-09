@@ -152,10 +152,12 @@ fn describe_access(access: &AccessKind) -> String {
 /// chat's `PermissionRequestPayload` parser: `tool_call_id`, `tool_name`,
 /// `description`, `scope`, and the bash/edit context.
 pub(crate) fn build_permission_payload(access: &AccessKind, tool_call_id: &str) -> Value {
-    let mut payload = serde_json::json!(
-        { "tool_call_id" : tool_call_id, "tool_name" : tool_name_for_access(access),
-        "description" : describe_access(access), "scope" : scope_for_access(access), }
-    );
+    let mut payload = serde_json::json!({
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name_for_access(access),
+        "description": describe_access(access),
+        "scope": scope_for_access(access),
+    });
     if let Some(map) = payload.as_object_mut() {
         match access {
             AccessKind::Bash(command) => {
@@ -195,6 +197,7 @@ pub(crate) fn reply_to_outcome(reply: &Value) -> PromptOutcome {
         "approve" => PromptOutcome::AllowOnce,
         "always_approve" => match scope_kind_value(reply) {
             Some(("bash_command", Some(value))) => PromptOutcome::AllowAlwaysBashCommand(value),
+            Some(("bash_glob", Some(value))) => PromptOutcome::AllowAlwaysBashGlob(value),
             Some(("server_prefix", Some(value))) => PromptOutcome::AllowAlwaysMcpServer(value),
             Some(("domain", Some(value))) => PromptOutcome::AllowAlwaysDomain(value),
             _ => PromptOutcome::AllowAlways,
@@ -278,6 +281,7 @@ pub fn prompt_outcome_allows(outcome: &PromptOutcome) -> bool {
             | PromptOutcome::AllowAlways
             | PromptOutcome::AllowEditsForSession
             | PromptOutcome::AllowAlwaysBashCommand(_)
+            | PromptOutcome::AllowAlwaysBashGlob(_)
             | PromptOutcome::AllowAlwaysDomain(_)
             | PromptOutcome::AllowAlwaysMcpTool(_)
             | PromptOutcome::AllowAlwaysMcpServer(_)
@@ -301,7 +305,7 @@ pub async fn request_permission_via_hub(
             other => other,
         },
         Err(e) => {
-            tracing::error!(error = % e, "hub permission request failed; rejecting");
+            tracing::error!(error = %e, "hub permission request failed; rejecting");
             PromptOutcome::Error(format!("hub permission request failed: {e}"))
         }
     }
@@ -359,20 +363,19 @@ mod tests {
     #[test]
     fn reply_outcomes_map_to_prompt_outcomes() {
         assert!(matches!(
-            reply_to_outcome(&serde_json::json!({ "outcome" : "approve" })),
+            reply_to_outcome(&serde_json::json!({ "outcome": "approve" })),
             PromptOutcome::AllowOnce
         ));
         assert!(matches!(
-            reply_to_outcome(&serde_json::json!({ "outcome" : "reject" })),
+            reply_to_outcome(&serde_json::json!({ "outcome": "reject" })),
             PromptOutcome::RejectOnce
         ));
         assert!(matches!(
-            reply_to_outcome(&serde_json::json!({ "outcome" : "cancelled" })),
+            reply_to_outcome(&serde_json::json!({ "outcome": "cancelled" })),
             PromptOutcome::Cancelled
         ));
         assert!(matches!(
-            reply_to_outcome(&serde_json::json!({ "outcome" : "unspecified"
-            })),
+            reply_to_outcome(&serde_json::json!({ "outcome": "unspecified" })),
             PromptOutcome::RejectOnce
         ));
         assert!(matches!(
@@ -382,9 +385,8 @@ mod tests {
     }
     #[test]
     fn reject_with_followup_routes_message_to_model() {
-        let reply = serde_json::json!(
-            { "outcome" : "reject", "followup_message" : "use cargo instead" }
-        );
+        let reply =
+            serde_json::json!({ "outcome": "reject", "followup_message": "use cargo instead" });
         match reply_to_outcome(&reply) {
             PromptOutcome::FollowupMessage(m) => assert_eq!(m, "use cargo instead"),
             other => panic!("expected FollowupMessage, got {other:?}"),
@@ -392,34 +394,33 @@ mod tests {
     }
     #[test]
     fn always_approve_maps_scope_to_persistent_outcome() {
-        let bash = serde_json::json!(
-            { "outcome" : "always_approve", "scope" : { "kind" : "bash_command", "value"
-            : "cargo build" }, }
-        );
+        let bash = serde_json::json!({
+            "outcome": "always_approve",
+            "scope": { "kind": "bash_command", "value": "cargo build" },
+        });
         match reply_to_outcome(&bash) {
             PromptOutcome::AllowAlwaysBashCommand(v) => assert_eq!(v, "cargo build"),
             other => panic!("expected AllowAlwaysBashCommand, got {other:?}"),
         }
-        let server = serde_json::json!(
-            { "outcome" : "always_approve", "scope" : { "kind" : "server_prefix", "value"
-            : "linear" }, }
-        );
+        let server = serde_json::json!({
+            "outcome": "always_approve",
+            "scope": { "kind": "server_prefix", "value": "linear" },
+        });
         match reply_to_outcome(&server) {
             PromptOutcome::AllowAlwaysMcpServer(v) => assert_eq!(v, "linear"),
             other => panic!("expected AllowAlwaysMcpServer, got {other:?}"),
         }
         assert!(matches!(
-            reply_to_outcome(&serde_json::json!({ "outcome" : "always_approve"
-            })),
+            reply_to_outcome(&serde_json::json!({ "outcome": "always_approve" })),
             PromptOutcome::AllowAlways
         ));
     }
     #[test]
     fn always_reject_with_bash_scope_persists_the_denied_prefix() {
-        let reply = serde_json::json!(
-            { "outcome" : "always_reject", "scope" : { "kind" : "bash_command", "value" :
-            "curl" }, }
-        );
+        let reply = serde_json::json!({
+            "outcome": "always_reject",
+            "scope": { "kind": "bash_command", "value": "curl" },
+        });
         match reply_to_outcome(&reply) {
             PromptOutcome::RejectAlwaysBashCommand(v) => assert_eq!(v, "curl"),
             other => panic!("expected RejectAlwaysBashCommand, got {other:?}"),
@@ -439,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn request_sends_payload_and_decodes_reply() {
         let transport = StubTransport {
-            reply: Ok(serde_json::json!({ "outcome" : "approve" })),
+            reply: Ok(serde_json::json!({ "outcome": "approve" })),
             seen: Mutex::new(None),
         };
         let outcome =
@@ -468,14 +469,14 @@ mod tests {
     #[tokio::test]
     async fn edit_always_approve_maps_to_session_scope() {
         let transport = StubTransport {
-            reply: Ok(serde_json::json!({ "outcome" : "always_approve" })),
+            reply: Ok(serde_json::json!({ "outcome": "always_approve" })),
             seen: Mutex::new(None),
         };
         let outcome =
             request_permission_via_hub(&transport, &AccessKind::Edit("a.rs".into()), "tc-9").await;
         assert!(matches!(outcome, PromptOutcome::AllowEditsForSession));
         let transport = StubTransport {
-            reply: Ok(serde_json::json!({ "outcome" : "always_approve" })),
+            reply: Ok(serde_json::json!({ "outcome": "always_approve" })),
             seen: Mutex::new(None),
         };
         let outcome = request_permission_via_hub(

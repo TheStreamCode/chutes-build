@@ -9,7 +9,7 @@
 
 /// Default auto-compact threshold (% of context window) when no other source
 /// (env var, user config, remote per-model/global flags) sets it. Shared by
-/// grok-build and Grok chat (~85% trigger on both sides).
+/// grok-build and Chutes Build chat (~85% trigger on both sides).
 pub const DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT: u8 = 85;
 
 /// Minimum character count for a cleaned summary seed.

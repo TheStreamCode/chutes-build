@@ -55,6 +55,8 @@ pub(super) enum OidcError {
     AudienceMismatch,
     #[error("OIDC id_token nonce mismatch")]
     NonceMismatch,
+    #[error("OIDC token response missing id_token")]
+    MissingIdToken,
     #[error("OIDC id_token validation failed: {0}")]
     IdTokenValidationFailed(String),
     #[error(
@@ -92,7 +94,7 @@ pub(crate) fn with_alpha_test_key(
     let _ = url;
     builder
 }
-pub fn is_configured(config: &GrokComConfig) -> bool {
+pub(crate) fn is_configured(config: &GrokComConfig) -> bool {
     config.oidc.is_some()
 }
 /// Peek at the unverified access token JWT to extract the `principal_type`
@@ -192,7 +194,8 @@ pub(crate) fn enforce_login_principal(
         format!("one of teams: {}", allowed.join(", "))
     };
     tracing::warn!(
-        expected = % expected, actual = ? actual,
+        expected = %expected,
+        actual = ?actual,
         "OIDC: login principal does not satisfy required policy; rejecting"
     );
     Err(anyhow::Error::new(OidcError::PinnedPrincipalMismatch {
@@ -301,7 +304,7 @@ fn discovery_retry_policy() -> backon::ExponentialBuilder {
 }
 async fn discover_once(issuer_key: &str) -> anyhow::Result<Discovery> {
     let url = format!("{issuer_key}/.well-known/openid-configuration");
-    tracing::debug!(url = % url, "OIDC: fetching discovery document");
+    tracing::debug!(url = %url, "OIDC: fetching discovery document");
     let resp = with_alpha_test_key(
         crate::http::shared_client()
             .get(&url)
@@ -318,9 +321,11 @@ async fn discover_once(issuer_key: &str) -> anyhow::Result<Discovery> {
     }
     let doc: Discovery = resp.json().await?;
     tracing::debug!(
-        authorization_endpoint = % doc.authorization_endpoint, token_endpoint = % doc
-        .token_endpoint, jwks_uri = ? doc.jwks_uri, id_token_algs = ? doc
-        .id_token_signing_alg_values_supported, "OIDC: discovery complete"
+        authorization_endpoint = %doc.authorization_endpoint,
+        token_endpoint = %doc.token_endpoint,
+        jwks_uri = ?doc.jwks_uri,
+        id_token_algs = ?doc.id_token_signing_alg_values_supported,
+        "OIDC: discovery complete"
     );
     Ok(doc)
 }
@@ -405,7 +410,8 @@ pub(super) async fn exchange_code(
     client_secret: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
     tracing::debug!(
-        token_endpoint = % token_endpoint, has_client_secret = client_secret.is_some(),
+        token_endpoint = %token_endpoint,
+        has_client_secret = client_secret.is_some(),
         "OIDC: exchanging code for tokens"
     );
     let mut form = vec![
@@ -415,6 +421,7 @@ pub(super) async fn exchange_code(
         ("client_id", client_id),
         ("code_verifier", code_verifier),
     ];
+    // Only for a confidential client; the built-in app has no secret.
     if let Some(secret) = client_secret {
         form.push(("client_secret", secret));
     }
@@ -477,9 +484,12 @@ pub(super) async fn refresh_tokens(
 ) -> anyhow::Result<TokenResponse> {
     use backon::Retryable;
     tracing::debug!(
-        token_endpoint = % token_endpoint, principal_type = ? principal_type,
-        principal_id = ? principal_id, "OIDC: refreshing token"
+        token_endpoint = %token_endpoint,
+        principal_type = ?principal_type,
+        principal_id = ?principal_id,
+        "OIDC: refreshing token"
     );
+    let probe = super::refresh::SuspendProbe::start();
     (|| {
         refresh_tokens_once(
             token_endpoint,
@@ -491,7 +501,23 @@ pub(super) async fn refresh_tokens(
         )
     })
     .retry(refresh_retry_policy())
-    .when(is_transient_refresh_error)
+    .when(move |err: &anyhow::Error| {
+        if !is_transient_refresh_error(err) {
+            return false;
+        }
+        if probe.straddled_past_grace() {
+            crate::unified_log::warn(
+                "auth.refresh.retry_suppressed_suspend",
+                None,
+                Some(serde_json::json!({
+                    "suspended_ms": probe.suspended_ms(),
+                    "error": err.to_string(),
+                })),
+            );
+            return false;
+        }
+        true
+    })
     .await
 }
 /// One unretried POST to `token_endpoint`. Errors carry the typed
@@ -535,9 +561,12 @@ async fn refresh_tokens_once(
             .ok()
             .and_then(|v| v.get("error")?.as_str().map(str::to_owned));
         tracing::warn!(
-            http_status = status, oauth2_error = ? error_code, rt_prefix = crate
-            ::auth::token_suffix(refresh_token), client_id = % client_id, principal_type
-            = ? principal_type, "OIDC: token refresh HTTP error"
+            http_status = status,
+            oauth2_error = ?error_code,
+            rt_prefix = xai_grok_auth::bearer_suffix(refresh_token),
+            client_id = %client_id,
+            principal_type = ?principal_type,
+            "OIDC: token refresh HTTP error"
         );
         return Err(anyhow::Error::new(OidcError::TokenRefreshHttp {
             status,
@@ -576,9 +605,7 @@ pub(super) fn aud_matches(aud: &serde_json::Value, expected: &str) -> bool {
 }
 pub(super) fn validate_state(expected: &str, received: &str) -> anyhow::Result<()> {
     if received != expected {
-        tracing::warn!(
-            expected = % expected, received = % received, "OIDC: state mismatch"
-        );
+        tracing::warn!(expected = %expected, received = %received, "OIDC: state mismatch");
         return Err(anyhow::Error::new(OidcError::StateMismatch));
     }
     Ok(())
@@ -699,7 +726,7 @@ pub(super) async fn validate_and_extract_user_info(
         organization_role: None,
         user_blocked_reason: None,
         team_blocked_reasons: vec![],
-        coding_data_retention_opt_out: false,
+        coding_data_retention_opt_out: crate::auth::default_coding_data_retention_opt_out(),
     })
 }
 pub(super) async fn extract_user_info(
@@ -730,38 +757,10 @@ pub(super) async fn extract_user_info(
             organization_role: None,
             user_blocked_reason: None,
             team_blocked_reasons: vec![],
-            coding_data_retention_opt_out: false,
+            coding_data_retention_opt_out: crate::auth::default_coding_data_retention_opt_out(),
         });
     }
-    let Some(token) = id_token else {
-        // Some OAuth2 providers behind this flow (Chutes' own IDP included)
-        // are not full OIDC providers and never issue an id_token -- their
-        // scope system has no `openid` concept, so there is nothing to
-        // validate. Proceed with an empty identity rather than failing the
-        // login outright; `recovery.rs` already treats an empty `user_id` as
-        // "no identity yet" and the account enrichment call (see
-        // `auth::manager::enrichment`) fills in the real email/name
-        // afterward. This mirrors the device-code login path, which has
-        // never required an id_token for personal (non-Team) logins.
-        return Ok(OidcUserInfo {
-            user_id: String::new(),
-            email: None,
-            first_name: None,
-            last_name: None,
-            profile_image_asset_id: None,
-            principal_type: principal_type.map(ToOwned::to_owned),
-            principal_id: principal_id.map(ToOwned::to_owned),
-            team_id: fallback_team_id,
-            team_name: None,
-            team_role: None,
-            organization_id: None,
-            organization_name: None,
-            organization_role: None,
-            user_blocked_reason: None,
-            team_blocked_reasons: vec![],
-            coding_data_retention_opt_out: false,
-        });
-    };
+    let token = id_token.ok_or_else(|| anyhow::Error::new(OidcError::MissingIdToken))?;
     validate_and_extract_user_info(
         token,
         discovery,
@@ -841,14 +840,14 @@ mod tests {
     #[test]
     fn authorize_url_includes_team_principal_params() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.example.com".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
             client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.example.com".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: Some("Team".into()),
@@ -857,8 +856,8 @@ mod tests {
             client_secret: None,
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.chutes.build/authorize".into(),
-            token_endpoint: "https://auth.chutes.build/token".into(),
+            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
+            token_endpoint: "https://auth.chutes.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -887,14 +886,14 @@ mod tests {
     #[test]
     fn authorize_url_uses_oauth2_referrer_override_once() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.example.com".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
             client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.example.com".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: None,
@@ -903,8 +902,8 @@ mod tests {
             client_secret: None,
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.chutes.build/authorize".into(),
-            token_endpoint: "https://auth.chutes.build/token".into(),
+            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
+            token_endpoint: "https://auth.chutes.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -957,35 +956,6 @@ mod tests {
         assert_eq!(user_info.principal_id.as_deref(), Some("team-123"));
         assert_eq!(user_info.team_id.as_deref(), Some("team-123"));
         assert!(user_info.email.is_none());
-    }
-    /// Regression: Chutes' own IDP has no `openid` scope and never issues an
-    /// id_token, even for a personal (non-Team) login. This must not fail
-    /// the login -- real identity comes from the post-login account
-    /// enrichment call instead.
-    #[tokio::test]
-    async fn extract_user_info_allows_personal_login_without_id_token() {
-        let discovery = Discovery {
-            authorization_endpoint: "https://api.chutes.ai/authorize".into(),
-            token_endpoint: "https://api.chutes.ai/token".into(),
-            jwks_uri: Some("https://api.chutes.ai/jwks".into()),
-            id_token_signing_alg_values_supported: Some(vec!["RS256".into()]),
-        };
-        let user_info = extract_user_info(
-            None,
-            &discovery,
-            "https://api.chutes.ai",
-            "test-client",
-            "nonce123",
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("personal login should not require id_token");
-        assert_eq!(user_info.user_id, "");
-        assert!(user_info.email.is_none());
-        assert!(user_info.principal_type.is_none());
-        assert!(user_info.team_id.is_none());
     }
     #[test]
     fn validate_state_rejects_mismatch() {
@@ -1065,23 +1035,31 @@ mod tests {
             )
             .unwrap()
         }
-        let team_jwt = make_jwt(serde_json::json!(
-            { "sub" : "user-42", "iss" : "https://auth.example.com", "aud" : "test-client",
-            "exp" : 9999999999u64, "iat" : 1000000000u64, "scope" :
-            "offline_access grok-cli:access api:access", "principal_type" : "Team",
-            "principal_id" : "team-abc-123", "client_id" : "test-client", "jti" :
-            "token-1", }
-        ));
+        let team_jwt = make_jwt(serde_json::json!({
+            "sub": "user-42",
+            "iss": "https://auth.chutes.ai",
+            "aud": "test-client",
+            "exp": 9999999999u64,
+            "iat": 1000000000u64,
+            "scope": "offline_access grok-cli:access api:access",
+            "principal_type": "Team",
+            "principal_id": "team-abc-123",
+            "client_id": "test-client",
+            "jti": "token-1",
+        }));
         let (pt, pid, tid) = peek_access_token_principal(&team_jwt).expect("team principal");
         assert_eq!(pt, "Team");
         assert_eq!(pid, "team-abc-123");
         assert_eq!(tid, None);
         assert!(peek_access_token_principal("not-a-jwt-token").is_none());
         assert!(peek_access_token_principal("").is_none());
-        let no_principal = make_jwt(serde_json::json!(
-            { "sub" : "user-42", "iss" : "https://auth.example.com", "aud" : "test-client",
-            "exp" : 9999999999u64, "iat" : 1000000000u64, }
-        ));
+        let no_principal = make_jwt(serde_json::json!({
+            "sub": "user-42",
+            "iss": "https://auth.chutes.ai",
+            "aud": "test-client",
+            "exp": 9999999999u64,
+            "iat": 1000000000u64,
+        }));
         assert!(peek_access_token_principal(&no_principal).is_none());
     }
     /// `peek_access_token_principal_id` extracts the id even when
@@ -1098,7 +1076,7 @@ mod tests {
             )
             .unwrap()
         }
-        let id_only = make_jwt(serde_json::json!({ "principal_id" : "team-abc", "sub" : "u" }));
+        let id_only = make_jwt(serde_json::json!({ "principal_id": "team-abc", "sub": "u" }));
         assert_eq!(
             peek_access_token_principal_id(&id_only).as_deref(),
             Some("team-abc"),
@@ -1107,7 +1085,7 @@ mod tests {
             peek_access_token_principal(&id_only).is_none(),
             "the strict peek still needs principal_type",
         );
-        let none = make_jwt(serde_json::json!({ "sub" : "u" }));
+        let none = make_jwt(serde_json::json!({ "sub": "u" }));
         assert!(peek_access_token_principal_id(&none).is_none());
         assert!(peek_access_token_principal_id("not-a-jwt").is_none());
     }
@@ -1185,10 +1163,10 @@ mod tests {
                 let counter = hits_for_handler.clone();
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
-                    axum::Json(serde_json::json!(
-                        { "authorization_endpoint" : format!("{b}/authorize"),
-                        "token_endpoint" : format!("{b}/token"), }
-                    ))
+                    axum::Json(serde_json::json!({
+                        "authorization_endpoint": format!("{b}/authorize"),
+                        "token_endpoint": format!("{b}/token"),
+                    }))
                 }
             }),
         );
@@ -1243,50 +1221,6 @@ mod tests {
             hits.load(Ordering::SeqCst),
             2,
             "first attempt fails 503, second succeeds — exactly 2 hits"
-        );
-        server.abort();
-    }
-
-    #[tokio::test]
-    async fn refresh_tokens_sends_configured_client_secret() {
-        let received = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let received_for_handler = received.clone();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let app = axum::Router::new().route(
-            "/token",
-            axum::routing::post(move |body: axum::body::Bytes| {
-                let received = received_for_handler.clone();
-                async move {
-                    *received.lock().unwrap() = String::from_utf8_lossy(&body).into_owned();
-                    (
-                        axum::http::StatusCode::OK,
-                        r#"{"access_token":"new-at","expires_in":3600}"#,
-                    )
-                }
-            }),
-        );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let token_endpoint = format!("http://127.0.0.1:{port}/token");
-
-        refresh_tokens(
-            &token_endpoint,
-            "rt",
-            "client",
-            Some("client secret"),
-            None,
-            None,
-        )
-        .await
-        .expect("refresh should succeed");
-
-        let body = received.lock().unwrap().clone();
-        let fields = url::form_urlencoded::parse(body.as_bytes())
-            .into_owned()
-            .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(
-            fields.get("client_secret").map(String::as_str),
-            Some("client secret")
         );
         server.abort();
     }

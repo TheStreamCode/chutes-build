@@ -1,4 +1,4 @@
-//! `GrokBuildConcise` namespace — concise variants of core GrokBuild tools.
+//! `GrokBuildConcise` namespace — concise variants of core ChutesBuild tools.
 //!
 //! These tools share implementation with `grok_build` via `pub(crate)` helpers
 //! but produce concise output (compact line numbers, shorter messages,

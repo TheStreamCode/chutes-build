@@ -1,6 +1,15 @@
-//! Speech-to-Text language codes used by the optional compatible transport.
+//! Chutes Build Speech-to-Text language codes.
 //!
-//! The transport sends a concrete language code. Use
+//! Source of truth for the `language` query/form parameter on
+//! `https://api.chutes.ai/v1/stt` and `wss://api.chutes.ai/v1/stt`.
+//!
+//! Official catalog (25 languages):
+//! <https://docs.chutes.ai/developers/model-capabilities/audio/speech-to-text#supported-languages>
+//!
+//! Per the docs, the model can transcribe these languages regardless of the
+//! parameter; setting `language` enables Inverse Text Normalization (numbers,
+//! currencies, units → written form) for that language. The STT API does **not**
+//! accept `auto` (unlike TTS) — clients must send a concrete code. Use
 //! [`language_for_api`] to resolve a stored preference (including the client-only
 //! `auto` sentinel) before connecting.
 
@@ -20,7 +29,10 @@ pub const STT_LANGUAGE_AUTO: &str = "auto";
 /// Default STT language when unset or unrecognized.
 pub const STT_LANGUAGE_DEFAULT: &str = "en";
 
-/// Compatibility language list, sorted by English name.
+/// Official Chutes Build STT languages (docs.chutes.ai), sorted by English name.
+///
+/// Keep this list in lockstep with the public docs. Adding a code that the API
+/// does not list will not break transcription, but ITN formatting may not apply.
 pub const STT_LANGUAGES: &[SttLanguage] = &[
     SttLanguage {
         code: "ar",
@@ -223,7 +235,10 @@ mod tests {
     fn catalog_matches_public_docs_exactly() {
         let ours: HashSet<&str> = STT_LANGUAGES.iter().map(|l| l.code).collect();
         let docs: HashSet<&str> = DOCS_CODES.iter().copied().collect();
-        assert_eq!(ours, docs, "STT_LANGUAGES must remain sorted and unique");
+        assert_eq!(
+            ours, docs,
+            "STT_LANGUAGES drifted from docs.chutes.ai supported languages"
+        );
     }
 
     #[test]

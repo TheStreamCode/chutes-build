@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 // exist only to migrate prior grants out of the legacy file.
 
 /// Path to the legacy project-hook trust file
-/// (`<user_grok_home>/trusted-hook-projects`), or `None` when no user grok home
+/// (`<user_grok_home>/trusted-hook-projects`), or `None` when no user Chutes Build home
 /// resolves. Retained only for the one-time migration into folder-trust.
 pub fn legacy_trust_file_path() -> Option<PathBuf> {
     Some(xai_grok_config::user_grok_home()?.join("trusted-hook-projects"))
@@ -59,7 +59,7 @@ fn is_hook_disabled_with_file(hook_name: &str, file: &Path) -> bool {
 /// Disable a hook by name. Adds to .
 pub fn disable_hook(hook_name: &str) -> Result<(), String> {
     let file = disabled_hooks_file_path()
-        .ok_or_else(|| "no user grok home (set $CHUTES_BUILD_HOME or $HOME)".to_string())?;
+        .ok_or_else(|| "no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)".to_string())?;
     disable_hook_with_file(hook_name, &file)
 }
 

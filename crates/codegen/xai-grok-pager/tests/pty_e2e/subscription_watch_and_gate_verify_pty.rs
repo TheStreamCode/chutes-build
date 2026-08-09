@@ -181,22 +181,21 @@ fn seed_fake_oauth_local_issuer(content: &ContentController, user: &str) {
 fn spawn_subscription_pager(
     content: &ContentController,
     oauth_user: &str,
-    extra_env: &[(&str, &str)],
+    extra_env: &[EnvOp<'_>],
 ) -> PtyHarness {
     seed_fake_oauth_local_issuer(content, oauth_user);
-    let env = oauth_env_for_pager(content);
-    let mut env_refs: Vec<(&str, &str)> =
-        env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    env_refs.push(("CHUTES_BUILD_LOCAL_AUTH", "1"));
-    env_refs.extend_from_slice(extra_env);
+    let mut overrides = Vec::from(oauth_credential_ops());
+    overrides.push(EnvOp::set("CHUTES_BUILD_LOCAL_AUTH", "1"));
+    overrides.extend_from_slice(extra_env);
 
     let binary = pager_binary().expect("resolve pager binary");
-    PtyHarness::new_in_dir(
+    PtyHarness::spawn_with_content_env_ops_in_dir(
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
+        content,
         &[],
-        &env_refs,
+        &overrides,
         Some(content.home()),
     )
     .expect("spawn pager with subscription session auth")
@@ -207,7 +206,7 @@ fn spawn_subscription_pager(
 fn spawn_subscription_session(
     content: &ContentController,
     oauth_user: &str,
-    extra_env: &[(&str, &str)],
+    extra_env: &[EnvOp<'_>],
 ) -> PtyHarness {
     let mut harness = spawn_subscription_pager(content, oauth_user, extra_env);
     harness
@@ -241,7 +240,10 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     let mut harness = spawn_subscription_session(
         &content,
         "pty-subwatch",
-        &[("CHUTES_BUILD_SUBSCRIPTION_WATCH_INTERVAL_SECS", "1")],
+        &[EnvOp::set(
+            "CHUTES_BUILD_SUBSCRIPTION_WATCH_INTERVAL_SECS",
+            "1",
+        )],
     );
 
     // While free, the watch fires repeatedly at the (test-shrunk) cadence.
@@ -328,10 +330,11 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
     let content = ContentController::start().await.expect("start content");
-    // Gated settings (no allow_access), free user (no subscriptionTier).
+    // Explicit deny + gate copy. Absent allow_access now fails open.
     content.server().set_settings(json!({
+        "allow_access": false,
         "gate_message": GATE_MSG,
-        "gate_url": "https://chutes.ai/pricing",
+        "gate_url": "https://chutes.ai/supergrok?referrer=chutes-build",
         "gate_label": "Subscribe",
     }));
 
@@ -388,7 +391,10 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
     let mut harness = spawn_subscription_session(
         &content,
         "pty-subgate-paid",
-        &[("CHUTES_BUILD_SUBSCRIPTION_WATCH_INTERVAL_SECS", "0")],
+        &[EnvOp::set(
+            "CHUTES_BUILD_SUBSCRIPTION_WATCH_INTERVAL_SECS",
+            "0",
+        )],
     );
 
     // Let startup fetches fully settle so the scripted one-shot below can
@@ -399,7 +405,10 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
     // One stale gated snapshot: the "remote settings stale moment".
     content.enqueue_response(
         "/v1/settings",
-        ScriptedResponse::json(200, json!({ "gate_message": GATE_MSG })),
+        ScriptedResponse::json(
+            200,
+            json!({ "allow_access": false, "gate_message": GATE_MSG }),
+        ),
     );
     harness.inject_keys(b"/new\r").expect("run /new");
 

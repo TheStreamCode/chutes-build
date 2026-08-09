@@ -18,7 +18,7 @@ async fn reasoning_efforts_from_config_toml_menu() {
     // Seed `~/.chutes-build/config.toml` with a per-model reasoning-effort menu.
     let grok_home = content.home().join(".chutes-build");
     std::fs::create_dir_all(&grok_home).expect("create .chutes-build");
-    // Quote the dotted model id: bare `[model.chutes-build-4.5]` is TOML key-path syntax (model.chutes-build-4.5), not the id "grok-4.5".
+    // Quote the dotted model id: bare `[model.grok-4.5]` is TOML key-path syntax (model.grok-4.5), not the id "grok-4.5".
     std::fs::write(
         grok_home.join("config.toml"),
         "[model.\"grok-4.5\"]\nreasoning_efforts = [{ value = \"high\", label = \"ConfigHigh\" }]\n",
@@ -45,7 +45,7 @@ async fn reasoning_efforts_from_config_toml_menu() {
         .wait_for_text("ConfigHigh", Duration::from_secs(10))
         .expect("config-driven label in /effort dropdown");
     assert!(
-        !harness.contains_text("Maximum reasoning"),
+        !harness.contains_text("Extended reasoning"),
         "config list must replace the built-in rows\nscreen:\n{}",
         harness.screen_contents()
     );

@@ -47,7 +47,7 @@ impl RepoDirChain {
             .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()))
             // Home-is-a-git-repo (dotfiles in $HOME): a discovery that walks up
             // to $HOME must NOT treat the whole home subtree as one repo, or
-            // home-level `.chutes-build`/`.mcp.json`/plugins would look repo-local. Drop
+            // home-level `.grok`/`.mcp.json`/plugins would look repo-local. Drop
             // it so cwd is handled as no-repo (probe cwd only). Home is compared
             // canonically to match the symlink handling in the walk below.
             .filter(|root| !is_home_dir(root));
@@ -85,20 +85,19 @@ impl RepoDirChain {
 /// from `xai-grok-workspace`, which depends on THIS crate) to keep the dep edge
 /// one-way; backs the home-is-dotfiles guard in [`RepoDirChain::resolve`].
 fn is_home_dir(path: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
-    is_home_dir_in(path, &home)
+    dirs::home_dir().is_some_and(|home| paths_are_same_dir(path, &home))
 }
 
-/// [`is_home_dir`] against an explicit home directory.
+/// The comparison behind [`is_home_dir`], with home passed in.
 ///
-/// Split out so the comparison is testable: `dirs::home_dir` reads `$HOME` only
-/// on Unix — on Windows it queries the shell for the real profile path, so a
-/// test cannot redirect it with an environment variable.
-fn is_home_dir_in(path: &Path, home: &Path) -> bool {
+/// Split out because `dirs::home_dir()` is not redirectable on Windows — it calls
+/// the `known_folder_profile` API rather than reading `HOME`, so a test that sets
+/// the variable proves nothing there. This half carries the logic worth testing
+/// (canonicalization, so a symlinked home still matches) and can be tested
+/// anywhere; the one line above is the part no test can reach.
+fn paths_are_same_dir(a: &Path, b: &Path) -> bool {
     let canon = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    canon(path) == canon(home)
+    canon(a) == canon(b)
 }
 
 /// Existing `<dir>/<subdir>` directories under each dir of a precomputed
@@ -190,19 +189,19 @@ mod tests {
         }
     }
 
-    /// Unix-only: the guard resolves the home through `dirs::home_dir`, which
-    /// reads `$HOME` only on Unix — on Windows it queries the real user
-    /// profile, so setting the variable cannot stage a fake home. The
-    /// comparison itself is covered on every platform by
-    /// `home_dir_guard_matches_the_injected_home`.
+    /// Home-is-a-git-repo (dotfiles in `$HOME`): discovery walks up to home, but
+    /// the guard drops that root so a subdir resolves as no-repo (probe cwd only)
+    /// instead of spanning the whole home subtree.
+    ///
+    /// Unix only, and not for lack of trying: the guard asks `dirs::home_dir()`,
+    /// which on Windows calls `known_folder_profile` rather than reading `HOME`,
+    /// so no environment guard can point it at a temp directory. The comparison
+    /// the guard actually performs is covered on every platform by
+    /// `home_guard_compares_canonical_paths` below.
     #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn resolve_treats_home_git_repo_as_no_repo() {
-        // Home-is-a-git-repo (dotfiles in $HOME): discovery walks up to $HOME,
-        // but the guard drops that root so a subdir resolves as no-repo (probe
-        // cwd only) instead of spanning the whole home subtree. $HOME is guarded
-        // (dirs::home_dir reads it) and canonicalized to match the guard.
         let tmp = tempfile::tempdir().unwrap();
         let home = dunce::canonicalize(tmp.path()).unwrap();
         git2::Repository::init(&home).unwrap();
@@ -215,23 +214,21 @@ mod tests {
         assert_eq!(chain.dirs, vec![sub]);
     }
 
-    /// The home comparison behind that guard, against an injected home so it
-    /// runs on every platform.
+    /// The guard's comparison, on every platform: home matches itself however it
+    /// is spelled, and a subdirectory of home is not home.
     #[test]
-    fn home_dir_guard_matches_the_injected_home() {
+    fn home_guard_compares_canonical_paths() {
         let tmp = tempfile::tempdir().unwrap();
         let home = dunce::canonicalize(tmp.path()).unwrap();
         let sub = home.join("proj");
         std::fs::create_dir_all(&sub).unwrap();
 
-        assert!(
-            is_home_dir_in(&home, &home),
-            "the home directory itself is the guarded root"
-        );
-        assert!(
-            !is_home_dir_in(&sub, &home),
-            "a subdirectory of home is not the home root"
-        );
+        assert!(paths_are_same_dir(&home, &home));
+        // Unnormalized spelling of the same directory still matches: the guard
+        // canonicalizes both sides so a symlinked or `..`-laden path cannot slip
+        // past it.
+        assert!(paths_are_same_dir(&sub.join(".."), &home));
+        assert!(!paths_are_same_dir(&sub, &home));
     }
 
     #[test]

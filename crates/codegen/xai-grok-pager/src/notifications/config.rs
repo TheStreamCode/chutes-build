@@ -95,7 +95,6 @@ pub enum TitleItem {
     Cwd,
     Model,
     TurnTimer,
-    #[serde(rename = "chutes", alias = "grok")]
     Grok,
     ActionRequired,
 }
@@ -178,11 +177,10 @@ session_recap_threshold_secs = 30
 # Set the terminal/tab title to reflect agent state.
 enabled = true
 # Items shown in the title. Options: action-required, spinner, activity,
-# session-name, cwd, model, turn-timer, chutes
-items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"chutes\"]
+# session-name, cwd, model, turn-timer, grok
+items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"grok\"]
 
 # [[ui.notifications.hooks]]
-# Commands run through `sh -c` on Unix and Windows PowerShell on Windows.
 # command = \"terminal-notifier -title 'Chutes Build' -message '$CHUTES_BUILD_MESSAGE'\"
 # events = [\"turn_complete\", \"approval_required\"]
 # only_unfocused = true
@@ -318,7 +316,7 @@ mod tests {
         let toml_str = r#"
             [title]
             enabled = true
-            items = ["action-required", "turn-timer", "session-name", "chutes"]
+            items = ["action-required", "turn-timer", "session-name"]
         "#;
         let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
         assert_eq!(
@@ -327,19 +325,8 @@ mod tests {
                 TitleItem::ActionRequired,
                 TitleItem::TurnTimer,
                 TitleItem::SessionName,
-                TitleItem::Grok,
             ]
         );
-    }
-
-    #[test]
-    fn legacy_grok_title_item_alias_still_deserializes() {
-        let toml_str = r#"
-            [title]
-            items = ["grok"]
-        "#;
-        let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
-        assert_eq!(parsed.title.items, vec![TitleItem::Grok]);
     }
 
     #[test]

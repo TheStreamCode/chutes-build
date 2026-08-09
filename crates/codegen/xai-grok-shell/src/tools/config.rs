@@ -35,6 +35,7 @@ pub struct BashToolConfig {
     /// Whether to allow a background `&` operator in foreground commands
     /// (default: `true`). Resolution: config.toml (this) > remote settings > `true`.
     pub allow_background_operator: Option<bool>,
+    pub login_shell_capture: Option<bool>,
 }
 
 impl BashToolConfig {
@@ -43,7 +44,7 @@ impl BashToolConfig {
     /// `remote_auto_bg` is the remote settings fallback for `auto_background_on_timeout`
     /// and `remote_allow_background_operator` for `allow_background_operator`.
     /// Resolution: local config.toml > remote fallback > `true`.
-    pub fn to_bash_params_json(
+    pub(crate) fn to_bash_params_json(
         &self,
         remote_auto_bg: Option<bool>,
         remote_allow_background_operator: Option<bool>,
@@ -110,6 +111,10 @@ pub struct WebFetchToolConfig {
     /// default allowlist. An explicit empty list blocks all fetches.
     /// Resolution: TOML > remote settings > built-in defaults.
     pub allowed_domains: Option<Vec<String>>,
+    /// Allow fetches to explicit loopback hosts only (`localhost` / `127.0.0.0/8`
+    /// / `::1`). Private and metadata ranges stay blocked. Default off.
+    /// Resolution: TOML > `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL` env > false.
+    pub allow_local: Option<bool>,
 }
 
 impl WebFetchToolConfig {
@@ -118,7 +123,7 @@ impl WebFetchToolConfig {
     /// `remote_proxy` and `remote_domains` are the remote settings fallback values
     /// from `RemoteSettings`. `context_window` comes from the session's
     /// SamplingConfig (model-provided).
-    pub fn resolve_params(
+    pub(crate) fn resolve_params(
         &self,
         remote_proxy: Option<&str>,
         remote_domains: Option<&[String]>,
@@ -139,10 +144,15 @@ impl WebFetchToolConfig {
             .cloned()
             .or_else(|| remote_domains.map(|d| d.to_vec()));
 
+        let allow_local = self
+            .allow_local
+            .or_else(|| xai_grok_config::env_bool("CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL"));
+
         xai_grok_tools::implementations::grok_build::web_fetch::WebFetchParams {
             proxy_endpoint,
             allowed_domains,
             context_window_tokens,
+            allow_local,
             ..Default::default()
         }
     }
@@ -202,7 +212,7 @@ impl ShellToolsetConfig {
     pub fn new(base: Option<Self>, sampling_config: Option<SamplerConfig>) -> Self {
         let default_base = SamplerConfig {
             api_key: None,
-            base_url: "https://llm.chutes.ai/v1".to_string(),
+            base_url: "https://api.chutes.ai/v1".to_string(),
             model: String::new(),
             max_completion_tokens: None,
             temperature: None,
@@ -210,6 +220,8 @@ impl ShellToolsetConfig {
             api_backend: Default::default(),
             auth_scheme: Default::default(),
             extra_headers: indexmap::IndexMap::new(),
+            query_params: indexmap::IndexMap::new(),
+            env_http_headers: indexmap::IndexMap::new(),
             context_window: 256_000,
             client_version: None,
             reasoning_effort: None,
@@ -251,14 +263,9 @@ impl ShellToolsetConfig {
         toolset
     }
 
-    /// Returns true if web search is enabled based on config.
-    pub fn web_search_enabled(&self) -> bool {
-        self.web_search.api_key.is_some()
-    }
-
     /// Resolve the effective file toolset. Local config takes precedence;
     /// remote `/v1/settings` is used as fallback when local is the default.
-    pub fn resolve_file_toolset(
+    pub(crate) fn resolve_file_toolset(
         &self,
         remote: Option<&crate::util::config::RemoteSettings>,
     ) -> FileToolset {
@@ -337,7 +344,7 @@ impl HashlineSchemeConfig {
 
 /// Which set of read/edit/search tools to use for file operations.
 ///
-/// Selects between the standard `GrokBuild` toolset (`read_file`,
+/// Selects between the standard `ChutesBuild` toolset (`read_file`,
 /// `search_replace`, `grep`) and the anchor-based `GrokBuildHashline`
 /// toolset (`hashline_read`, `hashline_edit`, `hashline_grep`).
 /// The two are mutually exclusive.
@@ -379,7 +386,7 @@ impl FileToolset {
                 };
                 Ok(vec![
                     ToolConfig {
-                        id: "ChutesBuildHashline:hashline_read".to_owned(),
+                        id: "GrokBuildHashline:hashline_read".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -388,7 +395,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "ChutesBuildHashline:hashline_edit".to_owned(),
+                        id: "GrokBuildHashline:hashline_edit".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -397,7 +404,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "ChutesBuildHashline:hashline_grep".to_owned(),
+                        id: "GrokBuildHashline:hashline_grep".to_owned(),
                         params: params_map,
                         name_override: None,
                         params_name_overrides: None,
@@ -439,9 +446,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"ChutesBuildHashline:hashline_read"));
-        assert!(ids.contains(&"ChutesBuildHashline:hashline_edit"));
-        assert!(ids.contains(&"ChutesBuildHashline:hashline_grep"));
+        assert!(ids.contains(&"GrokBuildHashline:hashline_read"));
+        assert!(ids.contains(&"GrokBuildHashline:hashline_edit"));
+        assert!(ids.contains(&"GrokBuildHashline:hashline_grep"));
     }
 
     /// Plan/explore omit `search_replace` by contract ("no Write/Edit/
@@ -474,13 +481,13 @@ mod tests {
                 .collect();
             // The swap engages (read moves to hashline)...
             assert!(
-                ids.contains(&"ChutesBuildHashline:hashline_read"),
+                ids.contains(&"GrokBuildHashline:hashline_read"),
                 "{name}: {ids:?}"
             );
             assert!(!ids.contains(&"ChutesBuild:read_file"), "{name}: {ids:?}");
             // ...but never grants the edit slot.
             assert!(
-                !ids.contains(&"ChutesBuildHashline:hashline_edit"),
+                !ids.contains(&"GrokBuildHashline:hashline_edit"),
                 "{name}: override granted an edit tool to a no-edit toolset: {ids:?}"
             );
         }
@@ -576,6 +583,7 @@ mod tests {
         let local = WebFetchToolConfig {
             proxy_endpoint: Some("https://toml-proxy.example.com".to_owned()),
             allowed_domains: Some(vec!["toml.example.com".to_owned()]),
+            allow_local: Some(true),
         };
         let params = local.resolve_params(
             Some("https://remote-proxy.example.com"),
@@ -590,6 +598,8 @@ mod tests {
             params.allowed_domains,
             Some(vec!["toml.example.com".to_owned()])
         );
+        assert_eq!(params.allow_local, Some(true));
+        assert!(params.allow_local());
     }
 
     #[test]
@@ -608,6 +618,7 @@ mod tests {
             params.allowed_domains,
             Some(vec!["remote.example.com".to_owned()])
         );
+        assert!(!params.allow_local());
     }
 
     #[test]
@@ -616,6 +627,7 @@ mod tests {
         let params = local.resolve_params(None, None, None);
         assert!(params.proxy_endpoint.is_none());
         assert!(params.allowed_domains.is_none());
+        assert!(!params.allow_local());
     }
 
     #[test]
@@ -623,6 +635,7 @@ mod tests {
         let local = WebFetchToolConfig {
             proxy_endpoint: None,
             allowed_domains: Some(vec![]),
+            allow_local: None,
         };
         let params = local.resolve_params(None, Some(&["remote.example.com".to_owned()]), None);
         assert_eq!(params.allowed_domains, Some(vec![]));

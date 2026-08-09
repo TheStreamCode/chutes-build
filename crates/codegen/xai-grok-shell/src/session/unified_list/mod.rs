@@ -4,6 +4,8 @@ mod facets;
 mod row;
 use crate::agent::session_registry_client::SessionRegistryClient;
 use crate::remote::{ConvError, ConvQuery, ConversationsClient};
+pub use crate::session::merge::CwdScope;
+use agent_client_protocol as acp;
 use cursor::{CompositeCursor, ConvLane, Paginated, merge_and_paginate};
 pub use envelope::{FacetMap, FacetValue, SessionKind, SessionMetaEnvelope};
 pub use facets::{
@@ -37,12 +39,12 @@ impl PartialReason {
     }
 }
 static FACET_REGISTRY: LazyLock<FacetRegistry> = LazyLock::new(build_facet_registry);
-pub fn facet_registry() -> &'static FacetRegistry {
+pub(crate) fn facet_registry() -> &'static FacetRegistry {
     &FACET_REGISTRY
 }
 /// Hard-off in release builds so they can't enable the
 /// conversations lane via env.
-pub fn conversations_lane_enabled() -> bool {
+pub(crate) fn conversations_lane_enabled() -> bool {
     false
 }
 /// Env lane (desktop `CHUTES_BUILD_SESSION_LIST_CONVERSATIONS`) OR process-wide
@@ -51,14 +53,49 @@ pub fn conversations_lane_enabled() -> bool {
 pub fn conversations_lane_active() -> bool {
     conversations_lane_enabled() || crate::agent::chat_modes::process_chat_mode_enabled()
 }
-/// Parse `chutes.build/session/list` params and, under process-wide chat mode, force
+/// Parse `chutes.ai/session/list` params and, under process-wide chat mode, force
 /// the conversations-only `kind` facet (see [`force_kind_chat`]).
+///
+/// Client-sent `kind` of `chat`/`build` is honored only behind
+/// `feature = "local-workspace"` (pager welcome Local history). Chat-only
+/// Desktop/ACP agents keep the force-rewrite so `kind: ["build"]` cannot
+/// surface Build rows.
 pub fn parse_list_req(raw: &str) -> Result<ListReq, serde_json::Error> {
     let mut req: ListReq = serde_json::from_str(raw)?;
     if crate::agent::chat_modes::process_chat_mode_enabled() {
-        force_kind_chat(&mut req);
+        let honor_client_kind = cfg!(feature = "local-workspace") && client_sent_kind_filter(&req);
+        if !honor_client_kind {
+            force_kind_chat(&mut req);
+        }
     }
     Ok(req)
+}
+fn cwd_scope_from_allow_relax<'de, D>(deserializer: D) -> Result<CwdScope, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(if bool::deserialize(deserializer)? {
+        CwdScope::RelaxIfEmpty
+    } else {
+        CwdScope::WithSiblings
+    })
+}
+fn client_sent_kind_filter(req: &ListReq) -> bool {
+    let Some(kind) = req
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("chutes.build/facetFilters"))
+        .and_then(|f| f.get("kind"))
+    else {
+        return false;
+    };
+    match kind {
+        serde_json::Value::Array(arr) if !arr.is_empty() => arr
+            .iter()
+            .any(|v| matches!(v.as_str(), Some("chat" | "build"))),
+        serde_json::Value::String(s) if s == "chat" || s == "build" => true,
+        _ => false,
+    }
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,14 +108,51 @@ pub struct ListReq {
     pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Which directories the listing draws from. The wire carries the original
+    /// `allowRelax` boolean; `Only` is reachable only in code (ACP
+    /// `session/list`), so "exact" and "relax" cannot be requested together.
+    /// A relaxed response sets `_meta["chutes.build/listScope"]`, re-evaluated per page.
+    #[serde(
+        default,
+        rename = "allowRelax",
+        deserialize_with = "cwd_scope_from_allow_relax"
+    )]
+    pub cwd_scope: CwdScope,
     #[serde(default, rename = "_meta")]
     pub meta: Option<serde_json::Value>,
+}
+/// Directory scope the returned sessions were drawn from. Wire form is the
+/// `as_str` value (`chutes.ai/listScope`), so no serde derive is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListScope {
+    /// Scoped to the request cwd.
+    #[default]
+    Cwd,
+    /// Relaxed to the cwd's repo when the cwd itself had no sessions.
+    Repo,
+    /// Relaxed to all directories when the cwd is not a git repo.
+    All,
+}
+impl ListScope {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cwd => "cwd",
+            Self::Repo => "repo",
+            Self::All => "all",
+        }
+    }
+    /// True when the scope relaxed past the cwd, to the repo or to all directories.
+    pub const fn is_relaxed(self) -> bool {
+        !matches!(self, Self::Cwd)
+    }
 }
 pub struct UnifiedListResult {
     pub rows: Vec<UnifiedRow>,
     pub next_cursor: Option<String>,
     pub facets: FacetSummary,
     pub conversations_partial: Option<PartialReason>,
+    /// Directory scope `rows` were drawn from; see [`ListReq::allow_relax`].
+    pub scope: ListScope,
 }
 #[derive(Debug, Default)]
 struct ParsedMeta {
@@ -123,10 +197,16 @@ fn value_list(v: &serde_json::Value) -> Vec<serde_json::Value> {
 }
 /// Rewrite `req` so the `kind` facet filter is exactly `["chat"]`.
 ///
-/// REPLACES any client-sent `kind` allow-list (a union with `"build"` would
-/// re-enable the local lane); every other facet filter and `_meta` key is
-/// left untouched.
-pub fn force_kind_chat(req: &mut ListReq) {
+/// Used when process chat mode is on **and** the client omitted a recognized
+/// `kind` facet (see [`parse_list_req`]). Welcome history sends an explicit
+/// `kind` (`chat` / `build`) that must not be rewritten. Other facet filters
+/// and `_meta` keys are left untouched.
+pub(crate) fn force_kind_chat(req: &mut ListReq) {
+    force_kind(req, SessionKind::Chat);
+}
+/// REPLACES any client-sent `kind` allow-list (a union would re-enable the
+/// excluded lanes); every other facet filter and `_meta` key is untouched.
+pub(crate) fn force_kind(req: &mut ListReq, kind: SessionKind) {
     let mut meta = match req.meta.take() {
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
@@ -137,7 +217,7 @@ pub fn force_kind_chat(req: &mut ListReq) {
     };
     filters.insert(
         KIND_FACET_KEY.to_owned(),
-        serde_json::json!([SessionKind::Chat.as_str()]),
+        serde_json::json!([kind.as_str()]),
     );
     meta.insert(
         "chutes.build/facetFilters".to_owned(),
@@ -148,8 +228,11 @@ pub fn force_kind_chat(req: &mut ListReq) {
 pub async fn build_unified_list(
     registry_client: Option<&SessionRegistryClient>,
     conversations_client: Option<&ConversationsClient>,
-    req: ListReq,
+    mut req: ListReq,
 ) -> UnifiedListResult {
+    if crate::agent::chat_modes::process_chat_mode_enabled() && !client_sent_kind_filter(&req) {
+        force_kind_chat(&mut req);
+    }
     let reg = facet_registry();
     let ParsedMeta {
         facet_filters,
@@ -163,21 +246,54 @@ pub async fn build_unified_list(
     reg.apply_pushdown(&facet_filters, &mut source_query);
     let exclude_conversations = excludes_conversations(&facet_filters);
     let exclude_build = excludes_build(&facet_filters);
-    let over = (limit * 3).max(100);
+    let over = crate::session::merge::over_fetch(limit);
+    let cwd_scope = req.cwd_scope;
+    let can_relax = relax_eligible(RelaxGate {
+        opted_in: matches!(req.cwd_scope, CwdScope::RelaxIfEmpty),
+        no_facet_filters: facet_filters.is_empty(),
+        has_cwd: req.cwd.is_some(),
+        is_search: query.is_some(),
+    });
     let local_fut = async {
         if exclude_build {
-            return Vec::new();
+            return LocalLane::default();
         }
-        crate::session::merge::fetch_merged(
-            registry_client,
-            req.cwd.as_deref(),
-            query.as_deref(),
-            over,
-        )
-        .await
-        .into_iter()
-        .map(|m| merged_session_to_row(m, reg))
-        .collect::<Vec<UnifiedRow>>()
+        let cwd = req.cwd.as_deref();
+        if can_relax {
+            let lanes =
+                crate::session::merge::fetch_lanes(registry_client, cwd, cwd_scope, None, over)
+                    .await;
+            let rows = to_rows(
+                crate::session::merge::merge(
+                    lanes.remote.clone(),
+                    lanes.local,
+                    None,
+                    &lanes.repo_urls,
+                    over,
+                ),
+                reg,
+            );
+            LocalLane {
+                rows,
+                relax: Some(RelaxInputs {
+                    remote: lanes.remote,
+                    repo_urls: lanes.repo_urls,
+                }),
+            }
+        } else {
+            let merged = crate::session::merge::fetch_merged(
+                registry_client,
+                cwd,
+                cwd_scope,
+                query.as_deref(),
+                over,
+            )
+            .await;
+            LocalLane {
+                rows: to_rows(merged, reg),
+                relax: None,
+            }
+        }
     };
     let conv_fut = async {
         if exclude_conversations {
@@ -223,7 +339,14 @@ pub async fn build_unified_list(
             }
         }
     };
-    let (local_rows, conv_lane) = tokio::join!(local_fut, conv_fut);
+    let (
+        LocalLane {
+            rows: local_rows,
+            relax,
+        },
+        conv_lane,
+    ) = tokio::join!(local_fut, conv_fut);
+    let (local_rows, scope) = maybe_relax(local_rows, relax, over, reg).await;
     {
         let (conv_lane_status, conv_rows) = match &conv_lane {
             ConvLane::Skipped => ("skipped", 0),
@@ -265,7 +388,87 @@ pub async fn build_unified_list(
         next_cursor: next_cursor.map(|c| c.encode()),
         facets,
         conversations_partial: partial,
+        scope,
     }
+}
+#[derive(Default)]
+struct LocalLane {
+    rows: Vec<UnifiedRow>,
+    relax: Option<RelaxInputs>,
+}
+struct RelaxInputs {
+    remote: Vec<crate::agent::session_registry_client::SessionRecord>,
+    repo_urls: Vec<String>,
+}
+fn to_rows(
+    merged: Vec<crate::session::merge::MergedSession>,
+    reg: &FacetRegistry,
+) -> Vec<UnifiedRow> {
+    merged
+        .into_iter()
+        .map(|m| merged_session_to_row(m, reg))
+        .collect()
+}
+#[derive(Clone, Copy)]
+struct RelaxGate {
+    opted_in: bool,
+    no_facet_filters: bool,
+    has_cwd: bool,
+    is_search: bool,
+}
+fn relax_eligible(gate: RelaxGate) -> bool {
+    gate.opted_in && gate.no_facet_filters && gate.has_cwd && !gate.is_search
+}
+/// True when no row has messages (a post-rebuild placeholder counts as empty).
+fn lane_has_no_messages(rows: &[UnifiedRow]) -> bool {
+    rows.iter().all(|r| r.legacy.num_messages == 0)
+}
+async fn maybe_relax(
+    local_rows: Vec<UnifiedRow>,
+    relax: Option<RelaxInputs>,
+    over: usize,
+    reg: &FacetRegistry,
+) -> (Vec<UnifiedRow>, ListScope) {
+    let Some(relax) = relax.filter(|_| lane_has_no_messages(&local_rows)) else {
+        return (local_rows, ListScope::Cwd);
+    };
+    let scope = if relax.repo_urls.is_empty() {
+        ListScope::All
+    } else {
+        ListScope::Repo
+    };
+    let all_local = crate::session::persistence::list_summaries(None)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::debug!("cwd scan failed: {e}");
+            Vec::new()
+        });
+    match relax_rows(relax, all_local, over, reg) {
+        Some(relaxed) => {
+            tracing::debug!(
+                rows = relaxed.len(),
+                scope = scope.as_str(),
+                "cwd empty; relaxing scope"
+            );
+            (relaxed, scope)
+        }
+        None => (local_rows, ListScope::Cwd),
+    }
+}
+/// Re-merge the registry page with a repo-scoped local scan (all directories
+/// when the cwd is not a repo); relax only when it reveals a messaged session.
+fn relax_rows(
+    relax: RelaxInputs,
+    all_local: Vec<crate::session::persistence::Summary>,
+    over: usize,
+    reg: &FacetRegistry,
+) -> Option<Vec<UnifiedRow>> {
+    let scoped = crate::session::merge::filter_summaries_by_repo(all_local, &relax.repo_urls);
+    let rows = to_rows(
+        crate::session::merge::merge(relax.remote, scoped, None, &relax.repo_urls, over),
+        reg,
+    );
+    (!lane_has_no_messages(&rows)).then_some(rows)
 }
 fn excludes_conversations(filters: &BTreeMap<String, Vec<serde_json::Value>>) -> bool {
     match filters.get(KIND_FACET_KEY) {
@@ -286,7 +489,7 @@ fn excludes_build(filters: &BTreeMap<String, Vec<serde_json::Value>>) -> bool {
     }
 }
 #[derive(Debug, Clone, Serialize)]
-pub struct ExtListResponse {
+pub(crate) struct ExtListResponse {
     pub sessions: Vec<ExtSupersetRow>,
     #[serde(rename = "nextCursor", skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
@@ -294,38 +497,62 @@ pub struct ExtListResponse {
     pub meta: ExtListResponseMeta,
 }
 #[derive(Debug, Clone, Serialize)]
-pub struct ExtListResponseMeta {
+pub(crate) struct ExtListResponseMeta {
     #[serde(rename = "chutes.build/facets")]
     pub facets: FacetSummary,
     #[serde(rename = "chutes.build/partial")]
     pub partial: PartialInfo,
+    /// Present only when the listing relaxed beyond the cwd.
+    #[serde(
+        rename = "chutes.build/listScope",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub list_scope: Option<&'static str>,
 }
 #[derive(Debug, Clone, Serialize)]
-pub struct PartialInfo {
+pub(crate) struct PartialInfo {
     pub conversations: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
 }
-pub fn ext_list_response(result: UnifiedListResult) -> ExtListResponse {
-    let UnifiedListResult {
-        rows,
-        next_cursor,
-        facets,
-        conversations_partial,
-    } = result;
+fn list_response_meta(result: &UnifiedListResult) -> ExtListResponseMeta {
+    ExtListResponseMeta {
+        facets: result.facets.clone(),
+        partial: PartialInfo {
+            conversations: result.conversations_partial.is_some(),
+            reason: result.conversations_partial.map(PartialReason::as_str),
+        },
+        list_scope: result.scope.is_relaxed().then_some(result.scope.as_str()),
+    }
+}
+pub(crate) fn ext_list_response(result: UnifiedListResult) -> ExtListResponse {
+    let meta = list_response_meta(&result);
     ExtListResponse {
-        sessions: rows
+        sessions: result
+            .rows
             .into_iter()
             .map(UnifiedRow::into_ext_superset)
             .collect(),
-        next_cursor,
-        meta: ExtListResponseMeta {
-            facets,
-            partial: PartialInfo {
-                conversations: conversations_partial.is_some(),
-                reason: conversations_partial.map(PartialReason::as_str),
-            },
-        },
+        next_cursor: result.next_cursor,
+        meta,
+    }
+}
+pub(crate) fn acp_response_meta(result: &UnifiedListResult) -> Option<acp::Meta> {
+    to_meta(serde_json::to_value(list_response_meta(result)))
+}
+pub(super) fn to_meta<E: std::fmt::Display>(
+    value: Result<serde_json::Value, E>,
+) -> Option<acp::Meta> {
+    match value {
+        Ok(serde_json::Value::Object(map)) => Some(map),
+        Ok(other) => {
+            tracing::warn!(kind = ?other, "session list _meta was not an object");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "session list _meta failed to serialize");
+            None
+        }
     }
 }
 #[cfg(test)]
@@ -351,6 +578,7 @@ mod tests {
             git_root_dir: Some("/Users/me/xai".into()),
             git_remotes: vec!["git@github.com:example/repo.git".into()],
             source_workspace_dir: Some("/Users/me/xai-src".into()),
+            last_turn_summary: None,
             session_kind: Some("worktree".into()),
         }
     }
@@ -392,10 +620,14 @@ mod tests {
     #[test]
     fn facets_carry_kind_and_cwd() {
         let r = row("s1", "2026-06-18T20:10:00Z");
-        assert!(matches!(r.facets.get(KIND_FACET_KEY),
-            Some(FacetValue::One(serde_json::Value::String(k))) if k == "build"));
-        assert!(matches!(r.facets.get(CWD_FACET_KEY),
-            Some(FacetValue::One(serde_json::Value::String(c))) if c == "/Users/me/xai"));
+        assert!(matches!(
+            r.facets.get(KIND_FACET_KEY),
+            Some(FacetValue::One(serde_json::Value::String(k))) if k == "build"
+        ));
+        assert!(matches!(
+            r.facets.get(CWD_FACET_KEY),
+            Some(FacetValue::One(serde_json::Value::String(c))) if c == "/Users/me/xai"
+        ));
     }
     #[test]
     fn bare_session_info_is_minimal_plus_meta() {
@@ -460,10 +692,11 @@ mod tests {
     }
     #[test]
     fn parsed_meta_reads_facet_filters_query_and_limit() {
-        let meta = serde_json::json!(
-            { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : true },
-            "chutes.build/query" : "antelope", "chutes.build/limit" : 5, }
-        );
+        let meta = serde_json::json!({
+            "chutes.build/facetFilters": { "kind": ["build"], "starred": true },
+            "chutes.build/query": "antelope",
+            "chutes.build/limit": 5,
+        });
         let parsed = ParsedMeta::parse(Some(&meta));
         assert_eq!(parsed.query.as_deref(), Some("antelope"));
         assert_eq!(parsed.limit, Some(5));
@@ -502,9 +735,9 @@ mod tests {
     #[test]
     fn forced_kind_replaces_client_build_filter() {
         let mut req = ListReq {
-            meta: Some(
-                serde_json::json!({ "chutes.build/facetFilters" : { "kind" : ["build"] }, }),
-            ),
+            meta: Some(serde_json::json!({
+                "chutes.build/facetFilters": { "kind": ["build"] },
+            })),
             ..ListReq::default()
         };
         force_kind_chat(&mut req);
@@ -520,11 +753,11 @@ mod tests {
     #[test]
     fn forced_kind_preserves_other_facets() {
         let mut req = ListReq {
-            meta: Some(serde_json::json!(
-                { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : [true],
-                "workspace" : ["w1"] }, "chutes.build/query" : "antelope", "chutes.build/limit" : 5,
-                }
-            )),
+            meta: Some(serde_json::json!({
+                "chutes.build/facetFilters": { "kind": ["build"], "starred": [true], "workspace": ["w1"] },
+                "chutes.build/query": "antelope",
+                "chutes.build/limit": 5,
+            })),
             ..ListReq::default()
         };
         force_kind_chat(&mut req);
@@ -597,14 +830,15 @@ mod tests {
     #[serial_test::serial]
     async fn forced_kind_serves_conversations_only() {
         let addr = spawn_conversations_stub(
-            serde_json::json!(
-                { "conversations" : [{ "conversationId" : "c1", "title" : "Hello",
-                "modifyTime" : "2026-07-01T00:00:00Z" }, { "conversationId" : "c2",
-                "title" : "", "modifyTime" : "2026-07-02T00:00:00Z" },], }
+                serde_json::json!({
+                "conversations": [
+                    { "conversationId": "c1", "title": "Hello", "modifyTime": "2026-07-01T00:00:00Z" },
+                    { "conversationId": "c2", "title": "", "modifyTime": "2026-07-02T00:00:00Z" },
+                ],
+            })
+                    .to_string(),
             )
-            .to_string(),
-        )
-        .await;
+            .await;
         let _env = xai_grok_test_support::EnvGuard::set(
             "CHUTES_BUILD_CONVERSATIONS_BASE_URL",
             format!("http://{addr}"),
@@ -612,9 +846,9 @@ mod tests {
         let home = tempfile::tempdir().expect("tempdir");
         let client = ConversationsClient::new(xai_auth_manager(home.path()));
         let mut req = ListReq {
-            meta: Some(
-                serde_json::json!({ "chutes.build/facetFilters" : { "kind" : ["build"] }, }),
-            ),
+            meta: Some(serde_json::json!({
+                "chutes.build/facetFilters": { "kind": ["build"] },
+            })),
             ..ListReq::default()
         };
         force_kind_chat(&mut req);
@@ -681,7 +915,7 @@ mod tests {
                 "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
                 "1",
             );
-            assert!(!conversations_lane_enabled());
+            assert_eq!(conversations_lane_enabled(), false);
         }
         {
             let _off = xai_grok_test_support::EnvGuard::set(
@@ -709,12 +943,13 @@ mod tests {
                 "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
                 "1",
             );
-            assert!(!conversations_lane_active());
+            assert_eq!(conversations_lane_active(), false);
         }
         {
             let _chat = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
-            assert!(
-                !conversations_lane_active(),
+            assert_eq!(
+                conversations_lane_active(),
+                false,
                 "process chat mode must enable the lane (chat feature only)"
             );
         }
@@ -725,10 +960,9 @@ mod tests {
     #[serial_test::serial]
     fn parse_list_req_forces_kind_under_process_chat_mode_only() {
         use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
-        let raw = serde_json::json!(
-            { "_meta" : { "chutes.build/facetFilters" : { "kind" : ["build"], "starred" : [true]
-            } }, }
-        )
+        let raw = serde_json::json!({
+            "_meta": { "chutes.build/facetFilters": { "kind": ["build"], "starred": [true] } },
+        })
         .to_string();
         {
             let _off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
@@ -744,19 +978,45 @@ mod tests {
             let _on = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
             let req = parse_list_req(&raw).expect("parse");
             let parsed = ParsedMeta::parse(req.meta.as_ref());
-            let expected = "build";
+            let expected_build = if cfg!(feature = "local-workspace") {
+                Some(&vec![serde_json::json!("build")])
+            } else {
+                Some(&vec![serde_json::json!("build")])
+            };
             assert_eq!(
                 parsed.facet_filters.get(KIND_FACET_KEY),
-                Some(&vec![serde_json::json!(expected)])
+                expected_build,
+                "client kind=build under process chat mode"
             );
             assert_eq!(
                 parsed.facet_filters.get("starred"),
                 Some(&vec![serde_json::json!(true)]),
                 "other facets pass through"
             );
+            let req = parse_list_req("{}").expect("parse");
+            let parsed = ParsedMeta::parse(req.meta.as_ref());
+            let expected = None;
+            assert_eq!(
+                parsed.facet_filters.get(KIND_FACET_KEY),
+                expected,
+                "absent client kind still forces chat under process chat mode"
+            );
+            for bad in [
+                serde_json::json!({ "_meta": { "chutes.build/facetFilters": { "kind": [] } } }),
+                serde_json::json!({ "_meta": { "chutes.build/facetFilters": { "kind": null } } }),
+                serde_json::json!({ "_meta": { "chutes.build/facetFilters": { "kind": ["other"] } } }),
+            ] {
+                let req = parse_list_req(&bad.to_string()).expect("parse");
+                let parsed = ParsedMeta::parse(req.meta.as_ref());
+                assert_eq!(
+                    parsed.facet_filters.get(KIND_FACET_KEY),
+                    expected,
+                    "empty/null/unknown kind must still force chat: {bad}"
+                );
+            }
         }
     }
-    /// Wire pin for the cross-crate `chutes.build/partial` envelope the pager parses:
+    /// Wire pin for the cross-crate `chutes.ai/partial` envelope the pager parses:
     /// the serialized reason strings must not drift (the pager maps unknown
     /// reasons to a generic retry notice, masking a rename).
     #[test]
@@ -771,12 +1031,12 @@ mod tests {
                 next_cursor: None,
                 facets: facet_registry().summarize_window(&[]),
                 conversations_partial: Some(reason),
+                scope: ListScope::Cwd,
             }))
             .expect("serialize");
             assert_eq!(
                 value["_meta"]["chutes.build/partial"],
-                serde_json::json!({ "conversations" :
-                true, "reason" : wire })
+                serde_json::json!({ "conversations": true, "reason": wire })
             );
         }
         let healthy = serde_json::to_value(ext_list_response(UnifiedListResult {
@@ -784,12 +1044,87 @@ mod tests {
             next_cursor: None,
             facets: facet_registry().summarize_window(&[]),
             conversations_partial: None,
+            scope: ListScope::Cwd,
         }))
         .expect("serialize");
         assert_eq!(
             healthy["_meta"]["chutes.build/partial"],
-            serde_json::json!({ "conversations" :
-            false })
+            serde_json::json!({ "conversations": false })
         );
+    }
+    /// Receive-side wire pin: a field rename would silently drop the pager's
+    /// `allowRelax`.
+    #[test]
+    fn list_req_deserializes_allow_relax_key() {
+        let req: ListReq = serde_json::from_str(r#"{"allowRelax": true}"#).expect("parse");
+        assert_eq!(req.cwd_scope, CwdScope::RelaxIfEmpty);
+        let req: ListReq = serde_json::from_str("{}").expect("parse");
+        assert_eq!(req.cwd_scope, CwdScope::WithSiblings);
+    }
+    /// relax_rows scopes to the cwd's repo and relaxes only on a messaged session.
+    #[test]
+    fn relax_rows_scopes_to_repo_and_requires_messages() {
+        use crate::session::persistence::Summary;
+        let this_repo = "git@github.com:example/app.git";
+        let repo_url = xai_grok_workspace::session::git::normalize_repo_url(this_repo).unwrap();
+        let summary = |id: &str, remote: Option<&str>, num_messages: usize| {
+            let mut s = Summary::new(
+                &crate::session::info::Info {
+                    id: agent_client_protocol::SessionId::new(id),
+                    cwd: format!("/elsewhere/{id}"),
+                },
+                agent_client_protocol::ModelId::new("m"),
+            )
+            .expect("summary");
+            s.num_messages = num_messages;
+            s.git_remotes = remote.map(|r| vec![r.to_string()]).unwrap_or_default();
+            s
+        };
+        let relax = || RelaxInputs {
+            remote: Vec::new(),
+            repo_urls: vec![repo_url.clone()],
+        };
+        let rows = relax_rows(
+            relax(),
+            vec![
+                summary("mine", Some(this_repo), 4),
+                summary("theirs", Some("git@github.com:xai-org/other.git"), 9),
+            ],
+            30,
+            facet_registry(),
+        )
+        .expect("relaxes onto the same-repo messaged session");
+        let ids: Vec<_> = rows.iter().map(|r| r.legacy.session_id.clone()).collect();
+        assert_eq!(ids, ["mine"], "only the same-repo session survives");
+        assert!(
+            relax_rows(
+                relax(),
+                vec![summary("husk", Some(this_repo), 0)],
+                30,
+                facet_registry()
+            )
+            .is_none(),
+            "placeholder-only scan keeps the scoped view"
+        );
+    }
+    /// Send-side wire pin: `chutes.ai/listScope` present iff the scope relaxed.
+    #[test]
+    fn ext_list_response_serializes_scope() {
+        let result = |scope| UnifiedListResult {
+            rows: Vec::new(),
+            next_cursor: None,
+            facets: facet_registry().summarize_window(&[]),
+            conversations_partial: None,
+            scope,
+        };
+        let with =
+            serde_json::to_value(ext_list_response(result(ListScope::Repo))).expect("serialize");
+        assert_eq!(
+            with["_meta"]["chutes.build/listScope"],
+            serde_json::json!("repo")
+        );
+        let without =
+            serde_json::to_value(ext_list_response(result(ListScope::Cwd))).expect("serialize");
+        assert!(without["_meta"].get("chutes.build/listScope").is_none());
     }
 }

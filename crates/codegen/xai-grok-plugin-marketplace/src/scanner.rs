@@ -14,46 +14,10 @@ use crate::types::{MarketplaceEntry, MarketplaceScan};
 /// Scan a marketplace directory for plugins, reporting whether a
 /// `plugin-index.json` component catalog was loaded.
 ///
-/// Tries indexed mode first, falls back to filesystem scanning.
+/// Tries indexed mode first, falls back to filesystem scanning. The component
+/// catalog is only consulted in indexed mode: its keys are defined as index
+/// names, so the filesystem fallback ignores it.
 pub fn scan_marketplace(root: &Path) -> MarketplaceScan {
-    let MarketplaceScan {
-        entries: mut plugins,
-        catalog_loaded,
-    } = scan_plugins(root);
-
-    // Also scan `default-skills/` as a virtual plugin if present.
-    let default_skills_dir = root.join("default-skills");
-    if default_skills_dir.is_dir() {
-        // default-skills/ has skills at root level (each subdir is a skill),
-        // not under a skills/ subdirectory. Count SKILL.md files directly.
-        let skill_count = std::fs::read_dir(&default_skills_dir)
-            .ok()
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .filter(|e| e.path().join("SKILL.md").exists())
-                    .count()
-            })
-            .unwrap_or(0);
-        if skill_count > 0 {
-            let mut entry = scan_single_plugin(&default_skills_dir, "default-skills");
-            // Override skill_count since scan_single_plugin looks under skills/.
-            entry.skill_count = skill_count;
-            plugins.push(entry);
-        }
-    }
-
-    MarketplaceScan {
-        entries: plugins,
-        catalog_loaded,
-    }
-}
-
-/// Core plugin scanning — tries indexed mode first, falls back to filesystem.
-///
-/// The component catalog is only consulted in indexed mode: its keys are
-/// defined as index names, so the filesystem fallback ignores it.
-fn scan_plugins(root: &Path) -> MarketplaceScan {
-    // Try indexed mode.
     match index::load_index(root) {
         Ok(Some(idx)) => {
             tracing::debug!(
@@ -475,7 +439,7 @@ mod tests {
     #[test]
     fn grok_plugin_dir_index_drives_scan_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
-        make_plugin(dir.path(), "grok-plugin", "1.0.0");
+        make_plugin(dir.path(), "chutes-build-plugin", "1.0.0");
 
         let grok_dir = dir.path().join(".chutes-build-plugin");
         std::fs::create_dir_all(&grok_dir).unwrap();
@@ -484,10 +448,10 @@ mod tests {
             r#"{
                 "name": "grok-marketplace",
                 "plugins": [{
-                    "name": "grok-plugin",
+                    "name": "chutes-build-plugin",
                     "description": "From the .chutes-build-plugin index",
                     "category": "design",
-                    "source": { "type": "local", "path": "./plugins/grok-plugin" },
+                    "source": { "type": "local", "path": "./plugins/chutes-build-plugin" },
                     "tags": ["grok"]
                 }]
             }"#,
@@ -496,7 +460,7 @@ mod tests {
 
         let plugins = scan_marketplace(dir.path()).entries;
         assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name, "grok-plugin");
+        assert_eq!(plugins[0].name, "chutes-build-plugin");
         assert_eq!(plugins[0].category.as_deref(), Some("design"));
         assert_eq!(plugins[0].tags, vec!["grok"]);
         assert!(plugins[0].keywords.is_empty());
@@ -736,34 +700,6 @@ mod tests {
         assert_eq!(scan.entries.len(), 1);
         assert!(scan.entries[0].components.is_none());
         assert_eq!(scan.entries[0].skill_count, 1);
-    }
-
-    #[test]
-    fn default_skills_virtual_plugin_has_no_components() {
-        let dir = tempfile::tempdir().unwrap();
-        write_grok_file(
-            dir.path(),
-            "marketplace.json",
-            r#"{"name": "m", "plugins": []}"#,
-        );
-        write_grok_file(
-            dir.path(),
-            "plugin-index.json",
-            r#"{
-                "version": 1,
-                "plugins": { "default-skills": { "components": { "skills": [ { "name": "s" } ] } } }
-            }"#,
-        );
-        let skill_dir = dir.path().join("default-skills").join("a-skill");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(skill_dir.join("SKILL.md"), "# A Skill").unwrap();
-
-        let scan = scan_marketplace(dir.path());
-        assert!(scan.catalog_loaded);
-        assert_eq!(scan.entries.len(), 1);
-        assert_eq!(scan.entries[0].name, "default-skills");
-        assert_eq!(scan.entries[0].skill_count, 1);
-        assert!(scan.entries[0].components.is_none());
     }
 
     #[test]

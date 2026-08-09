@@ -440,6 +440,9 @@ pub(super) mod paste_key_tests {
     use super::*;
     use crate::acp::model_state::ModelState;
     use crate::app::agent::{AgentId, AgentSession, AgentState};
+    use crate::app::agent_view::test_fixtures::{
+        make_followup_permission_state, make_plan_approval_view_state,
+    };
     use crate::app::app_view::InputOutcome;
     use crate::clipboard::ImageData;
     use crate::scrollback::state::ScrollbackState;
@@ -479,6 +482,7 @@ pub(super) mod paste_key_tests {
                 bg_tool_call_to_task: std::collections::HashMap::new(),
                 scheduled_tasks: std::collections::HashMap::new(),
                 in_flight_prompt: None,
+                compact_held_prompt: None,
                 current_prompt_id: None,
                 created_via_new: false,
             },
@@ -1121,9 +1125,24 @@ pub(super) mod paste_key_tests {
     #[test]
     fn event_paste_plan_approval_non_image_file_url_decoded_into_prompt() {
         assert_event_paste_arm_decodes_non_image("plan_approval", |agent| {
-            agent.plan_approval_view = Some(make_plan_approval_view_state());
+            let mut view = make_plan_approval_view_state();
+            view.focus = crate::views::plan_approval_view::PlanApprovalFocus::Prompt;
+            agent.plan_approval_view = Some(view);
             agent.line_viewer = None;
         });
+    }
+    #[test]
+    fn event_paste_plan_preview_does_not_mutate_hidden_prompt() {
+        let mut agent = make_agent();
+        agent.prompt.set_text("hidden prompt");
+        agent.plan_approval_view = Some(make_plan_approval_view_state());
+        agent.line_viewer = None;
+        let outcome = agent.handle_input(
+            &Event::Paste("ignored".to_owned()),
+            &ActionRegistry::defaults(),
+        );
+        assert!(matches!(outcome, InputOutcome::Unchanged));
+        assert_eq!(agent.prompt.text(), "hidden prompt");
     }
     /// Question-view `Event::Paste` arm routes through the classifier when
     /// the question view is in `InputMode` focus.
@@ -1133,79 +1152,22 @@ pub(super) mod paste_key_tests {
             agent.question_view = Some(make_question_view_state_in_input_mode());
         });
     }
-    /// Build a `PermissionViewState` already in FollowupInput focus —
-    /// enough for the dispatcher's permission-followup paste arm.
-    pub(in crate::app::agent_view) fn make_followup_permission_state()
-    -> crate::views::permission_view::PermissionViewState {
-        let (response_tx, _rx) = tokio::sync::oneshot::channel();
-        let request = agent_client_protocol::RequestPermissionRequest::new(
-            agent_client_protocol::SessionId::new(std::sync::Arc::from("test")),
-            agent_client_protocol::ToolCallUpdate::new(
-                agent_client_protocol::ToolCallId::new(std::sync::Arc::from("call-1")),
-                agent_client_protocol::ToolCallUpdateFields::default(),
-            ),
-            vec![],
-        );
-        let perm = xai_acp_lib::AcpArgs {
-            request,
-            response_tx,
-        };
-        crate::views::permission_view::PermissionViewState {
-            request: perm,
-            id: 0,
-            focus: crate::views::permission_view::PermissionFocus::FollowupInput,
-            options: vec![],
-            active_idx: 0,
-            bash_highlights: None,
-            bash_selection_count: 0,
-            bash_command_raw: None,
-            mcp_scope: None,
-            title: String::new(),
-            description: vec![],
-            args_expanded: false,
-            desc_scroll: 0,
-            subagent_label: None,
-            options_area_height: 0,
-            options_scroll_offset: 0,
-        }
-    }
-    /// Build a minimal `PlanApprovalViewState` — enough for the
-    /// dispatcher's plan-approval-view paste arm.
-    pub(in crate::app::agent_view) fn make_plan_approval_view_state()
-    -> crate::views::plan_approval_view::PlanApprovalViewState {
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let request = crate::views::plan_approval_view::ExitPlanModeExtRequest {
-            session_id: "test-session".into(),
-            tool_call_id: "call-1".into(),
-            plan_content: Some("# Plan\n\n## Step 1\nDo something".into()),
-        };
-        crate::views::plan_approval_view::PlanApprovalViewState::new(
-            request,
-            crate::views::prompt_widget::StashedPrompt {
-                text: String::new(),
-                cursor: 0,
-                images: Vec::new(),
-                chip_elements: Vec::new(),
-                image_counter: 0,
-                image_undo_stash: Vec::new(),
-            },
-            tx,
-        )
-    }
     /// Build a `QuestionViewState` already in `InputMode` focus.
     pub(in crate::app::agent_view) fn make_question_view_state_in_input_mode()
     -> crate::views::question_view::QuestionViewState {
-        let question =
-            xai_grok_tools::implementations::grok_build::ask_user_question::Question {
-                question: "Pick one?".to_string(),
-                options: vec![
-                xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption
-                { label : "A".to_string(), description : "Option A".to_string(), preview
-                : None, id : None, },
+        let question = xai_grok_tools::implementations::grok_build::ask_user_question::Question {
+            question: "Pick one?".to_string(),
+            options: vec![
+                xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption {
+                    label: "A".to_string(),
+                    description: "Option A".to_string(),
+                    preview: None,
+                    id: None,
+                },
             ],
-                multi_select: Some(false),
-                id: None,
-            };
+            multi_select: Some(false),
+            id: None,
+        };
         let mut state = crate::views::question_view::QuestionViewState::new(
             "tc-1".into(),
             vec![question],
@@ -1602,6 +1564,7 @@ pub(super) mod paste_key_tests {
         assert!(
             toast.starts_with("Copied")
                 || toast.starts_with("Copy sent")
+                || toast.starts_with("Clipboard unreachable")
                 || toast.starts_with("Copy failed"),
             "copy-source emits a clipboard toast, got {toast:?}",
         );
@@ -1924,8 +1887,6 @@ pub(super) mod paste_key_tests {
             top_crop_rows: 0,
             filepath_screen_rect: None,
             open_button_screen_rect: None,
-            audio_waveform_screen_rect: None,
-            text_button_kind: None,
             has_button_row: true,
         };
         let first = agent
@@ -2055,16 +2016,12 @@ pub(super) mod paste_key_tests {
             &mut scratch,
             None,
             false,
-            0,
-            &[],
-            &std::collections::BTreeSet::new(),
-            None,
+            crate::app::agent_view::BannerSlotParams::none(),
             &bundle,
             false,
+            false,
             &mut Vec::new(),
-            false,
-            false,
-            None,
+            crate::app::agent_view::AppRenderParams::default(),
         );
     }
     /// The scrolled-off/overlay branch of `AgentView::draw` (render.rs) must
@@ -2083,7 +2040,11 @@ pub(super) mod paste_key_tests {
         agent.inline_media_active = true;
         agent.inline_video = Some(crate::app::agent_view::InlineVideoState {
             path: std::path::PathBuf::from("/tmp/clip.mp4"),
-            viewer: crate::prompt_images::VideoViewerState::test_stub(),
+            frames: vec![Vec::new()],
+            current_frame: 0,
+            last_frame_time: std::time::Instant::now(),
+            fps: 1.0,
+            finished: false,
         });
         let before = test_support::calls();
         draw_media_frame(&mut agent);
@@ -2532,7 +2493,6 @@ pub(super) mod paste_key_tests {
         );
     }
     #[test]
-    #[cfg(not(windows))]
     fn agent_completion_inserts_unreadable_file_url_as_path_text() {
         let mut agent = make_agent();
         agent.set_active_pane(ActivePane::Prompt, true);

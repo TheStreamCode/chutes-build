@@ -1,4 +1,4 @@
-//! `chutes.build/debug/*` extension handlers for local client testing.
+//! `chutes.ai/debug/*` extension handlers for local client testing.
 //!
 //! These methods bypass heuristics, sampling, cooldowns, and enabled checks
 //! so client engineers can exercise notification → response flows without
@@ -7,6 +7,7 @@
 //! - `trigger_feedback`: fire a synthetic `FeedbackRequestNotification`.
 //! - `arm_auto_compact`: arm the next turn to unconditionally trigger
 //!   auto-compaction, regardless of context window usage.
+//! - `agent`: agent-process diagnostics (registry counts).
 
 use agent_client_protocol as acp;
 
@@ -22,8 +23,16 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             handle_trigger_feedback(agent, args).await
         }
         "chutes.build/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
+        "chutes.build/debug/agent" => handle_agent(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
+}
+
+async fn handle_agent(agent: &MvpAgent) -> ExtResult {
+    let registries = agent.registry_snapshot().await;
+    ExtMethodResult::success(serde_json::json!({ "registries": registries }))
+        .to_ext_response()
+        .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
 async fn handle_trigger_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
@@ -69,14 +78,9 @@ async fn handle_trigger_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> Ex
     };
 
     let session_id = acp::SessionId::new(params.session_id.clone());
-    let handle = agent
-        .sessions
-        .borrow()
-        .get(&session_id)
-        .cloned()
-        .ok_or_else(|| {
-            acp::Error::invalid_params().data(format!("session not found: {}", params.session_id))
-        })?;
+    let handle = agent.resident_handle(&session_id).ok_or_else(|| {
+        acp::Error::invalid_params().data(format!("session not found: {}", params.session_id))
+    })?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     handle
@@ -105,10 +109,7 @@ fn handle_arm_auto_compact(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResul
     let session_id = acp::SessionId::new(session_id_str);
 
     let handle = agent
-        .sessions
-        .borrow()
-        .get(&session_id)
-        .cloned()
+        .resident_handle(&session_id)
         .ok_or_else(|| acp::Error::invalid_params().data("unknown session id"))?;
 
     handle

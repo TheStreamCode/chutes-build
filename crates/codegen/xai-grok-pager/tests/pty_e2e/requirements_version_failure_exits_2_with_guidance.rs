@@ -8,8 +8,8 @@ use super::common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn requirements_version_failure_exits_2_with_guidance() {
-    let home = tempfile::tempdir().expect("tempdir");
-    let home_path = home.path();
+    let sandbox = xai_grok_test_support::TestSandbox::new();
+    let home_path = sandbox.grok_home();
     // fail_closed + a version_override whose version can't parse → apply_version_overrides errs → startup aborts.
     std::fs::write(
         home_path.join("requirements.toml"),
@@ -18,17 +18,18 @@ async fn requirements_version_failure_exits_2_with_guidance() {
     .expect("write requirements.toml");
 
     let binary = pager_binary().expect("resolve pager binary");
-    let home_str = home_path.to_str().expect("utf8 home path");
-    let mut harness = PtyHarness::new(
+    let mut harness = PtyHarness::new_in_sandbox_ops(
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
         &["--no-auto-update"],
-        &[("CHUTES_BUILD_HOME", home_str), ("NO_COLOR", "1")],
+        &sandbox,
+        &[EnvOp::set("NO_COLOR", "1")],
+        None,
     )
     .expect("spawn pager");
 
-    let msg = "Update Grok to a version the policy allows";
+    let msg = "Update Chutes Build to a version the policy allows";
     // This single budget must cover the child's cold *exec* (a ~680MB unoptimized
     // debug binary) plus reaching `main()` and running `validate_requirements` —
     // all before the runtime/TUI. Under the ~60-way-parallel `pty_e2e` suite,
@@ -46,12 +47,22 @@ async fn requirements_version_failure_exits_2_with_guidance() {
         if harness.contains_text(msg) || String::from_utf8_lossy(harness.raw_output()).contains(msg)
         {
             if exit_code.is_none() {
-                exit_code = harness.wait_exit_code(Duration::from_secs(2));
+                match wait_for_exit_status(&mut harness, Duration::from_secs(2))
+                    .expect("wait for requirements exit")
+                {
+                    PtyExitPoll::Exited(code) => exit_code = Some(code),
+                    PtyExitPoll::Running | PtyExitPoll::PendingStatus => {}
+                }
             }
             break;
         }
         if exit_code.is_none() {
-            exit_code = harness.wait_exit_code(Duration::ZERO);
+            match wait_for_exit_status(&mut harness, Duration::ZERO)
+                .expect("poll requirements exit")
+            {
+                PtyExitPoll::Exited(code) => exit_code = Some(code),
+                PtyExitPoll::Running | PtyExitPoll::PendingStatus => {}
+            }
             if exit_code.is_some() {
                 // The child exited before the guidance surfaced on our side.
                 // It wrote the guidance to fd 2 just before exiting; keep

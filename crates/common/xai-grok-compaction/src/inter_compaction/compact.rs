@@ -10,7 +10,7 @@
 //! Everything else — turn filtering, prior-compaction user-query
 //! extraction, chunk summarisation, and the final `<grok_user_queries>`
 //! + `<chunk_summary>` assembly — is shared. The harness supplies the
-//! candidate items, the *current* user-queries preamble (Grok chat
+//! candidate items, the *current* user-queries preamble (Chutes Build chat
 //! extracts it from the raw `ChatCompletionRequest`), the sampler, the
 //! token counter, and an observer for metrics.
 
@@ -66,11 +66,11 @@ pub struct ChunkedCompactionOutput {
 ///    `thinking` channels into the analysis text.
 ///
 /// `current_user_queries` is the harness-extracted preamble for *this*
-/// round's user messages (Grok chat: verbatim from the raw request, with
+/// round's user messages (Chutes Build chat: verbatim from the raw request, with
 /// attachment refs). `conversation_id` / `response_id` are threaded
 /// through for log correlation only.
 ///
-/// Observer events (the Grok chat observer maps them to the
+/// Observer events (the Chutes Build chat observer maps them to the
 /// pre-unification metrics):
 /// - [`InterCompactionObserver::on_recompaction`] when prior-compaction
 ///   summary items are found.

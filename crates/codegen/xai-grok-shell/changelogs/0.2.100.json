@@ -31,7 +31,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Grok no longer crashes** when printing resume hints after the terminal pane has closed.",
+    "description": "**Chutes Build no longer crashes** when printing resume hints after the terminal pane has closed.",
     "breaking_change": false
   },
   {

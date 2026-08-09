@@ -12,6 +12,20 @@ pub(crate) enum McpReminderMode {
     Full,
 }
 
+/// Which credential store a successful 401 recovery minted into. An
+/// uncharged resubmit can only usefully wait on the store that recovered:
+/// waiting on the session token for a provider-key 401 blocks 15s for a
+/// refresh that is irrelevant to the rejected credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveredStore {
+    /// `AuthManager` session token (devbox re-mint, OIDC refresh) —
+    /// `wait_for_token_refresh` is meaningful.
+    SessionToken,
+    /// Auth-provider key minted into chat-state credentials — nothing to
+    /// wait on in the `AuthManager`; floor-pace instead.
+    AuthProvider,
+}
+
 /// Recovery decision returned by
 /// `SessionActor::handle_sampling_failure` for the sampler-based
 /// turn loop.
@@ -19,9 +33,15 @@ pub(crate) enum SamplerFailureRecovery {
     /// Compaction ran. The turn loop should rebuild the request from
     /// the compacted conversation and resubmit.
     CompactAndResubmit,
-    /// Auth 401 recovery succeeded (devbox re-mint or OIDC refresh).
-    /// The turn loop should resubmit once with the fresh token.
-    RefreshAuthAndResubmit,
+    /// Auth 401 recovery succeeded; the turn loop should resubmit with the
+    /// fresh token. `credential` is the wire provenance of the rejected
+    /// request: a 401 for a request that carried no credential at all (a
+    /// fail-closed send) must not be charged against the per-incident
+    /// auth-retry budget.
+    RefreshAuthAndResubmit {
+        credential: xai_grok_sampling_types::SentCredential,
+        store: RecoveredStore,
+    },
 }
 
 /// Outcome of a single turn attempt via the sampler-based path.
@@ -35,8 +55,12 @@ pub(crate) enum SamplerTurnOutcome {
         Box<xai_grok_sampler::InferenceLatencyStats>,
     ),
     CompactAndResubmit,
-    /// Auth recovery succeeded; the outer loop should retry once.
-    RefreshAuthAndResubmit,
+    /// Auth recovery succeeded; the outer loop should retry. Mirrors
+    /// [`SamplerFailureRecovery::RefreshAuthAndResubmit`].
+    RefreshAuthAndResubmit {
+        credential: xai_grok_sampling_types::SentCredential,
+        store: RecoveredStore,
+    },
 }
 
 /// Outcome of `process_conversation_turn`, distinguishing normal completion from cancellation.
@@ -50,9 +74,9 @@ pub(crate) enum TurnOutcome {
         snapshot: Box<Option<TurnDeltaSnapshot>>,
         tools_called: Vec<String>,
         structured_output: Option<Result<serde_json::Value, String>>,
-        /// Terminal response was a content-filter refusal; maps the prompt's
-        /// ACP stop reason to `Refusal` instead of `EndTurn`.
-        refusal: bool,
+        /// `Some(explanation)` marks a content-filter refusal (empty when the
+        /// provider gave no message).
+        refusal: Option<String>,
     },
     /// The turn was cancelled (user rejection, hook denial, doom loop, etc.).
     /// The category distinguishes the cause for analytics.
@@ -62,8 +86,8 @@ pub(crate) enum TurnOutcome {
     },
     /// The `--max-turns` limit was reached after a tool-execution cycle.
     MaxTurnsReached { limit: usize },
-    /// Silent EndTurn after a repeated identical tool-call loop. Kept distinct
-    /// from normal completion so autonomous goal continuation cannot reopen it.
+    /// Silent EndTurn after stationarity/true-noop thrash. Distinct from
+    /// Completed so recovery/goal/stop-hook cannot re-open the sampling loop.
     StationarityEnded {
         snapshot: Box<Option<TurnDeltaSnapshot>>,
     },
@@ -226,6 +250,14 @@ pub(crate) enum NotAchievedSyntheticReason {
 pub(crate) enum GoalRoundDecision {
     Continue(String),
     EndTurn,
+}
+
+/// Decision from the turn-end stop gate: allow the turn to end, or keep the
+/// agent working by injecting `feedback` as a synthetic user message.
+#[derive(Debug)]
+pub(crate) enum StopGateDecision {
+    AllowStop,
+    KeepWorking { feedback: String },
 }
 
 /// Which part of the model's streaming lifecycle the capture was tied to

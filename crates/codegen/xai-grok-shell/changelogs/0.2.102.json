@@ -16,7 +16,7 @@
   },
   {
     "category": "features",
-    "description": "**chutes-build login** now requests Grok Projects scopes so workspace listing works after consent.",
+    "description": "**chutes-build login** now requests Chutes Build Projects scopes so workspace listing works after consent.",
     "breaking_change": false
   },
   {
@@ -166,7 +166,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Fixed background task tracking** when using grok -p --no-wait-for-background so tasks are properly reaped on exit.",
+    "description": "**Fixed background task tracking** when using chutes-build -p --no-wait-for-background so tasks are properly reaped on exit.",
     "breaking_change": false
   },
   {

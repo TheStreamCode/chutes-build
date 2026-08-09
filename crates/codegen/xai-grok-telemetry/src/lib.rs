@@ -1,4 +1,4 @@
-//! Telemetry engine for Grok Build sessions: product events + Mixpanel emission +
+//! Telemetry engine for Chutes Build sessions: product events + Mixpanel emission +
 //! Sentry error reporting + OpenTelemetry tracing + structured unified log.
 //!
 //! Extracted from `xai-file-utils` per review feedback so telemetry has
@@ -28,6 +28,7 @@ pub mod sampling_log;
 pub mod sentry;
 pub mod session_ctx;
 pub mod session_metrics;
+pub mod startup;
 pub mod unified_log;
 
 pub use client::{

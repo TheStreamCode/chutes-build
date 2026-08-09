@@ -110,6 +110,8 @@ pub struct TerminalRunRequest {
     /// `kill_all_background_tasks_by_owner` only targets the requesting
     /// session's processes — not the parent's or sibling's.
     pub owner_session_id: Option<String>,
+    /// Model-supplied label for task UI / snapshots.
+    pub description: Option<String>,
 }
 
 /// Distinguishes different types of background tasks.
@@ -188,7 +190,13 @@ pub struct TaskSnapshot {
     pub end_time: Option<std::time::SystemTime>,
     pub output: String,
     pub output_file: PathBuf,
+    /// `output` may not be the whole output: read `output_file` for the rest.
+    /// Says the copy is partial, not how it came to be.
     pub truncated: bool,
+    /// Total bytes the task has written, when the source tracks it. `output`
+    /// may hold only part of that; zero means unknown.
+    #[serde(default)]
+    pub output_total_bytes: usize,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub completed: bool,
@@ -214,6 +222,12 @@ pub struct TaskSnapshot {
     /// the parent's or sibling's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_session_id: Option<String>,
+    /// Model-supplied label for task UI / snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// True after explicit/user/auto backgrounding; false for pure foreground runs.
+    #[serde(default)]
+    pub is_backgrounded: bool,
 }
 
 impl TaskSnapshot {
@@ -233,11 +247,22 @@ impl TaskSnapshot {
     pub fn is_outstanding(&self) -> bool {
         !self.completed
     }
+
+    /// The output on hand, and the size of the output it came from. Readers
+    /// take the size from here so the "not tracked" case is handled once.
+    pub fn output_view(&self) -> crate::util::truncate::PartialOutput<'_> {
+        crate::util::truncate::PartialOutput::part_of(&self.output, self.output_total_bytes)
+    }
+
+    /// Incomplete and backgrounded — tray/`tasks_snapshot` predicate (not FG in-flight).
+    pub fn is_outstanding_background(&self) -> bool {
+        !self.completed && self.is_backgrounded
+    }
 }
 
 /// Result of killing a terminal task.
 ///
-/// Serialized over the wire in the `chutes.build/task/kill` ext response
+/// Serialized over the wire in the `chutes.ai/task/kill` ext response
 /// (`xai-grok-shell::extensions::task::KillTaskResponse`) and deserialized
 /// by clients (xai-grok-pager), so it derives both serde directions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -292,6 +317,8 @@ pub trait TerminalBackend: Send + Sync {
     /// only the subagent's own tasks are killed — not the parent's.
     async fn kill_all_background_tasks_by_owner(&self, _owner_session_id: &str) {}
 
+    async fn warm_shell(&self, _cwd: &std::path::Path) {}
+
     /// Reparent notification handles for all tasks owned by `old_owner_session_id`.
     /// Swaps the dead child session's notification handle with the parent's
     /// live handle so events from surviving processes route correctly.
@@ -318,6 +345,11 @@ pub trait TerminalBackend: Send + Sync {
     }
 
     /// Wait for a background task to complete, with optional timeout.
+    ///
+    /// # Panics / overflow
+    /// Implementations may add `timeout` to `Instant::now()`. Callers must
+    /// bound `timeout` (e.g. via `capped_wait_timeout`) so the sum stays
+    /// representable; unbounded model `timeout_ms` can overflow.
     async fn wait_for_completion(
         &self,
         task_id: &str,

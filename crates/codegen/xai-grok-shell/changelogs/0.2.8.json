@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "**Cursor skills and rules** are now discovered alongside Grok and Claude directories.",
+    "description": "**Cursor skills and rules** are now discovered alongside Chutes Build and Claude directories.",
     "breaking_change": false
   }
 ]

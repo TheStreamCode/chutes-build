@@ -316,6 +316,25 @@ pub fn native_tool_name() -> &'static str {
     }
 }
 
+/// Result of an explicit Wayland data-control capability probe.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WaylandDataControlProbe {
+    /// The compositor definitively reported the protocol present or absent.
+    Available(bool),
+    /// The bounded worker did not answer before its deadline.
+    Unavailable,
+    /// The worker or compositor returned an operational error.
+    Error(String),
+}
+
+/// Run one explicit, bounded Wayland data-control capability probe.
+///
+/// Unlike [`wayland_data_control_supported`], this preserves inconclusive
+/// outcomes for diagnostics instead of mapping them to `false`.
+pub fn probe_wayland_data_control() -> WaylandDataControlProbe {
+    platform::probe_wayland_data_control()
+}
+
 /// Whether the Wayland compositor supports the data-control clipboard
 /// protocol (`zwlr_data_control_v1` / `ext_data_control_v1`).
 ///
@@ -590,6 +609,10 @@ mod platform {
     /// No Wayland on macOS.
     pub(super) fn wayland_data_control_supported() -> bool {
         false
+    }
+
+    pub(super) fn probe_wayland_data_control() -> super::WaylandDataControlProbe {
+        super::WaylandDataControlProbe::Available(false)
     }
 
     /// Serializes every in-process NSPasteboard touch.
@@ -985,6 +1008,7 @@ mod platform {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             xai_grok_tools::util::detach_std_command(&mut cmd);
+            #[allow(clippy::disallowed_methods)] // short-lived clipboard helper, waited on below
             let mut child = cmd
                 .spawn()
                 .map_err(|e| anyhow::anyhow!("failed to spawn pbcopy: {e}"))?;
@@ -1170,7 +1194,6 @@ mod platform {
 #[cfg(not(target_os = "macos"))]
 mod platform {
     use super::ImageData;
-    #[cfg(target_os = "linux")]
     use std::process::{Command, Stdio};
 
     /// No subprocess-free pasteboard probe exists off-macOS.
@@ -1455,18 +1478,6 @@ mod platform {
         spec.is_some_and(|spec| spec.reads_wayland_selection)
     }
 
-    /// Outcome of one data-control probe attempt.
-    #[cfg(target_os = "linux")]
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum ProbeOutcome {
-        /// The compositor answered: protocol present or absent — decidable
-        /// forever.
-        Definitive(bool),
-        /// The compositor did not answer (probe timeout, connection failure,
-        /// worker died) — fail closed for this call, retry on a later one.
-        Indefinite,
-    }
-
     /// Indefinite probe outcomes tolerated before deciding `false` permanently
     /// (mirrors the lease's timeout ⇒ permanent-degradation stance), so a
     /// wedged compositor can't tax every copy with a bounded probe forever.
@@ -1499,13 +1510,17 @@ mod platform {
     /// runs the same connect on the same budget and may succeed moments later,
     /// leaving every working data-control copy mis-toasted as failed.
     #[cfg(target_os = "linux")]
-    fn apply_probe_outcome(cache: &mut ProbeCache, outcome: ProbeOutcome) -> bool {
+    fn apply_probe_outcome(
+        cache: &mut ProbeCache,
+        outcome: &super::WaylandDataControlProbe,
+    ) -> bool {
         match outcome {
-            ProbeOutcome::Definitive(supported) => {
-                cache.decided = Some(supported);
-                supported
+            super::WaylandDataControlProbe::Available(supported) => {
+                cache.decided = Some(*supported);
+                *supported
             }
-            ProbeOutcome::Indefinite => {
+            super::WaylandDataControlProbe::Unavailable
+            | super::WaylandDataControlProbe::Error(_) => {
                 cache.indefinite_seen += 1;
                 if cache.indefinite_seen >= PROBE_INDEFINITE_MAX {
                     cache.decided = Some(false);
@@ -1520,7 +1535,7 @@ mod platform {
     #[cfg(target_os = "linux")]
     fn cached_probe_answer(
         cache: &parking_lot::Mutex<ProbeCache>,
-        probe: impl FnOnce() -> ProbeOutcome,
+        probe: impl FnOnce() -> super::WaylandDataControlProbe,
     ) -> bool {
         let mut cache = cache.lock();
         if let Some(decided) = cache.decided {
@@ -1533,7 +1548,7 @@ mod platform {
         // cap count past PROBE_INDEFINITE_MAX in one wall-clock burst, or
         // dropping a concurrent definitive answer.
         let outcome = probe();
-        apply_probe_outcome(&mut cache, outcome)
+        apply_probe_outcome(&mut cache, &outcome)
     }
 
     /// Memoized data-control probe (see the public wrapper for semantics).
@@ -1555,44 +1570,81 @@ mod platform {
         false
     }
 
-    /// Run the same compositor probe arboard's `Clipboard::new` uses to pick
-    /// its Wayland backend, on a worker thread with a self-imposed deadline
-    /// (the Wayland connection can block on a hung compositor). Callers gate
-    /// on the kill switch and `WAYLAND_DISPLAY` first.
     #[cfg(target_os = "linux")]
-    fn probe_data_control() -> ProbeOutcome {
+    pub(super) fn probe_wayland_data_control() -> super::WaylandDataControlProbe {
+        if data_control_kill_switch_set() || !env_present("WAYLAND_DISPLAY") {
+            return super::WaylandDataControlProbe::Available(false);
+        }
+        probe_data_control()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(super) fn probe_wayland_data_control() -> super::WaylandDataControlProbe {
+        super::WaylandDataControlProbe::Available(false)
+    }
+
+    /// Run the same compositor probe arboard's `Clipboard::new` uses to pick
+    /// its Wayland backend, on a bounded worker. Both the legacy cached bool
+    /// adapter and explicit diagnostics consume this typed result.
+    #[cfg(target_os = "linux")]
+    fn probe_data_control() -> super::WaylandDataControlProbe {
+        use std::sync::mpsc::RecvTimeoutError;
         match spawn_with_deadline(
             "clipboard-dc-probe",
             DISPLAY_CONN_WAIT,
             wl_clipboard_rs::utils::is_primary_selection_supported,
         ) {
-            Ok(result) => data_control_from_probe(result),
-            Err(e) => {
-                tracing::debug!("wayland data-control probe aborted: {e}");
-                ProbeOutcome::Indefinite
+            Ok(result) => data_control_from_result(result),
+            Err(RecvTimeoutError::Timeout) => super::WaylandDataControlProbe::Unavailable,
+            Err(RecvTimeoutError::Disconnected) => {
+                super::WaylandDataControlProbe::Error("probe worker died".to_owned())
             }
         }
     }
 
-    /// Classify one probe answer: any `Ok` means the data-control protocol is
-    /// present (whether the *primary* selection is supported is irrelevant —
-    /// this mirrors arboard's own backend selection); `MissingProtocol` /
-    /// `NoSeats` are the compositor definitively answering "absent". Anything
-    /// else means the compositor didn't answer.
     #[cfg(target_os = "linux")]
-    fn data_control_from_probe(
-        result: Result<bool, wl_clipboard_rs::utils::PrimarySelectionCheckError>,
-    ) -> ProbeOutcome {
-        use wl_clipboard_rs::utils::PrimarySelectionCheckError;
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum DataControlSemanticResult {
+        Present,
+        MissingProtocol,
+        NoSeats,
+        ConnectionUnavailable,
+    }
+
+    #[cfg(target_os = "linux")]
+    fn classify_data_control_semantic(
+        result: DataControlSemanticResult,
+    ) -> super::WaylandDataControlProbe {
+        use super::WaylandDataControlProbe;
         match result {
-            Ok(_) => ProbeOutcome::Definitive(true),
-            Err(PrimarySelectionCheckError::MissingProtocol)
-            | Err(PrimarySelectionCheckError::NoSeats) => ProbeOutcome::Definitive(false),
-            Err(e) => {
-                tracing::debug!("wayland data-control probe inconclusive: {e}");
-                ProbeOutcome::Indefinite
+            DataControlSemanticResult::Present => WaylandDataControlProbe::Available(true),
+            DataControlSemanticResult::MissingProtocol => WaylandDataControlProbe::Available(false),
+            DataControlSemanticResult::NoSeats
+            | DataControlSemanticResult::ConnectionUnavailable => {
+                WaylandDataControlProbe::Unavailable
             }
         }
+    }
+
+    /// Canonical exhaustive mapping from dependency errors to semantic classes.
+    #[cfg(target_os = "linux")]
+    fn data_control_from_result(
+        result: Result<bool, wl_clipboard_rs::utils::PrimarySelectionCheckError>,
+    ) -> super::WaylandDataControlProbe {
+        use wl_clipboard_rs::utils::PrimarySelectionCheckError;
+        let semantic = match result {
+            Ok(_) => DataControlSemanticResult::Present,
+            Err(PrimarySelectionCheckError::MissingProtocol) => {
+                DataControlSemanticResult::MissingProtocol
+            }
+            Err(PrimarySelectionCheckError::NoSeats) => DataControlSemanticResult::NoSeats,
+            Err(
+                PrimarySelectionCheckError::SocketOpenError(_)
+                | PrimarySelectionCheckError::WaylandConnection(_)
+                | PrimarySelectionCheckError::WaylandCommunication(_),
+            ) => DataControlSemanticResult::ConnectionUnavailable,
+        };
+        classify_data_control_semantic(semantic)
     }
 
     #[cfg(target_os = "linux")]
@@ -1633,6 +1685,7 @@ mod platform {
             .stderr(Stdio::null());
         xai_grok_tools::util::detach_std_command(&mut cmd);
         // Availability = the tool ran and exited in time (any exit status).
+        #[allow(clippy::disallowed_methods)] // availability probe, waited on with a timeout
         let Ok(mut child) = cmd.spawn() else {
             return false;
         };
@@ -1753,6 +1806,7 @@ mod platform {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         xai_grok_tools::util::detach_std_command(&mut cmd);
+        #[allow(clippy::disallowed_methods)] // short-lived clipboard helper, waited on below
         let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {bin}: {e}"))?;
@@ -1777,6 +1831,7 @@ mod platform {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         xai_grok_tools::util::detach_std_command(&mut cmd);
+        #[allow(clippy::disallowed_methods)] // short-lived clipboard helper, waited on below
         let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to run {bin}: {e}"))?;
@@ -1934,18 +1989,19 @@ mod platform {
     // -- Public API ----------------------------------------------------------
 
     pub fn get_text() -> anyhow::Result<Option<String>> {
-        let arboard_error = match arboard_get_text() {
+        let mut arboard_error = None;
+        match arboard_get_text() {
             Ok(Some(text)) => return Ok(Some(text)),
             // Wayland-only: arboard's empty answer is not authoritative,
             // fall through to wl-paste (see `wayland_tool_selected`).
             #[cfg(target_os = "linux")]
-            Ok(None) if wayland_tool_selected(linux_tool_spec()) => None,
+            Ok(None) if wayland_tool_selected(linux_tool_spec()) => {}
             Ok(None) => return Ok(None),
             Err(e) => {
                 tracing::debug!("arboard get_text failed: {e}");
-                Some(e)
+                arboard_error = Some(e);
             }
-        };
+        }
         #[cfg(target_os = "linux")]
         if let Some(spec) = linux_tool_spec() {
             let bytes = run_capture_out_checked(spec.read_text, CLI_READ_WAIT)?;
@@ -2046,18 +2102,19 @@ mod platform {
     }
 
     pub fn get_image() -> anyhow::Result<Option<ImageData>> {
-        let arboard_error = match arboard_get_image() {
+        let mut arboard_error = None;
+        match arboard_get_image() {
             Ok(Some(image)) => return Ok(Some(image)),
             // Wayland-only: arboard's empty answer is not authoritative,
             // fall through to wl-paste (see `wayland_tool_selected`).
             #[cfg(target_os = "linux")]
-            Ok(None) if wayland_tool_selected(linux_tool_spec()) => None,
+            Ok(None) if wayland_tool_selected(linux_tool_spec()) => {}
             Ok(None) => return Ok(None),
             Err(e) => {
                 tracing::debug!("arboard get_image failed: {e}");
-                Some(e)
+                arboard_error = Some(e);
             }
-        };
+        }
         #[cfg(target_os = "linux")]
         if let Some(spec) = linux_tool_spec()
             && let Some(argv) = spec.read_png
@@ -2218,6 +2275,7 @@ mod platform {
     #[cfg(all(test, target_os = "linux"))]
     mod linux_tests {
         use super::*;
+        use crate::clipboard::WaylandDataControlProbe;
 
         #[test]
         fn primary_read_argv_targets_x11_primary_exactly() {
@@ -2527,34 +2585,50 @@ mod platform {
             assert!(!wayland_readback_required(false, false, false));
         }
 
-        /// `Ok(_)` means the data-control protocol is present regardless of
-        /// the primary-selection answer; MissingProtocol/NoSeats are the
-        /// compositor definitively answering "absent"; connection-class
-        /// failures are indefinite (fail closed now, retry later).
         #[test]
-        fn data_control_probe_classification() {
+        fn data_control_semantic_classification_is_exhaustive() {
+            assert_eq!(
+                classify_data_control_semantic(DataControlSemanticResult::Present),
+                WaylandDataControlProbe::Available(true)
+            );
+            assert_eq!(
+                classify_data_control_semantic(DataControlSemanticResult::MissingProtocol),
+                WaylandDataControlProbe::Available(false)
+            );
+            assert_eq!(
+                classify_data_control_semantic(DataControlSemanticResult::NoSeats),
+                WaylandDataControlProbe::Unavailable
+            );
+            assert_eq!(
+                classify_data_control_semantic(DataControlSemanticResult::ConnectionUnavailable),
+                WaylandDataControlProbe::Unavailable
+            );
+        }
+
+        #[test]
+        fn dependency_error_mapping_pins_directly_constructible_variants() {
             use wl_clipboard_rs::utils::PrimarySelectionCheckError;
             assert_eq!(
-                data_control_from_probe(Ok(true)),
-                ProbeOutcome::Definitive(true)
+                data_control_from_result(Ok(true)),
+                WaylandDataControlProbe::Available(true)
             );
             assert_eq!(
-                data_control_from_probe(Ok(false)),
-                ProbeOutcome::Definitive(true)
+                data_control_from_result(Ok(false)),
+                WaylandDataControlProbe::Available(true)
             );
             assert_eq!(
-                data_control_from_probe(Err(PrimarySelectionCheckError::MissingProtocol)),
-                ProbeOutcome::Definitive(false)
+                data_control_from_result(Err(PrimarySelectionCheckError::MissingProtocol)),
+                WaylandDataControlProbe::Available(false)
             );
             assert_eq!(
-                data_control_from_probe(Err(PrimarySelectionCheckError::NoSeats)),
-                ProbeOutcome::Definitive(false)
+                data_control_from_result(Err(PrimarySelectionCheckError::NoSeats)),
+                WaylandDataControlProbe::Unavailable
             );
             assert_eq!(
-                data_control_from_probe(Err(PrimarySelectionCheckError::SocketOpenError(
+                data_control_from_result(Err(PrimarySelectionCheckError::SocketOpenError(
                     std::io::Error::other("boom")
                 ))),
-                ProbeOutcome::Indefinite
+                WaylandDataControlProbe::Unavailable
             );
         }
 
@@ -2565,12 +2639,18 @@ mod platform {
         fn probe_cache_indefinite_stays_undecided_below_cap() {
             let mut cache = ProbeCache::new();
             for seen in 1..PROBE_INDEFINITE_MAX {
-                assert!(!apply_probe_outcome(&mut cache, ProbeOutcome::Indefinite));
+                assert!(!apply_probe_outcome(
+                    &mut cache,
+                    &WaylandDataControlProbe::Unavailable
+                ));
                 assert_eq!(cache.decided, None);
                 assert_eq!(cache.indefinite_seen, seen);
             }
             // Cap reached: permanently decided false (mirrors lease degradation).
-            assert!(!apply_probe_outcome(&mut cache, ProbeOutcome::Indefinite));
+            assert!(!apply_probe_outcome(
+                &mut cache,
+                &WaylandDataControlProbe::Unavailable
+            ));
             assert_eq!(cache.decided, Some(false));
         }
 
@@ -2578,12 +2658,33 @@ mod platform {
         /// once; the earlier indefinite attempts leave no residue in the
         /// decision.
         #[test]
+        fn repeated_probe_errors_reach_permanent_false() {
+            let mut cache = ProbeCache::new();
+            for seen in 1..PROBE_INDEFINITE_MAX {
+                assert!(!apply_probe_outcome(
+                    &mut cache,
+                    &WaylandDataControlProbe::Error("worker died".to_owned())
+                ));
+                assert_eq!(cache.decided, None);
+                assert_eq!(cache.indefinite_seen, seen);
+            }
+            assert!(!apply_probe_outcome(
+                &mut cache,
+                &WaylandDataControlProbe::Error("worker died".to_owned())
+            ));
+            assert_eq!(cache.decided, Some(false));
+        }
+
+        #[test]
         fn probe_cache_definitive_after_indefinite_decides_truth() {
             let mut cache = ProbeCache::new();
-            assert!(!apply_probe_outcome(&mut cache, ProbeOutcome::Indefinite));
+            assert!(!apply_probe_outcome(
+                &mut cache,
+                &WaylandDataControlProbe::Unavailable
+            ));
             assert!(apply_probe_outcome(
                 &mut cache,
-                ProbeOutcome::Definitive(true)
+                &WaylandDataControlProbe::Available(true)
             ));
             assert_eq!(cache.decided, Some(true));
             assert_eq!(cache.indefinite_seen, 1);
@@ -2594,7 +2695,7 @@ mod platform {
             let mut cache = ProbeCache::new();
             assert!(!apply_probe_outcome(
                 &mut cache,
-                ProbeOutcome::Definitive(false)
+                &WaylandDataControlProbe::Available(false)
             ));
             assert_eq!(cache.decided, Some(false));
         }
@@ -2607,11 +2708,11 @@ mod platform {
             let calls = std::cell::Cell::new(0u32);
             assert!(cached_probe_answer(&cache, || {
                 calls.set(calls.get() + 1);
-                ProbeOutcome::Definitive(true)
+                WaylandDataControlProbe::Available(true)
             }));
             assert!(cached_probe_answer(&cache, || {
                 calls.set(calls.get() + 1);
-                ProbeOutcome::Definitive(false)
+                WaylandDataControlProbe::Available(false)
             }));
             assert_eq!(calls.get(), 1);
         }
@@ -2631,7 +2732,7 @@ mod platform {
                             calls.fetch_add(1, Ordering::Relaxed);
                             // Hold the lock long enough that peers must wait.
                             std::thread::sleep(std::time::Duration::from_millis(50));
-                            ProbeOutcome::Definitive(true)
+                            WaylandDataControlProbe::Available(true)
                         });
                         assert!(answer);
                     });
@@ -2725,6 +2826,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[cfg(unix)]
+    #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
     fn spawn_sleep(seconds: &str) -> std::process::Child {
         let mut cmd = std::process::Command::new("sleep");
         cmd.arg(seconds)

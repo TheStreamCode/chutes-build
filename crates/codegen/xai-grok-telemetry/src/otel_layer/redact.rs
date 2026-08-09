@@ -137,6 +137,8 @@ pub(super) static ALLOWED_STRING_KEYS: &[&str] = &[
     "terminal.multiplexer",
     "terminal.tmux_version",
     "terminal.term_var",
+    "terminal.term_version",
+    "terminal.term_version_source",
     "skip_reason",
     "auto_cadence_reason",
 ];
@@ -491,6 +493,8 @@ mod tests {
             "terminal.multiplexer",
             "terminal.tmux_version",
             "terminal.term_var",
+            "terminal.term_version",
+            "terminal.term_version_source",
             "skip_reason",
             "auto_cadence_reason",
         ];
@@ -505,7 +509,7 @@ mod tests {
     fn error_status_message_retained_but_secret_scrubbed() {
         // Error messages are useful telemetry and must survive; only secret
         // shapes (and home/username paths) are scrubbed out of them.
-        let mut status = Status::error("upstream auth failed: sk-CANARYabcdefghij1234567890"); // gitleaks:allow
+        let mut status = Status::error("upstream auth failed: sk-CANARYabcdefghij1234567890");
         if let Status::Error { description } = &mut status {
             redact_in_place(description);
         }

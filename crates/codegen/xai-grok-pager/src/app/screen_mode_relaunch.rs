@@ -71,7 +71,7 @@ fn flag_takes_value(flag: &str) -> bool {
 ///
 /// Strips prior session-selection / mode flags, one-shot session-creation
 /// directives, and any bare positional prompt so a cold-start
-/// `chutes-build "do the thing"` does not re-submit on resume. Keeps everything else
+/// `grok "do the thing"` does not re-submit on resume. Keeps everything else
 /// (e.g. `--no-leader`, `--model`, endpoint overrides) intact, including the
 /// value token that follows value-taking flags.
 ///
@@ -175,7 +175,7 @@ pub(crate) fn build_screen_mode_relaunch_args(
             continue;
         }
 
-        // Bare positional prompt (e.g. `chutes-build "fix the bug"`). Must not re-fire
+        // Bare positional prompt (e.g. `grok "fix the bug"`). Must not re-fire
         // on resume. Clap positionals never start with `-`. Values for earlier
         // flags were already consumed above, so any remaining bare word here is
         // the prompt.
@@ -210,7 +210,7 @@ pub(crate) fn screen_mode_relaunch_resume_hint(session_id: &str, want_minimal: b
     } else {
         "--fullscreen"
     };
-    format!("{CHUTES_BUILD_SCREEN_MODE_ENV}={mode} grok {flag} --resume {session_id}")
+    format!("{CHUTES_BUILD_SCREEN_MODE_ENV}={mode} chutes-build {flag} --resume {session_id}")
 }
 
 /// Replace the current process with a relaunch into the requested screen mode.
@@ -288,6 +288,7 @@ pub(crate) fn exec_screen_mode_relaunch(session_id: &str, want_minimal: bool) ->
         // reader competes with the child for console records and swallows its
         // first keystrokes.
         std::thread::sleep(std::time::Duration::from_millis(150));
+        #[allow(clippy::disallowed_methods)] // the parent waits and exits with its status
         let mut child = cmd.spawn()?;
         let status = child.wait()?;
         std::process::exit(status.code().unwrap_or(0));
@@ -334,7 +335,7 @@ pub(crate) fn parse_screen_mode(value: Option<&str>) -> Option<super::ScreenMode
 ///
 /// Reads **and removes** the variable so the override is truly one-shot: it
 /// must not linger in this process's environment where every spawned child
-/// (tool shells, workers, nested `chutes-build` invocations) would inherit a forced
+/// (tool shells, workers, nested `grok` invocations) would inherit a forced
 /// screen mode the user never asked for.
 ///
 /// When set, the returned mode **wins** over CLI flags (`--minimal`,
@@ -836,11 +837,11 @@ mod tests {
         // explicit flag keeps the resume in the right mode if the env is dropped.
         assert_eq!(
             screen_mode_relaunch_resume_hint("abc-sid", false),
-            "CHUTES_BUILD_SCREEN_MODE=fullscreen grok --fullscreen --resume abc-sid"
+            "CHUTES_BUILD_SCREEN_MODE=fullscreen chutes-build --fullscreen --resume abc-sid"
         );
         assert_eq!(
             screen_mode_relaunch_resume_hint("abc-sid", true),
-            "CHUTES_BUILD_SCREEN_MODE=minimal grok --minimal --resume abc-sid"
+            "CHUTES_BUILD_SCREEN_MODE=minimal chutes-build --minimal --resume abc-sid"
         );
     }
 

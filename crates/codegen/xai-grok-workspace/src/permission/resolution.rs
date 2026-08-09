@@ -209,7 +209,7 @@ fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
         .collect()
 }
 
-/// Load `[permission]` rules from native Grok TOML config files:
+/// Load `[permission]` rules from native Chutes Build TOML config files:
 ///
 ///   * `~/.chutes-build/config.toml` (lowest priority)
 ///   * Each `.chutes-build/config.toml` from the git repo root down to `cwd`
@@ -276,7 +276,7 @@ fn managed_config_permissions(
 // Fallback Resolver
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Resolve permission config, merging native Grok and Claude sources.
+/// Resolve permission config, merging native Chutes Build and Claude sources.
 /// Evaluation is order-independent (deny > ask > allow); merge order affects
 /// provenance display only.
 ///
@@ -284,10 +284,9 @@ fn managed_config_permissions(
 /// `Allow Edit` rule appended to the Claude rules.
 ///
 /// `project_trusted` gates project-tier `.claude/settings.json` and
-/// `.chutes-build/config.toml` permission rules (mirrors
-/// [`load_claude_env_with_project`]). Global/user/admin tiers always load.
-/// Callers pass the folder-trust bridge verdict for local sessions; hub/cloud
-/// defaults trusted.
+/// `.chutes-build/config.toml` permission rules (mirrors [`load_claude_env_with_project`]).
+/// Global/user/admin tiers always load. Callers pass the folder-trust bridge
+/// verdict for local sessions; hub/cloud defaults trusted.
 pub async fn resolve_permission_config_with_fallback(
     cwd: &Path,
     project_trusted: bool,
@@ -414,8 +413,8 @@ struct ResolveInputs<'a> {
     managed: &'a ManagedSettings,
     managed_config_rules: Vec<Sourced<PermissionRule>>,
     /// Folder-trust verdict for `cwd`. When false, project-tier
-    /// `.claude/settings.json` / `.chutes-build/config.toml` permission rules
-    /// are dropped (global/user/admin tiers still load).
+    /// `.claude/settings.json` / `.chutes-build/config.toml` permission rules are dropped
+    /// (global/user/admin tiers still load).
     project_trusted: bool,
 }
 
@@ -1146,24 +1145,20 @@ impl McpServerAllowlist {
             | agent_client_protocol::McpServer::Sse(agent_client_protocol::McpServerSse {
                 url,
                 ..
-            }) => {
-                if !self.url_patterns.is_empty() {
-                    restricted = true;
-                    matched |= self
-                        .url_patterns
-                        .iter()
-                        .any(|pat| url_glob_matches(pat, url));
-                }
+            }) if !self.url_patterns.is_empty() => {
+                restricted = true;
+                matched |= self
+                    .url_patterns
+                    .iter()
+                    .any(|pat| url_glob_matches(pat, url));
             }
             agent_client_protocol::McpServer::Stdio(agent_client_protocol::McpServerStdio {
                 command,
                 ..
-            }) => {
-                if !self.commands.is_empty() {
-                    restricted = true;
-                    let command = command.to_string_lossy();
-                    matched |= self.commands.iter().any(|c| *c == command);
-                }
+            }) if !self.commands.is_empty() => {
+                restricted = true;
+                let command = command.to_string_lossy();
+                matched |= self.commands.iter().any(|c| *c == command);
             }
             // TODO(acp-0.10): `McpServer` is #[non_exhaustive].
             _ => {}
@@ -2869,6 +2864,12 @@ mod tests {
 
     #[test]
     fn single_file_still_works() {
+        // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count
+        // (paths merge global + project; concurrent env tests race without the lock).
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _home_guard = EnvVarGuard::set("HOME", home.path());
+
         let tmp = tempfile::tempdir().unwrap();
         let claude_dir = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
@@ -2892,10 +2893,6 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home_guard = EnvVarGuard::set("HOME", home.path());
-        // `dirs::home_dir()` (used by `global_claude_settings_paths`) reads
-        // %USERPROFILE% on Windows, not $HOME -- override both so this test is
-        // hermetic against the real dev machine's ~/.claude on every platform.
-        let _userprofile_guard = EnvVarGuard::set("USERPROFILE", home.path());
         let _grok_guard = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
         let _marker_guard = EnvVarGuard::unset("_CHUTES_BUILD_CLAUDE_MARKER_OVERRIDE");
 
@@ -2953,10 +2950,10 @@ mod tests {
     ///
     /// Sync + `block_on` so `ENV_LOCK` is not held across `.await` (clippy
     /// `await_holding_lock`). Does not assert exact global rule counts:
-    /// `xai_grok_config::user_grok_home()` is a process-wide `OnceLock`, so under
-    /// single-process `cargo test` an earlier test may have already pinned it.
-    /// Project-rule filtering is independent of that; global survival is checked
-    /// only when our temp home is the live `user_grok_home()`.
+    /// `xai_grok_config::grok_home()` is a process-wide `OnceLock`, so under
+    /// single-process `cargo test` an earlier test may have already pinned
+    /// `CHUTES_BUILD_HOME`. Project-rule filtering is independent of that; global
+    /// survival is checked only when our temp home is the live `user_grok_home()`.
     #[test]
     fn untrusted_project_config_toml_permissions_are_not_honored() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -2991,8 +2988,8 @@ allow = ["Bash(evil *)"]
             .enable_all()
             .build()
             .expect("test runtime");
-        // Untrusted may be None when no global rules load (the OnceLock is
-        // already pinned by another test) -- empty after dropping project is OK.
+        // Untrusted may be None when no global rules load (CHUTES_BUILD_HOME OnceLock
+        // already pinned by another test) — empty after dropping project is OK.
         let untrusted = rt.block_on(resolve_permissions_with_provenance_inner(
             tmp.path(),
             inputs_trusted(None, false),
@@ -4200,15 +4197,34 @@ allow = ["Bash(evil *)"]
     }
 
     #[test]
-    fn parse_notebook_read_tool_prefix() {
-        let rule = parse_permission_rule("NotebookRead(*.ipynb)", RuleAction::Allow).unwrap();
-        assert_eq!(rule.tool, ToolFilter::Read);
-    }
+    fn notebook_tools_warn_and_skip_like_enter_worktree() {
+        for rule in [
+            "NotebookEdit",
+            "NotebookEdit(*)",
+            "NotebookRead",
+            "NotebookRead(*)",
+            "EnterWorktree(*)",
+        ] {
+            let err = parse_permission_rule(rule, RuleAction::Deny).unwrap_err();
+            assert!(
+                matches!(err, RuleParseError::UnsupportedToolPrefix { .. }),
+                "{rule}: {err:?}"
+            );
+        }
 
-    #[test]
-    fn parse_notebook_edit_tool_prefix() {
-        let rule = parse_permission_rule("NotebookEdit(*.ipynb)", RuleAction::Allow).unwrap();
-        assert_eq!(rule.tool, ToolFilter::Edit);
+        let perms = ParsedPermissions {
+            deny: vec![
+                "NotebookEdit".to_string(),
+                "NotebookRead".to_string(),
+                "EnterWorktree".to_string(),
+            ],
+            allow: vec!["Bash(git status)".to_string()],
+            ..Default::default()
+        };
+        let (cfg, warnings) = perms.into_permission_config();
+        assert_eq!(cfg.rules.len(), 1, "rules: {:?}", cfg.rules);
+        assert_eq!(cfg.rules[0].tool, ToolFilter::Bash);
+        assert_eq!(warnings.len(), 3, "warnings: {warnings:?}");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -4308,20 +4324,6 @@ allow = ["Bash(evil *)"]
     fn parse_bare_web_search_tool_name() {
         let rule = parse_permission_rule("WebSearch", RuleAction::Allow).unwrap();
         assert_eq!(rule.tool, ToolFilter::WebSearch);
-        assert!(rule.pattern.is_none());
-    }
-
-    #[test]
-    fn parse_bare_notebook_read_tool_name() {
-        let rule = parse_permission_rule("NotebookRead", RuleAction::Allow).unwrap();
-        assert_eq!(rule.tool, ToolFilter::Read);
-        assert!(rule.pattern.is_none());
-    }
-
-    #[test]
-    fn parse_bare_notebook_edit_tool_name() {
-        let rule = parse_permission_rule("NotebookEdit", RuleAction::Allow).unwrap();
-        assert_eq!(rule.tool, ToolFilter::Edit);
         assert!(rule.pattern.is_none());
     }
 

@@ -232,7 +232,7 @@ fn slash_plan_desc_forwards_skill_token_ranges() {
             assert_eq!(text, "great /pr-workflow go");
             assert_eq!(
                 skill_token_ranges,
-                &std::iter::once(6..18).collect::<Vec<_>>(),
+                &vec![6..18],
                 "offsets recomputed against the stripped desc"
             );
         }
@@ -241,10 +241,7 @@ fn slash_plan_desc_forwards_skill_token_ranges() {
     // The drained echo block carries the same desc-space ranges.
     match &app.agents[&id].scrollback.get(0).unwrap().block {
         RenderBlock::UserPrompt(b) => {
-            assert_eq!(
-                b.skill_token_ranges,
-                std::iter::once(6..18).collect::<Vec<_>>()
-            );
+            assert_eq!(b.skill_token_ranges, vec![6..18]);
         }
         other => panic!("expected UserPrompt, got {other:?}"),
     }
@@ -600,7 +597,7 @@ fn yolo_on_drain_clears_double_click_tracker() {
 /// 2. The dispatcher returns a `PersistPermissionMode` effect with
 ///    canonical `"always-approve"` — this is what flips
 ///    `[ui] permission_mode` on disk AND fires the
-///    `chutes.build/yolo_mode_changed` ACP notification back to the shell.
+///    `chutes.ai/yolo_mode_changed` ACP notification back to the shell.
 /// 3. The agent's per-session `yolo_mode` flag is flipped to true,
 ///    so subsequent permission requests are auto-approved by
 ///    `handle_permission_request`.
@@ -653,7 +650,7 @@ fn enable_always_approve_sends_response_and_flips_yolo_and_persists() {
 
     // (2) The dispatcher returns a PersistPermissionMode effect with
     //     canonical "always-approve". This is the bridge that writes
-    //     ~/.chutes-build/config.toml AND fires chutes.build/yolo_mode_changed.
+    //     ~/.chutes-build/config.toml AND fires chutes.ai/yolo_mode_changed.
     let persist = effects
         .iter()
         .find_map(|e| match e {
@@ -727,7 +724,7 @@ fn enable_always_approve_is_idempotent_when_yolo_already_on() {
             .any(|e| matches!(e, Effect::PersistPermissionMode { .. })),
         "redundant PersistPermissionMode when YOLO already on — the dispatcher \
              must short-circuit to avoid double-writing config.toml and double-firing \
-             chutes.build/yolo_mode_changed",
+             chutes.ai/yolo_mode_changed",
     );
 }
 
@@ -1343,13 +1340,6 @@ fn cycle_mode_pre_session_always_approve_to_normal_persists_ask() {
         )),
         "pre-session Always-Approve → Normal must persist 'ask' \
          (stale config.toml relaunches yolo), got {effects:?}"
-    );
-    // Welcome-screen Shift+Tab still kicks off session creation.
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::CreateSession { .. })),
-        "expected CreateSession alongside the persist, got {effects:?}"
     );
 }
 

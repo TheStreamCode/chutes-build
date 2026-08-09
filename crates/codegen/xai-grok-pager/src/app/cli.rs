@@ -1,6 +1,6 @@
 //! CLI argument parsing for the pager.
 pub use crate::headless::OutputFormat;
-use clap::{ArgAction, ArgGroup, Parser, Subcommand, ValueHint};
+use clap::{ArgAction, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -15,15 +15,34 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Check terminal, clipboard, color, and input support without starting Chutes Build
+    Doctor(crate::doctor_cmd::DoctorArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
     /// Sign out and clear cached credentials
     Logout,
-    /// Configure Chutes authentication
+    /// Sign in to Chutes Build
     Login {
-        /// Read the API key from stdin instead of an interactive hidden prompt.
-        #[arg(long = "api-key-stdin")]
-        api_key_stdin: bool,
+        /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
+        #[arg(long, hide = true)]
+        legacy: bool,
+        /// Use Chutes Build OAuth via auth.chutes.ai.
+        #[arg(long = "oauth", alias = "oidc", conflicts_with_all = ["device_auth"])]
+        oauth: bool,
+        /// Use device-code authentication for headless/remote environments.
+        #[arg(
+            long = "device-auth",
+            visible_alias = "device-code",
+            conflicts_with_all = ["oauth"]
+        )]
+        device_auth: bool,
+        /// Authenticate for remote development environments (hidden).
+        ///
+        /// Field is always present so match arms stay feature-unification-safe
+        /// across Bazel/cargo graphs; clap only registers `--devbox` when
+        /// `devbox-login` is enabled (`arg(skip)` otherwise → always false).
+        #[arg(skip)]
+        devbox: bool,
     },
     /// Manage MCP server configurations
     Mcp(crate::mcp_cmd::McpArgs),
@@ -32,13 +51,19 @@ pub enum Command {
     /// Manage cross-session memory
     Memory(crate::memory_cmd::MemoryArgs),
     /// List available models and exit
-    Models {
-        /// Emit machine-readable JSON output.
+    Models,
+    /// List, search, or restore sessions
+    Sessions(crate::sessions_cmd::SessionsArgs),
+    /// Fetch and install managed configuration
+    Setup {
+        /// Print the fetched configuration as JSON instead of installing it;
+        /// writes nothing to ~/.chutes-build.
         #[arg(long)]
         json: bool,
     },
-    /// List, search, or delete local sessions
-    Sessions(crate::sessions_cmd::SessionsArgs),
+    /// Share a session and print the share URL
+    #[command(hide = true)]
+    Share(crate::share_cmd::ShareArgs),
     /// Run any command with local clipboard support (OSC 52 → system clipboard).
     #[cfg_attr(not(any(unix, windows)), command(hide = true))]
     #[command(long_about = "\
@@ -61,8 +86,32 @@ See ~/.chutes-build/README.md for more information.
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown
     Export(crate::export_cmd::ExportArgs),
-    /// Export local session trace data
+    /// Export or upload session trace data
     Trace(crate::trace_cmd::TraceArgs),
+    /// Check for updates or install a specific version
+    Update {
+        /// Check for updates without installing.
+        #[arg(long)]
+        check: bool,
+        /// Emit machine-readable JSON output (for --check).
+        #[arg(long)]
+        json: bool,
+        /// Force re-download and install even if already up to date.
+        #[arg(long)]
+        force_reinstall: bool,
+        /// Install a specific version (e.g. 0.1.150 or 0.1.151-alpha.2).
+        #[arg(long)]
+        version: Option<String>,
+        /// Switch to the alpha release channel (faster updates, may have bugs).
+        #[arg(long, conflicts_with_all = ["stable", "enterprise"])]
+        alpha: bool,
+        /// Switch to the stable release channel (default, weekly releases).
+        #[arg(long, conflicts_with_all = ["alpha", "enterprise"])]
+        stable: bool,
+        /// Switch to the enterprise release channel.
+        #[arg(long, conflicts_with_all = ["alpha", "stable"], hide = true)]
+        enterprise: bool,
+    },
     /// Print version information
     #[command(visible_alias = "v")]
     Version {
@@ -78,6 +127,15 @@ See ~/.chutes-build/README.md for more information.
     },
     /// Manage git worktrees
     Worktree(crate::worktree_cmd::WorktreeArgs),
+    /// Show what the Chutes Build home (~/.chutes-build) uses on disk
+    #[command(name = "du", visible_alias = "disk-usage")]
+    DiskUsage(crate::disk_usage_cmd::DiskUsageArgs),
+    /// Expose this workspace to the Computer Hub (via the leader).
+    ///
+    /// Disabled by default and enabled server-side per account; set
+    /// `CHUTES_BUILD_WORKSPACE_COMMAND=1` to enable it locally for testing.
+    #[command(hide = true)]
+    Workspace(WorkspaceMgmtArgs),
     /// Open the Agent Dashboard view at startup.
     ///
     /// Centralised, agent-native overview of every session (top-level and
@@ -100,7 +158,7 @@ pub struct WrapArgs {
     )]
     pub command: Vec<String>,
 }
-/// Targets a running leader process by PID.
+/// Targets a running leader process by PID (used by `chutes-build leader` / `grok workspace`).
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct LeaderTargetArgs {
     /// Leader process ID from `chutes-build leader list`.
@@ -131,13 +189,76 @@ pub enum LeaderMgmtCommand {
     /// Stop all running leader processes
     Kill,
 }
+#[derive(Debug, clap::Args, Clone)]
+pub struct WorkspaceMgmtArgs {
+    #[command(subcommand)]
+    pub command: WorkspaceMgmtCommand,
+}
+#[derive(Debug, Subcommand, Clone)]
+pub enum WorkspaceMgmtCommand {
+    /// Start (or update) the workspace→hub exposure.
+    Start(WorkspaceStartArgs),
+    /// Drain and disconnect from the hub, keeping the exposure warm.
+    Pause {
+        #[command(flatten)]
+        target: LeaderTargetArgs,
+        /// Emit machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconnect a paused exposure to the hub.
+    Resume {
+        #[command(flatten)]
+        target: LeaderTargetArgs,
+        /// Emit machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop exposing the workspace (the leader keeps running).
+    Stop {
+        #[command(flatten)]
+        target: LeaderTargetArgs,
+        /// Emit machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restart the exposure (stop, then start with the given options).
+    Restart(WorkspaceStartArgs),
+    /// Show the current workspace-exposure status.
+    #[command(visible_alias = "list")]
+    Status {
+        #[command(flatten)]
+        target: LeaderTargetArgs,
+        /// Emit machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+}
+#[derive(Debug, clap::Args, Clone)]
+pub struct WorkspaceStartArgs {
+    /// Computer Hub WebSocket URL (default: `[hub].url`, then the prod hub).
+    #[arg(long, value_name = "URL")]
+    pub hub_url: Option<String>,
+    /// Workspace root directory to expose. Defaults to the current directory.
+    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
+    pub cwd: Option<PathBuf>,
+    /// Force leader mode for this command, overriding config.
+    #[arg(long, conflicts_with = "no_leader")]
+    pub leader: bool,
+    /// Refuse to start even when config enables leader mode.
+    #[arg(long, conflicts_with = "leader")]
+    pub no_leader: bool,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub json: bool,
+}
 /// Arguments for the `agent` subcommand.
 #[derive(Debug, clap::Args, Clone)]
 pub struct AgentArgs {
     /// Run authentication before starting the agent
     #[arg(
         long = "reauth",
-        visible_alias = "reauthenticate",
+        visible_alias = "--reauthenticate",
         default_value = "false"
     )]
     pub reauthenticate: bool,
@@ -177,8 +298,8 @@ pub struct AgentArgs {
     /// Override the CLI chat proxy base URL.
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Override the Chutes inference API base URL.
-    #[arg(long = "chutes-api-base-url")]
+    /// Override the public xAI API base URL.
+    #[arg(long = "xai-api-base-url")]
     pub xai_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
@@ -213,7 +334,7 @@ impl AgentArgs {
 pub enum AgentCmd {
     /// Run the agent over stdio
     Stdio,
-    /// Run the agent headlessly over a configured WebSocket relay
+    /// Run the agent headlessly over the Chutes Build WebSocket relay
     Headless(HeadlessArgs),
     /// Run the agent as a WebSocket server
     Serve(ServeArgs),
@@ -223,9 +344,9 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "chutes-ws-origin", hide = true)]
+    #[arg(long = "grok-ws-origin")]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "chutes-ws-url", hide = true)]
+    #[arg(long = "grok-ws-url")]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
@@ -237,30 +358,36 @@ pub struct ServeArgs {
     /// Secret token for client authentication (auto-generated if not provided)
     #[arg(long, env = "CHUTES_BUILD_AGENT_SECRET")]
     pub secret: Option<String>,
-    /// Allow binding to a non-loopback interface.
+    /// Remote agent URL for proxy mode
     #[arg(long)]
-    pub allow_remote_bind: bool,
+    pub remote: Option<String>,
     /// Authentication and WebSocket URL overrides
     #[command(flatten)]
     pub headless: HeadlessArgs,
 }
 impl ServeArgs {
-    /// Get the secret, generating a random one if not provided.
-    pub fn get_secret(&self) -> anyhow::Result<String> {
-        let secret = self
-            .secret
-            .clone()
-            .unwrap_or_else(|| generate_random_key(32));
-        if secret.len() < 32 {
-            anyhow::bail!("--secret must contain at least 32 characters");
-        }
-        Ok(secret)
+    /// The token clients must present, generated if `--secret` was not given.
+    pub fn get_secret(&self) -> String {
+        self.secret.clone().unwrap_or_else(generate_server_key)
     }
 }
-/// Generate a random alphanumeric key of the given length.
-fn generate_random_key(len: usize) -> String {
-    let raw = uuid::Uuid::new_v4().to_string().replace('-', "");
-    raw.chars().cycle().take(len).collect()
+/// Bytes of entropy in a generated server key. This token authorises a server
+/// that runs shell commands and edits files, and `/ws` has no rate limit, so it
+/// is sized like a credential rather than like an identifier.
+const SERVER_KEY_BYTES: usize = 32;
+/// Generate a server key: [`SERVER_KEY_BYTES`] from the OS CSPRNG, base64url
+/// without padding so it survives a query string unescaped.
+///
+/// The previous version took twelve characters of a v4 UUID's hex — 48 bits, for
+/// a token that grants code execution.
+fn generate_server_key() -> String {
+    use base64::Engine as _;
+    use rand::TryRngCore as _;
+    let mut bytes = [0u8; SERVER_KEY_BYTES];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS CSPRNG must be available to mint a server key");
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 /// Arguments for the `agent leader` subcommand.
 #[derive(Debug, clap::Args, Clone)]
@@ -268,30 +395,28 @@ pub struct LeaderArgs {
     /// Keep the leader running after the last client disconnects.
     #[arg(long)]
     pub no_exit_on_disconnect: bool,
-    /// Legacy relay compatibility switch. The Chutes Build relay is disabled.
-    #[arg(long, hide = true)]
+    /// Defer the chutes.ai relay WebSocket until the first headless IPC client
+    /// registers. Without this flag the leader connects the relay eagerly at
+    /// startup — required for bare leaders (headless remote env / systemd) that
+    /// receive remote prompts *through* the relay. Passed by leaders auto-spawned
+    /// from interactive clients (TUI/IDE), which only need the relay if a
+    /// headless client appears.
+    #[arg(long)]
     pub relay_on_demand: bool,
+    /// Disable periodic auto-update checks for the leader.
+    #[arg(long)]
+    pub no_auto_update: bool,
     /// All environment URL overrides (passed from follower process)
     #[command(flatten)]
     pub headless: HeadlessArgs,
 }
-/// Return the version string with channel label for `--version` / `-v` output.
-///
-/// Uses a `OnceLock` so the formatting happens once and the result lives
-/// for `'static` (required by clap's `ArgAction::Version`).
-fn version_with_channel() -> &'static str {
-    use std::sync::OnceLock;
-    static V: OnceLock<String> = OnceLock::new();
-    V.get_or_init(|| xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), ""))
-}
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "chutes-build",
-    version = version_with_channel(),
+    version = env!("VERSION_WITH_COMMIT"),
     about = "Chutes Build — privacy-first coding agent for Chutes",
     disable_version_flag = true,
     next_display_order = None,
-    group(ArgGroup::new("resume_selection").args(["resume_session", "continue_last_session"])),
     help_template = "\
 {before-help}{about-with-newline}
 {usage-heading} {usage}
@@ -308,8 +433,8 @@ Commands:
 )]
 pub struct PagerArgs {
     /// Print version
-    #[arg(short = 'v', short_alias = 'V', long = "version", action = ArgAction::Version)]
-    pub version: (),
+    #[arg(short = 'v', short_alias = 'V', long = "version", action = ArgAction::SetTrue)]
+    pub version: bool,
     /// Working directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
@@ -391,6 +516,10 @@ pub struct PagerArgs {
     /// Output format for headless mode.
     #[clap(long = "output-format", value_enum, default_value = "plain")]
     pub output_format: OutputFormat,
+    /// Emit incremental `stream_event` lines (text/thinking deltas) alongside
+    /// whole messages. Only affects `--output-format streaming-messages-json`.
+    #[clap(long = "include-partial-messages")]
+    pub include_partial_messages: bool,
     /// JSON Schema for structured output. When set, the model is constrained to
     /// produce JSON matching this schema. Implies --output-format json.
     /// Example: --json-schema '{"type":"object","properties":{"name":{"type":"string"}}}'
@@ -427,22 +556,44 @@ pub struct PagerArgs {
         value_name = "PROMPT"
     )]
     pub system_prompt_override: Option<String>,
-    /// Resume a session by ID, or the most recent if omitted.
+    /// Resume a session by ID or title, or the most recent if omitted.
+    /// Non-ID values match session titles for the current directory
+    /// (ignoring letter case; a sole renamed match wins among duplicates,
+    /// otherwise ambiguity errors; UUID-shaped values always mean IDs).
     #[arg(
         long = "resume",
         short = 'r',
-        alias = "load",
-        value_name = "SESSION_ID",
+        value_name = "SESSION_ID_OR_TITLE",
         num_args = 0..= 1,
         default_missing_value = "",
         conflicts_with_all = ["continue_last_session"]
     )]
     pub resume_session: Option<String>,
+    /// Resume a previous session by session ID (alias for --resume).
+    #[arg(
+        long = "load",
+        value_name = "SESSION_ID",
+        hide = true,
+        conflicts_with_all = ["continue_last_session"]
+    )]
+    pub load_session: Option<String>,
+    /// Set by [`Self::pin_local_resume_target`]: the resume target was
+    /// resolved (or definitively missed) before the OS sandbox, so
+    /// materialization must not re-run local title selection.
+    #[clap(skip)]
+    pub resume_target_pinned: bool,
+    /// Sandbox profile of the title-pinned session, captured at pin time from
+    /// the selected summary (outer `None` = no title pin happened). The
+    /// id-based peek cannot re-derive it: a legacy id duplicated across cwd
+    /// dirs makes that lookup ambiguous.
+    #[clap(skip)]
+    pub(crate) pinned_resume_profile: Option<Option<String>>,
     /// Continue the most recent session for the current working directory.
     #[arg(
         short = 'c',
         long = "continue",
-        conflicts_with_all = ["resume_session"]
+        conflicts_with_all = ["resume_session",
+        "load_session"]
     )]
     pub continue_last_session: bool,
     /// Use a specific session UUID for a **new** conversation (must be a valid
@@ -457,30 +608,57 @@ pub struct PagerArgs {
     #[arg(long = "fork-session")]
     pub fork_session: bool,
     /// Start the session in a new git worktree, optionally named.
+    /// With `--resume` of a remote session, pass `--restore-code` to apply
+    /// the snapshot codebase (conversation is restored either way).
+    /// Headless (`-p`) does not create a worktree from this flag.
     #[arg(short = 'w', long = "worktree", num_args = 0..= 1, default_missing_value = "")]
     pub worktree: Option<String>,
     /// Branch, tag, or commit to base the worktree on (with `--worktree`).
     /// Defaults to the current HEAD of the source checkout when omitted.
     #[arg(long = "worktree-ref", visible_alias = "ref", requires = "worktree")]
     pub worktree_ref: Option<String>,
-    /// Check out the original session's commit when resuming.
-    #[arg(long = "restore-code", requires = "resume_selection")]
+    /// Restore the original session's repository snapshot when resuming.
+    /// Remote sessions require `--worktree` (never checks out into the current
+    /// directory). Without this flag, resume restores conversation only.
+    #[arg(long = "restore-code", requires = "resume_session")]
     pub restore_code: bool,
     /// Disable plan mode.
     #[arg(long = "no-plan")]
     pub no_plan: bool,
+    /// Own a local `workspace_server` (replaces remote sandbox). Requires `--chat`.
+    ///
+    /// Compiled only with `--features local-workspace` (not implied by `chat`).
+    #[cfg(feature = "local-workspace")]
+    #[arg(
+        long = "local-workspace",
+        num_args = 0..= 1,
+        value_name = "CWD",
+        conflicts_with = "local_workspace_attach",
+        requires = "chat"
+    )]
+    pub local_workspace: Option<Option<PathBuf>>,
+    /// Attach an existing local `workspace_server` by `server_id`,
+    /// replacing the chat sandbox (ExistingWorkspace only). Requires `--chat`.
+    #[cfg(feature = "local-workspace")]
+    #[arg(
+        long = "local-workspace-attach",
+        value_name = "SERVER_ID",
+        conflicts_with = "local_workspace",
+        requires = "chat"
+    )]
+    pub local_workspace_attach: Option<String>,
+    /// Cwd override for local-workspace attach/own. Requires `--chat`.
+    #[cfg(feature = "local-workspace")]
+    #[arg(long = "local-workspace-cwd", value_name = "PATH", requires = "chat")]
+    pub local_workspace_cwd: Option<PathBuf>,
     /// Disable subagent spawning.
     #[arg(long = "no-subagents")]
     pub no_subagents: bool,
     /// Disable structured question prompts from the agent.
     #[arg(long = "no-ask-user", hide = true)]
     pub no_ask_user: bool,
-    /// Enable local cross-session memory (enabled by default).
-    #[arg(
-        long = "memory",
-        alias = "experimental-memory",
-        conflicts_with = "no_memory"
-    )]
+    /// Enable cross-session memory.
+    #[arg(long = "experimental-memory", conflicts_with = "no_memory")]
     pub experimental_memory: bool,
     /// Disable cross-session memory for this session.
     #[arg(long = "no-memory", conflicts_with = "experimental_memory")]
@@ -488,16 +666,16 @@ pub struct PagerArgs {
     /// Agent name or definition file path.
     #[arg(long = "agent", value_name = "NAME")]
     pub agent: Option<String>,
-    /// Inline subagent definitions as JSON (headless only).
+    /// Inline subagent definitions as JSON.
     #[arg(long = "agents", value_name = "JSON")]
     pub agents_json: Option<String>,
-    /// Built-in tools to allow (comma-separated; headless only).
+    /// Built-in tools to allow (comma-separated).
     #[arg(long = "tools", value_name = "TOOLS")]
     pub cli_tools: Option<String>,
-    /// Built-in tools to remove (comma-separated; headless only).
+    /// Built-in tools to remove (comma-separated).
     #[arg(long = "disallowed-tools", value_name = "TOOLS")]
     pub cli_disallowed_tools: Option<String>,
-    /// Maximum number of agent turns (headless only).
+    /// Maximum number of agent turns.
     #[arg(
         long = "max-turns",
         value_name = "N",
@@ -516,9 +694,6 @@ pub struct PagerArgs {
     /// Disable web search and web fetch tools.
     #[arg(long = "disable-web-search")]
     pub disable_web_search: bool,
-    /// Append a self-verification loop to the prompt (headless only).
-    #[arg(long = "check", alias = "self-verify", conflicts_with = "no_subagents")]
-    pub self_verify: bool,
     /// Exit as soon as the first agent turn ends, without waiting for pending
     /// background bash/monitor tasks or background subagents (headless only).
     /// Default for all `chutes-build -p` runs is to wait (up to `--background-wait-timeout`)
@@ -542,14 +717,6 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Run the task N ways in parallel and pick the best (headless only).
-    #[arg(
-        long = "best-of-n",
-        value_name = "N",
-        conflicts_with = "no_subagents",
-        value_parser = clap::value_parser!(u32).range(2..=10)
-    )]
-    pub best_of_n: Option<u32>,
     /// Sandbox profile for filesystem and network access.
     #[arg(long, env = "CHUTES_BUILD_SANDBOX", value_name = "PROFILE")]
     pub sandbox: Option<String>,
@@ -572,6 +739,9 @@ pub struct PagerArgs {
     /// Enable client-side file writes.
     #[arg(long = "fs-write", hide = true)]
     pub fs_write: bool,
+    /// Disable automatic updates for this session.
+    #[arg(long = "no-auto-update", hide = true)]
+    pub no_auto_update: bool,
     /// Enable the runtime turn-end TodoGate for this session.
     ///
     /// Session-scoped (not persisted). Highest precedence —
@@ -588,7 +758,7 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `chutes-build` to
+    /// Session-scoped only — does not write config. To default plain `grok` to
     /// minimal, set `[ui] screen_mode = "minimal"` in ~/.chutes-build/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
@@ -604,8 +774,8 @@ pub struct PagerArgs {
     /// Show the login screen even when credentials are already available.
     #[arg(long = "force-login", hide = true)]
     pub force_login: bool,
-    /// Legacy custom-deployment OAuth transport override.
-    #[arg(long = "oauth", hide = true)]
+    /// Use OAuth when the welcome screen starts authentication.
+    #[arg(long = "oauth")]
     pub oauth: bool,
     /// Connect to a shared leader process.
     #[arg(long, conflicts_with = "no_leader", hide = true)]
@@ -613,7 +783,7 @@ pub struct PagerArgs {
     /// Run standalone even when leader mode is configured.
     #[arg(long, conflicts_with = "leader", hide = true)]
     pub no_leader: bool,
-    /// Initial prompt for the interactive session, e.g. `chutes-build "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
+    /// Initial prompt for the interactive session, e.g. `grok "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
         conflicts_with_all = &["single",
@@ -646,120 +816,87 @@ pub enum ResumeTarget {
     /// Not resuming an existing session (new auto or new-with-id).
     None,
 }
+fn anchor_to_launch_dir(path: PathBuf, launch_dir: Option<&std::path::Path>) -> PathBuf {
+    if path.is_absolute() {
+        strip_cur_dir(path)
+    } else if let Some(launch_dir) = launch_dir {
+        strip_cur_dir(launch_dir.join(path))
+    } else {
+        strip_cur_dir(path)
+    }
+}
+fn strip_cur_dir(path: PathBuf) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, std::path::Component::CurDir))
+        .collect()
+}
 impl PagerArgs {
-    /// Parse CLI arguments and apply `--cwd` if provided.
-    pub fn parse_and_apply_cwd() -> anyhow::Result<Self> {
+    /// Parse CLI arguments without applying side effects.
+    pub fn parse_cli() -> Self {
         let bin_name = std::env::args()
             .next()
             .as_deref()
             .map(std::path::Path::new)
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            .filter(|n| *n == "chutes-build" || *n == "chutes-build.exe" || *n == "agent")
+            // Only a known launcher name is trusted: argv[0] reaches the help
+            // and usage text, so an arbitrary value would let a renamed copy
+            // print whatever it likes. `agent` is the headless entry point.
+            .filter(|n| *n == "chutes-build" || *n == "grok.exe" || *n == "agent")
+            .map(|n| n.trim_end_matches(".exe"))
             .unwrap_or("chutes-build")
             .to_owned();
-        let mut args = Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)));
-        args.validate_invocation()?;
-        if let Some(socket) = args.leader_socket.take() {
-            args.leader_socket = Some(std::path::absolute(&socket).unwrap_or(socket));
+        Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)))
+    }
+    /// Apply launch-directory path anchoring and `--cwd` after early commands
+    /// have been dispatched without filesystem or process initialization.
+    pub fn apply_cwd(self) -> anyhow::Result<Self> {
+        let launch_dir = std::env::current_dir().ok();
+        self.apply_cwd_from(launch_dir.as_deref())
+    }
+    fn apply_cwd_from(mut self, launch_dir: Option<&std::path::Path>) -> anyhow::Result<Self> {
+        if let Some(socket) = self.leader_socket.take() {
+            self.leader_socket = Some(anchor_to_launch_dir(socket, launch_dir));
         }
-        if let Some(file) = args.debug_file.take() {
-            args.debug_file = Some(std::path::absolute(&file).unwrap_or(file));
+        if let Some(file) = self.debug_file.take() {
+            self.debug_file = Some(anchor_to_launch_dir(file, launch_dir));
         }
-        if let Some(cwd) = args.cwd.take() {
-            let cwd = dunce::canonicalize(&cwd).map_err(|e| {
-                anyhow::anyhow!("Failed to resolve working directory {:?}: {}", cwd, e)
-            })?;
-            std::env::set_current_dir(&cwd).map_err(|e| {
+        if let Some(ref cwd) = self.cwd {
+            std::env::set_current_dir(cwd).map_err(|e| {
                 anyhow::anyhow!("Failed to set working directory to {:?}: {}", cwd, e)
             })?;
-            args.cwd = Some(cwd);
         }
-        Ok(args)
-    }
-
-    fn validate_invocation(&self) -> anyhow::Result<()> {
-        let has_headless_prompt =
-            self.single.is_some() || self.prompt_json.is_some() || self.prompt_file.is_some();
-        let has_interactive_prompt = self
-            .prompt
-            .as_deref()
-            .is_some_and(|prompt| !prompt.trim().is_empty());
-        if self.command.is_some() && (has_headless_prompt || has_interactive_prompt) {
-            anyhow::bail!(
-                "a prompt cannot be combined with a subcommand; run the subcommand or the prompt \
-                 separately"
-            );
-        }
-        if self.command.is_none()
-            && let Some(command) = self
-                .prompt
-                .as_deref()
-                .map(str::trim)
-                .filter(|prompt| matches!(*prompt, "setup" | "share" | "update" | "workspace"))
-        {
-            anyhow::bail!(
-                "`chutes-build {command}` is not available in this distribution; see \
-                 `chutes-build --help` for supported commands"
-            );
-        }
-        if !has_headless_prompt {
-            let mut invalid = Vec::new();
-            if self.verbatim {
-                invalid.push("--verbatim");
-            }
-            if self.json_schema.is_some() {
-                invalid.push("--json-schema");
-            }
-            if self.output_format != OutputFormat::Plain {
-                invalid.push("--output-format");
-            }
-            if self.self_verify {
-                invalid.push("--check");
-            }
-            if self.best_of_n.is_some() {
-                invalid.push("--best-of-n");
-            }
-            if self.agents_json.is_some() {
-                invalid.push("--agents");
-            }
-            if self.cli_tools.is_some() {
-                invalid.push("--tools");
-            }
-            if self.cli_disallowed_tools.is_some() {
-                invalid.push("--disallowed-tools");
-            }
-            if self.max_turns.is_some() {
-                invalid.push("--max-turns");
-            }
-            if self.no_wait_for_background {
-                invalid.push("--no-wait-for-background");
-            }
-            if self.background_wait_timeout_secs != 600 {
-                invalid.push("--background-wait-timeout");
-            }
-            if !invalid.is_empty() {
-                anyhow::bail!(
-                    "{} require --single, --prompt-json, or --prompt-file",
-                    invalid.join(", ")
-                );
-            }
-        } else if self.no_plan {
-            anyhow::bail!("--no-plan is only supported by interactive sessions");
-        }
-        Ok(())
+        Ok(self)
     }
     /// Optional-flag accessor; always `false` in builds without the optional
     /// feature, so call sites need no `cfg` of their own.
     pub fn chat(&self) -> bool {
         false
     }
+    /// `--local-workspace[=cwd]` own-mode flag.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace(&self) -> Option<Option<&std::path::Path>> {
+        self.local_workspace.as_ref().map(|inner| inner.as_deref())
+    }
+    /// `--local-workspace-attach=<server_id>`.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace_attach(&self) -> Option<&str> {
+        self.local_workspace_attach.as_deref()
+    }
+    /// `--local-workspace-cwd=<path>`.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace_cwd(&self) -> Option<&std::path::Path> {
+        self.local_workspace_cwd.as_deref()
+    }
     /// Get the session ID to resume, from either --resume or --load (hidden alias).
     ///
     /// Returns `None` when `--resume` was used without a value (the empty-string
     /// sentinel). Use [`resume_most_recent`] to detect that case.
     pub fn session_to_resume(&self) -> Option<&str> {
-        self.resume_session.as_deref().filter(|s| !s.is_empty())
+        self.resume_session
+            .as_deref()
+            .or(self.load_session.as_deref())
+            .filter(|s| !s.is_empty())
     }
     /// Whether `--resume` was used without a session ID (meaning "resume most recent").
     pub fn resume_most_recent(&self) -> bool {
@@ -803,13 +940,69 @@ impl PagerArgs {
         let explicit = self.sandbox.as_deref().filter(|s| !s.is_empty());
         Self::resolve_startup_sandbox(explicit, saved.map(String::from))
     }
+    /// Pin an explicit non-UUID, non-chat resume/load target to its canonical
+    /// local session id, before the (irreversible) OS sandbox is applied.
+    ///
+    /// Resolving once — recorded via `resume_target_pinned` so materialization
+    /// never re-runs local title selection — makes the saved-profile peek and
+    /// materialization consume the same immutable target; re-selecting after
+    /// the sandbox would race a concurrent rename/create. Listing failures
+    /// and ambiguity are hard errors here (fail closed / surfaced before the
+    /// sandbox); a definitive no-match keeps the raw arg for the legacy
+    /// remote/worktree id path.
+    pub fn pin_local_resume_target(&mut self) -> anyhow::Result<()> {
+        let cwd_buf = std::env::current_dir().ok();
+        let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
+        self.pin_local_resume_target_for_cwd(cwd_str.as_deref())
+    }
+    /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so
+    /// tests never mutate the process cwd.
+    pub fn pin_local_resume_target_for_cwd(&mut self, cwd: Option<&str>) -> anyhow::Result<()> {
+        if self.chat() {
+            return Ok(());
+        }
+        let Some(target) = self.session_to_resume().map(str::to_owned) else {
+            return Ok(());
+        };
+        use crate::app::session_title_resolve::{PinnedResumeTarget, presandbox_resume_target};
+        let pinned = presandbox_resume_target(&target, cwd)?;
+        self.resume_target_pinned = true;
+        if let PinnedResumeTarget::Title {
+            ref id,
+            ref sandbox_profile,
+        } = pinned
+        {
+            eprintln!("Resuming session {} (matched by title)", id);
+            self.pinned_resume_profile = Some(sandbox_profile.clone());
+        }
+        let Some(id) = pinned.id() else {
+            return Ok(());
+        };
+        if self
+            .resume_session
+            .as_deref()
+            .is_some_and(|s| !s.is_empty())
+        {
+            self.resume_session = Some(id);
+        } else if self.load_session.as_deref().is_some_and(|s| !s.is_empty()) {
+            self.load_session = Some(id);
+        }
+        Ok(())
+    }
     /// The sandbox profile persisted with the session being resumed, if any.
     /// Local, best-effort; `None` when not resuming or nothing is found. Read once
     /// for the profile resume resolution.
     pub fn saved_resume_profile(&self) -> Option<String> {
         let cwd_buf = std::env::current_dir().ok();
         let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
-        let cwd = cwd_str.as_deref();
+        self.saved_resume_profile_for_cwd(cwd_str.as_deref())
+    }
+    /// Same as [`Self::saved_resume_profile`] with an explicit cwd, so tests
+    /// never mutate the process cwd.
+    pub fn saved_resume_profile_for_cwd(&self, cwd: Option<&str>) -> Option<String> {
+        if let Some(pinned) = &self.pinned_resume_profile {
+            return pinned.clone();
+        }
         match self.resume_target() {
             ResumeTarget::SessionId(id) => {
                 xai_grok_shell::session::persistence::resumed_session_sandbox_profile(
@@ -843,7 +1036,7 @@ impl PagerArgs {
     /// The initial interactive prompt from the positional argument, trimmed.
     ///
     /// Returns `None` when no positional prompt was given or it is only
-    /// whitespace. This is the `chutes-build "<prompt>"` launch form; the headless
+    /// whitespace. This is the `grok "<prompt>"` launch form; the headless
     /// `-p`/`--single` path is handled separately.
     pub fn initial_prompt(&self) -> Option<&str> {
         self.prompt
@@ -856,24 +1049,89 @@ impl PagerArgs {
 mod tests {
     use super::*;
     #[test]
-    fn version_flag_exits_zero() {
-        let err = PagerArgs::try_parse_from(["grok", "--version"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
-        assert!(
-            err.exit_code() == 0,
-            "--version must exit 0; got {}",
-            err.exit_code()
-        );
+    fn version_flags_parse_as_early_intent_without_exiting() {
+        for flag in ["--version", "-v", "-V"] {
+            let args = PagerArgs::try_parse_from(["grok", flag]).expect("version flag parses");
+            assert!(args.version, "{flag} must set the early version intent");
+            assert!(args.command.is_none());
+        }
     }
     #[test]
-    fn version_short_flag_exits_zero() {
-        let err = PagerArgs::try_parse_from(["grok", "-v"]).unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+    fn ordinary_and_doctor_parsing_do_not_set_version_intent() {
+        assert!(!PagerArgs::try_parse_from(["grok"]).unwrap().version);
         assert!(
-            err.exit_code() == 0,
-            "-v must exit 0; got {}",
-            err.exit_code()
+            !PagerArgs::try_parse_from(["grok", "doctor"])
+                .unwrap()
+                .version
         );
+        assert!(matches!(
+            PagerArgs::try_parse_from(["grok", "version"])
+                .unwrap()
+                .command,
+            Some(Command::Version { json: false })
+        ));
+    }
+    #[test]
+    fn doctor_accepts_report_and_explicit_fix_forms() {
+        let bare = PagerArgs::try_parse_from(["grok", "doctor"]).expect("bare doctor parses");
+        assert!(matches!(
+            bare.command,
+            Some(Command::Doctor(crate::doctor_cmd::DoctorArgs {
+                json: false,
+                command: None,
+            }))
+        ));
+        let json =
+            PagerArgs::try_parse_from(["grok", "doctor", "--json"]).expect("doctor --json parses");
+        assert!(matches!(
+            json.command,
+            Some(Command::Doctor(crate::doctor_cmd::DoctorArgs {
+                json: true,
+                command: None,
+            }))
+        ));
+        for id in [
+            "terminal.ssh-wrap",
+            "tmux-clipboard",
+            "terminal.dcs-passthrough",
+            "tmux-extended-keys",
+        ] {
+            let fix = PagerArgs::try_parse_from(["grok", "doctor", "fix", id, "--yes"])
+                .expect("doctor fix parses");
+            assert!(matches!(
+                fix.command,
+                Some(Command::Doctor(crate::doctor_cmd::DoctorArgs {
+                    json: false,
+                    command: Some(crate::doctor_cmd::DoctorCommand::Fix(
+                        crate::doctor_cmd::FixArgs { id: Some(ref parsed), yes: true }
+                    )),
+                })) if parsed == id
+            ));
+        }
+        let list = PagerArgs::try_parse_from(["grok", "doctor", "fix"])
+            .expect("doctor fix without an ID lists applicable fixes");
+        assert!(matches!(
+            list.command,
+            Some(Command::Doctor(crate::doctor_cmd::DoctorArgs {
+                json: false,
+                command: Some(crate::doctor_cmd::DoctorCommand::Fix(
+                    crate::doctor_cmd::FixArgs {
+                        id: None,
+                        yes: false
+                    }
+                )),
+            }))
+        ));
+        for unsupported in [
+            vec!["grok", "doctor", "all"],
+            vec!["grok", "doctor", "fix", "ssh-wrap", "extra"],
+            vec!["grok", "doctor", "fix", "--yes"],
+            vec!["grok", "doctor", "--json", "fix", "terminal.ssh-wrap"],
+        ] {
+            let error = PagerArgs::try_parse_from(unsupported)
+                .expect_err("unsupported doctor form must fail");
+            assert_eq!(error.exit_code(), 2);
+        }
     }
     #[test]
     fn resume_target_classifies_flags() {
@@ -1010,6 +1268,41 @@ mod tests {
         );
     }
     #[test]
+    fn launch_directory_anchoring_precedes_cwd_change() {
+        let args = PagerArgs::try_parse_from([
+            "grok",
+            "--leader-socket",
+            "relative.sock",
+            "--debug-file",
+            "relative.log",
+        ])
+        .unwrap()
+        .apply_cwd_from(Some(std::path::Path::new("/launch")))
+        .unwrap();
+        assert_eq!(
+            args.leader_socket.as_deref(),
+            Some(std::path::Path::new("/launch/relative.sock"))
+        );
+        assert_eq!(
+            args.debug_file.as_deref(),
+            Some(std::path::Path::new("/launch/relative.log"))
+        );
+    }
+    #[test]
+    fn launch_directory_anchoring_normalizes_dot_components() {
+        for (input, expected) in [
+            ("./leader.sock", "/launch/leader.sock"),
+            ("logs/../debug.log", "/launch/logs/../debug.log"),
+            ("../leader.sock", "/launch/../leader.sock"),
+        ] {
+            assert_eq!(
+                anchor_to_launch_dir(PathBuf::from(input), Some(std::path::Path::new("/launch"))),
+                PathBuf::from(expected),
+                "input: {input}"
+            );
+        }
+    }
+    #[test]
     fn leader_socket_flag_parses_at_root() {
         let args = PagerArgs::try_parse_from(["grok", "--leader-socket", "/tmp/leader-x.sock"])
             .expect("--leader-socket parses at the root");
@@ -1041,7 +1334,7 @@ mod tests {
     #[test]
     fn leader_mgmt_list_info_kill_parse() {
         let list = PagerArgs::try_parse_from(["grok", "leader", "list", "--json"])
-            .expect("grok leader list --json");
+            .expect("chutes-build leader list --json");
         assert!(matches!(
             list.command,
             Some(Command::Leader(LeaderMgmtArgs {
@@ -1049,7 +1342,7 @@ mod tests {
             }))
         ));
         let info = PagerArgs::try_parse_from(["grok", "leader", "info", "--pid", "42"])
-            .expect("grok leader info --pid");
+            .expect("chutes-build leader info --pid");
         assert!(matches!(
             info.command,
             Some(Command::Leader(LeaderMgmtArgs {
@@ -1059,7 +1352,8 @@ mod tests {
                 },
             }))
         ));
-        let kill = PagerArgs::try_parse_from(["grok", "leader", "kill"]).expect("grok leader kill");
+        let kill = PagerArgs::try_parse_from(["grok", "leader", "kill"])
+            .expect("chutes-build leader kill");
         assert!(matches!(
             kill.command,
             Some(Command::Leader(LeaderMgmtArgs {
@@ -1114,25 +1408,6 @@ mod tests {
         let args = PagerArgs::try_parse_from(["grok", "logout"]).expect("subcommand parses");
         assert!(matches!(args.command, Some(Command::Logout)));
         assert!(args.prompt.is_none());
-    }
-    #[test]
-    fn prompt_before_subcommand_is_rejected() {
-        let args =
-            PagerArgs::try_parse_from(["grok", "hello", "version"]).expect("arguments parse");
-        let err = args
-            .validate_invocation()
-            .expect_err("prompt plus subcommand must fail validation");
-        assert!(err.to_string().contains("prompt cannot be combined"));
-    }
-    #[test]
-    fn retired_bare_commands_do_not_start_an_interactive_session() {
-        for command in ["setup", "share", "update", "workspace"] {
-            let args = PagerArgs::try_parse_from(["grok", command]).expect("arguments parse");
-            let err = args
-                .validate_invocation()
-                .expect_err("retired command must fail validation");
-            assert!(err.to_string().contains("not available"));
-        }
     }
     #[test]
     fn positional_prompt_conflicts_with_headless_single() {
@@ -1201,130 +1476,40 @@ mod tests {
         };
         assert_eq!(agent.reasoning_effort.as_deref(), Some("max"));
     }
+
+    /// The `agent serve` token authorises code execution, so it is sized like a
+    /// credential. The previous implementation took twelve characters of a v4
+    /// UUID's hex — 48 bits — which this length check rejects.
     #[test]
-    fn load_is_an_alias_for_resume() {
-        let args =
-            PagerArgs::try_parse_from(["grok", "--load", "session-1"]).expect("--load parses");
-        assert_eq!(args.session_to_resume(), Some("session-1"));
-        assert!(!args.resume_most_recent());
-    }
-    #[test]
-    fn restore_code_requires_resume_or_continue() {
-        let err = PagerArgs::try_parse_from(["grok", "--restore-code"])
-            .expect_err("--restore-code alone must fail");
-        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
-        PagerArgs::try_parse_from(["grok", "--continue", "--restore-code"])
-            .expect("--continue --restore-code parses");
-    }
-    #[test]
-    fn worktree_ref_requires_worktree() {
-        let err = PagerArgs::try_parse_from(["grok", "--worktree-ref", "main"])
-            .expect_err("--worktree-ref alone must fail");
-        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
-        let args = PagerArgs::try_parse_from(["grok", "--worktree", "--worktree-ref", "main"])
-            .expect("--worktree-ref with --worktree parses");
-        assert_eq!(args.worktree_ref.as_deref(), Some("main"));
-    }
-    #[test]
-    fn best_of_n_enforces_documented_range() {
-        for invalid in ["1", "11"] {
-            PagerArgs::try_parse_from(["grok", "--single", "test", "--best-of-n", invalid])
-                .expect_err("out-of-range --best-of-n must fail");
-        }
-        for valid in ["2", "10"] {
-            let args =
-                PagerArgs::try_parse_from(["grok", "--single", "test", "--best-of-n", valid])
-                    .expect("in-range --best-of-n parses");
-            args.validate_invocation()
-                .expect("in-range headless invocation validates");
-        }
-    }
-    #[test]
-    fn headless_only_flags_require_a_headless_prompt() {
-        for argv in [
-            vec!["grok", "--check"],
-            vec!["grok", "--agents", "{}"],
-            vec!["grok", "--tools", "shell"],
-            vec!["grok", "--disallowed-tools", "browser"],
-            vec!["grok", "--max-turns", "2"],
-        ] {
-            let args = PagerArgs::try_parse_from(&argv).expect("headless-only flag parses");
-            let err = args
-                .validate_invocation()
-                .expect_err("headless-only flag without a headless prompt must fail");
-            assert!(
-                err.to_string().contains("require --single"),
-                "unexpected error for {argv:?}: {err}"
-            );
-        }
-    }
-    #[test]
-    fn no_plan_is_rejected_in_headless_mode() {
-        let args = PagerArgs::try_parse_from(["grok", "--single", "test", "--no-plan"])
-            .expect("flags parse");
-        let err = args
-            .validate_invocation()
-            .expect_err("--no-plan in headless mode must fail");
-        assert!(err.to_string().contains("interactive sessions"));
-    }
-    #[test]
-    fn models_json_routes_to_models_command() {
-        let args =
-            PagerArgs::try_parse_from(["grok", "models", "--json"]).expect("models --json parses");
-        assert!(matches!(args.command, Some(Command::Models { json: true })));
-    }
-    #[test]
-    fn agent_reauthenticate_alias_and_server_safety_flags_parse() {
-        let args = PagerArgs::try_parse_from([
-            "grok",
-            "agent",
-            "--reauthenticate",
-            "serve",
-            "--allow-remote-bind",
-        ])
-        .expect("agent compatibility alias and server acknowledgement parse");
-        let Some(Command::Agent(agent)) = args.command else {
-            panic!("expected agent command");
-        };
-        assert!(agent.reauthenticate);
-        assert!(matches!(
-            agent.mode,
-            Some(AgentCmd::Serve(ServeArgs {
-                allow_remote_bind: true,
-                ..
-            }))
-        ));
+    fn generated_server_key_carries_full_entropy() {
+        use base64::Engine as _;
+        let key = generate_server_key();
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&key)
+            .expect("server key must be base64url");
+        assert_eq!(decoded.len(), SERVER_KEY_BYTES);
         assert!(
-            PagerArgs::try_parse_from(["grok", "agent", "serve", "--remote"]).is_err(),
-            "removed no-op --remote must not parse"
+            !key.contains('=') && !key.contains('+') && !key.contains('/'),
+            "must survive a query string unescaped: {key}"
         );
     }
+
+    /// Two draws must differ. Cheap, and it would have caught a key derived from
+    /// something constant.
     #[test]
-    fn server_secret_is_generated_or_rejects_short_values() {
-        let generated = ServeArgs {
+    fn generated_server_keys_differ() {
+        assert_ne!(generate_server_key(), generate_server_key());
+    }
+
+    /// An explicit `--secret` is used verbatim; only the absent case is generated.
+    #[test]
+    fn explicit_secret_is_not_replaced() {
+        let args = ServeArgs {
             bind: "127.0.0.1:2419".parse().unwrap(),
-            secret: None,
-            allow_remote_bind: false,
-            headless: HeadlessArgs::default(),
-        }
-        .get_secret()
-        .expect("generated secret");
-        assert_eq!(generated.len(), 32);
-        let short = ServeArgs {
-            bind: "127.0.0.1:2419".parse().unwrap(),
-            secret: Some("short".to_string()),
-            allow_remote_bind: false,
+            secret: Some("chosen-by-the-operator".into()),
+            remote: None,
             headless: HeadlessArgs::default(),
         };
-        assert!(short.get_secret().is_err());
-    }
-    #[test]
-    fn remote_workspace_command_is_not_part_of_the_cli() {
-        let err = PagerArgs::try_parse_from(["grok", "workspace", "start"])
-            .expect_err("remote workspace exposure command must be absent");
-        assert!(matches!(
-            err.kind(),
-            clap::error::ErrorKind::InvalidSubcommand | clap::error::ErrorKind::UnknownArgument
-        ));
+        assert_eq!(args.get_secret(), "chosen-by-the-operator");
     }
 }

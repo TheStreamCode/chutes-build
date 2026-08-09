@@ -22,7 +22,7 @@ pub const MAX_SKILL_WALK_DEPTH: usize = 5;
 ///
 /// `skills` is the standard layout (`.chutes-build/skills/`, `.claude/skills/`,
 /// `.cursor/skills/`). The product-specific `skills-cursor/` layout is no
-/// longer scanned — it pulled vendor default skills into Grok Build sessions.
+/// longer scanned — it pulled vendor default skills into Chutes Build sessions.
 const SKILL_SUBDIRS: &[&str] = &["skills"];
 
 /// Cursor ships these default skills in `~/.cursor/skills-cursor/`
@@ -815,7 +815,7 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
 
     // Drop vendor-shipped default skills (vendor builtins) found under
     // a `/.cursor/` or `/.claude/` path. Always applied, independent of the
-    // per-vendor toggle, so vendor builtins never leak into Grok Build.
+    // per-vendor toggle, so vendor builtins never leak into Chutes Build.
     skills.retain(|s| !is_vendor_default_skill(&s.path, &s.name));
 
     skills
@@ -830,7 +830,7 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
 /// Skips already-checked dirs.
 ///
 /// Skill/command roots are **not** filtered by `.gitignore`. Discovery only
-/// visits known config roots (`.chutes-build`, `.agents`, `.claude`, …); those are
+/// visits known config roots (`.grok`, `.agents`, `.claude`, …); those are
 /// local harness config (often intentionally gitignored), not tree content.
 /// Contrast with AGENTS.md discovery, which still respects gitignore. Use
 /// `[skills] ignore` to hide a path. Compat loaders likewise load project
@@ -849,7 +849,7 @@ pub fn discover_skills_for_paths(
     already_checked: &mut HashSet<PathBuf>,
     compat: CompatConfig,
 ) -> Vec<SkillInfo> {
-    // `.chutes-build` and `.agents` are always scanned; `.claude` is gated on the
+    // `.grok` and `.agents` are always scanned; `.claude` is gated on the
     // claude-vendor skills cell. (`.cursor` is excluded here by design — see fn docs.)
     let mut config_dir_names: Vec<&str> = vec![".chutes-build", ".agents"];
     if compat.claude.skills {
@@ -1396,19 +1396,14 @@ model: test-model
         std::fs::write(standard.join("SKILL.md"), "---\nname: mine\n---\n").unwrap();
 
         let paths = find_skill_paths(&cursor_dir);
-        // Checked via components(), not a "skills/mine" substring: these are
-        // real filesystem paths, native-separator on Windows.
+        let strs: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         assert!(
-            paths
-                .iter()
-                .any(|p| p.ends_with(Path::new("skills").join("mine").join("SKILL.md"))),
-            "standard skills/ layout must still be found: {paths:?}"
+            strs.iter().any(|p| p.contains("skills/mine")),
+            "standard skills/ layout must still be found: {strs:?}"
         );
         assert!(
-            !paths
-                .iter()
-                .any(|p| p.components().any(|c| c.as_os_str() == "skills-cursor")),
-            "skills-cursor layout must no longer be scanned: {paths:?}"
+            !strs.iter().any(|p| p.contains("skills-cursor")),
+            "skills-cursor layout must no longer be scanned: {strs:?}"
         );
     }
 
@@ -1489,13 +1484,7 @@ model: test-model
             (grok_shell.join("SKILL.md"), SkillScope::User),
         ]);
         assert_eq!(skills.len(), 1, "cursor builtin must be dropped");
-        // Checked via Path components, not a "/.chutes-build/" substring:
-        // this is a real filesystem path, native-separator on Windows.
-        assert!(
-            Path::new(&skills[0].path)
-                .components()
-                .any(|c| c.as_os_str() == ".chutes-build")
-        );
+        assert!(skills[0].path.contains("/.chutes-build/"));
     }
 
     #[test]

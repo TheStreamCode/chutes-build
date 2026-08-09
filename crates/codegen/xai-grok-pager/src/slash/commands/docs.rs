@@ -1,17 +1,19 @@
-//! `/docs` -- open How-to Guides (in-TUI) or official Chutes docs.
+//! `/docs` -- open How-to Guides (in-TUI) or online Build docs.
 //!
 //! Bare `/docs` opens the same DocPicker as command-palette "How-to Guides".
-//! `/docs web` opens the official Chutes documentation in the browser.
+//! `/docs web` opens https://docs.chutes.ai/build/overview in the browser.
 //! `/docs <title>` opens a single guide by title (case-insensitive).
 
 use crate::app::actions::Action;
 use crate::docs::{all_titles, find_doc};
 use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
 
-/// Official Chutes documentation landing page.
+/// Online Build docs landing page (hardcoded like other TUI deep-links; docs.chutes.ai can redirect if the path moves).
+/// Verified to resolve. The earlier `docs.chutes.ai/build/overview` was a 404 —
+/// invented by the rebrand, plausible enough that nothing questioned it.
 pub const BUILD_DOCS_URL: &str = "https://chutes.ai/docs";
 
-/// Open How-to Guides or official Chutes docs.
+/// Open How-to Guides or online Build docs.
 pub struct DocsCommand;
 
 impl SlashCommand for DocsCommand {
@@ -24,7 +26,7 @@ impl SlashCommand for DocsCommand {
     }
 
     fn description(&self) -> &str {
-        "Open How-to Guides or official Chutes docs"
+        "Open How-to Guides or online Build docs"
     }
 
     fn usage(&self) -> &str {
@@ -55,7 +57,7 @@ impl SlashCommand for DocsCommand {
                 display: "web".into(),
                 match_text: "web".into(),
                 insert_text: "web".into(),
-                description: "Open the official Chutes documentation".into(),
+                description: "Open docs.chutes.ai/build in the browser".into(),
             },
         ];
         items.extend(all_titles().map(|title| ArgItem {
@@ -124,6 +126,8 @@ mod tests {
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
             screen_mode: crate::app::ScreenMode::Inline,
+            billing_surface_visible: true,
+            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -211,6 +215,9 @@ mod tests {
             models: &models,
             cwd,
             has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
         let items = DocsCommand.suggest_args(&ctx, "").expect("suggestions");

@@ -3,7 +3,10 @@ pub const HEADLESS_CLIENT_TYPE: &str = "chutes-build";
 
 pub const PAGER_CLIENT_VERSION: &str = xai_grok_version::VERSION;
 
-/// `User-Agent` for pager-owned API clients.
+/// `User-Agent` for pager-owned direct-to-`api.chutes.ai` clients (voice STT).
+///
+/// Matches the sampler's `<client>/<version> (os; arch)` shape so server-side
+/// dashboards bucket voice traffic alongside chat / imagine requests.
 pub fn client_user_agent() -> String {
     format!(
         "{}/{} ({}; {})",
@@ -26,7 +29,7 @@ mod tests {
         assert_eq!(
             ua,
             format!(
-                "chutes-build/{} ({}; {})",
+                "{HEADLESS_CLIENT_TYPE}/{} ({}; {})",
                 PAGER_CLIENT_VERSION,
                 std::env::consts::OS,
                 std::env::consts::ARCH

@@ -15,136 +15,39 @@
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
+use indexmap::IndexMap;
 use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
 };
 use serde::Serialize;
-use std::collections::HashSet;
 
 use chutes_build_core::reasoning::{
     ReasoningProfile, RequestedReasoning, WireReasoningEffort, reasoning_profile,
     reasoning_wire_plan,
 };
-use xai_grok_sampling_types::error::{parse_error_bytes, try_parse_stream_error};
+use xai_grok_sampling_types::error::{try_parse_stream_error, user_facing_api_error_message};
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DOOM_LOOP_CHECK_HEADER, MessagesRequestWrapper,
-    ReasoningEffort, ResponseModelMetadata, Result, SamplingError, build_messages_request,
-    is_check_event, messages, rs,
+    ReasoningEffort, ResponseModelMetadata, Result, SamplingError, SentCredential,
+    build_messages_request, is_check_event, messages, rs,
 };
 
 use crate::config::{AuthScheme, OriginClientInfo, SamplerConfig};
+use crate::events::SamplingErrorInfo;
+use xai_grok_auth::bearer_suffix;
 
 // Re-export ApiBackend from the shared types crate for downstream callers.
 pub use xai_grok_sampling_types::ApiBackend;
+
+/// Process-level fallback for the `x-grok-client-identifier` header.
+const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
 /// Product identifier baked into User-Agent strings.
 const AGENT_PRODUCT: &str = "chutes-build";
 const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
-fn is_chutes_backend(base_url: &str) -> bool {
-    let lower = base_url.to_ascii_lowercase();
-    lower.contains("chutes.ai") || lower.contains("model-router-ten.vercel.app")
-}
-
-fn env_flag(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
-    let mut models = vec![selected.to_owned()];
-    if !is_chutes_backend(base_url) || env_flag("CHUTES_STRICT_MODEL") {
-        return models;
-    }
-
-    if let Ok(configured) = std::env::var("CHUTES_FALLBACK_MODELS") {
-        models.extend(
-            configured
-                .split(',')
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-                .map(str::to_owned),
-        );
-    }
-    // The virtual model is dispatched to Chutes' native router endpoint by
-    // `chat_completions_endpoint`, so it is also the final safe fallback when
-    // a pinned model is explicitly cold or unavailable before streaming.
-    models.push("model-router".to_owned());
-    let mut seen = HashSet::new();
-    models.retain(|model| seen.insert(model.clone()));
-    models
-}
-
-fn requested_reasoning(effort: Option<ReasoningEffort>) -> RequestedReasoning {
-    match effort {
-        None => RequestedReasoning::Unspecified,
-        Some(ReasoningEffort::None) => RequestedReasoning::None,
-        Some(ReasoningEffort::Minimal) => RequestedReasoning::Minimal,
-        Some(ReasoningEffort::Low) => RequestedReasoning::Low,
-        Some(ReasoningEffort::Medium) => RequestedReasoning::Medium,
-        Some(ReasoningEffort::High) => RequestedReasoning::High,
-        Some(ReasoningEffort::Xhigh) => RequestedReasoning::Maximum,
-    }
-}
-
-/// Apply the centralized Chutes reasoning compatibility plan without changing
-/// non-Chutes BYOK requests. Unknown future models retain explicit catalog
-/// values; verified fixed-reasoning models drop incompatible overrides.
-fn chutes_chat_template_kwargs(
-    base_url: &str,
-    request: &mut ChatCompletionRequest,
-) -> Option<ChutesChatTemplateKwargs> {
-    if !is_chutes_backend(base_url) {
-        return None;
-    }
-
-    let model = request.model.as_deref().unwrap_or_default();
-    let profile = reasoning_profile(model);
-    if profile == ReasoningProfile::Unknown {
-        // A future catalog may publish an explicit server-side effort menu
-        // before this client knows the model's template. Trust that menu.
-        return None;
-    }
-
-    let plan = reasoning_wire_plan(model, requested_reasoning(request.reasoning_effort));
-    if !plan.preserve_reasoning_effort {
-        request.reasoning_effort = match plan.reasoning_effort {
-            Some(WireReasoningEffort::Medium) => Some(ReasoningEffort::Medium),
-            Some(WireReasoningEffort::High) => Some(ReasoningEffort::High),
-            None => None,
-        };
-    }
-
-    (plan.enable_thinking.is_some() || plan.thinking.is_some()).then_some(
-        ChutesChatTemplateKwargs {
-            enable_thinking: plan.enable_thinking,
-            thinking: plan.thinking,
-        },
-    )
-}
-
-/// Build one fallback attempt from the untouched logical request. Reasoning
-/// controls are normalized after changing the model so template switches from
-/// one family can never leak into the next candidate.
-fn prepare_chutes_chat_attempt(
-    base_url: &str,
-    payload: &ChatCompletionRequest,
-    model: &str,
-) -> (ChatCompletionRequest, Option<ChutesChatTemplateKwargs>) {
-    let mut attempt = payload.clone();
-    attempt.model = Some(model.to_owned());
-    let kwargs = chutes_chat_template_kwargs(base_url, &mut attempt);
-    (attempt, kwargs)
-}
-
-/// Legacy request metadata retained in the internal request type for upstream
-/// compatibility. Chutes Build deliberately does not transmit these identifiers.
-#[allow(dead_code)]
+/// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
 struct GrokRequestHeaders<'a> {
     conv_id: &'a str,
     req_id: &'a str,
@@ -158,7 +61,22 @@ struct GrokRequestHeaders<'a> {
 
 impl GrokRequestHeaders<'_> {
     fn apply(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        builder
+        let mut b = builder
+            .header("x-grok-conv-id", self.conv_id)
+            .header("x-grok-req-id", self.req_id)
+            .header("x-grok-model-override", self.model_id)
+            .header("x-grok-session-id", self.session_id)
+            .header("x-grok-agent-id", self.agent_id);
+        if let Some(idx) = self.turn_idx {
+            b = b.header("x-grok-turn-idx", idx);
+        }
+        if let Some(id) = self.deployment_id.filter(|s| !s.is_empty()) {
+            b = b.header("x-grok-deployment-id", id);
+        }
+        if let Some(id) = self.user_id.filter(|s| !s.is_empty()) {
+            b = b.header("x-grok-user-id", id);
+        }
+        b
     }
 }
 
@@ -208,7 +126,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
             }
             tracing::error!(
                 error = %first_err,
-                data_len = data.len(),
+                raw_data = %data,
                 "Failed to deserialize ResponseStreamEvent from stream"
             );
             return Err(SamplingError::Serialization(first_err));
@@ -348,12 +266,15 @@ fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<Respon
 /// Uses `#[serde(flatten)]` to inline all fields from the inner request,
 /// allowing single-pass serialization instead of the previous two-pass
 /// approach (serialize to `Value`, mutate, serialize to bytes).
-#[derive(Serialize)]
-struct ChatRequestWithTemplate<'a> {
-    #[serde(flatten)]
-    inner: &'a ChatCompletionRequest,
+/// Per-family chat-template controls Chutes expects alongside the request.
+/// Serialized only when the resolved plan actually sets one, so a non-Chutes
+/// backend never sees the field.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct ChutesChatTemplateKwargs {
     #[serde(skip_serializing_if = "Option::is_none")]
-    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
+    enable_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -371,17 +292,126 @@ struct StreamOptions {
     include_usage: bool,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct ChutesChatTemplateKwargs {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_thinking: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<bool>,
+fn is_chutes_backend(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    lower.contains("chutes.ai") || lower.contains("model-router-ten.vercel.app")
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
+    let mut models = vec![selected.to_owned()];
+    if !is_chutes_backend(base_url) || env_flag("CHUTES_STRICT_MODEL") {
+        return models;
+    }
+
+    if let Ok(configured) = std::env::var("CHUTES_FALLBACK_MODELS") {
+        models.extend(
+            configured
+                .split(',')
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    // The virtual model is dispatched to Chutes' native router endpoint by
+    // `chat_completions_endpoint`, so it is also the final safe fallback when
+    // a pinned model is explicitly cold or unavailable before streaming.
+    models.push("model-router".to_owned());
+    let mut seen = std::collections::HashSet::new();
+    models.retain(|model| seen.insert(model.clone()));
+    models
+}
+
+fn requested_reasoning(effort: Option<ReasoningEffort>) -> RequestedReasoning {
+    match effort {
+        None => RequestedReasoning::Unspecified,
+        Some(ReasoningEffort::None) => RequestedReasoning::None,
+        Some(ReasoningEffort::Minimal) => RequestedReasoning::Minimal,
+        Some(ReasoningEffort::Low) => RequestedReasoning::Low,
+        Some(ReasoningEffort::Medium) => RequestedReasoning::Medium,
+        Some(ReasoningEffort::High) => RequestedReasoning::High,
+        // Upstream grew a `Max` above `Xhigh`; Chutes' scale tops out at
+        // Maximum, so both map there rather than silently downgrading.
+        Some(ReasoningEffort::Xhigh) | Some(ReasoningEffort::Max) => RequestedReasoning::Maximum,
+    }
+}
+
+/// Apply the centralized Chutes reasoning compatibility plan without changing
+/// non-Chutes BYOK requests. Unknown future models retain explicit catalog
+/// values; verified fixed-reasoning models drop incompatible overrides.
+fn chutes_chat_template_kwargs(
+    base_url: &str,
+    request: &mut ChatCompletionRequest,
+) -> Option<ChutesChatTemplateKwargs> {
+    if !is_chutes_backend(base_url) {
+        return None;
+    }
+
+    let model = request.model.as_deref().unwrap_or_default();
+    let profile = reasoning_profile(model);
+    if profile == ReasoningProfile::Unknown {
+        // A future catalog may publish an explicit server-side effort menu
+        // before this client knows the model's template. Trust that menu.
+        return None;
+    }
+
+    let plan = reasoning_wire_plan(model, requested_reasoning(request.reasoning_effort));
+    if !plan.preserve_reasoning_effort {
+        request.reasoning_effort = match plan.reasoning_effort {
+            Some(WireReasoningEffort::Medium) => Some(ReasoningEffort::Medium),
+            Some(WireReasoningEffort::High) => Some(ReasoningEffort::High),
+            None => None,
+        };
+    }
+
+    (plan.enable_thinking.is_some() || plan.thinking.is_some()).then_some(
+        ChutesChatTemplateKwargs {
+            enable_thinking: plan.enable_thinking,
+            thinking: plan.thinking,
+        },
+    )
+}
+
+/// Resolve `env_http_headers` (`header -> env var`) into `headers` via `getenv`, skipping unset/blank/invalid entries and trimming values.
+fn apply_env_http_headers(
+    env_http_headers: &IndexMap<String, String>,
+    getenv: impl Fn(&str) -> Option<String>,
+    headers: &mut HeaderMap,
+) {
+    for (key, env_var) in env_http_headers {
+        let Some(value) = getenv(env_var) else {
+            continue;
+        };
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let (Ok(name), Ok(header_value)) = (
+            HeaderName::try_from(key.as_str()),
+            HeaderValue::from_str(value),
+        ) else {
+            tracing::warn!(
+                header = %key,
+                env_var = %env_var,
+                "skipping env_http_header with an invalid header name or value"
+            );
+            continue;
+        };
+        headers.insert(name, header_value);
+    }
 }
 
 /// HTTP client for sampling. Cheap to clone; carries an `Arc`-backed
-/// `reqwest::Client` and the default headers/request-defaults computed
-/// from a [`SamplerConfig`] at construction time.
+/// `reqwest::Client` and the default headers/request-defaults computed from a
+/// [`SamplerConfig`] at construction time.
 #[derive(Clone)]
 pub struct SamplingClient {
     http: reqwest::Client,
@@ -397,6 +427,8 @@ pub struct SamplingClient {
     bearer_resolver: Option<crate::config::SharedBearerResolver>,
     /// Per-request header injection (OTel traceparent).
     header_injector: Option<crate::config::SharedHeaderInjector>,
+    /// Endpoint URL builder, resolved once from `base_url` + `query_params`.
+    endpoint: EndpointTemplate,
 }
 
 impl std::fmt::Debug for SamplingClient {
@@ -423,6 +455,74 @@ struct ClientDefaults {
     auth_scheme: AuthScheme,
     stream_tool_calls: bool,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
+}
+
+/// Endpoint URL builder, resolved once at client construction so each request
+/// only appends its path.
+#[derive(Clone, Debug)]
+enum EndpointTemplate {
+    /// No query params and no query on the base URL (or an unparseable base):
+    /// append the path to the base verbatim.
+    Plain(String),
+    /// Query params configured: `{prefix}/{path}{suffix}`. `suffix` starts with
+    /// `?` and folds any base-URL params, with a configured key winning over the
+    /// same key in `base_url` (percent-encoded, no duplicates).
+    WithQuery { prefix: String, suffix: String },
+}
+
+impl EndpointTemplate {
+    fn new(base_url: &str, query_params: &IndexMap<String, String>) -> Self {
+        let base = base_url.trim_end_matches('/').to_string();
+        // The fast path is safe only when there is nothing to fold: no configured
+        // params and no query already on the base (which would otherwise land
+        // before the appended path).
+        if query_params.is_empty() && !base.contains('?') {
+            return Self::Plain(base);
+        }
+        let mut url = match reqwest::Url::parse(&base) {
+            Ok(url) => url,
+            Err(error) => {
+                tracing::warn!(
+                    url = %base,
+                    %error,
+                    "failed to parse base URL for endpoint; sending without folded query"
+                );
+                return Self::Plain(base);
+            }
+        };
+        let overridden: std::collections::HashSet<&str> =
+            query_params.keys().map(String::as_str).collect();
+        let kept: Vec<(String, String)> = url
+            .query_pairs()
+            .filter(|(k, _)| !overridden.contains(k.as_ref()))
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        let prefix = {
+            let mut prefix_url = url.clone();
+            prefix_url.set_query(None);
+            prefix_url.as_str().trim_end_matches('/').to_string()
+        };
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.clear();
+            for (key, value) in &kept {
+                pairs.append_pair(key, value);
+            }
+            for (key, value) in query_params {
+                pairs.append_pair(key, value);
+            }
+        }
+        let suffix = url.query().map(|q| format!("?{q}")).unwrap_or_default();
+        Self::WithQuery { prefix, suffix }
+    }
+
+    fn url_for_path(&self, path: &str) -> String {
+        let path = path.trim_start_matches('/');
+        match self {
+            Self::Plain(base) => format!("{base}/{path}"),
+            Self::WithQuery { prefix, suffix } => format!("{prefix}/{path}{suffix}"),
+        }
+    }
 }
 
 // =============================================================================
@@ -494,6 +594,28 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
     }
 }
 
+/// A request builder coupled to the credential state it was built with, so
+/// a 401 arm cannot classify from anything but the build-time capture. The
+/// wire default (`SentCredential::Unknown`, which charges the retry budget)
+/// stays the fail-closed one; only an explicit `sent_bearer: None` — a send
+/// the builder provably stamped no credential onto — reaches the uncharged
+/// lane via [`auth_rejected`].
+struct SentRequest {
+    builder: reqwest::RequestBuilder,
+    /// Tail fragment of the credential in the built headers (`None` = no
+    /// credential header at all).
+    sent_bearer: Option<String>,
+}
+
+/// The one way a 401 becomes a `SamplingError::Auth` with a wire-derived
+/// credential classification: from the fragment its [`SentRequest`] captured.
+fn auth_rejected(message: String, sent_bearer: Option<&str>) -> SamplingError {
+    SamplingError::Auth {
+        message,
+        credential: SentCredential::from_sent_fragment(sent_bearer),
+    }
+}
+
 // =============================================================================
 // SamplingClient
 // =============================================================================
@@ -513,11 +635,11 @@ impl SamplingClient {
                 AuthScheme::XApiKey => {
                     let header_value = HeaderValue::from_str(api_key).map_err(|_| {
                         tracing::debug!(
+                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP header"
                         );
-                        SamplingError::Auth(
-                            "Invalid api_key: cannot be converted to a valid HTTP header"
-                                .to_string(),
+                        SamplingError::auth_unknown(
+                            "Invalid api_key: cannot be converted to a valid HTTP header",
                         )
                     })?;
                     headers.insert(HeaderName::from_static("x-api-key"), header_value);
@@ -526,11 +648,11 @@ impl SamplingClient {
                     let bearer = format!("Bearer {}", api_key);
                     let header_value = HeaderValue::from_str(&bearer).map_err(|_| {
                         tracing::debug!(
+                            api_key = %api_key,
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
                         );
-                        SamplingError::Auth(
-                            "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
-                                .to_string(),
+                        SamplingError::auth_unknown(
+                            "Invalid api_key: cannot be converted to a valid HTTP Authorization header",
                         )
                     })?;
                     headers.insert(AUTHORIZATION, header_value);
@@ -549,10 +671,64 @@ impl SamplingClient {
             headers.insert(header_name, header_value);
         }
 
-        // A minimal product User-Agent is useful for HTTP interoperability but
-        // contains no session, user, origin-client, OS, or architecture data.
-        if let Ok(value) = HeaderValue::from_str(&format!("{AGENT_PRODUCT}/{}", agent_version())) {
-            headers.insert(USER_AGENT, value);
+        // Resolve here, not into `extra_headers`, so an env-sourced secret stays
+        // out of persisted state.
+        apply_env_http_headers(
+            &config.env_http_headers,
+            |var| std::env::var(var).ok(),
+            &mut headers,
+        );
+
+        // Add x-grok-client-version header for version gating at the proxy.
+        if let Some(client_version) = config.client_version.as_ref()
+            && let Ok(header_value) = HeaderValue::from_str(client_version)
+        {
+            headers.insert(
+                HeaderName::from_static("x-grok-client-version"),
+                header_value,
+            );
+        }
+
+        if let Some(deployment_id) = config.deployment_id.as_ref()
+            && let Ok(header_value) = HeaderValue::from_str(deployment_id)
+        {
+            headers.insert(
+                HeaderName::from_static("x-grok-deployment-id"),
+                header_value,
+            );
+        }
+
+        if let Some(user_id) = config.user_id.as_ref()
+            && let Ok(header_value) = HeaderValue::from_str(user_id)
+        {
+            headers.insert(HeaderName::from_static("x-grok-user-id"), header_value);
+        }
+
+        {
+            let client_id = config
+                .client_identifier
+                .clone()
+                .unwrap_or_else(|| DEFAULT_CLIENT_IDENTIFIER.to_string());
+            if let Ok(header_value) = HeaderValue::from_str(&client_id) {
+                headers.insert(
+                    HeaderName::from_static("x-grok-client-identifier"),
+                    header_value,
+                );
+            }
+        }
+
+        // Always set User-Agent: per-session origin if available, else fallback.
+        {
+            let ua_string = match config.origin_client.as_ref() {
+                Some(origin) => user_agent_string_for(origin),
+                None => user_agent_string_for(&OriginClientInfo {
+                    product: AGENT_PRODUCT.to_string(),
+                    version: Some(agent_version()),
+                }),
+            };
+            if let Ok(v) = HeaderValue::from_str(&ua_string) {
+                headers.insert(USER_AGENT, v);
+            }
         }
 
         let http = if config.force_http1 {
@@ -589,6 +765,8 @@ impl SamplingClient {
             doom_loop_recovery: config.doom_loop_recovery,
         };
 
+        let endpoint = EndpointTemplate::new(&config.base_url, &config.query_params);
+
         Ok(Self {
             http,
             default_headers: headers,
@@ -597,6 +775,7 @@ impl SamplingClient {
             attribution_callback: config.attribution_callback,
             bearer_resolver: config.bearer_resolver,
             header_injector: config.header_injector,
+            endpoint,
         })
     }
 
@@ -605,82 +784,96 @@ impl SamplingClient {
         self.defaults.api_backend.clone()
     }
 
-    /// POST with default headers. Overrides auth from resolver if wired.
-    fn post(&self, url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
+    /// POST with default headers, returning the builder coupled to the tail
+    /// fragment of the credential actually placed in its headers (`None` =
+    /// no credential) — captured at build time because a record-time
+    /// re-read races with the recovery a 401 triggers.
+    ///
+    /// A wired bearer_resolver is the sole auth source: a missing live
+    /// bearer strips default Authorization / x-api-key so a hard-expired
+    /// seed key cannot ride on the wire.
+    fn post(&self, url: impl reqwest::IntoUrl) -> SentRequest {
         let mut headers = self.default_headers.clone();
-        if let Some(resolver) = &self.bearer_resolver
-            && let Some(fresh) = resolver.current_bearer()
-        {
-            match self.defaults.auth_scheme {
-                AuthScheme::XApiKey => {
-                    headers.remove(AUTHORIZATION);
-                    if let Ok(v) = HeaderValue::from_str(&fresh) {
-                        headers.insert(HeaderName::from_static("x-api-key"), v);
+        if let Some(resolver) = &self.bearer_resolver {
+            headers.remove(AUTHORIZATION);
+            headers.remove(HeaderName::from_static("x-api-key"));
+            if let Some(fresh) = resolver.current_bearer() {
+                match self.defaults.auth_scheme {
+                    AuthScheme::XApiKey => {
+                        if let Ok(v) = HeaderValue::from_str(&fresh) {
+                            headers.insert(HeaderName::from_static("x-api-key"), v);
+                        }
                     }
-                }
-                AuthScheme::Bearer => {
-                    headers.remove(HeaderName::from_static("x-api-key"));
-                    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {fresh}")) {
-                        headers.insert(AUTHORIZATION, v);
+                    AuthScheme::Bearer => {
+                        if let Ok(v) = HeaderValue::from_str(&format!("Bearer {fresh}")) {
+                            headers.insert(AUTHORIZATION, v);
+                        }
                     }
                 }
             }
         }
-        tracing::info!(
-            target: crate::sampling_log::TARGET,
-            event = "client_post",
-            base_url = %self.base_url,
-            model = %self.defaults.model,
-            api_backend = ?self.defaults.api_backend,
-            auth_scheme = ?self.defaults.auth_scheme,
-            has_bearer_resolver = self.bearer_resolver.is_some(),
-            has_authorization_header = headers.get(AUTHORIZATION).is_some(),
-            has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
-        );
+        {
+            let auth_prefix = headers
+                .get(AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.chars().take(20).collect::<String>());
+            let x_api_key_prefix = headers
+                .get(HeaderName::from_static("x-api-key"))
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.chars().take(12).collect::<String>());
+            tracing::info!(
+                target: crate::sampling_log::TARGET,
+                event = "client_post",
+                base_url = %self.base_url,
+                model = %self.defaults.model,
+                api_backend = ?self.defaults.api_backend,
+                auth_scheme = ?self.defaults.auth_scheme,
+                has_bearer_resolver = self.bearer_resolver.is_some(),
+                has_authorization_header = headers.get(AUTHORIZATION).is_some(),
+                has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
+                auth_header_prefix = auth_prefix.as_deref().unwrap_or("none"),
+                x_api_key_prefix = x_api_key_prefix.as_deref().unwrap_or("none"),
+            );
+        }
+        let sent_bearer = Self::sent_fragment_from_headers(&headers, &self.defaults.auth_scheme);
         if let Some(injector) = &self.header_injector {
             injector.inject(&mut headers);
         }
-        self.http.post(url).headers(headers)
+        SentRequest {
+            builder: self.http.post(url).headers(headers),
+            sent_bearer,
+        }
     }
 
-    /// Bearer prefix for 401 attribution. Prefers live resolver, falls back to default_headers.
-    fn current_sent_bearer_prefix(&self) -> Option<String> {
-        self.bearer_resolver
-            .as_ref()
-            .and_then(|r| r.current_bearer())
-            .or_else(|| self.extract_sent_bearer())
-            .map(|mut s| {
-                s.truncate(crate::attribution::SENT_BEARER_PREFIX_LEN.min(s.len()));
-                s
-            })
-    }
-
-    /// Extract the bearer from `default_headers`, truncated to prefix length.
-    /// Reads `x-api-key` (Anthropic Messages API) or `Authorization` (OpenAI-completions).
-    fn extract_sent_bearer(&self) -> Option<String> {
-        let raw = match self.defaults.auth_scheme {
-            AuthScheme::XApiKey => self
-                .default_headers
+    /// Tail fragment of the credential in `headers` — `x-api-key`
+    /// (Messages-API scheme) or `Authorization` — per
+    /// [`crate::attribution::BEARER_SUFFIX_LEN`].
+    fn sent_fragment_from_headers(headers: &HeaderMap, scheme: &AuthScheme) -> Option<String> {
+        let raw = match scheme {
+            AuthScheme::XApiKey => headers
                 .get(HeaderName::from_static("x-api-key"))
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string()),
-            AuthScheme::Bearer => self
-                .default_headers
+                .and_then(|v| v.to_str().ok()),
+            AuthScheme::Bearer => headers
                 .get(AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.strip_prefix("Bearer "))
-                .map(|s| s.to_string()),
+                .and_then(|s| s.strip_prefix("Bearer ")),
         };
-        raw.map(|mut s| {
-            // Truncate in-place so we never materialize a heap-resident
-            // copy of the full bearer outside the local stack of this
-            // function. `String::truncate` operates on byte indices and
-            // panics on a non-char-boundary cut; bearer tokens are
-            // ASCII (per the `Authorization` and `x-api-key` header
-            // grammars) so the byte index is always safe.
-            s.truncate(crate::attribution::SENT_BEARER_PREFIX_LEN.min(s.len()));
-            s
-        })
+        raw.map(|s| bearer_suffix(s).to_string())
+    }
+
+    /// Best-effort *build-time* view of what the next request would carry
+    /// (resolver-authoritative). For request-start diagnostics
+    /// ([`Self::auth_info`]) only — 401 attribution must use the fragment
+    /// captured by [`Self::post`] instead, which cannot race a recovery.
+    fn current_sent_bearer_suffix(&self) -> Option<String> {
+        if self.bearer_resolver.is_some() {
+            return self
+                .bearer_resolver
+                .as_ref()
+                .and_then(|r| r.current_bearer())
+                .map(|s| bearer_suffix(&s).to_string());
+        }
+        Self::sent_fragment_from_headers(&self.default_headers, &self.defaults.auth_scheme)
     }
 
     /// Invoke the optional 401 attribution callback for one logical
@@ -690,36 +883,30 @@ impl SamplingClient {
     /// that saw the status, so higher layers that react to a 401 must
     /// not emit a duplicate event.
     ///
-    /// The bearer passed to the callback is already truncated to
-    /// [`crate::attribution::SENT_BEARER_PREFIX_LEN`] characters by
-    /// [`Self::extract_sent_bearer`]; the trait contract guarantees
-    /// that callers downstream of this crate never see the full
-    /// bearer.
-    fn record_401_attribution(&self, consumer: crate::attribution::SamplingConsumer) {
+    /// `sent_suffix` is the fragment [`Self::post`] captured for the
+    /// rejected request (already tail-truncated; the full bearer never
+    /// crosses this boundary).
+    fn record_401_attribution(
+        &self,
+        consumer: crate::attribution::SamplingConsumer,
+        sent_suffix: Option<&str>,
+    ) {
         if let Some(cb) = self.attribution_callback.as_ref() {
-            let sent_prefix = self.current_sent_bearer_prefix();
-            cb.record_401(consumer, sent_prefix.as_deref());
+            cb.record_401(consumer, sent_suffix);
         }
     }
 
     pub fn auth_info(&self) -> crate::sampling_log::AuthInfo {
-        let has_credentials = self
-            .bearer_resolver
-            .as_ref()
-            .and_then(|resolver| resolver.current_bearer())
-            .is_some()
-            || match self.defaults.auth_scheme {
-                AuthScheme::XApiKey => self
-                    .default_headers
-                    .contains_key(HeaderName::from_static("x-api-key")),
-                AuthScheme::Bearer => self.default_headers.contains_key(AUTHORIZATION),
-            };
-        let auth_type = match (&self.defaults.auth_scheme, has_credentials) {
-            (AuthScheme::XApiKey, true) => "x-api-key",
-            (AuthScheme::Bearer, true) => "bearer",
-            (_, false) => "none",
+        let auth_prefix = self.current_sent_bearer_suffix();
+        let auth_type = match (&self.defaults.auth_scheme, &auth_prefix) {
+            (AuthScheme::XApiKey, Some(_)) => "x-api-key",
+            (AuthScheme::Bearer, Some(_)) => "bearer",
+            (_, None) => "none",
         };
-        crate::sampling_log::AuthInfo { auth_type }
+        crate::sampling_log::AuthInfo {
+            auth_type,
+            auth_prefix,
+        }
     }
 
     /// Check if a header name contains sensitive information that should be redacted.
@@ -732,45 +919,9 @@ impl SamplingClient {
             || lower.contains("secret")
     }
 
-    /// Format a single header for error messages, redacting sensitive values.
-    fn format_header(name: &str, value: &str) -> String {
-        let display_value = if Self::is_sensitive_header(name) {
-            "[REDACTED]"
-        } else {
-            value
-        };
-        format!("  {}: {}", name, display_value)
-    }
-
-    /// Build request headers string for error messages (redacting sensitive values).
-    fn format_request_headers(
-        &self,
-        _x_grok_conv_id: &str,
-        _x_grok_req_id: &str,
-        _model_id: &str,
-        include_accept: bool,
-    ) -> Vec<String> {
-        let mut req_headers: Vec<String> = self
-            .default_headers
-            .iter()
-            .map(|(name, value)| {
-                Self::format_header(name.as_str(), value.to_str().unwrap_or("[non-utf8]"))
-            })
-            .collect();
-
-        if include_accept {
-            req_headers.push(Self::format_header("accept", "text/event-stream"));
-        }
-        req_headers
-    }
-
-    /// Build response headers string for error messages.
-    fn format_response_headers(response: &reqwest::Response) -> Vec<String> {
-        response
-            .headers()
-            .iter()
-            .map(|(name, value)| Self::format_header(name.as_str(), &format!("{:?}", value)))
-            .collect()
+    /// Short lossy body snippet for error logs (never user-facing).
+    fn body_preview(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).chars().take(500).collect()
     }
 
     /// Log all headers from a request at debug level (redacting sensitive values).
@@ -790,48 +941,19 @@ impl SamplingClient {
         }
     }
 
-    /// Build error context message based on error type and status code.
-    /// Includes relevant request/response details depending on what the error is about.
-    fn build_api_error_message(
-        &self,
-        status: reqwest::StatusCode,
-        server_message: &str,
-        endpoint: &str,
-        req_headers: &[String],
-        resp_headers: Option<&[String]>,
-    ) -> String {
-        let server_message_lower = server_message.to_lowercase();
-
-        let mut context_parts = vec![server_message.to_string()];
-        context_parts.push(format!("\nRequest URL: {}", endpoint));
-
-        // Show headers if error mentions headers
-        if server_message_lower.contains("header") {
-            context_parts.push(format!("Request headers:\n{}", req_headers.join("\n")));
-        }
-
-        // Always show response headers for server errors
-        if status.is_server_error()
-            && let Some(resp_hdrs) = resp_headers
-        {
-            context_parts.push(format!("Response headers:\n{}", resp_hdrs.join("\n")));
-        }
-
-        context_parts.join("\n")
-    }
-
     fn endpoint(&self, path: &str) -> String {
-        let base = self.base_url.trim_end_matches('/');
-        let path = path.trim_start_matches('/');
-        format!("{base}/{path}")
+        self.endpoint.url_for_path(path)
     }
 
+    /// Chat-completions URL for `model`.
+    ///
+    /// The virtual `model-router` model is dispatched to Chutes' own router
+    /// endpoint rather than the configured inference base, so the router picks
+    /// the backing model. `CHUTES_ROUTER_BASE_URL` is env-overridable, so the
+    /// resolved target is validated before a session credential is sent to it.
     fn chat_completions_endpoint(&self, model: &str) -> Result<String> {
         if is_chutes_backend(&self.base_url) && model.eq_ignore_ascii_case("model-router") {
             let endpoints = chutes_build_core::endpoints::ChutesEndpoints::default();
-            // `CHUTES_ROUTER_BASE_URL` is env-overridable; refuse to send a
-            // session credential to whatever it resolves to unless it's
-            // still a trusted Chutes/router host (see `endpoint_policy`).
             chutes_build_core::endpoint_policy::validate_endpoint_url(&endpoints.router).map_err(
                 |_| {
                     SamplingError::InvalidConfiguration(
@@ -864,7 +986,13 @@ impl SamplingClient {
         Ok(request)
     }
 
-    async fn handle_response(&self, response: reqwest::Response) -> Result<ChatCompletionResponse> {
+    /// `sent_bearer` is the fragment [`Self::post`] captured for the
+    /// request that produced `response` (401 attribution).
+    async fn handle_response(
+        &self,
+        response: reqwest::Response,
+        sent_bearer: Option<&str>,
+    ) -> Result<ChatCompletionResponse> {
         let status = response.status();
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
@@ -873,13 +1001,17 @@ impl SamplingClient {
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
-                self.record_401_attribution(crate::attribution::SamplingConsumer::ChatCompletions);
-                let server_message = parse_error_bytes(bytes.as_ref());
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401): {server_message}"
-                )));
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::ChatCompletions,
+                    sent_bearer,
+                );
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401): {server_message}"),
+                    sent_bearer,
+                ));
             }
-            let message = parse_error_bytes(bytes.as_ref());
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             return Err(SamplingError::Api {
                 status,
                 message,
@@ -890,9 +1022,10 @@ impl SamplingClient {
         }
 
         let completion = serde_json::from_slice::<ChatCompletionResponse>(&bytes).map_err(|e| {
+            let raw_body = String::from_utf8_lossy(&bytes);
             tracing::error!(
                 error = %e,
-                body_len = bytes.len(),
+                raw_body = %raw_body,
                 "Failed to deserialize ChatCompletionResponse"
             );
             SamplingError::Serialization(e)
@@ -908,8 +1041,7 @@ impl SamplingClient {
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
-        let mut payload = self.apply_defaults(request)?;
-        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
+        let payload = self.apply_defaults(request)?;
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -930,12 +1062,11 @@ impl SamplingClient {
             deployment_id: payload.x_grok_deployment_id.as_deref(),
             user_id: payload.x_grok_user_id.as_deref(),
         };
-        let http_request = grok_headers
-            .apply(self.post(self.chat_completions_endpoint(&model_id)?))
-            .json(&ChatRequestWithTemplate {
-                inner: &payload,
-                chat_template_kwargs: chat_template_kwargs.as_ref(),
-            });
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.endpoint("chat/completions"));
+        let http_request = grok_headers.apply(builder).json(&payload);
 
         let response = http_request.send().await.map_err(|e| {
             // Log at debug level; errors are surfaced to the caller.
@@ -943,7 +1074,7 @@ impl SamplingClient {
             e
         })?;
 
-        self.handle_response(response).await
+        self.handle_response(response, sent_bearer.as_deref()).await
     }
 
     /// Start a streaming chat completion request. Returns a stream of typed chunks.
@@ -958,6 +1089,13 @@ impl SamplingClient {
             error = tracing::field::Empty,
         )
     )]
+    /// Stream a chat completion, falling back across Chutes model candidates
+    /// while nothing has been streamed yet.
+    ///
+    /// The chain is: the selected model, then `CHUTES_FALLBACK_MODELS`, then the
+    /// virtual `model-router`. `CHUTES_STRICT_MODEL=1` disables it, and a
+    /// non-Chutes backend yields a single candidate, so this is a plain
+    /// pass-through there.
     pub async fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
@@ -966,135 +1104,139 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
     )> {
         let payload = self.apply_defaults(request)?;
-        let selected_model = payload.model.clone().unwrap_or_default();
-        let candidates = chutes_fallback_models(&self.base_url, &selected_model);
+        let selected = payload.model.clone().unwrap_or_default();
+        let candidates = chutes_fallback_models(&self.base_url, &selected);
         let policy = chutes_build_core::routing::FallbackPolicy::default();
-        let mut successful_response = None;
 
-        for (attempt_index, candidate) in candidates.iter().enumerate() {
-            let has_fallback = attempt_index + 1 < candidates.len();
-            let (attempt_payload, chat_template_kwargs) =
-                prepare_chutes_chat_attempt(&self.base_url, &payload, candidate);
-            let x_grok_conv_id = attempt_payload.x_grok_conv_id.clone().unwrap_or_default();
-            let x_grok_req_id = attempt_payload.x_grok_req_id.clone().unwrap_or_default();
-
-            // The request is rebuilt for each pre-stream candidate. Once a
-            // successful SSE response starts, the selected model is sticky.
-            let streaming_request = StreamingChatRequest {
-                inner: &attempt_payload,
-                stream: true,
-                stream_options: StreamOptions {
-                    include_usage: true,
-                },
-                chat_template_kwargs: chat_template_kwargs.as_ref(),
-            };
-            let grok_headers = GrokRequestHeaders {
-                conv_id: &x_grok_conv_id,
-                req_id: &x_grok_req_id,
-                model_id: candidate,
-                session_id: attempt_payload
-                    .x_grok_session_id
-                    .as_deref()
-                    .unwrap_or_default(),
-                turn_idx: attempt_payload.x_grok_turn_idx.as_deref(),
-                agent_id: attempt_payload
-                    .x_grok_agent_id
-                    .as_deref()
-                    .unwrap_or_default(),
-                deployment_id: attempt_payload.x_grok_deployment_id.as_deref(),
-                user_id: attempt_payload.x_grok_user_id.as_deref(),
-            };
-            let endpoint = self.chat_completions_endpoint(candidate)?;
-            let built_request = grok_headers
-                .apply(self.post(endpoint.clone()))
-                .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
-                .json(&streaming_request)
-                .build()
-                .map_err(|error| {
-                    tracing::error!("Failed to build HTTP request: {}", error);
-                    SamplingError::Http(error)
-                })?;
-
-            tracing::debug!(
-                url = %built_request.url(),
-                method = %built_request.method(),
-                model_id = %candidate,
-                "Sending chat/completions request"
-            );
-            Self::log_request_headers(&built_request, "chat/completions");
-
-            let response = match self.http.execute(built_request).await {
-                Ok(response) => response,
+        let mut last_error = None;
+        for (index, candidate) in candidates.iter().enumerate() {
+            let has_fallback = index + 1 < candidates.len();
+            let mut attempt = payload.clone();
+            attempt.model = Some(candidate.clone());
+            match self.chat_completion_stream_once(attempt).await {
+                Ok(result) => return Ok(result),
                 Err(error) => {
-                    tracing::debug!("HTTP request failed: {}", error);
-                    record_stream_request_failure(&error);
+                    let status = match &error {
+                        SamplingError::Api { status, .. } => Some(status.as_u16()),
+                        _ => None,
+                    };
                     if has_fallback
-                        && policy.permits_model_fallback(None, &error.to_string(), false)
+                        && policy.permits_model_fallback(status, &error.to_string(), false)
                     {
                         tracing::warn!(
                             model_id = %candidate,
-                            fallback_model = %candidates[attempt_index + 1],
-                            "Chutes model transport failed before streaming; trying fallback"
+                            fallback_model = %candidates[index + 1],
+                            %error,
+                            "Chutes model unavailable before streaming; trying the next candidate"
                         );
+                        last_error = Some(error);
                         continue;
                     }
-                    return Err(SamplingError::Http(error));
+                    return Err(error);
                 }
-            };
-
-            let status = response.status();
-            let span = tracing::Span::current();
-            span.record("status_code", status.as_u16() as i64);
-            span.record("success", status.is_success());
-            let model_metadata = extract_model_metadata(response.headers());
-            let retry_after_secs = extract_retry_after(response.headers());
-            let should_retry = extract_should_retry(response.headers());
-            if status.is_success() {
-                successful_response = Some((response, model_metadata));
-                break;
             }
+        }
+        Err(last_error.unwrap_or(SamplingError::InvalidConfiguration(
+            "no model candidates to try",
+        )))
+    }
 
+    /// One attempt against one model. Returns only once the SSE response has
+    /// started, so any error it yields happened before streaming.
+    async fn chat_completion_stream_once(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Result<(
+        BoxStream<'static, Result<ChatCompletionChunk>>,
+        Option<ResponseModelMetadata>,
+    )> {
+        let payload = self.apply_defaults(request)?;
+        let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
+        let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
+        let model_id = payload.model.clone().unwrap_or_default();
+
+        // Wrap the request with streaming fields and serialize once.
+        // Previously this path serialized twice: first to serde_json::Value
+        // (to inject `stream` and `stream_options`), then to HTTP body bytes.
+        let mut payload = payload;
+        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
+        let streaming_request = StreamingChatRequest {
+            inner: &payload,
+            stream: true,
+            stream_options: StreamOptions {
+                include_usage: true,
+            },
+            chat_template_kwargs: chat_template_kwargs.as_ref(),
+        };
+
+        let grok_headers = GrokRequestHeaders {
+            conv_id: x_grok_conv_id,
+            req_id: x_grok_req_id,
+            model_id: &model_id,
+            session_id: payload.x_grok_session_id.as_deref().unwrap_or_default(),
+            turn_idx: payload.x_grok_turn_idx.as_deref(),
+            agent_id: payload.x_grok_agent_id.as_deref().unwrap_or_default(),
+            deployment_id: payload.x_grok_deployment_id.as_deref(),
+            user_id: payload.x_grok_user_id.as_deref(),
+        };
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.chat_completions_endpoint(&model_id)?);
+        let http_request = grok_headers
+            .apply(builder)
+            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+            .json(&streaming_request);
+
+        let built_request = http_request.build().map_err(|e| {
+            tracing::error!("Failed to build HTTP request: {}", e);
+            SamplingError::Http(e)
+        })?;
+
+        tracing::debug!(
+            url = %built_request.url(),
+            method = %built_request.method(),
+            "Sending chat/completions request"
+        );
+        Self::log_request_headers(&built_request, "chat/completions");
+
+        let response = self.http.execute(built_request).await.map_err(|e| {
+            tracing::debug!("HTTP request failed: {}", e);
+            record_stream_request_failure(&e);
+            e
+        })?;
+
+        let status = response.status();
+        let span = tracing::Span::current();
+        span.record("status_code", status.as_u16() as i64);
+        span.record("success", status.is_success());
+        let model_metadata = extract_model_metadata(response.headers());
+        let retry_after_secs = extract_retry_after(response.headers());
+        let should_retry = extract_should_retry(response.headers());
+        if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 span.record("error", "unauthorized (401)");
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ChatCompletionsStream,
+                    sent_bearer.as_deref(),
                 );
-                let server_message = response.text().await.unwrap_or_default();
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401) from {endpoint}: {server_message}"
-                )));
+                let endpoint = self.endpoint("chat/completions");
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
             }
 
-            let req_headers =
-                self.format_request_headers(&x_grok_conv_id, &x_grok_req_id, candidate, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &endpoint,
-                &req_headers,
-                Some(&resp_headers),
-            );
-
-            if has_fallback
-                && policy.permits_model_fallback(Some(status.as_u16()), &server_message, false)
-            {
-                tracing::warn!(
-                    status = %status,
-                    model_id = %candidate,
-                    fallback_model = %candidates[attempt_index + 1],
-                    "Chutes model unavailable before streaming; trying fallback"
-                );
-                continue;
-            }
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
-                model_id = %candidate,
+                body_preview = %Self::body_preview(bytes.as_ref()),
+                model_id = %model_id,
                 "chat/completions API error"
             );
             return Err(SamplingError::Api {
@@ -1105,9 +1247,6 @@ impl SamplingClient {
                 should_retry,
             });
         }
-
-        let (response, model_metadata) = successful_response
-            .expect("the selected model always provides at least one request candidate");
 
         // Strip UTF-8 BOM if present: eventsource-stream 0.2.3 incorrectly slices BOM at byte 1 instead of 3.
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
@@ -1148,7 +1287,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "chat_completions",
-                            data_len = data.len(),
+                            data = %data,
                         );
 
                         if let Some(stream_error) = try_parse_stream_error(data) {
@@ -1158,7 +1297,7 @@ impl SamplingClient {
                                 serde_json::from_str::<ChatCompletionChunk>(data).map_err(|e| {
                                     tracing::error!(
                                         error = %e,
-                                        data_len = data.len(),
+                                        raw_data = %data,
                                         "Failed to deserialize ChatCompletionChunk from stream"
                                     );
                                     SamplingError::Serialization(e)
@@ -1259,9 +1398,11 @@ impl SamplingClient {
         // it in post-serialize. This is the last surviving piece of the
         // old raw_output machinery.
         xai_grok_sampling_types::patch_reasoning_text_types(&mut request_body);
-        let http_request = grok_headers
-            .apply(self.post(self.endpoint("responses")))
-            .json(&request_body);
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.endpoint("responses"));
+        let http_request = grok_headers.apply(builder).json(&request_body);
 
         let response = http_request.send().await.map_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
@@ -1276,28 +1417,23 @@ impl SamplingClient {
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
-                self.record_401_attribution(crate::attribution::SamplingConsumer::Responses);
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::Responses,
+                    sent_bearer.as_deref(),
+                );
                 let endpoint = self.endpoint("responses");
-                let server_message = parse_error_bytes(bytes.as_ref());
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401) from {endpoint}: {server_message}"
-                )));
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
             }
 
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, false);
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("responses"),
-                &req_headers,
-                None,
-            );
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
             );
@@ -1311,9 +1447,10 @@ impl SamplingClient {
         }
 
         let response_obj = serde_json::from_slice::<rs::Response>(&bytes).map_err(|e| {
+            let raw_body = String::from_utf8_lossy(&bytes);
             tracing::error!(
                 error = %e,
-                body_len = bytes.len(),
+                raw_body = %raw_body,
                 "Failed to deserialize rs::Response"
             );
             SamplingError::Serialization(e)
@@ -1384,7 +1521,7 @@ impl SamplingClient {
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
         };
-        let extra_raw_tools = std::mem::take(&mut request.extra_raw_tools);
+        let extra_tool_entries = std::mem::take(&mut request.extra_tool_entries);
         let mut request_body = serde_json::to_value(&request.inner).map_err(|e| {
             tracing::error!("Failed to serialize responses request: {}", e);
             SamplingError::Serialization(e)
@@ -1395,11 +1532,11 @@ impl SamplingClient {
         }
         // Inject xAI-specific tools (e.g., x_search) that can't be expressed
         // via async_openai's rs::Tool enum.
-        if !extra_raw_tools.is_empty() {
+        if !extra_tool_entries.is_empty() {
             if let Some(tools) = request_body.get_mut("tools").and_then(|v| v.as_array_mut()) {
-                tools.extend(extra_raw_tools);
+                tools.extend(extra_tool_entries);
             } else {
-                request_body["tools"] = serde_json::Value::Array(extra_raw_tools);
+                request_body["tools"] = serde_json::Value::Array(extra_tool_entries);
             }
         }
         xai_grok_sampling_types::patch_reasoning_text_types(&mut request_body);
@@ -1409,8 +1546,12 @@ impl SamplingClient {
             .defaults
             .doom_loop_recovery
             .map(crate::doom_loop::DoomLoopSignalCollector::new);
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.endpoint("responses"));
         let mut http_request = grok_headers
-            .apply(self.post(self.endpoint("responses")))
+            .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
         if doom_loop.is_some() {
             // Presence opts in; the server ignores the value.
@@ -1443,34 +1584,28 @@ impl SamplingClient {
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 span.record("error", "unauthorized (401)");
-                self.record_401_attribution(crate::attribution::SamplingConsumer::ResponsesStream);
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::ResponsesStream,
+                    sent_bearer.as_deref(),
+                );
                 let endpoint = self.endpoint("responses");
-                let server_message = response.text().await.unwrap_or_default();
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401) from {endpoint}: {server_message}"
-                )));
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
             }
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("responses"),
-                &req_headers,
-                Some(&resp_headers),
-            );
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
             );
@@ -1524,7 +1659,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "responses",
-                            data_len = data.len(),
+                            data = %data,
                         );
 
                         // Intercept the non-standard doom-loop event before
@@ -1616,9 +1751,11 @@ impl SamplingClient {
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
         };
-        let http_request = grok_headers
-            .apply(self.post(self.endpoint("messages")))
-            .json(&request.inner);
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.endpoint("messages"));
+        let http_request = grok_headers.apply(builder).json(&request.inner);
 
         let response = http_request.send().await.map_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
@@ -1633,28 +1770,23 @@ impl SamplingClient {
 
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
-                self.record_401_attribution(crate::attribution::SamplingConsumer::Messages);
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::Messages,
+                    sent_bearer.as_deref(),
+                );
                 let endpoint = self.endpoint("messages");
-                let server_message = parse_error_bytes(bytes.as_ref());
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401) from {endpoint}: {server_message}"
-                )));
+                let server_message = user_facing_api_error_message(status, bytes.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
             }
 
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, false);
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("messages"),
-                &req_headers,
-                None,
-            );
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
             );
@@ -1669,9 +1801,10 @@ impl SamplingClient {
 
         let response_obj =
             serde_json::from_slice::<messages::MessagesResponse>(&bytes).map_err(|e| {
+                let raw_body = String::from_utf8_lossy(&bytes);
                 tracing::error!(
                     error = %e,
-                    body_len = bytes.len(),
+                    raw_body = %raw_body,
                     "Failed to deserialize MessagesResponse"
                 );
                 SamplingError::Serialization(e)
@@ -1731,8 +1864,12 @@ impl SamplingClient {
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
         };
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(self.endpoint("messages"));
         let http_request = grok_headers
-            .apply(self.post(self.endpoint("messages")))
+            .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
             .json(&request.inner);
 
@@ -1761,34 +1898,28 @@ impl SamplingClient {
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 span.record("error", "unauthorized (401)");
-                self.record_401_attribution(crate::attribution::SamplingConsumer::MessagesStream);
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::MessagesStream,
+                    sent_bearer.as_deref(),
+                );
                 let endpoint = self.endpoint("messages");
-                let server_message = response.text().await.unwrap_or_default();
-                return Err(SamplingError::Auth(format!(
-                    "Unauthorized (401) from {endpoint}: {server_message}"
-                )));
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
             }
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
-            let req_headers =
-                self.format_request_headers(x_grok_conv_id, x_grok_req_id, &model_id, true);
-            let resp_headers = Self::format_response_headers(&response);
             let bytes = response.bytes().await?;
-            let server_message = parse_error_bytes(bytes.as_ref());
-
-            let message = self.build_api_error_message(
-                status,
-                &server_message,
-                &self.endpoint("messages"),
-                &req_headers,
-                Some(&resp_headers),
-            );
-
+            let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
             );
@@ -1840,7 +1971,7 @@ impl SamplingClient {
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "messages",
-                            data_len = data.len(),
+                            data = %data,
                         );
 
                         if let Some(stream_error) = try_parse_stream_error(data) {
@@ -1851,7 +1982,7 @@ impl SamplingClient {
                                     |e| {
                                         tracing::error!(
                                             error = %e,
-                                            data_len = data.len(),
+                                            raw_data = %data,
                                             "Failed to deserialize MessageStreamEvent from stream"
                                         );
                                         SamplingError::Serialization(e)
@@ -1963,7 +2094,7 @@ impl SamplingClient {
 
         // Collect xAI-specific tools that can't be expressed via rs::Tool
         // (e.g., x_search). These are injected as raw JSON after serialization.
-        let extra_tools = xai_grok_sampling_types::extra_raw_tools(&request.hosted_tools);
+        let extra_tools = xai_grok_sampling_types::extra_tool_entries(&request.hosted_tools);
 
         let responses_request: rs::CreateResponse = (&request).into();
 
@@ -1973,7 +2104,7 @@ impl SamplingClient {
         wrapper.x_grok_session_id = x_grok_session_id;
         wrapper.x_grok_turn_idx = x_grok_turn_idx;
         wrapper.x_grok_agent_id = x_grok_agent_id;
-        wrapper.extra_raw_tools = extra_tools;
+        wrapper.extra_tool_entries = extra_tools;
 
         if let Some(trace) = trace {
             wrapper.trace = Some(trace);
@@ -2109,16 +2240,22 @@ impl SamplingClient {
         };
         result
             .map(|(response, _metrics)| response)
-            .map_err(|info| SamplingError::Api {
-                status: info
-                    .status_code
-                    .and_then(|c| reqwest::StatusCode::from_u16(c).ok())
-                    .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
-                message: info.message,
-                model_metadata: info.model_metadata,
-                retry_after_secs: info.retry_after_secs,
-                should_retry: None,
-            })
+            .map_err(stream_collect_error)
+    }
+}
+
+/// Rebuild `Api` from stream-collected info, preserving status,
+/// `Retry-After`, and `x-should-retry` (kind is lost on this path).
+fn stream_collect_error(info: SamplingErrorInfo) -> SamplingError {
+    SamplingError::Api {
+        status: info
+            .status_code
+            .and_then(|c| reqwest::StatusCode::from_u16(c).ok())
+            .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+        message: info.message,
+        model_metadata: info.model_metadata,
+        retry_after_secs: info.retry_after_secs,
+        should_retry: info.should_retry,
     }
 }
 
@@ -2127,6 +2264,45 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
     use xai_grok_sampling_types::types::ChatRequestMessage;
+
+    #[test]
+    fn stream_collect_error_preserves_should_retry() {
+        let info = SamplingErrorInfo {
+            kind: crate::events::SamplingErrorKind::Api,
+            status_code: Some(529),
+            message: "Overloaded".into(),
+            is_retryable: true,
+            retry_after_secs: Some(3),
+            should_retry: Some(false),
+            model_metadata: None,
+            empty_response_context: None,
+            doom_loop_triggers: None,
+            doom_loop_aborted_at_chunk: None,
+            credential: xai_grok_sampling_types::SentCredential::Unknown,
+        };
+        // SamplingError is not PartialEq (it carries reqwest/serde errors),
+        // so destructure once and compare all fields in a single assert.
+        let SamplingError::Api {
+            status,
+            message,
+            model_metadata,
+            retry_after_secs,
+            should_retry,
+        } = stream_collect_error(info)
+        else {
+            panic!("expected Api");
+        };
+        assert_eq!(
+            (
+                status.as_u16(),
+                message.as_str(),
+                model_metadata.is_none(),
+                retry_after_secs,
+                should_retry,
+            ),
+            (529, "Overloaded", true, Some(3), Some(false)),
+        );
+    }
 
     fn minimal_config() -> SamplerConfig {
         SamplerConfig {
@@ -2139,6 +2315,8 @@ mod tests {
             api_backend: ApiBackend::ChatCompletions,
             auth_scheme: AuthScheme::Bearer,
             extra_headers: IndexMap::new(),
+            query_params: IndexMap::new(),
+            env_http_headers: IndexMap::new(),
             context_window: 8192,
             force_http1: false,
             max_retries: None,
@@ -2223,158 +2401,6 @@ mod tests {
 
         assert!(obj.get("max_tokens").is_none());
         assert!(obj.get("tools").is_none());
-        assert!(obj.get("chat_template_kwargs").is_none());
-    }
-
-    #[test]
-    fn chutes_glm_52_defaults_to_high_instead_of_max_reasoning() {
-        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(
-            kwargs,
-            Some(ChutesChatTemplateKwargs {
-                enable_thinking: Some(true),
-                thinking: None,
-            })
-        );
-    }
-
-    #[test]
-    fn chutes_glm_52_preserves_newer_catalog_scalar_efforts() {
-        for effort in [
-            ReasoningEffort::Minimal,
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-        ] {
-            let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
-            request.reasoning_effort = Some(effort);
-
-            let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-            assert_eq!(request.reasoning_effort, Some(effort));
-            assert_eq!(kwargs, None);
-        }
-    }
-
-    #[test]
-    fn chutes_glm_52_max_uses_gateway_compatible_medium_wire_value() {
-        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::Xhigh);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::Medium));
-        assert_eq!(kwargs.unwrap().enable_thinking, Some(true));
-    }
-
-    #[test]
-    fn chutes_none_effort_disables_thinking_in_chat_template() {
-        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::None);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, None);
-        assert_eq!(
-            kwargs,
-            Some(ChutesChatTemplateKwargs {
-                enable_thinking: Some(false),
-                thinking: None,
-            })
-        );
-    }
-
-    #[test]
-    fn chutes_instant_request_omits_reasoning_effort_on_the_wire() {
-        let mut request = ChatCompletionRequest::new("moonshotai/Kimi-K2.6-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::None);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-        let json = serde_json::to_value(ChatRequestWithTemplate {
-            inner: &request,
-            chat_template_kwargs: kwargs.as_ref(),
-        })
-        .unwrap();
-
-        assert!(json.get("reasoning_effort").is_none());
-        assert_eq!(json["chat_template_kwargs"]["thinking"], false);
-        assert!(
-            json["chat_template_kwargs"]
-                .get("enable_thinking")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn chutes_qwen_thinking_uses_template_switch_not_scalar_effort() {
-        let mut request = ChatCompletionRequest::new("Qwen/Qwen3.6-27B-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::High);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, None);
-        assert_eq!(kwargs.unwrap().enable_thinking, Some(true));
-    }
-
-    #[test]
-    fn fixed_reasoning_model_drops_invalid_disable_override() {
-        let mut request = ChatCompletionRequest::new("MiniMaxAI/MiniMax-M2.5-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::None);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, None);
-        assert_eq!(kwargs, None);
-    }
-
-    #[test]
-    fn chutes_fallback_candidate_recomputes_reasoning_for_its_own_family() {
-        let mut request = ChatCompletionRequest::new("Qwen/Qwen3.6-27B-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::High);
-
-        let (qwen, qwen_kwargs) = prepare_chutes_chat_attempt(
-            "https://llm.chutes.ai/v1",
-            &request,
-            "Qwen/Qwen3.6-27B-TEE",
-        );
-        let (minimax, minimax_kwargs) = prepare_chutes_chat_attempt(
-            "https://llm.chutes.ai/v1",
-            &request,
-            "MiniMaxAI/MiniMax-M2.5-TEE",
-        );
-        let (auto, auto_kwargs) =
-            prepare_chutes_chat_attempt("https://llm.chutes.ai/v1", &request, "model-router");
-
-        assert_eq!(qwen.reasoning_effort, None);
-        assert_eq!(qwen_kwargs.unwrap().enable_thinking, Some(true));
-        assert_eq!(minimax.reasoning_effort, None);
-        assert_eq!(minimax_kwargs, None);
-        assert_eq!(auto.reasoning_effort, None);
-        assert_eq!(auto_kwargs, None);
-    }
-
-    #[test]
-    fn unknown_future_chutes_model_keeps_explicit_catalog_effort() {
-        let mut request = ChatCompletionRequest::new("Qwen/Qwen4-Next-TEE", vec![]);
-        request.reasoning_effort = Some(ReasoningEffort::High);
-
-        let kwargs = chutes_chat_template_kwargs("https://llm.chutes.ai/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
-        assert_eq!(kwargs, None);
-    }
-
-    #[test]
-    fn non_chutes_requests_keep_reasoning_untouched() {
-        let mut request = ChatCompletionRequest::new("zai-org/GLM-5.2", vec![]);
-
-        let kwargs = chutes_chat_template_kwargs("https://example.com/v1", &mut request);
-
-        assert_eq!(request.reasoning_effort, None);
-        assert_eq!(kwargs, None);
     }
 
     #[test]
@@ -2455,29 +2481,6 @@ mod tests {
     }
 
     #[test]
-    fn chutes_routes_only_virtual_auto_model_through_router() {
-        let client = SamplingClient::new(SamplerConfig {
-            base_url: "https://llm.chutes.ai/v1".to_owned(),
-            ..minimal_config()
-        })
-        .expect("client should construct");
-
-        assert_eq!(
-            client
-                .chat_completions_endpoint("zai-org/GLM-5.2-TEE")
-                .unwrap(),
-            "https://llm.chutes.ai/v1/chat/completions"
-        );
-        assert_eq!(
-            client.chat_completions_endpoint("model-router").unwrap(),
-            format!(
-                "{}/chat/completions",
-                chutes_build_core::endpoints::ChutesEndpoints::default().router
-            )
-        );
-    }
-
-    #[test]
     fn new_applies_extra_headers() {
         let mut cfg = minimal_config();
         cfg.extra_headers
@@ -2485,6 +2488,56 @@ mod tests {
         cfg.extra_headers
             .insert("x-XAI-token-auth".to_string(), "xai-grok-cli".to_string());
         let _client = SamplingClient::new(cfg).expect("client with extra headers should construct");
+    }
+
+    #[test]
+    fn apply_env_http_headers_resolves_trims_skips_and_overrides() {
+        let mut map = IndexMap::new();
+        map.insert("x-tenant-token".to_string(), "TENANT".to_string());
+        map.insert("x-blank".to_string(), "BLANK".to_string());
+        map.insert("x-missing".to_string(), "MISSING".to_string());
+        map.insert("x-override".to_string(), "OVERRIDE".to_string());
+        map.insert("x invalid".to_string(), "INVALID".to_string());
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-override"),
+            HeaderValue::from_static("static"),
+        );
+
+        apply_env_http_headers(
+            &map,
+            |var| match var {
+                // Leading space + trailing newline exercises trimming.
+                "TENANT" => Some(" tenant-secret\n".to_string()),
+                "BLANK" => Some("   ".to_string()),
+                "OVERRIDE" => Some("from-env".to_string()),
+                "INVALID" => Some("value".to_string()),
+                _ => None,
+            },
+            &mut headers,
+        );
+
+        assert_eq!(headers.get("x-tenant-token").unwrap(), "tenant-secret");
+        assert!(headers.get("x-blank").is_none());
+        assert!(headers.get("x-missing").is_none());
+        // A resolved env value overrides an existing header of the same name.
+        assert_eq!(headers.get("x-override").unwrap(), "from-env");
+        // An invalid header name is skipped rather than panicking.
+        assert!(headers.get("x invalid").is_none());
+    }
+
+    #[test]
+    fn endpoint_appends_path_before_a_base_url_query_without_configured_params() {
+        let template =
+            EndpointTemplate::new("https://gateway.example/v1?api-version=x", &IndexMap::new());
+        let url = template.url_for_path("responses");
+        assert!(
+            url.starts_with("https://gateway.example/v1/responses?"),
+            "url: {url}"
+        );
+        assert!(url.contains("api-version=x"), "url: {url}");
+        assert!(!url.contains("x/responses"), "url: {url}");
     }
 
     #[test]
@@ -2547,10 +2600,8 @@ mod tests {
         let mut config = minimal_config();
         config.header_injector = Some(std::sync::Arc::new(TestInjector));
         let client = SamplingClient::new(config).expect("build");
-        let req = client
-            .post("http://localhost/test")
-            .build()
-            .expect("build request");
+        let SentRequest { builder, .. } = client.post("http://localhost/test");
+        let req = builder.build().expect("build request");
         assert!(
             req.headers().contains_key("traceparent"),
             "HeaderInjector should inject traceparent into post() requests"
@@ -2575,7 +2626,7 @@ mod tests {
             version: None,
         };
         let ua = user_agent_string_for(&origin);
-        // No slash between the origin product and the Chutes Build product.
+        // No slash between the origin product and the agent product.
         assert!(ua.starts_with(&format!("my-client {AGENT_PRODUCT}/")));
     }
 
@@ -2619,31 +2670,31 @@ mod tests {
         }
     }
 
-    /// `extract_sent_bearer` strips the `"Bearer "` prefix off
-    /// `Authorization` for OpenAI-completions backends and truncates the
-    /// remaining bearer to the cross-crate prefix length.
+    /// `post()` strips the `"Bearer "` scheme prefix off `Authorization`
+    /// and captures the tail fragment (see `BEARER_SUFFIX_LEN`).
     #[test]
-    fn extract_sent_bearer_strips_bearer_prefix_for_openai_compat() {
+    fn post_captures_bearer_tail_for_openai_compat() {
         let cfg = SamplerConfig {
             api_key: Some("test-bearer-1234567890".to_string()),
             api_backend: ApiBackend::ChatCompletions,
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let bearer = client.extract_sent_bearer();
-        // Bearer is truncated at the crate boundary -- callers
-        // downstream of this method only ever see the prefix.
-        assert_eq!(bearer.as_deref(), Some("test-bearer-"));
+        let SentRequest {
+            sent_bearer: bearer,
+            ..
+        } = client.post("https://example.test/v1/chat/completions");
+        assert_eq!(bearer.as_deref(), Some("r-1234567890"));
         assert_eq!(
             bearer.as_deref().map(str::len),
-            Some(crate::attribution::SENT_BEARER_PREFIX_LEN),
+            Some(crate::attribution::BEARER_SUFFIX_LEN),
         );
     }
 
-    /// `extract_sent_bearer` reads `x-api-key` for Anthropic Messages API
-    /// and truncates the value to the cross-crate prefix length.
+    /// `post()` captures `x-api-key` for Messages-API backends and keeps
+    /// the value's tail fragment.
     #[test]
-    fn extract_sent_bearer_reads_x_api_key_for_messages() {
+    fn post_captures_x_api_key_tail_for_messages() {
         let cfg = SamplerConfig {
             api_key: Some("anthropic-key-abc123".to_string()),
             api_backend: ApiBackend::Messages,
@@ -2651,24 +2702,77 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let bearer = client.extract_sent_bearer();
-        assert_eq!(bearer.as_deref(), Some("anthropic-ke"));
+        let SentRequest {
+            sent_bearer: bearer,
+            ..
+        } = client.post("https://example.test/v1/messages");
+        assert_eq!(bearer.as_deref(), Some("c-key-abc123"));
         assert_eq!(
             bearer.as_deref().map(str::len),
-            Some(crate::attribution::SENT_BEARER_PREFIX_LEN),
+            Some(crate::attribution::BEARER_SUFFIX_LEN),
         );
     }
 
-    /// `extract_sent_bearer` returns `None` when no auth header is set.
+    /// `post()` captures `None` when the request carries no auth header.
     #[test]
-    fn extract_sent_bearer_returns_none_when_no_header() {
+    fn post_captures_none_when_no_header() {
         let cfg = SamplerConfig {
             api_key: None,
             api_backend: ApiBackend::ChatCompletions,
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        assert!(client.extract_sent_bearer().is_none());
+        let SentRequest {
+            sent_bearer: bearer,
+            ..
+        } = client.post("https://example.test/v1/chat/completions");
+        assert!(bearer.is_none());
+    }
+
+    /// The race this design closes: a 401 triggers a recovery that rotates
+    /// the resolver, so a record-time re-read attributes a bearer the
+    /// rejected request never carried. The attributed fragment must be the
+    /// one captured when the request was built.
+    #[test]
+    fn post_capture_is_immune_to_resolver_rotation_after_build() {
+        #[derive(Debug)]
+        struct RotatingResolver(std::sync::Mutex<String>);
+        impl crate::config::BearerResolver for RotatingResolver {
+            fn current_bearer(&self) -> Option<String> {
+                Some(self.0.lock().unwrap().clone())
+            }
+        }
+
+        let resolver = std::sync::Arc::new(RotatingResolver(std::sync::Mutex::new(
+            "rejected-token-oldtail1".to_string(),
+        )));
+        let cfg = SamplerConfig {
+            api_key: None,
+            api_backend: ApiBackend::Responses,
+            bearer_resolver: Some(resolver.clone()),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+
+        let SentRequest {
+            sent_bearer: sent_at_build,
+            ..
+        } = client.post("https://example.test/v1/responses");
+        // The 401 kicks recovery; the resolver rotates before the callback runs.
+        *resolver.0.lock().unwrap() = "fresh-token-newtail99".to_string();
+
+        assert_eq!(
+            sent_at_build.as_deref(),
+            Some("ken-oldtail1"),
+            "attribution must describe the bearer the rejected request carried"
+        );
+        // A record-time re-read (the pre-fix behavior) would report the
+        // rotated token instead:
+        assert_eq!(
+            client.current_sent_bearer_suffix().as_deref(),
+            Some("en-newtail99"),
+            "sanity: the build-time capture and a live re-read now differ"
+        );
     }
 
     #[test]
@@ -2681,10 +2785,8 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let request = client
-            .post("https://example.test/v1/messages")
-            .build()
-            .expect("request should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/messages");
+        let request = builder.build().expect("request should build");
         let auth = request
             .headers()
             .get(AUTHORIZATION)
@@ -2709,10 +2811,8 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let request = client
-            .post("https://example.test/v1/responses")
-            .build()
-            .expect("request should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/responses");
+        let request = builder.build().expect("request should build");
         let auth_count = request.headers().get_all(AUTHORIZATION).iter().count();
         assert_eq!(
             auth_count, 1,
@@ -2737,10 +2837,8 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let request = client
-            .post("https://example.test/v1/messages")
-            .build()
-            .expect("request should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/messages");
+        let request = builder.build().expect("request should build");
         let api_key = request
             .headers()
             .get("x-api-key")
@@ -2749,27 +2847,10 @@ mod tests {
         assert!(request.headers().get(AUTHORIZATION).is_none());
     }
 
-    /// Bearers shorter than the prefix length pass through unchanged.
-    /// Defensive against the truncation logic inadvertently widening
-    /// short bearers (no panics, no zero-padding).
+    /// The callback receives the `post()`-captured fragment only — the
+    /// full bearer never crosses the crate boundary.
     #[test]
-    fn extract_sent_bearer_short_bearer_passes_through_unchanged() {
-        let cfg = SamplerConfig {
-            api_key: Some("abc".to_string()),
-            api_backend: ApiBackend::ChatCompletions,
-            ..minimal_config()
-        };
-        let client = SamplingClient::new(cfg).expect("client should build");
-        assert_eq!(client.extract_sent_bearer().as_deref(), Some("abc"));
-    }
-
-    /// `record_401_attribution` invokes the wired callback with the
-    /// expected `consumer` and the truncated bearer prefix that the
-    /// wire would carry. The key assertion is that the callback
-    /// receives the prefix only -- the full bearer never crosses the
-    /// crate boundary.
-    #[test]
-    fn record_401_attribution_invokes_callback_with_extracted_bearer() {
+    fn record_401_attribution_invokes_callback_with_captured_bearer() {
         let cb = std::sync::Arc::new(CountingCallback::default());
         let cb_dyn: crate::attribution::SharedAttributionCallback = cb.clone();
         let cfg = SamplerConfig {
@@ -2780,19 +2861,80 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        client.record_401_attribution(crate::attribution::SamplingConsumer::ChatCompletionsStream);
+        let SentRequest { sent_bearer, .. } =
+            client.post("https://example.test/v1/chat/completions");
+        client.record_401_attribution(
+            crate::attribution::SamplingConsumer::ChatCompletionsStream,
+            sent_bearer.as_deref(),
+        );
         let calls = cb.invocations.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(
             calls[0].0,
             crate::attribution::SamplingConsumer::ChatCompletionsStream
         );
-        // Prefix-only -- the `extra-tail` portion of the bearer is
-        // dropped by `extract_sent_bearer` before the callback fires.
-        assert_eq!(calls[0].1.as_deref(), Some("the-bearer-1"));
+        assert_eq!(calls[0].1.as_deref(), Some("0-extra-tail"));
         assert_eq!(
             calls[0].1.as_deref().map(str::len),
-            Some(crate::attribution::SENT_BEARER_PREFIX_LEN),
+            Some(crate::attribution::BEARER_SUFFIX_LEN),
+        );
+    }
+
+    /// When a bearer_resolver is wired but returns `None`, attribution must
+    /// report no sent bearer (not the construction-time default header seed).
+    #[test]
+    fn bearer_resolver_none_attribution_ignores_default_headers() {
+        #[derive(Debug)]
+        struct EmptyResolver;
+        impl crate::config::BearerResolver for EmptyResolver {
+            fn current_bearer(&self) -> Option<String> {
+                None
+            }
+        }
+
+        let cfg = SamplerConfig {
+            api_key: Some("stale-seed-token".to_string()),
+            api_backend: ApiBackend::Responses,
+            bearer_resolver: Some(std::sync::Arc::new(EmptyResolver)),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        assert_eq!(
+            client.current_sent_bearer_suffix(),
+            None,
+            "resolver None must not attribute a stripped default seed"
+        );
+    }
+
+    /// When a bearer_resolver is wired but returns `None` (hard-expired
+    /// session with no live AT), default Authorization / x-api-key must be
+    /// stripped so a stale seed key cannot ride the wire.
+    #[test]
+    fn bearer_resolver_none_strips_default_authorization() {
+        #[derive(Debug)]
+        struct EmptyResolver;
+        impl crate::config::BearerResolver for EmptyResolver {
+            fn current_bearer(&self) -> Option<String> {
+                None
+            }
+        }
+
+        let cfg = SamplerConfig {
+            api_key: Some("stale-token".to_string()),
+            api_backend: ApiBackend::Responses,
+            bearer_resolver: Some(std::sync::Arc::new(EmptyResolver)),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let SentRequest {
+            builder,
+            sent_bearer: sent,
+        } = client.post("https://example.test/v1/responses");
+        let request = builder.body("").build().expect("request should build");
+        assert_eq!(sent, None, "capture must agree: nothing was sent");
+        assert!(
+            request.headers().get(AUTHORIZATION).is_none(),
+            "stale default Authorization must not be sent when resolver is empty"
         );
     }
 
@@ -2821,7 +2963,7 @@ mod tests {
         let client = SamplingClient::new(cfg).expect("client should build");
 
         // Build a request to inspect the final headers.
-        let builder = client.post("https://example.test/v1/responses");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/responses");
         let request = builder.body("").build().expect("request should build");
 
         let auth_values: Vec<_> = request.headers().get_all(AUTHORIZATION).iter().collect();
@@ -2854,7 +2996,10 @@ mod tests {
         };
         let client = SamplingClient::new(cfg).expect("client should build");
         // Must not panic.
-        client.record_401_attribution(crate::attribution::SamplingConsumer::ChatCompletions);
+        client.record_401_attribution(
+            crate::attribution::SamplingConsumer::ChatCompletions,
+            Some("bearer-tail-12"),
+        );
     }
 
     /// `response.completed` carrying

@@ -28,19 +28,6 @@ def xor_encrypt(data: bytes, seed: int) -> bytes:
     return bytes(b ^ ((seed + i) & 0xFF) for i, b in enumerate(data))
 
 
-def read_normalized(path: Path) -> bytes:
-    """Template bytes with CRLF folded to LF.
-
-    The encrypted arrays are compared against `include_bytes!` of these same
-    files, which yields whatever line endings the checkout produced. Without
-    this, bytes generated on a CRLF working tree only ever match on Windows and
-    the staleness test fails everywhere else. Normalizing also keeps the
-    decrypted prompt byte-identical across platforms, with no stray carriage
-    returns spending tokens.
-    """
-    return path.read_bytes().replace(b"\r\n", b"\n")
-
-
 def main():
     lines = [
         "// Auto-generated -- do not edit.",
@@ -50,7 +37,7 @@ def main():
     ]
     for const_name, filename in TEMPLATES.items():
         path = TEMPLATE_DIR / filename
-        data = read_normalized(path)
+        data = path.read_bytes()
         enc = xor_encrypt(data, SEEDS[const_name])
         arr = ", ".join(str(b) for b in enc)
         # `#[rustfmt::skip]` keeps the multi-KB byte array on a single line so

@@ -3,90 +3,49 @@ use std::sync::Arc;
 use crate::auth::error::RefreshTokenFailedReason;
 use crate::auth::manager::RefreshReason;
 
-use super::{ExternalCommandRunner, RefreshOutcome, TokenRefresher};
+use super::ExternalCommandRunner;
+use super::RefreshOutcome;
+use super::TokenRefresher;
 
-/// Refreshes by re-running the operator's external auth binary via
-/// `spawn_blocking`. Pure data return -- mutation lives in
+/// Refreshes by re-running the operator's external auth binary via the async
+/// external-command runner. Returns data only; mutation lives in
 /// `refresh_chain` (honors the [`TokenRefresher`] no-mutation contract).
 pub(crate) struct ExternalBinaryRefresher {
     runner: Arc<dyn ExternalCommandRunner>,
     command: String,
-    timeout: std::time::Duration,
 }
 
 impl ExternalBinaryRefresher {
     pub(crate) fn new(runner: Arc<dyn ExternalCommandRunner>, command: String) -> Self {
-        Self {
-            runner,
-            command,
-            timeout: EXTERNAL_REFRESH_TIMEOUT,
-        }
+        Self { runner, command }
     }
 
-    /// Override the binary timeout (tests use a short one to exercise the
-    /// timeout arm without a real 30s wait).
-    #[cfg(test)]
-    pub(crate) fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = timeout;
-        self
-    }
-
-    /// A failed binary run is a single-strike `Other` permanent failure; the
-    /// `PERMANENT_FAILURE_TTL` lets a flaky binary self-heal without `/login`.
-    /// No consecutive-blip tolerance like OIDC: a local binary failure is a
-    /// stronger signal than a network refresh blip.
-    fn record_failure(&self, message: String) -> RefreshOutcome {
-        tracing::warn!(%message, "auth: external binary refresh failed -> permanent");
+    /// A failed or timed-out binary run is a single-strike permanent failure;
+    /// the reason is non-sticky so a flaky or briefly slow binary still
+    /// recovers without the user.
+    fn record_failure(&self, message: &str) -> RefreshOutcome {
+        tracing::warn!(%message, "auth: external binary refresh failed permanently");
         // No token key in the binary flow; the caller scopes the verdict.
-        RefreshOutcome::permanent(RefreshTokenFailedReason::Other, None)
+        RefreshOutcome::permanent(RefreshTokenFailedReason::ProviderInteractiveRequired, None)
     }
 }
-
-/// Timeout for the external auth binary. If the binary hangs, the
-/// `spawn_blocking` thread is leaked (it cannot be interrupted), but this is
-/// acceptable: the thread holds no locks and mutates no shared state.
-const EXTERNAL_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[async_trait::async_trait]
 impl TokenRefresher for ExternalBinaryRefresher {
     async fn refresh(&self, reason: RefreshReason) -> RefreshOutcome {
         tracing::debug!(?reason, "auth: external binary refresh starting");
-        let runner = self.runner.clone();
-        let cmd = self.command.clone();
-        let timeout_ms = self.timeout.as_millis() as u64;
-        match tokio::time::timeout(
-            self.timeout,
-            tokio::task::spawn_blocking(move || runner.run_external_command(&cmd)),
-        )
-        .await
-        {
-            Err(_elapsed) => {
-                tracing::warn!(
-                    timeout_ms,
-                    "auth: external binary refresh timed out (thread leaked)"
-                );
-                crate::unified_log::warn(
-                    "auth.refresh.external_timeout",
-                    None,
-                    Some(serde_json::json!({ "timeout_ms": timeout_ms })),
-                );
-                self.record_failure(format!("external binary timed out after {timeout_ms}ms"))
-            }
-            Ok(Ok(Some(auth))) => {
+        match self.runner.run_external_command(&self.command).await {
+            Some(auth) => {
                 crate::unified_log::info("auth: external binary refresh succeeded", None, None);
                 RefreshOutcome::success(auth)
             }
-            Ok(Ok(None)) => {
+            None => {
                 crate::unified_log::warn(
                     "auth: external binary refresh returned no token",
                     None,
                     None,
                 );
-                self.record_failure("external binary returned no token".into())
-            }
-            Ok(Err(e)) => {
-                tracing::warn!(error = %e, "auth: external binary refresh task failed");
-                self.record_failure(format!("external binary task failed: {e}"))
+                self.record_failure("external binary returned no token")
             }
         }
     }
@@ -96,32 +55,49 @@ impl TokenRefresher for ExternalBinaryRefresher {
 mod tests {
     use super::*;
     use crate::auth::GrokAuth;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// Minimal runner whose external command returns a fixed result.
+    /// Runner that yields scripted results in order, then `None`.
     struct FakeRunner {
-        external_result: Option<GrokAuth>,
+        results: Mutex<Vec<Option<GrokAuth>>>,
+        calls: AtomicU32,
     }
+    impl FakeRunner {
+        fn new(results: Vec<Option<GrokAuth>>) -> Self {
+            Self {
+                results: Mutex::new(results),
+                calls: AtomicU32::new(0),
+            }
+        }
+        fn calls(&self) -> u32 {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+    #[async_trait::async_trait]
     impl ExternalCommandRunner for FakeRunner {
-        fn run_external_command(&self, _command: &str) -> Option<GrokAuth> {
-            self.external_result.clone()
+        async fn run_external_command(&self, _command: &str) -> Option<GrokAuth> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mut results = self.results.lock().unwrap();
+            if results.is_empty() {
+                return None;
+            }
+            results.remove(0)
         }
     }
 
-    /// A failed binary run is a single-strike `Other` permanent failure that is
-    /// NON-sticky: it must age out via the TTL, never lock an external-binary
-    /// user out forever. (Flipping this to a sticky reason would be a silent
-    /// lockout regression.)
+    /// A failed binary run must stay NON-sticky: it has to age out via the
+    /// TTL, never lock an external-binary user out forever.
     #[tokio::test]
     async fn external_binary_failure_is_single_strike_non_sticky_permanent() {
-        let refresher = ExternalBinaryRefresher::new(
-            Arc::new(FakeRunner {
-                external_result: None,
-            }),
-            "auth-binary".into(),
-        );
+        let runner = Arc::new(FakeRunner::new(vec![None]));
+        let refresher = ExternalBinaryRefresher::new(runner.clone(), "auth-binary".into());
         match refresher.refresh(RefreshReason::ServerRejected).await {
             RefreshOutcome::PermanentFailure { error, .. } => {
-                assert_eq!(error.reason, RefreshTokenFailedReason::Other);
+                assert_eq!(
+                    error.reason,
+                    RefreshTokenFailedReason::ProviderInteractiveRequired
+                );
                 assert!(
                     !error.reason.is_sticky(),
                     "external-binary failure must age out, not strand the user forever",
@@ -129,31 +105,7 @@ mod tests {
             }
             other => panic!("a failed binary run must be a permanent Other failure, got {other:?}"),
         }
-    }
-
-    /// A binary that outlives the (test-shortened) timeout hits the `Elapsed`
-    /// arm and maps to the same non-sticky `Other` permanent failure.
-    #[tokio::test]
-    async fn external_binary_timeout_is_non_sticky_permanent() {
-        struct SlowRunner;
-        impl ExternalCommandRunner for SlowRunner {
-            fn run_external_command(&self, _command: &str) -> Option<GrokAuth> {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                Some(GrokAuth::test_default())
-            }
-        }
-        let refresher = ExternalBinaryRefresher::new(Arc::new(SlowRunner), "auth-binary".into())
-            .with_timeout(std::time::Duration::from_millis(5));
-        match refresher.refresh(RefreshReason::ServerRejected).await {
-            RefreshOutcome::PermanentFailure { error, .. } => {
-                assert_eq!(error.reason, RefreshTokenFailedReason::Other);
-                assert!(
-                    !error.reason.is_sticky(),
-                    "timeout must age out, not strand"
-                );
-            }
-            other => panic!("a timed-out binary must be a permanent Other failure, got {other:?}"),
-        }
+        assert_eq!(runner.calls(), 1, "the single run gets the whole 7s budget");
     }
 
     #[tokio::test]
@@ -162,15 +114,16 @@ mod tests {
             key: "ext-fresh".into(),
             ..GrokAuth::test_default()
         };
-        let refresher = ExternalBinaryRefresher::new(
-            Arc::new(FakeRunner {
-                external_result: Some(token),
-            }),
-            "auth-binary".into(),
-        );
+        let runner = Arc::new(FakeRunner::new(vec![Some(token)]));
+        let refresher = ExternalBinaryRefresher::new(runner.clone(), "auth-binary".into());
         match refresher.refresh(RefreshReason::ServerRejected).await {
             RefreshOutcome::Success(auth) => assert_eq!(auth.key, "ext-fresh"),
             other => panic!("a successful binary run must return Success, got {other:?}"),
         }
+        assert_eq!(
+            runner.calls(),
+            1,
+            "a success must run the binary exactly once"
+        );
     }
 }

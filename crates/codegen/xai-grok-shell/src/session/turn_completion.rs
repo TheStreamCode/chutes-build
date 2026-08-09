@@ -1,7 +1,7 @@
 //! Pure construction of the durable, replayable turn-completion terminal.
 //!
 //! `TurnCompleted` is the persisted + replayed twin of the fire-and-forget
-//! `chutes.build/session/prompt_complete` notification: it rides the
+//! `chutes.ai/session/prompt_complete` notification: it rides the
 //! `_chutes.build/session/update` rail so a viewer that re-attaches mid-turn finalizes
 //! the turn from replay instead of stranding on "Waiting…". The
 //! `(stop_reason, agent_result)` pair is the SAME pair `prompt_complete`

@@ -2,7 +2,7 @@
 //!
 //! Split out of the crate-root `prompt` module so grok-build's full-replace
 //! prompt lives alongside the rest of its [`code_compaction`](crate::code_compaction)
-//! subsystem. The Grok chat's step-level intra prompt
+//! subsystem. The Chutes Build chat's step-level intra prompt
 //! ([`format_compaction_prompt`](crate::prompt::format_compaction_prompt))
 //! stays at the crate root.
 

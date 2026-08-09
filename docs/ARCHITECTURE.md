@@ -207,6 +207,32 @@ builds on, not specific to any provider):
 - `xai-grok-auth` — OAuth/credential machinery in general; the Chutes issuer
   configuration is a caller-supplied parameter, not a fork of this crate.
 
+### Where the Chutes layer is wired in
+
+Ownership is not the whole picture: a Chutes-owned tool is only reachable if an
+upstream file lists it. Two places do, and the 1.0.0 re-base lost both — every
+implementation survived and not one tool was callable.
+
+- `xai-grok-agent::config` — the toolset presets. A tool absent from the preset
+  the session runs under does not exist as far as the model is concerned. The
+  presets also decide *which* sessions get it: the read-only `explore` and `plan`
+  toolsets carry the documentation lookups and nothing heavier.
+- `xai-grok-agent::builder` — `ensure_chutes_tools` covers agents whose toolset
+  came from a config file rather than a preset, and the lazy pair
+  (`take_lazy_chutes_tools` / `register_lazy_chutes_tools`) moves these tools off
+  the per-turn schema list while registering them on the bridge so `use_tool` can
+  still call them. Both halves or neither: taking them off the list without
+  registering them deletes the feature silently.
+
+`config::tests::chutes_ecosystem_tools_are_in_the_default_toolsets` and
+`legacy_imagine_tools_are_not_advertised` guard this. They exist because a tool's
+own unit tests pass whether or not anything can reach it — which is how six
+thousand lines of working code sat unreachable through a green gate.
+
+The same shape caught the docs: `xai-grok-pager::docs::USER_GUIDE` lists which
+guide chapters ship, and the fork's two chapters were on disk, unlisted, for the
+same reason.
+
 Crates not listed here are unremarkable utility/support code (formatting,
 markdown rendering, terminal primitives, telemetry plumbing that is disabled
 by default, etc.) and follow the same rule of thumb: if it encodes a decision

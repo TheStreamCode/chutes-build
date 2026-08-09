@@ -91,6 +91,11 @@ pub(crate) struct SummaryPatch {
     /// automatic LLM title generation so it never clobbers a title the user
     /// set via `/rename`. Ignored when `generated_title` is also set.
     pub generated_title_if_absent: Option<String>,
+    pub cwd_switch_bookkeeping_generation: Option<u64>,
+    /// Per-turn dashboard summary as `(text, prompt_id)`. Outer `Some`
+    /// applies (last-writer-wins); `Some(None)` clears it (conversation
+    /// rewind removed the described work).
+    pub last_turn_summary: Option<Option<(String, String)>>,
 }
 
 impl Summary {
@@ -119,6 +124,17 @@ impl Summary {
         if let Some(version) = patch.chat_format_version {
             self.chat_format_version = self.chat_format_version.max(version);
         }
+        if let Some(generation) = patch.cwd_switch_bookkeeping_generation
+            && generation > self.cwd_switch_bookkeeping_generation
+        {
+            self.cwd_switch_bookkeeping_generation = generation;
+            // An explicit chat counter op already owns the resulting count
+            // (append increments; history replacement sets). Without one, this
+            // patch repairs a line found on disk after an earlier summary failure.
+            if patch.chat_messages.is_none() {
+                self.num_chat_messages = self.num_chat_messages.saturating_add(1);
+            }
+        }
         if let Some(trace_turn) = &patch.trace_turn {
             // next_trace_turn is monotonic; keep request_id paired with the
             // winning turn so a stale lower-turn write can't re-pair them.
@@ -144,6 +160,11 @@ impl Summary {
         }
         if let Some(collection_id) = &patch.collection_id {
             self.collection_id = Some(collection_id.clone());
+        }
+        if let Some(last_turn_summary) = &patch.last_turn_summary {
+            let (text, prompt_id) = last_turn_summary.clone().unzip();
+            self.last_turn_summary = text;
+            self.last_turn_summary_prompt_id = prompt_id;
         }
         let mut absent_title_applied = false;
         if let Some(title) = &patch.generated_title {
@@ -228,9 +249,7 @@ fn read_summary(path: &Path) -> io::Result<Summary> {
 fn write_summary_atomic(summary_path: &Path, summary: &Summary) -> io::Result<()> {
     let bytes = serde_json::to_vec_pretty(summary)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let tmp = summary_path.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, summary_path)
+    crate::session::storage::write_bytes_atomic(summary_path, &bytes)
 }
 
 #[cfg(test)]

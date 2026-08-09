@@ -2,19 +2,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::VoiceError;
 
+/// Default STT capture rate (Hz). Shared with the `__mic-capture` helper's
+/// argv default so parent and child agree when `--rate` is omitted.
+pub const DEFAULT_SAMPLE_RATE: u32 = 16_000;
+
 /// STT transport mode.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SttMode {
     /// One-shot batch transcription (default): the pipeline buffers the whole
     /// utterance locally and posts it once, on release, to a REST endpoint
-    /// (Chutes' `/stt/whisper`-shaped backends). No live interim preview —
-    /// the transcript arrives all at once after a short round trip.
+    /// (Chutes' `/stt/whisper`-shaped backends). No live interim preview — the
+    /// transcript arrives all at once after a short round trip.
     #[default]
     Batch,
-    /// Real-time WebSocket streaming STT with live interim results. Requires
-    /// a backend that speaks the streaming protocol (`[`Self::stt_ws_url`]),
-    /// which Chutes' default inference API does not.
+    /// Real-time WebSocket streaming STT with live interim results. Requires a
+    /// backend that speaks the streaming protocol ([`VoiceConfig::stt_ws_url`]),
+    /// which Chutes' inference API does not — so this is opt-in and only useful
+    /// pointed at a proxy that provides it.
     Streaming,
 }
 
@@ -33,16 +38,15 @@ pub struct VoiceConfig {
     pub stt_ws_path: String,
     /// Which STT transport to use. See [`SttMode`].
     pub stt_mode: SttMode,
-    /// HTTPS base for the [`SttMode::Batch`] REST transcription endpoint
-    /// (Chutes' `vonkaiser-audiodojo` chute by default). Unlike `api_base`,
-    /// this always has a working default — Chutes' own inference API has no
-    /// batch STT route, so there is no `[endpoints]` fallback to inherit.
+    /// HTTPS base for the [`SttMode::Batch`] REST transcription endpoint (a
+    /// Whisper chute by default). Unlike `api_base` this always has a working
+    /// default: Chutes' own inference API has no batch STT route, so there is no
+    /// `[endpoints]` value to inherit.
     pub batch_api_base: String,
     /// Preferred STT language (catalog code or `"auto"`). Resolved via
-    /// [`crate::language_for_api`] at connect time in [`SttMode::Streaming`];
-    /// in [`SttMode::Batch`], `"auto"` is sent as an omitted `language` field
-    /// so the backend's own (real) auto-detection runs instead of guessing
-    /// from the process locale.
+    /// [`crate::language_for_api`] at connect time in [`SttMode::Streaming`]; in
+    /// [`SttMode::Batch`] `"auto"` is sent as an omitted `language` field so the
+    /// backend's own detection runs instead of guessing from the process locale.
     pub language: String,
     pub sample_rate: u32,
     pub stt_endpointing_ms: u32,
@@ -58,12 +62,15 @@ pub struct VoiceConfig {
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
+            // Fail closed: there is no Chutes streaming-STT host, so the
+            // default must not resolve to a real one that would 404 on connect.
+            // `SttMode::Batch` is the default and does not read this.
             api_base: "https://127.0.0.1:9".into(),
             stt_ws_path: "/v1/stt".into(),
             stt_mode: SttMode::default(),
             batch_api_base: "https://vonkaiser-audiodojo.chutes.ai".into(),
             language: "en".into(),
-            sample_rate: 16_000,
+            sample_rate: DEFAULT_SAMPLE_RATE,
             stt_endpointing_ms: 400,
             stt_interim_results: true,
             client_identifier: String::new(),
@@ -79,7 +86,7 @@ impl VoiceConfig {
     }
 
     /// `api_base`: non-empty `[voice].api_base`, else `[endpoints].xai_api_base_url`
-    /// from `root`, else `resolved_endpoints_base`, else a fail-closed loopback endpoint.
+    /// from `root`, else `resolved_endpoints_base`, else `https://api.chutes.ai`.
     ///
     /// `resolved_endpoints_base` carries the caller's env / CLI overrides; it
     /// ranks below the raw table so config keeps beating env (shell precedence).
@@ -90,7 +97,7 @@ impl VoiceConfig {
             .unwrap_or_default();
 
         // Read `[voice].api_base` from the raw table, not `cfg`: serde default
-        // makes "unset" and an explicit default indistinguishable.
+        // makes "unset" and an explicit `https://api.chutes.ai` indistinguishable.
         cfg.api_base = non_empty_str(
             voice_table
                 .and_then(|t| t.get("api_base"))
@@ -149,12 +156,16 @@ mod tests {
 
     #[test]
     fn default_stt_ws_uses_wss() {
+        // A loopback sentinel, not a real host: streaming STT has no Chutes
+        // backend, so the default must fail closed rather than 404 on connect.
         assert_eq!(
             VoiceConfig::default().stt_ws_url().unwrap(),
             "wss://127.0.0.1:9/v1/stt"
         );
     }
 
+    /// The default transport is the one that works. Batch posts to a Whisper
+    /// chute; streaming would need a backend Chutes does not serve.
     #[test]
     fn default_stt_mode_is_batch_with_a_working_endpoint() {
         let cfg = VoiceConfig::default();
@@ -180,15 +191,15 @@ batch_api_base = "https://stt.example.com"
     #[test]
     fn scheme_less_and_wss_bases() {
         for base in [
-            "voice.example.com",
-            "wss://voice.example.com",
-            "HTTPS://voice.example.com",
+            "api.chutes.ai",
+            "wss://api.chutes.ai",
+            "HTTPS://api.chutes.ai",
         ] {
             let cfg = VoiceConfig {
                 api_base: base.into(),
                 ..VoiceConfig::default()
             };
-            assert_eq!(cfg.stt_ws_url().unwrap(), "wss://voice.example.com/v1/stt");
+            assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.chutes.ai/v1/stt");
         }
     }
 
@@ -202,14 +213,14 @@ batch_api_base = "https://stt.example.com"
     }
 
     #[test]
-    fn nested_v1_base_preserves_prefix() {
+    fn xai_v1_base_preserves_prefix() {
         let cfg = VoiceConfig {
-            api_base: "https://proxy.example.com/speech/v1".into(),
+            api_base: "https://proxy.example.com/xai/v1".into(),
             ..VoiceConfig::default()
         };
         assert_eq!(
             cfg.stt_ws_url().unwrap(),
-            "wss://proxy.example.com/speech/v1/stt"
+            "wss://proxy.example.com/xai/v1/stt"
         );
     }
 
@@ -234,15 +245,15 @@ batch_api_base = "https://stt.example.com"
         let table: toml::Table = toml::from_str(
             r#"
 [endpoints]
-xai_api_base_url = "https://proxy.example.com/speech/v1"
+xai_api_base_url = "https://proxy.example.com/xai/v1"
 "#,
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, "https://proxy.example.com/speech/v1");
+        assert_eq!(cfg.api_base, "https://proxy.example.com/xai/v1");
         assert_eq!(
             cfg.stt_ws_url().unwrap(),
-            "wss://proxy.example.com/speech/v1/stt"
+            "wss://proxy.example.com/xai/v1/stt"
         );
     }
 
@@ -251,7 +262,7 @@ xai_api_base_url = "https://proxy.example.com/speech/v1"
         let table: toml::Table = toml::from_str(
             r#"
 [endpoints]
-xai_api_base_url = "https://proxy.example.com/speech/v1"
+xai_api_base_url = "https://proxy.example.com/xai/v1"
 [voice]
 api_base = "  "
 language = "fr"
@@ -259,7 +270,7 @@ language = "fr"
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, "https://proxy.example.com/speech/v1");
+        assert_eq!(cfg.api_base, "https://proxy.example.com/xai/v1");
         assert_eq!(cfg.language, "fr");
     }
 
@@ -310,17 +321,17 @@ xai_api_base_url = "https://config.example.com"
         let table: toml::Table = toml::from_str(
             r#"
 [endpoints]
-xai_api_base_url = "https://proxy.example.com/speech/v1"
+xai_api_base_url = "https://proxy.example.com/xai/v1"
 [voice]
-api_base = "https://voice.example.com"
+api_base = "https://api.chutes.ai"
 language = "es"
 "#,
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, "https://voice.example.com");
+        assert_eq!(cfg.api_base, "https://api.chutes.ai");
         assert_eq!(cfg.language, "es");
-        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://voice.example.com/v1/stt");
+        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.chutes.ai/v1/stt");
     }
 
     #[test]

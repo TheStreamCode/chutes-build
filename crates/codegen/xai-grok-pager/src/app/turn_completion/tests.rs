@@ -103,7 +103,6 @@ fn marker_push_consumes_matching_stop_hook_stash() {
             elapsed: Some(std::time::Duration::from_secs(2)),
         }),
         Some("p1"),
-        false,
     );
 
     assert_eq!(
@@ -131,7 +130,6 @@ fn marker_push_flushes_stale_stash_standalone() {
             elapsed: Some(std::time::Duration::from_secs(2)),
         }),
         Some("p2"),
-        false,
     );
 
     assert_eq!(
@@ -160,7 +158,6 @@ fn marker_without_ending_pid_flushes_stamped_stash_standalone() {
             elapsed: Some(std::time::Duration::from_secs(2)),
         }),
         None,
-        false,
     );
 
     assert_eq!(
@@ -182,7 +179,7 @@ fn no_marker_flushes_stash_as_standalone_block() {
         groups: one_stop_group(),
     });
 
-    push_turn_terminal_marker(&mut agent, None, Some("p1"), false);
+    push_turn_terminal_marker(&mut agent, None, Some("p1"));
 
     assert_eq!(count_lifecycle_blocks(&agent.scrollback), 1);
     assert!(agent.pending_stop_hooks.is_none());
@@ -233,20 +230,64 @@ fn viewer_finalize_stop_reason_to_marker_mapping() {
         Some(SessionEvent::TurnCancelled { .. })
     ));
 
-    // error (+agentResult) → Turn failed carrying the error text.
+    // error (+agentResult) → TurnFailed with formatted text.
     let mut agent = running_viewer("p1");
     let _ = finalize_turn_from_terminal(
         &mut agent,
         "s1",
         Some("p1"),
         Some("error"),
-        Some("boom"),
+        Some(r#"API error (status 500): {"error":"boom"}"#),
         None,
     );
     match last_session_event(&agent.scrollback) {
-        Some(SessionEvent::TurnFailed { error, .. }) => assert_eq!(error, "boom"),
+        Some(SessionEvent::TurnFailed { error, .. }) => {
+            assert_eq!(
+                error,
+                "Server error (500) \u{2014} Something went wrong on our side. Wait a minute and send again."
+            );
+        }
         other => panic!("expected TurnFailed, got {other:?}"),
     }
+
+    // error with a dedicated banner already in the trailing run → the
+    // banner explains the failure; no redundant TurnFailed marker.
+    let mut agent = running_viewer("p1");
+    agent
+        .scrollback
+        .push_block(RenderBlock::session_event(SessionEvent::RequestFailed {
+            status: Some(500),
+            headline: "Server error (500)".into(),
+            detail: String::new(),
+        }));
+    let _ = finalize_turn_from_terminal(&mut agent, "s1", Some("p1"), Some("error"), None, None);
+    assert!(
+        !matches!(
+            last_session_event(&agent.scrollback),
+            Some(SessionEvent::TurnFailed { .. })
+        ),
+        "a trailing RequestFailed banner must suppress the viewer's TurnFailed"
+    );
+
+    // …but a banner buried behind a substantive block is a previous turn's:
+    // the trailing-run scan stops and the marker is pushed.
+    let mut agent = running_viewer("p1");
+    agent
+        .scrollback
+        .push_block(RenderBlock::session_event(SessionEvent::RequestFailed {
+            status: Some(500),
+            headline: "Server error (500)".into(),
+            detail: String::new(),
+        }));
+    agent.scrollback.push_block(RenderBlock::user_prompt("hi"));
+    let _ = finalize_turn_from_terminal(&mut agent, "s1", Some("p1"), Some("error"), None, None);
+    assert!(
+        matches!(
+            last_session_event(&agent.scrollback),
+            Some(SessionEvent::TurnFailed { .. })
+        ),
+        "a banner behind a substantive block must not suppress the marker"
+    );
 
     // rate_limit → finished, but no marker (not actionable from a viewer).
     let mut agent = running_viewer("p1");
@@ -379,9 +420,7 @@ fn driver_rearm_same_pid_preserves_received_at() {
     assert_eq!(first, second);
 }
 
-// ── EndLine snapshots: work suffix + between-turns status window ──
-
-use crate::scrollback::blocks::EndWork;
+// ── End markers: always the plain event text (work lives in the status row) ──
 
 fn insert_bg_task(agent: &mut AgentView, task_id: &str, is_monitor: bool) {
     agent.session.bg_tasks.insert(
@@ -422,7 +461,7 @@ fn last_marker_block(agent: &AgentView) -> &SessionEventBlock {
 }
 
 #[test]
-fn real_end_marker_snapshots_running_work() {
+fn real_end_marker_stays_plain_with_running_work() {
     let mut agent = running_driver("p1");
     insert_bg_task(&mut agent, "bg-1", false);
 
@@ -432,33 +471,21 @@ fn real_end_marker_snapshots_running_work() {
             elapsed: Some(std::time::Duration::from_secs(2)),
         }),
         Some("p1"),
-        false,
     );
 
     let block = last_marker_block(&agent);
-    assert!(!block.parked);
     assert_eq!(block.prompt_id.as_deref(), Some("p1"));
+    assert_eq!(block.event.message(), "Worked for 2.0s");
     assert_eq!(
-        block.end_work,
-        Some(EndWork {
-            running_commands: 1,
-            ..EndWork::default()
-        })
-    );
-    assert_eq!(
-        block.marker_text(),
-        "Worked for 2.0s. 1 command still running."
-    );
-    assert!(
-        agent.end_work_announced,
-        "announcing work opens the between-turns status window"
+        agent.watchers().commands,
+        1,
+        "the running command feeds the status-row watchers cue instead"
     );
 }
 
 #[test]
-fn workless_marker_stays_legacy_and_closes_window() {
+fn workless_marker_renders_legacy_text() {
     let mut agent = running_driver("p1");
-    agent.end_work_announced = true;
 
     push_turn_terminal_marker(
         &mut agent,
@@ -466,40 +493,10 @@ fn workless_marker_stays_legacy_and_closes_window() {
             elapsed: Some(std::time::Duration::from_secs(2)),
         }),
         Some("p1"),
-        false,
     );
 
     let block = last_marker_block(&agent);
-    assert!(block.end_work.is_none(), "legacy marker: no work suffix");
-    assert_eq!(block.marker_text(), "Worked for 2.0s.");
-    assert!(
-        !agent.end_work_announced,
-        "a workless marker proves nothing is running — window closed"
-    );
-}
-
-#[test]
-fn marker_snapshot_never_mutates() {
-    // The suffix is a push-time snapshot: later completions re-emit a
-    // fresh status line instead of editing the marker.
-    let mut agent = running_driver("p1");
-    insert_bg_task(&mut agent, "bg-1", false);
-    push_turn_terminal_marker(
-        &mut agent,
-        Some(SessionEvent::TurnCompleted {
-            elapsed: Some(std::time::Duration::from_secs(2)),
-        }),
-        Some("p1"),
-        false,
-    );
-
-    agent.session.bg_tasks.get_mut("bg-1").unwrap().status = crate::app::agent::BgTaskStatus::Done;
-
-    assert_eq!(
-        last_marker_block(&agent).marker_text(),
-        "Worked for 2.0s. 1 command still running.",
-        "the marker keeps its push-time counts"
-    );
+    assert_eq!(block.event.message(), "Worked for 2.0s");
 }
 
 // ── Send-now cancel marker suppression (viewer finalize rail) ────────
@@ -574,4 +571,30 @@ fn driver_arm_records_cancel_trigger_for_reconcile() {
             .and_then(|p| p.cancel_trigger.as_deref()),
         Some("send_now")
     );
+}
+
+/// The turn-end marker takes no fold path — a park has no row to fold into.
+#[test]
+fn turn_end_after_park_pushes_single_marker() {
+    use crate::app::agent_view::test_fixtures::count_turn_markers;
+
+    let mut agent = running_driver("p1");
+    super::super::agent_view::test_fixtures::simulate_task_output_wait(&mut agent, "bg-1");
+    assert!(agent.renders_parked());
+    assert_eq!(count_turn_markers(&agent), 0, "the park writes no marker");
+
+    push_turn_terminal_marker(
+        &mut agent,
+        Some(SessionEvent::TurnCompleted {
+            elapsed: Some(std::time::Duration::from_secs(5)),
+        }),
+        Some("p1"),
+    );
+
+    assert_eq!(
+        count_turn_markers(&agent),
+        1,
+        "the real turn end pushes exactly one marker"
+    );
+    assert_eq!(last_marker_block(&agent).event.message(), "Worked for 5.0s");
 }

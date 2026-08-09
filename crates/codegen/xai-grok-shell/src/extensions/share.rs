@@ -1,4 +1,4 @@
-//! `chutes.build/share_session` extension handler.
+//! `chutes.ai/share_session` extension handler.
 //!
 //! Loads a local session, exports it, uploads the message payload to cloud storage via
 //! a signed URL (so large sessions bypass the proxy/backend body-size limits),
@@ -203,12 +203,13 @@ mod tests {
 
         let expires_at = Utc::now() + ttl;
 
-        // We must explicitly set oidc_issuer to the first-party Chutes issuer.
-        // This is required for the share tests to exercise the happy path
-        // through require_xai_auth_for_share.
+        // We must explicitly set oidc_issuer to a first-party xAI issuer.
+        // Only OIDC tokens against https://auth.chutes.ai (or the local-dev equivalent)
+        // return true from is_xai_auth(). This is required for the share tests to
+        // exercise the happy path through require_xai_auth_for_share.
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
-            oidc_issuer: Some(crate::auth::XAI_OAUTH2_ISSUER.to_string()),
+            oidc_issuer: Some("https://auth.chutes.ai".to_string()),
             key: "test-key".into(),
             expires_at: Some(expires_at),
             create_time: Utc::now() - Duration::hours(1),

@@ -113,7 +113,7 @@ pub(crate) fn load_requirements() -> Option<toml::Value> {
 }
 
 /// User requirements layer from `<home>/requirements.toml`, or `None` with no
-/// resolvable user home (rather than reading a cwd-relative `.chutes-build`).
+/// resolvable user home (rather than reading a cwd-relative `.grok`).
 fn load_user_requirements(home: Option<&Path>) -> Option<toml::Value> {
     load_requirements_layer(&home?.join("requirements.toml"))
 }

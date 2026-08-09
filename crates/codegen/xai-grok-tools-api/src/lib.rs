@@ -1,4 +1,4 @@
-//! Shared API definitions for Grok tools: protobuf types, config validation,
+//! Shared API definitions for Chutes Build tools: protobuf types, config validation,
 //! and canonical slash-command wording.
 //!
 //! Used by both the tools library and the gRPC server, and by host services
@@ -8,7 +8,7 @@
 
 /// Generated protobuf types.
 pub mod pb {
-    include!(concat!(env!("OUT_DIR"), "/chutes.build.tools.v1.rs"));
+    include!(concat!(env!("OUT_DIR"), "/xai.grok.tools.v1.rs"));
 }
 
 pub mod config_validation;
@@ -21,6 +21,7 @@ pub use pb::{
     AgentToolExecConfig,
     AgentToolRetryConfig,
     // Request/response types
+    CallbackStatus,
     ClearToolOverrideRequest,
     ClearToolOverrideResponse,
     DisableToolRequest,
@@ -75,10 +76,12 @@ pub use pb::{
     SetToolOverrideResponse,
     SetTruncationConfigRequest,
     SetTruncationConfigResponse,
+    SpawnSubagentRequest,
     // Streaming types
     StreamDataChunk,
     StreamDataKind,
     StreamFinalResult,
+    SubagentResultMsg,
     // Capability/metadata types
     ToolCapabilities,
     ToolCategory,
@@ -86,6 +89,7 @@ pub use pb::{
     ToolConfigEntry,
     ToolError,
     ToolInfo,
+    ToolNotificationMsg,
     ToolSource,
     ToolStreamChunk,
     ToolSuccess,

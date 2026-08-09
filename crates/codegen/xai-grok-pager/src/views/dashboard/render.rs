@@ -5,12 +5,13 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
+use unicode_width::UnicodeWidthStr;
 
 use super::layout::{MIN_DASHBOARD_WIDTH, compute_layout};
 use super::row::{DashboardRow, RowBadge, build_rows_with_roster};
 use super::state::{
-    DashboardRowId, DashboardState, Filter, Focusable, Grouping, LocationPickerState, RowState,
-    SectionKey,
+    DashboardRowId, DashboardState, Filter, Focusable, Grouping, LocationPickerState, RenameDraft,
+    RowState, SectionKey,
 };
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
@@ -152,6 +153,13 @@ pub fn render_dashboard(
         home,
         roster,
     );
+    // Chat-conversation roster rows can't be deleted from the dashboard
+    // yet — record them so the `[✗]` and Ctrl+X arm both skip them.
+    state.conversation_row_ids = roster
+        .iter()
+        .filter(|e| e.origin.kind == "conversation")
+        .map(|e| e.session_id.clone())
+        .collect();
     state.reanchor_selection(&rows);
 
     // DO NOT GC pinned/reorder at render time. The old
@@ -286,16 +294,13 @@ pub fn render_dashboard(
     // Header.
     render_header(buf, layout.header, &theme, &rows, state, upgrade_cta);
 
-    // Body.
-    //
-    // Three distinct branches:
-    //  (a) no agents at all → "no agents yet" hint
-    //  (b) agents exist but filter hides all → "no match" hint
-    //  (c) otherwise → render rows
-    if agents.is_empty() {
-        render_empty_state(buf, layout.list, &theme, dashboard_sessions_loading);
-    } else if rows.is_empty() {
-        render_no_match(buf, layout.list, &theme, &state.filter);
+    // Body: key off visible rows (local agents + roster), not the local map alone.
+    if rows.is_empty() {
+        if state.filter.is_active() {
+            render_no_match(buf, layout.list, &theme, &state.filter);
+        } else {
+            render_empty_state(buf, layout.list, &theme, dashboard_sessions_loading);
+        }
     } else if area.width < MIN_DASHBOARD_WIDTH {
         render_narrow_rows(buf, layout.list, &theme, &rows, state);
     } else {
@@ -480,63 +485,80 @@ pub fn render_dashboard(
         return None;
     }
 
-    // Return a visible cursor for the dispatch input
-    // / rename overlay so the user sees where typing lands.
-    // Rename takes precedence — it paints over the row list.
-    //
-    // Cursor width is computed from the SANITISED
-    // draft (matching what the renderer paints). The previous
-    // `rn.draft.as_str()` form drifted right of the actual end of
-    // typed text when the draft contained control characters.
-    //
-    // Clamp `cx` to the row's right edge so a
-    // wider-than-rect draft doesn't park the cursor off the row.
+    // An active rename replaces the dispatch caret with its row-local editor caret.
     if let Some(pos) = rename_cursor_pos(state, &rows) {
         return Some(pos);
     }
     dispatch_cursor
 }
 
-/// Cursor position for the in-flight rename overlay: one cell past the
-/// end of the typed draft, on the renamed row's title line. `None` when
-/// no rename is active (or its row isn't on screen).
-///
-/// The overlay paints `rename: {draft}` at the title's own column —
-/// past the marker (1) + gap (1) + indent + icon + gap (1) chrome — in
-/// BOTH layouts (`render_row` / `render_narrow_rows` share the
-/// formula). The cursor mirrors that chrome math; anything else parks
-/// it over the `rename:` prefix or past the typed text. Indent and
-/// icon width come from the live row so a Working spinner or a
-/// (future) indented renameable row can't drift the formula.
-///
-/// Width is computed from the SANITISED draft (matching
-/// what the renderer paints). Clamped to the row's right
-/// edge so a wider-than-rect draft doesn't park the cursor off the row.
+const RENAME_PREFIX: &str = "rename: ";
+
+fn rename_editor_view(draft: &RenameDraft, width: u16) -> (&str, u16) {
+    let prefix_width = UnicodeWidthStr::width(RENAME_PREFIX) as u16;
+    let editor_width = width.saturating_sub(prefix_width);
+    let viewport = draft.viewport(editor_width as usize);
+    let visible = &draft.text()[viewport.visible_byte_range];
+    let cursor_offset = prefix_width
+        .saturating_add(viewport.cursor_display_column as u16)
+        .min(width.saturating_sub(1));
+    (visible, cursor_offset)
+}
+
+fn render_rename_editor(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    width: u16,
+    style: Style,
+    draft: &RenameDraft,
+) {
+    if width == 0 {
+        return;
+    }
+    let prefix_width = UnicodeWidthStr::width(RENAME_PREFIX) as u16;
+    buf.set_span(
+        x,
+        y,
+        &Span::styled(RENAME_PREFIX, style),
+        prefix_width.min(width),
+    );
+    let (visible, _) = rename_editor_view(draft, width);
+    if !visible.is_empty() && prefix_width < width {
+        buf.set_span(
+            x + prefix_width,
+            y,
+            &Span::styled(visible, style),
+            width - prefix_width,
+        );
+    }
+}
+
+/// Return the in-flight rename caret when its row is visible.
 fn rename_cursor_pos(state: &DashboardState, rows: &[DashboardRow]) -> Option<(u16, u16)> {
-    use unicode_width::UnicodeWidthStr;
     let rn = state.rename.as_ref()?;
     let (_, rect) = state.row_rects.iter().find(|(id, _)| *id == rn.row)?;
-    let safe_draft = crate::views::session_title::sanitize_display_text(&rn.draft);
-    let prefix_w = UnicodeWidthStr::width("rename: ") as u16;
-    let draft_w = UnicodeWidthStr::width(safe_draft.as_ref()) as u16;
-    let (indent_w, icon_w) = rows
-        .iter()
-        .find(|r| r.id == rn.row)
+    let row = rows.iter().find(|r| r.id == rn.row);
+    let (marker_width, indent_width, icon_width) = row
         .map(|r| {
             (
+                UnicodeWidthStr::width(crate::glyphs::selection_bar()) as u16,
                 (r.indent as u16) * 2,
                 UnicodeWidthStr::width(state_icon(r.state, state.spinner_tick)) as u16,
             )
         })
-        .unwrap_or((0, 1));
-    let chrome_w = 1 + 1 + indent_w + icon_w + 1;
-    let unbounded_cx = rect
-        .x
-        .saturating_add(chrome_w)
-        .saturating_add(prefix_w)
-        .saturating_add(draft_w);
-    let cx_max = rect.x.saturating_add(rect.width.saturating_sub(1));
-    Some((unbounded_cx.min(cx_max), rect.y))
+        .unwrap_or((1, 0, 1));
+    let chrome_width = marker_width + 1 + indent_width + icon_width + 1;
+    let content_x = rect.x.saturating_add(chrome_width);
+    let content_width = rect.x.saturating_add(rect.width).saturating_sub(content_x);
+    let (_, cursor_offset) = rename_editor_view(rn, content_width);
+    let cursor_x = content_x
+        .saturating_add(cursor_offset)
+        .min(rect.x.saturating_add(rect.width.saturating_sub(1)));
+    // Mirror `render_row`'s vertical centering so the caret lands on
+    // the title line (narrow-mode single-line rects yield offset 0).
+    let title_y = rect.y + row.map_or(0, |r| row_content_offset(rect.height, r));
+    Some((cursor_x, title_y))
 }
 
 /// Render the compact dashboard "banner" used when an agent is
@@ -577,6 +599,7 @@ fn render_dashboard_banner(
     use ratatui::widgets::{Block, Borders, Widget};
 
     state.row_rects.clear();
+    state.row_delete_rects.clear();
     state.section_rects.clear();
     if area.area() == 0 || area.height < 3 {
         return;
@@ -685,7 +708,6 @@ fn render_header(
     upgrade_cta: Option<HeaderUpgradeCta<'_>>,
 ) {
     use ratatui::text::{Line, Span};
-    use unicode_width::UnicodeWidthStr;
 
     use crate::views::agent_status::AgentStatusBar;
 
@@ -1004,7 +1026,8 @@ fn render_location_picker(
         ModalSizing, ModalWindowConfig, Shortcut, push_vim_nav_search_hint, render_modal_window,
     };
     use crate::views::picker::{
-        PickerEntry, PickerRow, render_divider, render_picker_content, render_search_bar_with_label,
+        PickerEntry, PickerRow, render_divider, render_picker_content,
+        render_picker_search_bar_with_label,
     };
 
     let mut shortcuts = vec![
@@ -1090,17 +1113,16 @@ fn render_location_picker(
         } else {
             (content_area.width, None)
         };
-        render_search_bar_with_label(
+        render_picker_search_bar_with_label(
             buf,
             content_area.x,
             content_area.y,
             path_w,
             theme,
             " path: ",
-            &modal.picker.query,
+            &modal.picker,
             /* active */ false,
             /* show_hint */ false,
-            modal.picker.query_cursor,
             Some(theme.bg_base),
         );
         modal.worktree_hit.set(wt_rect);
@@ -1176,7 +1198,6 @@ fn render_location_picker(
     // `render_picker_row`'s layout (fold prefix 2, gap 2, trailing 1); the
     // `-1` conservatively reserves a scrollbar column.
     let details: Vec<String> = {
-        use unicode_width::UnicodeWidthStr;
         const PREFIX: u16 = 2;
         const GAP: u16 = 2;
         const TRAILING: u16 = 1;
@@ -1535,6 +1556,7 @@ fn render_rows(
     state: &mut DashboardState,
 ) {
     state.row_rects.clear();
+    state.row_delete_rects.clear();
     state.section_rects.clear();
     state.idle_overflow_rect = None;
     if area.area() == 0 {
@@ -1542,7 +1564,7 @@ fn render_rows(
     }
 
     // Rows are 3 visual cells tall (title + secondary
-    // + breathing gap) and headers are 2 cells tall (label + gap).
+    // + padding) and headers are 2 cells tall (label + gap).
     // Viewport scrolling works on cumulative cell offsets so partial
     // rows can't peek out at the top / bottom of the list. The
     // clamp helper still operates in "1 unit = 1 cell" — we just
@@ -1634,6 +1656,10 @@ fn render_rows(
     let body_width = area.width;
     let max_y = area.y + area.height;
 
+    // Content background per visible line (`None` = spacer), consumed
+    // by the half-block halo pass after the items are painted.
+    let mut line_bg: Vec<Option<Color>> = vec![None; viewport_h];
+
     let mut cell_y: usize = 0;
     for (line, &h) in lines.iter().zip(heights.iter()) {
         let next_cell_y = cell_y + h as usize;
@@ -1661,6 +1687,14 @@ fn render_rows(
             width: body_width,
             height: render_h,
         };
+        // `line_bg` records each visible line's CONTENT background
+        // (`None` = spacer line) for the half-block halo pass below.
+        let mark = |line_bg: &mut Vec<Option<Color>>, dy: u16, bg: Color| {
+            let idx = (y - area.y + dy) as usize;
+            if let Some(slot) = line_bg.get_mut(idx) {
+                *slot = Some(bg);
+            }
+        };
         match line {
             DashboardLine::PinnedHeader { count } => {
                 let key = SectionKey::Pinned;
@@ -1670,12 +1704,16 @@ fn render_rows(
                 render_group_header(
                     buf, line_rect, theme, "Pinned", *count, collapsed, selected, hovered,
                 );
+                mark(&mut line_bg, 0, theme.bg_base);
+                // Full-height hit rect (label + trailing gap) — no
+                // hover/click dead zone between items.
                 state
                     .section_rects
-                    .push((key, Rect::new(area.x, y, body_width, 1)));
+                    .push((key, Rect::new(area.x, y, body_width, render_h)));
             }
             DashboardLine::Divider => {
                 render_divider(buf, line_rect, theme);
+                mark(&mut line_bg, 0, theme.bg_base);
             }
             DashboardLine::Header { state: rs, count } => {
                 // Headers only paint into the first cell; the
@@ -1694,22 +1732,31 @@ fn render_rows(
                     selected,
                     hovered,
                 );
+                mark(&mut line_bg, 0, theme.bg_base);
+                // Full-height hit rect (label + trailing gap) — no
+                // hover/click dead zone between items.
                 state
                     .section_rects
-                    .push((key, Rect::new(area.x, y, body_width, 1)));
+                    .push((key, Rect::new(area.x, y, body_width, render_h)));
             }
             DashboardLine::Row(row) => {
                 render_row(buf, line_rect, theme, row, state);
+                let bg = row_bg(theme, state, row);
+                let content_top = row_content_offset(render_h, row);
+                let content_h = row_content_height(row).min(render_h);
+                for dy in content_top..(content_top + content_h).min(render_h) {
+                    mark(&mut line_bg, dy, bg);
+                }
                 if !row.is_more_placeholder {
-                    // Hit rect covers the two content cells so a
-                    // click on the secondary line still selects the
-                    // row. The trailing gap (if any) stays outside.
-                    let hit_h = render_h.min(2);
+                    // Full-height hit rect (content + spacer lines) —
+                    // no hover/click dead zone between items; the
+                    // highlight covers the content plus half-cell
+                    // halos on the neighbouring spacer lines.
                     let hit = Rect {
                         x: area.x,
                         y,
                         width: body_width,
-                        height: hit_h,
+                        height: render_h,
                     };
                     state.row_rects.push((row.id.clone(), hit));
                 }
@@ -1724,14 +1771,59 @@ fn render_rows(
                     state.selected_idle_overflow,
                     state.hovered_idle_overflow,
                 );
-                state.idle_overflow_rect = Some(Rect::new(area.x, y, body_width, 1));
+                mark(&mut line_bg, 0, theme.bg_base);
+                // Full-height hit rect (label + trailing gap) — no
+                // hover/click dead zone below the overflow row.
+                state.idle_overflow_rect = Some(Rect::new(area.x, y, body_width, render_h));
             }
         }
         cell_y = next_cell_y;
     }
 
+    render_spacer_halos(buf, area, body_width, &line_bg, theme.bg_base);
+
     if needs_scrollbar {
         render_scrollbar(buf, area, offset, viewport_h, total_cells, theme);
+    }
+}
+
+/// Paint the spacer lines between items as half-cell "halos" so a
+/// highlighted row reads as vertically centered: the spacer below a
+/// highlighted block shows the highlight in its TOP half, and the
+/// spacer above shows it in its BOTTOM half. Implemented with the
+/// upper-half-block glyph (`▀`, CP437 `0xDF` — safe on legacy
+/// consoles): fg paints the top half with the colour of the content
+/// line above, bg paints the bottom half with the colour of the
+/// content line below. Spacers between two `bg_base` neighbours are
+/// left untouched.
+fn render_spacer_halos(
+    buf: &mut Buffer,
+    area: Rect,
+    body_width: u16,
+    line_bg: &[Option<Color>],
+    base: Color,
+) {
+    for (i, slot) in line_bg.iter().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let above = if i > 0 {
+            line_bg[i - 1].unwrap_or(base)
+        } else {
+            base
+        };
+        let below = line_bg.get(i + 1).copied().flatten().unwrap_or(base);
+        if above == base && below == base {
+            continue;
+        }
+        let y = area.y + i as u16;
+        if above == below {
+            let fill = " ".repeat(body_width as usize);
+            buf.set_string(area.x, y, &fill, Style::default().bg(above));
+        } else {
+            let fill = "\u{2580}".repeat(body_width as usize);
+            buf.set_string(area.x, y, &fill, Style::default().fg(above).bg(below));
+        }
     }
 }
 
@@ -1757,7 +1849,6 @@ fn render_group_header(
     selected: bool,
     hovered: bool,
 ) {
-    use unicode_width::UnicodeWidthStr;
     let bg = Style::default().bg(theme.bg_base);
     let fill = " ".repeat(rect.width as usize);
     buf.set_string(rect.x, rect.y, fill, bg);
@@ -2016,10 +2107,38 @@ fn snap_offset_to_line_boundary(offset: usize, heights: &[u16]) -> usize {
     snapped
 }
 
-/// Render a row as a 2-line block (`rect.height` is
-/// expected to be `>= 2`; the caller — `render_rows` — sizes the
-/// rect to either 2 or 3 lines depending on whether the trailing
-/// breathing-room gap is in budget).
+/// Number of content lines a row renders: title + optional secondary.
+fn row_content_height(row: &DashboardRow) -> u16 {
+    if row.secondary_line.as_deref().is_some_and(|s| !s.is_empty()) {
+        2
+    } else {
+        1
+    }
+}
+
+/// Vertical offset of a row's content block within its rect. The
+/// 1- or 2-line content is centered at cell granularity: a title-only
+/// row in a 3-cell rect gets one padding line above and below, while
+/// a title+secondary row stays top-aligned ((3 - 2) / 2 = 0).
+fn row_content_offset(height: u16, row: &DashboardRow) -> u16 {
+    height.saturating_sub(row_content_height(row)) / 2
+}
+
+/// The row's background: keyboard selection wins over mouse hover.
+fn row_bg(theme: &Theme, state: &DashboardState, row: &DashboardRow) -> Color {
+    if state.selected.as_ref().is_some_and(|s| *s == row.id) {
+        theme.bg_highlight
+    } else if state.hovered_row.as_ref().is_some_and(|h| *h == row.id) {
+        theme.bg_hover
+    } else {
+        theme.bg_base
+    }
+}
+
+/// Render a row as a 2-line block plus a trailing padding line
+/// (`rect.height` is expected to be `>= 2`; the caller —
+/// `render_rows` — sizes the rect to either 2 or 3 lines depending
+/// on whether the padding is in budget).
 ///
 /// Visual:
 ///
@@ -2033,36 +2152,36 @@ fn snap_offset_to_line_boundary(offset: usize, heights: &[u16]) -> usize {
 /// tool call, the last assistant message, or a `Pending: …` preview
 /// of the front-most permission request.
 ///
-/// Selection / hover backgrounds cover both content rows (the
-/// trailing gap row, if any, stays on `bg_base` so consecutive
-/// selected rows still look distinct).
+/// The content block is vertically centered within the rect (see
+/// [`row_content_offset`]): a title-only row in a 3-cell rect renders
+/// as padding + title + padding.
+///
+/// Selection / hover backgrounds fill the CONTENT lines; the spacer
+/// lines around them are painted afterwards by `render_rows`'s
+/// half-block pass (see `render_spacer_halos`), which extends the
+/// highlight half a cell above and below so it reads as centered on
+/// the text.
 fn render_row(
     buf: &mut Buffer,
     rect: Rect,
     theme: &Theme,
     row: &DashboardRow,
-    state: &DashboardState,
+    state: &mut DashboardState,
 ) {
-    use unicode_width::UnicodeWidthStr;
     if rect.area() == 0 {
         return;
     }
     let selected = state.selected.as_ref().is_some_and(|s| *s == row.id);
-    let hovered = state.hovered_row.as_ref().is_some_and(|h| *h == row.id);
     let renaming = state.rename.as_ref().is_some_and(|r| r.row == row.id);
-    let bg = if selected {
-        theme.bg_highlight
-    } else if hovered {
-        theme.bg_hover
-    } else {
-        theme.bg_base
-    };
+    let bg = row_bg(theme, state, row);
 
-    // Paint both content rows with the same background so selection
-    // reads as a single block.
-    let content_h = rect.height.min(2);
+    // Paint the content lines with the row background. Spacer lines
+    // keep `bg_base` here; the halo pass splits them between the
+    // neighbouring items.
+    let content_top = row_content_offset(rect.height, row);
+    let content_h = row_content_height(row).min(rect.height);
     let fill = " ".repeat(rect.width as usize);
-    for dy in 0..content_h {
+    for dy in content_top..(content_top + content_h).min(rect.height) {
         buf.set_string(rect.x, rect.y + dy, &fill, Style::default().bg(bg));
     }
 
@@ -2086,8 +2205,11 @@ fn render_row(
     let icon_w = UnicodeWidthStr::width(icon) as u16;
     // Title-row paint cursor (no leading 1-col gap before the marker
     // — the marker IS the leftmost cell, mirroring the wide-mode
-    // header which starts flush-left at col 0).
-    let title_y = rect.y;
+    // header which starts flush-left at col 0). The content block is
+    // vertically centered within the rect at cell granularity:
+    // title-only rows sit padded above and below, while 2-line rows
+    // stay top-aligned (2 lines cannot center in a 3-cell row).
+    let title_y = rect.y + row_content_offset(rect.height, row);
     let content_start_x = rect.x + marker_w + 1 + indent_w + icon_w + 1;
 
     // Rename overlay: keep the row's chrome (marker + state icon) in
@@ -2104,14 +2226,14 @@ fn render_row(
                 .fg(theme.accent_user)
                 .add_modifier(Modifier::BOLD),
         );
-        // Keep the left bar continuous on secondary lines even while
-        // the rename overlay is active on the title line.
-        if selected && content_h >= 2 {
+        // Keep the left bar continuous on every content line even
+        // while the rename overlay is active on the title line.
+        if selected {
             let bar_style = Style::default()
                 .bg(bg)
                 .fg(theme.accent_user)
                 .add_modifier(Modifier::BOLD);
-            for dy in 1..content_h {
+            for dy in content_top..(content_top + content_h).min(rect.height) {
                 buf.set_string(
                     rect.x,
                     rect.y + dy,
@@ -2127,19 +2249,17 @@ fn render_row(
             icon,
             Style::default().fg(icon_color).bg(bg),
         );
-        let prefix = "rename: ";
-        let safe_draft = crate::views::session_title::sanitize_display_text(&rn.draft).into_owned();
-        let line = format!("{prefix}{safe_draft}");
-        let avail = (rect.x + rect.width).saturating_sub(content_start_x + 1);
-        let truncated = truncate_str(&line, avail as usize);
-        buf.set_string(
+        let available = (rect.x + rect.width).saturating_sub(content_start_x);
+        render_rename_editor(
+            buf,
             content_start_x,
             title_y,
-            truncated,
+            available,
             Style::default()
                 .fg(theme.accent_user)
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
+            rn,
         );
         return;
     }
@@ -2156,16 +2276,15 @@ fn render_row(
     );
 
     // For the active selection, extend the thin left bar down every
-    // content line of the row (title + secondary) so it forms one
-    // continuous vertical rule along the full height of the selected
-    // item. Hover and normal states keep their marker only on the
-    // title line.
-    if selected && content_h >= 2 {
+    // content line of the row so it forms one continuous vertical rule
+    // along the highlighted text. Hover and normal states keep their
+    // marker only on the title line.
+    if selected {
         let bar_style = Style::default()
             .bg(bg)
             .fg(theme.accent_user)
             .add_modifier(Modifier::BOLD);
-        for dy in 1..content_h {
+        for dy in content_top..(content_top + content_h).min(rect.height) {
             buf.set_string(
                 rect.x,
                 rect.y + dy,
@@ -2183,25 +2302,57 @@ fn render_row(
         Style::default().bg(bg).fg(icon_color),
     );
 
-    // Age column — reserve up to 8 cells on the right edge (to fit
-    // "just now"). Uses coarse buckets: just now / m / h / d / mo / y.
+    let armed_delete = state.armed_delete_row_ref();
+    let show_delete = !row.is_more_placeholder
+        && !row.id.is_subagent()
+        && row.state.allows_delete()
+        && !state.row_is_conversation(&row.id)
+        && (state.hovered_row.as_ref() == Some(&row.id) || armed_delete == Some(&row.id));
+    let delete_label = crate::glyphs::ballot_x_button();
+    let delete_w = UnicodeWidthStr::width(delete_label) as u16;
     let age = format_time_ago(row.last_change_at.elapsed().unwrap_or_default());
     let age_str = format!("{age:>6}");
     let age_w = UnicodeWidthStr::width(age_str.as_str()) as u16;
-    let age_x = rect.x + rect.width.saturating_sub(age_w + 1);
-    if age_x > content_start_x {
-        buf.set_string(
-            age_x,
-            title_y,
-            &age_str,
-            Style::default().bg(bg).fg(theme.gray),
-        );
+    let right_w = if show_delete { delete_w } else { age_w };
+    let right_x = rect.x + rect.width.saturating_sub(right_w + 1);
+    if right_x > content_start_x {
+        if show_delete {
+            let fg = if state.hovered_delete.as_ref() == Some(&row.id)
+                || armed_delete == Some(&row.id)
+            {
+                theme.accent_error
+            } else {
+                theme.text_secondary
+            };
+            buf.set_string(
+                right_x,
+                title_y,
+                delete_label,
+                Style::default().bg(bg).fg(fg),
+            );
+            state.row_delete_rects.push((
+                row.id.clone(),
+                Rect {
+                    x: right_x,
+                    y: title_y,
+                    width: delete_w,
+                    height: 1,
+                },
+            ));
+        } else {
+            buf.set_string(
+                right_x,
+                title_y,
+                &age_str,
+                Style::default().bg(bg).fg(theme.gray),
+            );
+        }
     }
 
     // Title text: `{label}` (bright) + ` · {subtitle}` (dim) +
     // optional `[badge]` chips for failed / pinned.
     // Trimmed to fit between the icon and the age column.
-    let title_avail = age_x.saturating_sub(content_start_x).saturating_sub(2);
+    let title_avail = right_x.saturating_sub(content_start_x).saturating_sub(2);
     let mut cx = content_start_x;
     if title_avail > 0 {
         let label_style = Style::default().bg(bg).fg(if row.is_more_placeholder {
@@ -2243,9 +2394,9 @@ fn render_row(
 
         // Subtitle: ` · xai my-branch-2 worktree`.
         if let Some(sub) = row.subtitle.as_deref()
-            && cx + 4 < age_x
+            && cx + 4 < right_x
         {
-            let remaining = age_x.saturating_sub(cx).saturating_sub(2) as usize;
+            let remaining = right_x.saturating_sub(cx).saturating_sub(2) as usize;
             let sub_str = format!(" \u{00B7} {sub}");
             let sub_trunc = truncate_str(&sub_str, remaining);
             let sub_w = UnicodeWidthStr::width(&sub_trunc[..]) as u16;
@@ -2277,7 +2428,7 @@ fn render_row(
             };
             let chip = format!(" [{label}]");
             let cw = UnicodeWidthStr::width(chip.as_str()) as u16;
-            if cx + cw + 1 < age_x {
+            if cx + cw + 1 < right_x {
                 buf.set_string(
                     cx,
                     title_y,
@@ -2298,7 +2449,7 @@ fn render_row(
         && let Some(secondary) = row.secondary_line.as_deref()
         && !secondary.is_empty()
     {
-        let sec_y = rect.y + 1;
+        let sec_y = title_y + 1;
         let avail = rect
             .width
             .saturating_sub(content_start_x - rect.x)
@@ -2348,6 +2499,7 @@ fn render_narrow_rows(
     state: &mut DashboardState,
 ) {
     state.row_rects.clear();
+    state.row_delete_rects.clear();
     state.section_rects.clear();
     state.idle_overflow_rect = None;
     if area.area() == 0 {
@@ -2358,7 +2510,6 @@ fn render_narrow_rows(
     // form would push too many rows off-screen on a 40-col terminal).
     // We still emit group headers and the selection marker so the
     // visual vocabulary stays consistent.
-    use unicode_width::UnicodeWidthStr;
     let lines = build_dashboard_lines(
         rows,
         state.grouping,
@@ -2486,18 +2637,16 @@ fn render_narrow_rows(
                 &chrome,
                 Style::default().fg(theme.text_primary).bg(bg),
             );
-            let safe_draft =
-                crate::views::session_title::sanitize_display_text(&rn.draft).into_owned();
-            let line = format!("rename: {safe_draft}");
-            let truncated = truncate_str(&line, body_width.saturating_sub(chrome_w) as usize);
-            buf.set_string(
+            render_rename_editor(
+                buf,
                 area.x + chrome_w,
                 y,
-                truncated,
+                body_width.saturating_sub(chrome_w),
                 Style::default()
                     .fg(theme.accent_user)
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
+                rn,
             );
         } else {
             let marker = if selected {
@@ -2512,7 +2661,18 @@ fn render_narrow_rows(
             let indent_w = UnicodeWidthStr::width(indent.as_str()) as u16;
             let gap_after_marker = 1u16;
             let chrome = marker_w + gap_after_marker + indent_w + icon_w + 1;
-            let label = truncate_str(&row.label, body_width.saturating_sub(chrome) as usize);
+            let armed_here = state.armed_delete_row_ref() == Some(&row.id);
+            let show_delete = !row.is_more_placeholder
+                && !row.id.is_subagent()
+                && row.state.allows_delete()
+                && !state.row_is_conversation(&row.id)
+                && (hovered || armed_here);
+            let delete_label = crate::glyphs::ballot_x_button();
+            let delete_w = UnicodeWidthStr::width(delete_label) as u16;
+            let label_budget = body_width
+                .saturating_sub(chrome)
+                .saturating_sub(if show_delete { delete_w + 1 } else { 0 });
+            let label = truncate_str(&row.label, label_budget as usize);
             let line = format!("{marker} {indent}{icon} {label}");
             buf.set_string(
                 area.x,
@@ -2520,6 +2680,18 @@ fn render_narrow_rows(
                 line,
                 Style::default().fg(theme.text_primary).bg(bg),
             );
+            if show_delete && body_width > chrome + delete_w {
+                let dx = area.x + body_width.saturating_sub(delete_w);
+                let fg = if state.hovered_delete.as_ref() == Some(&row.id) || armed_here {
+                    theme.accent_error
+                } else {
+                    theme.text_secondary
+                };
+                buf.set_string(dx, y, delete_label, Style::default().fg(fg).bg(bg));
+                state
+                    .row_delete_rects
+                    .push((row.id.clone(), Rect::new(dx, y, delete_w, 1)));
+            }
         }
         if !row.is_more_placeholder {
             state.row_rects.push((row.id.clone(), line_rect));
@@ -2604,7 +2776,7 @@ fn render_empty_state(buf: &mut Buffer, area: Rect, theme: &Theme, loading: bool
 /// chrome reflects what Enter will do: dispatch a new session vs.
 /// enqueue / send a prompt to the currently-selected agent.
 /// Paint a short right-aligned feedback badge onto the dispatch box's
-/// **top border** (e.g. `✗ Session no longer exists`, `✓ Theme: Grok
+/// **top border** (e.g. `✗ Session no longer exists`, `✓ Theme: Chutes Build
 /// Day`), in a neutral accent colour. The message is painted VERBATIM:
 /// it already carries its own status glyph — errors are built via
 /// [`DashboardState::set_error_toast`] (`✗`), while successes / info
@@ -2621,8 +2793,6 @@ fn paint_dispatch_feedback_badge(
     theme: &Theme,
     error_toast: Option<&str>,
 ) {
-    use unicode_width::UnicodeWidthStr;
-
     let Some(err) = error_toast else {
         return;
     };
@@ -2746,9 +2916,8 @@ fn render_dispatch(
     overlay_area: Option<Rect>,
 ) -> Option<(u16, u16)> {
     use ratatui::widgets::{Block, BorderType, Borders, Widget};
-    use unicode_width::UnicodeWidthStr;
 
-    use crate::views::prompt_widget::PromptStyle;
+    use crate::views::prompt_widget::{PromptBg, PromptStyle};
 
     if area.area() == 0 {
         return None;
@@ -2806,7 +2975,7 @@ fn render_dispatch(
             height: 1,
         }
     };
-    if content.width < 4 {
+    if content.width == 0 {
         return None;
     }
 
@@ -2817,46 +2986,70 @@ fn render_dispatch(
     if state.search_mode {
         let prefix = "Search: ";
         let prefix_w = UnicodeWidthStr::width(prefix) as u16;
-        buf.set_string(
+        let painted_prefix_w = prefix_w.min(content.width);
+        buf.set_span(
             content.x,
             content.y,
-            prefix,
-            Style::default()
-                .fg(theme.warning)
-                .bg(theme.bg_base)
-                .add_modifier(Modifier::BOLD),
+            &Span::styled(
+                prefix,
+                Style::default()
+                    .fg(theme.warning)
+                    .bg(theme.bg_base)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            painted_prefix_w,
         );
-        let avail = content.width.saturating_sub(prefix_w);
-        let (to_show, style) = if state.dispatch.text().is_empty() {
-            (
-                "Type to filter sessions\u{2026}".to_string(),
-                Style::default().fg(theme.gray_dim).bg(theme.bg_base),
-            )
+        let editor_x = content.x + painted_prefix_w;
+        let avail = content.width - painted_prefix_w;
+        let cursor_column = if state.dispatch.text().is_empty() {
+            if avail > 0 {
+                let placeholder = truncate_str("Type to filter sessions\u{2026}", avail as usize);
+                buf.set_string(
+                    editor_x,
+                    content.y,
+                    placeholder,
+                    Style::default().fg(theme.gray_dim).bg(theme.bg_base),
+                );
+            }
+            0
         } else {
-            (
-                state.dispatch.text().to_string(),
-                Style::default().fg(theme.text_primary).bg(theme.bg_base),
+            let viewport = xai_ratatui_textarea::EditBuffer::from_parts(
+                state.dispatch.text(),
+                state.dispatch.cursor(),
             )
+            .single_line_viewport(avail as usize);
+            let visible = &state.dispatch.text()[viewport.visible_byte_range];
+            if avail > 0 {
+                buf.set_span(
+                    editor_x,
+                    content.y,
+                    &Span::styled(
+                        visible,
+                        Style::default().fg(theme.text_primary).bg(theme.bg_base),
+                    ),
+                    (UnicodeWidthStr::width(visible) as u16).min(avail),
+                );
+            }
+            viewport.cursor_display_column as u16
         };
-        let trunc = truncate_str(&to_show, avail as usize);
-        buf.set_string(content.x + prefix_w, content.y, trunc, style);
-        let text_disp_w: u16 = UnicodeWidthStr::width(state.dispatch.text())
-            .try_into()
-            .unwrap_or(u16::MAX);
-        let cx = content.x + prefix_w + text_disp_w.min(avail.saturating_sub(1));
+        let cursor_offset = painted_prefix_w
+            .saturating_add(cursor_column)
+            .min(content.width - 1);
+        let cx = content.x + cursor_offset;
         return input_focused.then_some((cx, content.y));
+    }
+
+    if content.width < 4 {
+        return None;
     }
 
     let prefix = "\u{276F} ";
     let prefix_w = UnicodeWidthStr::width(prefix) as u16;
 
-    // Voice overlay: stream the interim transcript into the box and hide the
-    // caret while listening. When active we render through `PromptWidget::draw`
-    // (below) even on an empty buffer, so the manual empty-state branch is
-    // skipped in that case.
+    // When voice is active, draw through PromptWidget even on an empty buffer
+    // so the manual empty-state branch is skipped.
     let voice_overlay = (state.voice_listening || state.voice_interim.is_some()).then_some(
         crate::views::prompt_widget::VoicePromptOverlay {
-            listening: state.voice_listening,
             interim: state.voice_interim.as_deref(),
             color: theme.accent_running,
         },
@@ -2900,7 +3093,7 @@ fn render_dispatch(
         show_prefix: true,
         vpad_top: 0,
         chrome: false,
-        bg_override: Some(theme.bg_base),
+        bg: PromptBg::Canvas(theme.bg_base),
         image_preview: false,
         ..PromptStyle::default()
     };
@@ -3175,19 +3368,11 @@ fn render_file_search_dropdown_for(
 ///   (no inline approve/reject yet — punted per the user's note
 ///   "maybe its just easier to hit enter and go details view";
 ///   the dashboard is intentionally a navigator, not a permission UI).
-/// - Anything else → `Enter:open · Ctrl+x:stop|close · ?:shortcuts`.
+/// - Anything else → `Enter:open · Ctrl+x:stop|delete · ?:shortcuts`.
 ///
 /// The Ctrl+x chip label follows the selected agent's state: `stop`
 /// for an agent with a live turn (Working, or NeedsInput — paused but
-/// still running, so the first Ctrl+x cancels), `close` for an idle /
-/// quiet one.
-///
-/// The ↑/↓ nav chip is intentionally omitted from every state — the
-/// list is obviously arrow-navigable, and dropping it frees space so
-/// the Ctrl+x chip stays visible while an agent is selected.
-///
-/// Stop-confirm still routes through `with_pending` so the canonical
-/// `press again to close this session` message takes over.
+/// still running, so the first Ctrl+x cancels), `delete` otherwise.
 #[allow(clippy::too_many_arguments)]
 fn render_footer(
     buf: &mut Buffer,
@@ -3230,27 +3415,31 @@ fn render_footer(
         return;
     }
 
-    // Only paint the "press again" hint while the confirm window is
-    // actually live — the dispatcher re-arms (rather than closes) on a
-    // press after [`super::state::STOP_CONFIRM_WINDOW`], so an expired
-    // confirm must not keep claiming the footer (e.g. after a mouse
-    // click moved the selection without a keypress to disarm it).
-    let stop_confirm_live = state
-        .stop_confirm
-        .as_ref()
-        .is_some_and(|(_, t)| t.elapsed() < super::state::STOP_CONFIRM_WINDOW);
-    if stop_confirm_live {
-        let stop_key = registry
-            .find(crate::actions::ActionId::DashboardStop)
-            .map(|d| d.default_key)
-            .unwrap_or_else(|| key!('x', CONTROL));
-        let pending = PendingHint {
-            shortcut: stop_key,
-            label: "close this session",
-        };
-        ShortcutsBar::new(&[])
-            .with_pending(Some(pending))
-            .render(inner, buf);
+    // A live delete-confirm owns the footer: `y`/`n` when the list is
+    // focused, else the second-`Ctrl+X` "press again" hint. An expired arm
+    // falls through to the normal hints.
+    if state.armed_delete_row_ref().is_some() {
+        if state.list_focused {
+            let hints = vec![
+                HintItem::new(key!('y'), "confirm delete"),
+                HintItem::new(key!('n'), "cancel"),
+            ];
+            ShortcutsBar::new(&hints)
+                .compact(4, None)
+                .render(inner, buf);
+        } else {
+            let stop_key = registry
+                .find(crate::actions::ActionId::DashboardStop)
+                .map(|d| d.default_key)
+                .unwrap_or_else(|| key!('x', CONTROL));
+            let pending = PendingHint {
+                shortcut: stop_key,
+                label: "delete this session",
+            };
+            ShortcutsBar::new(&[])
+                .with_pending(Some(pending))
+                .render(inner, buf);
+        }
         return;
     }
 
@@ -3282,23 +3471,16 @@ fn render_footer(
         return;
     }
 
-    // A selected Inactive row is roster-only (owned by another pager
-    // process, never loaded here) — there's nothing running to stop,
-    // so every branch below suppresses its `stop` chip.
-    let stoppable = selected_state != Some(RowState::Inactive);
-
-    // Ctrl+x cancels the live turn for a busy agent, else closes the
-    // session — mirroring `dispatch_dashboard_stop` (cancel-if-running,
-    // else close). A `NeedsInput` row keeps a paused-but-running turn (the
-    // permission/Q&A prompt suspends it, never idles it), so its first
-    // Ctrl+x cancels too — label it `stop`, not `close`.
+    let show_ctrl_x = selected_state.is_some_and(|s| {
+        matches!(s, RowState::Working | RowState::NeedsInput) || s.allows_delete()
+    });
     let stop_label = if matches!(
         selected_state,
         Some(RowState::Working | RowState::NeedsInput)
     ) {
         "stop"
     } else {
-        "close"
+        "delete"
     };
 
     // Overview list focused (via Tab) — navigation hints: arrows / j-k
@@ -3360,11 +3542,10 @@ fn render_footer(
             HintItem::new(key!(Enter), "open"),
             HintItem::new(key!(Tab), "input"),
         ];
-        if stoppable {
-            // Pinned so the stop chip always survives compact
-            // truncation while an agent row is selected.
+        if show_ctrl_x {
             hints.push(HintItem::new(stop, stop_label).pinned());
         }
+
         ShortcutsBar::new(&hints)
             .compact(4, Some(HintItem::new(help, "shortcuts")))
             .render(inner, buf);
@@ -3462,7 +3643,7 @@ fn render_footer(
                 tab_hint,
                 esc_hint,
             ];
-            if stoppable {
+            if show_ctrl_x {
                 h.push(HintItem::new(stop, stop_label).pinned());
             }
             h
@@ -3483,7 +3664,7 @@ fn render_footer(
             if !reply_empty {
                 h.insert(1, HintItem::new(send_open, "send+open"));
             }
-            if stoppable {
+            if show_ctrl_x {
                 h.push(HintItem::new(stop, stop_label).pinned());
             }
             h
@@ -3495,7 +3676,7 @@ fn render_footer(
                 tab_hint,
                 esc_hint,
             ];
-            if stoppable {
+            if show_ctrl_x {
                 h.push(HintItem::new(stop, stop_label).pinned());
             }
             h
@@ -3511,7 +3692,7 @@ fn render_footer(
             // bare Enter still attaches.
             let open_key = if peek_focused { send_key } else { enter };
             let mut h = vec![HintItem::new(open_key, "open"), tab_hint, esc_hint];
-            if stoppable {
+            if show_ctrl_x {
                 h.push(HintItem::new(stop, stop_label).pinned());
             }
             h
@@ -3583,22 +3764,13 @@ fn render_footer(
             h.push(HintItem::new(send_key, "send"));
             h.push(HintItem::new(send_open, "send+open"));
         }
-        if stoppable {
-            // Pinned so Ctrl+x always shows while an agent row is
-            // selected, even if earlier chips would otherwise fill the
-            // compact bar.
+        if show_ctrl_x {
             h.push(HintItem::new(stop, stop_label).pinned());
         }
         h
     } else {
         // Defensive — neither the button nor a row is focused.
-        // Should never happen given the invariant on
-        // `DashboardState`, but a fall-through keeps the bar
-        // populated rather than silently empty.
-        vec![
-            HintItem::new(send_key, "create"),
-            HintItem::new(stop, stop_label),
-        ]
+        vec![HintItem::new(send_key, "create")]
     };
 
     ShortcutsBar::new(&hints)
@@ -3825,7 +3997,6 @@ pub fn render_popup_overlay(
 
     let title_text = format!(" \u{2771} {title_label} ");
 
-    use unicode_width::UnicodeWidthStr;
     let close_label = crate::glyphs::ballot_x_button();
     let close_w = UnicodeWidthStr::width(close_label) as u16;
     // Reserve close-affordance width + a 1-cell gap on the right;
@@ -3885,9 +4056,9 @@ pub fn render_popup_overlay(
 /// ```
 ///
 /// The agent renders inside the frame's `content` rect — the
-/// agent's own shortcuts bar (with the `Ctrl+\\:dashboard` +
-/// `Ctrl+[/]:agents` hints added by `agent.draw` when overlay is
-/// active) sits at the bottom of the content, inside the frame.
+/// agent's own shortcuts bar (with the `Ctrl+\\:dashboard` hint, and
+/// `Ctrl+[/]:prev/next agent` when the cycle order has more than one
+/// agent) sits at the bottom of the content, inside the frame.
 ///
 /// Returns `None` when the area is too small for the bordered
 /// frame; the caller falls back to a chromeless render so the
@@ -4047,8 +4218,6 @@ fn paint_session_title_bar(
     left_inset: u16,
     right_inset: u16,
 ) -> (Option<Rect>, Option<Rect>, Option<Rect>) {
-    use unicode_width::UnicodeWidthStr;
-
     // `‹` / `›` / `✗` are all painted as plain bracketed text
     // (no button background fills). Hover only changes the fg
     // color (`text_primary` vs `gray`) for subtle clickability
@@ -4264,6 +4433,104 @@ mod tests {
         assert!(
             content.contains("No agents yet, type a prompt to start one."),
             "expected empty-state hint, got: {content:?}"
+        );
+    }
+
+    #[test]
+    fn render_dashboard_shows_roster_when_local_agents_empty() {
+        use crate::app::roster::{RosterActivity, RosterEntry, RosterOrigin};
+
+        let area = Rect::new(0, 0, 100, 24);
+        let mut buf = Buffer::empty(area);
+        let mut agents: IndexMap<AgentId, AgentView> = IndexMap::new();
+        let mut state = DashboardState::new();
+        let registry = crate::actions::ActionRegistry::defaults();
+        let roster = [RosterEntry {
+            session_id: "sess-fleet-1".into(),
+            title: Some("Fix fleet dashboard".into()),
+            cwd: "/repo/work".into(),
+            is_worktree: false,
+            model_id: None,
+            yolo: false,
+            activity: RosterActivity::Working,
+            last_turn_summary: None,
+            resident: true,
+            last_change_unix_ms: 1_725_000_000_000,
+            origin: RosterOrigin::default(),
+        }];
+
+        let _ = render_dashboard(
+            &mut buf,
+            area,
+            &mut state,
+            &mut agents,
+            &registry,
+            None,
+            &roster,
+            false,
+            None,
+        );
+
+        let content = buf_to_text(&buf);
+        assert!(
+            content.contains("Fix fleet dashboard"),
+            "roster-only working session must paint when local agents are empty, got: {content:?}"
+        );
+        assert!(
+            !content.contains("No agents yet"),
+            "must not show empty-state while roster rows exist, got: {content:?}"
+        );
+    }
+
+    /// Hover `[✗]` paints only on settled rows, never on a busy one.
+    #[test]
+    fn render_dashboard_hover_shows_delete_x_only_for_settled_rows() {
+        use crate::app::roster::{RosterActivity, RosterEntry, RosterOrigin};
+
+        let ballot = crate::glyphs::ballot_x_button();
+        let render_with = |activity: RosterActivity| -> String {
+            let area = Rect::new(0, 0, 100, 24);
+            let mut buf = Buffer::empty(area);
+            let mut agents: IndexMap<AgentId, AgentView> = IndexMap::new();
+            let mut state = DashboardState::new();
+            let registry = crate::actions::ActionRegistry::defaults();
+            let roster = [RosterEntry {
+                session_id: "sess-hover".into(),
+                title: Some("Hover me".into()),
+                cwd: "/repo/work".into(),
+                is_worktree: false,
+                model_id: None,
+                yolo: false,
+                activity,
+                last_turn_summary: None,
+                resident: true,
+                last_change_unix_ms: 1_725_000_000_000,
+                origin: RosterOrigin::default(),
+            }];
+            state.hovered_row = Some(DashboardRowId::Roster {
+                session_id: "sess-hover".into(),
+            });
+            let _ = render_dashboard(
+                &mut buf,
+                area,
+                &mut state,
+                &mut agents,
+                &registry,
+                None,
+                &roster,
+                false,
+                None,
+            );
+            buf_to_text(&buf)
+        };
+
+        assert!(
+            render_with(RosterActivity::Completed).contains(ballot),
+            "hovering a settled (completed) row must show the [✗] delete affordance",
+        );
+        assert!(
+            !render_with(RosterActivity::Working).contains(ballot),
+            "hovering a busy (working) row must NOT show the [✗] delete affordance",
         );
     }
 
@@ -5001,6 +5268,112 @@ mod tests {
         assert!(!state.row_rects.is_empty());
     }
 
+    /// Wide-mode hit rects include each item's trailing gap line and
+    /// tile the list contiguously, so hover/click never falls into a
+    /// dead zone between items.
+    #[test]
+    fn render_rows_hit_rects_leave_no_dead_zones() {
+        let rows = vec![
+            header_test_row(1, RowState::Working, "alpha"),
+            header_test_row(2, RowState::Working, "beta"),
+            header_test_row(3, RowState::Idle, "gamma"),
+        ];
+        let area = Rect::new(0, 0, 60, 30);
+        let mut buf = Buffer::empty(area);
+        let mut state = DashboardState::new();
+        state.grouping = Grouping::State;
+        let theme = Theme::current();
+        render_rows(&mut buf, area, &theme, &rows, &mut state);
+
+        assert_eq!(state.row_rects.len(), 3);
+        for (id, rect) in &state.row_rects {
+            assert_eq!(rect.height, ROW_HEIGHT, "row {id:?} must be full-height");
+        }
+        assert_eq!(state.section_rects.len(), 2);
+        for (key, rect) in &state.section_rects {
+            assert_eq!(
+                rect.height, GROUP_HEADER_HEIGHT,
+                "section {key:?} must be full-height",
+            );
+        }
+
+        // Each hit rect starts exactly where the previous one ended.
+        let mut rects: Vec<Rect> = state
+            .row_rects
+            .iter()
+            .map(|(_, r)| *r)
+            .chain(state.section_rects.iter().map(|(_, r)| *r))
+            .collect();
+        rects.sort_by_key(|r| r.y);
+        for pair in rects.windows(2) {
+            assert_eq!(
+                pair[0].y + pair[0].height,
+                pair[1].y,
+                "hit rects must tile without gaps: {pair:?}",
+            );
+        }
+
+        // Hovering a row highlights its content line fully and paints
+        // half-cell halos on the spacer lines above and below, so the
+        // highlight reads as centered on the text. These rows are
+        // title-only, so the content line is the middle of the 3-cell
+        // rect. Use an unquantized theme: `Theme::current()` in the
+        // test environment collapses `bg_hover` onto `bg_base`, which
+        // (correctly) suppresses the halos.
+        let theme = Theme::chutesnight();
+        assert_ne!(theme.bg_hover, theme.bg_base);
+        let (id, rect) = state.row_rects[0].clone();
+        state.hovered_row = Some(id);
+        render_rows(&mut buf, area, &theme, &rows, &mut state);
+        let title_y = rect.y + 1;
+        assert_eq!(
+            buf[(rect.x, title_y)].style().bg,
+            Some(theme.bg_hover),
+            "hovered row must highlight its content line",
+        );
+        let above = &buf[(rect.x, title_y - 1)];
+        assert_eq!(above.symbol(), "\u{2580}", "spacer above must be a halo");
+        assert_eq!(
+            above.style().bg,
+            Some(theme.bg_hover),
+            "halo above must show the hover colour in its bottom half",
+        );
+        let below = &buf[(rect.x, title_y + 1)];
+        assert_eq!(below.symbol(), "\u{2580}", "spacer below must be a halo");
+        assert_eq!(
+            below.style().fg,
+            Some(theme.bg_hover),
+            "halo below must show the hover colour in its top half",
+        );
+    }
+
+    /// A row's content is vertically centered within its 3-cell rect:
+    /// a title-only row renders padding + title + padding, while a
+    /// title + secondary row stays top-aligned (2 lines cannot center
+    /// in 3 cells).
+    #[test]
+    fn render_row_centers_title_only_content() {
+        let theme = Theme::current();
+        let mut state = DashboardState::new();
+
+        // Title-only → centered on the middle line.
+        let row = header_test_row(1, RowState::Idle, "solo");
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 3));
+        render_row(&mut buf, Rect::new(0, 0, 40, 3), &theme, &row, &mut state);
+        assert_eq!(buf[(4, 1)].symbol(), "s", "title must sit on line 1");
+        assert_eq!(buf[(4, 0)].symbol(), " ", "line 0 must be padding");
+        assert_eq!(buf[(4, 2)].symbol(), " ", "line 2 must be padding");
+
+        // Title + secondary → top-aligned.
+        let mut row = header_test_row(2, RowState::Working, "pair");
+        row.secondary_line = Some("Responding".to_string());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 3));
+        render_row(&mut buf, Rect::new(0, 0, 40, 3), &theme, &row, &mut state);
+        assert_eq!(buf[(4, 0)].symbol(), "p", "title must sit on line 0");
+        assert_eq!(buf[(4, 1)].symbol(), "R", "secondary must sit on line 1");
+        assert_eq!(buf[(4, 2)].symbol(), " ", "line 2 must be padding");
+    }
+
     /// Empty area is a quick exit.
     #[test]
     fn render_empty_state_zero_area_is_no_op() {
@@ -5385,13 +5758,10 @@ mod tests {
         );
     }
 
-    /// The in-flight rename overlay sanitises the
-    /// draft before painting so a smuggled ANSI escape never lands in
-    /// the buffer (test wide-mode and narrow-mode separately).
+    /// RenameDraft sanitation keeps control characters out of both render paths.
     #[test]
-    fn render_rename_overlay_strips_control_chars_from_live_draft() {
+    fn sanitized_rename_draft_is_safe_in_both_render_paths() {
         use crate::app::agent::AgentId;
-        use crate::views::dashboard::state::RenameDraft;
         let id = DashboardRowId::TopLevel(AgentId(7));
         let row = DashboardRow {
             id: id.clone(),
@@ -5420,10 +5790,7 @@ mod tests {
             let mut buf = Buffer::empty(Rect::new(0, 0, 80, 3));
             let mut state = DashboardState::new();
             state.selected = Some(id.clone());
-            state.rename = Some(RenameDraft {
-                row: id.clone(),
-                draft: "a\x1b[31m".to_string(),
-            });
+            state.rename = Some(RenameDraft::new(id.clone(), "a\x1b[31m"));
             render_rows(&mut buf, Rect::new(0, 0, 80, 3), &theme, &rows, &mut state);
             let content = buf_to_text(&buf);
             assert!(
@@ -5441,10 +5808,7 @@ mod tests {
             let mut buf = Buffer::empty(Rect::new(0, 0, 30, 3));
             let mut state = DashboardState::new();
             state.selected = Some(id.clone());
-            state.rename = Some(RenameDraft {
-                row: id.clone(),
-                draft: "a\x1b[31m".to_string(),
-            });
+            state.rename = Some(RenameDraft::new(id.clone(), "a\x1b[31m"));
             render_narrow_rows(&mut buf, Rect::new(0, 0, 30, 3), &theme, &rows, &mut state);
             let content = buf_to_text(&buf);
             assert!(
@@ -5458,13 +5822,10 @@ mod tests {
         }
     }
 
-    /// The rename overlay keeps the row's chrome (state icon) and paints
-    /// `rename:` at the title's own column, so the editing row stays
-    /// aligned with its neighbours (wide and narrow layouts).
+    /// Rename rendering preserves row chrome and title alignment in both layouts.
     #[test]
     fn render_rename_overlay_aligns_with_title_and_keeps_icon() {
         use crate::app::agent::AgentId;
-        use crate::views::dashboard::state::RenameDraft;
         let id = DashboardRowId::TopLevel(AgentId(7));
         let row = DashboardRow {
             id: id.clone(),
@@ -5491,7 +5852,9 @@ mod tests {
             (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect()
         };
 
-        // Wide path: title row sits 2 below the group header (header + gap).
+        // Wide path: this title-only row centers its title within its
+        // 3-cell rect, so the title sits 3 below the group header
+        // (header + gap + row top padding).
         // `title_byte` is a byte offset (for `str::find` comparisons);
         // `title_col` is the display column (the icon glyph is
         // multi-byte UTF-8, so the two differ) for cursor math.
@@ -5499,26 +5862,23 @@ mod tests {
             let mut buf = Buffer::empty(Rect::new(0, 0, 80, 5));
             let mut state = DashboardState::new();
             render_rows(&mut buf, Rect::new(0, 0, 80, 5), &theme, &rows, &mut state);
-            let line = row_text(&buf, 2, 80);
+            let line = row_text(&buf, 3, 80);
             let byte = line.find("row label").expect("title must render");
             (byte, line[..byte].chars().count() as u16)
         };
         {
             let mut buf = Buffer::empty(Rect::new(0, 0, 80, 5));
             let mut state = DashboardState::new();
-            state.rename = Some(RenameDraft {
-                row: id.clone(),
-                draft: "new name".to_string(),
-            });
+            state.rename = Some(RenameDraft::new(id.clone(), "new name"));
             render_rows(&mut buf, Rect::new(0, 0, 80, 5), &theme, &rows, &mut state);
-            let line = row_text(&buf, 2, 80);
+            let line = row_text(&buf, 3, 80);
             assert_eq!(
                 line.find("rename: new name"),
                 Some(title_byte),
                 "wide: `rename:` must start at the title column, got: {line:?}",
             );
             assert_eq!(
-                buf[(2, 2)].symbol(),
+                buf[(2, 3)].symbol(),
                 crate::glyphs::diamond_hollow(),
                 "wide: the state icon must stay in place while renaming",
             );
@@ -5528,18 +5888,15 @@ mod tests {
             let draft_w = "new name".len() as u16;
             assert_eq!(
                 rename_cursor_pos(&state, &rows),
-                Some((title_col + prefix_w + draft_w, 2)),
+                Some((title_col + prefix_w + draft_w, 3)),
                 "cursor must sit one cell past the draft text",
             );
             // With an empty draft the cursor sits immediately after
             // `rename: ` (the position typing lands at).
-            state.rename = Some(RenameDraft {
-                row: id.clone(),
-                draft: String::new(),
-            });
+            state.rename = Some(RenameDraft::new(id.clone(), ""));
             assert_eq!(
                 rename_cursor_pos(&state, &rows),
-                Some((title_col + prefix_w, 2)),
+                Some((title_col + prefix_w, 3)),
                 "empty draft: cursor must sit right after `rename: `",
             );
         }
@@ -5556,10 +5913,7 @@ mod tests {
         {
             let mut buf = Buffer::empty(Rect::new(0, 0, 30, 3));
             let mut state = DashboardState::new();
-            state.rename = Some(RenameDraft {
-                row: id.clone(),
-                draft: "nn".to_string(),
-            });
+            state.rename = Some(RenameDraft::new(id.clone(), "nn"));
             render_narrow_rows(&mut buf, Rect::new(0, 0, 30, 3), &theme, &rows, &mut state);
             let line = row_text(&buf, 1, 30);
             assert_eq!(
@@ -5572,6 +5926,97 @@ mod tests {
                 crate::glyphs::diamond_hollow(),
                 "narrow: the state icon must stay in place while renaming",
             );
+        }
+    }
+
+    #[test]
+    fn rename_viewport_handles_long_unicode_in_wide_and_narrow_rows() {
+        use crate::app::agent::AgentId;
+        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+        let id = DashboardRowId::TopLevel(AgentId(7));
+        let row = DashboardRow {
+            id: id.clone(),
+            label: "row label".to_string(),
+            subtitle: None,
+            state: RowState::Idle,
+            activity: None,
+            secondary_line: None,
+            cwd_display: String::new(),
+            cwd: std::path::PathBuf::from("/tmp"),
+            last_change_at: std::time::SystemTime::now(),
+            pinned: false,
+            is_active: false,
+            badges: Vec::new(),
+            context_pct: None,
+            indent: 0,
+            parent_label: None,
+            is_more_placeholder: false,
+            more_count: 0,
+        };
+        let rows = vec![row];
+        let text = format!("{}中e\u{301}👩🏽\u{200d}💻", "x".repeat(90));
+        let theme = Theme::current();
+        let registry = crate::actions::ActionRegistry::defaults();
+
+        for (width, narrow, row_y) in [(80, false, 3), (30, true, 1)] {
+            let area = Rect::new(0, 0, width, if narrow { 3 } else { 5 });
+            let mut buffer = Buffer::empty(area);
+            let mut state = DashboardState::new();
+            state.rename = Some(RenameDraft::new(id.clone(), text.clone()));
+            if narrow {
+                render_narrow_rows(&mut buffer, area, &theme, &rows, &mut state);
+            } else {
+                render_rows(&mut buffer, area, &theme, &rows, &mut state);
+            }
+            let line = (0..width)
+                .map(|x| buffer[(x, row_y)].symbol().to_string())
+                .collect::<String>();
+            assert!(line.contains('中'), "CJK tail missing: {line:?}");
+            assert!(line.contains("e\u{301}"), "combining tail split: {line:?}");
+            assert!(line.contains("👩🏽\u{200d}💻"), "ZWJ tail split: {line:?}",);
+            let end_cursor = rename_cursor_pos(&state, &rows).expect("end cursor");
+
+            let _ = state.handle_input(
+                &Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+                &registry,
+            );
+            for _ in 0..20 {
+                let _ = state.handle_input(
+                    &Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+                    &registry,
+                );
+            }
+            let mut middle_buffer = Buffer::empty(area);
+            if narrow {
+                render_narrow_rows(&mut middle_buffer, area, &theme, &rows, &mut state);
+            } else {
+                render_rows(&mut middle_buffer, area, &theme, &rows, &mut state);
+            }
+            let middle_cursor = rename_cursor_pos(&state, &rows).expect("middle cursor");
+            assert_ne!(
+                state.rename.as_ref().expect("rename draft").cursor_byte(),
+                text.len()
+            );
+            if !narrow {
+                assert_ne!(middle_cursor, end_cursor);
+            }
+            let prefix_x = (0..width)
+                .find(|x| middle_buffer[(*x, row_y)].symbol() == "r")
+                .expect("rename prefix");
+            let row_rect = state
+                .row_rects
+                .iter()
+                .find(|(row_id, _)| row_id == &id)
+                .map(|(_, rect)| *rect)
+                .expect("rename row rect");
+            let editor_x = prefix_x + RENAME_PREFIX.len() as u16;
+            let editor_width = row_rect
+                .x
+                .saturating_add(row_rect.width)
+                .saturating_sub(editor_x);
+            let expected_cursor = editor_x + 20u16.min(editor_width.saturating_sub(1));
+            assert_eq!(middle_cursor, (expected_cursor, row_y));
         }
     }
 
@@ -5596,6 +6041,52 @@ mod tests {
             content.contains('\u{276F}'),
             "dispatch must paint ❯ prefix inside the box, got: {content:?}",
         );
+    }
+
+    #[test]
+    fn render_search_mode_uses_textarea_cursor_not_text_end() {
+        let area = Rect::new(0, 0, 40, 3);
+        let mut buffer = Buffer::empty(area);
+        let theme = Theme::current();
+        let mut state = DashboardState::new();
+        state.search_mode = true;
+        state.dispatch.set_text("abcdef");
+        state.dispatch.set_cursor(2);
+
+        let cursor = render_dispatch(&mut buffer, area, &theme, &mut state, None)
+            .expect("focused search cursor");
+        let prefix_x = (0..area.width)
+            .find(|x| buffer[(*x, cursor.1)].symbol() == "S")
+            .expect("Search prefix");
+        assert_eq!(cursor.0, prefix_x + "Search: ".len() as u16 + 2);
+    }
+
+    #[test]
+    fn render_search_mode_clips_prefix_and_cursor_at_widths_one_through_nine() {
+        let theme = Theme::current();
+        for width in 1..=9 {
+            let full = Rect::new(0, 0, 14, 1);
+            let area = Rect::new(2, 0, width, 1);
+            let mut buffer = Buffer::empty(full);
+            buffer.set_string(0, 0, "#".repeat(full.width as usize), Style::default());
+            let mut state = DashboardState::new();
+            state.search_mode = true;
+            state.dispatch.set_text("abcdef");
+            state.dispatch.set_cursor(2);
+
+            let cursor = render_dispatch(&mut buffer, area, &theme, &mut state, None)
+                .expect("focused narrow search cursor");
+            assert!(cursor.0 >= area.x && cursor.0 < area.x + area.width);
+            for x in 0..full.width {
+                if x < area.x || x >= area.x + area.width {
+                    assert_eq!(
+                        buffer[(x, 0)].symbol(),
+                        "#",
+                        "width {width} wrote outside at column {x}",
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -6393,7 +6884,7 @@ mod tests {
             is_more_placeholder: false,
             more_count: 0,
         };
-        render_row(&mut buf, Rect::new(0, 0, 100, 2), &theme, &row, &state);
+        render_row(&mut buf, Rect::new(0, 0, 100, 2), &theme, &row, &mut state);
 
         // Title row.
         assert_eq!(
@@ -6483,13 +6974,13 @@ mod tests {
 
         // Unselected → dim secondary.
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 2));
-        let state_unselected = DashboardState::new();
+        let mut state_unselected = DashboardState::new();
         render_row(
             &mut buf,
             Rect::new(0, 0, 100, 2),
             &theme,
             &row,
-            &state_unselected,
+            &mut state_unselected,
         );
         assert_eq!(
             buf[(4, 1)].fg,
@@ -6506,7 +6997,7 @@ mod tests {
             Rect::new(0, 0, 100, 2),
             &theme,
             &row,
-            &state_selected,
+            &mut state_selected,
         );
         assert_eq!(
             buf[(4, 1)].fg,
@@ -6552,7 +7043,7 @@ mod tests {
                 Rect::new(0, 0, 100, 2),
                 &theme,
                 &make_row(),
-                &state,
+                &mut state,
             );
             buf
         };
@@ -6613,7 +7104,7 @@ mod tests {
         use std::time::SystemTime;
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 2));
         let theme = Theme::current();
-        let state = DashboardState::new();
+        let mut state = DashboardState::new();
         let row = DashboardRow {
             id: DashboardRowId::TopLevel(crate::app::agent::AgentId(1)),
             label: "New session #abc12345".to_string(),
@@ -6633,7 +7124,7 @@ mod tests {
             is_more_placeholder: false,
             more_count: 0,
         };
-        render_row(&mut buf, Rect::new(0, 0, 100, 2), &theme, &row, &state);
+        render_row(&mut buf, Rect::new(0, 0, 100, 2), &theme, &row, &mut state);
 
         // Title starts at col 4: "New session" (11 chars, cols 4..15) then
         // " #abc12345" (suffix from col 15).
@@ -6659,8 +7150,9 @@ mod tests {
     /// Group header (section title) leads with a disclosure glyph at
     /// col 0, then the label at col 2, within the list area. Row content
     /// below is indented (marker col 0, gap col 1, icon col 2). The
-    /// header is 2 visual cells tall (label + gap) so the row's title
-    /// sits 2 rows below the header in this fixture.
+    /// header is 2 visual cells tall (label + gap) and the title-only
+    /// row centers its title, so the title sits 3 rows below the
+    /// header in this fixture.
     #[test]
     fn render_group_header_leads_with_disclosure_glyph() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 80, 8));
@@ -6683,12 +7175,13 @@ mod tests {
             "section title `Idle …` must start after the disclosure glyph, got: {header_label_x:?}",
         );
 
-        // Header gap → row 1 is blank. Row's title row starts at y=2
-        // (after the 2-cell header). Rows still render their marker/icon
-        // in the left chrome columns.
-        let row_col0 = buf[(0, 2)].symbol().to_string();
-        let row_col1 = buf[(1, 2)].symbol().to_string();
-        let row_col2 = buf[(2, 2)].symbol().to_string();
+        // Header gap → row 1 is blank. The title-only row centers its
+        // title within its 3-cell rect (y=2..5), so the title sits at
+        // y=3. Rows still render their marker/icon in the left chrome
+        // columns.
+        let row_col0 = buf[(0, 3)].symbol().to_string();
+        let row_col1 = buf[(1, 3)].symbol().to_string();
+        let row_col2 = buf[(2, 3)].symbol().to_string();
         assert_eq!(
             row_col0, " ",
             "row's col 0 must be the marker space when nothing selected, got: {row_col0:?}",
@@ -6778,7 +7271,7 @@ mod tests {
     #[test]
     fn render_rows_subagents_do_not_trigger_their_own_headers() {
         use crate::app::agent::AgentId;
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 10));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 20));
         let mut state = DashboardState::new();
         let parent = DashboardRow {
             id: DashboardRowId::TopLevel(AgentId(1)),
@@ -7340,8 +7833,7 @@ mod tests {
             std::path::PathBuf::from("/base"),
             std::collections::HashMap::new(),
         );
-        modal.picker.query = "/tmp/zzz".to_string();
-        modal.picker.query_cursor = modal.picker.query.len();
+        modal.picker.set_query("/tmp/zzz");
         render_location_picker(&mut buf, area, &theme, &mut modal);
         let content = buf_to_text(&buf);
         assert!(
@@ -7635,10 +8127,6 @@ mod tests {
         );
     }
 
-    /// When peek is active, the footer flips to peek-
-    /// mode hints (`enter:open · esc:New Agent · ctrl+x:close`). The
-    /// nav chip is dropped (saving space) and the Ctrl+x chip stays
-    /// visible while the agent is selected.
     #[test]
     fn render_footer_peek_mode_shows_peek_hints() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
@@ -7651,8 +8139,8 @@ mod tests {
             &theme,
             &state,
             &registry,
-            None,
-            true, // peek_active
+            Some(RowState::Idle),
+            true,
             None,
         );
         let content = buf_to_text(&buf);
@@ -7660,11 +8148,9 @@ mod tests {
             content.contains(":open") && content.contains(":New Agent"),
             "peek-mode footer must include open + New Agent (unselect) hints, got: {content:?}",
         );
-        // The stop chip stays visible while an agent is selected. With
-        // no row state passed (None) the label is the idle-style `close`.
         assert!(
-            content.contains(":close"),
-            "peek-mode footer must keep the Ctrl+x stop chip, got: {content:?}",
+            content.contains(":delete"),
+            "peek-mode footer must keep the Ctrl+x delete chip, got: {content:?}",
         );
         // The nav chip is dropped to save bottom-bar space.
         assert!(
@@ -7978,10 +8464,8 @@ mod tests {
         );
     }
 
-    /// An Inactive (roster-only) selection has nothing running to stop —
-    /// the stop chip is suppressed in both focus modes.
     #[test]
-    fn render_footer_inactive_row_hides_stop() {
+    fn render_footer_inactive_row_shows_delete() {
         let theme = Theme::current();
         let registry = crate::actions::ActionRegistry::defaults();
 
@@ -8001,15 +8485,14 @@ mod tests {
         );
         let content = buf_to_text(&buf);
         assert!(
-            !content.contains(":stop") && !content.contains(":close"),
-            "inactive row footer must NOT show the stop chip, got: {content:?}",
+            content.contains(":delete"),
+            "list-focused idle-row footer must show the delete chip, got: {content:?}",
         );
         assert!(
             content.contains(":open"),
-            "inactive row footer keeps the open chip, got: {content:?}",
+            "list-focused idle-row footer must show the open chip, got: {content:?}",
         );
 
-        // List focused (Tab) — same suppression.
         state.list_focused = true;
         let mut buf2 = Buffer::empty(Rect::new(0, 0, 200, 1));
         render_footer(
@@ -8023,13 +8506,8 @@ mod tests {
             None,
         );
         let content2 = buf_to_text(&buf2);
-        assert!(
-            !content2.contains(":stop") && !content2.contains(":close"),
-            "list-focused inactive footer must NOT show the stop chip, got: {content2:?}",
-        );
+        assert!(content2.contains(":delete"), "{content2:?}");
 
-        // Control: an Idle selection keeps the stop chip in both modes —
-        // labelled `close` (the session is idle, so Ctrl+x closes it).
         state.list_focused = false;
         let mut buf3 = Buffer::empty(Rect::new(0, 0, 200, 1));
         render_footer(
@@ -8043,16 +8521,9 @@ mod tests {
             None,
         );
         let content3 = buf_to_text(&buf3);
-        assert!(
-            content3.contains(":close"),
-            "idle row footer must keep the stop chip labelled `close`, got: {content3:?}",
-        );
+        assert!(content3.contains(":delete"), "{content3:?}");
     }
 
-    /// The Ctrl+x chip label follows the selected agent's state: a
-    /// Working or NeedsInput agent shows `stop` (cancel the turn — a
-    /// NeedsInput row keeps a paused-but-running turn), while an idle /
-    /// quiet one shows `close` (close the session).
     #[test]
     fn render_footer_stop_label_follows_state() {
         let theme = Theme::current();
@@ -8097,7 +8568,7 @@ mod tests {
             "NeedsInput agent footer must label Ctrl+x as `stop`, got: {needs_input:?}",
         );
 
-        // Idle → `close`.
+        // Idle → `delete`.
         let mut buf2 = Buffer::empty(Rect::new(0, 0, 200, 1));
         render_footer(
             &mut buf2,
@@ -8111,8 +8582,8 @@ mod tests {
         );
         let idle = buf_to_text(&buf2);
         assert!(
-            idle.contains(":close") && !idle.contains(":stop"),
-            "Idle agent footer must label Ctrl+x as `close`, got: {idle:?}",
+            idle.contains(":delete") && !idle.contains(":stop"),
+            "Idle agent footer must label Ctrl+x as `delete`, got: {idle:?}",
         );
     }
 
@@ -8255,21 +8726,16 @@ mod tests {
         );
     }
 
-    /// An in-flight rename swaps the footer for its two actions —
-    /// Enter saves, Esc cancels — and hides the normal nav/stop chips.
+    /// Rename mode shows only save and cancel actions.
     #[test]
     fn render_footer_rename_shows_save_and_cancel() {
         use crate::app::agent::AgentId;
-        use crate::views::dashboard::state::RenameDraft;
         let theme = Theme::current();
         let registry = crate::actions::ActionRegistry::defaults();
         let mut state = DashboardState::new();
         let id = DashboardRowId::TopLevel(AgentId(0));
         state.focus_row(id.clone());
-        state.rename = Some(RenameDraft {
-            row: id,
-            draft: String::new(),
-        });
+        state.rename = Some(RenameDraft::new(id, ""));
         let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
         render_footer(
             &mut buf,
@@ -8396,10 +8862,8 @@ mod tests {
         );
         let content = buf_to_text(&buf);
         assert!(
-            content.contains("Shift+Enter:send")
-                || content.contains("Alt+Enter:send")
-                || content.contains("Opt+Enter:send"),
-            "multiline footer must advertise Shift/Alt/Opt+Enter as send, got: {content:?}",
+            content.contains("Shift+Enter:send") || content.contains("Alt+Enter:send"),
+            "multiline footer must advertise Shift/Alt+Enter as send, got: {content:?}",
         );
         // Bare Enter:send would appear as "  Enter:send" (footer pad); the
         // modified chords contain the substring "Enter:send" so avoid that.
@@ -8435,10 +8899,8 @@ mod tests {
         );
         let content = buf_to_text(&buf);
         assert!(
-            content.contains("Shift+Enter:create")
-                || content.contains("Alt+Enter:create")
-                || content.contains("Opt+Enter:create"),
-            "multiline empty footer must advertise Shift/Alt/Opt+Enter as create, got: {content:?}",
+            content.contains("Shift+Enter:create") || content.contains("Alt+Enter:create"),
+            "multiline empty footer must advertise Shift/Alt+Enter as create, got: {content:?}",
         );
         assert!(
             !content.contains("  Enter:create"),
@@ -8446,17 +8908,14 @@ mod tests {
         );
     }
 
-    /// Stop-confirm armed routes through `ShortcutsBar::with_pending`.
+    /// Delete-confirm armed while the input is focused routes through
+    /// `ShortcutsBar::with_pending` ("press Ctrl+x again to delete").
     #[test]
-    fn render_footer_stop_confirm_uses_pending_hint() {
-        use std::time::Instant;
+    fn render_footer_delete_confirm_uses_pending_hint() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
         let theme = Theme::current();
         let mut state = DashboardState::new();
-        state.stop_confirm = Some((
-            DashboardRowId::TopLevel(crate::app::agent::AgentId(1)),
-            Instant::now(),
-        ));
+        state.arm_delete(DashboardRowId::TopLevel(crate::app::agent::AgentId(1)));
         let registry = crate::actions::ActionRegistry::defaults();
         render_footer(
             &mut buf,
@@ -8474,26 +8933,26 @@ mod tests {
             "stop-confirm footer must say `press again`, got: {content:?}",
         );
         assert!(
-            content.to_lowercase().contains("close this session"),
-            "stop-confirm footer must mention closing the session, got: {content:?}",
+            content.to_lowercase().contains("delete this session"),
+            "delete-confirm footer must name the action, got: {content:?}",
         );
     }
 
-    /// An EXPIRED stop-confirm (older than `STOP_CONFIRM_WINDOW`) must
+    /// An EXPIRED delete-confirm (older than `CONFIRM_WINDOW`) must
     /// not claim the footer — the dispatcher would re-arm rather than
-    /// close on the next press, so "press again" would lie. Regular
+    /// delete on the next press, so "press again" would lie. Regular
     /// hints render instead (e.g. after a mouse click moved the
     /// selection without a keypress to disarm the confirm).
     #[test]
-    fn render_footer_expired_stop_confirm_shows_regular_hints() {
+    fn render_footer_expired_delete_confirm_shows_regular_hints() {
         use std::time::{Duration, Instant};
         let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
         let theme = Theme::current();
         let mut state = DashboardState::new();
         state.focus_row(DashboardRowId::TopLevel(crate::app::agent::AgentId(1)));
-        state.stop_confirm = Some((
+        state.delete_confirm = Some((
             DashboardRowId::TopLevel(crate::app::agent::AgentId(1)),
-            Instant::now() - (super::super::state::STOP_CONFIRM_WINDOW + Duration::from_secs(1)),
+            Instant::now() - (super::super::state::CONFIRM_WINDOW + Duration::from_secs(1)),
         ));
         let registry = crate::actions::ActionRegistry::defaults();
         render_footer(

@@ -25,10 +25,10 @@ const MAX_PENDING: usize = 256;
 const DROP_BATCH_SIZE: usize = 64;
 
 /// Build the share URL for a session.
-/// Sharing is disabled by default; the URL base is a fail-closed loopback endpoint.
-pub fn build_share_url(session_id: &str) -> String {
+/// Format: https://chutes.ai/build/{sessionId}
+pub(crate) fn build_share_url(session_id: &str) -> String {
     let base_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:9".to_string());
+        .unwrap_or_else(|_| "https://chutes.ai".to_string());
     format!("{}/build/{}", base_url, session_id)
 }
 
@@ -143,7 +143,7 @@ impl RelaySyncState {
     }
 
     /// Update the cursor after a successful sync.
-    pub fn update_cursor(&mut self, event_id: String) {
+    pub(crate) fn update_cursor(&mut self, event_id: String) {
         self.last_synced_event_id = Some(event_id);
         self.last_synced_at = Some(
             std::time::SystemTime::now()
@@ -309,7 +309,7 @@ impl RelaySync {
     }
 
     /// Get the current connection state.
-    pub fn connection_state(&self) -> ConnectionState {
+    pub(crate) fn connection_state(&self) -> ConnectionState {
         *self.connection_state_rx.borrow()
     }
 
@@ -325,7 +325,7 @@ impl RelaySync {
     }
 
     /// Subscribe to connection state changes.
-    pub fn subscribe_state(&self) -> watch::Receiver<ConnectionState> {
+    pub(crate) fn subscribe_state(&self) -> watch::Receiver<ConnectionState> {
         self.connection_state_rx.clone()
     }
 }
@@ -836,7 +836,7 @@ mod tests {
     #[test]
     fn test_build_share_url_default() {
         let url = build_share_url("test-session-123");
-        assert_eq!(url, "http://127.0.0.1:9/build/test-session-123");
+        assert_eq!(url, "https://chutes.ai/build/test-session-123");
     }
 
     #[test]
@@ -844,7 +844,7 @@ mod tests {
         let url = build_share_url("01937d8a-1234-7abc-9def-0123456789ab");
         assert_eq!(
             url,
-            "http://127.0.0.1:9/build/01937d8a-1234-7abc-9def-0123456789ab"
+            "https://chutes.ai/build/01937d8a-1234-7abc-9def-0123456789ab"
         );
     }
 

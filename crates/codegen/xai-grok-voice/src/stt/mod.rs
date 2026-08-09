@@ -1,4 +1,4 @@
-//! Optional Speech-to-Text transport for explicitly configured compatible endpoints.
+//! xAI Speech-to-Text: streaming `wss://api.chutes.ai/v1/stt`.
 
 pub mod batch;
 mod streaming;

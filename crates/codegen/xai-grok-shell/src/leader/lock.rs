@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -148,7 +148,7 @@ pub struct LeaderLock {
 }
 
 impl LeaderLock {
-    /// Create a new LeaderLock using the default paths in grok home.
+    /// Create a new LeaderLock using the default paths in Chutes Build home.
     /// If ws_url differs from the default production URL, a hash suffix is added
     /// to the lock and socket file names to differentiate leader instances.
     pub fn new(ws_url: &str) -> Self {
@@ -201,45 +201,38 @@ impl LeaderLock {
         }
     }
 
-    /// Acquire exclusive lock, blocking until available.
+    /// Acquire exclusive lock with a bounded wait, re-opening the lock-file path
+    /// on every attempt.
     ///
-    /// Used by the leader process on startup. Blocks until the lock is available.
-    /// After acquiring, call `write_pid()` to record the leader's PID.
-    pub fn acquire_blocking(&mut self) -> Result<(), LockError> {
-        let file = self.open_lock_file()?;
-
-        file.lock_exclusive()?;
-        self.mark_acquired(file);
-        Ok(())
-    }
-
-    /// Try to acquire exclusive lock with a timeout.
+    /// Polls `try_lock_exclusive()` every 200ms until acquired or the timeout
+    /// elapses (`LockError::Timeout`). The re-open is load-bearing on the leader
+    /// path: an old-flow client's `Drop` unlinks the lock file on its timeout, so
+    /// the winner must acquire on the freshly re-created inode — a single held fd
+    /// would keep polling the stale, unlinked inode forever.
     ///
-    /// Polls `try_lock_exclusive()` every 200ms until the lock is acquired or the
-    /// timeout elapses. Returns `LockError::Timeout` if the deadline is exceeded.
-    ///
-    /// Used by the leader subprocess in the socket-then-lock startup flow: the
-    /// spawning client holds the lock while the leader binds its IPC socket, then
-    /// releases it. This method waits for that handoff, but gives up after `timeout`
-    /// so a duplicate leader (started while another is already running) exits
-    /// cleanly instead of blocking forever.
-    pub fn try_acquire_timeout(&mut self, timeout: Duration) -> Result<(), LockError> {
-        let file = self.open_lock_file()?;
-
+    /// Async so the 200ms poll yields to the Tokio runtime instead of blocking a
+    /// worker thread — `run_leader` calls this on the multi-thread runtime.
+    pub(crate) async fn acquire_reopen_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(), LockError> {
         let deadline = Instant::now() + timeout;
         let poll_interval = Duration::from_millis(200);
 
         loop {
+            // Re-open each attempt: the inode may have been replaced since the last poll.
+            let file = self.open_lock_file()?;
             match file.try_lock_exclusive() {
                 Ok(()) => {
                     self.mark_acquired(file);
                     return Ok(());
                 }
                 Err(e) if is_lock_contended(&e) => {
+                    drop(file); // release the fd before sleeping; re-open next poll
                     if Instant::now() >= deadline {
                         return Err(LockError::Timeout(timeout));
                     }
-                    std::thread::sleep(poll_interval);
+                    tokio::time::sleep(poll_interval).await;
                 }
                 Err(e) => return Err(LockError::Io(e)),
             }
@@ -258,17 +251,10 @@ impl LeaderLock {
 
     /// Read PID from lock file (for diagnostics).
     pub fn read_pid(&self) -> Option<u32> {
-        if let Some(file) = self.lock_file.as_ref() {
-            let mut file = file.try_clone().ok()?;
-            file.seek(SeekFrom::Start(0)).ok()?;
-            let mut content = String::new();
-            file.read_to_string(&mut content).ok()?;
-            return content.trim().parse().ok();
-        }
         Self::read_pid_from_path(&self.lock_path)
     }
 
-    pub fn read_pid_from_path(path: &Path) -> Option<u32> {
+    pub(crate) fn read_pid_from_path(path: &Path) -> Option<u32> {
         let mut content = String::new();
         File::open(path)
             .and_then(|mut f| f.read_to_string(&mut content))
@@ -277,7 +263,7 @@ impl LeaderLock {
     }
 
     /// Delete the socket file. Call while holding the lock.
-    pub fn cleanup_socket(&self) -> io::Result<()> {
+    pub(crate) fn cleanup_socket(&self) -> io::Result<()> {
         match fs::remove_file(&self.sock_path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -285,18 +271,14 @@ impl LeaderLock {
         }
     }
 
-    /// Release the lock explicitly.
-    ///
-    /// This is used by the spawner to release the lock after the leader has bound
-    /// its socket. After calling this, the `Drop` impl will NOT clean up files,
-    /// since we're intentionally handing off to the leader process.
+    /// Release the lock explicitly. `Drop` will NOT clean up files afterward.
     pub fn release(&mut self) -> io::Result<()> {
+        // Clear FIRST: even if `unlock()` errors, `Drop` must not delete the live
+        // child leader's socket.
+        self.was_leader = false;
         if let Some(file) = self.lock_file.take() {
             file.unlock()?;
         }
-        // Clear was_leader so Drop doesn't delete files.
-        // The actual leader process will clean up when it exits.
-        self.was_leader = false;
         Ok(())
     }
 
@@ -416,7 +398,6 @@ mod tests {
 
         let pid = lock.read_pid().unwrap();
         assert_eq!(pid, std::process::id());
-        lock.release().unwrap();
         assert_eq!(
             LeaderLock::read_pid_from_path(lock.lock_path()),
             Some(std::process::id())
@@ -558,24 +539,28 @@ mod tests {
         assert!(lock.read_pid().is_none());
     }
 
-    #[test]
-    fn try_acquire_timeout_succeeds_when_unlocked() {
+    #[tokio::test]
+    async fn acquire_reopen_timeout_succeeds_when_unlocked() {
         let temp = TempDir::new().unwrap();
         let mut lock = test_lock(&temp);
 
-        lock.try_acquire_timeout(Duration::from_secs(1)).unwrap();
+        lock.acquire_reopen_timeout(Duration::from_secs(1))
+            .await
+            .unwrap();
         assert!(lock.is_held());
     }
 
-    #[test]
-    fn try_acquire_timeout_returns_timeout_when_held() {
+    #[tokio::test]
+    async fn acquire_reopen_timeout_returns_timeout_when_held() {
         let temp = TempDir::new().unwrap();
         let mut lock1 = test_lock(&temp);
         let mut lock2 = test_lock(&temp);
 
         assert!(lock1.try_acquire().unwrap());
 
-        let result = lock2.try_acquire_timeout(Duration::from_millis(500));
+        let result = lock2
+            .acquire_reopen_timeout(Duration::from_millis(500))
+            .await;
         assert!(
             matches!(result, Err(LockError::Timeout(_))),
             "Expected Timeout error, got {:?}",
@@ -584,8 +569,89 @@ mod tests {
         assert!(!lock2.is_held());
     }
 
+    /// The re-open is load-bearing: while `lock1` holds the flock on the ORIGINAL
+    /// (now-unlinked) inode for the whole test, re-opening the path each poll lets
+    /// the waiter acquire on a fresh inode. A single-fd waiter would time out here.
+    #[tokio::test]
+    async fn acquire_reopen_timeout_tolerates_unlinked_recreated_lock_file() {
+        let temp = TempDir::new().unwrap();
+        let mut lock1 = test_lock(&temp);
+        let mut lock2 = test_lock(&temp);
+
+        assert!(lock1.try_acquire().unwrap()); // inode A, held for the whole test
+        let lock_path = lock1.lock_path().clone();
+
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            // Simulate the old-flow client's Drop unlinking the lock file while it
+            // still holds the (now-anonymous) inode.
+            fs::remove_file(&lock_path).unwrap();
+            lock1 // return to keep inode A flock-held until the waiter has acquired
+        });
+
+        lock2
+            .acquire_reopen_timeout(Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(lock2.is_held());
+
+        let _lock1 = handle.join().unwrap();
+    }
+
+    /// Mirrors `run_leader`'s lock-then-socket guard: only the flock winner
+    /// binds the socket; a loser returns `false` without touching it.
+    fn try_start_leader(lock: &mut LeaderLock, socket_contents: &str) -> bool {
+        match lock.try_acquire() {
+            Ok(true) => {
+                lock.cleanup_socket().unwrap();
+                fs::write(lock.socket_path(), socket_contents).unwrap();
+                true
+            }
+            Ok(false) | Err(_) => false,
+        }
+    }
+
+    /// Single-leader invariant: a racing would-be leader that loses the flock
+    /// must not touch the socket.
     #[test]
-    fn try_acquire_timeout_succeeds_after_release() {
+    fn racing_leader_without_flock_cannot_clobber_socket() {
+        let temp = TempDir::new().unwrap();
+        let mut leader1 = test_lock(&temp);
+        let mut leader2 = test_lock(&temp);
+
+        assert!(try_start_leader(&mut leader1, "leader1-socket"));
+        assert!(!try_start_leader(&mut leader2, "leader2-socket"));
+
+        // Leader 1's socket survives untouched.
+        assert!(leader1.socket_path().exists());
+        assert_eq!(
+            fs::read_to_string(leader1.socket_path()).unwrap(),
+            "leader1-socket"
+        );
+    }
+
+    /// The leader holds the flock continuously for its lifetime (released only on
+    /// `Drop`), so no second leader can acquire it while the leader is alive.
+    #[test]
+    fn flock_held_continuously_blocks_second_leader_until_drop() {
+        let temp = TempDir::new().unwrap();
+        let mut contender = test_lock(&temp);
+
+        {
+            let mut leader = test_lock(&temp);
+            assert!(leader.try_acquire().unwrap());
+            leader.write_pid().unwrap();
+
+            assert!(!contender.try_acquire().unwrap());
+            assert!(!contender.try_acquire().unwrap());
+            // leader dropped here (simulating exit) → flock released, files cleaned
+        }
+
+        assert!(contender.try_acquire().unwrap());
+    }
+
+    #[tokio::test]
+    async fn acquire_reopen_timeout_succeeds_after_release() {
         let temp = TempDir::new().unwrap();
         let mut lock1 = test_lock(&temp);
         let mut lock2 = test_lock(&temp);
@@ -601,7 +667,10 @@ mod tests {
         });
 
         // lock2 should acquire within the timeout because lock1 is released after 200ms
-        lock2.try_acquire_timeout(Duration::from_secs(5)).unwrap();
+        lock2
+            .acquire_reopen_timeout(Duration::from_secs(5))
+            .await
+            .unwrap();
         assert!(lock2.is_held());
 
         handle.join().unwrap();

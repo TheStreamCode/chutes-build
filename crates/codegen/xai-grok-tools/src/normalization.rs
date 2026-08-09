@@ -19,7 +19,7 @@ pub fn tool_identity_of(metadata: &dyn ToolMetadata) -> ToolIdentity {
         read_only: metadata.is_read_only(),
     }
 }
-/// Resolve `wire_name` in `toolset` and merge the canonical `chutes.build/tool` object
+/// Resolve `wire_name` in `toolset` and merge the canonical `chutes.ai/tool` object
 /// into `existing` (see [`CanonicalToolMeta::merge_into`]). Returns `existing`
 /// unchanged when the tool is unknown (uninitialized MCP, backend-hosted), so
 /// markers like `bash_mode`/`backend` are never clobbered. This is the harness
@@ -51,7 +51,7 @@ pub fn norm_offset_i64(offset: Option<i64>) -> Option<u64> {
     }
 }
 /// Project a tool's **typed** input into the harness-independent `input` dict of
-/// the `chutes.build/tool` `_meta` object. Equivalent tools across toolsets emit the
+/// the `chutes.ai/tool` `_meta` object. Equivalent tools across toolsets emit the
 /// same keys with the same meaning (a harness may add an extra key).
 ///
 /// Returns `None` for tools with no stable cross-harness shape (MCP / dynamic /
@@ -104,13 +104,6 @@ pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
         | ToolInput::WaitTasks(_)
         | ToolInput::KillTask(_)
         | ToolInput::Task(_)
-        | ToolInput::Context7Search(_)
-        | ToolInput::Context7Docs(_)
-        | ToolInput::GetChutesUsage(_)
-        | ToolInput::ListMediaModels(_)
-        | ToolInput::DescribeMediaModel(_)
-        | ToolInput::GenerateMedia(_)
-        | ToolInput::Browser(_)
         | ToolInput::WebSearch(_)
         | ToolInput::ImageGen(_)
         | ToolInput::ImageEdit(_)
@@ -135,6 +128,7 @@ pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
         | ToolInput::SchedulerDelete(_)
         | ToolInput::SchedulerList(_)
         | ToolInput::UpdateGoal(_)
+        | ToolInput::Workflow(_)
         | ToolInput::Dynamic(_) => return None,
     })
 }
@@ -146,7 +140,7 @@ mod tests {
     }
     #[test]
     fn canonical_omits_absent_options_not_null() {
-        let grok = parse(serde_json::json!({ "variant" : "ReadFile", "target_file" : "/a" }));
+        let grok = parse(serde_json::json!({"variant":"ReadFile","target_file":"/a"}));
         let g = canonical_input(&grok).unwrap();
         let keys: Vec<&String> = g.as_object().unwrap().keys().collect();
         assert_eq!(

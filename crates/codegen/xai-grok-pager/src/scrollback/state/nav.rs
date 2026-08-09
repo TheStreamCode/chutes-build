@@ -350,6 +350,32 @@ impl ScrollbackState {
         false
     }
 
+    /// Whether the response being read starts above the viewport top: the
+    /// active turn (the one owning the top row) has a response anchor whose
+    /// first line is scrolled off screen. Drives the ▲ jump-to-response-top
+    /// indicator, whose click runs [`Self::prev_response`] — from inside an
+    /// answer that anchor is exactly the nearest one above, so the indicator
+    /// only shows when the click has that answer's top to land on.
+    ///
+    /// Cache-only estimate (`&self`, headers ignored) so render can poll it
+    /// every frame; the estimate never undershoots the exact target, so a
+    /// visible indicator always has a real jump behind it.
+    pub fn has_response_top_above(&self) -> bool {
+        let Some(turn) = self
+            .active_turn_for_viewport()
+            .and_then(|t| self.turns.get(t))
+        else {
+            return false;
+        };
+        let Some(idx) = response_anchor_in_range(&self.entries, turn.range()) else {
+            return false;
+        };
+        self.visible_entry_range().contains(&idx)
+            && self
+                .entry_top_estimate(idx)
+                .is_some_and(|estimate| estimate < self.scroll_offset)
+    }
+
     /// Set status of the last turn.
     pub fn set_last_turn_status(&mut self, status: TurnStatus) {
         if let Some(turn) = self.turns.last_mut() {
@@ -568,6 +594,29 @@ impl ScrollbackState {
     pub fn enable_follow_with_preserve(&mut self) {
         self.follow_mode = true;
         self.follow_preserve_scroll = true;
+    }
+
+    /// Viewport policy for a turn this client just started.
+    ///
+    /// - `page_flip` + prompt: pin at viewport top and arm follow-with-preserve.
+    /// - `page_flip` + no prompt (bash/synthetic): arm follow-with-preserve only.
+    /// - `!page_flip` + prompt: leave scroll and follow unchanged.
+    /// - `!page_flip` + no prompt: still arm follow-with-preserve (there is no
+    ///   prompt to snap; pre-setting bash/adoption always engaged follow).
+    ///
+    /// Always selects `prompt_idx` when present.
+    pub fn follow_new_turn(&mut self, prompt_idx: Option<usize>, page_flip: bool) {
+        if page_flip {
+            if let Some(idx) = prompt_idx {
+                self.scroll_to_entry_top(idx);
+            }
+            self.enable_follow_with_preserve();
+        } else if prompt_idx.is_none() {
+            self.enable_follow_with_preserve();
+        }
+        if let Some(idx) = prompt_idx {
+            self.set_selected(Some(idx));
+        }
     }
 
     /// Check if follow mode is enabled.
@@ -1069,7 +1118,7 @@ impl ScrollbackState {
         let theme = Theme::current();
         let entry_area_width = self.entry_area_width(self.last_width);
         EntryRenderer::new(entry, &theme)
-            .with_appearance(self.appearance.clone())
+            .with_appearance_ref(&self.appearance)
             .with_cwd(self.cwd())
             .rendered_row_of_logical_line(entry_area_width, line_in_entry)
     }
@@ -1168,6 +1217,63 @@ mod tests {
     use super::super::test_util::*;
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn follow_new_turn_scroll_policies() {
+        fn tall_state_with_prompt() -> (ScrollbackState, usize) {
+            let mut state = ScrollbackState::new();
+            for i in 0..30 {
+                state.push_block(agent_block(&format!("filler line {i}")));
+            }
+            state.push_block(user_block("next question"));
+            let prompt_idx = state.len() - 1;
+            state.prepare_layout(80, 8);
+            (state, prompt_idx)
+        }
+
+        let (mut state, prompt_idx) = tall_state_with_prompt();
+        state.goto_bottom();
+        let bottom = state.scroll_offset();
+        state.follow_new_turn(Some(prompt_idx), true);
+        assert!(state.is_follow_mode());
+        assert!(state.is_follow_preserve_scroll());
+        assert_eq!(state.selected(), Some(prompt_idx));
+        assert_ne!(state.scroll_offset(), bottom);
+
+        let (mut state, prompt_idx) = tall_state_with_prompt();
+        state.goto_bottom();
+        let bottom = state.scroll_offset();
+        state.follow_new_turn(Some(prompt_idx), false);
+        assert!(state.is_follow_mode());
+        assert!(!state.is_follow_preserve_scroll());
+        assert_eq!(state.scroll_offset(), bottom);
+        assert_eq!(state.selected(), Some(prompt_idx));
+
+        let (mut state, prompt_idx) = tall_state_with_prompt();
+        state.goto_bottom();
+        state.scroll_up(10);
+        let reading = state.scroll_offset();
+        state.follow_new_turn(Some(prompt_idx), false);
+        assert!(!state.is_follow_mode());
+        assert_eq!(state.scroll_offset(), reading);
+        assert_eq!(state.selected(), Some(prompt_idx));
+
+        // No prompt (bash/synthetic): always arm follow, with or without page_flip.
+        let (mut state, _) = tall_state_with_prompt();
+        state.goto_bottom();
+        state.follow_new_turn(None, true);
+        assert!(state.is_follow_mode());
+        assert!(state.is_follow_preserve_scroll());
+
+        let (mut state, _) = tall_state_with_prompt();
+        state.goto_bottom();
+        state.scroll_up(10);
+        let reading = state.scroll_offset();
+        state.follow_new_turn(None, false);
+        assert!(state.is_follow_mode());
+        assert!(state.is_follow_preserve_scroll());
+        assert_eq!(state.scroll_offset(), reading);
+    }
 
     #[test]
     fn test_response_anchor_trailing_run_skips_interleaved_messages() {
@@ -2342,5 +2448,86 @@ mod tests {
             expected as usize,
             "page-down should advance a full viewport - 2 with sticky headers off"
         );
+    }
+
+    #[test]
+    fn response_top_above_tracks_the_answer_being_read() {
+        let mut state = ScrollbackState::new();
+        state.push_block(user_block("Q1")); // 0
+        state.push_block(tall_agent_block()); // 1
+        state.prepare_layout(80, 6);
+
+        // Follow mode parks at the tail of the long answer: its first line
+        // is above the viewport, so the indicator has a jump to offer.
+        assert!(state.is_follow_mode());
+        assert!(state.has_response_top_above());
+
+        // Taking the jump (the indicator click = K) lands on the answer's
+        // top; from there there is nothing further up to jump to.
+        assert!(state.prev_response());
+        assert_eq!(state.selected(), Some(1));
+        assert!(!state.has_response_top_above());
+    }
+
+    #[test]
+    fn response_top_above_is_false_for_short_answers_and_without_layout() {
+        let mut state = ScrollbackState::new();
+        state.push_block(user_block("Q1"));
+        state.push_block(agent_block("short answer"));
+
+        // No layout yet: no viewport top to compare against.
+        assert!(!state.has_response_top_above());
+
+        // Fully visible answer: nothing above the viewport top.
+        state.prepare_layout(80, 20);
+        assert!(!state.has_response_top_above());
+    }
+
+    #[test]
+    fn response_top_above_works_for_earlier_turns_too() {
+        let mut state = ScrollbackState::new();
+        state.push_block(user_block("Q1")); // 0
+        state.push_block(tall_agent_block()); // 1
+        state.push_block(user_block("Q2")); // 2
+        state.push_block(tall_agent_block()); // 3
+        state.prepare_layout(80, 6);
+
+        // Park the viewport mid-way through turn 0's answer: the indicator
+        // is not reserved for the last turn.
+        state.goto_top();
+        while !state.has_response_top_above() {
+            let before = state.scroll_offset();
+            state.scroll_down(1);
+            assert_ne!(
+                state.scroll_offset(),
+                before,
+                "hit the bottom without ever entering turn 0's answer"
+            );
+        }
+        assert_eq!(state.active_turn_for_viewport(), Some(0));
+
+        // The jump snaps to THIS answer's top, not the last one's.
+        assert!(state.prev_response());
+        assert_eq!(state.selected(), Some(1));
+    }
+
+    #[test]
+    fn response_top_above_is_false_while_the_answer_is_still_below() {
+        let mut state = ScrollbackState::new();
+        state.push_block(user_block("Q1")); // 0
+        state.push_block(tall_agent_block()); // 1
+        state.push_block(user_block("Q2")); // 2
+        for i in 0..8 {
+            state.push_block(tool_block(&format!("tool {i}"))); // 3..=10
+        }
+        state.push_block(agent_block("A2")); // 11
+        state.prepare_layout(80, 6);
+
+        // Viewport top inside turn 1's tool run: turn 1's answer starts
+        // BELOW the top, so there is no "top of the response" to return to
+        // even though turn 0's answer sits further up.
+        state.scroll_to_entry_top(8);
+        assert_eq!(state.active_turn_for_viewport(), Some(1));
+        assert!(!state.has_response_top_above());
     }
 }

@@ -12,6 +12,11 @@ workspace = true
 anyhow = { workspace = true }
 pbjson-build = { workspace = true }
 prost-build = { workspace = true }
+prost-reflect = { workspace = true }
+# Windows cannot execute the shebang-based DotSlash wrapper in `bin/protoc`
+# from a Rust build script, so a vendored platform binary is the last resort
+# in `find_protoc`. Without it every Cargo build on Windows fails in the
+# proto codegen step.
 protoc-bin-vendored = "3"
 tempfile = { workspace = true }
 tonic-prost-build = { workspace = true }

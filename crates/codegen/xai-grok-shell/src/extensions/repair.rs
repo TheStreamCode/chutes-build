@@ -1,4 +1,4 @@
-//! `chutes.build/session/repair` — out-of-band recovery for sessions bricked by
+//! `chutes.ai/session/repair` — out-of-band recovery for sessions bricked by
 //! corrupted tool-pairing history.
 //!
 //! A `ToolResult` whose owning assistant `tool_call` is missing (e.g. a
@@ -32,10 +32,10 @@ struct RepairSessionRequest {
     dry_run: bool,
 }
 
-/// Response payload for `chutes.build/session/repair`.
+/// Response payload for `chutes.ai/session/repair`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RepairSessionResponse {
+pub(crate) struct RepairSessionResponse {
     /// Whether the repair modified (or, for `dryRun`, would modify) the history.
     pub repaired: bool,
     /// Echo of the request's `dryRun` flag.

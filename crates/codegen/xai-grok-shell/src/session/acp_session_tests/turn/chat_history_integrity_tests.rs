@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use xai_grok_test_support::sse::{
-    responses_api_reasoning_and_text_events, responses_api_reasoning_then_tool_call_events,
+    responses_api_reasoning_then_tool_call_events, responses_api_script_exact,
 };
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
@@ -67,7 +67,7 @@ fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg
     tokio::task::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
-                let _ = respond_to.send(());
+                let _ = respond_to.send(Ok(()));
             }
         }
     });
@@ -95,20 +95,11 @@ fn tool_results_by_call_id(conv: &[ConversationItem]) -> HashMap<String, Vec<Str
 /// Pre-fix this failed: the nudge was pushed after the assistant `tool_use`
 /// was committed and before `execute_tool_calls`, so integrity repair wrote
 /// a cancel result and the real result landed beside it under the same id.
-#[test]
-fn mid_turn_user_injection_must_not_duplicate_tool_results_for_one_tool_use_id() {
-    std::thread::Builder::new()
-        .name("chat-history-integrity".into())
-        .stack_size(16 * 1024 * 1024)
-        .spawn(|| {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build test runtime");
-            runtime.block_on(async {
-                let local = tokio::task::LocalSet::new();
-                local
-                    .run_until(async {
+#[tokio::test(flavor = "current_thread")]
+async fn mid_turn_user_injection_must_not_duplicate_tool_results_for_one_tool_use_id() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
             let server = MockInferenceServer::start().await.expect("mock inference server");
             for i in 1..=IDENTICAL_CALLS_TO_TRIP_NUDGE {
                 server.enqueue_response(
@@ -118,9 +109,7 @@ fn mid_turn_user_injection_must_not_duplicate_tool_results_for_one_tool_use_id()
             }
             server.enqueue_response(
                 "/v1/responses",
-                ScriptedResponse::sse(responses_api_reasoning_and_text_events(
-                    "finished", "done", "test",
-                )),
+                ScriptedResponse::sse(responses_api_script_exact("done", "test")),
             );
 
             let sampling_cfg = xai_grok_sampler::SamplerConfig {
@@ -258,11 +247,6 @@ fn mid_turn_user_injection_must_not_duplicate_tool_results_for_one_tool_use_id()
                  run; deleting the nudge is not a valid fix for chat-history corruption. \
                  conversation={conv:#?}"
             );
-                    })
-                    .await;
-            });
         })
-        .expect("spawn test thread")
-        .join()
-        .expect("chat-history-integrity test thread");
+        .await;
 }

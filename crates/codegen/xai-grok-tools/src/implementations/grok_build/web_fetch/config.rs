@@ -40,6 +40,12 @@ pub struct WebFetchParams {
     /// routed through this URL.
     #[serde(default)]
     pub proxy_endpoint: Option<String>,
+    /// When true, allow fetches to **explicit** loopback hosts only
+    /// (`localhost`, `127.0.0.0/8`, `::1`). Private/metadata stay blocked.
+    /// Default: `false` (fail closed). Set via `[toolset.web_fetch]
+    /// allow_local = true` or `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL=1`.
+    #[serde(default)]
+    pub allow_local: Option<bool>,
 }
 
 register_resource!("grok_build", "WebFetch", WebFetchParams);
@@ -71,6 +77,10 @@ impl WebFetchParams {
         self.context_window_tokens.unwrap_or(128_000)
     }
 
+    pub fn allow_local(&self) -> bool {
+        self.allow_local.unwrap_or(false)
+    }
+
     pub fn allowed_domains(&self) -> Vec<String> {
         match &self.allowed_domains {
             Some(v) => v.clone(),
@@ -87,6 +97,8 @@ impl WebFetchParams {
 pub static DEFAULT_ALLOWED_DOMAINS: &[&str] = &[
     // xAI
     "chutes.ai",
+    "console.chutes.ai",
+    "docs.chutes.ai",
     "api.chutes.ai",
     "llm.chutes.ai",
     "model-router-ten.vercel.app",

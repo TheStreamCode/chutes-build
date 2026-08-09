@@ -233,8 +233,8 @@ pub fn persist_trust(store: &mut TrustStore, key: &Path) {
     }
 }
 
-/// Whether any repo-local code-exec config is present for `cwd`. When none are
-/// present there is nothing to gate, so we skip the prompt entirely.
+/// Whether any repo-local trust-sensitive config is present for `cwd`. When none
+/// are present there is nothing to gate, so we skip the prompt entirely.
 ///
 /// Thin wrapper over [`collect_repo_config_kinds`] with `first_only = true`, so
 /// the gate and the display-only [`repo_config_kinds`] enumerate the EXACT same
@@ -244,22 +244,23 @@ pub fn repo_configs_present(cwd: &Path) -> bool {
     !collect_repo_config_kinds(cwd, true).is_empty()
 }
 
-/// Display-only: which repo-local code-exec config KINDS are present for `cwd`
-/// (`mcp`, `plugins`, `permission`, `lsp`, `envrc`, `claude`, `hooks`, `agents`),
-/// deduped in cheap→expensive marker order. Single source with
-/// [`repo_configs_present`] (which is `!repo_config_kinds(cwd).is_empty()`), so
-/// a folder that the gate fired on always has a non-empty, accurate kind list —
-/// no `[plugins].paths` / `[permission]` / `.claude` / `.chutes-build/agents` /
-/// subdir-launch gaps. NOT itself the trust gate.
+/// Display-only: which repo-local trust-sensitive config KINDS are present for
+/// `cwd` (`mcp`, `plugins`, `permission`, `lsp`, `envrc`, `claude`, `hooks`,
+/// `agents`, `roles`, `personas`, `workflows`), deduped in cheap→expensive
+/// marker order. Single source with [`repo_configs_present`] (which is
+/// `!repo_config_kinds(cwd).is_empty()`), so a folder that the gate fired on
+/// always has a non-empty, accurate kind list — no `[plugins].paths` /
+/// `[permission]` / `.claude` / `.chutes-build/agents` / subdir-launch gaps. NOT itself
+/// the trust gate.
 pub fn repo_config_kinds(cwd: &Path) -> Vec<&'static str> {
     collect_repo_config_kinds(cwd, false)
 }
 
-/// Whether a project `.chutes-build/config.toml` `[permission]` value would
-/// contribute rules to the permission resolver. Mirrors the compact/verbose
-/// shapes that `permission::resolution` loads: non-empty `allow`/`deny`/`ask`
-/// string arrays, or a non-empty verbose `rules` array. Empty arrays / empty
-/// tables do not gate (same as empty `[mcp_servers]` / empty `[plugins].paths`).
+/// Whether a project `.chutes-build/config.toml` `[permission]` value would contribute
+/// rules to the permission resolver. Mirrors the compact/verbose shapes that
+/// `permission::resolution` loads: non-empty `allow`/`deny`/`ask` string arrays,
+/// or a non-empty verbose `rules` array. Empty arrays / empty tables do not gate
+/// (same as empty `[mcp_servers]` / empty `[plugins].paths`).
 fn config_toml_permission_contributes(permission_value: &TomlValue) -> bool {
     let Some(table) = permission_value.as_table() else {
         // Non-table `[permission]` fails config load elsewhere; treat as a
@@ -285,6 +286,14 @@ fn config_toml_permission_contributes(permission_value: &TomlValue) -> bool {
 fn path_present_or_uncertain(path: &Path) -> bool {
     match std::fs::symlink_metadata(path) {
         Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
+}
+
+fn directory_present_or_uncertain(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(metadata) => metadata.is_dir(),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(_) => true,
     }
@@ -359,9 +368,8 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
         hit!("lsp");
     }
     // Project `.cursor/mcp.json` — vendor MCP loading is default-on and tagged
-    // `Project`, so a repo shipping ONLY this file must still be gated. (File
-    // presence is enough; if the `.cursor` compat flag is off the servers won't
-    // spawn and gating is a harmless no-op.)
+    // `Project`, so a repo shipping ONLY this file must still be gated (file
+    // presence is enough).
     if cwd.join(".cursor").join("mcp.json").is_file() {
         hit!("mcp");
     }
@@ -411,6 +419,17 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // can't drift from agent discovery — same pattern as the plugin line above.
     if !xai_grok_agent::discovery::project_agent_dirs_in(&chain.dirs).is_empty() {
         hit!("agents");
+    }
+    // Presence matches exact-cwd discovery without parsing repository content.
+    let grok = cwd.join(".chutes-build");
+    if directory_present_or_uncertain(&grok.join("roles")) {
+        hit!("roles");
+    }
+    if directory_present_or_uncertain(&grok.join("personas")) {
+        hit!("personas");
+    }
+    if directory_present_or_uncertain(&hook_root.join(".chutes-build").join("workflows")) {
+        hit!("workflows");
     }
     // `~/.claude.json` `projects.<cwd>.mcpServers`.
     if claude_project_mcp_present(cwd) {
@@ -632,6 +651,74 @@ mod tests {
     }
 
     #[test]
+    fn repo_configs_present_detects_project_roles() {
+        let tmp = repo_tmp();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("roles")).unwrap();
+
+        assert!(repo_configs_present(tmp.path()));
+        assert!(repo_config_kinds(tmp.path()).contains(&"roles"));
+    }
+
+    #[test]
+    fn repo_configs_present_detects_project_personas() {
+        let tmp = repo_tmp();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("personas")).unwrap();
+
+        assert!(repo_configs_present(tmp.path()));
+        assert!(repo_config_kinds(tmp.path()).contains(&"personas"));
+    }
+
+    #[test]
+    fn project_subagent_marker_regular_file_is_absent() {
+        let tmp = repo_tmp();
+        let grok = tmp.path().join(".chutes-build");
+        std::fs::create_dir_all(&grok).unwrap();
+        std::fs::write(grok.join("roles"), "not a directory").unwrap();
+        assert!(!repo_configs_present(tmp.path()));
+    }
+
+    #[test]
+    fn project_subagent_marker_at_repo_root_is_absent_from_subdir() {
+        let tmp = repo_tmp();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build/roles")).unwrap();
+        let subdir = tmp.path().join("nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+        assert!(!repo_configs_present(&subdir));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_subagent_marker_symlink_to_directory_is_present() {
+        let tmp = repo_tmp();
+        let target = tmp.path().join("target-roles");
+        let grok = tmp.path().join(".chutes-build");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&grok).unwrap();
+        std::os::unix::fs::symlink(&target, grok.join("roles")).unwrap();
+        assert!(repo_configs_present(tmp.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_project_subagent_marker_is_absent() {
+        let tmp = repo_tmp();
+        let grok = tmp.path().join(".chutes-build");
+        std::fs::create_dir_all(&grok).unwrap();
+        std::os::unix::fs::symlink("missing", grok.join("personas")).unwrap();
+        assert!(!repo_configs_present(tmp.path()));
+    }
+
+    #[test]
+    fn repo_configs_present_detects_project_workflows_from_subdir() {
+        let tmp = repo_tmp();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("workflows")).unwrap();
+        let subdir = tmp.path().join("crates").join("inner");
+        std::fs::create_dir_all(&subdir).unwrap();
+        assert!(repo_configs_present(&subdir));
+        assert!(repo_config_kinds(&subdir).contains(&"workflows"));
+    }
+
+    #[test]
     fn repo_configs_present_detects_claude_settings_from_subdir() {
         // A `.claude/settings.json` `env` in a SUBDIR (no other repo config),
         // launched from that subdir, must be detected: the env loader walks
@@ -749,7 +836,7 @@ mod tests {
         // A repo whose ONLY repo-local config is a contributing `[permission]`
         // section (no MCP/plugins/hooks) must still be gated: those allow rules
         // auto-approve tool calls, so an ungated clone loads the attacker's
-        // policy. Also covers subdir launch (cwd->git-root walk).
+        // policy. Also covers subdir launch (cwd→git-root walk).
         let tmp = repo_tmp();
         let grok = tmp.path().join(".chutes-build");
         std::fs::create_dir_all(&grok).unwrap();

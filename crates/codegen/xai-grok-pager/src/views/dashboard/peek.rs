@@ -571,7 +571,7 @@ pub fn render_peek_panel(
     live_tail: Option<PeekLiveTailArgs<'_>>,
     empty_hint: Option<&str>,
 ) -> PeekRenderResult {
-    use crate::views::prompt_widget::PromptStyle;
+    use crate::views::prompt_widget::{PromptBg, PromptStyle};
     use ratatui::widgets::{Block, BorderType, Borders, Widget};
     use unicode_width::UnicodeWidthStr;
     if area.area() == 0 || area.height < 3 || area.width < 20 {
@@ -724,7 +724,7 @@ pub fn render_peek_panel(
                             show_prefix: false,
                             vpad_top: 0,
                             chrome: false,
-                            bg_override: Some(theme.bg_base),
+                            bg: PromptBg::Canvas(theme.bg_base),
                             image_preview: false,
                             ..PromptStyle::default()
                         };
@@ -863,17 +863,14 @@ pub fn render_peek_panel(
         show_prefix: false,
         vpad_top: 0,
         chrome: false,
-        bg_override: Some(theme.bg_base),
+        bg: PromptBg::Canvas(theme.bg_base),
         placeholder_override: Some("reply\u{2026}"),
         image_preview: false,
         ..PromptStyle::default()
     };
-    // Stream the interim transcript into the reply box (and hide the caret)
-    // while dictating, so voice on the dashboard is visible even with a row's
-    // peek panel open — it stands in for the dispatch box's voice overlay.
+    // Interim STT into the reply box so voice stays visible with a peek open.
     let voice_overlay = (voice_listening || voice_interim.is_some()).then_some(
         crate::views::prompt_widget::VoicePromptOverlay {
-            listening: voice_listening,
             interim: voice_interim,
             color: theme.accent_running,
         },
@@ -1021,6 +1018,7 @@ pub fn extract_last_response_type(agent: &AgentView) -> String {
                 }
             }
             RenderBlock::Subagent(_) => return "Subagent".to_string(),
+            RenderBlock::Workflow(_) => return "Workflow".to_string(),
             RenderBlock::BgTask(_) => return "Task".to_string(),
             RenderBlock::Btw(_) => return "Btw".to_string(),
             RenderBlock::ContextInfo(_) => return "Context".to_string(),
@@ -1150,6 +1148,7 @@ fn block_short_text(block: &crate::scrollback::block::RenderBlock) -> Option<Str
         RenderBlock::ToolCall(_) => Some("(tool call)".to_string()),
         RenderBlock::BgTask(_) => Some("(background task)".to_string()),
         RenderBlock::Subagent(_) => Some("(subagent)".to_string()),
+        RenderBlock::Workflow(_) => Some("(workflow)".to_string()),
         RenderBlock::Btw(_) => Some("(btw)".to_string()),
         RenderBlock::ContextInfo(_) => Some("(context info)".to_string()),
         RenderBlock::CreditLimit(_) => Some("(credit limit)".to_string()),

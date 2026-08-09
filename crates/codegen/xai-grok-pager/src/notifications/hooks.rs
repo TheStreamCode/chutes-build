@@ -1,24 +1,9 @@
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::notifications::NotificationEvent;
 use crate::notifications::config::NotificationHook;
-
-fn configure_hook_environment(
-    cmd: &mut Command,
-    event_str: &str,
-    message: &str,
-    session_id: Option<&str>,
-) {
-    cmd.env("CHUTES_BUILD_EVENT", event_str)
-        .env("CHUTES_BUILD_MESSAGE", message)
-        // Do not let a parent process leak a stale session ID into events that
-        // intentionally have no owning session.
-        .env_remove("CHUTES_BUILD_SESSION_ID");
-    if let Some(sid) = session_id {
-        cmd.env("CHUTES_BUILD_SESSION_ID", sid);
-    }
-}
 
 fn execute_hook(
     command: &str,
@@ -27,29 +12,17 @@ fn execute_hook(
     session_id: Option<&str>,
     timeout: Duration,
 ) {
-    #[cfg(windows)]
-    let mut cmd = {
-        let mut command_process = Command::new("powershell.exe");
-        command_process.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            command,
-        ]);
-        command_process
-    };
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut command_process = Command::new("sh");
-        command_process.args(["-c", command]);
-        command_process
-    };
-
-    configure_hook_environment(&mut cmd, event_str, message, session_id);
-    cmd.stdin(Stdio::null())
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
+        .arg(command)
+        .env("CHUTES_BUILD_EVENT", event_str)
+        .env("CHUTES_BUILD_MESSAGE", message)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if let Some(sid) = session_id {
+        cmd.env("CHUTES_BUILD_SESSION_ID", sid);
+    }
 
     // Create a new process group so we can kill the entire tree on timeout,
     // preventing orphaned subprocesses from accumulating.
@@ -66,36 +39,59 @@ fn execute_hook(
         }
     }
 
-    match cmd.spawn() {
-        Ok(mut child) => {
-            use wait_timeout::ChildExt;
-            match child.wait_timeout(timeout) {
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    // Kill the entire process group, not just the direct child.
-                    #[cfg(unix)]
-                    {
-                        let pid = child.id() as i32;
-                        let _ = nix::sys::signal::killpg(
-                            nix::unistd::Pid::from_raw(pid),
-                            nix::sys::signal::Signal::SIGKILL,
-                        );
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = child.kill();
-                    }
-                    let _ = child.wait();
-                    tracing::warn!("hook timed out");
-                }
-                Err(e) => tracing::debug!(error = %e, command, "hook wait failed"),
+    #[allow(clippy::disallowed_methods)] // enrolled below, once the child exists
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            tracing::debug!(error = %e, command, "hook spawn failed");
+            return;
+        }
+    };
+
+    // Enrolled so a hook still running when the pager exits is reaped with it.
+    let group = attach_to_global_scope(&child);
+
+    use wait_timeout::ChildExt;
+    let waited = child.wait_timeout(timeout);
+    if !matches!(waited, Ok(Some(_))) {
+        // The enrollment ends with this function, so kill rather than orphan.
+        match &group {
+            Some(group) => {
+                let _ = group.kill();
+            }
+            None => {
+                let _ = child.kill();
             }
         }
-        Err(e) => tracing::debug!(error = %e, command, "hook spawn failed"),
+        let _ = child.wait();
+    }
+    // Reaped, so the pid is released and its pgid can be recycled: the group
+    // handle must not outlive the child it names.
+    drop(group);
+    match waited {
+        Ok(Some(_)) => {}
+        Ok(None) => tracing::warn!("hook timed out"),
+        Err(e) => tracing::debug!(error = %e, command, "hook wait failed"),
     }
 }
 
-fn spawn_hook(hook: &NotificationHook, event: &NotificationEvent) -> std::thread::JoinHandle<()> {
+/// `None` when the child could not be enrolled, which includes the scope
+/// having already closed and killed it.
+fn attach_to_global_scope(child: &std::process::Child) -> Option<Arc<xai_tty_utils::ProcessGroup>> {
+    let mut group = xai_tty_utils::ProcessGroup::new()
+        .inspect_err(|e| tracing::debug!(error = %e, "hook process group failed"))
+        .ok()?;
+    group
+        .attach_std(child)
+        .inspect_err(|e| tracing::debug!(error = %e, "hook process group attach failed"))
+        .ok()?;
+    let group = Arc::new(group);
+    xai_tty_utils::global_process_scope()
+        .register(&group)
+        .then_some(group)
+}
+
+pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
     let command = hook.command.clone();
     let event_str: &'static str = event.kind.as_str();
     let message = event.body.clone();
@@ -110,91 +106,45 @@ fn spawn_hook(hook: &NotificationHook, event: &NotificationEvent) -> std::thread
             session_id.as_deref(),
             timeout,
         );
-    })
-}
-
-pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
-    // Notification hooks are intentionally fire-and-forget in production.
-    // Keeping the handle available in the private helper lets tests wait for
-    // the worker deterministically without changing the public behavior.
-    drop(spawn_hook(hook, event));
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::notifications::config::NotificationEventKind;
-    use std::path::Path;
     use std::time::Instant;
 
-    #[cfg(windows)]
-    fn quote_path(path: &Path) -> String {
-        format!("'{}'", path.display().to_string().replace('\'', "''"))
-    }
-
-    #[cfg(not(windows))]
-    fn quote_path(path: &Path) -> String {
-        format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
-    }
-
-    #[cfg(windows)]
-    fn write_env_command(out: &Path) -> String {
-        format!(
-            "@('CHUTES_BUILD_EVENT=' + $env:CHUTES_BUILD_EVENT, \
-             'CHUTES_BUILD_MESSAGE=' + $env:CHUTES_BUILD_MESSAGE, \
-             'CHUTES_BUILD_SESSION_ID=' + $env:CHUTES_BUILD_SESSION_ID) | \
-             Set-Content -LiteralPath {}",
-            quote_path(out)
-        )
-    }
-
-    #[cfg(not(windows))]
-    fn write_env_command(out: &Path) -> String {
-        format!(
-            "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
-             \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
-            quote_path(out)
-        )
-    }
-
-    #[cfg(windows)]
-    fn sleep_command(seconds: u64) -> String {
-        format!("Start-Sleep -Seconds {seconds}")
-    }
-
-    #[cfg(not(windows))]
-    fn sleep_command(seconds: u64) -> String {
-        format!("sleep {seconds}")
-    }
-
-    #[cfg(windows)]
-    fn create_file_command(path: &Path) -> String {
-        format!(
-            "Set-Content -LiteralPath {} -Value '' -NoNewline",
-            quote_path(path)
-        )
-    }
-
-    #[cfg(not(windows))]
-    fn create_file_command(path: &Path) -> String {
-        format!("touch {}", quote_path(path))
+    /// A redirect target `sh -c` will accept.
+    ///
+    /// The hook runs through `sh -c`, so a bare Windows path in the command
+    /// string has its backslashes eaten as escapes: `> C:\Users\me\t\env.txt`
+    /// becomes `> CUsersmetenv.txt`. The redirect then lands in the process's
+    /// working directory — the crate root — leaving a stray file behind on
+    /// every run, and the assertion reads the temp path and finds nothing.
+    /// Quote it and hand the shell forward slashes.
+    fn shell_redirect_target(path: &std::path::Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\\', "/"))
     }
 
     fn test_event() -> NotificationEvent {
         NotificationEvent {
             kind: NotificationEventKind::TurnComplete,
-            title: "Grok".into(),
+            title: "Chutes Build".into(),
             body: "test body payload".into(),
             session_id: Some("test-session-123".into()),
         }
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
-        let command = write_env_command(&out);
+        let command = format!(
+            "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
+             \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
+            shell_redirect_target(&out)
+        );
 
         execute_hook(
             &command,
@@ -220,26 +170,31 @@ mod tests {
     }
 
     #[test]
-    fn removes_inherited_session_id_when_none() {
-        let mut cmd = Command::new("unused");
-        cmd.env("CHUTES_BUILD_SESSION_ID", "stale-parent-session");
+    fn omits_session_id_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("env.txt");
+        let command = format!("env > {}", shell_redirect_target(&out));
 
-        configure_hook_environment(&mut cmd, "Turn complete", "msg", None);
+        execute_hook(
+            &command,
+            "Turn complete",
+            "msg",
+            None,
+            Duration::from_secs(5),
+        );
 
-        let session_id = cmd
-            .get_envs()
-            .find(|(key, _)| *key == std::ffi::OsStr::new("CHUTES_BUILD_SESSION_ID"))
-            .expect("session ID must have an explicit environment disposition")
-            .1;
-        assert_eq!(session_id, None);
+        let content = std::fs::read_to_string(&out).unwrap();
+        assert!(
+            !content.contains("CHUTES_BUILD_SESSION_ID"),
+            "CHUTES_BUILD_SESSION_ID should not be set: {content}"
+        );
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn kills_on_timeout() {
         let start = Instant::now();
         execute_hook(
-            &sleep_command(100),
+            "sleep 100",
             "Turn complete",
             "msg",
             None,
@@ -253,7 +208,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn handles_failed_shell_command_gracefully() {
         execute_hook(
             "/nonexistent/path/binary",
@@ -265,7 +219,6 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn handles_nonzero_exit_gracefully() {
         execute_hook(
             "exit 1",
@@ -277,11 +230,10 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
-        let command = create_file_command(&marker);
+        let command = format!("touch {}", marker.display());
 
         execute_hook(
             &command,
@@ -295,10 +247,9 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn run_hook_spawns_thread_without_panic() {
         let hook = NotificationHook {
-            command: "exit 0".into(),
+            command: "true".into(),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 5,
@@ -308,12 +259,11 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn timeout_clamped_to_minimum_one_second() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
         let hook = NotificationHook {
-            command: format!("{}; {}", sleep_command(100), create_file_command(&marker)),
+            command: format!("sleep 100; touch {}", marker.display()),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 0, // exercises the .max(1) clamp inside run_hook
@@ -338,23 +288,35 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial(NOTIFICATION_HOOKS)]
     fn run_hook_passes_correct_env_via_thread() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("env.txt");
         let hook = NotificationHook {
-            command: write_env_command(&out),
+            command: format!(
+                "printf 'CHUTES_BUILD_EVENT=%s\\nCHUTES_BUILD_MESSAGE=%s\\nCHUTES_BUILD_SESSION_ID=%s\\n' \
+                 \"$CHUTES_BUILD_EVENT\" \"$CHUTES_BUILD_MESSAGE\" \"$CHUTES_BUILD_SESSION_ID\" > {}",
+                shell_redirect_target(&out)
+            ),
             events: vec![],
             only_unfocused: false,
             timeout_secs: 5,
         };
         let event = test_event();
-        spawn_hook(&hook, &event)
-            .join()
-            .expect("notification hook worker should not panic");
+        run_hook(&hook, &event);
 
-        let content = std::fs::read_to_string(&out)
-            .expect("notification hook should produce the environment output file");
+        // Poll for the output file instead of a fixed sleep — the spawned
+        // thread + fork/exec may take variable time on loaded systems.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let content = loop {
+            if let Ok(c) = std::fs::read_to_string(&out) {
+                break c;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "hook did not produce output file within 5s (sh or printf may not be available)"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
         assert!(content.contains("CHUTES_BUILD_EVENT=Turn complete"));
         assert!(content.contains("CHUTES_BUILD_MESSAGE=test body payload"));
         assert!(content.contains("CHUTES_BUILD_SESSION_ID=test-session-123"));

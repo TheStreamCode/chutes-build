@@ -11,7 +11,7 @@ pub(crate) fn is_server_initiated_prompt(prompt_id: &str) -> bool {
 /// Cron turns are synthetic (so [`is_server_initiated_prompt`] is also true for
 /// them), but UNLIKE auto-wake / subagent-completion turns they are
 /// CLIENT-driven via `MvpAgent::prompt()` and therefore DO emit a matching
-/// `chutes.build/session/prompt_complete` turn-end signal. A viewer can thus safely
+/// `chutes.ai/session/prompt_complete` turn-end signal. A viewer can thus safely
 /// enter `TurnRunning` for them (the exit exists, so it won't strand) — which is
 /// what lets the dashboard show a running `/loop` session as Working.
 pub(crate) fn is_scheduler_fired_prompt(prompt_id: &str) -> bool {
@@ -22,24 +22,26 @@ pub(crate) fn is_scheduler_fired_prompt(prompt_id: &str) -> bool {
 }
 
 /// Returns true for the auto-wake turn families (`task-completed-…`,
-/// `subagent-completed-…`, `notifications-…`). These run non-adopted — no
+/// `subagent-completed-…`, `workflow-completed-…`, `notifications-…`). These run non-adopted — no
 /// `PromptResponse`, no viewer finalize — so their durable `TurnCompleted` is
-/// the only signal marking the back-to-idle point, and it pushes the turn-end
-/// marker directly. Deliberately narrower than "non-adopted synthetic": goal
-/// turns render through the goal chip/loop chrome and `plan-resume-…` keeps
-/// its current markerless shape.
+/// the only signal marking the back-to-idle point (see [`finish_wake_turn`];
+/// a chatty wake closes with a marker, a silent one stays markerless).
+/// Deliberately narrower than "non-adopted
+/// synthetic": goal turns render through the goal chip/loop chrome and
+/// `plan-resume-…` keeps its own markerless shape.
 pub(crate) fn is_wake_prompt(prompt_id: &str) -> bool {
     matches!(
         xai_grok_shell::session::PromptOrigin::from_prompt_id(prompt_id),
         xai_grok_shell::session::PromptOrigin::TaskCompleted { .. }
             | xai_grok_shell::session::PromptOrigin::SubagentCompleted { .. }
+            | xai_grok_shell::session::PromptOrigin::WorkflowCompleted { .. }
             | xai_grok_shell::session::PromptOrigin::NotificationDrain
     )
 }
 
 /// Whether a running `prompt_id` is adoptable — i.e. safe to bind as the
 /// viewer's `current_prompt_id` and show as a live `TurnRunning`. The invariant:
-/// adoptable iff the turn emits a terminal `chutes.build/session/prompt_complete`, the
+/// adoptable iff the turn emits a terminal `chutes.ai/session/prompt_complete`, the
 /// only non-interactive way a viewer leaves `TurnRunning`. That holds for
 /// user-driven turns and `/loop` (`scheduler-fired-…`) fires — both run via
 /// `MvpAgent::prompt()` — and is false for actor-run synthetic turns
@@ -85,42 +87,86 @@ pub(super) fn viewer_turn_anchor(turn_start_ms: Option<i64>) -> std::time::Insta
         .unwrap_or(now)
 }
 
-/// Elapsed for a wake turn's end marker: its delta-borne `turnStartMs`
-/// ([`AgentView::wake_turn_start`], consumed here on a pid match) to the
-/// terminal's `agentTimestampMs` — both stamped by the shell clock, so client
-/// skew cancels (fall back to client now when the stamp is missing). `None`
-/// — no tracked start (old shells / no deltas seen) or a nonsensical negative
-/// span — renders the marker without a duration rather than lying with
-/// "0.0s".
-pub(super) fn wake_turn_elapsed(
+/// Close out a wake turn — the only flush site for its in-flight streamed
+/// entries (wake turns skip `PromptResponse`). Markers: visible output closes
+/// with one; silence closes with none — except failures, which surface even
+/// when silent (the user's standing instruction stopped executing invisibly).
+/// Silent rate limits defer to the retry notifications, like the real-turn
+/// rails.
+///
+/// `cancel_trigger` is the signal's `_meta.cancelTrigger`. `"send_now"` marks
+/// an internal cancel-and-send, so the `TurnCancelled` marker is suppressed
+/// (wire trigger wins; `expect_send_now_cancel` is the older-shell fallback).
+pub(super) fn finish_wake_turn(
     agent: &mut AgentView,
     prompt_id: &str,
-    end_ms: Option<i64>,
-) -> Option<std::time::Duration> {
-    let (_, start_ms) = agent.wake_turn_start.take_if(|(pid, _)| pid == prompt_id)?;
-    let end_ms = end_ms.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-    u64::try_from(end_ms - start_ms)
-        .ok()
-        .map(std::time::Duration::from_millis)
-}
-
-/// Push a wake turn's end marker via the shared terminal-marker helper so the
-/// wake turn's OWN stop hooks (pid-matched stash) render inline on the marker
-/// instead of as a stray block. A REAL turn's leftover stash (pid mismatch)
-/// must stay pending for its own marker rail — never fold into, nor flush
-/// standalone on, an unrelated wake — hence `preserve_mismatched_stash`.
-pub(super) fn push_wake_end_marker(
-    agent: &mut AgentView,
-    prompt_id: &str,
-    elapsed: Option<std::time::Duration>,
+    stop_reason: &str,
+    agent_result: Option<&str>,
+    cancel_trigger: Option<&str>,
 ) {
-    // Wake turns skip PromptResponse; finish streaming so a trailing ` is flushed.
-    agent.session.tracker.finish_turn(&mut agent.scrollback);
+    use crate::scrollback::blocks::SessionEvent;
 
-    crate::app::turn_completion::push_turn_terminal_marker(
-        agent,
-        Some(SessionEvent::TurnCompleted { elapsed }),
-        Some(prompt_id),
-        /* preserve_mismatched_stash */ true,
-    );
+    let had_output = agent.session.tracker.output_since_last_finish();
+    agent.session.tracker.finish_turn(&mut agent.scrollback);
+    // The stored `turn_start_ms` may belong to an earlier turn (a silent wake
+    // streamed no deltas of its own; interleaved deltas can re-stamp it) —
+    // claim an elapsed only when the anchor is provably this wake's.
+    let anchor_is_ours = agent.turn_start_ms_prompt.as_deref() == Some(prompt_id);
+    let elapsed = if had_output && anchor_is_ours {
+        agent.turn_start_ms.and_then(|start_ms| {
+            let ms = chrono::Utc::now()
+                .timestamp_millis()
+                .saturating_sub(start_ms);
+            (ms >= 0).then(|| std::time::Duration::from_millis(ms as u64))
+        })
+    } else {
+        None
+    };
+    // Wire trigger carries this case; pid-matched fallback is consistency-only (do not take/clear).
+    let send_now_cancel = match cancel_trigger {
+        Some(trigger) => trigger == "send_now",
+        None => agent.expect_send_now_cancel.as_deref() == Some(prompt_id),
+    };
+    let already_failed = agent.failed_wake_marker_for.as_deref() == Some(prompt_id);
+    let event = match stop_reason {
+        "error" | "rate_limit"
+            if already_failed || (stop_reason == "rate_limit" && !had_output) =>
+        {
+            None
+        }
+        "error" | "rate_limit" => {
+            agent.failed_wake_marker_for = Some(prompt_id.to_string());
+            // A dedicated banner (re-auth, overflow, disk-full, formatted
+            // request failure) from the retry-state rail already covers this
+            // failure — same dedupe as `turn_failed_event` on the local rails.
+            if crate::app::dispatch::scrollback_has_recent_error_banner(&agent.scrollback) {
+                None
+            } else {
+                let error = if stop_reason == "error" {
+                    crate::app::error_display::format_request_failure(
+                        None,
+                        None,
+                        agent_result.unwrap_or("unknown error"),
+                    )
+                    .message()
+                } else {
+                    agent_result
+                        .map(str::to_string)
+                        .unwrap_or_else(|| "rate limited".to_string())
+                };
+                Some(SessionEvent::TurnFailed { error, elapsed })
+            }
+        }
+        "cancelled" if !had_output => None,
+        // Send-now cancel: no marker (the sender's new prompt is the next turn).
+        "cancelled" if send_now_cancel => None,
+        "cancelled" => Some(SessionEvent::TurnCancelled {
+            elapsed: elapsed.unwrap_or_default(),
+        }),
+        _ if !had_output => None,
+        _ => Some(SessionEvent::TurnCompleted { elapsed }),
+    };
+    if event.is_some() {
+        crate::app::turn_completion::push_turn_terminal_marker(agent, event, Some(prompt_id));
+    }
 }

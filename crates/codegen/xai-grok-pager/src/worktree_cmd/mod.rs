@@ -1,5 +1,7 @@
 mod display;
 
+use std::io::Write;
+
 use anyhow::{Result, bail};
 use clap::Subcommand;
 use tokio_util::sync::CancellationToken;
@@ -46,54 +48,35 @@ enum WorktreeCommand {
     /// List tracked worktrees
     #[command(visible_alias = "ls")]
     List {
-        /// Filter by repository path.
         #[arg(long)]
         repo: Option<String>,
-        /// Filter by one or more comma-separated worktree types.
         #[arg(long, value_delimiter = ',')]
         r#type: Vec<String>,
-        /// Emit machine-readable JSON output.
         #[arg(long)]
         json: bool,
-        /// Include inactive and otherwise hidden records.
         #[arg(long)]
         all: bool,
     },
     /// Show details for a specific worktree
-    Show {
-        /// Worktree ID or filesystem path.
-        id_or_path: String,
-    },
+    Show { id_or_path: String },
     /// Remove worktrees
     Rm {
-        /// Worktree IDs or paths to remove.
         #[arg(required = true)]
         ids: Vec<String>,
-        /// Request forced removal.
         #[arg(short, long)]
         force: bool,
-        /// Report what would be removed without changing anything.
         #[arg(long)]
         dry_run: bool,
-        /// Remove without an interactive confirmation.
-        #[arg(long, short = 'y')]
-        yes: bool,
     },
     /// Garbage-collect orphaned/stale worktrees
     #[command(alias = "prune")]
     Gc {
-        /// Report eligible worktrees without removing them.
         #[arg(long)]
         dry_run: bool,
-        /// Remove only records older than this duration.
         #[arg(long)]
         max_age: Option<String>,
-        /// Include records that normal safety checks would retain.
         #[arg(short, long)]
         force: bool,
-        /// Garbage-collect without an interactive confirmation.
-        #[arg(long, short = 'y')]
-        yes: bool,
     },
     /// Database maintenance
     Db {
@@ -113,10 +96,13 @@ enum WorktreeDbCommand {
 }
 
 pub async fn run(args: WorktreeArgs, agent_config: &AgentConfig) -> Result<()> {
-    confirm_destructive_command(&args.command)?;
-
     let cancel = CancellationToken::new();
+    // A utility command is not a startup: latch so nothing records or mirrors.
+    xai_grok_telemetry::startup::clear();
     let spawned = crate::acp::spawn::spawn_grok_shell(agent_config.clone(), &cancel, None).await?;
+    // Cancel + join on every return path, including the `?` below.
+    let _agent_guard =
+        crate::acp::spawn::AgentShutdownGuard::new(cancel.clone(), Some(spawned.thread_handle));
 
     let _init: acp::InitializeResponse = acp_send(
         acp::InitializeRequest::new(acp::ProtocolVersion::V1)
@@ -137,9 +123,7 @@ pub async fn run(args: WorktreeArgs, agent_config: &AgentConfig) -> Result<()> {
     )
     .await?;
 
-    let result = dispatch(args.command, &spawned.channel.tx).await;
-    cancel.cancel();
-    result
+    dispatch(args.command, &spawned.channel.tx).await
 }
 
 async fn dispatch(command: WorktreeCommand, tx: &xai_acp_lib::AcpAgentTx) -> Result<()> {
@@ -155,53 +139,13 @@ async fn dispatch(command: WorktreeCommand, tx: &xai_acp_lib::AcpAgentTx) -> Res
             ids,
             force,
             dry_run,
-            ..
         } => cmd_rm(tx, ids, force, dry_run).await,
         WorktreeCommand::Gc {
             dry_run,
             max_age,
             force,
-            ..
         } => cmd_gc(tx, dry_run, max_age, force).await,
         WorktreeCommand::Db { command } => cmd_db(tx, command).await,
-    }
-}
-
-fn confirm_destructive_command(command: &WorktreeCommand) -> Result<()> {
-    let prompt = match command {
-        WorktreeCommand::Rm {
-            ids,
-            dry_run: false,
-            yes: false,
-            ..
-        } => Some(format!(
-            "Permanently remove {} worktree(s): {}? [y/N] ",
-            ids.len(),
-            ids.join(", ")
-        )),
-        WorktreeCommand::Gc {
-            dry_run: false,
-            yes: false,
-            ..
-        } => Some("Garbage-collect eligible worktrees? [y/N] ".to_string()),
-        _ => None,
-    };
-    let Some(prompt) = prompt else {
-        return Ok(());
-    };
-
-    use std::io::{IsTerminal as _, Write as _};
-    if !std::io::stdin().is_terminal() {
-        bail!("refusing destructive worktree operation on non-interactive stdin; pass --yes");
-    }
-    print!("{prompt}");
-    std::io::stdout().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    if matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-        Ok(())
-    } else {
-        bail!("worktree operation cancelled")
     }
 }
 
@@ -258,12 +202,13 @@ async fn cmd_list(
     )
     .await?;
 
-    if json {
-        display::print_json(&records);
+    let mut out = std::io::stdout().lock();
+    let written = if json {
+        display::print_json(&records, &mut out)
     } else {
-        display::print_table(&records);
-    }
-    Ok(())
+        display::print_table(&records, &mut out)
+    };
+    Ok(crate::util::ignore_broken_pipe(written)?)
 }
 
 async fn cmd_show(tx: &xai_acp_lib::AcpAgentTx, id_or_path: &str) -> Result<()> {
@@ -276,8 +221,8 @@ async fn cmd_show(tx: &xai_acp_lib::AcpAgentTx, id_or_path: &str) -> Result<()> 
 
     match rec {
         Some(r) => {
-            display::print_show(&r);
-            Ok(())
+            let written = display::print_show(&r, &mut std::io::stdout().lock());
+            Ok(crate::util::ignore_broken_pipe(written)?)
         }
         None => bail!("worktree not found: {id_or_path}"),
     }
@@ -297,7 +242,6 @@ async fn cmd_rm(
     force: bool,
     dry_run: bool,
 ) -> Result<()> {
-    let mut failures = 0usize;
     for id_or_path in &ids {
         let resp: Result<RemoveResponse> = ext_call(
             tx,
@@ -317,22 +261,12 @@ async fn cmd_rm(
                     println!("  would remove: {path}");
                 } else if r.removed {
                     println!("  removed: {path}");
-                } else {
-                    failures += 1;
-                    eprintln!("  error removing {id_or_path}: worktree was not removed");
                 }
             }
-            Err(e) => {
-                failures += 1;
-                eprintln!("  error removing {id_or_path}: {e}");
-            }
+            Err(e) => eprintln!("  error removing {id_or_path}: {e}"),
         }
     }
-    if failures == 0 {
-        Ok(())
-    } else {
-        bail!("failed to remove {failures} worktree(s)")
-    }
+    Ok(())
 }
 
 async fn cmd_gc(
@@ -352,19 +286,22 @@ async fn cmd_gc(
     )
     .await?;
 
-    if dry_run {
-        println!("Dry run \u{2014} no changes made.");
-    }
-    display::print_gc(&report);
-    Ok(())
+    let mut out = std::io::stdout().lock();
+    let written = (|| {
+        if dry_run {
+            writeln!(out, "Dry run \u{2014} no changes made.")?;
+        }
+        display::print_gc(&report, &mut out)
+    })();
+    Ok(crate::util::ignore_broken_pipe(written)?)
 }
 
 async fn cmd_db(tx: &xai_acp_lib::AcpAgentTx, command: WorktreeDbCommand) -> Result<()> {
     match command {
         WorktreeDbCommand::Stats => {
             let stats: DbStats = ext_call(tx, "chutes.build/git/worktree/db/stats", &()).await?;
-            display::print_stats(&stats);
-            Ok(())
+            let written = display::print_stats(&stats, &mut std::io::stdout().lock());
+            Ok(crate::util::ignore_broken_pipe(written)?)
         }
         WorktreeDbCommand::Path => {
             #[derive(serde::Deserialize)]
@@ -378,8 +315,8 @@ async fn cmd_db(tx: &xai_acp_lib::AcpAgentTx, command: WorktreeDbCommand) -> Res
         WorktreeDbCommand::Rebuild => {
             let report: RebuildReport =
                 ext_call(tx, "chutes.build/git/worktree/db/rebuild", &()).await?;
-            display::print_rebuild(&report);
-            Ok(())
+            let written = display::print_rebuild(&report, &mut std::io::stdout().lock());
+            Ok(crate::util::ignore_broken_pipe(written)?)
         }
     }
 }
@@ -535,7 +472,6 @@ mod tests {
                 ids,
                 force,
                 dry_run,
-                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);
@@ -561,7 +497,6 @@ mod tests {
                 ids,
                 force,
                 dry_run,
-                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);
@@ -587,7 +522,6 @@ mod tests {
                 force,
                 dry_run,
                 max_age,
-                ..
             } => {
                 assert!(force);
                 assert!(!dry_run);

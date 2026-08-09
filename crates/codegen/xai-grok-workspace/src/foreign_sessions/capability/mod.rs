@@ -237,11 +237,11 @@ impl ApprovedRoot {
             {
                 return None;
             }
-            Some(OpenedRegularFile {
+            return Some(OpenedRegularFile {
                 file,
                 path: canonical_path,
                 metadata,
-            })
+            });
         }
         #[cfg(not(any(unix, windows)))]
         {

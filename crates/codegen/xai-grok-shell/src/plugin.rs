@@ -41,7 +41,7 @@ pub struct InstallOutcome {
 /// Classify an install source as local (filesystem) vs git (remote) without
 /// installing — used for telemetry `install_kind` on the failure path, where no
 /// [`InstallOutcome`] is available.
-pub fn install_source_is_local(source: &str, cwd: &Path) -> bool {
+pub(crate) fn install_source_is_local(source: &str, cwd: &Path) -> bool {
     matches!(
         git_install::parse_install_source(source, cwd),
         git_install::InstallSource::Local { .. }
@@ -87,9 +87,6 @@ pub enum UninstallError {
         other_plugins: Vec<String>,
         total: usize,
     },
-    Operation {
-        message: String,
-    },
 }
 
 impl std::fmt::Display for UninstallError {
@@ -118,7 +115,6 @@ impl std::fmt::Display for UninstallError {
                 writeln!(f)?;
                 write!(f, "Uninstalling will remove all {total} plugin(s).")
             }
-            Self::Operation { message } => f.write_str(message),
         }
     }
 }
@@ -156,9 +152,9 @@ pub fn uninstall_plugin(
         });
     }
 
-    git_install::remove_repo_path(&repo.path).map_err(|e| UninstallError::Operation {
-        message: format!("Failed to remove plugin directory: {e}"),
-    })?;
+    if let Err(e) = git_install::remove_repo_path(&repo.path) {
+        tracing::warn!("failed to remove repo path: {e}");
+    }
 
     if !keep_data {
         // Plugins under $HOME are user-scope; everything else is config-path scope.
@@ -170,11 +166,7 @@ pub fn uninstall_plugin(
     }
 
     registry.remove(&repo_key);
-    registry.save().map_err(|e| UninstallError::Operation {
-        message: format!(
-            "Plugin files were removed, but the install registry could not be updated: {e}"
-        ),
-    })?;
+    save_registry_or_warn(&registry);
 
     Ok(UninstallOutcome {
         repo_key,
@@ -354,7 +346,7 @@ pub fn update_plugins(name: Option<&str>) -> Result<Vec<RepoUpdateOutcome>, Upda
     update_plugins_by_selector(name.map(|name| PluginUpdateSelector::PluginName(name.to_string())))
 }
 
-pub fn update_plugins_by_selector(
+pub(crate) fn update_plugins_by_selector(
     selector: Option<PluginUpdateSelector>,
 ) -> Result<Vec<RepoUpdateOutcome>, UpdateError> {
     let mut registry = InstallRegistry::load();
@@ -714,14 +706,14 @@ fn bullet_list(items: &[String]) -> String {
 /// The require-sha pin policy for remote plugin code. Disk-only config + env,
 /// both tighten-only: a remote campaign overlay must not be able to relax a
 /// local security policy, and an unreadable config falls back to the env knob.
-pub fn marketplace_require_sha() -> bool {
+pub(crate) fn marketplace_require_sha() -> bool {
     xai_grok_config::load_effective_config_disk_only()
         .map(|c| xai_grok_plugin_marketplace::load_require_sha(&c))
         .unwrap_or_else(|_| xai_grok_plugin_marketplace::env_require_sha())
 }
 
 /// Marketplace sources from config.toml + settings JSON, unfiltered.
-pub fn load_marketplace_sources() -> Vec<MarketplaceSource> {
+pub(crate) fn load_marketplace_sources() -> Vec<MarketplaceSource> {
     let config = crate::config::load_effective_config()
         .ok()
         .unwrap_or(toml::Value::Table(toml::map::Map::new()));
@@ -733,7 +725,7 @@ pub fn load_marketplace_sources() -> Vec<MarketplaceSource> {
 /// Like [`load_marketplace_sources`] but drops git sources blocked by the
 /// managed `marketplace_allowlist`. Install paths must use this so policy
 /// cannot be bypassed.
-pub fn load_filtered_marketplace_sources() -> Vec<MarketplaceSource> {
+pub(crate) fn load_filtered_marketplace_sources() -> Vec<MarketplaceSource> {
     let allowlist =
         &xai_grok_workspace::permission::resolution::managed_settings().marketplace_allowlist;
     filter_sources_by_allowlist(load_marketplace_sources(), allowlist)
@@ -1115,17 +1107,8 @@ fn install_marketplace_entry(
     })
 }
 
-/// Result of removing plugins that came from one marketplace source.
-pub struct MarketplaceUninstallOutcome {
-    pub removed_repos: Vec<String>,
-    pub failures: Vec<String>,
-}
-
-/// Remove all plugins installed from a marketplace source.
-///
-/// A repo is removed from the registry only after its files were removed.
-/// Failures are returned to the caller instead of being logged as success.
-pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> MarketplaceUninstallOutcome {
+/// Remove all plugins installed from a marketplace source. Returns removed repo keys.
+pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Vec<String> {
     let mut registry = InstallRegistry::load();
     let to_remove: Vec<(String, std::path::PathBuf, InstalledRepo)> = registry
         .list()
@@ -1141,12 +1124,9 @@ pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Marketplac
         })
         .collect();
 
-    let mut removed_repos = Vec::new();
-    let mut failures = Vec::new();
     for (key, path, repo) in &to_remove {
         if let Err(e) = git_install::remove_repo_path(path) {
-            failures.push(format!("{key}: failed to remove plugin directory: {e}"));
-            continue;
+            tracing::warn!("failed to remove plugin dir for {key}: {e}");
         }
         let scope = match dirs::home_dir() {
             Some(home) if path.starts_with(&home) => PluginScope::User,
@@ -1154,19 +1134,13 @@ pub fn uninstall_marketplace_source_plugins(source_identity: &str) -> Marketplac
         };
         git_install::cleanup_plugin_data(repo, scope);
         registry.remove(key);
-        removed_repos.push(key.clone());
     }
 
-    if !removed_repos.is_empty()
-        && let Err(e) = registry.save()
-    {
-        failures.push(format!("failed to save install registry: {e}"));
+    if !to_remove.is_empty() {
+        save_registry_or_warn(&registry);
     }
 
-    MarketplaceUninstallOutcome {
-        removed_repos,
-        failures,
-    }
+    to_remove.into_iter().map(|(key, _, _)| key).collect()
 }
 
 /// Remove a `[[marketplace.sources]]` entry matching `git` or `path`.
@@ -1219,7 +1193,7 @@ pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Op
 pub fn try_remove_source_from_json_files(source_url_or_path: &str) -> bool {
     // Resolve user grok via user_grok_home() (None when no home resolves) and
     // home separately, so removal still runs from $CHUTES_BUILD_HOME when no home dir
-    // exists, and never touches a cwd-relative .chutes-build.
+    // exists, and never touches a cwd-relative .grok.
     let home = dirs::home_dir();
     let grok = xai_grok_config::user_grok_home();
 

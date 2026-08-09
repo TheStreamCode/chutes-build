@@ -4,6 +4,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use xai_grok_workspace::permission::{MCP_TOOL_NAME_DELIMITER, mcp_titleize_segment};
 
+use crate::appearance::AppearanceConfig;
 use crate::render::line_utils::truncate_str;
 use crate::scrollback::block::BlockContent;
 use crate::scrollback::types::{
@@ -11,8 +12,8 @@ use crate::scrollback::types::{
 };
 use crate::theme::Theme;
 
-/// Max lines of output shown inline before truncation.
 const MAX_INLINE_LINES: usize = 10;
+const TRUNCATED_INLINE_LINES: usize = 3;
 
 /// Use tool call — dispatching to an MCP integration tool.
 #[derive(Debug, Clone)]
@@ -175,7 +176,11 @@ impl BlockContent for UseToolCallBlock {
                     }
                 }
 
-                // Output preview
+                let max_inline = if ctx.mode == DisplayMode::Truncated {
+                    TRUNCATED_INLINE_LINES
+                } else {
+                    MAX_INLINE_LINES
+                };
                 if let Some(ref output) = self.output {
                     lines.push(Line::from("").into());
                     lines
@@ -185,8 +190,8 @@ impl BlockContent for UseToolCallBlock {
                     let content_lines: Vec<&str> = output.lines().collect();
 
                     for (i, line) in content_lines.iter().enumerate() {
-                        if i >= MAX_INLINE_LINES {
-                            let remaining = content_lines.len() - MAX_INLINE_LINES;
+                        if i >= max_inline {
+                            let remaining = content_lines.len() - max_inline;
                             lines.push(
                                 BlockLine::from(Line::from(Span::styled(
                                     format!(
@@ -252,7 +257,7 @@ impl BlockContent for UseToolCallBlock {
         }
     }
 
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         false
     }
 
@@ -282,5 +287,60 @@ impl BlockContent for UseToolCallBlock {
     fn preamble(&self, _ctx: &BlockContext) -> Option<Text<'static>> {
         let theme = Theme::current();
         Some(Text::from(vec![self.header_line(&theme, false, None)]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scrollback::types::BlockContext;
+
+    fn ctx(mode: DisplayMode) -> BlockContext {
+        BlockContext {
+            width: 80,
+            mode,
+            is_running: false,
+            raw: false,
+            max_lines: None,
+            appearance: Default::default(),
+            is_selected: false,
+            cwd: None,
+        }
+    }
+
+    fn rendered_text(block: &UseToolCallBlock, mode: DisplayMode) -> String {
+        block
+            .output(&ctx(mode))
+            .lines
+            .iter()
+            .map(|l| {
+                l.content
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn truncated_caps_inline_output_tighter_than_expanded() {
+        let mut block = UseToolCallBlock::new("linear__list_issues");
+        let content: Vec<String> = (1..=12).map(|i| format!("l{i:02} row")).collect();
+        block.output = Some(content.join("\n"));
+
+        let truncated = rendered_text(&block, DisplayMode::Truncated);
+        assert!(truncated.contains("l03"), "truncated:\n{truncated}");
+        assert!(!truncated.contains("l04"), "truncated:\n{truncated}");
+        assert!(
+            truncated.contains("(9 more lines"),
+            "truncated:\n{truncated}"
+        );
+
+        let expanded = rendered_text(&block, DisplayMode::Expanded);
+        assert!(expanded.contains("l10"), "expanded:\n{expanded}");
+        assert!(!expanded.contains("l11"), "expanded:\n{expanded}");
+        assert!(expanded.contains("(2 more lines"), "expanded:\n{expanded}");
     }
 }

@@ -226,6 +226,28 @@ pub enum SettingValue {
     Int(i64),
 }
 
+/// Why `coding_data_sharing` cannot be changed in the settings modal.
+/// Computed by `AppView::coding_data_sharing_lock`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodingDataSharingLock {
+    Zdr,
+    TeamManaged,
+    /// This build has no coding-data retention control to offer
+    /// (`product::CODING_DATA_RETENTION_CONTROLS`). Locked rather than hidden:
+    /// a row that silently does nothing is worse than one that says why.
+    ProductPolicy,
+}
+
+impl CodingDataSharingLock {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Zdr => "Your team has Zero Data Retention.",
+            Self::TeamManaged => "Managed by your team admin.",
+            Self::ProductPolicy => "Chutes Build never shares coding data.",
+        }
+    }
+}
+
 /// Snapshot of pager-local state captured when the modal opens.
 /// Used by `current_value_for` to render against LIVE state rather
 /// than the on-disk `UiConfig`. Refreshed by
@@ -249,8 +271,11 @@ pub struct PagerLocalSnapshot {
     pub available_models: Vec<(String, acp::ModelId)>,
     /// Whether the user has opted OUT of coding data sharing.
     /// Lives in auth metadata (no `UiConfig` field). Inverted mapping:
-    /// `opt_out == false` → canonical "opt-in".
+    /// `opt_out == false` → canonical "opt-in". Snapshot default is
+    /// `true` (opted out) to match the safer consumer default.
     pub coding_data_sharing_opt_out: bool,
+    /// Why `coding_data_sharing` cannot be changed here (`None` = editable).
+    pub coding_data_sharing_lock: Option<CodingDataSharingLock>,
     /// Whether plan mode is active. Uses effective state
     /// (`pending.unwrap_or(active)`) so rapid toggles don't double-send.
     /// Refreshed on all mutation paths including ACP `CurrentModeUpdate`.
@@ -279,6 +304,11 @@ pub struct PagerLocalSnapshot {
     /// language actually in effect when `[ui].voice_stt_language` is unset but
     /// an explicit `[voice].language` applies.
     pub voice_stt_language: String,
+    /// Mirrors `AgentView::scheduler_background_loops` — the value the shell
+    /// pinned for THIS session — falling back to
+    /// `AppView::scheduler_background_loops_seed` before the session response
+    /// lands. `/loop` reads it to describe where a scheduled fire runs.
+    pub scheduler_background_loops: bool,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -289,7 +319,8 @@ impl Default for PagerLocalSnapshot {
             auto_mode: false,
             current_model_name: None,
             available_models: Vec::new(),
-            coding_data_sharing_opt_out: false,
+            coding_data_sharing_opt_out: true,
+            coding_data_sharing_lock: None,
             plan_mode_active: false,
             show_tips: None,
             auto_update: None,
@@ -302,6 +333,8 @@ impl Default for PagerLocalSnapshot {
             auto_mode_gate: false,
             ask_user_question_timeout_enabled: None,
             voice_stt_language: xai_grok_voice::STT_LANGUAGE_DEFAULT.to_string(),
+            // Matches `resolve_scheduler_background_loops`'s default.
+            scheduler_background_loops: true,
         }
     }
 }
@@ -320,7 +353,7 @@ pub fn canonical_voice_capture_mode(value: Option<&str>) -> &'static str {
 /// Canonicalize a raw voice STT language to a settings choice.
 ///
 /// Delegates to [`xai_grok_voice::canonicalize_stt_language`] so the pager and
-/// the STT client share one catalog (official Grok STT languages + client-only
+/// the STT client share one catalog (official Chutes Build STT languages + client-only
 /// `auto`). Unknown/blank/`None` → `en`.
 pub fn canonical_voice_stt_language(value: Option<&str>) -> &'static str {
     xai_grok_voice::canonicalize_stt_language(value)
@@ -484,6 +517,15 @@ pub fn current_value_for(
         "compact_mode" => Some(SettingValue::Bool(ui.compact_mode)),
         "show_timestamps" => Some(SettingValue::Bool(ui.show_timestamps.unwrap_or(true))),
         "show_timeline" => Some(SettingValue::Bool(ui.show_timeline_enabled())),
+        // Cache is the send-path source of truth (same pattern as group_tool_verbs).
+        "page_flip_on_send" => Some(SettingValue::Bool(
+            crate::appearance::cache::load_page_flip_on_send(),
+        )),
+        // Cache is the drain-path source of truth (same pattern as page_flip_on_send).
+        "combine_queued_prompts" => Some(SettingValue::Bool(
+            crate::appearance::cache::load_combine_queued_prompts(),
+        )),
+        "confirm_before_rewind" => Some(SettingValue::Bool(ui.confirm_before_rewind_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints — `None` (inherit) reads as the default ON.
         "contextual_hints.undo" => {
@@ -557,6 +599,10 @@ pub fn current_value_for(
         "screen_mode" => Some(SettingValue::Enum(canonical_screen_mode(
             ui.screen_mode.as_deref(),
         ))),
+        // SHELL — whether the Ctrl+Space / F8 chord is active; None → true.
+        "voice_keybind_enabled" => {
+            Some(SettingValue::Bool(ui.voice_keybind_enabled.unwrap_or(true)))
+        }
         // SHELL — canonicalized from `[ui].voice_capture_mode`; None → "hold".
         "voice_capture_mode" => Some(SettingValue::Enum(canonical_voice_capture_mode(
             ui.voice_capture_mode.as_deref(),
@@ -656,18 +702,31 @@ pub fn current_value_for(
         // CLI batch: snapshot mirrors; `None` → effective default `true`.
         "show_tips" => Some(SettingValue::Bool(pager.show_tips.unwrap_or(true))),
         "auto_update" => Some(SettingValue::Bool(pager.auto_update.unwrap_or(true))),
-        // fork_secondary_model: baseline value folds to empty string.
+        // fork_secondary_model: baseline value folds to empty string. The
+        // mirror persists the ModelId slug but the DynamicEnum canonicals
+        // are catalog display names, so resolve via the snapshot; a stale
+        // id passes through raw.
         "fork_secondary_model" => Some(SettingValue::String({
             let baseline = xai_grok_shell::models::default_model();
             if ui.fork_secondary_model == baseline {
                 String::new()
             } else {
-                ui.fork_secondary_model.clone()
+                pager
+                    .available_models
+                    .iter()
+                    .find(|(_, id)| id.0.as_ref() == ui.fork_secondary_model.as_str())
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_else(|| ui.fork_secondary_model.clone())
             }
         })),
 
         _ => None,
     }
+}
+
+/// Consent chooser: no docs tip, and no `d` reset (hint or key).
+pub fn is_consent_chooser(key: &str) -> bool {
+    key == "coding_data_sharing"
 }
 
 /// Default value for `key`, derived from the registry metadata.
@@ -780,6 +839,27 @@ mod tests {
                         "show_timeline default drifts from UiConfig::default()"
                     );
                 }
+                ("page_flip_on_send", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.page_flip_on_send_enabled(),
+                        "page_flip_on_send default drifts from UiConfig::default()"
+                    );
+                }
+                ("confirm_before_rewind", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.confirm_before_rewind_enabled(),
+                        "confirm_before_rewind default drifts from UiConfig::default()"
+                    );
+                }
+                ("combine_queued_prompts", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.combine_queued_prompts.unwrap_or(false),
+                        "combine_queued_prompts default drifts from UiConfig::default()"
+                    );
+                }
                 ("simple_mode", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
@@ -865,14 +945,15 @@ mod tests {
                     );
                 }
                 // coding_data_sharing: no UiConfig field; default pinned
-                // against auth metadata (opt_out=false → "opt-in").
+                // against auth metadata (opt_out=true → "opt-out").
                 ("coding_data_sharing", SettingKind::Enum { default, .. }) => {
-                    let expected = "opt-in";
+                    let expected = "opt-out";
                     assert_eq!(
                         *default, expected,
-                        "coding_data_sharing registry default must be 'opt-in' — \
+                        "coding_data_sharing registry default must be 'opt-out' — \
                          the on-disk source of truth is `AuthEntry::coding_data_retention_opt_out: \
-                         bool` (defaults to `false`, i.e. user has NOT opted out)",
+                         bool` (defaults to `true`, i.e. user has opted out until they \
+                         explicitly share or the server opts them in)",
                     );
                 }
                 // CLI batch: fields live on CliConfig, not UiConfig.
@@ -954,6 +1035,14 @@ mod tests {
                         "flash"
                     };
                     assert_eq!(*default, expected);
+                }
+                // voice_keybind_enabled: Option<bool>; None → true.
+                ("voice_keybind_enabled", SettingKind::Bool { default }) => {
+                    assert_eq!(
+                        *default,
+                        ui.voice_keybind_enabled.unwrap_or(true),
+                        "voice_keybind_enabled default drifts from UiConfig::default()",
+                    );
                 }
                 // voice_capture_mode: Option<String>; None → "hold".
                 ("voice_capture_mode", SettingKind::Enum { default, .. }) => {
@@ -1375,6 +1464,51 @@ mod tests {
         let pager = PagerLocalSnapshot::default();
         let value = current_value_for("auto_dark_theme", &ui, &pager).expect("must resolve");
         assert_eq!(value, SettingValue::Enum("chutesnight"));
+    }
+
+    /// The persisted `fork_secondary_model` slug resolves to the catalog
+    /// display name (matching the `default_model` row and the DynamicEnum
+    /// picker canonicals); the baseline still folds to the empty sentinel
+    /// and a slug missing from the catalog passes through raw.
+    #[test]
+    fn fork_secondary_model_current_value_resolves_display_name() {
+        let slug = "grok-4.5-fast";
+        assert_ne!(
+            slug,
+            xai_grok_shell::models::default_model(),
+            "test slug must differ from the baseline or the empty-fold arm masks the lookup",
+        );
+        let pager = PagerLocalSnapshot {
+            available_models: vec![(
+                "Grok 4.5 Fast".to_string(),
+                acp::ModelId::new(std::sync::Arc::from(slug)),
+            )],
+            ..Default::default()
+        };
+        let ui = UiConfig {
+            fork_secondary_model: slug.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("fork_secondary_model", &ui, &pager),
+            Some(SettingValue::String("Grok 4.5 Fast".to_string())),
+        );
+
+        // Baseline folds to the empty "no override" sentinel.
+        assert_eq!(
+            current_value_for("fork_secondary_model", &UiConfig::default(), &pager),
+            Some(SettingValue::String(String::new())),
+        );
+
+        // Stale slug (not in the catalog) passes through unresolved.
+        let stale_ui = UiConfig {
+            fork_secondary_model: "retired-model".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("fork_secondary_model", &stale_ui, &pager),
+            Some(SettingValue::String("retired-model".to_string())),
+        );
     }
 
     /// Keywords must be lowercase and non-empty.

@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "You can now pass --json-schema to grok -p and receive a validated JSON object instead of free text.",
+    "description": "You can now pass --json-schema to chutes-build -p and receive a validated JSON object instead of free text.",
     "breaking_change": false
   },
   {

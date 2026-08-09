@@ -55,7 +55,7 @@ impl crate::types::tool_metadata::ToolMetadata for ExitPlanModeTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn emitted_notifications(&self) -> &'static [&'static str] {
@@ -97,7 +97,7 @@ impl xai_tool_runtime::Tool for ExitPlanModeTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "exit_plan_mode",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 
@@ -260,12 +260,8 @@ mod tests {
                 assert!(message.contains("start coding"));
                 assert!(plan_content.contains("Do thing A"));
                 assert!(plan_content.contains("Do thing B"));
-                // Cwd fallback now displays the resolved absolute path (shared
-                // resolver). Checked as two components rather than one
-                // "a/b" substring: the path is joined with the platform's
-                // native separator, which is `\` on Windows.
-                assert!(plan_file_path.contains(".chutes-build"));
-                assert!(plan_file_path.ends_with("plan.md"));
+                // Cwd fallback now displays the resolved absolute path (shared resolver).
+                assert!(plan_file_path.ends_with(".chutes-build/plan.md"));
             }
             other => panic!("Expected PlanReady, got {:?}", other),
         }
@@ -354,10 +350,7 @@ mod tests {
             ToolNotification::PlanModeExited(exited) => {
                 assert_eq!(exited.tool_call_id, "call-99");
                 assert_eq!(exited.plan_content, Some("The plan".to_string()));
-                // Two components, not one "a/b" substring -- see the
-                // matching comment in `exit_with_plan_content`.
-                assert!(exited.plan_file_path.contains(".chutes-build"));
-                assert!(exited.plan_file_path.ends_with("plan.md"));
+                assert!(exited.plan_file_path.ends_with(".chutes-build/plan.md"));
             }
             other => panic!("Expected PlanModeExited, got {:?}", other),
         }
@@ -405,10 +398,7 @@ mod tests {
         assert!(prompt.contains("saved at:"));
         assert!(prompt.contains("Step 1"));
         assert!(prompt.contains("Step 2"));
-        // Two components, not one "a/b" substring -- see the matching
-        // comment in `exit_with_plan_content`.
-        assert!(prompt.contains(".chutes-build"));
-        assert!(prompt.contains("plan.md"));
+        assert!(prompt.contains(".chutes-build/plan.md"));
         assert!(prompt.contains("## Plan:"));
     }
 

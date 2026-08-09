@@ -77,7 +77,7 @@ impl ChatStateActor {
         });
     }
 
-    /// Out-of-band history repair (`chutes.build/session/repair`): run
+    /// Out-of-band history repair (`chutes.ai/session/repair`): run
     /// [`crate::compaction_utils::repair_history`] and persist changes via
     /// [`Self::replace_conversation`]. Unlike
     /// [`Self::ensure_conversation_integrity`], this also removes orphaned
@@ -107,6 +107,37 @@ impl ChatStateActor {
             self.state.conversation = items;
         }
         report
+    }
+
+    /// Make memory match the disk-authoritative switch for one generation.
+    pub(super) fn converge_working_directory_switch(
+        &mut self,
+        generation: u64,
+        authoritative: ConversationItem,
+    ) {
+        let existing = self
+            .state
+            .conversation
+            .iter_mut()
+            .find(|item| item.working_directory_switch_generation() == Some(generation));
+        if let Some(existing) = existing {
+            let old_tokens = super::state::estimate_item_tokens(existing);
+            let new_tokens = super::state::estimate_item_tokens(&authoritative);
+            self.state.estimated_tokens_since_model = if new_tokens >= old_tokens {
+                self.state
+                    .estimated_tokens_since_model
+                    .saturating_add(new_tokens - old_tokens)
+            } else {
+                self.state
+                    .estimated_tokens_since_model
+                    .saturating_sub(old_tokens - new_tokens)
+            };
+            *existing = authoritative;
+        } else {
+            self.state.estimated_tokens_since_model +=
+                super::state::estimate_item_tokens(&authoritative);
+            self.state.conversation.push(authoritative);
+        }
     }
 
     /// Push any conversation item (user, assistant, or tool result) and persist it.

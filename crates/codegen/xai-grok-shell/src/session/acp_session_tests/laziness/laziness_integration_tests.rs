@@ -38,6 +38,7 @@ fn detector_entry(
         info,
         api_key: None,
         env_key: None,
+        auth_provider: None,
         api_base_url: None,
     }
 }
@@ -336,6 +337,8 @@ async fn idle_recheck_after_sleep_short_circuits_silently() {
                         verbatim: true,
                         json_schema: None,
                         origin: crate::session::PromptOrigin::User,
+                        task_wake_fallback: None,
+                        tool_overrides_update: None,
                         respond_to,
                         persist_ack: None,
                         parsed_prompt_tx: None,
@@ -612,7 +615,7 @@ async fn debug_mode_fires_classifier_even_with_per_model_enable_false() {
 
 /// Dev-flag contract gate 2: the long-idle-threshold must be
 /// bypassed when `laziness_debug_log = Some(_)`. Configures a
-/// 60-second threshold and asserts the call returns within five seconds
+/// 60-second threshold and asserts the call returns within 200ms
 /// — proving the `idle_threshold = ZERO` branch was taken.
 /// Prevents a future change that drops the `if debug_mode` guard
 /// around `Duration::ZERO`.
@@ -633,17 +636,16 @@ async fn debug_mode_bypasses_idle_wait() {
             SessionActor::maybe_fire_laziness_check(actor.clone()).await;
             let elapsed = started.elapsed();
             drop(Arc::try_unwrap(actor).ok().unwrap());
-            // Five-second ceiling: the bypass path still does a chat-state
+            // 2s ceiling: the bypass path still does a chat-state
             // MPSC roundtrip, two tool-bridge reads,
             // `prepare_chat_completion` + JWT refresh, a TCP
             // connect attempt against localhost, and a JSONL
             // append — all of which can run slowly on shared CI.
-            // Five seconds is still far below the configured 60-second idle
-            // threshold, so the bypass signal is unambiguous without making
-            // the test sensitive to Windows scheduler and socket startup
-            // variance.
+            // 2s is still 30_000× faster than the configured
+            // 60_000ms idle threshold, so the bypass signal is
+            // unambiguous.
             assert!(
-                elapsed < std::time::Duration::from_secs(5),
+                elapsed < std::time::Duration::from_millis(2000),
                 "idle threshold must be bypassed in debug mode (took {elapsed:?})",
             );
             // Sanity: the classifier did reach the sampler and

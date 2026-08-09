@@ -1,12 +1,14 @@
 use agent_client_protocol as acp;
+use xai_grok_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use xai_grok_tools::implementations::grok_build::{
-    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction,
-    imagine_video_usage_message,
+    IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction, imagine_video_usage_message,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
-const REQUIRED_TOOLS: &[&str] = &[IMAGE_TO_VIDEO_TOOL_NAME];
+// One tool for every medium on Chutes; whether the chosen model needs a starting
+// frame is a property of its schema, which the instruction has the model read.
+const REQUIRED_TOOLS: &[&str] = &[GENERATE_MEDIA_TOOL_NAME];
 
 pub struct ImagineVideoCommand;
 
@@ -61,7 +63,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_chutes_media_tool() {
+    fn requires_the_chutes_media_tool() {
         assert_eq!(ImagineVideoCommand.required_tools(), &["generate_media"]);
     }
 
@@ -100,9 +102,18 @@ mod tests {
                     acp::ContentBlock::Text(t) => &t.text,
                     _ => panic!("expected Text block"),
                 };
-                assert!(text.contains("list_media_models"));
-                assert!(text.contains("describe_media_model"));
-                assert!(text.contains("generate_media"));
+                assert!(
+                    text.contains("generate_media"),
+                    "skill should reference generate_media"
+                );
+                assert!(
+                    text.contains("describe_media_model"),
+                    "the skill must teach describe-before-generate: whether a model                      needs a starting frame is a property of its schema"
+                );
+                assert!(
+                    text.contains("list_media_models"),
+                    "and it must start from the catalog, since no model name is fixed"
+                );
                 assert!(text.contains("a cat playing piano"));
             }
             other => panic!("expected InjectSkill, got {other:?}"),

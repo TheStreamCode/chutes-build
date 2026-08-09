@@ -48,14 +48,17 @@ fn handle_cancel(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_get_bearer_token(agent: &MvpAgent) -> ExtResult {
+    // Fail closed for session tokens: desktop resume treats non-null as success.
+    // Never return a hard-expired AT. Still surface wire-valid session ATs and
+    // static/BYOK keys (process model key / env / disk api_key) so non-session
+    // sessions keep working when AuthManager has no OIDC entry.
     let token = match agent.auth_manager.get_valid_token().await {
         Ok(token) => Some(token),
         Err(_) => agent
-            .sampling_config
-            .borrow()
-            .api_key
-            .clone()
-            .or_else(|| agent.auth_manager.current().map(|a| a.key)),
+            .auth_manager
+            .current_wire_valid()
+            .map(|a| a.key)
+            .or_else(|| agent.auth_manager.static_api_key_for_export()),
     };
     ExtMethodResult::success(serde_json::json!({ "token": token }))
         .to_ext_response()
@@ -63,7 +66,7 @@ async fn handle_get_bearer_token(agent: &MvpAgent) -> ExtResult {
 }
 
 fn handle_get_api_key() -> ExtResult {
-    let key = crate::agent::auth_method::read_xai_api_key_env().ok();
+    let key = crate::agent::auth_method::read_chutes_api_key_env().ok();
     ExtMethodResult::success(serde_json::json!({ "key": key }))
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
@@ -209,7 +212,7 @@ fn handle_info(agent: &MvpAgent) -> ExtResult {
         .load()
         .as_ref()
         .map(|m| m.0.to_string());
-    let auth = agent.auth_manager.current();
+    let auth = agent.auth_manager.current_or_expired();
     let raw_asset_id = auth.as_ref().and_then(|a| a.profile_image_asset_id.clone());
 
     // Return a grok-asset:// URL that the Electron renderer resolves at
@@ -242,8 +245,11 @@ fn handle_info(agent: &MvpAgent) -> ExtResult {
             .as_ref()
             .map(|a| a.team_blocked_reasons.clone())
             .unwrap_or_default(),
+        // No credential ⇒ unknown privacy state: report opted-out (fail closed),
+        // matching `AuthManager::allows_data_collection` / GrokAuth Default.
         coding_data_retention_opt_out: auth
             .as_ref()
-            .is_some_and(|a| a.coding_data_retention_opt_out),
+            .map(|a| a.coding_data_retention_opt_out)
+            .unwrap_or_else(crate::auth::default_coding_data_retention_opt_out),
     })
 }

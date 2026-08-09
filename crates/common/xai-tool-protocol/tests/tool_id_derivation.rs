@@ -26,7 +26,7 @@ fn bare_name_derives_to_tool_id_without_namespace() {
 
 #[test]
 fn namespaced_name_derives_to_namespaced_tool_id() {
-    let derived = entry("read_file", Some("GrokBuild"))
+    let derived = entry("read_file", Some("ChutesBuild"))
         .derive_tool_id()
         .unwrap();
     assert_eq!(derived, ToolId::new("ChutesBuild:read_file").unwrap());
@@ -58,9 +58,9 @@ fn empty_name_yields_empty_id_error() {
 #[test]
 fn duplicate_derivations_in_a_batch_are_detectable() {
     let batch = [
-        entry("read_file", Some("GrokBuild")),
-        entry("write_file", Some("GrokBuild")),
-        entry("read_file", Some("GrokBuild")),
+        entry("read_file", Some("ChutesBuild")),
+        entry("write_file", Some("ChutesBuild")),
+        entry("read_file", Some("ChutesBuild")),
     ];
 
     let mut seen = std::collections::HashMap::new();
@@ -82,7 +82,7 @@ fn duplicate_derivations_in_a_batch_are_detectable() {
 
 #[test]
 fn derivation_does_not_collide_across_namespaces() {
-    let a = entry("read_file", Some("GrokBuild"))
+    let a = entry("read_file", Some("ChutesBuild"))
         .derive_tool_id()
         .unwrap();
     let b = entry("read_file", Some("github")).derive_tool_id().unwrap();

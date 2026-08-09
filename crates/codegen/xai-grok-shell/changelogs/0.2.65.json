@@ -16,7 +16,7 @@
   },
   {
     "category": "features",
-    "description": "**grok -w --ref <branch>** now creates worktrees based on the specified ref instead of HEAD.",
+    "description": "**chutes-build -w --ref <branch>** now creates worktrees based on the specified ref instead of HEAD.",
     "breaking_change": false
   },
   {

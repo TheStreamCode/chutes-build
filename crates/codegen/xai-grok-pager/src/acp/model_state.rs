@@ -94,7 +94,7 @@ impl ModelState {
     ///
     /// Honors an explicit `acceptsImages` bool, else an `inputModalities` array
     /// containing `"image"`. DEFAULTS TO `true` when neither key is present:
-    /// correct today (all current Grok models accept images, so nothing is
+    /// correct today (all current Chutes Build models accept images, so nothing is
     /// suppressed) and forward-compatible (suppresses non-vision models once the
     /// ACP server populates the key). Populating that key server-side is a
     /// separate change.
@@ -231,9 +231,6 @@ impl ModelState {
         {
             return Some(option.value);
         }
-        // Canonical level (e.g. "high", "max"→xhigh) only if the model menu
-        // actually offers that value — not free-form power-user aliases that
-        // would 400 on the server (e.g. `none` on grok-4.5).
         let parsed = token.parse::<ReasoningEffort>().ok()?;
         options
             .iter()
@@ -398,7 +395,7 @@ mod tests {
         let mut state = ModelState::default();
         state.available.insert(
             id.clone(),
-            model_with_effort("grok-build", "Grok Build", "high"),
+            model_with_effort("grok-build", "Chutes Build", "high"),
         );
         state.set_current(id.clone(), Some(ReasoningEffort::Xhigh));
         assert_eq!(state.reasoning_effort, Some(ReasoningEffort::Xhigh));
@@ -407,7 +404,7 @@ mod tests {
         let mut refreshed = IndexMap::new();
         refreshed.insert(
             id.clone(),
-            model_with_effort("grok-build", "Grok Build", "high"),
+            model_with_effort("grok-build", "Chutes Build", "high"),
         );
         state.update_catalog(refreshed, Some(id.clone()));
 

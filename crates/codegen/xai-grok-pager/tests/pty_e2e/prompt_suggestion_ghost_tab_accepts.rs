@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// The suggestion the mock streams for every request. Serves BOTH the prompt
-/// turn and the turn-end `chutes.build/suggestPrompt` call (the mock's fixed mode
+/// turn and the turn-end `chutes.ai/suggestPrompt` call (the mock's fixed mode
 /// answers every request), so after the turn the ghost text mirrors it.
 /// Multi-word so the shell-side sanitizer (`sanitize_suggestion`) accepts it.
 const SUGGESTION: &str = "review the staged changes";
@@ -38,15 +38,26 @@ async fn prompt_suggestion_ghost_tab_accepts() {
     .expect("start content");
     content.set_response(SUGGESTION);
 
-    // env_for_pager disables the feature for the suite; re-enable it here.
-    let mut env = content.env_for_pager();
-    env.retain(|(k, _)| k != "CHUTES_BUILD_PROMPT_SUGGESTIONS");
-    env.push(("CHUTES_BUILD_PROMPT_SUGGESTIONS".into(), "true".into()));
-    let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    // The sandbox baseline disables the feature for the suite; re-enable it here.
+    let overrides = [(
+        "CHUTES_BUILD_PROMPT_SUGGESTIONS".to_owned(),
+        "true".to_owned(),
+    )];
+    let env_refs: Vec<(&str, &str)> = overrides
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
 
     let binary = pager_binary().expect("resolve pager binary");
-    let mut harness =
-        PtyHarness::new(&binary, DEFAULT_ROWS, DEFAULT_COLS, &[], &env_refs).expect("spawn pager");
+    let mut harness = PtyHarness::spawn_with_content_env(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &[],
+        &env_refs,
+    )
+    .expect("spawn pager");
 
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)

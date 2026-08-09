@@ -234,7 +234,7 @@ Agent definitions are discovered from multiple locations with priority:
 2. **User-level**: `~/.chutes-build/agents/*.md`
 3. **Compat paths** (lowest priority): additional vendor agent
    directories under the user home (when enabled)
-4. **Built-in**: the default Chutes Build agent and `browser_use()`
+4. **Built-in**: `default_grok_build()`, `browser_use()`
 
 Name-based dedup ensures the highest-priority definition wins. For
 example, a project `.chutes-build/agents/code-reviewer.md` shadows a
@@ -296,7 +296,7 @@ ones.
 
 ## Development
 
-```powershell
+```bash
 # Check
 cargo check -p xai-grok-agent
 

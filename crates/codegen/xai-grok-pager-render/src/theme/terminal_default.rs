@@ -22,6 +22,10 @@
 //!   `Color::Reset`; [`Theme::muted`] / [`Theme::dim`] apply `Modifier::DIM`
 //!   so de-emphasis tracks the terminal's own fg (polarity-safe), unlike
 //!   hard-coding bright black.
+//! - **Syntax highlighting** is not themed day/night. Under the native lock,
+//!   syntect tokens are remapped via
+//!   [`crate::syntax::polarity_safe_syntax_fg`] (default-fg grays + base ANSI
+//!   accents). Do not load a light tmTheme based on OS/terminal detection.
 
 use ratatui::style::{Color, Modifier};
 
@@ -68,7 +72,6 @@ impl Theme {
 
             accent_plan: Color::Yellow,
             accent_verify: Color::Magenta,
-            accent_feedback: Color::Cyan,
             accent_remember: Color::Green,
 
             selection_border: MUTED,
@@ -150,7 +153,6 @@ mod tests {
             ("fuzzy_accent", theme.fuzzy_accent),
             ("accent_plan", theme.accent_plan),
             ("accent_verify", theme.accent_verify),
-            ("accent_feedback", theme.accent_feedback),
             ("accent_remember", theme.accent_remember),
             ("selection_border", theme.selection_border),
             ("hover_border", theme.hover_border),

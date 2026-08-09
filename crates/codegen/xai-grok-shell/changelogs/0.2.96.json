@@ -11,7 +11,7 @@
   },
   {
     "category": "features",
-    "description": "**chutes.build/pr/status** now reports whether an open PR is in the merge queue.",
+    "description": "**chutes.ai/pr/status** now reports whether an open PR is in the merge queue.",
     "breaking_change": false
   },
   {

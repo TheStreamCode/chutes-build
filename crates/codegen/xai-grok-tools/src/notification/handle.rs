@@ -1,11 +1,13 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::types::{
     BashExecutionBackgrounded, BashExecutionComplete, BashExecutionFailed, BashExecutionTimeout,
     BashOutputChunk, FileWritten, LspServerCrashed, LspServerFailed, LspServerReady,
     LspServerRetrying, LspServerStarting, MonitorEvent, PlanModeEntered, PlanModeExited,
-    ScheduledTaskCreated, ScheduledTaskFired, ScheduledTaskRemoved, ToolNotification,
-    UserQuestionAsked,
+    ScheduledTaskCreated, ScheduledTaskFired, ScheduledTaskRemoved, SubagentCompleted,
+    ToolNotification, UserQuestionAsked,
 };
 use crate::types::TaskSnapshot;
 
@@ -40,11 +42,9 @@ pub enum NotificationAcknowledgementError {
 #[must_use = "acknowledged notification receipts must be awaited"]
 pub struct NotificationAcknowledgementBatch {
     receipts: Vec<tokio::sync::oneshot::Receiver<Result<(), String>>>,
-    durable_targets: usize,
     dispatch_closed: usize,
 }
 
-/// Whether an acknowledged send has configured durable notification targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DurableNotificationTargets {
     None,
@@ -52,15 +52,6 @@ pub enum DurableNotificationTargets {
 }
 
 impl NotificationAcknowledgementBatch {
-    /// Whether any target was configured for durable acknowledgement.
-    pub fn durable_targets(&self) -> DurableNotificationTargets {
-        if self.durable_targets == 0 {
-            DurableNotificationTargets::None
-        } else {
-            DurableNotificationTargets::Present
-        }
-    }
-
     /// Wait for every live durable target and report all observed failure classes.
     pub async fn wait(self) -> Result<(), NotificationAcknowledgementError> {
         let mut acknowledgements_dropped = 0;
@@ -101,7 +92,85 @@ impl NotificationAcknowledgementBatch {
 #[derive(Clone)]
 enum ToolNotificationTarget {
     Plain(tokio::sync::mpsc::UnboundedSender<ToolNotification>),
+    Bounded(tokio::sync::mpsc::Sender<ToolNotification>),
+    Capped(Arc<CappedNotificationQueue>),
     Acknowledged(tokio::sync::mpsc::UnboundedSender<AcknowledgedToolNotification>),
+}
+
+struct CappedNotificationQueue {
+    queue: parking_lot::Mutex<VecDeque<ToolNotification>>,
+    capacity: usize,
+    closed: AtomicBool,
+    ready: tokio::sync::Notify,
+}
+
+impl CappedNotificationQueue {
+    fn push(&self, notification: ToolNotification) {
+        if self.closed.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut queue = self.queue.lock();
+        if queue.len() >= self.capacity {
+            if !is_critical_notification(&notification) {
+                tracing::warn!("tool notification queue full; dropping newest lossy event");
+                return;
+            }
+            let evict = queue
+                .iter()
+                .position(|queued| !is_critical_notification(queued))
+                .unwrap_or(0);
+            queue.remove(evict);
+            tracing::warn!("tool notification queue full; evicting older event for terminal event");
+        }
+        queue.push_back(notification);
+        drop(queue);
+        self.ready.notify_one();
+    }
+}
+
+fn is_critical_notification(notification: &ToolNotification) -> bool {
+    matches!(
+        notification,
+        ToolNotification::BashExecutionComplete(_)
+            | ToolNotification::BashExecutionTimeout(_)
+            | ToolNotification::BashExecutionFailed(_)
+            | ToolNotification::TaskCompleted(_)
+            | ToolNotification::SubagentCompleted(_)
+            | ToolNotification::PlanModeEntered(_)
+            | ToolNotification::PlanModeExited(_)
+            | ToolNotification::UserQuestionAsked(_)
+            | ToolNotification::LspServerCrashed(_)
+            | ToolNotification::LspServerFailed(_)
+            | ToolNotification::ScheduledTaskFired(_)
+            | ToolNotification::ScheduledTaskRemoved(_)
+    )
+}
+
+/// Receiver for a capped queue that preserves terminal notifications.
+pub struct CappedToolNotificationReceiver {
+    queue: Arc<CappedNotificationQueue>,
+}
+
+impl CappedToolNotificationReceiver {
+    pub async fn recv(&mut self) -> Option<ToolNotification> {
+        loop {
+            let ready = self.queue.ready.notified();
+            if let Some(notification) = self.queue.queue.lock().pop_front() {
+                return Some(notification);
+            }
+            if self.queue.closed.load(Ordering::Relaxed) {
+                return None;
+            }
+            ready.await;
+        }
+    }
+}
+
+impl Drop for CappedToolNotificationReceiver {
+    fn drop(&mut self) {
+        self.queue.closed.store(true, Ordering::Relaxed);
+        self.queue.ready.notify_waiters();
+    }
 }
 
 /// Cloneable notification fan-out with per-target FIFO ordering.
@@ -138,6 +207,35 @@ impl ToolNotificationHandle {
         (Self::new(sender), receiver)
     }
 
+    /// Create a capped target that drops the newest event when full.
+    pub fn bounded_channel(
+        capacity: usize,
+    ) -> (Self, tokio::sync::mpsc::Receiver<ToolNotification>) {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+        (
+            Self {
+                targets: Arc::from([ToolNotificationTarget::Bounded(sender)]),
+            },
+            receiver,
+        )
+    }
+
+    /// Create a capped queue that evicts lossy events before terminal events.
+    pub fn capped_channel(capacity: usize) -> (Self, CappedToolNotificationReceiver) {
+        let queue = Arc::new(CappedNotificationQueue {
+            queue: parking_lot::Mutex::new(VecDeque::new()),
+            capacity: capacity.max(1),
+            closed: AtomicBool::new(false),
+            ready: tokio::sync::Notify::new(),
+        });
+        (
+            Self {
+                targets: Arc::from([ToolNotificationTarget::Capped(Arc::clone(&queue))]),
+            },
+            CappedToolNotificationReceiver { queue },
+        )
+    }
+
     pub fn acknowledged_channel() -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<AcknowledgedToolNotification>,
@@ -167,6 +265,16 @@ impl ToolNotificationHandle {
         }
     }
 
+    pub(crate) fn durable_targets(&self) -> DurableNotificationTargets {
+        if self.targets.iter().any(|target| {
+            matches!(target, ToolNotificationTarget::Acknowledged(sender) if !sender.is_closed())
+        }) {
+            DurableNotificationTargets::Present
+        } else {
+            DurableNotificationTargets::None
+        }
+    }
+
     pub fn send(&self, notification: ToolNotification) {
         let last = self.targets.len().saturating_sub(1);
         let mut notification = Some(notification);
@@ -186,6 +294,12 @@ impl ToolNotificationHandle {
                 ToolNotificationTarget::Plain(target) => {
                     let _ = target.send(notification);
                 }
+                ToolNotificationTarget::Bounded(target) => {
+                    if target.try_send(notification).is_err() {
+                        tracing::warn!("tool notification queue full; dropping newest event");
+                    }
+                }
+                ToolNotificationTarget::Capped(target) => target.push(notification),
                 ToolNotificationTarget::Acknowledged(target) => {
                     let _ = target.send(AcknowledgedToolNotification {
                         notification,
@@ -204,7 +318,6 @@ impl ToolNotificationHandle {
         let notification = ToolNotification::ScheduledTaskRemoved(removed);
         let mut batch = NotificationAcknowledgementBatch {
             receipts: Vec::new(),
-            durable_targets: 0,
             dispatch_closed: 0,
         };
         for target in self.targets.iter() {
@@ -212,8 +325,13 @@ impl ToolNotificationHandle {
                 ToolNotificationTarget::Plain(target) => {
                     let _ = target.send(notification.clone());
                 }
+                ToolNotificationTarget::Bounded(target) => {
+                    if target.try_send(notification.clone()).is_err() {
+                        tracing::warn!("tool notification queue full; dropping newest event");
+                    }
+                }
+                ToolNotificationTarget::Capped(target) => target.push(notification.clone()),
                 ToolNotificationTarget::Acknowledged(target) => {
-                    batch.durable_targets += 1;
                     let (acknowledgement, receipt) = tokio::sync::oneshot::channel();
                     if target
                         .send(AcknowledgedToolNotification {
@@ -240,6 +358,7 @@ impl ToolNotificationHandle {
         send_failed, BashExecutionFailed, BashExecutionFailed;
         send_file_written, FileWritten, FileWritten;
         send_task_complete, TaskSnapshot, TaskCompleted;
+        send_subagent_completed, SubagentCompleted, SubagentCompleted;
         send_plan_mode_entered, PlanModeEntered, PlanModeEntered;
         send_plan_mode_exited, PlanModeExited, PlanModeExited;
         send_user_question_asked, UserQuestionAsked, UserQuestionAsked;

@@ -229,11 +229,9 @@ pub enum ActiveModal {
         entries_query: Option<String>,
         /// Source filter for the modal session picker.
         source_filter: crate::views::session_picker::SourceFilter,
-        /// Session armed for delete, captured as `(source, session_id, cwd)` when
-        /// `d` is pressed so the `y` confirm always has a valid cwd even if
-        /// the picker lists change underneath it. `Some` only while the
-        /// focused row is armed; cleared on cancel / completion.
-        pending_delete: Option<(String, String, String)>,
+        /// Session armed for delete via `d` (see
+        /// [`crate::views::session_picker::PendingDelete`]).
+        pending_delete: Option<crate::views::session_picker::PendingDelete>,
     },
     /// How-to documentation list modal (wider picker style).
     DocPicker {
@@ -290,6 +288,11 @@ pub enum ActiveModal {
     Settings {
         state: Box<crate::views::settings_modal::SettingsModalState>,
     },
+    /// Tabbed usage / session-info modal (`/usage`, `/session-info`,
+    /// `/context`, context-bar click). Boxed — holds fetched snapshots.
+    UsageInfo {
+        state: Box<crate::views::usage_modal::UsageInfoModalState>,
+    },
     /// Reset-settings confirmation, stacked above Settings.
     ///
     /// The underlying `SettingsModalState` is moved in/out so cancel
@@ -343,8 +346,10 @@ pub enum PaletteCommand {
     NewSessionInWorktree,
     Home,
     Quit,
-    /// Execute a slash command by inserting it into the prompt.
+    /// Execute a slash command through the palette's draft-preserving route.
     SlashCommand(String),
+    /// Edit the minimal-mode composer draft without routing through slash text.
+    EditPromptExternal,
     /// Non-selectable section header for visual grouping.
     SectionHeader(String),
     /// Open the how-to documentation picker.
@@ -363,11 +368,13 @@ pub enum PaletteCommand {
     OpenAgentsModal,
 }
 /// Build the default set of palette entries with section grouping.
-///
-/// `sharing_enabled` controls whether the `/share` entry is included.
-/// Pass `true` to preserve the default behavior (show `/share`).
-pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
+pub(crate) fn default_palette_entries(
+    sharing_enabled: bool,
+    slash: &crate::slash::SlashController,
+) -> Vec<PaletteEntry> {
+    let screen_mode = slash.screen_mode();
     let mut entries = vec![
+        // ── Session ──
         PaletteEntry {
             label: "Session".into(),
             shortcut: String::new(),
@@ -394,6 +401,11 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             command: PaletteCommand::Home,
         },
         PaletteEntry {
+            label: "Delete This Session".into(),
+            shortcut: "/delete".into(),
+            command: PaletteCommand::SlashCommand("/delete".into()),
+        },
+        PaletteEntry {
             label: "Resume Session".into(),
             shortcut: "/resume".into(),
             command: PaletteCommand::SlashCommand("/resume".into()),
@@ -418,6 +430,7 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             shortcut: "/feedback".into(),
             command: PaletteCommand::SlashCommand("/feedback ".into()),
         },
+        // ── Context ──
         PaletteEntry {
             label: "Context".into(),
             shortcut: String::new(),
@@ -443,6 +456,7 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             shortcut: "/memory".into(),
             command: PaletteCommand::Memory,
         },
+        // ── Model & Input ──
         PaletteEntry {
             label: "Model & Input".into(),
             shortcut: String::new(),
@@ -463,6 +477,12 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             shortcut: "/multiline".into(),
             command: PaletteCommand::SlashCommand("/multiline".into()),
         },
+        PaletteEntry {
+            label: "Edit Prompt in External Editor".into(),
+            shortcut: "Ctrl+G".into(),
+            command: PaletteCommand::EditPromptExternal,
+        },
+        // ── Tools ──
         PaletteEntry {
             label: "Tools".into(),
             shortcut: String::new(),
@@ -508,6 +528,7 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             shortcut: "/config-agents".into(),
             command: PaletteCommand::OpenAgentsModal,
         },
+        // ── Other ──
         PaletteEntry {
             label: "Other".into(),
             shortcut: String::new(),
@@ -538,24 +559,43 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             command: PaletteCommand::HowTo,
         },
         PaletteEntry {
+            label: "Tutorial".into(),
+            shortcut: "/tutorial".into(),
+            command: PaletteCommand::SlashCommand("/tutorial".into()),
+        },
+        PaletteEntry {
             label: "Quit".into(),
             shortcut: "Ctrl+Q".into(),
             command: PaletteCommand::Quit,
         },
     ];
-    if !sharing_enabled {
-        entries.retain(|e| {
-            !matches!(
-                & e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/share"
-            )
-        });
-    }
+    entries.retain(|entry| {
+        if !sharing_enabled
+            && matches!(&entry.command, PaletteCommand::SlashCommand(s) if s.trim() == "/share")
+        {
+            return false;
+        }
+        if let PaletteCommand::SlashCommand(text) = &entry.command
+            && let Some(invocation) = crate::slash::parse_invocation(text.trim())
+            && !slash
+                .registry()
+                .mode_support(invocation.token)
+                .supports(screen_mode)
+        {
+            return false;
+        }
+        screen_mode.is_minimal() || !matches!(entry.command, PaletteCommand::EditPromptExternal)
+    });
     entries
 }
 #[allow(clippy::collapsible_if)]
 /// Filter palette entries for search, preserving section headers when any item in the section matches.
-pub fn filter_palette_entries(query: &str, sharing_enabled: bool) -> Vec<PaletteEntry> {
-    let all = default_palette_entries(sharing_enabled);
+pub(crate) fn filter_palette_entries(
+    query: &str,
+    sharing_enabled: bool,
+    slash: &crate::slash::SlashController,
+) -> Vec<PaletteEntry> {
+    let all = default_palette_entries(sharing_enabled, slash);
     let query_lower = query.to_lowercase();
     if query_lower.is_empty() {
         return all;
@@ -612,6 +652,7 @@ impl ActiveModal {
             | ActiveModal::ShortcutsHelp { .. }
             | ActiveModal::MemoryBrowser { .. }
             | ActiveModal::Settings { .. }
+            | ActiveModal::UsageInfo { .. }
             | ActiveModal::RememberNoteReview { .. } => vec![],
         }
     }
@@ -643,6 +684,7 @@ impl ActiveModal {
             ActiveModal::Settings { .. } => crate::views::settings_modal::MODAL_TITLE,
             ActiveModal::ResetSettingsConfirm { .. } => "Reset setting?",
             ActiveModal::RememberNoteReview { .. } => "Memory Note",
+            ActiveModal::UsageInfo { .. } => "Usage",
         }
     }
 }
@@ -980,7 +1022,7 @@ pub fn apply_doc_mouse_scroll(kind: crossterm::event::MouseEventKind, scroll: &m
 }
 const DOCS_USER_GUIDE_REL: &str = "docs/user-guide";
 /// Prefer keeping the on-disk path when width is tight.
-fn fit_docs_ask_chutes_build_tip(docs_path: &str, width: usize) -> String {
+fn fit_docs_ask_grok_tip(docs_path: &str, width: usize) -> String {
     use crate::render::line_utils::truncate_str;
     if width == 0 {
         return String::new();
@@ -1020,10 +1062,10 @@ pub fn render_doc_picker_overlay(
         render_centered_tip_footer, split_content_for_tip_footer,
     };
     use super::picker::{self, PickerEntry, PickerRow};
-    let filtered: Vec<_> = if state.query.is_empty() {
+    let filtered: Vec<_> = if state.query().is_empty() {
         entries.iter().enumerate().collect()
     } else {
-        let q = state.query.to_lowercase();
+        let q = state.query().to_lowercase();
         entries
             .iter()
             .enumerate()
@@ -1078,7 +1120,7 @@ pub fn render_doc_picker_overlay(
     let (picker_area, tip_area) = split_content_for_tip_footer(mca.content);
     if let Some(tip_rect) = tip_area {
         let docs_path = crate::util::display_user_grok_path(DOCS_USER_GUIDE_REL);
-        let tip_line = fit_docs_ask_chutes_build_tip(&docs_path, tip_rect.width as usize);
+        let tip_line = fit_docs_ask_grok_tip(&docs_path, tip_rect.width as usize);
         render_centered_tip_footer(buf, tip_rect, theme, &tip_line);
     }
     const NARROW_THRESHOLD: u16 = 70;
@@ -1141,8 +1183,7 @@ pub fn render_doc_viewer_overlay(
     compact: bool,
     theme: &Theme,
 ) {
-    use ratatui::widgets::{Paragraph, Widget, Wrap};
-    let doc_shortcuts = vec![
+    let doc_shortcuts = [
         super::modal_window::Shortcut {
             label: "\u{2191}/\u{2193} scroll",
             clickable: false,
@@ -1154,10 +1195,39 @@ pub fn render_doc_viewer_overlay(
             id: 0,
         },
     ];
+    render_doc_viewer_overlay_with_shortcuts(
+        buf,
+        area,
+        window,
+        title,
+        content,
+        scroll,
+        cached_lines,
+        compact,
+        theme,
+        &doc_shortcuts,
+    );
+}
+/// [`render_doc_viewer_overlay`] with caller-supplied footer shortcuts (the
+/// tutorial adds a next-topic hint).
+#[allow(clippy::too_many_arguments)]
+pub fn render_doc_viewer_overlay_with_shortcuts(
+    buf: &mut ratatui::buffer::Buffer,
+    area: Rect,
+    window: &mut super::modal_window::ModalWindowState,
+    title: &str,
+    content: &str,
+    scroll: &mut u16,
+    cached_lines: &mut Option<(u16, Vec<ratatui::text::Line<'static>>)>,
+    compact: bool,
+    theme: &Theme,
+    shortcuts: &[super::modal_window::Shortcut<'_>],
+) {
+    use ratatui::widgets::{Paragraph, Widget, Wrap};
     let modal_config = super::modal_window::ModalWindowConfig {
         title,
         tabs: None,
-        shortcuts: &doc_shortcuts,
+        shortcuts,
         sizing: super::modal_window::ModalSizing {
             width_pct: 0.80,
             max_width: 120,
@@ -1244,15 +1314,19 @@ mod doc_viewer_scroll_tests {
 mod palette_sharing_tests {
     use super::*;
     fn has_share(entries: &[PaletteEntry]) -> bool {
-        entries.iter().any(|e| {
-            matches!(
-                & e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/share"
-            )
-        })
+        entries
+            .iter()
+            .any(|e| matches!(&e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/share"))
+    }
+    fn slash(mode: crate::app::ScreenMode) -> crate::slash::SlashController {
+        let mut controller =
+            crate::slash::SlashController::with_builtins(std::path::PathBuf::from("."));
+        controller.set_screen_mode(mode);
+        controller
     }
     #[test]
     fn default_palette_includes_share_when_enabled() {
-        let entries = default_palette_entries(true);
+        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
         assert!(
             has_share(&entries),
             "/share should be present when sharing_enabled=true"
@@ -1260,13 +1334,10 @@ mod palette_sharing_tests {
     }
     #[test]
     fn default_palette_includes_dashboard() {
-        let entries = default_palette_entries(true);
-        let has_dashboard = entries.iter().any(|e| {
-            matches!(
-                & e.command, PaletteCommand::SlashCommand(s) if s.trim() ==
-                "/dashboard"
-            )
-        });
+        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
+        let has_dashboard = entries.iter().any(
+            |e| matches!(&e.command, PaletteCommand::SlashCommand(s) if s.trim() == "/dashboard"),
+        );
         assert!(
             has_dashboard,
             "/dashboard entry must be present in the palette so users can switch between agents"
@@ -1277,9 +1348,66 @@ mod palette_sharing_tests {
             "palette entry must use the 'Agent Dashboard' label"
         );
     }
+    fn slash_rows(mode: crate::app::ScreenMode) -> Vec<String> {
+        default_palette_entries(true, &slash(mode))
+            .into_iter()
+            .filter_map(|entry| match entry.command {
+                PaletteCommand::SlashCommand(text) => Some(text.trim().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+    #[test]
+    fn palette_drops_slash_rows_the_mode_cannot_run() {
+        let minimal = slash_rows(crate::app::ScreenMode::Minimal);
+        for gated in ["/theme", "/dashboard", "/tutorial"] {
+            assert!(!minimal.contains(&gated.to_string()), "{gated} in minimal");
+        }
+        assert!(
+            minimal.contains(&"/compact".to_string()),
+            "mode-agnostic rows stay: {minimal:?}"
+        );
+        let fullscreen = slash_rows(crate::app::ScreenMode::Fullscreen);
+        for offered in ["/theme", "/dashboard", "/tutorial"] {
+            assert!(
+                fullscreen.contains(&offered.to_string()),
+                "{offered} missing in fullscreen"
+            );
+        }
+    }
+    #[test]
+    fn every_palette_slash_row_resolves_to_a_registered_command() {
+        let builtins = crate::slash::commands::builtin_commands();
+        for row in slash_rows(crate::app::ScreenMode::Fullscreen) {
+            let invocation = crate::slash::parse_invocation(&row)
+                .unwrap_or_else(|| panic!("palette row {row:?} is not a slash invocation"));
+            assert!(
+                builtins
+                    .iter()
+                    .any(|command| command.name() == invocation.token
+                        || command.aliases().contains(&invocation.token)),
+                "palette row {row:?} names no builtin command"
+            );
+        }
+    }
+    #[test]
+    fn edit_prompt_palette_entry_is_minimal_only() {
+        let minimal = default_palette_entries(true, &slash(crate::app::ScreenMode::Minimal));
+        assert!(
+            minimal
+                .iter()
+                .any(|entry| matches!(entry.command, PaletteCommand::EditPromptExternal))
+        );
+        let fullscreen = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
+        assert!(
+            !fullscreen
+                .iter()
+                .any(|entry| matches!(entry.command, PaletteCommand::EditPromptExternal))
+        );
+    }
     #[test]
     fn default_palette_omits_share_when_disabled() {
-        let entries = default_palette_entries(false);
+        let entries = default_palette_entries(false, &slash(crate::app::ScreenMode::Fullscreen));
         assert!(
             !has_share(&entries),
             "/share must not appear in palette when sharing_enabled=false"
@@ -1287,12 +1415,13 @@ mod palette_sharing_tests {
     }
     #[test]
     fn filter_palette_omits_share_when_disabled() {
-        let entries = filter_palette_entries("", false);
+        let entries = filter_palette_entries("", false, &slash(crate::app::ScreenMode::Fullscreen));
         assert!(
             !has_share(&entries),
             "/share must not appear in unfiltered palette when sharing_enabled=false"
         );
-        let entries = filter_palette_entries("share", false);
+        let entries =
+            filter_palette_entries("share", false, &slash(crate::app::ScreenMode::Fullscreen));
         assert!(
             !has_share(&entries),
             "/share must not appear when filtering for 'share' with sharing_enabled=false"
@@ -1300,7 +1429,8 @@ mod palette_sharing_tests {
     }
     #[test]
     fn filter_palette_includes_share_when_enabled_and_matched() {
-        let entries = filter_palette_entries("share", true);
+        let entries =
+            filter_palette_entries("share", true, &slash(crate::app::ScreenMode::Fullscreen));
         assert!(
             has_share(&entries),
             "/share should match a 'share' query when sharing_enabled=true"
@@ -1309,7 +1439,7 @@ mod palette_sharing_tests {
     #[test]
     fn palette_tools_section_routes_each_tab_to_itself() {
         use crate::views::extensions_modal::ExtensionsTab;
-        let entries = default_palette_entries(true);
+        let entries = default_palette_entries(true, &slash(crate::app::ScreenMode::Fullscreen));
         for (label, expected) in [
             ("Hooks", ExtensionsTab::Hooks),
             ("Plugins", ExtensionsTab::Plugins),
@@ -1322,8 +1452,10 @@ mod palette_sharing_tests {
                 .find(|e| e.label == label)
                 .unwrap_or_else(|| panic!("Tools entry {label:?} missing from palette"));
             assert!(
-                matches!(& entry.command, PaletteCommand::OpenExtensionsTab(t) if * t ==
-                expected,),
+                matches!(
+                    &entry.command,
+                    PaletteCommand::OpenExtensionsTab(t) if *t == expected,
+                ),
                 "Tools entry {label:?} dispatches to the wrong tab",
             );
         }
@@ -1345,7 +1477,7 @@ mod palette_sharing_tests {
 #[cfg(test)]
 mod doc_picker_tip_tests {
     use super::{
-        ActiveModal, DOCS_USER_GUIDE_REL, fit_docs_ask_chutes_build_tip, howto_list_modal,
+        ActiveModal, DOCS_USER_GUIDE_REL, fit_docs_ask_grok_tip, howto_list_modal,
         render_doc_picker_overlay,
     };
     use ratatui::buffer::Buffer;
@@ -1359,14 +1491,11 @@ mod doc_picker_tip_tests {
         );
         let short = format!("Tip · Ask Chutes Build about the docs · {path}");
         let path_only = format!("Tip · {path}");
-        assert_eq!(fit_docs_ask_chutes_build_tip(&path, long.width()), long);
-        assert_eq!(fit_docs_ask_chutes_build_tip(&path, short.width()), short);
-        assert_eq!(
-            fit_docs_ask_chutes_build_tip(&path, path_only.width()),
-            path_only
-        );
+        assert_eq!(fit_docs_ask_grok_tip(&path, long.width()), long);
+        assert_eq!(fit_docs_ask_grok_tip(&path, short.width()), short);
+        assert_eq!(fit_docs_ask_grok_tip(&path, path_only.width()), path_only);
         for w in [5usize, 12, 20, 30] {
-            let line = fit_docs_ask_chutes_build_tip(&path, w);
+            let line = fit_docs_ask_grok_tip(&path, w);
             assert!(line.width() <= w, "overflow at {w}: {line:?}");
         }
     }

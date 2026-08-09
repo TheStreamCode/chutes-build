@@ -284,7 +284,7 @@ async fn try_discover_managed_servers() -> (ConfigSourceStatus, Vec<DiscoveredSe
 
     let token = match auth_manager.get_valid_token().await {
         Ok(key) => key,
-        Err(_) => return managed_skipped("authentication unavailable — run `chutes-build login`"),
+        Err(_) => return managed_skipped("auth expired — run `chutes-build login`"),
     };
 
     let proxy_url = crate::agent::config::EndpointsConfig::from_effective_config().proxy_url();
@@ -363,17 +363,8 @@ async fn check_server_start(
 ) -> Result<(mcp_servers::McpClient, Check), Check> {
     let start = std::time::Instant::now();
     let noop = xai_file_utils::events::EventWriter::noop();
-    match mcp_servers::start_mcp_server(
-        acp_server,
-        None,
-        Some(cwd),
-        None,
-        None,
-        &noop,
-        mcp_servers::OauthInteractivity::Interactive,
-    )
-    .await
-    {
+    let ctx = mcp_servers::McpSpawnCtx::session_less(&noop);
+    match mcp_servers::start_mcp_server(acp_server, Some(cwd), None, None, &ctx).await {
         Ok(client) => {
             let elapsed = start.elapsed();
             Ok((

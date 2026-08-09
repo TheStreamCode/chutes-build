@@ -7,7 +7,7 @@
 //! unnecessary network requests.
 //!
 //! ACP integration: on text change (after debounce), sends an
-//! `chutes.build/suggest` request through the Effect pipeline. Stale responses
+//! `chutes.ai/suggest` request through the Effect pipeline. Stale responses
 //! are discarded via generation tracking.
 
 /// Source of a shell command suggestion.
@@ -46,14 +46,14 @@ pub(crate) struct GhostTextState {
     pub(crate) generation: u64,
 }
 
-/// Parsed ghost suggestion from an ACP `chutes.build/suggest` response.
+/// Parsed ghost suggestion from an ACP `chutes.ai/suggest` response.
 #[derive(Debug, Clone)]
 pub struct GhostSuggestionParsed {
     pub suffix: String,
     pub source: SuggestionSource,
 }
 
-/// A single completion item from an ACP `chutes.build/suggest` response.
+/// A single completion item from an ACP `chutes.ai/suggest` response.
 // `Default` (empty item) exists for downstream test fixtures — functional-
 // update construction (`..Default::default()`) keeps out-of-crate literals
 // (e.g. xai-grok-pager-minimal's) compiling when optional fields are added.
@@ -87,7 +87,7 @@ impl CompletionItemParsed {
     }
 }
 
-/// Parsed response from an ACP `chutes.build/suggest` request.
+/// Parsed response from an ACP `chutes.ai/suggest` request.
 #[derive(Debug, Clone)]
 pub struct SuggestResponseParsed {
     pub ghost: Option<GhostSuggestionParsed>,
@@ -96,7 +96,7 @@ pub struct SuggestResponseParsed {
 }
 
 impl SuggestResponseParsed {
-    /// Parse a raw JSON value from an ACP `chutes.build/suggest` response.
+    /// Parse a raw JSON value from an ACP `chutes.ai/suggest` response.
     pub fn from_json(value: &serde_json::Value) -> Option<Self> {
         let result = value.get("result").unwrap_or(value);
         let generation = result.get("generation")?.as_u64()?;
@@ -197,7 +197,7 @@ pub enum SuggestionAction {
     Debounce { generation: u64 },
 }
 
-/// Wire `limit` for `chutes.build/suggest` fetches. Matches the shell file
+/// Wire `limit` for `chutes.ai/suggest` fetches. Matches the shell file
 /// provider's ranked-result cap (`MAX_RESULTS` in the shell crate's
 /// `file_provider.rs`): the provider ranks BEFORE capping, the dropdown
 /// renders 6 rows and scrolls the rest. Both fetch sites (Tab and the
@@ -326,7 +326,7 @@ pub struct SuggestionController {
     /// Whether AI-powered suggestions are enabled.
     /// Resolved at construction from `CHUTES_BUILD_SUGGESTIONS_AI` env var.
     pub ai_enabled: bool,
-    /// Model to use for AI suggestions. Sent in the `chutes.build/suggest` request.
+    /// Model to use for AI suggestions. Sent in the `chutes.ai/suggest` request.
     /// Resolved at construction from `CHUTES_BUILD_SUGGESTIONS_AI_MODEL` env var.
     pub ai_model: Option<String>,
 }
@@ -734,7 +734,7 @@ impl SuggestionController {
         generation == self.generation
     }
 
-    /// Called when an ACP `chutes.build/suggest` response arrives, with the text and
+    /// Called when an ACP `chutes.ai/suggest` response arrives, with the text and
     /// cursor the request was built from (the anchor item `replace_range`
     /// offsets index into, and the position Tab targets). Takes ownership to
     /// avoid copying strings. Discards stale responses.

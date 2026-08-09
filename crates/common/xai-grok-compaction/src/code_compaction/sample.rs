@@ -2,7 +2,7 @@
 //!
 //! The canonical `sample → classify → retry` loop, used by **both** grok-build's
 //! full-replace pass ([`sample_full_replace_summary`](super::sample_full_replace_summary))
-//! and Grok chat's intra `Shared` summarizer
+//! and Chutes Build chat's intra `Shared` summarizer
 //! ([`apply_intra_compaction`](crate::intra_compaction::apply_intra_compaction)).
 //! Centralising it here removes the two near-identical copies that previously
 //! lived in `code_compaction::compact` and `intra_compaction::compact`.
@@ -306,6 +306,26 @@ mod tests {
         let sampler =
             MockSampler::scripted(vec![Err(CompactionSampleError::Other(anyhow::anyhow!(
                 "API error (status 400): prompt is too long for this model's context window"
+            )))]);
+        let err = run(&sampler, 3).await.expect_err("should fail");
+        assert!(matches!(
+            err,
+            SampleRetryError::Failure {
+                deterministic: true,
+                context_overflow: true,
+                ..
+            }
+        ));
+        assert_eq!(sampler.call_count(), 1, "overflow must not retry");
+    }
+
+    #[tokio::test]
+    async fn conversation_exceeds_budget_is_context_overflow() {
+        let sampler =
+            MockSampler::scripted(vec![Err(CompactionSampleError::Other(anyhow::anyhow!(
+                "API error (status 400 Bad Request): invalid-argument: \
+                 Failed to start sampling: [conversation] Current message \
+                 (1000000 tokens) exceeds budget (500000 tokens)"
             )))]);
         let err = run(&sampler, 3).await.expect_err("should fail");
         assert!(matches!(

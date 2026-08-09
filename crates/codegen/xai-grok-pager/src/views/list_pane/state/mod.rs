@@ -2747,4 +2747,70 @@ mod tests {
             state.scroll_offset,
         );
     }
+
+    #[test]
+    fn paste_targets_only_active_list_input_and_preserves_comment_newlines() {
+        let items = vec![
+            TestItem::new(0).with_text("alpha"),
+            TestItem::new(1).with_text("beta"),
+        ];
+        let mut state =
+            ListPaneState::new_with_config(WrapMode::NoWrap, false, ListPaneConfig::streaming());
+        state.prepare_layout(&items, 80, 4);
+        assert!(state.handle_key_event(&key!('/').to_key_event(), &items));
+        assert!(state.handle_key_event(&key!('a').to_key_event(), &items));
+        assert!(state.handle_key_event(&key!('b').to_key_event(), &items));
+        assert!(state.handle_key_event(&key!(Left).to_key_event(), &items));
+        assert!(state.handle_paste("中\r\n", &items));
+        assert_eq!(state.input_text(), "a中b");
+        assert_eq!(state.matcher().map(ListMatcher::query), Some("a中b"));
+
+        assert!(!state.handle_paste("\r\n", &items));
+        assert_eq!(state.input_text(), "a中b");
+
+        state.close_input_bar();
+        assert!(!state.handle_paste("ignored", &items));
+
+        state.open_comment_input("");
+        assert!(state.handle_paste("a\nb", &items));
+        assert_eq!(state.input_text(), "a\nb");
+    }
+
+    #[test]
+    fn content_down_clears_stale_scrollbar_drag_latch() {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        use ratatui::layout::Rect;
+
+        let items: Vec<TestItem> = (0..40).map(TestItem::new).collect();
+        let mut state = ListPaneState::new(WrapMode::NoWrap, false);
+        let pane = Rect::new(0, 0, 80, 10);
+        let track = Rect::new(79, 0, 1, 10);
+        state.prepare_layout(&items, pane.width, pane.height);
+        state.set_scrollbar_area(Some(track));
+
+        assert!(state.handle_mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            track.x,
+            5,
+            pane,
+            &items,
+        ));
+        assert!(
+            state.is_scrollbar_dragging(),
+            "press on the track must latch a thumb drag"
+        );
+
+        // Lost Up, then a content press — latch must not stick.
+        assert!(state.handle_mouse_event(
+            MouseEventKind::Down(MouseButton::Left),
+            10,
+            4,
+            pane,
+            &items,
+        ));
+        assert!(
+            !state.is_scrollbar_dragging(),
+            "a later content Down must clear a stale scrollbar latch"
+        );
+    }
 }

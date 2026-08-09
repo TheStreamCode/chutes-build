@@ -6,7 +6,7 @@
   },
   {
     "category": "fixes",
-    "description": "**grok --resume** now correctly finds the real session instead of failing on empty image-only folders.",
+    "description": "**chutes-build --resume** now correctly finds the real session instead of failing on empty image-only folders.",
     "breaking_change": false
   },
   {

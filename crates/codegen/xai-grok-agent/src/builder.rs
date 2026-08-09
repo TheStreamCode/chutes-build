@@ -15,8 +15,8 @@ use xai_grok_tools::computer::types::{AsyncFileSystem, TerminalBackend};
 use xai_grok_tools::notification::ToolNotificationHandle;
 use xai_grok_tools::registry::types::SessionContext;
 use xai_grok_tools::types::tool::ToolKind;
-/// The Grok [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
-/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Grok
+/// The Chutes Build [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
+/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Chutes Build
 /// tool registry in `xai-grok-tools` (also used by the hook matcher).
 fn claude_tool_kind(name: &str) -> Option<ToolKind> {
     xai_grok_tools::types::kind_for(name)
@@ -99,6 +99,7 @@ pub struct AgentBuilder {
         xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     subagents_enabled: bool,
+    background_workflows_enabled: bool,
     ask_user_question_enabled: bool,
     subagent_toggle: HashMap<String, bool>,
     task_model_slugs: Vec<String>,
@@ -134,54 +135,10 @@ pub struct AgentBuilder {
     /// `list_skills_with_plugins()`.
     preloaded_skills: Option<Vec<xai_grok_tools::implementations::skills::types::SkillInfo>>,
 }
-/// Ensure plan mode tools (`enter_plan_mode`, `exit_plan_mode`,
-/// `ask_user_question`) are present in the tool config.
-fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
-    use xai_grok_tools::implementations::grok_build;
-    let existing: std::collections::HashSet<&str> =
-        tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
-    let missing_enter = !existing.contains("ChutesBuild:enter_plan_mode");
-    let missing_exit = !existing.contains("ChutesBuild:exit_plan_mode");
-    let missing_ask = !existing.contains("ChutesBuild:ask_user_question");
-    drop(existing);
-    if missing_enter {
-        tool_config
-            .tools
-            .push((&grok_build::EnterPlanModeTool).into());
-    }
-    if missing_exit {
-        tool_config
-            .tools
-            .push((&grok_build::ExitPlanModeTool).into());
-    }
-    if missing_ask {
-        tool_config
-            .tools
-            .push((&grok_build::AskUserQuestionTool).into());
-    }
-}
-/// Add a session-level optional tool unless the agent's declared toolset
-/// already lists it.
-///
-/// These injections layer on top of `definition.tool_config`, so a curated
-/// toolset that already names one of them (the advisor declares
-/// `memory_search`, `memory_get` and `web_fetch`) would otherwise receive a
-/// second entry with the same id. Both entries resolve to the same
-/// client-facing name and `validate_config` rejects the whole toolset with
-/// `duplicate client_name`, so the agent fails to build at all.
-fn push_session_tool(
-    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
-    tool: xai_grok_tools::registry::types::ToolConfig,
-) {
-    if !tool_config
-        .tools
-        .iter()
-        .any(|existing| existing.id == tool.id)
-    {
-        tool_config.tools.push(tool);
-    }
-}
 /// Ensure the Chutes-native ecosystem tools are available to default agents.
+///
+/// A toolset assembled from a config file rather than one of the presets would
+/// otherwise miss them entirely — the presets are not the only path in.
 fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
     use xai_grok_tools::implementations::chutes;
     use xai_grok_tools::registry::types::ToolConfig;
@@ -217,41 +174,25 @@ fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolSe
 
 /// Remove Chutes ecosystem tools from the per-turn schema list when the agent
 /// can discover and invoke them through `search_tool` / `use_tool` instead.
+///
+/// Both must be present: `search_tool` alone can find a tool it cannot call, and
+/// `use_tool` alone cannot be told what exists.
 fn take_lazy_chutes_tools(
     tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
 ) -> Vec<String> {
-    let supports_lazy_discovery = tool_config
-        .tools
-        .iter()
-        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool)))
-        && tool_config
-            .tools
-            .iter()
-            .any(|tool| matches!(tool.kind, Some(ToolKind::UseTool)));
-    if !supports_lazy_discovery {
-        return Vec::new();
-    }
-
-    const LAZY_CHUTES_IDS: [&str; 8] = [
-        "ChutesBuild:context7_search",
-        "ChutesBuild:context7_docs",
-        "ChutesBuild:get_chutes_usage",
-        "ChutesBuild:list_media_models",
-        "ChutesBuild:describe_media_model",
-        "ChutesBuild:generate_media",
-        "ChutesBuild:browser",
-        "ChutesBuild:ocr_page",
-    ];
-    let mut lazy = Vec::new();
-    tool_config.tools.retain(|tool| {
-        if LAZY_CHUTES_IDS.contains(&tool.id.as_str()) {
-            lazy.push(tool.id.clone());
-            false
-        } else {
-            true
-        }
-    });
-    lazy
+    take_lazy(
+        tool_config,
+        &[
+            "ChutesBuild:context7_search",
+            "ChutesBuild:context7_docs",
+            "ChutesBuild:get_chutes_usage",
+            "ChutesBuild:list_media_models",
+            "ChutesBuild:describe_media_model",
+            "ChutesBuild:generate_media",
+            "ChutesBuild:browser",
+            "ChutesBuild:ocr_page",
+        ],
+    )
 }
 
 /// Keep low-frequency runtime controls available without paying their schema
@@ -259,28 +200,37 @@ fn take_lazy_chutes_tools(
 fn take_lazy_support_tools(
     tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
 ) -> Vec<String> {
-    let supports_lazy_discovery = tool_config
-        .tools
-        .iter()
-        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool)))
-        && tool_config
+    take_lazy(
+        tool_config,
+        &[
+            "ChutesBuild:scheduler_create",
+            "ChutesBuild:scheduler_delete",
+            "ChutesBuild:scheduler_list",
+            "ChutesBuild:monitor",
+            "ChutesBuild:update_goal",
+        ],
+    )
+}
+
+/// Shared body of the two `take_lazy_*` helpers: pull `ids` out of the schema
+/// list and return the ones that were there, or change nothing when the agent
+/// has no way to discover them again.
+fn take_lazy(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+    ids: &[&str],
+) -> Vec<String> {
+    let has = |kind: ToolKind| {
+        tool_config
             .tools
             .iter()
-            .any(|tool| matches!(tool.kind, Some(ToolKind::UseTool)));
-    if !supports_lazy_discovery {
+            .any(|tool| tool.kind.as_ref() == Some(&kind))
+    };
+    if !(has(ToolKind::SearchTool) && has(ToolKind::UseTool)) {
         return Vec::new();
     }
-
-    const LAZY_SUPPORT_IDS: [&str; 5] = [
-        "ChutesBuild:scheduler_create",
-        "ChutesBuild:scheduler_delete",
-        "ChutesBuild:scheduler_list",
-        "ChutesBuild:monitor",
-        "ChutesBuild:update_goal",
-    ];
     let mut lazy = Vec::new();
     tool_config.tools.retain(|tool| {
-        if LAZY_SUPPORT_IDS.contains(&tool.id.as_str()) {
+        if ids.contains(&tool.id.as_str()) {
             lazy.push(tool.id.clone());
             false
         } else {
@@ -386,6 +336,33 @@ async fn register_lazy_support_tools(
     }
     Ok(())
 }
+
+/// Ensure plan mode tools (`enter_plan_mode`, `exit_plan_mode`,
+/// `ask_user_question`) are present in the tool config.
+fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
+    use xai_grok_tools::implementations::grok_build;
+    let existing: std::collections::HashSet<&str> =
+        tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
+    let missing_enter = !existing.contains("ChutesBuild:enter_plan_mode");
+    let missing_exit = !existing.contains("ChutesBuild:exit_plan_mode");
+    let missing_ask = !existing.contains("ChutesBuild:ask_user_question");
+    drop(existing);
+    if missing_enter {
+        tool_config
+            .tools
+            .push((&grok_build::EnterPlanModeTool).into());
+    }
+    if missing_exit {
+        tool_config
+            .tools
+            .push((&grok_build::ExitPlanModeTool).into());
+    }
+    if missing_ask {
+        tool_config
+            .tools
+            .push((&grok_build::AskUserQuestionTool).into());
+    }
+}
 /// Merge a shell-resolved params map into every matching tool's
 /// `ToolConfig.params` (single copy of the loop the per-tool injections share).
 fn merge_tool_params(
@@ -400,6 +377,21 @@ fn merge_tool_params(
                 params.insert(k.clone(), v.clone());
             }
         }
+    }
+}
+fn apply_workflow_tool_gates(
+    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
+    background_workflows_enabled: bool,
+) {
+    use xai_grok_tools::types::tool::ToolKind;
+    if background_workflows_enabled {
+        tool_config
+            .tools
+            .retain(|tool| tool.kind != Some(ToolKind::GoalUpdate));
+    } else {
+        tool_config
+            .tools
+            .retain(|tool| tool.kind != Some(ToolKind::Workflow));
     }
 }
 impl AgentBuilder {
@@ -449,6 +441,7 @@ impl AgentBuilder {
             app_builder_deployer_config: Default::default(),
             write_file_enabled: true,
             subagents_enabled: false,
+            background_workflows_enabled: false,
             ask_user_question_enabled: true,
             subagent_toggle: HashMap::new(),
             task_model_slugs: Vec::new(),
@@ -759,7 +752,11 @@ impl AgentBuilder {
         self.subagents_enabled = enabled;
         self
     }
-    /// Set public model slugs advertised in the GrokBuild Task description.
+    pub fn with_background_workflows_enabled(mut self, enabled: bool) -> Self {
+        self.background_workflows_enabled = enabled;
+        self
+    }
+    /// Set public model slugs advertised in the ChutesBuild Task description.
     pub fn with_task_model_slugs(mut self, slugs: Vec<String>) -> Self {
         self.task_model_slugs = slugs;
         self
@@ -798,7 +795,7 @@ impl AgentBuilder {
     }
     /// Set the skills config (custom paths, ignore globs) from config.toml.
     /// Without this, only auto-discovered skills (cwd/.chutes-build/skills, ~/.chutes-build/skills)
-    /// are included — custom paths added via `chutes.build/skills/add` would be ignored.
+    /// are included — custom paths added via `chutes.ai/skills/add` would be ignored.
     pub fn with_skills_config(mut self, config: crate::prompt::skills::SkillsConfig) -> Self {
         self.skills_config = config;
         self
@@ -921,26 +918,32 @@ impl AgentBuilder {
         if definition.inject_default_tools {
             if self.memory_backend.is_some() {
                 use xai_grok_tools::implementations::memory;
-                push_session_tool(
-                    &mut tool_config,
-                    (&memory::search_tool::MemorySearchImpl).into(),
-                );
-                push_session_tool(&mut tool_config, (&memory::get_tool::MemoryGetImpl).into());
+                tool_config
+                    .tools
+                    .push((&memory::search_tool::MemorySearchImpl).into());
+                tool_config
+                    .tools
+                    .push((&memory::get_tool::MemoryGetImpl).into());
             }
             if self.web_search_config.is_enabled() {
                 use xai_grok_tools::implementations::grok_build;
-                push_session_tool(&mut tool_config, (&grok_build::WebSearchTool).into());
+                tool_config.tools.push((&grok_build::WebSearchTool).into());
             }
             if self.web_fetch_config.is_enabled() {
                 use xai_grok_tools::implementations::grok_build;
-                push_session_tool(&mut tool_config, (&grok_build::WebFetchTool).into());
+                tool_config.tools.push((&grok_build::WebFetchTool).into());
             }
             if self.lsp.is_some() {
-                push_session_tool(
-                    &mut tool_config,
-                    (&xai_grok_tools::implementations::grok_build::LspTool).into(),
-                );
+                tool_config
+                    .tools
+                    .push((&xai_grok_tools::implementations::grok_build::LspTool).into());
             }
+            // Upstream advertises its Imagine tools here. They call an xAI
+            // endpoint Chutes has no equivalent for — their own tier message
+            // says "This legacy image tool is unavailable. Use the native
+            // generate_media tool" — so `ensure_chutes_tools` below supplies the
+            // Chutes media tools instead. The implementations stay in the tree,
+            // unadvertised, so an upstream merge still applies cleanly.
             let has_write_tool = tool_config
                 .tools
                 .iter()
@@ -954,7 +957,7 @@ impl AgentBuilder {
             ensure_plan_mode_tools(&mut tool_config);
         }
         if self.memory_backend.is_none() {
-            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::GrokBuild.to_string();
+            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::ChutesBuild.to_string();
             let mem_search_id = format!(
                 "{grok_build_ns}:{}",
                 xai_grok_tools::implementations::memory::MEMORY_SEARCH_TOOL_NAME
@@ -970,13 +973,14 @@ impl AgentBuilder {
         if !self.ask_user_question_enabled {
             let ask_user_id = format!(
                 "{}:ask_user_question",
-                xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
+                xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
             );
             tool_config.tools.retain(|tc| tc.id != ask_user_id);
         }
+        apply_workflow_tool_gates(&mut tool_config, self.background_workflows_enabled);
         let task_tool_id = format!(
             "{}:{}",
-            xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
+            xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
             "task"
         );
         let mut task_stripped = false;
@@ -1024,7 +1028,7 @@ impl AgentBuilder {
                                 .unwrap_or(true))
                 })
             };
-            if !has_satisfier(ToolNamespace::GrokBuild, "run_terminal_cmd", true)
+            if !has_satisfier(ToolNamespace::ChutesBuild, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::OpenCode, "bash", false)
             {
@@ -1047,7 +1051,7 @@ impl AgentBuilder {
                 &mut tool_config,
                 &[
                     "ChutesBuild:run_terminal_cmd",
-                    "ChutesBuildConcise:run_terminal_cmd",
+                    "GrokBuildConcise:run_terminal_cmd",
                 ],
                 bash_params,
             );
@@ -1074,10 +1078,7 @@ impl AgentBuilder {
                 }
                 let matched = removed.iter().any(|&id| tool_id_eq(d, id));
                 if !matched {
-                    tracing::warn!(
-                        agent = % definition.name, tool = % d,
-                        "disallowedTools entry matched nothing"
-                    );
+                    tracing::warn!(agent = %definition.name, tool = %d, "disallowedTools entry matched nothing");
                 }
             }
         }
@@ -1120,8 +1121,8 @@ impl AgentBuilder {
             }
             if !recognized_but_unavailable.is_empty() {
                 tracing::debug!(
-                    agent = % definition.name, recognized_but_unavailable = ?
-                    recognized_but_unavailable,
+                    agent = %definition.name,
+                    recognized_but_unavailable = ?recognized_but_unavailable,
                     "tools allowlist named recognized tools that aren't enabled; ignoring them"
                 );
             }
@@ -1132,14 +1133,12 @@ impl AgentBuilder {
                         || (has_agent_entry && task_deps.contains(&short_tool_name(&tc.id)))
                         || matches!(tc.kind, Some(ToolKind::SearchTool | ToolKind::UseTool))
                 });
-                tracing::debug!(
-                    agent = % definition.name, allowed = ? definition.tools,
-                    "tools allowlist applied"
-                );
+                tracing::debug!(agent = %definition.name, allowed = ?definition.tools, "tools allowlist applied");
             } else {
                 tracing::warn!(
-                    agent = % definition.name, unresolved = ? unresolved, allowed = ?
-                    definition.tools,
+                    agent = %definition.name,
+                    unresolved = ?unresolved,
+                    allowed = ?definition.tools,
                     "tools allowlist had unmappable entries; keeping full grok toolset"
                 );
             }
@@ -1213,10 +1212,12 @@ impl AgentBuilder {
                 }
             }
         }
-        let lazy_chutes_tools = take_lazy_chutes_tools(&mut tool_config);
-        let lazy_support_tools = take_lazy_support_tools(&mut tool_config);
         let use_backend_search = self.backend_search;
         let web_search_enabled = self.web_search_config.is_enabled();
+        // Taken off the schema list before the bridge sees it, and registered
+        // on the bridge immediately after, so `use_tool` can still reach them.
+        let lazy_chutes_tools = take_lazy_chutes_tools(&mut tool_config);
+        let lazy_support_tools = take_lazy_support_tools(&mut tool_config);
         let tool_bridge = ToolBridge::finalize_builder(
             tool_bridge_builder,
             tool_config,
@@ -1231,6 +1232,7 @@ impl AgentBuilder {
                 session_env: self.session_env.unwrap_or_default(),
                 notification_handle: self.notification_handle.clone(),
                 owner_session_id: self.owner_session_id.clone(),
+                subagent: None,
                 parent_scheduler_handle: self.parent_scheduler_handle.take(),
                 skills: skill_info.clone(),
                 state_path,
@@ -1386,13 +1388,15 @@ impl AgentBuilder {
         let mut hosted_tools = Vec::new();
         if use_backend_search {
             if web_search_enabled && definition.hosted_tool_allowed("web_search") {
-                hosted_tools.push(xai_grok_sampling_types::HostedTool::WebSearch {
-                    allowed_domains: None,
-                });
+                hosted_tools.push(xai_grok_sampling_types::HostedTool::WebSearch { options: None });
             }
             if definition.hosted_tool_allowed("x_search") {
-                hosted_tools.push(xai_grok_sampling_types::HostedTool::XSearch);
+                hosted_tools.push(xai_grok_sampling_types::HostedTool::XSearch { options: None });
             }
+            xai_grok_sampling_types::apply_tool_overrides(
+                &mut hosted_tools,
+                definition.tool_overrides.as_ref(),
+            );
         }
         #[allow(clippy::arc_with_non_send_sync)]
         let tool_bridge = Arc::new(tool_bridge);
@@ -1456,7 +1460,6 @@ fn builtin_tools_fragment(name: BuiltinAgentName) -> String {
         BuiltinAgentName::GeneralPurpose => xai_tool_types::GENERAL_PURPOSE_SUBAGENT,
         BuiltinAgentName::Explore => xai_tool_types::EXPLORE_SUBAGENT,
         BuiltinAgentName::Plan => xai_tool_types::PLAN_SUBAGENT,
-        BuiltinAgentName::Advisor => xai_tool_types::ADVISOR_SUBAGENT,
         _ => return String::new(),
     };
     subagent.render_tools(&SUBAGENT_TOOL_NAMING)
@@ -1677,16 +1680,14 @@ mod tests {
             &subagents,
             &["zeta".to_string(), "alpha".to_string(), "alpha".to_string()],
         );
-        assert!(
-            desc
-            .contains("If the user explicitly asks for the model of a subagent/task, you may ONLY use model slugs from this list:\n\
+        assert!(desc.contains(
+            "If the user explicitly asks for the model of a subagent/task, you may ONLY use model slugs from this list:\n\
              - alpha\n\
-             - zeta")
-        );
-        assert!(
-            desc
-            .contains("If the user does not explicitly request a model, omit `${{ params.task.model }}` to inherit the parent model.")
-        );
+             - zeta"
+        ));
+        assert!(desc.contains(
+            "If the user does not explicitly request a model, omit `${{ params.task.model }}` to inherit the parent model."
+        ));
         assert!(!desc.contains("Available model slugs:"));
         assert!(!desc.contains(concat!("grok", " models")));
     }
@@ -1762,6 +1763,64 @@ mod tests {
         assert!(
             desc.contains("same subagent_type"),
             "should state the resumed agent must match subagent_type"
+        );
+    }
+    /// The bridge's full-discovery snapshot must record every discovered
+    /// skill name — including `paths:`-gated and preloaded skills that the
+    /// listing baseline (`slash_skills`) holds back — so session-start
+    /// telemetry can reuse it instead of re-walking the disk.
+    #[tokio::test]
+    async fn discovery_snapshot_records_gated_and_preloaded_skills() {
+        use xai_grok_tools::computer::local::LocalTerminalBackend;
+        use xai_grok_tools::notification::ToolNotificationHandle;
+        let tmp = tempfile::tempdir().unwrap();
+        let write_skill = |dir: &str, content: &str| {
+            let d = tmp.path().join(".chutes-build/skills").join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("SKILL.md"), content).unwrap();
+        };
+        write_skill(
+            "snapshot-plain-skill",
+            "---\nname: snapshot-plain-skill\ndescription: plain\n---\nbody\n",
+        );
+        write_skill(
+            "snapshot-gated-skill",
+            "---\nname: snapshot-gated-skill\ndescription: gated\npaths: \"src/**\"\n---\nbody\n",
+        );
+        let mut definition = crate::config::AgentDefinition::default_grok_build();
+        definition.skills = vec!["snapshot-plain-skill".to_string()];
+        let agent = AgentBuilder::new(
+            tmp.path().to_path_buf(),
+            Arc::new(LocalTerminalBackend::new()),
+            ToolNotificationHandle::noop(),
+        )
+        .from_definition(definition)
+        .build()
+        .await
+        .expect("agent should build with local skill fixtures");
+        let snapshot = agent.tool_bridge().skill_discovery_snapshot_names().await;
+        assert!(
+            snapshot.contains(&"snapshot-plain-skill".to_string()),
+            "preloaded skill missing from snapshot: {snapshot:?}"
+        );
+        assert!(
+            snapshot.contains(&"snapshot-gated-skill".to_string()),
+            "paths:-gated skill missing from snapshot: {snapshot:?}"
+        );
+        let listed: Vec<String> = agent
+            .tool_bridge()
+            .slash_skills()
+            .await
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(
+            !listed.contains(&"snapshot-gated-skill".to_string()),
+            "paths:-gated skill must stay out of the listing baseline: {listed:?}"
+        );
+        assert!(
+            !listed.contains(&"snapshot-plain-skill".to_string()),
+            "preloaded skill must stay out of the listing baseline: {listed:?}"
         );
     }
     async fn build_pager_agent(
@@ -1892,39 +1951,6 @@ mod tests {
                 names.contains(&"exit_plan_mode"),
                 "[{label}] exit_plan_mode must always be present (TUI plan-mode keybind needs it); got tools: {names:?}"
             );
-            for native_tool in [
-                "chutes__context7_search",
-                "chutes__context7_docs",
-                "chutes__get_chutes_usage",
-                "chutes__list_media_models",
-                "chutes__describe_media_model",
-                "chutes__generate_media",
-                "chutes__browser",
-            ] {
-                assert!(
-                    names.contains(&native_tool),
-                    "[{label}] missing Chutes-native tool {native_tool}; got tools: {names:?}"
-                );
-            }
-            for support_tool in [
-                "chutes_build__scheduler_create",
-                "chutes_build__scheduler_delete",
-                "chutes_build__scheduler_list",
-                "chutes_build__monitor",
-                "chutes_build__update_goal",
-            ] {
-                assert!(
-                    names.contains(&support_tool),
-                    "[{label}] missing lazy support tool {support_tool}; got tools: {names:?}"
-                );
-            }
-            let builtins = agent.tool_definitions_builtins_only().await;
-            assert!(
-                builtins
-                    .iter()
-                    .all(|definition| !definition.function.name.contains("__")),
-                "[{label}] lazy tools must not be sent on every inference"
-            );
         }
     }
     #[tokio::test]
@@ -1950,93 +1976,6 @@ mod tests {
                     "expected InvalidConfig, got: {err:?}"
                 )
             }
-        }
-    }
-    /// The advisor declares `memory_search`, `memory_get` and `web_fetch` in its
-    /// curated toolset but leaves `inject_default_tools` at its default, so it is
-    /// the one builtin where session-level injection overlaps the declared list.
-    /// A second entry for the same id resolves to the same client-facing name and
-    /// `validate_config` rejects the whole toolset with `duplicate client_name`,
-    /// which made `/advisor` fail to spawn on every attempt.
-    #[tokio::test]
-    async fn advisor_builds_with_memory_and_web_fetch_enabled() {
-        use xai_grok_tools::computer::local::LocalTerminalBackend;
-        use xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig;
-        use xai_grok_tools::notification::ToolNotificationHandle;
-        use xai_grok_tools::types::memory_backend::{MemoryBackend, MemorySearchResult};
-        type BackendError = Box<dyn std::error::Error + Send + Sync>;
-        struct StubMemory;
-        #[async_trait::async_trait]
-        impl MemoryBackend for StubMemory {
-            async fn search(
-                &self,
-                _query: &str,
-                _max_results: usize,
-                _min_score: f64,
-            ) -> Result<Vec<MemorySearchResult>, BackendError> {
-                Ok(vec![])
-            }
-            fn get(
-                &self,
-                _path: &str,
-                _from: Option<usize>,
-                _lines: Option<usize>,
-            ) -> Result<String, BackendError> {
-                Ok(String::new())
-            }
-            fn total_chunks(&self) -> Result<usize, BackendError> {
-                Ok(0)
-            }
-        }
-        let profile = crate::config::AgentDefinition::advisor();
-        assert!(
-            profile.inject_default_tools,
-            "test premise: the advisor takes session-level tool injection"
-        );
-        for id in [
-            "ChutesBuild:memory_search",
-            "ChutesBuild:memory_get",
-            "ChutesBuild:web_fetch",
-        ] {
-            assert!(
-                profile.tool_config.tools.iter().any(|tc| tc.id == id),
-                "test premise: the advisor pre-declares {id}"
-            );
-        }
-        let agent = AgentBuilder::new(
-            std::env::temp_dir(),
-            Arc::new(LocalTerminalBackend::new()),
-            ToolNotificationHandle::noop(),
-        )
-        .from_definition(profile)
-        .with_memory_backend(Arc::new(StubMemory))
-        .with_web_fetch_config(WebFetchConfig::Enabled {
-            params: Default::default(),
-        })
-        .build()
-        .await
-        .expect("advisor must build when memory and web_fetch are enabled");
-        let mut names: Vec<String> = agent
-            .tool_definitions()
-            .await
-            .into_iter()
-            .map(|definition| definition.function.name)
-            .collect();
-        names.sort();
-        let duplicates: Vec<&String> = names
-            .windows(2)
-            .filter(|pair| pair[0] == pair[1])
-            .map(|pair| &pair[0])
-            .collect();
-        assert!(
-            duplicates.is_empty(),
-            "advisor toolset must not advertise a name twice: {duplicates:?}"
-        );
-        for expected in ["memory_search", "memory_get", "web_fetch"] {
-            assert!(
-                names.iter().any(|name| name == expected),
-                "advisor must still expose {expected}: {names:?}"
-            );
         }
     }
     /// The ask_user_question params merge must run after `ensure_plan_mode_tools`:
@@ -2258,10 +2197,11 @@ mod tests {
         use xai_grok_tools::types::resources::Params;
         let mut definition = crate::config::AgentDefinition::default_grok_build();
         definition.tools = vec!["run_terminal_cmd".into()];
-        let bash_params = serde_json::json!(
-            { "max_timeout_secs" : 36_000.0, "auto_background_on_timeout" : true,
-            "allow_background_operator" : false, }
-        )
+        let bash_params = serde_json::json!({
+            "max_timeout_secs": 36_000.0,
+            "auto_background_on_timeout": true,
+            "allow_background_operator": false,
+        })
         .as_object()
         .unwrap()
         .clone();
@@ -2296,7 +2236,7 @@ mod tests {
             Some(vec!["worker".into()])
         );
     }
-    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Grok
+    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Chutes Build
     /// equivalents by `ToolKind` — a real restricted toolset, not zero tools.
     #[tokio::test]
     async fn claude_tool_names_map_to_grok_equivalents() {
@@ -2458,11 +2398,6 @@ mod tests {
             "Edit must be excluded; got: {names:?}"
         );
     }
-    /// An allowlist entry does not conjure a tool the builder was not configured
-    /// to register: `web_fetch` defaults to `Disabled`, so naming it changes
-    /// nothing. `web_search` is the contrast — `WebSearchConfig` defaults to the
-    /// native provider, so it is registered on its own merits, not because the
-    /// allowlist asked for it.
     #[tokio::test]
     async fn registered_but_absent_web_tools_do_not_fall_back() {
         let tools = vec![
@@ -2479,10 +2414,9 @@ mod tests {
             .iter()
             .map(|d| d.function.name.clone())
             .collect();
-        assert!(
-            !names.contains(&"web_fetch".to_string()),
-            "web_fetch is disabled by default and the allowlist must not add it; got: {names:?}"
-        );
+        for absent in ["web_search", "web_fetch"] {
+            assert!(!names.contains(&absent.to_string()), "got: {names:?}");
+        }
         for kept in ["read_file", "grep", "list_dir"] {
             assert!(names.contains(&kept.to_string()), "got: {names:?}");
         }
@@ -2512,7 +2446,7 @@ mod tests {
         .from_definition(definition)
         .with_web_search_config(WebSearchConfig::Enabled {
             api_key: "test-key".into(),
-            base_url: "https://llm.chutes.ai/v1".into(),
+            base_url: "https://api.chutes.ai/v1".into(),
             model: "test-web-search-model".into(),
             extra_headers: Default::default(),
             alpha_test_key: None,
@@ -2631,6 +2565,7 @@ mod tests {
         web_search_enabled: bool,
         backend_search_enabled: bool,
         disallowed_tools: &[&str],
+        tool_overrides: Option<xai_grok_sampling_types::ToolOverrides>,
     ) -> crate::agent::Agent {
         use xai_grok_tools::computer::local::LocalTerminalBackend;
         use xai_grok_tools::implementations::web_search::WebSearchConfig;
@@ -2638,7 +2573,7 @@ mod tests {
         let web_search_config = if web_search_enabled {
             WebSearchConfig::Enabled {
                 api_key: "test-key".into(),
-                base_url: "https://llm.chutes.ai/v1".into(),
+                base_url: "https://api.chutes.ai/v1".into(),
                 model: "test-web-search-model".into(),
                 extra_headers: Default::default(),
                 alpha_test_key: None,
@@ -2648,6 +2583,7 @@ mod tests {
         };
         let mut def = crate::config::AgentDefinition::default_grok_build();
         def.disallowed_tools = disallowed_tools.iter().map(|s| s.to_string()).collect();
+        def.tool_overrides = tool_overrides;
         AgentBuilder::new(
             std::env::temp_dir(),
             Arc::new(LocalTerminalBackend::new()),
@@ -2662,7 +2598,7 @@ mod tests {
     }
     #[tokio::test]
     async fn disallowed_web_search_strips_function_and_hosted_tools() {
-        let agent = build_with_web_search(true, true, &["web_search"]).await;
+        let agent = build_with_web_search(true, true, &["web_search"], None).await;
         let hosted = agent.hosted_tools();
         assert!(
             !hosted
@@ -2673,7 +2609,7 @@ mod tests {
         assert!(
             hosted
                 .iter()
-                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch)),
+                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch { .. })),
             "XSearch must remain when only web_search is disallowed, got: {hosted:?}"
         );
         let has_web_search_fn = agent
@@ -2690,7 +2626,7 @@ mod tests {
     /// hosted tools appear and `backend_search_enabled()` is true.
     #[tokio::test]
     async fn hosted_tools_populated_when_backend_search_and_web_search_enabled() {
-        let agent = build_with_web_search(true, true, &[]).await;
+        let agent = build_with_web_search(true, true, &[], None).await;
         assert!(agent.backend_search_enabled());
         let hosted = agent.hosted_tools();
         assert!(
@@ -2702,7 +2638,7 @@ mod tests {
         assert!(
             hosted
                 .iter()
-                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch)),
+                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch { .. })),
             "expected XSearch hosted tool, got: {hosted:?}"
         );
     }
@@ -2710,7 +2646,7 @@ mod tests {
     /// WebSearch requires the web-search config.
     #[tokio::test]
     async fn hosted_tools_only_xsearch_when_web_search_disabled() {
-        let agent = build_with_web_search(false, true, &[]).await;
+        let agent = build_with_web_search(false, true, &[], None).await;
         let hosted = agent.hosted_tools();
         assert!(
             !hosted
@@ -2721,7 +2657,7 @@ mod tests {
         assert!(
             hosted
                 .iter()
-                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch)),
+                .any(|t| matches!(t, xai_grok_sampling_types::HostedTool::XSearch { .. })),
             "expected XSearch hosted tool, got: {hosted:?}"
         );
     }
@@ -2729,8 +2665,35 @@ mod tests {
     /// of web-search config.
     #[tokio::test]
     async fn hosted_tools_empty_when_backend_search_disabled() {
-        let agent = build_with_web_search(true, false, &[]).await;
+        let agent = build_with_web_search(true, false, &[], None).await;
         assert!(!agent.backend_search_enabled());
         assert!(agent.hosted_tools().is_empty());
+    }
+    #[tokio::test]
+    async fn hosted_tools_bake_definition_tool_overrides_into_options() {
+        let x_search = xai_grok_sampling_types::XSearchOptions {
+            date_bound: Some(
+                xai_grok_sampling_types::SearchDateBound::new(None, Some("2024-03-15".into()))
+                    .unwrap(),
+            ),
+        };
+        let agent = build_with_web_search(
+            true,
+            true,
+            &[],
+            Some(xai_grok_sampling_types::ToolOverrides {
+                x_search: Some(x_search.clone()),
+                web_search: None,
+            }),
+        )
+        .await;
+        assert!(
+            agent
+                .hosted_tools()
+                .contains(&xai_grok_sampling_types::HostedTool::XSearch {
+                    options: Some(x_search),
+                }),
+            "definition tool_overrides must be applied to HostedTool options"
+        );
     }
 }

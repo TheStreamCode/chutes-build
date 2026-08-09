@@ -1,4 +1,4 @@
-//! `chutes.build/recap` extension handler.
+//! `chutes.ai/recap` extension handler.
 //!
 //! Triggers generation of a session recap — a short "where was I" summary of
 //! the session so far — via [`SessionCommand::Recap`]. This is fire-and-forget:

@@ -11,7 +11,7 @@ pub(super) const MAX_FOLLOW_UP_LABEL: usize = 256;
 /// retained `follow_up_seen` ring.
 pub(super) const MAX_RESPONSE_ID_LEN: usize = 128;
 
-/// Deserialize shape of the `chutes.build/follow_ups` params emitted by the shell
+/// Deserialize shape of the `chutes.ai/follow_ups` params emitted by the shell
 /// translator: `{ response_id, suggestions: [{ label, .. }] }`. The keys are
 /// prost-derived snake_case — NOT camelCase like most other pager
 /// notification payloads — so this struct must match snake_case verbatim.
@@ -38,7 +38,7 @@ pub(super) struct FollowUpsParams {
     meta: Option<serde_json::Value>,
 }
 
-/// A single `chutes.build/follow_ups` suggestion. Only the human-facing `label` is
+/// A single `chutes.ai/follow_ups` suggestion. Only the human-facing `label` is
 /// consumed; `properties` / `tool_overrides` (also in the wire shape) are
 /// ignored.
 #[derive(serde::Deserialize)]
@@ -60,7 +60,7 @@ pub(super) fn sanitize_suggestion(label: &str) -> String {
     cleaned.trim().to_owned()
 }
 
-/// Handle `chutes.build/follow_ups` — render follow-up suggestion chips for the
+/// Handle `chutes.ai/follow_ups` — render follow-up suggestion chips for the
 /// latest assistant response.
 ///
 /// Newest-response-wins keying lives in [`AgentView::apply_follow_ups`]. The

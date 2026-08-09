@@ -92,7 +92,7 @@ fn registered_public_toolset_preset_names() -> Vec<String> {
         .map(|(name, _)| name.clone())
         .collect()
 }
-/// Orchestrator-specific prompt body appended to the standard GrokBuild
+/// Orchestrator-specific prompt body appended to the standard ChutesBuild
 /// system prompt (`prompt.md`). Instructs the GBL model to delegate
 /// coding and exploration work to subagents.
 const ORCHESTRATOR_PROMPT_BODY: &str = "\
@@ -181,13 +181,13 @@ pub fn workspace_grok_build_toolset() -> ToolServerConfig {
     tools.push((&grok_build::ExitPlanModeTool).into());
     tools.push((&grok_build::AskUserQuestionTool).into());
     tools.push((&grok_build::WebSearchTool).into());
-    tools.push((&grok_build::WebFetchTool).into());
     tools.push((&chutes::Context7SearchTool).into());
     tools.push((&chutes::Context7DocsTool).into());
     tools.push((&chutes::ListMediaModelsTool).into());
     tools.push((&chutes::DescribeMediaModelTool).into());
     tools.push((&chutes::GenerateMediaTool).into());
     tools.push((&chutes::BrowserTool).into());
+    tools.push((&grok_build::WebFetchTool).into());
     tools.push((&memory::search_tool::MemorySearchImpl).into());
     tools.push((&memory::get_tool::MemoryGetImpl).into());
     tools.push((&grok_build::LspTool).into());
@@ -283,13 +283,14 @@ fn default_grok_build_toolset() -> ToolServerConfig {
             (&grok_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
             (&chutes::Context7SearchTool).into(),
             (&chutes::Context7DocsTool).into(),
             (&chutes::ListMediaModelsTool).into(),
             (&chutes::DescribeMediaModelTool).into(),
             (&chutes::GenerateMediaTool).into(),
             (&chutes::BrowserTool).into(),
+            (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
         ],
         behavior_preset: None,
     }
@@ -310,6 +311,7 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
             (&grok_build::SchedulerListTool).into(),
             (&grok_build::MonitorTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
         ],
         behavior_preset: None,
     }
@@ -339,6 +341,7 @@ pub fn grok_build_hashline_toolset(
         (&search_tool::SearchTool).into(),
         (&use_tool::UseTool).into(),
         (&grok_build::UpdateGoalTool).into(),
+        (&grok_build::WorkflowTool).into(),
     ]);
     ToolServerConfig {
         tools,
@@ -392,16 +395,18 @@ fn plan_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
-            (&grok_build::TodoWriteTool).into(),
             (&chutes::Context7SearchTool).into(),
             (&chutes::Context7DocsTool).into(),
+            // (&grok_build::SkillTool).into(),
+            (&grok_build::TodoWriteTool).into(),
+            // search_replace + run_terminal_command intentionally omitted (read-only)
         ],
         behavior_preset: None,
     }
 }
-
 /// Read-only advisor toolset: repository inspection plus current public
-/// documentation and local memory. No shell, edit, media, or nested agents.
+/// documentation and local memory. No shell, edit, media, or nested agents —
+/// the advisor reviews, it never implements.
 fn advisor_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -426,6 +431,7 @@ fn advisor_toolset() -> ToolServerConfig {
 fn grok_build_plan_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
+            // Standard chutes-build tools
             bash_tool_config(),
             (&grok_build::ReadFileTool).into(),
             (&grok_build::SearchReplaceTool).into(),
@@ -441,16 +447,18 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
             (&grok_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::EnterPlanModeTool).into(),
-            (&grok_build::ExitPlanModeTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
             (&chutes::Context7SearchTool).into(),
             (&chutes::Context7DocsTool).into(),
             (&chutes::ListMediaModelsTool).into(),
             (&chutes::DescribeMediaModelTool).into(),
             (&chutes::GenerateMediaTool).into(),
             (&chutes::BrowserTool).into(),
+            (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
+            // Plan mode tools
+            (&grok_build::EnterPlanModeTool).into(),
+            (&grok_build::ExitPlanModeTool).into(),
+            (&grok_build::AskUserQuestionTool).into(),
         ],
         behavior_preset: None,
     }
@@ -464,35 +472,47 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
 fn orchestrator_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
+            // Research tools
             bash_tool_config(),
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            // Subagent orchestration
             task_tool_config(),
             task_output_tool_config(),
             wait_tasks_tool_config(),
             kill_task_tool_config(),
+            // Skills and MCP
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
+            // Planning and user interaction
             (&grok_build::TodoWriteTool).into(),
             (&grok_build::EnterPlanModeTool).into(),
             (&grok_build::ExitPlanModeTool).into(),
             (&grok_build::AskUserQuestionTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
+            // Scheduling and monitoring
             (&grok_build::SchedulerCreateTool).into(),
             (&grok_build::SchedulerDeleteTool).into(),
             (&grok_build::SchedulerListTool).into(),
             (&grok_build::MonitorTool).into(),
+            // Web tools
             (&grok_build::WebSearchTool).into(),
             (&grok_build::WebFetchTool).into(),
+            // Imagine
             (&chutes::Context7SearchTool).into(),
             (&chutes::Context7DocsTool).into(),
             (&chutes::ListMediaModelsTool).into(),
             (&chutes::DescribeMediaModelTool).into(),
             (&chutes::GenerateMediaTool).into(),
             (&chutes::BrowserTool).into(),
+            // Memory
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
+            // Intentionally excluded:
+            // - SearchReplaceTool (no file editing — delegate to subagents)
+            // - OpenCodeWriteTool (no file writing — delegate to subagents)
         ],
         behavior_preset: None,
     }
@@ -505,6 +525,8 @@ fn orchestrator_toolset() -> ToolServerConfig {
 fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
+            // Standard chutes-build tools (minus TaskTool only — KillTaskTool and
+            // TaskOutputTool are kept because BashTool's background mode requires them)
             bash_tool_config(),
             (&grok_build::ReadFileTool).into(),
             (&grok_build::SearchReplaceTool).into(),
@@ -520,6 +542,8 @@ fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
+            // Plan mode tools
             (&grok_build::EnterPlanModeTool).into(),
             (&grok_build::ExitPlanModeTool).into(),
             (&grok_build::AskUserQuestionTool).into(),
@@ -551,6 +575,8 @@ fn grok_build_ask_user_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&grok_build::UpdateGoalTool).into(),
+            (&grok_build::WorkflowTool).into(),
+            // Ask user tool (without plan mode)
             (&grok_build::AskUserQuestionTool).into(),
         ],
         behavior_preset: None,
@@ -688,7 +714,7 @@ where
 /// are defined in exactly one place. The enum covers all built-in
 /// agents for centralized name management and `by_name()` dispatch.
 ///
-/// `subagent_variants()` returns the roles exposed to the LLM
+/// `subagent_variants()` returns only the 3 that are exposed to the LLM
 /// via the `TaskTool` description. The remaining 6 are top-level agent
 /// profiles resolvable by name but not advertised as subagent types.
 #[derive(
@@ -696,8 +722,15 @@ where
 )]
 #[strum(serialize_all = "kebab-case")]
 pub enum BuiltinAgentName {
+    // `serialize_all = "kebab-case"` derives the wire name from the variant
+    // identifier, so these need explicit names: the identifiers stay
+    // `ChutesBuild*` (renaming them would touch every match arm and every future
+    // upstream merge), while the strings they parse from and print as are the
+    // ones the rest of the product uses — `toolset_for_preset`, the pager's
+    // profile helper, `--agent`, and the ACP `agentProfile` field. Leaving them
+    // derived is how `chutes-build-plan` came to resolve to nothing.
     #[strum(serialize = "chutes-build")]
-    GrokBuild,
+    ChutesBuild,
     #[strum(serialize = "chutes-build-concise")]
     GrokBuildConcise,
     #[strum(serialize = "chutes-build-plan")]
@@ -731,7 +764,7 @@ impl BuiltinAgentName {
     /// Build the `AgentDefinition` for this built-in agent.
     pub fn definition(self) -> AgentDefinition {
         match self {
-            Self::GrokBuild => AgentDefinition::default_grok_build(),
+            Self::ChutesBuild => AgentDefinition::default_grok_build(),
             Self::GrokBuildConcise => AgentDefinition::grok_build_concise(),
             Self::GrokBuildPlan => AgentDefinition::grok_build_plan(),
             Self::GrokBuildPlanNoSubagents => AgentDefinition::grok_build_plan_no_subagents(),
@@ -820,7 +853,7 @@ pub struct AgentDefinition {
     pub isolation: Option<IsolationMode>,
     #[serde(default)]
     pub background: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_agent_color")]
     pub color: Option<AgentColor>,
     #[serde(default)]
     pub initial_prompt: Option<String>,
@@ -838,6 +871,8 @@ pub struct AgentDefinition {
     /// specific tool before the turn ends.
     #[serde(default)]
     pub completion_requirement: Option<CompletionRequirement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_overrides: Option<xai_grok_sampling_types::ToolOverrides>,
     /// Subagent types this agent can spawn (derived by builder from `tools`).
     /// `None` = unrestricted, `Some([t1])` = restricted, `Some([])` = blocked.
     #[serde(skip)]
@@ -1085,11 +1120,13 @@ const _: () =
     Eq,
     Deserialize,
     serde::Serialize,
+    AsRefStr,
+    EnumString,
     IntoStaticStr,
     strum::EnumCount,
 )]
 #[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum AgentColor {
     Red,
     Blue,
@@ -1106,6 +1143,35 @@ impl AgentColor {
     ];
 }
 const _: () = assert!(AgentColor::VALID_VALUES.len() == <AgentColor as strum::EnumCount>::COUNT);
+/// Never fails: `color` is decorative, but a rejected value fails the whole
+/// frontmatter parse, and discovery skips agents that fail to parse — so a
+/// typo'd or hex color would silently make the agent unspawnable.
+///
+/// Frontmatter is only ever decoded by `serde_yaml`, so the intermediate value
+/// is captured as `serde_yaml::Value` (total for YAML — tagged scalars and
+/// maps with non-string keys included, which have no `serde_json::Value`
+/// form). Unrecognized values are dropped to `None` with a warning rather
+/// than mapped to a stand-in color the author never wrote.
+fn deserialize_agent_color<'de, D>(deserializer: D) -> Result<Option<AgentColor>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::str::FromStr;
+    let Some(value) = Option::<serde_yaml::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    let parsed = value
+        .as_str()
+        .and_then(|name| AgentColor::from_str(name.trim()).ok());
+    if parsed.is_none() {
+        tracing::warn!(
+            color = ?value,
+            valid = ?AgentColor::VALID_VALUES,
+            "unrecognized agent color, ignoring"
+        );
+    }
+    Ok(parsed)
+}
 /// Agent memory scope. Distinct from `storage::MemoryScope` (global-vs-workspace write target).
 #[derive(
     Debug,
@@ -1453,12 +1519,12 @@ impl AgentDefinition {
         file_tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
     ) {
         const FILE_TOOL_SLOTS: &[[&str; 2]] = &[
-            ["ChutesBuild:read_file", "ChutesBuildHashline:hashline_read"],
+            ["ChutesBuild:read_file", "GrokBuildHashline:hashline_read"],
             [
                 "ChutesBuild:search_replace",
-                "ChutesBuildHashline:hashline_edit",
+                "GrokBuildHashline:hashline_edit",
             ],
-            ["ChutesBuild:grep", "ChutesBuildHashline:hashline_grep"],
+            ["ChutesBuild:grep", "GrokBuildHashline:hashline_grep"],
         ];
         for tool in self.tool_config.tools.iter_mut() {
             let Some(slot) = FILE_TOOL_SLOTS
@@ -1508,6 +1574,7 @@ impl AgentDefinition {
             session_tools_denylist: None,
             model: ModelOverride::Inherit,
             completion_requirement: None,
+            tool_overrides: None,
             prompt_body: None,
             system_prompt: TemplateOverride::None,
             source_path: None,
@@ -1517,7 +1584,7 @@ impl AgentDefinition {
     }
     pub fn default_grok_build() -> Self {
         Self::base(
-            BuiltinAgentName::GrokBuild,
+            BuiltinAgentName::ChutesBuild,
             "Chutes Build agent for software engineering tasks.",
         )
     }
@@ -1615,17 +1682,18 @@ impl AgentDefinition {
     }
     /// Advisor subagent — on-demand senior review with read-only evidence.
     ///
-    /// Defaults to maximum reasoning effort: it is invoked sparingly, for
-    /// plans, blockers, and completion claims, where review quality matters
-    /// more than latency or cost. `[subagents.roles.advisor]` in config.toml
-    /// (`model`, `reasoning_effort`) overrides this, e.g. to pin it to a
-    /// specific higher-capability model.
+    /// Defaults to maximum reasoning effort: it is invoked sparingly, for plans,
+    /// blockers and completion claims, where review quality matters more than
+    /// latency or cost. `[subagents.roles.advisor]` in config.toml (`model`,
+    /// `reasoning_effort`) overrides this — e.g. to pin it to a
+    /// higher-capability model than the session's.
     pub fn advisor() -> Self {
+        use crate::prompt::subagent_prompts;
         Self {
             description: xai_tool_types::ADVISOR_SUBAGENT.description.to_string(),
             tool_config: advisor_toolset(),
             permission_mode: PermissionMode::Plan,
-            prompt_body: Some(xai_tool_types::ADVISOR_PROMPT.to_string()),
+            prompt_body: Some(subagent_prompts::ADVISOR_PROMPT.to_string()),
             inherit_skills: false,
             effort: Some(Effort::Max),
             ..Self::base(BuiltinAgentName::Advisor, "")
@@ -1648,7 +1716,7 @@ impl AgentDefinition {
             )
         }
     }
-    /// Chutes Build Orchestrator — GBL model with full GrokBuild tools
+    /// Chutes Build Orchestrator — GBL model with full ChutesBuild tools
     /// (skills, MCPs, plan mode) that delegates coding/exploration to
     /// subagents.
     ///
@@ -1662,7 +1730,7 @@ impl AgentDefinition {
             prompt_body: Some(ORCHESTRATOR_PROMPT_BODY.to_string()),
             ..Self::base(
                 BuiltinAgentName::GrokBuildOrchestrator,
-                "GrokBuild orchestrator that delegates coding to specialized subagents",
+                "ChutesBuild orchestrator that delegates coding to specialized subagents",
             )
         }
     }
@@ -1710,11 +1778,6 @@ impl AgentDefinition {
 mod tests {
     use super::*;
     /// Native presets only.
-    ///
-    /// The `grok_*` spellings were dropped with the rebrand: `native_toolset_presets`
-    /// lists `chutes-*` names, and nothing registers the old ones, so they resolve
-    /// only if a caller registers them itself. Both halves are asserted so a
-    /// reintroduced alias is a deliberate change rather than a silent one.
     #[test]
     fn toolset_for_preset_resolves_known_names() {
         for name in [
@@ -1731,6 +1794,10 @@ mod tests {
                 "preset `{name}` should resolve"
             );
         }
+        // `toolset_for_preset` normalises `_` to `-`, so upstream's names still
+        // arrive here intact after the rebrand. They must not resolve: a config
+        // naming a preset this build does not have should say so, not silently
+        // get whatever the normaliser happens to land on.
         for retired in ["grok_build", "grok_computer"] {
             assert!(
                 toolset_for_preset(retired).is_none(),
@@ -1739,6 +1806,63 @@ mod tests {
         }
         assert!(toolset_for_preset("does-not-exist").is_none());
     }
+    /// The Chutes ecosystem tools must be *in* a toolset, not merely compiled.
+    ///
+    /// The 1.0.0 re-base kept every implementation — media, browser, OCR,
+    /// Context7, usage — and dropped every registration. Six thousand lines of
+    /// working code that the model could not call, because nothing listed them
+    /// and nothing checks that anything does. Unit tests on a tool pass whether
+    /// or not it is reachable, which is exactly why this test exists.
+    #[test]
+    fn chutes_ecosystem_tools_are_in_the_default_toolsets() {
+        const MEDIA_AND_BROWSE: [&str; 6] = [
+            "ChutesBuild:context7_search",
+            "ChutesBuild:context7_docs",
+            "ChutesBuild:list_media_models",
+            "ChutesBuild:describe_media_model",
+            "ChutesBuild:generate_media",
+            "ChutesBuild:browser",
+        ];
+        for preset in ["chutes-build", "chutes-build-plan"] {
+            let toolset = toolset_for_preset(preset).unwrap();
+            let ids: Vec<&str> = toolset.tools.iter().map(|t| t.id.as_str()).collect();
+            for want in MEDIA_AND_BROWSE {
+                assert!(
+                    ids.contains(&want),
+                    "preset `{preset}` must carry `{want}`; it has {ids:?}"
+                );
+            }
+        }
+        // Read-only presets get the documentation lookups and nothing heavier:
+        // an explore turn has no business generating media or driving a browser.
+        for preset in ["explore", "plan"] {
+            let toolset = toolset_for_preset(preset).unwrap();
+            let ids: Vec<&str> = toolset.tools.iter().map(|t| t.id.as_str()).collect();
+            assert!(ids.contains(&"ChutesBuild:context7_search"), "{preset}");
+            assert!(
+                !ids.contains(&"ChutesBuild:generate_media"),
+                "{preset} must stay read-only"
+            );
+        }
+    }
+
+    /// The xAI Imagine tools call an endpoint Chutes has no equivalent for, and
+    /// their own tier message says so. `generate_media` replaces them.
+    #[test]
+    fn legacy_imagine_tools_are_not_advertised() {
+        for preset in ["chutes-build", "chutes-build-plan", "chutes-computer"] {
+            let toolset = toolset_for_preset(preset).unwrap();
+            for tool in &toolset.tools {
+                for legacy in ["image_gen", "image_to_video", "reference_to_video"] {
+                    assert!(
+                        !tool.id.ends_with(legacy),
+                        "preset `{preset}` still advertises the legacy `{legacy}`"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn presets_select_distinct_toolsets_by_size() {
         let gb = toolset_for_preset("chutes-build").unwrap();
@@ -1855,7 +1979,7 @@ mod tests {
     fn expected_strict_harness(name: BuiltinAgentName) -> bool {
         match name {
             BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
-            BuiltinAgentName::GrokBuild
+            BuiltinAgentName::ChutesBuild
             | BuiltinAgentName::GrokBuildConcise
             | BuiltinAgentName::GrokBuildPlan
             | BuiltinAgentName::GrokBuildPlanNoSubagents
@@ -2104,20 +2228,16 @@ description: Minimal agent
         let v: McpServerRef = serde_json::from_value(serde_json::json!("slack")).unwrap();
         assert_eq!(v, McpServerRef::Named("slack".to_string()));
         let v: McpServerRef =
-            serde_json::from_value(serde_json::json!({ "s" : { "type" : "stdio" } })).unwrap();
+            serde_json::from_value(serde_json::json!({"s": {"type": "stdio"}})).unwrap();
         assert!(matches!(v, McpServerRef::Inline { ref name, .. } if name == "s"));
         let v: McpServerRef =
-            serde_json::from_value(serde_json::json!({ "name" : "s", "type" : "stdio" })).unwrap();
+            serde_json::from_value(serde_json::json!({"name": "s", "type": "stdio"})).unwrap();
         assert!(matches!(v, McpServerRef::Inline { ref name, .. } if name == "s"));
         assert!(
-            serde_json::from_value::<McpServerRef>(serde_json::json!({ "type" :
-            "stdio" }))
-            .is_err()
+            serde_json::from_value::<McpServerRef>(serde_json::json!({"type": "stdio"})).is_err()
         );
         assert!(serde_json::from_value::<McpServerRef>(serde_json::json!(42)).is_err());
-        assert!(
-            serde_json::from_value::<McpServerRef>(serde_json::json!({ "s" : "bad" })).is_err()
-        );
+        assert!(serde_json::from_value::<McpServerRef>(serde_json::json!({"s": "bad"})).is_err());
     }
     #[test]
     fn memory_scope_resolve_dir() {
@@ -2156,8 +2276,10 @@ description: Minimal agent
         }
         for color in AgentColor::VALID_VALUES {
             let c = format!("---\nname: t\ndescription: t\ncolor: {color}\n---\n");
-            assert!(
-                AgentDefinition::parse(&c).unwrap().color.is_some(),
+            let parsed = AgentDefinition::parse(&c).unwrap().color;
+            assert_eq!(
+                parsed.map(<&'static str>::from),
+                Some(*color),
                 "color: {color}"
             );
         }
@@ -2168,6 +2290,33 @@ description: Minimal agent
                 "memory: {memory}"
             );
         }
+    }
+    #[test]
+    fn unparseable_color_is_dropped_instead_of_dropping_the_agent() {
+        for (declared, expected) in [
+            ("Purple", Some(AgentColor::Purple)),
+            ("  CYAN  ", Some(AgentColor::Cyan)),
+            ("teal", None),
+            ("\"#ff0000\"", None),
+            ("chartreuse", None),
+            ("42", None),
+            ("[red, blue]", None),
+            ("!custom x", None),
+            ("{1: 2}", None),
+        ] {
+            let c = format!("---\nname: t\ndescription: t\ncolor: {declared}\n---\n");
+            let def = AgentDefinition::parse(&c)
+                .unwrap_or_else(|e| panic!("color {declared} must not fail the parse: {e}"));
+            assert_eq!(def.color, expected, "color: {declared}");
+            assert_eq!(def.name, "t");
+        }
+    }
+    #[test]
+    fn absent_or_null_color_stays_none() {
+        let def = AgentDefinition::parse("---\nname: t\ndescription: t\n---\n").unwrap();
+        assert!(def.color.is_none());
+        let def = AgentDefinition::parse("---\nname: t\ndescription: t\ncolor:\n---\n").unwrap();
+        assert!(def.color.is_none());
     }
     #[test]
     fn test_parse_missing_name() {
@@ -2333,9 +2482,10 @@ description: Test default tool config
     }
     #[test]
     fn test_from_json_minimal() {
-        let json = serde_json::json!(
-            { "name" : "acp-agent", "description" : "An agent from ACP" }
-        );
+        let json = serde_json::json!({
+            "name": "acp-agent",
+            "description": "An agent from ACP"
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(def.name, "acp-agent");
         assert_eq!(def.description, "An agent from ACP");
@@ -2346,11 +2496,14 @@ description: Test default tool config
     }
     #[test]
     fn test_from_json_has_default_toolset_with_task_tool() {
-        let json = serde_json::json!(
-            { "name" : "chutes-build", "description" : "Multi-surface coding agent.",
-            "promptMode" : "extend", "permissionMode" : "dontAsk", "agentsMd" : true,
-            "promptBody" : "You are a coding assistant." }
-        );
+        let json = serde_json::json!({
+            "name": "chutes-build",
+            "description": "Multi-surface coding agent.",
+            "promptMode": "extend",
+            "permissionMode": "dontAsk",
+            "agentsMd": true,
+            "promptBody": "You are a coding assistant."
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         let task_tool_id = "ChutesBuild:task";
         assert!(
@@ -2366,10 +2519,11 @@ description: Test default tool config
     }
     #[test]
     fn test_from_json_with_prompt_body() {
-        let json = serde_json::json!(
-            { "name" : "custom-agent", "description" : "Agent with prompt body",
-            "promptBody" : "You are a specialized coding assistant.\n\nFocus on Rust." }
-        );
+        let json = serde_json::json!({
+            "name": "custom-agent",
+            "description": "Agent with prompt body",
+            "promptBody": "You are a specialized coding assistant.\n\nFocus on Rust."
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(def.name, "custom-agent");
         assert_eq!(
@@ -2379,20 +2533,23 @@ description: Test default tool config
     }
     #[test]
     fn test_from_json_with_permission_mode() {
-        let json = serde_json::json!(
-            { "name" : "auto-accept-agent", "description" :
-            "Agent with dontAsk permission mode", "permissionMode" : "dontAsk",
-            "promptBody" : "## Auto-accept Mode" }
-        );
+        let json = serde_json::json!({
+            "name": "auto-accept-agent",
+            "description": "Agent with dontAsk permission mode",
+            "permissionMode": "dontAsk",
+            "promptBody": "## Auto-accept Mode"
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(def.permission_mode, PermissionMode::DontAsk);
         assert_eq!(def.prompt_body.as_deref(), Some("## Auto-accept Mode"));
     }
     #[test]
     fn test_from_json_empty_prompt_body_is_none() {
-        let json = serde_json::json!(
-            { "name" : "test", "description" : "Test", "promptBody" : "   " }
-        );
+        let json = serde_json::json!({
+            "name": "test",
+            "description": "Test",
+            "promptBody": "   "
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert!(
             def.prompt_body.is_none(),
@@ -2401,16 +2558,20 @@ description: Test default tool config
     }
     #[test]
     fn test_from_json_missing_required_fields() {
-        let json = serde_json::json!({ "description" : "Missing name" });
+        let json = serde_json::json!({
+            "description": "Missing name"
+        });
         let result = AgentDefinition::from_json(&json);
         assert!(result.is_err());
     }
     #[test]
     fn test_from_json_ignores_unknown_fields() {
-        let json = serde_json::json!(
-            { "name" : "test", "description" : "Test", "unknownField" : "value",
-            "futureFeature" : true }
-        );
+        let json = serde_json::json!({
+            "name": "test",
+            "description": "Test",
+            "unknownField": "value",
+            "futureFeature": true
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(def.name, "test");
     }
@@ -2488,9 +2649,11 @@ description: Test default tool config
     }
     #[test]
     fn test_model_override_in_json() {
-        let json = serde_json::json!(
-            { "name" : "test", "description" : "Test", "model" : "grok-code-fast-1" }
-        );
+        let json = serde_json::json!({
+            "name": "test",
+            "description": "Test",
+            "model": "grok-code-fast-1"
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(
             def.model,
@@ -2501,7 +2664,7 @@ description: Test default tool config
     fn test_builtin_agent_name_strum_round_trip() {
         use std::str::FromStr;
         for (s, expected) in [
-            ("chutes-build", BuiltinAgentName::GrokBuild),
+            ("chutes-build", BuiltinAgentName::ChutesBuild),
             ("chutes-build-concise", BuiltinAgentName::GrokBuildConcise),
             ("chutes-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
             ("codex", BuiltinAgentName::Codex),
@@ -2597,10 +2760,11 @@ description: Test default tool config
     }
     #[test]
     fn mcp_inheritance_round_trips_via_json() {
-        let json = serde_json::json!(
-            { "name" : "t", "description" : "t", "mcpInheritance" : { "named" : ["a",
-            "b"] } }
-        );
+        let json = serde_json::json!({
+            "name": "t",
+            "description": "t",
+            "mcpInheritance": {"named": ["a", "b"]}
+        });
         let def = AgentDefinition::from_json(&json).unwrap();
         assert_eq!(
             def.mcp_inheritance,

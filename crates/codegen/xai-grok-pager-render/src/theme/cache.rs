@@ -10,6 +10,7 @@
 //! via `Effect::PersistSetting` from the dispatcher. This module is a
 //! pager-side in-memory cache + resolution layer only.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
@@ -113,11 +114,16 @@ pub fn terminal_native_locked() -> bool {
 /// Engage or clear the terminal-native theme lock.
 pub fn set_terminal_native_lock(locked: bool) {
     TERMINAL_NATIVE_LOCK.store(locked, Ordering::Relaxed);
+    // Cap quantization at ANSI-16 and switch syntax tokens to the dual-
+    // polarity accent map (default-fg grays + base ANSI hues). Without the
+    // polarity-safe remap, night-theme pastels collapse to White and vanish
+    // on light terminal profiles in minimal mode.
     xai_grok_markdown::set_color_level_cap(if locked {
         xai_grok_markdown::ColorLevel::Basic
     } else {
         xai_grok_markdown::ColorLevel::TrueColor
     });
+    xai_grok_markdown::set_polarity_safe_syntax(locked);
 }
 
 // -- Auto-mode ---------------------------------------------------------------
@@ -159,15 +165,50 @@ pub fn invalidate_auto_theme_config() {
 /// Called once at startup. Returns the concrete `ThemeKind` (never `Auto`).
 ///
 /// Precedence:
-/// 1. Environment variable (`CHUTES_BUILD_THEME`)
+/// 1. Environment variable (`CHUTES_BUILD_THEME` / `LC_CHUTES_BUILD_THEME`)
 /// 2. Config file (`[ui].theme`)
 /// 3. Default: `ChutesNight`
 #[must_use]
 pub fn resolve_initial_theme() -> ThemeKind {
-    // 1. Environment variable (for desktop app integration)
+    resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), true)
+}
 
-    // 2. Config file + 3. Default
-    resolve_from_config(load_from_disk(), true)
+/// Variant of [`resolve_initial_theme`] without the OSC 11 startup
+/// fallback, for resolution after the terminal is initialized.
+#[must_use]
+pub fn resolve_initial_theme_no_osc11() -> ThemeKind {
+    resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), false)
+}
+
+fn env_theme_name() -> Option<String> {
+    env_theme_name_from(&crate::host::collect_unicode_env()).map(str::to_owned)
+}
+
+fn env_theme_name_from(env: &HashMap<String, String>) -> Option<&str> {
+    for key in ["CHUTES_BUILD_THEME", "LC_CHUTES_BUILD_THEME"] {
+        let Some(raw) = env
+            .get(key)
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if ThemeKind::from_name(raw).is_some() {
+            return Some(raw);
+        }
+    }
+    None
+}
+
+fn resolve_initial_theme_from(
+    env_theme: Option<&str>,
+    config_theme: Option<ThemeKind>,
+    osc11_fallback: bool,
+) -> ThemeKind {
+    if let Some(kind) = env_theme.and_then(ThemeKind::from_name) {
+        return resolve_from_config(Some(kind), osc11_fallback);
+    }
+    resolve_from_config(config_theme, osc11_fallback)
 }
 
 /// Inner resolution logic, factored out for testability.
@@ -203,19 +244,12 @@ fn resolve_from_appearance(appearance: Option<system_appearance::SystemAppearanc
 /// and the user's dark/light theme mapping. Falls back to `ChutesNight`
 /// when detection fails.
 ///
-/// Uses desktop APIs only (no OSC 11) — safe to call at runtime while
+/// Uses desktop APIs + env hints (no OSC 11) — safe to call at runtime while
 /// crossterm's `EventStream` is active. Called from the settings modal
 /// and the `/theme auto` slash command.
 #[must_use]
 pub fn resolve_auto() -> ThemeKind {
     resolve_from_appearance(system_appearance::detect())
-}
-
-/// Variant of [`resolve_initial_theme`] without the OSC 11 startup
-/// fallback, for resolution after the terminal is initialized.
-#[must_use]
-pub fn resolve_initial_theme_no_osc11() -> ThemeKind {
-    resolve_from_config(load_from_disk(), false)
 }
 
 // -- Disk reads --------------------------------------------------------------
@@ -385,6 +419,20 @@ mod tests {
     }
 
     #[test]
+    fn terminal_native_lock_enables_polarity_safe_syntax() {
+        with_test_env(|| {
+            assert!(!xai_grok_markdown::polarity_safe_syntax());
+            set_terminal_native_lock(true);
+            assert!(
+                xai_grok_markdown::polarity_safe_syntax(),
+                "minimal must engage polarity-safe syntax remapping"
+            );
+            set_terminal_native_lock(false);
+            assert!(!xai_grok_markdown::polarity_safe_syntax());
+        });
+    }
+
+    #[test]
     fn terminal_native_lock_caps_quantize_at_ansi16() {
         use ratatui::style::Color;
 
@@ -458,7 +506,7 @@ mod tests {
     // -- resolve_auto --------------------------------------------------------
 
     #[test]
-    fn resolve_auto_dark_system_returns_chutesnight() {
+    fn resolve_auto_dark_system_returns_groknight() {
         with_test_env(|| {
             system_appearance::set_mock(Some(system_appearance::SystemAppearance::Dark));
             let result = resolve_auto();
@@ -467,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auto_light_system_returns_chutesday() {
+    fn resolve_auto_light_system_returns_grokday() {
         with_test_env(|| {
             system_appearance::set_mock(Some(system_appearance::SystemAppearance::Light));
             let result = resolve_auto();
@@ -476,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auto_detection_failure_returns_chutesnight() {
+    fn resolve_auto_detection_failure_returns_groknight() {
         with_test_env(|| {
             system_appearance::set_mock(None);
             let result = resolve_auto();
@@ -509,7 +557,7 @@ mod tests {
     // -- resolve_from_config (resolve_initial_theme inner logic) ---------------
 
     #[test]
-    fn resolve_from_config_no_config_returns_chutesnight() {
+    fn resolve_from_config_no_config_returns_groknight() {
         with_test_env(|| {
             let result = resolve_from_config(None, true);
             assert_eq!(result, ThemeKind::ChutesNight);
@@ -556,6 +604,192 @@ mod tests {
             let result = resolve_from_config(Some(ThemeKind::Auto), true);
             assert_eq!(result, ThemeKind::ChutesNight);
             assert!(is_auto_mode(), "auto mode is set before detection");
+        });
+    }
+
+    #[test]
+    fn env_theme_overrides_config() {
+        with_test_env(|| {
+            assert_eq!(
+                resolve_initial_theme_from(Some("chutesday"), Some(ThemeKind::TokyoNight), false),
+                ThemeKind::ChutesDay
+            );
+            assert!(!is_auto_mode());
+        });
+    }
+
+    #[test]
+    fn env_theme_auto_arms_watcher_and_resolves() {
+        with_test_env(|| {
+            system_appearance::set_mock(Some(system_appearance::SystemAppearance::Light));
+            assert_eq!(
+                resolve_initial_theme_from(Some("auto"), Some(ThemeKind::TokyoNight), false),
+                ThemeKind::ChutesDay
+            );
+            assert!(is_auto_mode());
+        });
+    }
+
+    #[test]
+    fn env_theme_auto_dark_arms_watcher_and_resolves() {
+        with_test_env(|| {
+            system_appearance::set_mock(Some(system_appearance::SystemAppearance::Dark));
+            assert_eq!(
+                resolve_initial_theme_from(Some("auto"), Some(ThemeKind::TokyoNight), false),
+                ThemeKind::ChutesNight
+            );
+            assert!(is_auto_mode());
+        });
+    }
+
+    #[test]
+    fn unknown_env_theme_falls_through_to_config() {
+        with_test_env(|| {
+            assert_eq!(
+                resolve_initial_theme_from(Some("not-a-theme"), Some(ThemeKind::ChutesDay), false),
+                ThemeKind::ChutesDay
+            );
+        });
+    }
+
+    fn theme_env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn grok_theme_wins_over_lc_and_config() {
+        with_test_env(|| {
+            let env = theme_env(&[
+                ("CHUTES_BUILD_THEME", "chutesday"),
+                ("LC_CHUTES_BUILD_THEME", "tokyonight"),
+            ]);
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&env),
+                    Some(ThemeKind::TokyoNight),
+                    false
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&env),
+                    Some(ThemeKind::TokyoNight),
+                    true
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert!(!is_auto_mode());
+        });
+    }
+
+    #[test]
+    fn empty_or_absent_grok_theme_falls_through_to_lc() {
+        with_test_env(|| {
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[
+                        ("CHUTES_BUILD_THEME", ""),
+                        ("LC_CHUTES_BUILD_THEME", "chutesday")
+                    ])),
+                    Some(ThemeKind::TokyoNight),
+                    false,
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[("LC_CHUTES_BUILD_THEME", "chutesday")])),
+                    Some(ThemeKind::TokyoNight),
+                    true,
+                ),
+                ThemeKind::ChutesDay
+            );
+        });
+    }
+
+    #[test]
+    fn unknown_grok_theme_falls_through_to_valid_lc() {
+        with_test_env(|| {
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[
+                        ("CHUTES_BUILD_THEME", "not-a-theme"),
+                        ("LC_CHUTES_BUILD_THEME", "chutesday"),
+                    ])),
+                    Some(ThemeKind::TokyoNight),
+                    false,
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert!(!is_auto_mode());
+        });
+    }
+
+    #[test]
+    fn unknown_or_empty_theme_env_falls_through_to_config() {
+        with_test_env(|| {
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[
+                        ("CHUTES_BUILD_THEME", "not-a-theme"),
+                        ("LC_CHUTES_BUILD_THEME", "")
+                    ])),
+                    Some(ThemeKind::ChutesDay),
+                    false,
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[
+                        ("CHUTES_BUILD_THEME", ""),
+                        ("LC_CHUTES_BUILD_THEME", "")
+                    ])),
+                    Some(ThemeKind::ChutesDay),
+                    true,
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[])),
+                    Some(ThemeKind::ChutesDay),
+                    false
+                ),
+                ThemeKind::ChutesDay
+            );
+        });
+    }
+
+    #[test]
+    fn env_theme_system_alias_arms_auto_on_both_resolve_paths() {
+        with_test_env(|| {
+            system_appearance::set_mock(Some(system_appearance::SystemAppearance::Light));
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[("CHUTES_BUILD_THEME", "system")])),
+                    Some(ThemeKind::TokyoNight),
+                    false,
+                ),
+                ThemeKind::ChutesDay
+            );
+            assert!(is_auto_mode());
+        });
+        with_test_env(|| {
+            system_appearance::set_mock(Some(system_appearance::SystemAppearance::Dark));
+            assert_eq!(
+                resolve_initial_theme_from(
+                    env_theme_name_from(&theme_env(&[("LC_CHUTES_BUILD_THEME", "auto")])),
+                    Some(ThemeKind::TokyoNight),
+                    true,
+                ),
+                ThemeKind::ChutesNight
+            );
+            assert!(is_auto_mode());
         });
     }
 

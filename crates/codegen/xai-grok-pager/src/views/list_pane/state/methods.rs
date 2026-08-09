@@ -166,6 +166,14 @@ impl ListPaneState {
         self.scrollbar_dragging
     }
 
+    /// Whether a mouse position lands in the scrollbar's grab zone
+    /// ([`crate::render::scrollbar::scrollbar_grab_zone`]).
+    pub fn scrollbar_hit(&self, column: u16, row: u16) -> bool {
+        self.scrollbar_area().is_some_and(|sb| {
+            crate::render::scrollbar::scrollbar_grab_zone(sb).contains((column, row).into())
+        })
+    }
+
     /// Whether search/filter is enabled in the config.
     pub fn is_search_enabled(&self) -> bool {
         self.config.search_enabled
@@ -1500,6 +1508,29 @@ impl ListPaneState {
     // Keyboard input
     // =======================================================================
 
+    /// Paste into the active input bar. Returns `false` when no editor is open.
+    pub fn handle_paste<T: ListItem>(&mut self, text: &str, items: &[T]) -> bool {
+        let Some(mode) = self.input_mode else {
+            return false;
+        };
+        let old_text = self.input_textarea.text().to_owned();
+        if mode == InputBarMode::Comment {
+            self.input_textarea.insert_str(text);
+        } else {
+            let cleaned = crate::input::line_editor::sanitize_single_line(text);
+            self.input_textarea.insert_str(&cleaned);
+        }
+        if self.input_textarea.text() == old_text {
+            return false;
+        }
+        match mode {
+            InputBarMode::GotoLine => self.apply_goto_line_live(items),
+            InputBarMode::Search | InputBarMode::Filter => self.apply_input_buffer(items),
+            InputBarMode::Comment => {}
+        }
+        true
+    }
+
     /// Handle a key event for navigation, search, and filter.
     ///
     /// Returns `true` if the key was consumed (state changed), `false` if
@@ -2185,14 +2216,15 @@ impl ListPaneState {
 
         match kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                // Scrollbar click?
-                if let Some(sb) = self.scrollbar_area()
-                    && column >= sb.x
-                    && column < sb.x + sb.width
-                {
+                if self.scrollbar_hit(column, row) {
                     self.scrollbar_dragging = true;
                     return self.apply_scrollbar_click(row, items);
                 }
+                // A new press elsewhere ends any stale thumb latch (lost Up
+                // from terminal coalescing / SSH / focus loss). Callers that
+                // treat `is_scrollbar_dragging()` after this dispatch as
+                // "this Down hit the track" rely on that.
+                self.scrollbar_dragging = false;
                 // Content click → select item.
                 if pane_area.width > 0 && pane_area.height > 0 && row >= pane_area.y {
                     let ry = (row - pane_area.y) as usize;
@@ -2229,12 +2261,7 @@ impl ListPaneState {
         items: &[T],
     ) {
         // Check if mouse is on scrollbar → percentage scroll.
-        if let Some(sb) = self.scrollbar_area()
-            && column >= sb.x
-            && column < sb.x + sb.width
-            && row >= sb.y
-            && row < sb.y + sb.height
-        {
+        if self.scrollbar_hit(column, row) {
             let total = self.total_height();
             let pct_delta = ((total as f64) * 0.0025).round() as i32;
             let effective = pct_delta.max(lines.abs()) * lines.signum();

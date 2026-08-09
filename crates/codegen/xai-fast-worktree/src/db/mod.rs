@@ -12,9 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use xai_sqlite_journal::JournalMode;
+use xai_sqlite_journal::{BUSY_RETRY_BUDGET, JournalMode};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorktreeKind {
     Session,
@@ -38,14 +38,33 @@ impl WorktreeKind {
     }
 
     pub fn from_str_lossy(s: &str) -> Self {
+        Self::from_str_exact(s).unwrap_or(Self::Manual)
+    }
+
+    /// Exact known kind key. Unknown → None (unlike [`Self::from_str_lossy`]).
+    pub fn from_str_exact(s: &str) -> Option<Self> {
         match s {
-            "session" => Self::Session,
-            "ab" => Self::Ab,
-            "pool" => Self::Pool,
-            "fork" => Self::Fork,
-            "manual" => Self::Manual,
-            "subagent" => Self::Subagent,
-            _ => Self::Manual,
+            "session" => Some(Self::Session),
+            "ab" => Some(Self::Ab),
+            "pool" => Some(Self::Pool),
+            "fork" => Some(Self::Fork),
+            "manual" => Some(Self::Manual),
+            "subagent" => Some(Self::Subagent),
+            _ => None,
+        }
+    }
+
+    /// Config key parse: trim + case-insensitive; unknown → None.
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        let t = s.trim();
+        if let Some(k) = Self::from_str_exact(t) {
+            return Some(k);
+        }
+        // Only allocate lowercase when needed.
+        if t.bytes().any(|b| b.is_ascii_uppercase()) {
+            Self::from_str_exact(&t.to_ascii_lowercase())
+        } else {
+            None
         }
     }
 }
@@ -74,6 +93,8 @@ impl WorktreeStatus {
     }
 }
 
+pub const META_KEY_LABEL: &str = "label";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorktreeRecord {
     pub id: String,
@@ -90,6 +111,17 @@ pub struct WorktreeRecord {
     pub last_accessed_at: Option<i64>,
     pub status: WorktreeStatus,
     pub metadata: Option<serde_json::Value>,
+}
+
+impl WorktreeRecord {
+    /// The user-facing label from `metadata.label`; empty labels are `None`.
+    pub fn label(&self) -> Option<&str> {
+        self.metadata
+            .as_ref()
+            .and_then(|m| m.get(META_KEY_LABEL))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+    }
 }
 
 #[derive(Default)]
@@ -113,10 +145,59 @@ pub struct WorktreeDb {
     conn: Connection,
 }
 
+/// Outcome of a read-only open. A corrupt file still reaches `Opened`, since
+/// SQLite reads lazily and fails at the first query.
+pub enum RegistryOpen {
+    Opened { path: PathBuf, db: WorktreeDb },
+    Absent { path: PathBuf },
+    Busy { path: PathBuf, error: anyhow::Error },
+    Failed { path: PathBuf, error: anyhow::Error },
+}
+
+#[derive(Debug)]
+enum OpenFailure {
+    Busy(anyhow::Error),
+    Other(anyhow::Error),
+}
+
+const WORKTREES_DB_FILE: &str = "worktrees.db";
+
+fn is_sqlite_busy(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(f, _) if is_busy_code(f.code))
+}
+
+fn is_busy_code(code: rusqlite::ErrorCode) -> bool {
+    use rusqlite::ErrorCode;
+    matches!(code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SqliteFailureKind {
+    Busy,
+    Corrupt,
+    Other,
+}
+
+/// What a SQLite failure says about the file. Only the damage codes justify
+/// telling a user to delete their registry.
+pub fn classify_sqlite_error(error: &anyhow::Error) -> SqliteFailureKind {
+    use rusqlite::ErrorCode;
+    let Some(rusqlite::Error::SqliteFailure(f, _)) = error.downcast_ref::<rusqlite::Error>() else {
+        return SqliteFailureKind::Other;
+    };
+    if is_busy_code(f.code) {
+        return SqliteFailureKind::Busy;
+    }
+    match f.code {
+        ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt => SqliteFailureKind::Corrupt,
+        _ => SqliteFailureKind::Other,
+    }
+}
+
 impl WorktreeDb {
     /// Open (or create) the DB at `grok_home/worktrees.db`.
     pub fn open(grok_home: &Path) -> Result<Self> {
-        Self::open_at(&grok_home.join("worktrees.db"))
+        Self::open_at(&grok_home.join(WORKTREES_DB_FILE))
     }
 
     /// Open with an explicit path.
@@ -138,78 +219,97 @@ impl WorktreeDb {
             .with_context(|| format!("failed to open worktree DB: {}", path.display()))?;
         let db = Self { conn };
         db.set_journal_mode(journal_mode)?;
-        // Normal statement timeout, now that the conversion budget is done.
-        db.conn
-            .busy_timeout(std::time::Duration::from_millis(5000))?;
         db.init_schema()?;
         Ok(db)
     }
 
-    /// Put the database in `mode`'s journal mode, retrying on `SQLITE_BUSY`
-    /// under one absolute deadline (~10s total).
-    ///
-    /// Conversion-lock acquisition only partially honors `busy_timeout` (see
-    /// `JournalMode::apply`, the single source of truth): a second process
-    /// opening the same file at the same instant can still get `SQLITE_BUSY`
-    /// immediately. Without a retry that opener's `open_at` fails, and callers
-    /// like `register_worktree`/`unregister_worktree` swallow the error
-    /// (best-effort) — silently dropping worktree tracking, exactly what this DB
-    /// exists to prevent. A bounded retry rides out the concurrent converter
-    /// (which finishes in microseconds), while the deadline plus a per-attempt
-    /// `busy_timeout` cap keeps a held legacy lock from stalling startup by
-    /// `attempts x busy_timeout`. Once converted the setting persists (WAL) or
-    /// re-applies as a no-op (TRUNCATE), so later opens are cheap.
     fn set_journal_mode(&self, mode: JournalMode) -> Result<()> {
-        use rusqlite::ErrorCode;
-        use std::time::{Duration, Instant};
-        // Total conversion budget; each attempt waits at most 1s for locks.
-        const DEADLINE: Duration = Duration::from_secs(10);
-        let start = Instant::now();
-        let mut last_err = None;
-        loop {
-            let remaining = DEADLINE.saturating_sub(start.elapsed());
-            if remaining.is_zero() {
-                break;
-            }
-            self.conn
-                .busy_timeout(remaining.min(Duration::from_millis(1000)))?;
-            match mode.apply(&self.conn) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    let busy = matches!(
-                        &e,
-                        rusqlite::Error::SqliteFailure(f, _)
-                            if matches!(f.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
-                    );
-                    if !busy {
-                        return Err(e).with_context(|| {
-                            format!("failed to set journal mode {}", mode.as_str())
-                        });
-                    }
-                    last_err = Some(e);
-                    // Brief pause so fail-fast busy errors don't spin hot.
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-        }
-        Err(last_err.expect("deadline allows at least one attempt")).with_context(|| {
-            format!(
-                "failed to set journal mode {} (database busy after {:?})",
-                mode.as_str(),
-                start.elapsed()
-            )
-        })
+        mode.apply_with_retry(&self.conn)
+            .with_context(|| format!("failed to set journal mode {}", mode.as_str()))
     }
 
     /// Open the default DB at `~/.chutes-build/worktrees.db`.
     ///
-    /// Discovers grok home via `$CHUTES_BUILD_HOME`, falling back to the canonicalized
-    /// `$HOME/.chutes-build` (matching `xai_grok_config::grok_home`).
+    /// Discovers Chutes Build home via `$CHUTES_BUILD_HOME`, falling back to the canonicalized
+    /// `$HOME/.grok` (matching `xai_grok_config::grok_home`).
     /// Path is resolved fresh each call (~1µs env var read) to support
     /// test overrides. Each call opens its own connection — callers in hot
     /// paths should cache the `WorktreeDb` instance.
     pub fn open_default() -> Result<Self> {
         Self::open(&resolve_grok_home()?)
+    }
+
+    fn journal_mode_and_base_path(grok_home: &Path) -> (JournalMode, PathBuf) {
+        let base_path = grok_home.join(WORKTREES_DB_FILE);
+        let mode = JournalMode::for_db_path(&base_path);
+        (mode, base_path)
+    }
+
+    /// The path a read-write open would use (per-host on network mounts).
+    /// Runs statfs and a hostname lookup, so resolve once and carry it.
+    pub fn resolve_db_path(grok_home: &Path) -> PathBuf {
+        let (mode, base_path) = Self::journal_mode_and_base_path(grok_home);
+        mode.effective_db_path(&base_path)
+    }
+
+    /// Read-only open: creates no directory, database file, or schema. Not
+    /// side-effect free, though: reading a WAL database leaves `-shm` and
+    /// `-wal` sidecars, and a network-mount open still converts the journal.
+    pub fn open_read_only(grok_home: &Path) -> RegistryOpen {
+        let (mode, base_path) = Self::journal_mode_and_base_path(grok_home);
+        let path = mode.effective_db_path(&base_path);
+        match Self::open_read_only_at(mode, &path) {
+            Ok(Some(db)) => RegistryOpen::Opened { path, db },
+            Ok(None) => RegistryOpen::Absent { path },
+            Err(OpenFailure::Busy(error)) => RegistryOpen::Busy { path, error },
+            Err(OpenFailure::Other(error)) => RegistryOpen::Failed { path, error },
+        }
+    }
+
+    fn open_read_only_at(mode: JournalMode, effective: &Path) -> Result<Option<Self>, OpenFailure> {
+        let present = effective.try_exists().map_err(|e| {
+            OpenFailure::Other(
+                anyhow::Error::new(e)
+                    .context(format!("cannot stat worktree DB: {}", effective.display())),
+            )
+        })?;
+        if !present {
+            return Ok(None);
+        }
+        let deadline = std::time::Instant::now() + BUSY_RETRY_BUDGET;
+        let conn = Self::open_readonly_with_busy_retry(mode, effective, deadline)?;
+        Ok(Some(Self { conn }))
+    }
+
+    /// Retry busy failures until `deadline`, which also bounds the network
+    /// arm's journal conversion, so the wait cannot come to twice what the
+    /// caller allowed.
+    fn open_readonly_with_busy_retry(
+        mode: JournalMode,
+        path: &Path,
+        deadline: std::time::Instant,
+    ) -> Result<Connection, OpenFailure> {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let context = || format!("failed to open worktree DB read-only: {}", path.display());
+        loop {
+            match mode.open_readonly_until(path, deadline) {
+                Ok(conn) => return Ok(conn),
+                Err(e) if !is_sqlite_busy(&e) => {
+                    return Err(OpenFailure::Other(anyhow::Error::new(e).context(context())));
+                }
+                Err(e) => {
+                    if Instant::now() >= deadline {
+                        let elapsed = start.elapsed();
+                        return Err(OpenFailure::Busy(anyhow::Error::new(e).context(format!(
+                            "{} (database busy after {elapsed:?})",
+                            context()
+                        ))));
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
     }
 
     /// Open an in-memory DB (for tests).
@@ -306,6 +406,35 @@ impl WorktreeDb {
     pub fn sweep_dead(&self) -> Result<u64> {
         queries::sweep_dead(&self.conn)
     }
+
+    /// Read a value from the `meta` table. `Ok(None)` when the key is absent.
+    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        match self
+            .conn
+            .query_row(schema::GET_META, [key], |row| row.get(0))
+        {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("failed to read meta key {key}")),
+        }
+    }
+
+    /// Insert or replace a `meta` table value.
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn
+            .execute(schema::UPSERT_META, rusqlite::params![key, value])
+            .with_context(|| format!("failed to write meta key {key}"))?;
+        Ok(())
+    }
+
+    /// Test-only: run raw SQL (e.g. drop tables to force fail-closed paths).
+    #[cfg(test)]
+    pub(crate) fn execute_batch_for_test(&self, sql: &str) -> Result<()> {
+        self.conn
+            .execute_batch(sql)
+            .context("execute_batch_for_test failed")?;
+        Ok(())
+    }
 }
 
 /// Derive a worktree ID from its destination path: `<basename>-<hash of full path>`
@@ -371,7 +500,7 @@ static CHUTES_BUILD_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(
 pub(crate) struct GrokHomeFixture {
     _lock: std::sync::MutexGuard<'static, ()>,
     prev: Option<std::ffi::OsString>,
-    /// The isolated grok home; pass to `WorktreeDb::open` to read the same DB
+    /// The isolated Chutes Build home; pass to `WorktreeDb::open` to read the same DB
     /// `open_default()` writes to.
     pub home: PathBuf,
     _tmp: tempfile::TempDir,

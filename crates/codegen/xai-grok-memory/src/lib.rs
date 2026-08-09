@@ -1,7 +1,7 @@
 //! Memory system for cross-session knowledge persistence.
 //!
 //! This crate provides a markdown-based memory storage layer that allows
-//! Grok to persist important information across sessions. Memory files are
+//! Chutes Build to persist important information across sessions. Memory files are
 //! stored under `~/.chutes-build/memory/` with workspace-scoped subdirectories
 //! keyed by a blake3 hash of the workspace path.
 //!
@@ -9,9 +9,9 @@
 //!
 //! ```text
 //! ~/.chutes-build/memory/
-//!   ├── memories.md                         # Global curated knowledge
+//!   ├── MEMORY.md                         # Global curated knowledge
 //!   └── {workspace_hash}/                 # Per-workspace (blake3(cwd)[..16])
-//!       ├── memories.md                     # Project-level curated knowledge
+//!       ├── MEMORY.md                     # Project-level curated knowledge
 //!       └── sessions/
 //!           └── YYYY-MM-DD-{slug}-{sid8}.md  # Session logs
 //! ```

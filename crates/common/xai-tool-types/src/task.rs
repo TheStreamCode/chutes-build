@@ -21,9 +21,9 @@ pub struct TaskToolInput {
     pub description: String,
 
     /// Name of the subagent type to launch. Built-in types: "general-purpose",
-    /// "explore", "plan", "advisor". Additional user-defined types may also be available.
+    /// "explore", "plan". Additional user-defined types may also be available.
     #[schemars(
-        description = "Name of the subagent type to launch. Built-in types: \"general-purpose\", \"explore\", \"plan\", \"advisor\". Additional user-defined types may also be available."
+        description = "Name of the subagent type to launch. Built-in types: \"general-purpose\", \"explore\", \"plan\". Additional user-defined types may also be available."
     )]
     #[serde(default = "default_subagent_type")]
     pub subagent_type: String,
@@ -252,22 +252,148 @@ impl SubagentCompletedOutput {
     }
 }
 
+/// Plain-text CTA after a background-spawn notice.
+///
+/// Keep this unwrapped (no `<system-reminder>` / `<system_reminder>` tags).
+/// Hardcoding either tag in shared tool text clashes with harness-specific
+/// wrappers and can make UIs hide the whole spawn result as a reminder block.
+/// Harness-owned reminders go through `format_with_reminders` with
+/// `system_reminder_tag`.
+pub const BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK: &str =
+    "Do not only poll the child. Continue unfinished parent work now.";
+
+/// How many asks *before* the latest one may still count as leftover parent
+/// exec. Older implement/fix history after the user switched to review-only
+/// must not keep the CTA on.
+const PRIOR_EXEC_LOOKBACK: usize = 2;
+
+/// Whether background-spawn text should tell the parent to keep its own work.
+///
+/// `user_asks` are recent parent user texts (oldest → newest), not including
+/// this spawn's tool call. `child_description` / `child_prompt` are the spawn
+/// being acknowledged.
+///
+/// Returns true only when the latest ask (or either of the two before it)
+/// shows unfinished parent exec work besides the delegated child job.
+/// No user asks → false.
+pub fn should_continue_parent_work(
+    user_asks: &[String],
+    child_description: &str,
+    child_prompt: &str,
+) -> bool {
+    let child = format!("{child_description}\n{child_prompt}");
+    let Some((last, prior)) = user_asks.split_last() else {
+        return false;
+    };
+    let skip = prior.len().saturating_sub(PRIOR_EXEC_LOOKBACK);
+    let recent_prior = &prior[skip..];
+    if recent_prior.iter().any(|a| blob_has_exec(a)) {
+        return true;
+    }
+    if blob_has_exec(last) && (blob_is_delegate(last) || blob_is_delegate(&child)) {
+        return true;
+    }
+    if blob_has_exec(last) && !blob_is_delegate(last) {
+        return true;
+    }
+    // "while waiting, spawn …" — parent still has the waiting work.
+    let last_l = last.to_ascii_lowercase();
+    if last_l.contains("while waiting") || last_l.contains("whilst waiting") {
+        return true;
+    }
+    false
+}
+
+fn blob_has_exec(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "smoke",
+        "op_chain",
+        "ci fail",
+        "ci failure",
+        "still fail",
+        "still fails",
+        "failing",
+        "bazel test",
+        "pytest",
+        "cargo test",
+        "npm test",
+        "deploy",
+        "bringup",
+        "implement",
+        "unfinished",
+        "rebase",
+        "adler",
+        "nondetermin",
+        "fix the ",
+        "fix these ",
+        "fix all ",
+        "gt submit",
+        "check ",
+        " bug",
+        "bugs",
+        "run the test",
+        "run tests",
+        "pass/fail",
+        "integration test",
+        "hw5",
+        "pr check",
+        "ci check",
+    ];
+    NEEDLES.iter().any(|n| t.contains(n))
+}
+
+fn blob_is_delegate(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "spawn an agent",
+        "spawn a subagent",
+        "spawn a agent",
+        "spawn subagent",
+        "spawn agent",
+        "spawn as many",
+        "spawn 4",
+        "spawn four",
+        "/pr-babysit",
+        "pr-babysit",
+        "/code-review",
+        "/review",
+        "review this pr",
+        "review the pr",
+        "review this pull",
+        "code review",
+        "colossus-review",
+        "peer review",
+        "subagent review",
+        "independent review",
+        "reviewer",
+    ];
+    NEEDLES.iter().any(|n| t.contains(n))
+}
+
 /// Render the model-facing notice for a subagent that was spawned in the
-/// background and is still running: its id/type/description plus a hint to
-/// poll it via the task-output tool.
+/// background and is still running.
+///
+/// When `continue_parent_work` is true, append the continue-parent CTA.
 pub fn format_subagent_started_background(
     subagent_id: &str,
     subagent_type: &str,
     description: &str,
     task_output_tool_name: &str,
+    continue_parent_work: bool,
 ) -> String {
-    format!(
+    let mut text = format!(
         "Subagent started in background.\n\
          subagent_id: {subagent_id}\n\
          type: {subagent_type}\n\
          description: {description}\n\n\
          Use {task_output_tool_name} with task_ids=[\"{subagent_id}\"] and timeout_ms to wait for results."
-    )
+    );
+    if continue_parent_work {
+        text.push_str("\n\n");
+        text.push_str(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK);
+    }
+    text
 }
 
 /// Render the full model-facing completion block for a finished subagent:
@@ -321,15 +447,31 @@ pub const MAX_MULTI_WAIT_IDS: usize = 20;
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct TaskOutputToolInput {
     /// Task IDs to query. Pass one or more; a single task is a one-element list.
+    ///
+    /// Lenient on the wire (invisible to the advertised schema — schemars
+    /// ignores serde aliases and custom deserializers): also accepts the
+    /// singular `task_id` key and a bare string/number instead of an array.
+    /// Models frequently mirror `kill_task`'s singular `task_id` here (in
+    /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
+    /// with "Provide a non-empty task_ids list", after which they abandoned
+    /// the background-task workflow for shell polling.
     #[schemars(
         description = "Task IDs to get output from. Pass one or more; for a single task use a one-element array. With a positive timeout_ms, multiple ids wait until all complete. Omit timeout_ms or pass 0 for a non-blocking snapshot."
     )]
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "task_id",
+        deserialize_with = "crate::serde_lenient::deserialize_lenient_string_list"
+    )]
     pub task_ids: Vec<String>,
 
     /// When set and positive, wait up to this many milliseconds; omit or `0` polls.
+    ///
+    /// `{max_wait_ms}` is resolved at finalize from the session's wait ceiling,
+    /// which also pins it as the schema `maximum` — the tool description cannot
+    /// carry the bound alone, since randomization may replace it wholesale.
     #[schemars(
-        description = "Max wait time in milliseconds. A positive value waits for completion; omit or pass 0 for a non-blocking status poll."
+        description = "Max wait time in milliseconds, up to {max_wait_ms}. A positive value waits for completion; omit or pass 0 for a non-blocking status poll."
     )]
     #[serde(default)]
     pub timeout_ms: Option<u64>,
@@ -368,6 +510,44 @@ impl TaskOutputToolInput {
 pub fn task_output_waits(timeout_ms: Option<u64>) -> bool {
     timeout_ms.is_some_and(|ms| ms > 0)
 }
+
+/// Default ceiling on a single blocking wait (`get_task_output` with a positive
+/// `timeout_ms`, `wait_tasks`). Capping is safe because a completed task pings
+/// the model, so a truncated wait costs one more poll, not the result.
+pub const MAX_WAIT_BLOCK_MS_DEFAULT: u64 = 600_000;
+
+/// The blocking-wait ceiling in effect, honoring `CHUTES_BUILD_MAX_WAIT_BLOCK_MS`.
+///
+/// A host whose transport deadline is shorter than the default sets the env var
+/// so the server enforces — and the tool descriptions advertise — the same
+/// number the caller will actually wait for. Without that, a model believing the
+/// default asks for a wait its own client will abandon first.
+pub fn max_wait_block_ms() -> u64 {
+    std::env::var("CHUTES_BUILD_MAX_WAIT_BLOCK_MS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(MAX_WAIT_BLOCK_MS_DEFAULT)
+}
+
+/// Render a wait ceiling for tool descriptions, e.g. `600000 (~10 min)`.
+///
+/// The unit is derived from the value, so it cannot drift from the millisecond
+/// figure beside it. Both branches round *down*: a cap must never read as
+/// longer than it is.
+pub fn format_wait_cap_ms(ms: u64) -> String {
+    if ms < 60_000 {
+        format!("{ms} (~{} s)", ms / 1_000)
+    } else {
+        format!("{ms} (~{} min)", ms / 60_000)
+    }
+}
+
+/// Placeholder the description builders emit for the wait ceiling.
+///
+/// Resolved per session by `TruncationConfig::interpolate_description` in the
+/// finalize loop, the same way `{max_lines_read}` is: the cap is client
+/// configurable, so it cannot be baked in when the description is built.
+pub const MAX_WAIT_MS_PLACEHOLDER: &str = "{max_wait_ms}";
 
 /// Same as [`task_output_waits`], from raw tool-arg JSON (fingerprint / doom-loop).
 pub fn task_output_waits_from_json(args: &serde_json::Value) -> bool {
@@ -492,7 +672,9 @@ pub struct WaitTasksToolInput {
     )]
     pub mode: WaitMode,
 
-    #[schemars(description = "Max wait time in milliseconds")]
+    /// Carries the same `{max_wait_ms}` marker as `TaskOutputToolInput`: this
+    /// tool blocks on the same ceiling, so it needs the same resolved bound.
+    #[schemars(description = "Max wait time in milliseconds, up to {max_wait_ms}")]
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
@@ -771,6 +953,7 @@ Workspace boundary:
 - Your default analysis scope is the workspace in <user_info>. Stay within it unless asked otherwise.
 - Note explicitly if the design requires understanding external dependencies.";
 
+/// The **general-purpose** built-in subagent.
 /// Prompt body for the on-demand, read-only advisor.
 pub const ADVISOR_PROMPT: &str = "\
 You are an on-demand senior technical advisor. Review the executor's question, inspect the relevant code and current documentation, and return concise, actionable advice.
@@ -786,11 +969,10 @@ Focus on:
 
 Do not restate the entire task. Clearly separate confirmed evidence from assumptions. If the proposed approach is sound, say so briefly and identify the most important remaining risk.";
 
-/// The **general-purpose** built-in subagent.
 pub const GENERAL_PURPOSE_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
     name: "general-purpose",
     description: "General purpose agent for multi-step tasks.",
-    tools_template: "Has access to all tools: \
+    tools_template: "Has access to: \
          ${{ tools.by_kind.execute }}, ${{ tools.by_kind.read }}, ${{ tools.by_kind.edit }}, \
          ${{ tools.by_kind.list }}, ${{ tools.by_kind.search }}, ${{ tools.by_kind.web_search }}, \
          and ${{ tools.by_kind.plan }}.",
@@ -811,22 +993,23 @@ pub const EXPLORE_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
 pub const PLAN_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
     name: "plan",
     description: "Software architect for planning implementation strategies.",
-    tools_template: "Read-only \u{2014} has access to all tools except file editing \
-         (${{ tools.by_kind.edit }} is not available): \
+    tools_template: "Read-only \u{2014} has access to: \
          ${{ tools.by_kind.read }}, ${{ tools.by_kind.list }}, ${{ tools.by_kind.search }}, \
-         ${{ tools.by_kind.web_search }}, and ${{ tools.by_kind.plan }}.",
+         ${{ tools.by_kind.web_search }}, and ${{ tools.by_kind.plan }}. \
+         File editing and command execution are not available.",
     prompt_template: PLAN_PROMPT,
 };
 
+/// The built-in subagent types advertised to the model, in display order.
 /// The on-demand read-only advisor built-in subagent.
 pub const ADVISOR_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
     name: "advisor",
     description: "On-demand senior reviewer for architecture, correctness, security, and trade-offs.",
-    tools_template: "Read-only — has access to repository inspection, memory, Context7, and web research tools.",
+    tools_template: "Read-only \u{2014} has access to repository inspection, memory, Context7, and web \
+         research tools.",
     prompt_template: ADVISOR_PROMPT,
 };
 
-/// The built-in subagent types advertised to the model, in display order.
 pub const BUILTIN_SUBAGENTS: [BuiltinSubagent; 4] = [
     GENERAL_PURPOSE_SUBAGENT,
     EXPLORE_SUBAGENT,
@@ -915,10 +1098,15 @@ fn lifecycle_target_suffix(monitor_present: bool, subagent_present: bool) -> &'s
     }
 }
 
-/// Optional "(a monitor's task_id is returned by {monitor})" clause.
-fn monitor_task_id_note(monitor_tool: Option<&str>) -> String {
+/// Optional "(a monitor's {id_name} is returned by {monitor})" clause.
+///
+/// `id_name` is the model-facing singular id name — kill_task's `task_id`
+/// input (tracks renames). get_task_output's `task_ids` array is plural and
+/// must not be used here; both tools share this wording so randomization
+/// cannot disagree across kill vs get-output docs.
+fn monitor_task_id_note(monitor_tool: Option<&str>, id_name: &str) -> String {
     match monitor_tool {
-        Some(m) => format!(" (a monitor's task_id is returned by {m})"),
+        Some(m) => format!(" (a monitor's {id_name} is returned by {m})"),
         None => String::new(),
     }
 }
@@ -934,6 +1122,8 @@ pub struct KillTaskToolNaming<'a> {
     pub bash_present: bool,
     /// Whether termination uses a Windows Job Object (vs POSIX signals).
     pub is_windows: bool,
+    /// Model-facing name of the `task_id` input (tracks param renames).
+    pub task_id_param: &'a str,
 }
 
 /// Build the shared `kill_task` tool description.
@@ -943,11 +1133,12 @@ pub fn build_kill_task_description(naming: &KillTaskToolNaming) -> String {
         subagent_present,
         bash_present,
         is_windows,
+        task_id_param,
     } = *naming;
     let monitor_present = monitor_tool.is_some();
 
     let target_suffix = lifecycle_target_suffix(monitor_present, subagent_present);
-    let monitor_note = monitor_task_id_note(monitor_tool);
+    let monitor_note = monitor_task_id_note(monitor_tool, task_id_param);
 
     let verb = if is_windows {
         "Terminates the Job Object of"
@@ -974,7 +1165,7 @@ pub fn build_kill_task_description(naming: &KillTaskToolNaming) -> String {
     format!(
         "Terminate a running background task{target_suffix}.\n\n\
          Usage notes:\n\
-         - Pass its task_id{monitor_note}.\n\
+         - Pass its {task_id_param}{monitor_note}.\n\
          - {action}.\n\
          - Returns success if the task was killed or had already exited."
     )
@@ -991,6 +1182,13 @@ pub struct TaskOutputToolNaming<'a> {
     pub bash_background_param: Option<&'a str>,
     /// The subagent `run_in_background` param name, when a `task` tool is present.
     pub subagent_background_param: Option<&'a str>,
+    /// Model-facing name of the `task_ids` input (tracks param renames).
+    pub task_ids_param: &'a str,
+    /// Model-facing name of the `timeout_ms` input (tracks param renames).
+    pub timeout_ms_param: &'a str,
+    /// Singular monitor-id name for the monitor aside — kill_task's `task_id`
+    /// (tracks renames). Not get_task_output's plural `task_ids`.
+    pub task_id_param: &'a str,
 }
 
 /// Build the shared `get_task_output` tool description.
@@ -1000,32 +1198,36 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
         read_tool,
         bash_background_param,
         subagent_background_param,
+        task_ids_param,
+        timeout_ms_param,
+        task_id_param,
     } = *naming;
     let monitor_present = monitor_tool.is_some();
     let subagent_present = subagent_background_param.is_some();
 
     let target_suffix = lifecycle_target_suffix(monitor_present, subagent_present);
 
-    let mut sources: Vec<String> = Vec::new();
-    if let Some(p) = bash_background_param {
-        sources.push(format!("{p}=true commands"));
-    }
-    if let Some(p) = subagent_background_param {
-        sources.push(format!("{p}=true subagents"));
-    }
-    let sources = sources.join(" or ");
+    let sources = match (bash_background_param, subagent_background_param) {
+        // Both params share one client-facing name: don't repeat it.
+        (Some(b), Some(s)) if b == s => format!("{b}=true commands or subagents"),
+        (Some(b), Some(s)) => format!("{b}=true commands or {s}=true subagents"),
+        (Some(b), None) => format!("{b}=true commands"),
+        (None, Some(s)) => format!("{s}=true subagents"),
+        (None, None) => "background tasks".to_string(),
+    };
 
-    let monitor_note = monitor_task_id_note(monitor_tool);
+    let monitor_note = monitor_task_id_note(monitor_tool, task_id_param);
     let read_note = match read_tool {
         Some(r) => format!("\n- If output is large, use {r} on the output_file path"),
         None => String::new(),
     };
+    let wait_cap = MAX_WAIT_MS_PLACEHOLDER;
 
     format!(
         "Get output and status from a background task{target_suffix}.\n\n\
          Usage notes:\n\
-         - Pass task_ids with one or more ids from {sources}{monitor_note}; for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
-         - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at ~10 min\n\
+         - Pass {task_ids_param} with one or more ids from {sources}{monitor_note}; for a single task use a one-element array. Multiple ids with a positive {timeout_ms_param} wait until all complete\n\
+         - Omit {timeout_ms_param} or pass 0 for a non-blocking status snapshot; set a positive {timeout_ms_param} to wait up to that many milliseconds, capped at {wait_cap}\n\
          - Returns current output, status, and exit code if completed{read_note}"
     )
 }
@@ -1049,14 +1251,16 @@ pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
         subagent_background_param,
     } = *naming;
 
-    let mut sources: Vec<String> = Vec::new();
-    if let Some(p) = bash_background_param {
-        sources.push(format!("{p}=true"));
-    }
-    if let Some(p) = subagent_background_param {
-        sources.push(format!("{p}=true"));
-    }
-    let sources = sources.join(" or ");
+    let sources = match (bash_background_param, subagent_background_param) {
+        // Both params share one client-facing name: don't repeat it.
+        (Some(b), Some(s)) if b == s => format!("{b}=true commands or subagents"),
+        (Some(b), Some(s)) => format!("{b}=true commands or {s}=true subagents"),
+        (Some(b), None) => format!("{b}=true commands"),
+        (None, Some(s)) => format!("{s}=true subagents"),
+        (None, None) => "background tasks".to_string(),
+    };
+
+    let wait_cap = MAX_WAIT_MS_PLACEHOLDER;
 
     format!(
         "Wait for multiple background tasks or subagents to complete.\n\n\
@@ -1064,7 +1268,7 @@ pub fn build_wait_tasks_description(naming: &WaitTasksToolNaming) -> String {
          Usage notes:\n\
          - task_ids: list of task IDs from {sources}\n\
          - mode: 'wait_all' or 'wait_any'\n\
-         - timeout_ms: optional max wait, default 30s, capped at ~10 min"
+         - timeout_ms: optional max wait, default 30s, capped at {wait_cap}"
     )
 }
 
@@ -1164,6 +1368,54 @@ mod tests {
         };
         let value = serde_json::to_value(&input).unwrap();
         assert!(value.get("model").is_none());
+    }
+
+    #[test]
+    fn task_output_input_accepts_singular_task_id_alias() {
+        // Canonical plural form (unchanged).
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_ids": ["a", "b"]}"#).unwrap();
+        assert_eq!(input.resolved_task_ids(), vec!["a", "b"]);
+
+        // Singular key with a bare string — the shape models organically send
+        // (mirroring kill_task's singular task_id).
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_id": "abc-123", "timeout_ms": 0}"#).unwrap();
+        assert_eq!(input.resolved_task_ids(), vec!["abc-123"]);
+        assert_eq!(input.timeout_ms, Some(0));
+
+        // Singular key with an array also works.
+        let input: TaskOutputToolInput =
+            serde_json::from_str(r#"{"task_id": ["x", "y"]}"#).unwrap();
+        assert_eq!(input.resolved_task_ids(), vec!["x", "y"]);
+
+        // Plural key with a bare string.
+        let input: TaskOutputToolInput = serde_json::from_str(r#"{"task_ids": "solo"}"#).unwrap();
+        assert_eq!(input.resolved_task_ids(), vec!["solo"]);
+
+        // Bare number (observed: an OS PID) becomes a string id, so the tool
+        // answers "Task 228 not found" instead of a deserialize error.
+        let input: TaskOutputToolInput = serde_json::from_str(r#"{"task_id": 228}"#).unwrap();
+        assert_eq!(input.resolved_task_ids(), vec!["228"]);
+    }
+
+    #[test]
+    fn task_output_input_schema_does_not_advertise_the_alias() {
+        // The leniency is wire-only: the advertised schema must keep exactly
+        // the canonical properties (task_ids, timeout_ms) so tool-definition
+        // dumps and param randomization are unaffected.
+        let schema = serde_json::to_value(schemars::schema_for!(TaskOutputToolInput)).unwrap();
+        let props = schema["properties"].as_object().unwrap();
+        assert!(props.contains_key("task_ids"));
+        assert!(props.contains_key("timeout_ms"));
+        assert!(
+            !props.contains_key("task_id"),
+            "singular alias must not leak into the schema: {props:?}"
+        );
+        assert_eq!(props.len(), 2);
+        // And task_ids stays a plain string array.
+        assert_eq!(props["task_ids"]["type"], "array");
+        assert_eq!(props["task_ids"]["items"]["type"], "string");
     }
 
     #[test]
@@ -1347,12 +1599,12 @@ mod tests {
         // Bare-kind naming reproduces the placeholder kinds verbatim.
         assert_eq!(
             GENERAL_PURPOSE_SUBAGENT.render_tools(&plain_tool_naming()),
-            "Has access to all tools: execute, read, edit, list, search, web_search, and plan."
+            "Has access to: execute, read, edit, list, search, web_search, and plan."
         );
         assert_eq!(
             PLAN_SUBAGENT.render_tools(&plain_tool_naming()),
-            "Read-only \u{2014} has access to all tools except file editing (edit is not available): \
-             read, list, search, web_search, and plan."
+            "Read-only \u{2014} has access to: read, list, search, web_search, and plan. \
+             File editing and command execution are not available."
         );
 
         // Real tool names are substituted per kind.
@@ -1413,6 +1665,7 @@ mod tests {
             subagent_present: true,
             bash_present: true,
             is_windows: false,
+            task_id_param: "task_id",
         });
         assert_eq!(
             desc,
@@ -1431,6 +1684,7 @@ mod tests {
             subagent_present: true,
             bash_present: true,
             is_windows: true,
+            task_id_param: "task_id",
         });
         assert!(desc.contains(
             "- Terminates the Job Object of a bash task or monitor; sends Cancel+Shutdown to a subagent."
@@ -1444,6 +1698,7 @@ mod tests {
             subagent_present: true,
             bash_present: false,
             is_windows: false,
+            task_id_param: "task_id",
         });
         assert_eq!(
             desc,
@@ -1456,19 +1711,83 @@ mod tests {
     }
 
     #[test]
+    fn kill_task_description_tracks_renamed_task_id() {
+        let desc = build_kill_task_description(&KillTaskToolNaming {
+            monitor_tool: Some("monitor"),
+            subagent_present: false,
+            bash_present: true,
+            is_windows: false,
+            task_id_param: "id",
+        });
+        assert!(
+            desc.contains("Pass its id (a monitor's id is returned by monitor)"),
+            "renamed task_id must appear in pass-line and monitor aside: {desc}"
+        );
+        assert!(
+            !desc.contains("task_id"),
+            "canonical task_id must not remain after rename: {desc}"
+        );
+    }
+
+    #[test]
+    fn format_wait_cap_ms_derives_its_unit_and_rounds_down() {
+        assert_eq!(
+            format_wait_cap_ms(MAX_WAIT_BLOCK_MS_DEFAULT),
+            "600000 (~10 min)"
+        );
+        assert_eq!(format_wait_cap_ms(300_000), "300000 (~5 min)");
+        // Rounds down: 1.5 min must not read as 2.
+        assert_eq!(format_wait_cap_ms(90_000), "90000 (~1 min)");
+        // Sub-minute caps switch unit rather than rendering "~0 min".
+        assert_eq!(format_wait_cap_ms(30_000), "30000 (~30 s)");
+    }
+
+    #[test]
+    fn task_output_description_tracks_renamed_params() {
+        let desc = build_task_output_description(&TaskOutputToolNaming {
+            monitor_tool: Some("monitor"),
+            read_tool: None,
+            bash_background_param: Some("is_background"),
+            subagent_background_param: None,
+            task_ids_param: "process_ids",
+            timeout_ms_param: "max_wait",
+            task_id_param: "id",
+        });
+        assert!(
+            desc.contains("Pass process_ids with"),
+            "renamed task_ids must appear: {desc}"
+        );
+        assert!(
+            desc.contains("positive max_wait wait") && desc.contains("Omit max_wait or pass 0"),
+            "renamed timeout_ms must appear: {desc}"
+        );
+        assert!(
+            desc.contains("a monitor's id is returned by monitor"),
+            "renamed kill_task task_id must appear in monitor aside: {desc}"
+        );
+        assert!(
+            !desc.contains("task_ids") && !desc.contains("timeout_ms") && !desc.contains("task_id"),
+            "canonical param names must not remain after rename: {desc}"
+        );
+    }
+
+    #[test]
     fn task_output_matches_cli_default() {
         let desc = build_task_output_description(&TaskOutputToolNaming {
             monitor_tool: Some("monitor"),
             read_tool: Some("read_file"),
             bash_background_param: Some("background"),
             subagent_background_param: Some("background"),
+            task_ids_param: "task_ids",
+            timeout_ms_param: "timeout_ms",
+            task_id_param: "task_id",
         });
         assert_eq!(
             desc,
             "Get output and status from a background task, monitor, or subagent.\n\n\
              Usage notes:\n\
-             - Pass task_ids with one or more ids from background=true commands or background=true subagents (a monitor's task_id is returned by monitor); for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
-             - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at ~10 min\n\
+             - Pass task_ids with one or more ids from background=true commands or subagents (a monitor's task_id is returned by monitor); for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
+             - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at {max_wait_ms}\n\
              - Returns current output, status, and exit code if completed\n\
              - If output is large, use read_file on the output_file path"
         );
@@ -1481,13 +1800,16 @@ mod tests {
             read_tool: Some("read_file"),
             bash_background_param: None,
             subagent_background_param: Some("run_in_background"),
+            task_ids_param: "task_ids",
+            timeout_ms_param: "timeout_ms",
+            task_id_param: "task_id",
         });
         assert_eq!(
             desc,
             "Get output and status from a background task or subagent.\n\n\
              Usage notes:\n\
              - Pass task_ids with one or more ids from run_in_background=true subagents; for a single task use a one-element array. Multiple ids with a positive timeout_ms wait until all complete\n\
-             - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at ~10 min\n\
+             - Omit timeout_ms or pass 0 for a non-blocking status snapshot; set a positive timeout_ms to wait up to that many milliseconds, capped at {max_wait_ms}\n\
              - Returns current output, status, and exit code if completed\n\
              - If output is large, use read_file on the output_file path"
         );
@@ -1505,9 +1827,9 @@ mod tests {
             "Wait for multiple background tasks or subagents to complete.\n\n\
              Prefer get_command_or_subagent_output with task_ids and a positive timeout_ms. This tool is kept for compatibility.\n\n\
              Usage notes:\n\
-             - task_ids: list of task IDs from background=true or background=true\n\
+             - task_ids: list of task IDs from background=true commands or subagents\n\
              - mode: 'wait_all' or 'wait_any'\n\
-             - timeout_ms: optional max wait, default 30s, capped at ~10 min"
+             - timeout_ms: optional max wait, default 30s, capped at {max_wait_ms}"
         );
     }
 
@@ -1518,7 +1840,117 @@ mod tests {
             bash_background_param: None,
             subagent_background_param: Some("run_in_background"),
         });
-        assert!(desc.contains("- task_ids: list of task IDs from run_in_background=true\n"));
+        assert!(
+            desc.contains("- task_ids: list of task IDs from run_in_background=true subagents\n")
+        );
         assert!(desc.contains("Prefer get_task_output with task_ids"));
+    }
+
+    #[test]
+    fn background_spawn_notice_keeps_poll_hint_and_open_parent_work() {
+        let with_cta = format_subagent_started_background(
+            "sa-1",
+            "general-purpose",
+            "author board-setup skill",
+            "get_command_or_subagent_output",
+            true,
+        );
+        assert!(
+            with_cta.contains("subagent_id: sa-1"),
+            "id must stay pollable: {with_cta}"
+        );
+        assert!(
+            with_cta.contains("get_command_or_subagent_output") && with_cta.contains("timeout_ms"),
+            "poll instruction must remain: {with_cta}"
+        );
+        assert!(
+            !with_cta.contains("<system-reminder>") && !with_cta.contains("<system_reminder>"),
+            "shared spawn text must not hardcode either reminder tag: {with_cta}"
+        );
+        assert!(
+            with_cta.contains(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK),
+            "open parent work must get the continue-parent CTA: {with_cta}"
+        );
+
+        let poll_only = format_subagent_started_background(
+            "sa-1",
+            "general-purpose",
+            "review pr",
+            "get_command_or_subagent_output",
+            false,
+        );
+        assert!(
+            poll_only.contains("timeout_ms")
+                && !poll_only.contains(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK),
+            "no leftover parent work must not get the CTA: {poll_only}"
+        );
+    }
+
+    #[test]
+    fn continue_parent_work_detects_prior_exec_and_skips_review_only() {
+        assert!(should_continue_parent_work(
+            &[
+                "run bazel test //hw5:op_chain and don't skip smoke".into(),
+                "spawn an agent to create a skill for board setup".into(),
+            ],
+            "Create bringup skill",
+            "write SKILL.md",
+        ));
+        assert!(should_continue_parent_work(
+            &["PRs still fail, fix and gt submit + /pr-babysit".into()],
+            "[pr-babysit] stack",
+            "fix CI",
+        ));
+        assert!(should_continue_parent_work(
+            &[
+                "rerun 512 and 672 adler tests".into(),
+                "while waiting, use 8 subagents on the nondetermin bug".into(),
+            ],
+            "FWD experiment",
+            "kernel repro",
+        ));
+        assert!(!should_continue_parent_work(
+            &["review this PR https://github.com/example/repo/pull/1".into()],
+            "[reviewer] pr",
+            "review the diff",
+        ));
+        assert!(!should_continue_parent_work(
+            &["/pr-babysit https://example.com/github/pr/demo/1".into()],
+            "[pr-babysit]",
+            "babysit checks",
+        ));
+        assert!(!should_continue_parent_work(&[], "explore", "look around",));
+        // Distant implement + recent review-only: do not inherit old exec.
+        assert!(!should_continue_parent_work(
+            &[
+                "implement the auth feature and run tests".into(),
+                "what would example secrets look like".into(),
+                "and what if we have more than one".into(),
+                "ok. can you do a 3 agent review please".into(),
+            ],
+            "3 agent review",
+            "review the diff",
+        ));
+        // Exec two asks ago still counts (check bugs → nudge → review spawn).
+        assert!(should_continue_parent_work(
+            &[
+                "kan je is de recente signal bug's checken?".into(),
+                "loop alle 4 de punten even na aub".into(),
+                "ja, en review die meteen met andere agents".into(),
+            ],
+            "review bugs",
+            "independent review",
+        ));
+        // Exec three asks ago is too old once the user is review-only.
+        assert!(!should_continue_parent_work(
+            &[
+                "implement foo and fix the tests".into(),
+                "thanks".into(),
+                "ok noted".into(),
+                "/code-review the PR".into(),
+            ],
+            "review",
+            "review the diff",
+        ));
     }
 }

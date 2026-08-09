@@ -60,8 +60,23 @@ static WORKSPACE_RPC_REQUESTS_TOTAL: std::sync::LazyLock<IntCounterVec> =
     std::sync::LazyLock::new(|| {
         register_int_counter_vec!(
             "grok_workspace_rpc_requests_total",
-            "Workspace RPC dispatches, by method and result",
+            "Workspace RPC dispatches, by method and result. Donated per-sandbox \
+             series inflate absolute volume — SLOs must use ratios \
+             (error/total), not increase() counts.",
             &["method", "result"]
+        )
+        .unwrap()
+    });
+/// Failed `workspace.*` RPC dispatches, by method and
+/// [`WorkspaceError::metric_kind`].
+static WORKSPACE_RPC_ERRORS_TOTAL: std::sync::LazyLock<IntCounterVec> =
+    std::sync::LazyLock::new(|| {
+        register_int_counter_vec!(
+            "grok_workspace_rpc_errors_total",
+            "Failed workspace RPC dispatches, by method and error kind. \
+             Donated per-sandbox series inflate absolute volume — compare \
+             error_kind shares or error/total ratios, not raw counts.",
+            &["method", "error_kind"]
         )
         .unwrap()
     });
@@ -79,14 +94,13 @@ static WORKSPACE_RPC_DURATION_SECONDS: std::sync::LazyLock<HistogramVec> =
         .unwrap()
     });
 const UNKNOWN_METHOD_LABEL: &str = "unknown";
-/// Prefix of the [`WorkspaceError::HubError`] for an unrecognized method. Shared
-/// by the dispatch default arm and the metric classifier so the "collapse to
-/// `unknown`" decision cannot drift from the error it keys on.
-const UNKNOWN_METHOD_ERR_PREFIX: &str = "unknown workspace method:";
 /// Zero-init this module's metric families. See [`crate::init_metrics`].
 pub(crate) fn init_metrics() {
     WORKSPACE_RPC_REQUESTS_TOTAL
         .with_label_values(&[UNKNOWN_METHOD_LABEL, "error"])
+        .inc_by(0);
+    WORKSPACE_RPC_ERRORS_TOTAL
+        .with_label_values(&[UNKNOWN_METHOD_LABEL, "unknown_method"])
         .inc_by(0);
     let _ = WORKSPACE_RPC_DURATION_SECONDS.with_label_values(&[UNKNOWN_METHOD_LABEL]);
 }
@@ -106,7 +120,9 @@ fn resolve_mutation_caller<'a>(
                     .with_label_values(&[method, "param_mismatch"])
                     .inc();
                 tracing::warn!(
-                    method, envelope_session = % envelope, param_caller = % param,
+                    method,
+                    envelope_session = %envelope,
+                    param_caller = %param,
                     "caller_session_id param disagrees with the server-bound envelope session; \
                      trusting the envelope"
                 );
@@ -144,9 +160,7 @@ fn record_mutation_rpc<T>(
     match result {
         Ok(_) => tracing::info!(method, caller, target, "workspace mutation rpc"),
         Err(e) => {
-            tracing::warn!(
-                method, caller, target, error = % e, "workspace mutation rpc failed"
-            );
+            tracing::warn!(method, caller, target, error = %e, "workspace mutation rpc failed");
         }
     }
 }
@@ -233,8 +247,7 @@ async fn list_outstanding_background_tasks(
         })
         .collect()
 }
-/// Point-in-time snapshot of the session's outstanding background terminal
-/// tasks and live scheduled tasks.
+/// Incomplete backgrounded terminal tasks + live scheduled tasks (client tray rebuild).
 async fn tasks_snapshot(toolset: &FinalizedToolset) -> TasksSnapshotResponse {
     let (terminal, scheduler) = {
         let res = toolset.resources.lock().await;
@@ -248,7 +261,7 @@ async fn tasks_snapshot(toolset: &FinalizedToolset) -> TasksSnapshotResponse {
             .list_tasks()
             .await
             .into_iter()
-            .filter(|t| !t.completed)
+            .filter(|t| t.is_outstanding_background())
             .map(|t| {
                 let command = t
                     .display_command
@@ -263,6 +276,7 @@ async fn tasks_snapshot(toolset: &FinalizedToolset) -> TasksSnapshotResponse {
                         TaskKind::Monitor => "monitor".to_owned(),
                     },
                     started_at: DateTime::<Utc>::from(t.start_time).to_rfc3339(),
+                    description: t.description,
                 }
             })
             .collect(),
@@ -274,6 +288,7 @@ async fn tasks_snapshot(toolset: &FinalizedToolset) -> TasksSnapshotResponse {
             let _ = handle.0.send(SchedulerCommand::List { reply: reply_tx });
             reply_rx
                 .await
+                .map(|snapshot| snapshot.tasks)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|t| ScheduledTaskSnapshotWire {
@@ -376,7 +391,11 @@ impl WorkspaceRpcHandler {
                             .map(|n| n.to_string_lossy().to_string())
                     })
                     .unwrap_or_else(|| "sh".to_string());
-                Ok(serde_json::json!({ "os" : os, "shell" : shell, "cwd" : cwd_str, }))
+                Ok(serde_json::json!({
+                    "os": os,
+                    "shell": shell,
+                    "cwd": cwd_str,
+                }))
             }
             <GitStatusReq as WorkspaceRpc>::METHOD => {
                 static DEPRECATION_WARNING: std::sync::Once = std::sync::Once::new();
@@ -506,10 +525,27 @@ impl WorkspaceRpcHandler {
                 let cwd = self.workspace.root_cwd()?;
                 let mut results = Vec::new();
                 for ref_path in &refs {
-                    let full_path = if std::path::Path::new(ref_path).is_absolute() {
+                    let requested_path = if std::path::Path::new(ref_path).is_absolute() {
                         std::path::PathBuf::from(ref_path)
                     } else {
                         cwd.join(ref_path)
+                    };
+                    let full_path = match self
+                        .workspace
+                        .confine_to_workspace_root(&requested_path)
+                        .await
+                    {
+                        Ok((confined, _)) => confined,
+                        Err(e) => {
+                            results.push(serde_json::json!({
+                                "path": requested_path.to_string_lossy(),
+                                "ref": ref_path,
+                                "exists": false,
+                                "content": Value::Null,
+                                "error": e.to_string(),
+                            }));
+                            continue;
+                        }
                     };
                     let exists = full_path.exists();
                     let content = if exists {
@@ -517,10 +553,12 @@ impl WorkspaceRpcHandler {
                     } else {
                         None
                     };
-                    results.push(serde_json::json!(
-                        { "path" : full_path.to_string_lossy(), "ref" : ref_path,
-                        "exists" : exists, "content" : content, }
-                    ));
+                    results.push(serde_json::json!({
+                        "path": full_path.to_string_lossy(),
+                        "ref": ref_path,
+                        "exists": exists,
+                        "content": content,
+                    }));
                 }
                 Ok(Value::Array(results))
             }
@@ -579,6 +617,9 @@ impl WorkspaceRpcHandler {
                 );
                 Ok(Value::Array(plugins))
             }
+            <ExportGithubReq as WorkspaceRpc>::METHOD => {
+                dispatch_op::<ExportGithubReq>(params, &self.workspace, None).await
+            }
             <HookRegistryReq as WorkspaceRpc>::METHOD => {
                 dispatch_op::<HookRegistryReq>(params, &self.workspace, None).await
             }
@@ -588,8 +629,6 @@ impl WorkspaceRpcHandler {
             }
             <LoadPermissionsReq as WorkspaceRpc>::METHOD => {
                 let cwd = self.workspace.root_cwd()?;
-                // Hub/cloud callers are outside the local folder-trust model
-                // (matches the neighboring plugin-discovery call above).
                 Ok(crate::discovery::load_permissions(&cwd, true).await)
             }
             <LoadEnvrcReq as WorkspaceRpc>::METHOD => {
@@ -692,6 +731,9 @@ impl WorkspaceRpcHandler {
                 let result = crate::worktree::create_worktree_streaming(&req, &NoOpNotifier).await;
                 serde_json::to_value(result).map_err(|e| WorkspaceError::HubError(e.to_string()))
             }
+            <ReposListReq as WorkspaceRpc>::METHOD => {
+                dispatch_op::<ReposListReq>(params, &self.workspace, None).await
+            }
             <GitStatusExtReq as WorkspaceRpc>::METHOD => {
                 dispatch_op::<GitStatusExtReq>(params, &self.workspace, None).await
             }
@@ -715,6 +757,9 @@ impl WorkspaceRpcHandler {
             }
             <GitCommitReq as WorkspaceRpc>::METHOD => {
                 dispatch_op::<GitCommitReq>(params, &self.workspace, None).await
+            }
+            <GitSyncBaseReq as WorkspaceRpc>::METHOD => {
+                dispatch_op::<GitSyncBaseReq>(params, &self.workspace, None).await
             }
             <GitCheckoutReq as WorkspaceRpc>::METHOD => {
                 dispatch_op::<GitCheckoutReq>(params, &self.workspace, None).await
@@ -888,9 +933,7 @@ impl WorkspaceRpcHandler {
             }
             _ => {
                 tracing::warn!(method, "unknown workspace rpc method");
-                Err(WorkspaceError::HubError(format!(
-                    "{UNKNOWN_METHOD_ERR_PREFIX} {method}"
-                )))
+                Err(WorkspaceError::UnknownMethod(method.to_owned()))
             }
         }
     }
@@ -907,12 +950,20 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         )
     }
     fn input_schema(&self) -> Option<Value> {
-        Some(serde_json::json!(
-            { "type" : "object", "properties" : { "method" : { "type" : "string",
-            "description" : "The workspace.* method to invoke" }, "params" : { "type"
-            : "object", "description" : "Method parameters" } }, "required" :
-            ["method"] }
-        ))
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "method": {
+                    "type": "string",
+                    "description": "The workspace.* method to invoke"
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Method parameters"
+                }
+            },
+            "required": ["method"]
+        }))
     }
     async fn handle_call(&self, ctx: ToolCallContext, args: Value) -> ToolStream<TypedToolOutput> {
         let tool_id = self.tool_id();
@@ -931,18 +982,11 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             .cloned()
             .unwrap_or(Value::Object(Default::default()));
         let bound_session = ctx.extensions.get::<xai_tool_runtime::SessionContext>();
+        let session_id = bound_session.as_deref().map(|s| s.0.as_str());
         let start = std::time::Instant::now();
-        let result = self
-            .dispatch(
-                method,
-                params,
-                bound_session.as_deref().map(|s| s.0.as_str()),
-            )
-            .await;
-        let is_unknown_method = matches!(
-            & result, Err(WorkspaceError::HubError(msg)) if msg
-            .starts_with(UNKNOWN_METHOD_ERR_PREFIX)
-        );
+        let result = self.dispatch(method, params, session_id).await;
+        let error_kind = result.as_ref().err().map(WorkspaceError::metric_kind);
+        let is_unknown_method = matches!(&result, Err(WorkspaceError::UnknownMethod(_)));
         let method_label = if is_unknown_method {
             UNKNOWN_METHOD_LABEL
         } else {
@@ -951,6 +995,11 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         WORKSPACE_RPC_REQUESTS_TOTAL
             .with_label_values(&[method_label, if result.is_ok() { "ok" } else { "error" }])
             .inc();
+        if let Some(error_kind) = error_kind {
+            WORKSPACE_RPC_ERRORS_TOTAL
+                .with_label_values(&[method_label, error_kind])
+                .inc();
+        }
         WORKSPACE_RPC_DURATION_SECONDS
             .with_label_values(&[method_label])
             .observe(start.elapsed().as_secs_f64());
@@ -966,16 +1015,16 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         match frame.event {
             HookEvent::Cancel => {
                 if let Some(call_id) = &frame.call_id {
-                    tracing::info!(% session_id, % call_id, "cancel hook received");
+                    tracing::info!(%session_id, %call_id, "cancel hook received");
                     self.workspace
                         .cancel_tool_call(session_id.as_str(), call_id.as_str());
                 } else {
-                    tracing::info!(% session_id, "cancel hook received (session-wide)");
+                    tracing::info!(%session_id, "cancel hook received (session-wide)");
                     self.workspace.cancel_all_tool_calls(session_id.as_str());
                 }
             }
             HookEvent::SessionEnded => {
-                tracing::info!(% session_id, "session_ended hook received");
+                tracing::info!(%session_id, "session_ended hook received");
                 self.workspace
                     .teardown_session_mcp(session_id.as_str())
                     .await;
@@ -990,14 +1039,17 @@ impl ToolServerHandler for WorkspaceRpcHandler {
                         match serde_json::from_value::<BeforeTurnPayload>(payload) {
                             Ok(p) => {
                                 tracing::info!(
-                                    session = % session_id, turn = p.turn_number, model = % p
-                                    .model_id, "before_turn hook received"
+                                    session = %session_id,
+                                    turn = p.turn_number,
+                                    model = %p.model_id,
+                                    "before_turn hook received"
                                 );
                                 self.workspace.on_before_turn(session_id.as_str(), &p).await;
                             }
                             Err(e) => {
                                 tracing::warn!(
-                                    error = % e, "before_turn payload deserialization failed"
+                                    error = %e,
+                                    "before_turn payload deserialization failed"
                                 );
                             }
                         }
@@ -1005,30 +1057,32 @@ impl ToolServerHandler for WorkspaceRpcHandler {
                     AFTER_TURN_KIND => match serde_json::from_value::<AfterTurnPayload>(payload) {
                         Ok(p) => {
                             tracing::info!(
-                                session = % session_id, turn = p.turn_number, outcome = ? p
-                                .outcome, duration_ms = p.duration_ms,
+                                session = %session_id,
+                                turn = p.turn_number,
+                                outcome = ?p.outcome,
+                                duration_ms = p.duration_ms,
                                 "after_turn hook received"
                             );
                             self.workspace.on_after_turn(session_id.as_str(), &p).await;
                         }
                         Err(e) => {
                             tracing::warn!(
-                                error = % e, "after_turn payload deserialization failed"
+                                error = %e,
+                                "after_turn payload deserialization failed"
                             );
                         }
                     },
                     _ => {
                         tracing::debug!(
-                            kind = % kind, session = % session_id,
+                            kind = %kind,
+                            session = %session_id,
                             "unrecognized custom hook kind"
                         );
                     }
                 }
             }
             HookEvent::Pause | HookEvent::Resume => {
-                tracing::debug!(
-                    % session_id, event = ? frame.event, "hook not yet implemented"
-                );
+                tracing::debug!(%session_id, event = ?frame.event, "hook not yet implemented");
             }
         }
     }
@@ -1049,7 +1103,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         let request: TurnHookRequest = match serde_json::from_value(payload) {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(error = % e, % session_id, "invalid turn hook request");
+                tracing::warn!(error = %e, %session_id, "invalid turn hook request");
                 return no_op();
             }
         };
@@ -1080,6 +1134,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             if let Some(session) = sessions.remove(sid) {
                 session.abort_system_notify_forwarder();
                 session.shutdown_terminal_backend();
+                session.shutdown_browser_service();
                 session.cancel_hunk_tracker();
             }
             let empty = sessions.is_empty();
@@ -1093,12 +1148,14 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         if !start_drain {
             if became_empty {
                 tracing::info!(
-                    session = % params.session_id, reason = % params.reason,
+                    session = %params.session_id,
+                    reason = %params.reason,
                     "workspace: hub evict — already draining/shutting down; dropped session only"
                 );
             } else {
                 tracing::info!(
-                    session = % params.session_id, reason = % params.reason,
+                    session = %params.session_id,
+                    reason = %params.reason,
                     "workspace: hub evict — other sessions live; dropped session only"
                 );
             }
@@ -1106,8 +1163,9 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         }
         let grace = std::time::Duration::from_millis(params.grace_period_ms);
         tracing::info!(
-            session = % params.session_id, reason = % params.reason, grace_period_ms =
-            params.grace_period_ms,
+            session = %params.session_id,
+            reason = %params.reason,
+            grace_period_ms = params.grace_period_ms,
             "workspace: hub evict — last session; commencing two-phase drain"
         );
         let unfinished = self
@@ -1116,7 +1174,8 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             .await;
         if unfinished > 0 {
             tracing::warn!(
-                session = % params.session_id, unfinished,
+                session = %params.session_id,
+                unfinished,
                 "workspace: hub evict drain left items pending"
             );
         }
@@ -1127,8 +1186,13 @@ impl ToolServerHandler for WorkspaceRpcHandler {
 mod tests {
     use super::*;
     use crate::capability::CapabilityMode;
-    use crate::handle::tests::{background_capable_cfg, make_handle, start_background_sleep};
-    use xai_grok_tools::implementations::grok_build::scheduler::types::ScheduledTask;
+    use crate::handle::tests::{
+        background_capable_cfg, make_confining_handle, make_handle, start_background_sleep,
+    };
+    use xai_grok_tools::implementations::grok_build::scheduler::types::{
+        ScheduledTask, SchedulerState,
+    };
+    use xai_grok_tools::types::resources::State;
     use xai_tool_protocol::turn_hook;
     /// Helper: consume the first item from a ToolStream.
     async fn next_item(
@@ -1204,14 +1268,18 @@ mod tests {
         assert_eq!(reply, turn_hook::HookReply::default());
     }
     #[tokio::test]
-    async fn dispatch_unknown_method_returns_hub_error() {
+    async fn dispatch_unknown_method_returns_unknown_method_error() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
         let result = handler
             .dispatch("workspace.nonexistent", Value::Null, None)
             .await;
-        assert!(matches!(result, Err(WorkspaceError::HubError(msg)) if msg
-            .contains("unknown workspace method")));
+        match result {
+            Err(WorkspaceError::UnknownMethod(method)) => {
+                assert_eq!(method, "workspace.nonexistent");
+            }
+            other => panic!("expected UnknownMethod, got {other:?}"),
+        }
     }
     /// A hub evict runs the two-phase drain then settles into terminal
     /// ShuttingDown (not a lingering Draining) for an evicted workspace.
@@ -1296,7 +1364,7 @@ mod tests {
             let value = handler
                 .dispatch(
                     "workspace.list_background_tasks",
-                    serde_json::json!({ "session_id" : "bg-rpc" }),
+                    serde_json::json!({"session_id": "bg-rpc"}),
                     Some("bg-rpc"),
                 )
                 .await
@@ -1379,7 +1447,7 @@ mod tests {
             let value = handler
                 .dispatch(
                     "workspace.tasks_snapshot",
-                    serde_json::json!({ "session_id" : "snap-rpc" }),
+                    serde_json::json!({"session_id": "snap-rpc"}),
                     Some("snap-rpc"),
                 )
                 .await
@@ -1396,6 +1464,11 @@ mod tests {
         assert_eq!(task.task_id, bg.task_id);
         assert_eq!(task.kind, "bash");
         assert!(
+            task.description.is_none(),
+            "start_background_sleep does not set description: {:?}",
+            task.description
+        );
+        assert!(
             DateTime::parse_from_rfc3339(&task.started_at).is_ok(),
             "started_at must be RFC3339: {}",
             task.started_at
@@ -1405,6 +1478,24 @@ mod tests {
             "no scheduler resource in this toolset: {:?}",
             snap.scheduled_tasks
         );
+        {
+            use crate::handle::tests::terminal_run_request;
+            let mut req = terminal_run_request("sleep 30", out_dir.path(), "snap-desc-task");
+            req.description = Some("build frontend".into());
+            let desc_bg = session
+                .terminal_backend()
+                .run_background(req)
+                .await
+                .expect("start described background task");
+            let snap = snapshot(&handler).await;
+            let described = snap
+                .background_tasks
+                .iter()
+                .find(|t| t.task_id == desc_bg.task_id)
+                .expect("described task in snapshot");
+            assert_eq!(described.description.as_deref(), Some("build frontend"));
+            session.terminal_backend().kill_task(&desc_bg.task_id).await;
+        }
         session.terminal_backend().kill_task(&bg.task_id).await;
         let snap = snapshot(&handler).await;
         assert!(
@@ -1413,18 +1504,12 @@ mod tests {
             snap.background_tasks
         );
         {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(async move {
-                while let Some(cmd) = rx.recv().await {
-                    if let SchedulerCommand::List { reply } = cmd {
-                        let mut task = ScheduledTask::new(300, "check CI".into(), true, false);
-                        task.id = "loop-1".into();
-                        let _ = reply.send(vec![task]);
-                    }
-                }
-            });
             let toolset = session.toolset();
-            toolset.resources.lock().await.insert(SchedulerHandle(tx));
+            let mut resources = toolset.resources.lock().await;
+            let state = resources.get_or_default::<State<SchedulerState>>();
+            let mut task = ScheduledTask::new(300, "check CI".into(), true, false);
+            task.id = "loop-1".into();
+            state.tasks.push(task);
         }
         let snap = snapshot(&handler).await;
         assert_eq!(snap.scheduled_tasks.len(), 1);
@@ -1438,6 +1523,149 @@ mod tests {
             "next_fire_at must be RFC3339: {}",
             loop_task.next_fire_at
         );
+    }
+    /// FG in-flight out of snapshot; after backgrounding in; completed BG out.
+    /// Preconditions ensure a bare `!completed` filter would fail.
+    #[tokio::test]
+    async fn tasks_snapshot_excludes_foreground_and_completed_processes() {
+        use crate::handle::tests::terminal_run_request;
+        use std::time::{Duration, Instant};
+        let handle = make_handle();
+        let cfg = background_capable_cfg();
+        let session = handle
+            .create_session_with_config(
+                "snap-fg-rpc",
+                None,
+                Some(cfg.clone()),
+                CapabilityMode::All,
+                None,
+                false,
+            )
+            .expect("create background-capable session");
+        session.set_bind_tool_config_fingerprint(serde_json::to_value(&cfg).ok());
+        let out_dir = tempfile::tempdir().expect("temp dir");
+        let handler = WorkspaceRpcHandler::new(handle.clone());
+        async fn snapshot(handler: &WorkspaceRpcHandler) -> TasksSnapshotResponse {
+            let value = handler
+                .dispatch(
+                    "workspace.tasks_snapshot",
+                    serde_json::json!({"session_id": "snap-fg-rpc"}),
+                    Some("snap-fg-rpc"),
+                )
+                .await
+                .expect("tasks_snapshot rpc");
+            serde_json::from_value(value).expect("decode response")
+        }
+        let backend = session.terminal_backend().clone();
+        let fg_req = terminal_run_request("sleep 30", out_dir.path(), "snap-fg-task");
+        let fg_join = tokio::spawn(async move { backend.run(fg_req).await });
+        let poll_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let listed = session.terminal_backend().list_tasks().await;
+            if listed.iter().any(|t| !t.completed && !t.is_backgrounded) {
+                break;
+            }
+            assert!(
+                Instant::now() < poll_deadline,
+                "timeout waiting for incomplete FG in list_tasks: {listed:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let snap = snapshot(&handler).await;
+        assert!(
+            snap.background_tasks.is_empty(),
+            "in-flight FG must not appear in tasks_snapshot: {:?}",
+            snap.background_tasks
+        );
+        assert!(
+            session
+                .terminal_backend()
+                .background_foreground_command("snap-fg-task")
+                .await,
+            "expected FG process snap-fg-task to background"
+        );
+        let snap = snapshot(&handler).await;
+        assert!(
+            snap.background_tasks
+                .iter()
+                .any(|t| t.task_id == "snap-fg-task"),
+            "backgrounded former FG must appear: {:?}",
+            snap.background_tasks
+        );
+        assert_eq!(
+            snap.background_tasks.len(),
+            1,
+            "only the transitioned FG so far: {:?}",
+            snap.background_tasks
+        );
+        let bg = start_background_sleep(&session, out_dir.path(), "snap-bg-task").await;
+        let snap = snapshot(&handler).await;
+        assert_eq!(
+            snap.background_tasks.len(),
+            2,
+            "transitioned FG + incomplete BG must appear: {:?}",
+            snap.background_tasks
+        );
+        assert!(
+            snap.background_tasks
+                .iter()
+                .any(|t| t.task_id == bg.task_id),
+            "run_background task missing: {:?}",
+            snap.background_tasks
+        );
+        let short = session
+            .terminal_backend()
+            .run_background(terminal_run_request(
+                "true",
+                out_dir.path(),
+                "snap-done-task",
+            ))
+            .await
+            .expect("start short background task");
+        let done = session
+            .terminal_backend()
+            .wait_for_completion(&short.task_id, Some(Duration::from_secs(5)))
+            .await
+            .expect("short background task should complete");
+        assert!(done.completed, "short task must complete: {done:?}");
+        let listed = session.terminal_backend().list_tasks().await;
+        assert!(
+            listed
+                .iter()
+                .any(|t| t.task_id == short.task_id && t.completed && t.is_backgrounded),
+            "precondition: completed BG must still be in list_tasks: {listed:?}"
+        );
+        let snap = snapshot(&handler).await;
+        assert!(
+            snap.background_tasks
+                .iter()
+                .all(|t| t.task_id != short.task_id),
+            "completed BG must not appear: {:?}",
+            snap.background_tasks
+        );
+        assert_eq!(
+            snap.background_tasks.len(),
+            2,
+            "still-running BG tasks remain: {:?}",
+            snap.background_tasks
+        );
+        assert!(
+            snap.background_tasks
+                .iter()
+                .any(|t| t.task_id == bg.task_id),
+            "run_background task should still be present: {:?}",
+            snap.background_tasks
+        );
+        assert!(
+            snap.background_tasks
+                .iter()
+                .any(|t| t.task_id == "snap-fg-task"),
+            "transitioned FG should still be present: {:?}",
+            snap.background_tasks
+        );
+        session.terminal_backend().kill_task(&bg.task_id).await;
+        session.terminal_backend().kill_task("snap-fg-task").await;
+        let _ = fg_join.await;
     }
     /// Evicting one session while another is live must NOT global-drain (which
     /// would close the shared queue for the survivor) — even when the evicted
@@ -1541,7 +1769,7 @@ mod tests {
     async fn dispatch_tool_definitions_returns_known_tools() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "session_id" : "main" });
+        let params = serde_json::json!({"session_id": "main"});
         let result = handler
             .dispatch("workspace.tool_definitions", params, None)
             .await;
@@ -1565,7 +1793,7 @@ mod tests {
     async fn dispatch_tool_definitions_unknown_session() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "session_id" : "ghost" });
+        let params = serde_json::json!({"session_id": "ghost"});
         let result = handler
             .dispatch("workspace.tool_definitions", params, None)
             .await;
@@ -1618,9 +1846,7 @@ mod tests {
     async fn dispatch_drop_session_self_succeeds() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle.clone());
-        let params = serde_json::json!(
-            { "caller_session_id" : "main", "session_id" : "main" }
-        );
+        let params = serde_json::json!({"caller_session_id": "main", "session_id": "main"});
         let result = handler
             .dispatch("workspace.drop_session", params, None)
             .await;
@@ -1635,8 +1861,7 @@ mod tests {
             .dispatch("workspace.update_tool_config", serde_json::json!({}), None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing")),
             "got {result:?}"
         );
     }
@@ -1657,10 +1882,11 @@ mod tests {
         let mismatch_before = caller_mismatch_count("update_tool_config", "param_mismatch");
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "caller_session_id" : "spoofed", "session_id" : "main", "new_config" :
-            baseline_config_value(), }
-        );
+        let params = serde_json::json!({
+            "caller_session_id": "spoofed",
+            "session_id": "main",
+            "new_config": baseline_config_value(),
+        });
         let result = handler
             .dispatch("workspace.update_tool_config", params, Some("main"))
             .await;
@@ -1680,10 +1906,11 @@ mod tests {
     async fn dispatch_update_tool_config_envelope_cross_session_unauthorized() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle.clone());
-        let params = serde_json::json!(
-            { "caller_session_id" : "main", "session_id" : "main", "new_config" :
-            baseline_config_value(), }
-        );
+        let params = serde_json::json!({
+            "caller_session_id": "main",
+            "session_id": "main",
+            "new_config": baseline_config_value(),
+        });
         let result = handler
             .dispatch("workspace.update_tool_config", params, Some("other"))
             .await;
@@ -1704,10 +1931,11 @@ mod tests {
         let absent_before = caller_mismatch_count("update_tool_config", "envelope_absent");
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "caller_session_id" : "main", "session_id" : "main", "new_config" :
-            baseline_config_value(), }
-        );
+        let params = serde_json::json!({
+            "caller_session_id": "main",
+            "session_id": "main",
+            "new_config": baseline_config_value(),
+        });
         let result = handler
             .dispatch("workspace.update_tool_config", params, None)
             .await;
@@ -1727,9 +1955,10 @@ mod tests {
     async fn dispatch_update_tool_config_envelope_only_without_param() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "session_id" : "main", "new_config" : baseline_config_value(), }
-        );
+        let params = serde_json::json!({
+            "session_id": "main",
+            "new_config": baseline_config_value(),
+        });
         let result = handler
             .dispatch("workspace.update_tool_config", params, Some("main"))
             .await;
@@ -1773,9 +2002,7 @@ mod tests {
             .get();
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle.clone());
-        let params = serde_json::json!(
-            { "caller_session_id" : "spoofed", "session_id" : "main" }
-        );
+        let params = serde_json::json!({"caller_session_id": "spoofed", "session_id": "main"});
         let result = handler
             .dispatch("workspace.drop_session", params, Some("main"))
             .await;
@@ -1795,9 +2022,7 @@ mod tests {
     async fn dispatch_drop_session_envelope_cross_session_unauthorized() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle.clone());
-        let params = serde_json::json!(
-            { "caller_session_id" : "main", "session_id" : "main" }
-        );
+        let params = serde_json::json!({"caller_session_id": "main", "session_id": "main"});
         let result = handler
             .dispatch("workspace.drop_session", params, Some("observer-ish"))
             .await;
@@ -1819,7 +2044,7 @@ mod tests {
         let _ = handler
             .dispatch(
                 "workspace.configure_mcp",
-                serde_json::json!({ "mcp_servers" : [] }),
+                serde_json::json!({"mcp_servers": []}),
                 Some("mcp-fresh"),
             )
             .await;
@@ -1835,9 +2060,9 @@ mod tests {
     async fn dispatch_hunk_action_unknown_action() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "action" : { "hunk_id" : "test-id", "action" : "dance" } }
-        );
+        let params = serde_json::json!({
+            "action": {"hunk_id": "test-id", "action": "dance"}
+        });
         let result = handler
             .dispatch("workspace.hunk_action", params, None)
             .await;
@@ -1850,7 +2075,9 @@ mod tests {
     async fn dispatch_hunk_action_malformed_json() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "action" : "not-an-object" });
+        let params = serde_json::json!({
+            "action": "not-an-object"
+        });
         let result = handler
             .dispatch("workspace.hunk_action", params, None)
             .await;
@@ -1868,8 +2095,7 @@ mod tests {
             .dispatch("workspace.hunk_action", params, None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field")),
             "got {result:?}"
         );
     }
@@ -1877,13 +2103,12 @@ mod tests {
     async fn dispatch_hunk_file_action_missing_path() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "action" : "accept" });
+        let params = serde_json::json!({"action": "accept"});
         let result = handler
             .dispatch("workspace.hunk_file_action", params, None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field")),
             "got {result:?}"
         );
     }
@@ -1891,13 +2116,12 @@ mod tests {
     async fn dispatch_hunk_turn_action_missing_prompt_index() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "action" : "accept" });
+        let params = serde_json::json!({"action": "accept"});
         let result = handler
             .dispatch("workspace.hunk_turn_action", params, None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field")),
             "got {result:?}"
         );
     }
@@ -1905,7 +2129,7 @@ mod tests {
     async fn dispatch_hunk_all_action_invalid_action() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!({ "action" : "explode" });
+        let params = serde_json::json!({"action": "explode"});
         let result = handler
             .dispatch("workspace.hunk_all_action", params, None)
             .await;
@@ -1945,7 +2169,7 @@ mod tests {
         let result = handler
             .dispatch(
                 "workspace.fuzzy_open",
-                serde_json::json!({ "hidden" : false }),
+                serde_json::json!({"hidden": false}),
                 None,
             )
             .await;
@@ -1962,7 +2186,7 @@ mod tests {
         let result = handler
             .dispatch(
                 "workspace.fuzzy_close",
-                serde_json::json!({ "search_id" : "nonexistent" }),
+                serde_json::json!({"search_id": "nonexistent"}),
                 None,
             )
             .await;
@@ -1976,13 +2200,12 @@ mod tests {
         let result = handler
             .dispatch(
                 "workspace.fuzzy_change",
-                serde_json::json!({ "query" : "test" }),
+                serde_json::json!({"query": "test"}),
                 None,
             )
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field")),
             "got {result:?}"
         );
     }
@@ -1994,8 +2217,7 @@ mod tests {
             .dispatch("workspace.fuzzy_search", serde_json::json!({}), None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing search_id")),
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing search_id")),
             "got {result:?}"
         );
     }
@@ -2006,7 +2228,7 @@ mod tests {
         let open_result = handler
             .dispatch(
                 "workspace.fuzzy_open",
-                serde_json::json!({ "hidden" : false }),
+                serde_json::json!({"hidden": false}),
                 None,
             )
             .await
@@ -2018,7 +2240,7 @@ mod tests {
         let close_result = handler
             .dispatch(
                 "workspace.fuzzy_close",
-                serde_json::json!({ "search_id" : search_id }),
+                serde_json::json!({"search_id": search_id}),
                 None,
             )
             .await
@@ -2031,7 +2253,7 @@ mod tests {
         let close_again = handler
             .dispatch(
                 "workspace.fuzzy_close",
-                serde_json::json!({ "search_id" : search_id }),
+                serde_json::json!({"search_id": search_id}),
                 None,
             )
             .await
@@ -2049,9 +2271,10 @@ mod tests {
         let mut ctx = ToolCallContext::default();
         ctx.extensions
             .insert(xai_tool_runtime::SessionContext("main".to_owned()));
-        let args = serde_json::json!(
-            { "method" : "workspace.get_session_summary", "params" : {} }
-        );
+        let args = serde_json::json!({
+            "method": "workspace.get_session_summary",
+            "params": {}
+        });
         let mut stream = handler.handle_call(ctx, args).await;
         let item = next_item(&mut stream).await.expect("should have terminal");
         match item {
@@ -2073,9 +2296,10 @@ mod tests {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
         let ctx = ToolCallContext::default();
-        let args = serde_json::json!(
-            { "method" : "workspace.nonexistent", "params" : {} }
-        );
+        let args = serde_json::json!({
+            "method": "workspace.nonexistent",
+            "params": {}
+        });
         let mut stream = handler.handle_call(ctx, args).await;
         let item = next_item(&mut stream).await.expect("should have terminal");
         match item {
@@ -2111,9 +2335,7 @@ mod tests {
         let mut stream = handler
             .handle_call(
                 ctx,
-                serde_json::json!(
-                    { "method" : "workspace.get_session_summary", "params" : {} }
-                ),
+                serde_json::json!({"method": "workspace.get_session_summary", "params": {}}),
             )
             .await;
         let _ = next_item(&mut stream).await;
@@ -2135,10 +2357,13 @@ mod tests {
         let unknown_before = WORKSPACE_RPC_REQUESTS_TOTAL
             .with_label_values(&[UNKNOWN_METHOD_LABEL, "error"])
             .get();
+        let kind_before = WORKSPACE_RPC_ERRORS_TOTAL
+            .with_label_values(&[UNKNOWN_METHOD_LABEL, "unknown_method"])
+            .get();
         let mut stream = handler
             .handle_call(
                 ToolCallContext::default(),
-                serde_json::json!({ "method" : BOGUS, "params" : {} }),
+                serde_json::json!({"method": BOGUS, "params": {}}),
             )
             .await;
         let _ = next_item(&mut stream).await;
@@ -2148,6 +2373,13 @@ mod tests {
                 .get()
                 > unknown_before,
             "an unrecognized method must increment the collapsed unknown/error counter"
+        );
+        assert!(
+            WORKSPACE_RPC_ERRORS_TOTAL
+                .with_label_values(&[UNKNOWN_METHOD_LABEL, "unknown_method"])
+                .get()
+                > kind_before,
+            "a failed dispatch must also record its error_kind on the errors counter"
         );
         let has_bogus_series = prometheus::gather()
             .iter()
@@ -2180,8 +2412,7 @@ mod tests {
             .dispatch("workspace.git_commit", serde_json::json!({}), None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field"))
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field"))
         );
     }
     #[tokio::test]
@@ -2192,8 +2423,7 @@ mod tests {
             .dispatch("workspace.git_checkout", serde_json::json!({}), None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing field"))
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing field"))
         );
     }
     #[tokio::test]
@@ -2204,8 +2434,7 @@ mod tests {
             .dispatch("workspace.git_stage_content", serde_json::json!({}), None)
             .await;
         assert!(
-            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg
-            .contains("missing"))
+            matches!(result, Err(WorkspaceError::HubError(ref msg)) if msg.contains("missing"))
         );
     }
     #[tokio::test]
@@ -2281,7 +2510,7 @@ mod tests {
             hook_id: None,
             event: HookEvent::Custom {
                 kind: turn_hook::BEFORE_TURN_KIND.to_string(),
-                payload: serde_json::json!({ "garbage" : true }),
+                payload: serde_json::json!({"garbage": true}),
             },
             trace_context: None,
         };
@@ -2389,9 +2618,9 @@ mod tests {
         let handle = make_handle();
         let root = handle.root_cwd().unwrap();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "test_file.txt", "content" : "hello world" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "test_file.txt", "content": "hello world"}]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2413,9 +2642,9 @@ mod tests {
     async fn dispatch_put_files_rejects_path_traversal() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "../escape.txt", "content" : "evil" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "../escape.txt", "content": "evil"}]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2432,6 +2661,34 @@ mod tests {
             "error should mention escape: {:?}",
             res.results[0].error
         );
+    }
+    #[tokio::test]
+    async fn dispatch_resolve_file_references_rejects_outside_root_when_confined() {
+        let handle = make_confining_handle();
+        let handler = WorkspaceRpcHandler::new(handle);
+        let secret = std::env::temp_dir().join("h1_3885911_outside_secret.txt");
+        std::fs::write(&secret, "OUTSIDE_SECRET").unwrap();
+        let params = serde_json::json!({
+            "refs": [secret.to_string_lossy(), "../escape.txt"]
+        });
+        let result = handler
+            .dispatch("workspace.resolve_file_references", params, None)
+            .await
+            .expect("dispatch itself should succeed");
+        let arr = result.as_array().expect("results array");
+        assert_eq!(arr.len(), 2);
+        for entry in arr {
+            assert_eq!(entry["exists"], serde_json::Value::Bool(false));
+            assert_eq!(entry["content"], serde_json::Value::Null);
+            assert!(
+                entry["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("escapes workspace root"),
+                "escape should be rejected, not read: {entry:?}"
+            );
+        }
+        std::fs::remove_file(&secret).ok();
     }
     #[tokio::test]
     async fn handle_hook_pause_resume_are_noops() {
@@ -2455,9 +2712,9 @@ mod tests {
     async fn dispatch_put_files_rejects_absolute_outside_root() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "/etc/passwd", "content" : "evil" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "/etc/passwd", "content": "evil"}]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2484,10 +2741,9 @@ mod tests {
         let root = handle.root_cwd().unwrap();
         let handler = WorkspaceRpcHandler::new(handle);
         let abs = root.join("sub/abs.txt");
-        let params = serde_json::json!(
-            { "files" : [{ "path" : abs.to_str().expect("utf-8 path"), "content" :
-            "hello" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": abs.to_str().expect("utf-8 path"), "content": "hello"}]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2513,9 +2769,9 @@ mod tests {
         let outside = tempfile::tempdir().expect("create outside dir");
         std::os::unix::fs::symlink(outside.path(), root.join("escape_link"))
             .expect("create symlink");
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "escape_link/evil.txt", "content" : "pwned" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "escape_link/evil.txt", "content": "pwned"}]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2542,10 +2798,12 @@ mod tests {
         let handle = make_handle();
         let root = handle.root_cwd().unwrap();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "good.txt", "content" : "valid content" }, { "path" :
-            "../bad.txt", "content" : "should fail" },] }
-        );
+        let params = serde_json::json!({
+            "files": [
+                {"path": "good.txt", "content": "valid content"},
+                {"path": "../bad.txt", "content": "should fail"},
+            ]
+        });
         let result = handler
             .dispatch("workspace.put_files", params, None)
             .await
@@ -2573,7 +2831,9 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(handle);
         let content = "read me back";
         std::fs::write(root.join("readable.txt"), content).unwrap();
-        let params = serde_json::json!({ "files" : [{ "path" : "readable.txt" }] });
+        let params = serde_json::json!({
+            "files": [{"path": "readable.txt"}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2604,9 +2864,9 @@ mod tests {
     async fn dispatch_get_files_nonexistent_returns_not_exists() {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "does_not_exist.txt" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "does_not_exist.txt"}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2628,7 +2888,9 @@ mod tests {
         let root = handle.root_cwd().unwrap();
         let handler = WorkspaceRpcHandler::new(handle);
         std::fs::create_dir_all(root.join("a_directory")).unwrap();
-        let params = serde_json::json!({ "files" : [{ "path" : "a_directory" }] });
+        let params = serde_json::json!({
+            "files": [{"path": "a_directory"}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2650,7 +2912,9 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(handle);
         let binary_content: &[u8] = b"\xff\xfe\x00\x01";
         std::fs::write(root.join("binary.bin"), binary_content).unwrap();
-        let params = serde_json::json!({ "files" : [{ "path" : "binary.bin" }] });
+        let params = serde_json::json!({
+            "files": [{"path": "binary.bin"}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2691,9 +2955,9 @@ mod tests {
         let content = "cacheable content";
         std::fs::write(root.join("cached.txt"), content).unwrap();
         let expected_hash = test_sha256(content.as_bytes());
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "cached.txt", "if_none_match" : expected_hash }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "cached.txt", "if_none_match": expected_hash}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2720,10 +2984,9 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(handle);
         let content = "fresh content";
         std::fs::write(root.join("stale.txt"), content).unwrap();
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "stale.txt", "if_none_match" :
-            "0000000000000000000000000000000000000000000000000000000000000000" }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "stale.txt", "if_none_match": "0000000000000000000000000000000000000000000000000000000000000000"}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2749,9 +3012,9 @@ mod tests {
         let handle = make_handle();
         let handler = WorkspaceRpcHandler::new(handle);
         let content = "round trip content";
-        let put_params = serde_json::json!(
-            { "files" : [{ "path" : "round_trip.txt", "content" : content }] }
-        );
+        let put_params = serde_json::json!({
+            "files": [{"path": "round_trip.txt", "content": content}]
+        });
         let put_result = handler
             .dispatch("workspace.put_files", put_params, None)
             .await
@@ -2759,9 +3022,9 @@ mod tests {
         let put_res: PutFilesRes = serde_json::from_value(put_result).unwrap();
         assert!(put_res.results[0].ok);
         let put_hash = put_res.results[0].hash.clone().unwrap();
-        let get_params = serde_json::json!(
-            { "files" : [{ "path" : "round_trip.txt" }] }
-        );
+        let get_params = serde_json::json!({
+            "files": [{"path": "round_trip.txt"}]
+        });
         let get_result = handler
             .dispatch("workspace.get_files", get_params, None)
             .await
@@ -2784,10 +3047,9 @@ mod tests {
         let handle = make_handle();
         let root = handle.root_cwd().unwrap();
         let handler = WorkspaceRpcHandler::new(handle);
-        let params1 = serde_json::json!(
-            { "files" : [{ "path" : "chunked.txt", "content" : "hello", "append" : false
-            }] }
-        );
+        let params1 = serde_json::json!({
+            "files": [{"path": "chunked.txt", "content": "hello", "append": false}]
+        });
         let res1 = handler
             .dispatch("workspace.put_files", params1, None)
             .await
@@ -2800,10 +3062,9 @@ mod tests {
             test_sha256(b"hello"),
             "hash should be of the appended chunk, not full file"
         );
-        let params2 = serde_json::json!(
-            { "files" : [{ "path" : "chunked.txt", "content" : " world", "append" : true
-            }] }
-        );
+        let params2 = serde_json::json!({
+            "files": [{"path": "chunked.txt", "content": " world", "append": true}]
+        });
         let res2 = handler
             .dispatch("workspace.put_files", params2, None)
             .await
@@ -2826,9 +3087,9 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(handle);
         let content = "0123456789";
         std::fs::write(root.join("range.txt"), content).unwrap();
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "range.txt", "offset" : 3, "length" : 4 }] }
-        );
+        let params = serde_json::json!({
+            "files": [{"path": "range.txt", "offset": 3, "length": 4}]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2862,10 +3123,14 @@ mod tests {
         let content = "abcdefghij";
         std::fs::write(root.join("range_cache.txt"), content).unwrap();
         let full_hash = test_sha256(content.as_bytes());
-        let params = serde_json::json!(
-            { "files" : [{ "path" : "range_cache.txt", "offset" : 2, "length" : 3,
-            "if_none_match" : full_hash, }] }
-        );
+        let params = serde_json::json!({
+            "files": [{
+                "path": "range_cache.txt",
+                "offset": 2,
+                "length": 3,
+                "if_none_match": full_hash,
+            }]
+        });
         let result = handler
             .dispatch("workspace.get_files", params, None)
             .await
@@ -2911,6 +3176,7 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(make_handle());
         let methods = [
             <WorkspaceInfoReq as WorkspaceRpc>::METHOD,
+            <ReposListReq as WorkspaceRpc>::METHOD,
             <GitStatusReq as WorkspaceRpc>::METHOD,
             <DiscoverSkillsReq as WorkspaceRpc>::METHOD,
             <DiscoverAgentsMdReq as WorkspaceRpc>::METHOD,
@@ -2922,6 +3188,7 @@ mod tests {
             <GitUnstageReq as WorkspaceRpc>::METHOD,
             <GitDiscardReq as WorkspaceRpc>::METHOD,
             <GitCommitReq as WorkspaceRpc>::METHOD,
+            <GitSyncBaseReq as WorkspaceRpc>::METHOD,
             <GitCheckoutReq as WorkspaceRpc>::METHOD,
             <GitStashReq as WorkspaceRpc>::METHOD,
             <GitInfoReq as WorkspaceRpc>::METHOD,
@@ -2985,6 +3252,7 @@ mod tests {
             <InstallPluginReq as WorkspaceRpc>::METHOD,
             <RefreshPluginsReq as WorkspaceRpc>::METHOD,
             <DiscoverPluginsReq as WorkspaceRpc>::METHOD,
+            <ExportGithubReq as WorkspaceRpc>::METHOD,
         ];
         let skipped_global_db_mutators = [
             <WorktreeGcReq as WorkspaceRpc>::METHOD,

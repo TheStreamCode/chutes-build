@@ -2,6 +2,7 @@ pub(crate) mod checkpoint;
 pub(crate) mod checkpoint_store;
 pub mod file_state;
 pub mod git;
+pub(crate) mod git_gate;
 pub mod jj;
 pub(crate) mod swap_policy;
 pub mod tool_config;
@@ -308,6 +309,8 @@ impl WorkspaceSession {
     pub(crate) fn shutdown_terminal_backend(&self) {
         self.terminal_backend.shutdown();
     }
+    /// No-op when the browser tools are compiled out.
+    pub(crate) fn shutdown_browser_service(&self) {}
     /// Cancel the workspace-spawned hunk-tracker actor, if this session owns
     /// one. Runs at the session drop chokepoints so the actor (which pins file
     /// contents in `file_states`) stops even while leaked handle clones hold
@@ -443,7 +446,7 @@ impl WorkspaceSession {
                 .with_label_values(&["swap"])
                 .inc();
             tracing::error!(
-                session_id = % self.session_id,
+                session_id = %self.session_id,
                 "toolset swap: outgoing toolset's terminal backend is not the \
                  session-owned one — its background tasks die with the old toolset"
             );
@@ -501,7 +504,7 @@ pub struct WorkspaceShared {
     pub(crate) activity_notify_handle:
         arc_swap::ArcSwap<Option<xai_grok_tools::notification::types::ToolNotificationHandle>>,
     /// Sink for workspace-originated ext-notifications to the client (e.g.
-    /// `chutes.build/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
+    /// `chutes.ai/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
     /// agent gateway in local mode, and to the server in proxy mode. `None` until
     /// set via [`WorkspaceHandle::set_client_ext_sink`](crate::handle::WorkspaceHandle::set_client_ext_sink).
     pub(crate) client_ext_sink: arc_swap::ArcSwap<Option<ClientExtSink>>,
@@ -652,7 +655,7 @@ impl WorkspaceShared {
             Ok(typed) => typed,
             Err(e) => {
                 tracing::warn!(
-                    error = % e,
+                    error = %e,
                     "workspace: malformed server_metadata; salvaging sandbox_id field-wise"
                 );
                 crate::config::WorkspaceServerMetadata {
@@ -787,7 +790,8 @@ impl WorkspaceShared {
                     Ok(g) => g,
                     Err(_) => {
                         tracing::trace!(
-                            session = % sid, source = % source,
+                            session = %sid,
+                            source = %source,
                             "skipping rebuild: session update_lock held"
                         );
                         continue;
@@ -806,7 +810,8 @@ impl WorkspaceShared {
                         SwapAction::Skipped(reason),
                     );
                     tracing::warn!(
-                        session = % sid, source = % source,
+                        session = %sid,
+                        source = %source,
                         "skipping rebuild: toolset terminal backend is externally \
                          owned (local bind)"
                     );
@@ -819,7 +824,9 @@ impl WorkspaceShared {
                         "snapshot rebuild produced a non-rebuild decision: {decision:?}"
                     );
                     tracing::error!(
-                        session = % sid, source = % source, ? decision,
+                        session = %sid,
+                        source = %source,
+                        ?decision,
                         "skipping rebuild: snapshot rebuild policy returned a \
                          non-rebuild decision (policy regression)"
                     );
@@ -870,7 +877,9 @@ impl WorkspaceShared {
                         SwapAction::ApplyFailed,
                     );
                     tracing::warn!(
-                        session = % sid, source = % source, error = % e,
+                        session = %sid,
+                        source = %source,
+                        error = %e,
                         "snapshot rebuild failed for session"
                     );
                 }
@@ -907,7 +916,9 @@ pub(crate) fn get_or_open_session_writer(
     let dir = workspace_home.join("sessions").join(session_id);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         tracing::warn!(
-            session_id = % session_id, dir = % dir.display(), error = % e,
+            session_id = %session_id,
+            dir = %dir.display(),
+            error = %e,
             "failed to create session event dir; events.jsonl disabled for this session (will retry on next use)"
         );
         return EventWriter::noop();

@@ -11,7 +11,7 @@
 //!    picks chain back to back, reproducing the continuous
 //!    `.git/index.lock` / HEAD-move churn of an agent-run rebase.
 //!
-//! With the fs-watch machinery on (`chutes.build/hunkTracker` + `chutes.build/gitHeadChanged`
+//! With the fs-watch machinery on (`chutes.ai/hunkTracker` + `chutes.ai/gitHeadChanged`
 //! advertised), fsnotify merges rapid lock cycles into one operation and the
 //! session defers debounce fires while an op is in flight, so one rebase
 //! costs at most a couple of `refresh_all_baselines` scans (each scoped to
@@ -425,7 +425,7 @@ fn git_rebase_refresh_storm_e2e() {
     let server = mock_rt
         .block_on(MockInferenceServer::start())
         .expect("mock server");
-    let grok_home = TempDir::new().expect("grok home");
+    let grok_home = TempDir::new().expect("Chutes Build home");
 
     // SAFETY: the only live threads are the mock runtime's workers, which
     // serve HTTP and never read the process environment.

@@ -77,17 +77,6 @@ pub async fn discover_agents_md(root_cwd: &Path) -> Vec<Value> {
 
     files
         .into_iter()
-        .map(|mut file| {
-            // Strip rules-file YAML frontmatter so it does not leak as raw YAML (matches grok-build render).
-            if file.file_path.contains("/.chutes-build/rules/")
-                || file.file_path.contains("/.claude/rules/")
-            {
-                file.content = xai_grok_tools::implementations::skills::skill::extract_skill_body(
-                    &file.content,
-                );
-            }
-            file
-        })
         .filter_map(|file| match serde_json::to_value(&file) {
             Ok(v) => Some(v),
             Err(e) => {
@@ -376,9 +365,9 @@ mod tests {
 
     // Discovery also scans the real `~/.chutes-build`, so fixtures use test-unique names.
     #[tokio::test]
-    async fn discover_agents_md_strips_rules_frontmatter() {
+    async fn discover_agents_md_receives_normalized_rule_content() {
         let tmp = tempfile::tempdir().unwrap();
-        let rules_dir = tmp.path().join(".chutes-build").join("rules");
+        let rules_dir = tmp.path().join(".cursor").join("rules");
         fs::create_dir_all(&rules_dir).unwrap();
         fs::write(
             rules_dir.join("xyzzy-discover-agents-md-test.md"),
@@ -390,9 +379,9 @@ mod tests {
         let rule = files
             .iter()
             .find(|f| {
-                f["file_path"].as_str().is_some_and(|p| {
-                    p.ends_with("/.chutes-build/rules/xyzzy-discover-agents-md-test.md")
-                })
+                f["file_path"]
+                    .as_str()
+                    .is_some_and(|p| p.ends_with("/.cursor/rules/xyzzy-discover-agents-md-test.md"))
             })
             .expect("should discover the rules file");
         let content = rule["content"].as_str().unwrap();
@@ -563,7 +552,7 @@ mod tests {
 
     // Note: `resolve_permissions_with_provenance` checks system-managed
     // settings and requirements.toml from the global config, so on a
-    // developer machine with Grok installed it may return non-Null even
+    // developer machine with Chutes Build installed it may return non-Null even
     // for a temp directory. Both branches assert a concrete condition.
 
     #[tokio::test]

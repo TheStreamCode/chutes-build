@@ -96,10 +96,10 @@ fn is_platform_system_dir(cwd: &Path) -> bool {
 
 #[cfg(target_os = "windows")]
 fn is_platform_system_dir(cwd: &Path) -> bool {
-    if let Ok(temp) = std::env::var("TEMP").or_else(|_| std::env::var("TMP"))
-        && cwd.starts_with(&temp)
-    {
-        return true;
+    if let Ok(temp) = std::env::var("TEMP").or_else(|_| std::env::var("TMP")) {
+        if cwd.starts_with(&temp) {
+            return true;
+        }
     }
 
     let path_lower = cwd.to_string_lossy().to_lowercase();
@@ -110,7 +110,7 @@ fn is_platform_system_dir(cwd: &Path) -> bool {
         return true;
     }
 
-    if cwd.parent().is_some_and(|p| p.parent().is_none()) && cwd.to_string_lossy().len() <= 3 {
+    if cwd.parent().map_or(false, |p| p.parent().is_none()) && cwd.to_string_lossy().len() <= 3 {
         return true;
     }
 
@@ -164,7 +164,7 @@ fn has_excluded_component(path: &Path) -> bool {
                 return true;
             }
 
-            if name_lower.starts_with(".chutes-build-") {
+            if name_lower.starts_with(".grok-") {
                 return true;
             }
         }
@@ -271,7 +271,7 @@ mod tests {
         #[test]
         fn grok_prefixed_dirs_are_unsafe() {
             if let Some(home) = dirs::home_dir() {
-                assert!(!is_project_dir(&home.join(".chutes-build-proxy-work")));
+                assert!(!is_project_dir(&home.join(".grok-proxy-work")));
             }
         }
 

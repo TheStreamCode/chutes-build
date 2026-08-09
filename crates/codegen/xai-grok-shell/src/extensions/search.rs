@@ -14,14 +14,14 @@ type ExtResult = Result<acp::ExtResponse, acp::Error>;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FuzzyOpenResponse {
+pub(crate) struct FuzzyOpenResponse {
     pub session_id: String,
     pub search_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FuzzyChangeResponse {
+pub(crate) struct FuzzyChangeResponse {
     pub session_id: String,
     pub search_id: String,
 }
@@ -65,7 +65,7 @@ fn resolve_cwd(
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FuzzyOpenRequest {
+pub(crate) struct FuzzyOpenRequest {
     /// Optional session ID - used to lookup cwd if cwd not provided directly
     #[serde(default)]
     pub session_id: Option<acp::SessionId>,
@@ -86,7 +86,7 @@ pub struct FuzzyOpenRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FuzzyChangeRequest {
+pub(crate) struct FuzzyChangeRequest {
     pub search_id: String,
     pub query: String,
     #[serde(default)]
@@ -97,7 +97,7 @@ pub struct FuzzyChangeRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FuzzyCloseRequest {
+pub(crate) struct FuzzyCloseRequest {
     pub search_id: String,
 }
 
@@ -155,7 +155,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .resolve_workspace_ops()
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // The workspace owns the manager and spawns the status driver, which
-            // streams `chutes.build/search/fuzzy/status` through the client sink.
+            // streams `chutes.ai/search/fuzzy/status` through the client sink.
             let found = ops
                 .dispatch(
                     &FuzzyChangeReq {
@@ -219,7 +219,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
 
             // The workspace runs the streaming search and emits
-            // `chutes.build/search/content/status` batches through the client sink.
+            // `chutes.ai/search/content/status` batches through the client sink.
             let mut op = req.params;
             op.cwd = Some(cwd);
             op.context_id = Some(context_id);

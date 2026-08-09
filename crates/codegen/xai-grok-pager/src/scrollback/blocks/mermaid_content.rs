@@ -825,7 +825,7 @@ mod tests {
     // -- theme mapping + cache filename --------------------------------------
 
     #[test]
-    fn theme_is_dark_maps_chutesday_to_light_only() {
+    fn theme_is_dark_maps_grokday_to_light_only() {
         assert!(
             !theme_is_dark(ThemeKind::ChutesDay),
             "ChutesDay is the light theme"

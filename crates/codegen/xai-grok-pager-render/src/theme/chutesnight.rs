@@ -98,8 +98,6 @@ impl Theme {
 
             accent_verify: CYAN,
 
-            accent_feedback: ACCENT_SOFT,
-
             accent_remember: ACCENT_MUTED,
 
             selection_border: rgb(58, 106, 79),

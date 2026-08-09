@@ -3,13 +3,11 @@ license = "Apache-2.0"
 name = "xai-grok-voice"
 version = "0.1.0"
 edition.workspace = true
-description = "Voice dictation (streaming STT) for Grok Build CLI"
+description = "Voice dictation (streaming STT) for Chutes Build CLI"
 
 [dependencies]
 anyhow = { workspace = true }
-base64 = { workspace = true }
 futures-util = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 # Used by the standalone `voice-probe` bin to install the process-level crypto
 # provider (`ring`, matching the pager's choice in its own main). The lib itself
 # only reaches rustls through tokio-tungstenite.
@@ -23,6 +21,16 @@ toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
+# Sanctioned TTY detach for the capture subprocesses (Linux system recorders,
+# macOS `__mic-capture` self-exec helper) — workspace rule: never spawn a raw
+# `std::process::Command`.
+xai-tty-utils = { workspace = true }
+# Batch STT (`SttMode::Batch`): posts a WAV to a Whisper-shaped REST endpoint.
+base64 = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+# For `shared_client()`, so batch STT inherits `CHUTES_EXTRA_CA_BUNDLE` and the
+# pool health-checks instead of building a bare client of its own.
+xai-grok-http = { workspace = true }
 
 [features]
 # `audio` = "microphone capture is compiled in". It's enabled on every OS for

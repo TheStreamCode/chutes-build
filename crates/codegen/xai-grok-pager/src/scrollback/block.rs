@@ -3,6 +3,7 @@
 use ratatui::style::Style;
 use ratatui::text::{Span, Text};
 
+use crate::appearance::AppearanceConfig;
 use crate::diff::DiffHunk;
 use crate::inline_media_ffmpeg::inline_media_reserved_rows;
 use crate::prompt_images::{InlineMediaInfo, ScrollbackImageRef, ScrollbackVideoRef};
@@ -17,7 +18,7 @@ use super::blocks::{
     EditToolCallBlock, ExecuteToolCallBlock, LineRange, ListDirToolCallBlock, OtherToolCallBlock,
     ReadToolCallBlock, SearchFileMatch, SearchToolCallBlock, SessionEvent, SessionEventBlock,
     SubagentBlock, SubagentBlockKind, SystemMessageBlock, ThinkingBlock, ToolCallBlock,
-    UserPromptBlock,
+    UserPromptBlock, WorkflowBlock,
 };
 use super::types::{
     AccentStyle, BlockBackground, BlockContext, BlockOutput, DisplayMode, RenderedBlockOutput,
@@ -40,15 +41,6 @@ pub struct AnchoredMedia {
     pub row_offset: u16,
     /// Height of the image area in rows (the crop region).
     pub rows: u16,
-}
-
-/// Action represented by a media card's text-mode button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MediaButtonKind {
-    Image,
-    Video,
-    Audio,
-    File,
 }
 
 /// Trait for block content description.
@@ -93,8 +85,15 @@ pub trait BlockContent {
     }
 
     /// Vertical padding (blank line with accent top/bottom).
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    ///
+    /// Borrows the appearance rather than taking a [`BlockContext`] so the
+    /// O(history) height passes do not build one per entry.
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         true
+    }
+
+    fn has_vpad(&self, ctx: &BlockContext) -> bool {
+        self.has_vpad_for(&ctx.appearance)
     }
 
     /// Whether block supports raw mode toggle.
@@ -252,10 +251,9 @@ pub trait BlockContent {
     }
 
     /// For media blocks on terminals without inline-graphics support, returns
-    /// `(path, kind)` so the block can render a clickable text media action.
-    /// `None` on graphics terminals for image/video cards because the overlay
-    /// hosts their buttons. Audio always uses this text-mode action.
-    fn inline_open_button(&self) -> Option<(std::path::PathBuf, MediaButtonKind)> {
+    /// `(path, is_video)` so the block can render a clickable text `[Open]`
+    /// line. `None` on graphics terminals (the overlay hosts its own buttons).
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
         None
     }
 }
@@ -389,6 +387,7 @@ pub enum RenderBlock {
     BgTask(BgTaskBlock),
     /// Subagent lifecycle (started / completed / failed).
     Subagent(SubagentBlock),
+    Workflow(WorkflowBlock),
     /// /btw side-question response (golden accent).
     Btw(BtwBlock),
     /// `/context` snapshot with categorical bar + breakdown.
@@ -410,6 +409,7 @@ macro_rules! delegate_block {
             RenderBlock::SessionEvent(b) => b.$method($($arg),*),
             RenderBlock::BgTask(b) => b.$method($($arg),*),
             RenderBlock::Subagent(b) => b.$method($($arg),*),
+            RenderBlock::Workflow(b) => b.$method($($arg),*),
             RenderBlock::Btw(b) => b.$method($($arg),*),
             RenderBlock::ContextInfo(b) => b.$method($($arg),*),
             RenderBlock::CreditLimit(b) => b.$method($($arg),*),
@@ -498,8 +498,8 @@ impl BlockContent for RenderBlock {
         delegate_block!(self, background(ctx))
     }
 
-    fn has_vpad(&self, ctx: &BlockContext) -> bool {
-        delegate_block!(self, has_vpad(ctx))
+    fn has_vpad_for(&self, appearance: &AppearanceConfig) -> bool {
+        delegate_block!(self, has_vpad_for(appearance))
     }
 
     fn has_raw_mode(&self) -> bool {
@@ -566,7 +566,7 @@ impl BlockContent for RenderBlock {
         delegate_block!(self, estimate_extra_rows())
     }
 
-    fn inline_open_button(&self) -> Option<(std::path::PathBuf, MediaButtonKind)> {
+    fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
         delegate_block!(self, inline_open_button())
     }
 }
@@ -988,6 +988,7 @@ impl RenderBlock {
         match self {
             RenderBlock::UserPrompt(_) => Some(theme.text_primary),
             RenderBlock::AgentMessage(_) => None, // No accent for agent messages
+            RenderBlock::Workflow(_) => None,
             RenderBlock::ToolCall(block) => {
                 // Execute: Green for success, red for failure
                 // Read/Edit/ListDir/Search: No accent
@@ -1144,9 +1145,12 @@ impl RenderBlock {
             RenderBlock::AgentMessage(b) => join_searchable([Some(b.copy_text(false))]),
             RenderBlock::Thinking(b) => join_searchable([Some(b.copy_text(false))]),
             RenderBlock::System(b) => join_searchable([Some(b.text.clone())]),
-            RenderBlock::SessionEvent(b) => join_searchable([Some(b.marker_text())]),
+            RenderBlock::SessionEvent(b) => join_searchable([Some(b.event.message())]),
             RenderBlock::BgTask(b) => {
                 join_searchable([Some(b.command.clone()), b.description.clone()])
+            }
+            RenderBlock::Workflow(b) => {
+                join_searchable([Some(b.name.clone()), Some(b.objective.clone())])
             }
             RenderBlock::Subagent(b) => {
                 // Only the failed variant carries an error string worth indexing.
@@ -1624,7 +1628,7 @@ mod searchable_text_tests {
         mem.results = vec![MemoryResult {
             score: 0.9,
             source: "global".into(),
-            path: "memories.md".into(),
+            path: "MEMORY.md".into(),
             start_line: 1,
             end_line: 5,
             snippet: "use graphite for PRs".into(),
@@ -1633,7 +1637,7 @@ mod searchable_text_tests {
         let text = block.searchable_text().expect("memory search text");
         assert!(text.contains("deployment process"), "got: {text:?}");
         assert!(text.contains("global"), "got: {text:?}");
-        assert!(text.contains("memories.md"), "got: {text:?}");
+        assert!(text.contains("MEMORY.md"), "got: {text:?}");
         assert!(text.contains("use graphite for PRs"), "got: {text:?}");
     }
 

@@ -75,7 +75,10 @@ pub async fn transcribe_batch(
         "{}{WHISPER_PATH}",
         config.batch_api_base.trim_end_matches('/')
     );
-    let client = reqwest::Client::new();
+    // The shared client, not a fresh one: it carries `CHUTES_EXTRA_CA_BUNDLE`
+    // (a proxy-terminated network is precisely where this request would
+    // otherwise fail) and the connection health-checks.
+    let client = xai_grok_http::shared_client();
     let mut request = client.post(&url).bearer_auth(bearer).json(&body);
     if !config.client_identifier.is_empty() {
         request = request.header(

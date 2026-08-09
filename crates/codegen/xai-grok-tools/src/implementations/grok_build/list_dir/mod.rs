@@ -463,7 +463,7 @@ impl xai_tool_runtime::Tool for ListDirTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "list_dir",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
     fn capabilities(&self) -> xai_tool_protocol::ToolCapabilities {
@@ -579,7 +579,7 @@ impl crate::types::tool_metadata::ToolMetadata for ListDirTool {
         ToolKind::List
     }
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
     fn description_template(&self) -> &str {
         r#"Lists files and directories in a given path.

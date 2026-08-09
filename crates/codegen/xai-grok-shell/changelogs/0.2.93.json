@@ -1,7 +1,7 @@
 [
   {
     "category": "fixes",
-    "description": "**grok --minimal** now aligns the prompt, status bar, and messages flush-left with the welcome card.",
+    "description": "**chutes-build --minimal** now aligns the prompt, status bar, and messages flush-left with the welcome card.",
     "breaking_change": false
   },
   {

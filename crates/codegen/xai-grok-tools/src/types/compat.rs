@@ -111,7 +111,7 @@ impl CompatCell {
         self.remote_key
     }
 
-    /// Whether Grok currently implements this compatibility surface.
+    /// Whether Chutes Build currently implements this compatibility surface.
     ///
     /// Codex non-session cells remain reserved in the registry so their config
     /// shape is stable, but runtime discovery does not consume them.
@@ -358,7 +358,7 @@ impl CompatConfig {
     }
 
     /// Config directories that may contain `skills/` subdirectories, in
-    /// priority order. `.chutes-build` and `.agents` are always included; `.claude`
+    /// priority order. `.grok` and `.agents` are always included; `.claude`
     /// and `.cursor` are gated on their respective `skills` cell.
     ///
     /// Replaces the hard-coded `[".chutes-build", ".agents", ".claude", ".cursor"]`

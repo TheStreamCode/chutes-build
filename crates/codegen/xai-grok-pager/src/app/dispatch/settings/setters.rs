@@ -193,6 +193,39 @@ pub(in crate::app::dispatch) fn set_voice_capture_mode(
     }]
 }
 
+/// Mirror the voice-shortcut gate into `app.current_ui` (read live by the
+/// event-loop chord intercept) and the process-global mirror (read by key
+/// routing / view code without an `AppView`). Called by the commit path AND by
+/// [`apply_setting_rollback`](super::ui::apply_setting_rollback).
+pub(super) fn set_voice_keybind_enabled_inner(app: &mut AppView, new: bool) {
+    app.current_ui.voice_keybind_enabled = Some(new);
+    crate::app::VOICE_KEYBIND_ENABLED.store(new, std::sync::atomic::Ordering::Release);
+}
+
+/// Enable/disable the Ctrl+Space / F8 voice shortcut. SHELL-owned; persists to
+/// `[ui].voice_keybind_enabled` via `Effect::PersistSetting`. Applies on the
+/// next keypress (no restart). Only the chord is gated — `/voice`, Esc while
+/// listening, and the recording-row `[stop]` keep working.
+pub(in crate::app::dispatch) fn set_voice_keybind_enabled(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev_state = app.current_ui.voice_keybind_enabled;
+    let prev_effective = prev_state.unwrap_or(true);
+    if prev_effective == new && prev_state.is_some() {
+        return vec![];
+    }
+    set_voice_keybind_enabled_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "voice_keybind_enabled", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Voice shortcut", new));
+    vec![Effect::PersistSetting {
+        key: "voice_keybind_enabled",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev_effective),
+    }]
+}
+
 /// Mirror the STT language preference into `app.current_ui` and
 /// `app.voice_config.language` (may be the client-only `"auto"` sentinel; the
 /// voice crate resolves it at connect time). Called by the commit path AND by
@@ -921,6 +954,77 @@ pub(in crate::app::dispatch) fn set_timeline(app: &mut AppView, new: bool) -> Ve
     }]
 }
 
+pub(super) fn set_page_flip_on_send_inner(app: &mut AppView, new: bool) {
+    app.current_ui.page_flip_on_send = Some(new);
+    crate::appearance::cache::set_page_flip_on_send(new);
+}
+
+/// SHARED: cache + `[ui].page_flip_on_send` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_page_flip_on_send(app: &mut AppView, new: bool) -> Vec<Effect> {
+    let prev = crate::appearance::cache::load_page_flip_on_send();
+    if prev == new {
+        return vec![];
+    }
+    set_page_flip_on_send_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "page_flip_on_send", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Snap prompt to top on send", new));
+    vec![Effect::PersistSetting {
+        key: "page_flip_on_send",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
+pub(in crate::app::dispatch) fn set_confirm_before_rewind_inner(app: &mut AppView, new: bool) {
+    app.current_ui.confirm_before_rewind = Some(new);
+}
+
+/// SHARED: `[ui].confirm_before_rewind` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_confirm_before_rewind(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = app.current_ui.confirm_before_rewind_enabled();
+    if prev == new {
+        return vec![];
+    }
+    set_confirm_before_rewind_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "confirm_before_rewind", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Confirm before rewind", new));
+    vec![Effect::PersistSetting {
+        key: "confirm_before_rewind",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
+pub(super) fn set_combine_queued_prompts_inner(app: &mut AppView, new: bool) {
+    app.current_ui.combine_queued_prompts = Some(new);
+    crate::appearance::cache::set_combine_queued_prompts(new);
+}
+
+/// SHARED: cache + `[ui].combine_queued_prompts` via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_combine_queued_prompts(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    let prev = crate::appearance::cache::load_combine_queued_prompts();
+    if prev == new {
+        return vec![];
+    }
+    set_combine_queued_prompts_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(target: "settings", key = "combine_queued_prompts", value = new, "setting changed");
+    app.show_toast(&save_success_toast("Combine queued prompts", new));
+    vec![Effect::PersistSetting {
+        key: "combine_queued_prompts",
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev),
+    }]
+}
+
 /// State-only mutation for `simple_mode`.
 ///
 /// Propagates to every agent's `input_mode` so the toggle takes
@@ -1540,7 +1644,7 @@ pub(in crate::app::dispatch) fn set_default_model_inner(
     // or `/clear` creates a fresh session by cloning `app.models`
     // (`dispatch_new_session_inner_with_id`), so without this the new session —
     // and the welcome card it commits — would show the previous default until
-    // the next `chutes.build/models/update` roundtrip.
+    // the next `chutes.ai/models/update` roundtrip.
     if app.models.available.contains_key(id) {
         app.models.set_current(id.clone(), None);
     }
@@ -1620,7 +1724,7 @@ pub(in crate::app::dispatch) fn set_default_model(
 
     // Persist the **model ID** (catalog key), not the display name.
     // The shell's `resolve_default_model` matches by slug / map key,
-    // so persisting the human-readable name (e.g. "Grok Build")
+    // so persisting the human-readable name (e.g. "Chutes Build")
     // would silently fail to resolve on the next startup.
     //
     // Chat (`--chat` / CHUTES_BUILD_CHAT_MODE) catalogs use opaque `/rest/modes`
@@ -1659,7 +1763,11 @@ pub(in crate::app::dispatch) fn set_default_model(
         // No session id yet — stash for
         // `EventLoop::on_session_created` to apply once the session
         // id materialises. Mirrors `Action::SwitchModel` line 586.
-        agent.session.deferred_model_switch = Some((new_id, None));
+        agent.session.deferred_model_switch = Some(crate::app::agent::DeferredModelSwitch {
+            model_id: new_id,
+            effort: None,
+            prev_model_id: prev_id,
+        });
     }
     effects
 }
@@ -1745,6 +1853,40 @@ fn save_fork_secondary_model_toast(value: &str) -> String {
 
 /// Outer dispatcher for `Action::SetForkSecondaryModel`.
 /// Mirror + persist + toast. Idempotent: same-id → no-op.
+// ---------------------------------------------------------------------------
+// `/advisor` — pins/unpins the model and enabled state of the built-in advisor
+// subagent. Unlike the settings above these write directly to
+// `[subagents.roles.advisor]` / `[subagents.toggle]` (not part of the typed
+// settings registry — see `Effect::SetAdvisorModel`) and have no live in-memory
+// mirror to keep in sync or roll back: the advisor is spawned on demand, so the
+// persisted config is the only state that matters.
+// ---------------------------------------------------------------------------
+
+/// Outer dispatcher for `Action::SetAdvisorModel`. An empty `model` clears the
+/// pin, and the advisor falls back to inheriting the session's model.
+pub(in crate::app::dispatch) fn set_advisor_model(app: &mut AppView, model: String) -> Vec<Effect> {
+    let toast = if model.is_empty() {
+        "\u{2713} Advisor model: inherit from session".to_string()
+    } else {
+        format!("\u{2713} Advisor model: {model}")
+    };
+    app.show_toast(&toast);
+    vec![Effect::SetAdvisorModel(model)]
+}
+
+/// Outer dispatcher for `Action::SetAdvisorEnabled`.
+pub(in crate::app::dispatch) fn set_advisor_enabled(
+    app: &mut AppView,
+    enabled: bool,
+) -> Vec<Effect> {
+    app.show_toast(if enabled {
+        "\u{2713} Advisor enabled"
+    } else {
+        "\u{2713} Advisor disabled"
+    });
+    vec![Effect::SetAdvisorEnabled(enabled)]
+}
+
 pub(in crate::app::dispatch) fn set_fork_secondary_model(
     app: &mut AppView,
     new_id: acp::ModelId,
@@ -1838,40 +1980,6 @@ pub(in crate::app::dispatch) fn clear_fork_secondary_model(app: &mut AppView) ->
         value: crate::settings::SettingValue::String(String::new()),
         rollback_value: crate::settings::SettingValue::String(prev_id_str),
     }]
-}
-
-// ---------------------------------------------------------------------------
-// `/advisor` — pins/unpins the model and enabled state of the built-in
-// advisor subagent. Unlike the settings above, these write directly to
-// `[subagents.roles.advisor]` / `[subagents.toggle]` (not part of the typed
-// settings registry — see `Effect::SetAdvisorModel` doc comment) and have no
-// live in-memory mirror to keep in sync or roll back: advisor is spawned
-// on-demand, so the persisted config is the only state that matters.
-// ---------------------------------------------------------------------------
-
-/// Outer dispatcher for `Action::SetAdvisorModel`. `model.is_empty()` clears
-/// the pin (advisor falls back to inheriting the parent session's model).
-pub(in crate::app::dispatch) fn set_advisor_model(app: &mut AppView, model: String) -> Vec<Effect> {
-    let toast = if model.is_empty() {
-        "\u{2713} Advisor model: inherit from session".to_string()
-    } else {
-        format!("\u{2713} Advisor model: {model}")
-    };
-    app.show_toast(&toast);
-    vec![Effect::SetAdvisorModel(model)]
-}
-
-/// Outer dispatcher for `Action::SetAdvisorEnabled`.
-pub(in crate::app::dispatch) fn set_advisor_enabled(
-    app: &mut AppView,
-    enabled: bool,
-) -> Vec<Effect> {
-    app.show_toast(if enabled {
-        "\u{2713} Advisor enabled"
-    } else {
-        "\u{2713} Advisor disabled"
-    });
-    vec![Effect::SetAdvisorEnabled(enabled)]
 }
 
 // `web_search_model`, `session_summary_model`, and

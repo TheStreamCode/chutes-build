@@ -4,12 +4,13 @@
 //! chrome, opened by the `/hooks` and `/plugins` slash commands.
 //! Blocks all input until closed with `Esc`.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use unicode_width::UnicodeWidthStr;
 
+use crate::input::line_editor::{LineEditOutcome, LineEditor};
 use crate::theme::Theme;
 use crate::views::modal_window::{
     self, ModalContentArea, ModalSizing, ModalWindowConfig, ModalWindowState, Shortcut,
@@ -58,6 +59,198 @@ pub fn fuzzy_matches_hook(hook: &xai_hooks_plugins_types::HookInfo, query: &str)
         || hook.url.as_ref().is_some_and(|u| fuzzy_matches(u, query))
 }
 
+/// Case-insensitive string order without intermediate allocations.
+/// Equal ignoring case falls back to the original byte order for stability.
+fn cmp_str_ci(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut ai = a.chars().flat_map(char::to_lowercase);
+    let mut bi = b.chars().flat_map(char::to_lowercase);
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x != y => return x.cmp(&y),
+            _ => {}
+        }
+    }
+}
+
+fn hook_row_label(hook: &xai_hooks_plugins_types::HookInfo) -> String {
+    let matcher = hook
+        .matcher
+        .as_deref()
+        .map(|m| format!(" /{m}"))
+        .unwrap_or_default();
+    format!("on:{}{matcher}", hook.event)
+}
+
+/// Logical source kind for hook group rank (independent of display copy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum HookSourceKind {
+    Project = 0,
+    Global = 1,
+    Claude = 2,
+    Plugin = 3,
+    Custom = 4,
+}
+
+/// Label plus kind for a hooks source directory.
+#[derive(Debug, Clone)]
+struct HookSourceMeta {
+    label: String,
+    kind: HookSourceKind,
+}
+
+impl HookSourceMeta {
+    fn is_custom(&self) -> bool {
+        self.kind == HookSourceKind::Custom
+    }
+}
+
+/// Sort key for hook source groups: kind rank, then A–Z label, then path.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct HookGroupSortKey<'a> {
+    kind: HookSourceKind,
+    label_lower: String,
+    source_dir: &'a str,
+}
+
+fn hook_group_sort_key<'a>(source_dir: &'a str, meta: &HookSourceMeta) -> HookGroupSortKey<'a> {
+    HookGroupSortKey {
+        kind: meta.kind,
+        label_lower: meta.label.to_lowercase(),
+        source_dir,
+    }
+}
+
+fn is_official_marketplace_source(source: &xai_hooks_plugins_types::MarketplaceScanResult) -> bool {
+    source.source_name == xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME
+        || xai_grok_plugin_marketplace::is_official_source_url(&source.source_url_or_path)
+}
+
+/// One marketplace source in display order with plugins sorted A–Z.
+#[derive(Debug, Clone)]
+pub(crate) struct MarketplaceSourceView {
+    pub source_index: usize,
+    pub plugin_indices: Vec<usize>,
+}
+
+/// Official source first, then A–Z by `source_name`; plugins A–Z within each.
+pub(crate) fn ordered_marketplace_view(
+    sources: &[xai_hooks_plugins_types::MarketplaceScanResult],
+) -> Vec<MarketplaceSourceView> {
+    let mut source_order: Vec<usize> = (0..sources.len()).collect();
+    let source_keys: Vec<(bool, String)> = sources
+        .iter()
+        .map(|s| {
+            (
+                is_official_marketplace_source(s),
+                s.source_name.to_lowercase(),
+            )
+        })
+        .collect();
+    source_order.sort_by(|&a, &b| match (source_keys[a].0, source_keys[b].0) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => source_keys[a]
+            .1
+            .cmp(&source_keys[b].1)
+            .then_with(|| a.cmp(&b)),
+    });
+    source_order
+        .into_iter()
+        .map(|si| {
+            let names: Vec<String> = sources[si]
+                .plugins
+                .iter()
+                .map(|p| p.name.to_lowercase())
+                .collect();
+            let mut plugin_order: Vec<usize> = (0..sources[si].plugins.len()).collect();
+            plugin_order.sort_by(|&a, &b| names[a].cmp(&names[b]).then_with(|| a.cmp(&b)));
+            MarketplaceSourceView {
+                source_index: si,
+                plugin_indices: plugin_order,
+            }
+        })
+        .collect()
+}
+
+/// Collapse key for the Workflows block on the Skills tab.
+const SKILLS_WORKFLOWS_GROUP_KEY: &str = "Workflows";
+
+/// Group header for a skill scope/source.
+#[derive(Debug, Clone)]
+struct SkillGroup {
+    rank: u8,
+    label: String,
+}
+
+/// Project → User → Plugin → Bundled → Server → Config.
+fn skill_group(skill: &SkillInfo) -> SkillGroup {
+    use xai_grok_tools::implementations::skills::types::SkillScope;
+    use xai_grok_tools::types::config_source::ConfigSource;
+
+    if let Some(ref cs) = skill.config_source {
+        return match cs {
+            ConfigSource::Project { .. } => SkillGroup {
+                rank: 0,
+                label: "Project".into(),
+            },
+            ConfigSource::User { .. } => SkillGroup {
+                rank: 1,
+                label: "User".into(),
+            },
+            ConfigSource::Plugin { plugin_name, .. } => SkillGroup {
+                rank: 2,
+                label: format!("Plugin: {plugin_name}"),
+            },
+            ConfigSource::Bundled { .. } => SkillGroup {
+                rank: 3,
+                label: "Bundled".into(),
+            },
+            ConfigSource::Server { .. } => SkillGroup {
+                rank: 4,
+                label: "Server".into(),
+            },
+            ConfigSource::Builtin
+            | ConfigSource::ConfigToml { .. }
+            | ConfigSource::ClaudeJson { .. }
+            | ConfigSource::McpJson { .. }
+            | ConfigSource::Cli { .. }
+            | ConfigSource::Managed { .. } => SkillGroup {
+                rank: 5,
+                label: "Config".into(),
+            },
+        };
+    }
+    match skill.scope {
+        SkillScope::Local | SkillScope::Repo => SkillGroup {
+            rank: 0,
+            label: "Project".into(),
+        },
+        SkillScope::User => SkillGroup {
+            rank: 1,
+            label: "User".into(),
+        },
+        SkillScope::Plugin => SkillGroup {
+            rank: 2,
+            label: format!(
+                "Plugin: {}",
+                skill.plugin_name.as_deref().unwrap_or("unknown")
+            ),
+        },
+        SkillScope::Bundled => SkillGroup {
+            rank: 3,
+            label: "Bundled".into(),
+        },
+        SkillScope::Server => SkillGroup {
+            rank: 4,
+            label: "Server".into(),
+        },
+    }
+}
+
 /// Word-wrap text into lines that fit within `max_w` characters.
 ///
 /// Splits on newlines first, then wraps each paragraph at word boundaries.
@@ -93,34 +286,6 @@ fn word_wrap(text: &str, max_w: usize) -> Vec<&str> {
         }
     }
     result
-}
-
-/// Source-level search gate shared by the marketplace count, resolve, and
-/// navigation helpers: empty query, or any plugin name fuzzy-matches.
-pub(crate) fn source_has_matching_plugin(
-    source: &xai_hooks_plugins_types::MarketplaceScanResult,
-    query: &str,
-) -> bool {
-    query.is_empty() || source.plugins.iter().any(|p| fuzzy_matches(&p.name, query))
-}
-
-/// Count marketplace plugins that match the search query.
-pub fn filtered_marketplace_count(
-    sources: &[xai_hooks_plugins_types::MarketplaceScanResult],
-    query: &str,
-) -> usize {
-    // Match the renderer's indexing: non-matching sources take plugins.len().max(1)
-    // slots (no header), matching sources take 1 (header) + plugins.len().
-    sources
-        .iter()
-        .map(|s| {
-            if !source_has_matching_plugin(s, query) {
-                s.plugins.len().max(1)
-            } else {
-                1 + s.plugins.len()
-            }
-        })
-        .sum()
 }
 
 /// Test fixture: a minimal `PluginInfo` shared by the pager's plugin tests.
@@ -171,11 +336,29 @@ impl PluginGroup {
             label: label.to_string(),
         }
     }
+
+    fn into_sort_key(self) -> PluginGroupSortKey {
+        PluginGroupSortKey {
+            rank: self.rank,
+            label_lower: self.label.to_lowercase(),
+            label: self.label,
+            key: self.key,
+        }
+    }
 }
 
-/// Plugins bucketed by `(rank, label, key)` group sort key for the Plugins tab.
+/// Sort key for plugin origin groups (rank, then A–Z label).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PluginGroupSortKey {
+    rank: u8,
+    label_lower: String,
+    label: String,
+    key: String,
+}
+
+/// Plugins bucketed by group sort key for the Plugins tab.
 type GroupedPlugins<'a> = std::collections::BTreeMap<
-    (u8, String, String),
+    PluginGroupSortKey,
     Vec<(usize, &'a xai_hooks_plugins_types::PluginInfo)>,
 >;
 
@@ -247,134 +430,18 @@ pub fn plugin_group(plugin: &xai_hooks_plugins_types::PluginInfo) -> PluginGroup
     }
 }
 
-/// Resolve a flat marketplace index to (source_index, plugin) or just source_index.
-///
-/// This is the single source of truth for flat-index → item mapping. All code
-/// that needs to identify which source header or plugin a flat index refers to
-/// (ToggleExpand, Install, Uninstall) must go through this function so the
-/// index arithmetic stays consistent with the rendering and navigation helpers.
-pub fn resolve_marketplace_index<'a>(
-    sources: &'a [xai_hooks_plugins_types::MarketplaceScanResult],
-    target: usize,
-    query: &str,
-    collapsed_sources: &std::collections::HashSet<usize>,
-) -> Option<MarketplaceHit<'a>> {
-    let mut idx = 0usize;
-    for (si, source) in sources.iter().enumerate() {
-        if !source_has_matching_plugin(source, query) {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        // Source header.
-        if idx == target {
-            return Some(MarketplaceHit::SourceHeader { source_index: si });
-        }
-        idx += 1;
-
-        let source_is_collapsed = collapsed_sources.contains(&si) && query.is_empty();
-        if source.plugins.is_empty() || source.error.is_some() || source_is_collapsed {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        for plugin in &source.plugins {
-            if idx == target && fuzzy_matches(&plugin.name, query) {
-                return Some(MarketplaceHit::Plugin {
-                    source_index: si,
-                    source,
-                    plugin,
-                });
-            }
-            idx += 1;
-        }
-    }
-    None
+/// Group + order hooks the same way the renderer does.
+struct HookGroupView<'a> {
+    source_dir: &'a str,
+    label: String,
+    indices: Vec<usize>,
 }
 
-/// What a flat marketplace index resolved to.
-#[derive(Debug)]
-pub enum MarketplaceHit<'a> {
-    /// The index points at a source header row.
-    SourceHeader { source_index: usize },
-    /// The index points at a specific plugin inside a source.
-    Plugin {
-        source_index: usize,
-        source: &'a xai_hooks_plugins_types::MarketplaceScanResult,
-        plugin: &'a xai_hooks_plugins_types::MarketplacePluginEntry,
-    },
-}
-/// Find the next selectable marketplace index at or after `start`.
-pub fn next_matching_marketplace(
-    sources: &[xai_hooks_plugins_types::MarketplaceScanResult],
-    start: usize,
-    query: &str,
-    collapsed_sources: &std::collections::HashSet<usize>,
-) -> Option<usize> {
-    let mut idx = 0;
-    for (si, source) in sources.iter().enumerate() {
-        if !source_has_matching_plugin(source, query) {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        // Source header.
-        if idx >= start {
-            return Some(idx);
-        }
-        idx += 1;
-        let source_is_collapsed = collapsed_sources.contains(&si) && query.is_empty();
-        if source.plugins.is_empty() || source.error.is_some() || source_is_collapsed {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        for plugin in &source.plugins {
-            if fuzzy_matches(&plugin.name, query) && idx >= start {
-                return Some(idx);
-            }
-            idx += 1;
-        }
-    }
-    None
-}
-
-/// Find the previous selectable marketplace index at or before `start`.
-pub fn prev_matching_marketplace(
-    sources: &[xai_hooks_plugins_types::MarketplaceScanResult],
-    start: usize,
-    query: &str,
-    collapsed_sources: &std::collections::HashSet<usize>,
-) -> Option<usize> {
-    let mut result = None;
-    let mut idx = 0;
-    for (si, source) in sources.iter().enumerate() {
-        if !source_has_matching_plugin(source, query) {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        // Source header.
-        if idx <= start {
-            result = Some(idx);
-        }
-        idx += 1;
-        let source_is_collapsed = collapsed_sources.contains(&si) && query.is_empty();
-        if source.plugins.is_empty() || source.error.is_some() || source_is_collapsed {
-            idx += source.plugins.len().max(1);
-            continue;
-        }
-        for plugin in &source.plugins {
-            if fuzzy_matches(&plugin.name, query) && idx <= start {
-                result = Some(idx);
-            }
-            idx += 1;
-        }
-    }
-    result
-}
-
-/// Build merged hook groups (same grouping as the renderer uses).
 fn build_hook_groups<'a>(
     hooks: &'a [xai_hooks_plugins_types::HookInfo],
     filter: StatusFilter,
     query: &str,
-) -> Vec<(&'a str, Vec<usize>)> {
+) -> Vec<HookGroupView<'a>> {
     let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
     for (i, hook) in hooks.iter().enumerate() {
         if !fuzzy_matches_hook(hook, query) {
@@ -389,100 +456,28 @@ fn build_hook_groups<'a>(
             groups.push((&hook.source_dir, vec![i]));
         }
     }
-    groups
-}
-
-/// Find the next visible hook index after `current`, skipping collapsed groups.
-pub fn next_visible_hook(
-    hooks: &[xai_hooks_plugins_types::HookInfo],
-    current: usize,
-    collapsed: &std::collections::HashSet<String>,
-    filter: StatusFilter,
-    query: &str,
-) -> Option<usize> {
-    if hooks.is_empty() {
-        return None;
+    let mut metas: Vec<HookSourceMeta> = groups
+        .iter()
+        .map(|(dir, _)| classify_hook_source(dir))
+        .collect();
+    let group_keys: Vec<HookGroupSortKey<'_>> = groups
+        .iter()
+        .zip(metas.iter())
+        .map(|((dir, _), meta)| hook_group_sort_key(dir, meta))
+        .collect();
+    let mut group_order: Vec<usize> = (0..groups.len()).collect();
+    group_order.sort_by(|&a, &b| group_keys[a].cmp(&group_keys[b]));
+    let mut ordered: Vec<HookGroupView<'a>> = Vec::with_capacity(groups.len());
+    for gi in group_order {
+        let (source_dir, mut indices) = std::mem::take(&mut groups[gi]);
+        indices.sort_by_cached_key(|&i| (hook_row_label(&hooks[i]).to_lowercase(), i));
+        ordered.push(HookGroupView {
+            source_dir,
+            label: std::mem::take(&mut metas[gi].label),
+            indices,
+        });
     }
-    let groups = build_hook_groups(hooks, filter, query);
-    // Find which group `current` belongs to.
-    let mut current_group_idx = None;
-    for (gi, (_source_dir, indices)) in groups.iter().enumerate() {
-        if indices.contains(&current) {
-            current_group_idx = Some(gi);
-            break;
-        }
-    }
-    if let Some(gi) = current_group_idx {
-        let (source_dir, indices) = &groups[gi];
-        // If group is expanded, try to move within the group.
-        if !collapsed.contains(*source_dir)
-            && let Some(&next) = indices.iter().find(|&&i| i > current)
-        {
-            return Some(next);
-        }
-        // Move to next group's first hook.
-        if gi + 1 < groups.len() {
-            return groups[gi + 1].1.first().copied();
-        }
-    } else {
-        // current not found (filtered out): find first group with any index > current.
-        for (_source_dir, indices) in &groups {
-            if let Some(&next) = indices.iter().find(|&&i| i > current) {
-                return Some(next);
-            }
-        }
-    }
-    None
-}
-
-/// Find the previous visible hook index before `current`, skipping collapsed groups.
-pub fn prev_visible_hook(
-    hooks: &[xai_hooks_plugins_types::HookInfo],
-    current: usize,
-    collapsed: &std::collections::HashSet<String>,
-    filter: StatusFilter,
-    query: &str,
-) -> Option<usize> {
-    if hooks.is_empty() {
-        return None;
-    }
-    let groups = build_hook_groups(hooks, filter, query);
-    // Find which group `current` belongs to.
-    let mut current_group_idx = None;
-    for (gi, (_source_dir, indices)) in groups.iter().enumerate() {
-        if indices.contains(&current) {
-            current_group_idx = Some(gi);
-            break;
-        }
-    }
-    if let Some(gi) = current_group_idx {
-        let (source_dir, indices) = &groups[gi];
-        // If group is expanded, try to move within the group.
-        if !collapsed.contains(*source_dir)
-            && let Some(&prev) = indices.iter().rev().find(|&&i| i < current)
-        {
-            return Some(prev);
-        }
-        // Move to previous group's representative.
-        if gi > 0 {
-            let (prev_dir, prev_indices) = &groups[gi - 1];
-            return if collapsed.contains(*prev_dir) {
-                prev_indices.first().copied()
-            } else {
-                prev_indices.last().copied()
-            };
-        }
-    } else {
-        // current not found: find last index < current across all groups.
-        let mut best: Option<usize> = None;
-        for (_source_dir, indices) in &groups {
-            if let Some(&prev) = indices.iter().rev().find(|&&i| i < current) {
-                best = Some(prev);
-            }
-        }
-        return best;
-    }
-    None
+    ordered
 }
 
 // ---------------------------------------------------------------------------
@@ -626,7 +621,7 @@ pub enum ButtonAction {
     ReloadSkills,
     /// Refresh MCP server list (re-fetch from shell).
     RefreshMcpList,
-    /// Open the Chutes account page (MCP tab: press `o`).
+    /// Open chutes.ai connectors page (MCP tab: press `o`).
     OpenManagedConnectors,
     /// Update (fetch latest from source) the selected plugin.
     UpdateSelectedPlugin,
@@ -673,10 +668,10 @@ pub struct ModalInput {
     /// Command prefix used to build the typed action on submit.
     pub command_prefix: String,
     /// Input fields.
-    pub fields: Vec<ModalInputField>,
+    fields: Vec<ModalInputField>,
     /// Index of the currently focused field.
-    pub focused: usize,
-    /// Inline error message shown below the form. Cleared on next keystroke.
+    focused: usize,
+    /// Inline error cleared by text edits, completion, or field navigation.
     pub error: Option<String>,
 }
 
@@ -684,37 +679,63 @@ pub struct ModalInput {
 #[derive(Debug, Clone)]
 pub struct ModalInputField {
     /// Human-readable label shown before the input field.
-    pub label: String,
-    /// Current text in the input field.
-    pub text: String,
-    /// Cursor position (byte offset into `text`).
-    pub cursor: usize,
+    label: String,
+    editor: LineEditor,
     /// Whether the field must be non-empty to submit.
-    pub required: bool,
+    required: bool,
     /// Placeholder text shown when the field is empty.
-    pub placeholder: Option<String>,
+    placeholder: Option<String>,
 }
 
 impl ModalInputField {
-    /// Sanitize pasted text and insert at cursor. Strips `\n` and `\r`.
-    /// Returns `true` if text was inserted.
-    pub fn insert_paste(&mut self, text: &str) -> bool {
-        let cleaned: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
-        if cleaned.is_empty() {
-            return false;
+    fn new(spec: FieldSpec) -> Self {
+        Self {
+            label: spec.label,
+            editor: LineEditor::default(),
+            required: spec.required,
+            placeholder: spec.placeholder,
         }
-        self.text.insert_str(self.cursor, &cleaned);
-        self.cursor += cleaned.len();
-        true
     }
 
-    /// Delete the word before the cursor (readline backward-kill-word).
-    pub fn delete_word_backward(&mut self) {
-        if self.cursor > 0 {
-            let boundary = prev_word_boundary(&self.text, self.cursor);
-            self.text.drain(boundary..self.cursor);
-            self.cursor = boundary;
-        }
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn text(&self) -> &str {
+        self.editor.text()
+    }
+
+    pub fn cursor_byte(&self) -> usize {
+        self.editor.cursor_byte()
+    }
+
+    pub fn required(&self) -> bool {
+        self.required
+    }
+
+    pub fn placeholder(&self) -> Option<&str> {
+        self.placeholder.as_deref()
+    }
+
+    pub(crate) fn set_text(&mut self, text: impl Into<String>) {
+        self.editor.set_text(text);
+    }
+
+    #[cfg(test)]
+    fn set_cursor_byte(&mut self, cursor_byte: usize) -> LineEditOutcome {
+        self.editor.set_cursor_byte(cursor_byte)
+    }
+
+    fn insert_paste(&mut self, text: &str) -> LineEditOutcome {
+        self.editor.insert_paste(text)
+    }
+
+    fn handle_key(&mut self, key: &KeyEvent) -> LineEditOutcome {
+        self.editor.handle_key(key)
+    }
+
+    pub(crate) fn viewport(&self, width: usize) -> xai_ratatui_textarea::SingleLineViewport {
+        self.editor.viewport(width)
     }
 }
 
@@ -722,16 +743,7 @@ impl ModalInput {
     /// Build from a command prefix and field specs.
     pub fn from_specs(command_prefix: String, specs: Vec<FieldSpec>) -> Self {
         debug_assert!(!specs.is_empty(), "ModalInput needs at least one field");
-        let fields = specs
-            .into_iter()
-            .map(|s| ModalInputField {
-                label: s.label,
-                text: String::new(),
-                cursor: 0,
-                required: s.required,
-                placeholder: s.placeholder,
-            })
-            .collect();
+        let fields = specs.into_iter().map(ModalInputField::new).collect();
         Self {
             command_prefix,
             fields,
@@ -740,8 +752,24 @@ impl ModalInput {
         }
     }
 
-    /// The currently focused field (mutable).
-    pub fn focused_field_mut(&mut self) -> Option<&mut ModalInputField> {
+    pub fn fields(&self) -> &[ModalInputField] {
+        &self.fields
+    }
+
+    pub fn field(&self, index: usize) -> Option<&ModalInputField> {
+        self.fields.get(index)
+    }
+
+    #[cfg(test)]
+    fn field_mut(&mut self, index: usize) -> Option<&mut ModalInputField> {
+        self.fields.get_mut(index)
+    }
+
+    pub fn focused_index(&self) -> usize {
+        self.focused
+    }
+
+    fn focused_field_mut(&mut self) -> Option<&mut ModalInputField> {
         self.fields.get_mut(self.focused)
     }
 
@@ -752,18 +780,16 @@ impl ModalInput {
 
     /// Collect all field texts into a Vec for submission.
     pub fn field_texts(&self) -> Vec<String> {
-        self.fields.iter().map(|f| f.text.clone()).collect()
+        self.fields
+            .iter()
+            .map(|field| field.text().to_owned())
+            .collect()
     }
 
     /// Process a key event on the input form. Returns what the caller
     /// should do (submit, cancel, nothing, etc.) without coupling to
     /// `AgentView` or `InputOutcome`.
     pub fn handle_key(&mut self, key: &KeyEvent) -> ModalInputOutcome {
-        // Clear inline error on any keystroke except Esc.
-        if key.code != KeyCode::Esc {
-            self.error = None;
-        }
-
         match key {
             KeyEvent {
                 code: KeyCode::Esc, ..
@@ -779,9 +805,9 @@ impl ModalInput {
                     .iter()
                     .enumerate()
                     .filter(|(i, f)| {
-                        f.required && field_texts.get(*i).is_none_or(|t| t.trim().is_empty())
+                        f.required() && field_texts.get(*i).is_none_or(|t| t.trim().is_empty())
                     })
-                    .map(|(_, f)| f.label.as_str())
+                    .map(|(_, f)| f.label())
                     .collect();
                 if !empty_required.is_empty() {
                     self.error = Some(format!("Required: {}", empty_required.join(", ")));
@@ -793,19 +819,11 @@ impl ModalInput {
                 }
             }
 
-            // Field navigation (multi-field forms).
-            KeyEvent {
-                code: KeyCode::Tab,
-                modifiers,
-                ..
-            } if !modifiers.contains(KeyModifiers::SHIFT) && self.is_multi_field() => {
-                self.focused = (self.focused + 1) % self.fields.len();
-                ModalInputOutcome::Changed
-            }
-            KeyEvent {
-                code: KeyCode::BackTab,
-                ..
-            } if self.is_multi_field() => {
+            _ if crate::input::key::is_shift_tab(key) => {
+                if !self.is_multi_field() {
+                    return ModalInputOutcome::Unchanged;
+                }
+                self.error = None;
                 self.focused = if self.focused == 0 {
                     self.fields.len() - 1
                 } else {
@@ -813,283 +831,74 @@ impl ModalInput {
                 };
                 ModalInputOutcome::Changed
             }
-            // Tab in single-field forms: path completion.
-            KeyEvent {
-                code: KeyCode::Tab, ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    let partial = field.text[..field.cursor].to_string();
-                    if let Some(completed) = tab_complete_path(&partial) {
-                        let len = completed.len();
-                        field.text = completed;
-                        field.cursor = len;
-                        return ModalInputOutcome::Changed;
+            _ if crate::input::key::KeyShortcut::key(KeyCode::Tab).matches(key) => {
+                if self.is_multi_field() {
+                    self.error = None;
+                    self.focused = (self.focused + 1) % self.fields.len();
+                    return ModalInputOutcome::Changed;
+                }
+                let completed = self.focused_field_mut().and_then(|field| {
+                    let partial = field.text()[..field.cursor_byte()].to_owned();
+                    tab_complete_path(&partial)
+                });
+                if let Some(completed) = completed {
+                    if let Some(field) = self.focused_field_mut() {
+                        field.set_text(completed);
                     }
-                }
-                ModalInputOutcome::Unchanged
-            }
-
-            // Single-char backspace.
-            KeyEvent {
-                code: KeyCode::Backspace,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor > 0
-                {
-                    let prev = field.text[..field.cursor]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    field.text.remove(prev);
-                    field.cursor = prev;
+                    self.error = None;
                     return ModalInputOutcome::Changed;
                 }
                 ModalInputOutcome::Unchanged
             }
 
-            // Forward-delete: Delete key, Ctrl+D.
-            KeyEvent {
-                code: KeyCode::Delete,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('d'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor < field.text.len()
-                {
-                    field.text.remove(field.cursor);
-                    return ModalInputOutcome::Changed;
-                }
-                ModalInputOutcome::Unchanged
-            }
-
-            // Word-delete backward: Alt+Backspace, Ctrl+Backspace, Ctrl+W.
-            KeyEvent {
-                code: KeyCode::Backspace,
-                modifiers: KeyModifiers::ALT,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Backspace,
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('w'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.delete_word_backward();
-                }
-                ModalInputOutcome::Changed
-            }
-            // Word-delete backward: Ctrl+Alt+H.
-            KeyEvent {
-                code: KeyCode::Char('h'),
-                modifiers,
-                ..
-            } if *modifiers == (KeyModifiers::CONTROL | KeyModifiers::ALT) => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.delete_word_backward();
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Delete to start of line: Cmd+Backspace (Super), Ctrl+U.
-            KeyEvent {
-                code: KeyCode::Backspace,
-                modifiers: KeyModifiers::SUPER,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('u'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor > 0
-                {
-                    field.text.drain(..field.cursor);
-                    field.cursor = 0;
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Delete to end of line: Ctrl+K.
-            KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor < field.text.len()
-                {
-                    field.text.truncate(field.cursor);
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Word movement: Alt+Left/Right, Ctrl+Left/Right.
-            KeyEvent {
-                code: KeyCode::Left,
-                modifiers,
-                ..
-            } if modifiers.contains(KeyModifiers::ALT)
-                || modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = prev_word_boundary(&field.text, field.cursor);
-                }
-                ModalInputOutcome::Changed
-            }
-            KeyEvent {
-                code: KeyCode::Right,
-                modifiers,
-                ..
-            } if modifiers.contains(KeyModifiers::ALT)
-                || modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = next_word_boundary(&field.text, field.cursor);
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Alt+B / Alt+F (readline word movement).
-            KeyEvent {
-                code: KeyCode::Char('b'),
-                modifiers: KeyModifiers::ALT,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = prev_word_boundary(&field.text, field.cursor);
-                }
-                ModalInputOutcome::Changed
-            }
-            KeyEvent {
-                code: KeyCode::Char('f'),
-                modifiers: KeyModifiers::ALT,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = next_word_boundary(&field.text, field.cursor);
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Line start/end: Cmd+Left/Right (Super), Home/End, Ctrl+A/E.
-            KeyEvent {
-                code: KeyCode::Left,
-                modifiers: KeyModifiers::SUPER,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Home,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('a'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = 0;
-                }
-                ModalInputOutcome::Changed
-            }
-            KeyEvent {
-                code: KeyCode::Right,
-                modifiers: KeyModifiers::SUPER,
-                ..
-            }
-            | KeyEvent {
-                code: KeyCode::End, ..
-            }
-            | KeyEvent {
-                code: KeyCode::Char('e'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.cursor = field.text.len();
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Single-char cursor movement.
-            KeyEvent {
-                code: KeyCode::Left,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor > 0
-                {
-                    let prev = field.text[..field.cursor]
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    field.cursor = prev;
-                }
-                ModalInputOutcome::Changed
-            }
-            KeyEvent {
-                code: KeyCode::Right,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && field.cursor < field.text.len()
-                {
-                    let next = field.text[field.cursor..]
-                        .char_indices()
-                        .nth(1)
-                        .map(|(i, _)| field.cursor + i)
-                        .unwrap_or(field.text.len());
-                    field.cursor = next;
-                }
-                ModalInputOutcome::Changed
-            }
-
-            // Clipboard paste (Ctrl+V fallback).
-            KeyEvent {
-                code: KeyCode::Char('v'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            } => {
-                if let Some(field) = self.focused_field_mut()
-                    && let Some(clip) = crate::clipboard::system_clipboard_get()
-                    && field.insert_paste(&clip)
-                {
+            _ if crate::input::key::is_paste_key(key) => {
+                let Some(clip) = crate::clipboard::system_clipboard_get() else {
+                    return ModalInputOutcome::Unchanged;
+                };
+                let outcome = self
+                    .focused_field_mut()
+                    .map_or(LineEditOutcome::Unhandled, |field| {
+                        field.insert_paste(&clip)
+                    });
+                if outcome == LineEditOutcome::TextChanged {
+                    self.error = None;
                     ModalInputOutcome::Changed
                 } else {
                     ModalInputOutcome::Unchanged
                 }
             }
 
-            // Plain character insertion (no CONTROL/ALT/SUPER modifier).
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers,
-                ..
-            } if !modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
-                || crate::input::key::is_altgr(*modifiers) =>
-            {
-                if let Some(field) = self.focused_field_mut() {
-                    field.text.insert(field.cursor, *c);
-                    field.cursor += c.len_utf8();
-                }
+            _ => {
+                let outcome = self
+                    .focused_field_mut()
+                    .map_or(LineEditOutcome::Unhandled, |field| field.handle_key(key));
+                self.finish_line_edit(outcome)
+            }
+        }
+    }
+
+    fn finish_line_edit(&mut self, outcome: LineEditOutcome) -> ModalInputOutcome {
+        match outcome {
+            LineEditOutcome::TextChanged => {
+                self.error = None;
                 ModalInputOutcome::Changed
             }
+            LineEditOutcome::HandledNoChange | LineEditOutcome::CursorChanged => {
+                ModalInputOutcome::Changed
+            }
+            LineEditOutcome::Unhandled => ModalInputOutcome::Unchanged,
+        }
+    }
 
-            _ => ModalInputOutcome::Unchanged,
+    fn insert_paste(&mut self, text: &str) -> bool {
+        let outcome = self
+            .focused_field_mut()
+            .map_or(LineEditOutcome::Unhandled, |field| field.insert_paste(text));
+        if outcome == LineEditOutcome::TextChanged {
+            self.error = None;
+            true
+        } else {
+            false
         }
     }
 }
@@ -1097,7 +906,7 @@ impl ModalInput {
 /// Result of processing a key event on the modal input form.
 #[derive(Debug)]
 pub enum ModalInputOutcome {
-    /// State was modified, redraw needed.
+    /// Event was consumed and a redraw is needed.
     Changed,
     /// No state change, skip redraw.
     Unchanged,
@@ -1205,20 +1014,27 @@ pub enum McpSetupOutcome {
     Submit,
 }
 
-/// Modal message overlay (errors, confirmations).
-#[derive(Debug, Clone)]
+/// Concrete action to run after the user presses `y` on a confirmation overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmationAction {
+    /// Replay a hooks action (e.g. remove a hook source directory).
+    Hooks(xai_hooks_plugins_types::HooksAction),
+    /// Replay a plugins action (e.g. uninstall; may still be `confirmed: false`
+    /// so multi-plugin repos can return a second server-owned prompt).
+    Plugins(xai_hooks_plugins_types::PluginsAction),
+    /// Replay a marketplace action (uninstall plugin or remove source).
+    Marketplace(xai_hooks_plugins_types::MarketplaceAction),
+    /// Delete a removable (local) MCP server by name.
+    DeleteMcpServer { server_name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalMessage {
-    /// An error message from a failed action. Any key dismisses.
     Error(String),
-    /// A confirmation prompt. Stores the action to replay with confirmed=true.
     Confirmation {
         message: String,
-        action: xai_hooks_plugins_types::PluginsAction,
-    },
-    /// A confirmation prompt for a marketplace action (install/uninstall/update).
-    MarketplaceConfirmation {
-        message: String,
-        action: xai_hooks_plugins_types::MarketplaceAction,
+        action: ConfirmationAction,
+        pending_entry_index: Option<usize>,
     },
 }
 
@@ -1678,66 +1494,6 @@ fn longest_common_prefix(strings: &[String]) -> String {
         .map(|(a, _)| a)
         .collect()
 }
-// ---------------------------------------------------------------------------
-// Word boundary helpers (for readline-style editing in modal input fields)
-// ---------------------------------------------------------------------------
-
-/// Byte offset of the start of the previous word.
-///
-/// Skips whitespace backward from `cursor`, then skips non-whitespace backward.
-/// Returns 0 if already at the beginning.
-pub fn prev_word_boundary(text: &str, cursor: usize) -> usize {
-    let before = &text[..cursor];
-    let mut iter = before.char_indices().rev();
-    // Phase 1: skip whitespace.
-    let mut pos = cursor;
-    for (i, c) in iter.by_ref() {
-        if !c.is_whitespace() {
-            pos = i;
-            break;
-        }
-        pos = i;
-    }
-    if pos == cursor && cursor > 0 {
-        // Entire prefix was whitespace (or empty).
-        return 0;
-    }
-    // Phase 2: skip non-whitespace.
-    for (i, c) in iter {
-        if c.is_whitespace() {
-            return i + c.len_utf8();
-        }
-    }
-    0
-}
-
-/// Byte offset of the end of the next word.
-///
-/// Skips whitespace forward from `cursor`, then skips non-whitespace forward.
-/// Returns `text.len()` if already at the end.
-pub fn next_word_boundary(text: &str, cursor: usize) -> usize {
-    let after = &text[cursor..];
-    let mut iter = after.char_indices();
-    // Phase 1: skip whitespace.
-    let mut offset = after.len();
-    for (i, c) in iter.by_ref() {
-        if !c.is_whitespace() {
-            offset = i;
-            break;
-        }
-    }
-    if offset == after.len() {
-        return text.len();
-    }
-    // Phase 2: skip non-whitespace.
-    for (i, c) in iter {
-        if c.is_whitespace() {
-            return cursor + i;
-        }
-    }
-    text.len()
-}
-
 /// Collect characters from `text` until the accumulated display width
 /// reaches `max_w`. Prevents wide characters (CJK, emoji) from
 /// overflowing a fixed-width column.
@@ -1895,6 +1651,29 @@ pub enum TabDataState<T> {
     Error(String),
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct WorkflowInfo {
+    pub name: String,
+    pub description: String,
+    pub when_to_use: Option<String>,
+    pub source: String,
+    pub path: Option<String>,
+}
+
+impl WorkflowInfo {
+    fn has_usable_command_name(&self) -> bool {
+        let name = self.name.as_str();
+        !name.is_empty()
+            && name.len() <= 64
+            && !name.starts_with('-')
+            && !name.ends_with('-')
+            && !name.contains("--")
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    }
+}
+
 /// State for the hooks/plugins modal popup.
 pub struct ExtensionsModalState {
     /// Shared modal window chrome state (close button, tabs, footer
@@ -1945,12 +1724,20 @@ pub struct ExtensionsModalState {
     pub plugins_scroll: usize,
     /// Marketplace tab state.
     pub marketplace_data: TabDataState<xai_hooks_plugins_types::MarketplaceListResponse>,
+    /// A marketplace list fetch is in flight. Overlapping list calls
+    /// serialize on the shell's per-source cache lock and each re-scans
+    /// every git source, so duplicates multiply the slowest source's latency.
+    pub marketplace_fetch_inflight: bool,
+    /// A refetch arrived while one was in flight; it runs when the current
+    /// fetch lands so post-action results stay fresh.
+    pub marketplace_refetch_queued: bool,
     pub marketplace_selected: usize,
     pub marketplace_scroll: usize,
     /// Skills tab state.
     pub skills_data: TabDataState<Vec<SkillInfo>>,
     pub skills_selected: usize,
     pub skills_scroll: usize,
+    pub workflows_data: TabDataState<Vec<WorkflowInfo>>,
     /// MCP servers tab state.
     pub mcps_data: TabDataState<Vec<crate::views::mcps_modal::McpServerInfo>>,
     /// Last selection that triggered auto-scroll. Prevents mouse scroll
@@ -1970,10 +1757,14 @@ pub struct ExtensionsModalState {
     pub plugins_collapsed_groups: std::collections::HashSet<String>,
     /// See [`Self::seed_plugin_groups_once`].
     pub plugins_groups_seeded: bool,
-    /// Collapsed marketplace entries (by flat plugin index). Default collapsed.
-    pub marketplace_collapsed: std::collections::HashSet<usize>,
     /// Collapsed marketplace sources (by source index). Default collapsed.
     pub marketplace_collapsed_sources: std::collections::HashSet<usize>,
+    /// Collapsed skill source groups (by [`SkillGroup::label`] / Workflows key).
+    pub skills_collapsed_groups: std::collections::HashSet<String>,
+    /// See [`Self::seed_skills_groups_once`].
+    pub skills_groups_seeded: bool,
+    /// See [`Self::seed_workflows_group_once`].
+    pub workflows_group_seeded: bool,
     /// Expanded skill entries (by skill index). Skills start collapsed.
     pub skills_expanded: std::collections::HashSet<usize>,
     /// Status filter for the plugins tab.
@@ -2032,11 +1823,14 @@ impl ExtensionsModalState {
             hooks_scroll: 0,
             plugins_scroll: 0,
             marketplace_data: TabDataState::Loading,
+            marketplace_fetch_inflight: false,
+            marketplace_refetch_queued: false,
             marketplace_selected: 0,
             marketplace_scroll: 0,
             skills_data: TabDataState::Loading,
             skills_selected: 0,
             skills_scroll: 0,
+            workflows_data: TabDataState::Loading,
             mcps_data: TabDataState::Loading,
             mcps_scroll_pinned_selection: None,
             mcps_scroll: 0,
@@ -2049,10 +1843,12 @@ impl ExtensionsModalState {
             mcps_section_collapse_initialized: false,
             skills_visible_map: Vec::new(),
             skills_expanded: std::collections::HashSet::new(),
+            skills_collapsed_groups: std::collections::HashSet::new(),
+            skills_groups_seeded: false,
+            workflows_group_seeded: false,
             hooks_collapsed_groups: std::collections::HashSet::new(),
             plugins_collapsed_groups: std::collections::HashSet::new(),
             plugins_groups_seeded: false,
-            marketplace_collapsed: std::collections::HashSet::new(),
             marketplace_collapsed_sources: std::collections::HashSet::new(),
             plugins_filter: StatusFilter::default(),
             mcps_filter: StatusFilter::default(),
@@ -2087,7 +1883,7 @@ impl ExtensionsModalState {
     /// (the Add form, an error/confirmation overlay, an in-flight
     /// `[processing]` badge, the picker selection / scroll / expansion
     /// state) is cleared so the new tab opens in a clean browse view.
-    /// The user's search query (`picker_state.query`) is intentionally
+    /// The user's search query (`picker_state.query()`) is intentionally
     /// preserved across tabs — current behavior elsewhere in the modal.
     pub fn switch_tab(&mut self, tab: ExtensionsTab) {
         self.active_tab = tab;
@@ -2109,10 +1905,6 @@ impl ExtensionsModalState {
         self.picker_state.hovered = None;
     }
 
-    /// Whether a group header at picker index `sel` with the given
-    /// `group_key` is currently expanded (children visible).
-    ///
-    /// The answer depends on the active tab: Hooks use
     /// Seed the all-collapsed default for plugin source groups exactly once.
     ///
     /// Called from both plugin-data delivery channels (list fetch and the
@@ -2126,11 +1918,36 @@ impl ExtensionsModalState {
         self.plugins_groups_seeded = true;
     }
 
-    /// `hooks_collapsed_groups`, Marketplace uses
-    /// `marketplace_collapsed_sources` (or `picker_state.expanded` for
-    /// error-source headers), and other tabs use `picker_state.expanded`.
+    /// Seed default-collapsed skill source groups exactly once.
+    ///
+    /// Unions [`SkillGroup::label`] keys into `skills_collapsed_groups` so a
+    /// prior Workflows expand/collapse (seeded independently) is preserved.
+    /// Later reloads leave the set alone.
+    pub fn seed_skills_groups_once(&mut self, skills: &[SkillInfo]) {
+        if self.skills_groups_seeded {
+            return;
+        }
+        for skill in skills {
+            self.skills_collapsed_groups
+                .insert(skill_group(skill).label);
+        }
+        self.skills_groups_seeded = true;
+    }
+
+    /// Seed default-collapsed Workflows header once (independent of skills load).
+    pub fn seed_workflows_group_once(&mut self) {
+        if self.workflows_group_seeded {
+            return;
+        }
+        self.skills_collapsed_groups
+            .insert(SKILLS_WORKFLOWS_GROUP_KEY.to_string());
+        self.workflows_group_seeded = true;
+    }
+
+    /// Whether a group header at picker index `sel` with the given
+    /// `group_key` is currently expanded (children visible).
     pub fn is_group_expanded(&self, sel: usize, group_key: &str) -> bool {
-        let searching = !self.picker_state.query.is_empty();
+        let searching = !self.picker_state.query().is_empty();
 
         match self.active_tab {
             // During active search we force all hook groups open so matches
@@ -2139,6 +1956,7 @@ impl ExtensionsModalState {
             ExtensionsTab::Plugins => {
                 searching || !self.plugins_collapsed_groups.contains(group_key)
             }
+            ExtensionsTab::Skills => searching || !self.skills_collapsed_groups.contains(group_key),
             ExtensionsTab::Marketplace => {
                 let source_has_error = group_key
                     .parse::<usize>()
@@ -2173,7 +1991,6 @@ impl ExtensionsModalState {
                     false
                 }
             }
-            _ => self.picker_state.expanded.contains(&sel),
         }
     }
 
@@ -2182,20 +1999,12 @@ impl ExtensionsModalState {
     /// Strips `\n` and `\r`. Returns `true` if any state was modified.
     pub fn apply_paste(&mut self, text: &str) -> bool {
         if let Some(ref mut input) = self.input {
-            let Some(field) = input.fields.get_mut(input.focused) else {
-                return false;
-            };
-            field.insert_paste(text)
+            input.insert_paste(text)
         } else if self.picker_state.search_active {
-            let cleaned: String = text.chars().filter(|c| *c != '\n' && *c != '\r').collect();
-            if cleaned.is_empty() {
-                return false;
-            }
-            self.picker_state
-                .query
-                .insert_str(self.picker_state.query_cursor, &cleaned);
-            self.picker_state.query_cursor += cleaned.len();
-            true
+            matches!(
+                self.picker_state.paste_query(text),
+                crate::input::line_editor::LineEditOutcome::TextChanged
+            )
         } else {
             false
         }
@@ -2448,9 +2257,16 @@ pub(crate) fn mcp_section_children_hidden(
 /// Returns `(label, is_custom)` where `is_custom` means the source was added
 /// via hooks-paths and can be removed.
 pub fn derive_source_label(source_dir: &str) -> (String, bool) {
+    let meta = classify_hook_source(source_dir);
+    let is_custom = meta.is_custom();
+    (meta.label, is_custom)
+}
+
+/// Classify a hooks `source_dir` into a display label and stable kind rank.
+fn classify_hook_source(source_dir: &str) -> HookSourceMeta {
     let grok = xai_grok_config::grok_home();
     let source_path = std::path::Path::new(source_dir);
-    // Plugin / installed-plugin dirs, under the user grok home (CHUTES_BUILD_HOME-aware)
+    // Plugin / installed-plugin dirs, under the user Chutes Build home (CHUTES_BUILD_HOME-aware)
     // or a project-scoped `{cwd}/.chutes-build/<subdir>/`. Returns the first path
     // component after the subdir (the plugin's install directory name).
     let plugin_name = |subdir: &str| -> Option<String> {
@@ -2460,7 +2276,7 @@ pub fn derive_source_label(source_dir: &str) -> (String, bool) {
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .filter(|s| !s.is_empty())
         };
-        // User grok home (CHUTES_BUILD_HOME-aware).
+        // User Chutes Build home (CHUTES_BUILD_HOME-aware).
         if let Ok(rest) = source_path.strip_prefix(grok.join(subdir))
             && let Some(name) = first_comp(rest)
         {
@@ -2478,22 +2294,34 @@ pub fn derive_source_label(source_dir: &str) -> (String, bool) {
             .map(|w| w[2].clone())
     };
     if let Some(name) = plugin_name("plugins").or_else(|| plugin_name("installed-plugins")) {
-        return (format!("Plugin: {name}"), false);
+        return HookSourceMeta {
+            label: format!("Plugin: {name}"),
+            kind: HookSourceKind::Plugin,
+        };
     }
     // Global hooks under $CHUTES_BUILD_HOME/hooks
     let global_hooks = grok.join("hooks");
     let global_str = global_hooks.display().to_string();
     if source_dir == global_str || source_dir.starts_with(&format!("{global_str}/")) {
-        return ("Global hooks".into(), false);
+        return HookSourceMeta {
+            label: "Global hooks".into(),
+            kind: HookSourceKind::Global,
+        };
     }
     // Settings under .claude/
     if source_dir.contains("/.claude/") {
-        return ("Claude settings".into(), false);
+        return HookSourceMeta {
+            label: "Claude settings".into(),
+            kind: HookSourceKind::Claude,
+        };
     }
     // Project hooks
     if source_dir.ends_with("/.chutes-build/hooks") || source_dir.contains("/.chutes-build/hooks/")
     {
-        return ("Project hooks".into(), false);
+        return HookSourceMeta {
+            label: "Project hooks".into(),
+            kind: HookSourceKind::Project,
+        };
     }
     // Custom directory — removable
     let display = {
@@ -2512,17 +2340,29 @@ pub fn derive_source_label(source_dir: &str) -> (String, bool) {
             format!("Custom: {source_dir}")
         }
     };
-    (display, true)
+    HookSourceMeta {
+        label: display,
+        kind: HookSourceKind::Custom,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Entry builders — convert tab data into Vec<PickerEntry> for render_picker
 // ---------------------------------------------------------------------------
 
-/// Data needed to build entries for a tab. Avoids borrow conflicts with state.
+/// One skill row after filter + group-then-A–Z sort.
+#[derive(Debug, Clone)]
+struct SkillMatch {
+    skill_index: usize,
+    /// True when the query hit name/label/author (not description-only).
+    name_hit: bool,
+    group_rank: u8,
+    group_label: String,
+}
+
+/// Ordered skill matches for the Skills tab (group labels included).
 struct SkillsEntryData {
-    /// (skill_index, is_name_match)
-    matches: Vec<(usize, bool)>,
+    matches: Vec<SkillMatch>,
 }
 
 fn filter_and_sort_skills(
@@ -2530,34 +2370,62 @@ fn filter_and_sort_skills(
     query: &str,
     filter: StatusFilter,
 ) -> SkillsEntryData {
-    let mut matches: Vec<(usize, bool)> = Vec::new();
+    let mut matches: Vec<SkillMatch> = Vec::new();
     let query_lower = query.to_lowercase();
     for (si, skill) in skills.iter().enumerate() {
         if !filter.matches(skill.enabled) {
             continue;
         }
+        let group = skill_group(skill);
         if query.is_empty() {
-            matches.push((si, true));
-        } else {
-            let desc_text = skill
-                .short_description
-                .as_deref()
-                .unwrap_or(&skill.description);
-            let desc_lower = desc_text.to_lowercase();
-            let author_lower = skill.author.as_deref().unwrap_or("").to_lowercase();
-            // Plugin skills differ in label (shown) vs name (slash id); match either.
-            let name_hit = skill.label().to_lowercase().contains(&query_lower)
-                || skill.name.to_lowercase().contains(&query_lower);
-            let desc_hit = desc_lower.contains(&query_lower);
-            let author_hit = !author_lower.is_empty() && author_lower.contains(&query_lower);
-            if name_hit || author_hit {
-                matches.push((si, true));
-            } else if desc_hit {
-                matches.push((si, false));
-            }
+            matches.push(SkillMatch {
+                skill_index: si,
+                name_hit: true,
+                group_rank: group.rank,
+                group_label: group.label,
+            });
+            continue;
+        }
+        let desc_text = skill
+            .short_description
+            .as_deref()
+            .unwrap_or(&skill.description);
+        let desc_lower = desc_text.to_lowercase();
+        let author_lower = skill.author.as_deref().unwrap_or("").to_lowercase();
+        // Plugin skills differ in label (shown) vs name (slash id); match either.
+        let name_hit = skill.label().to_lowercase().contains(&query_lower)
+            || skill.name.to_lowercase().contains(&query_lower);
+        let desc_hit = desc_lower.contains(&query_lower);
+        let author_hit = !author_lower.is_empty() && author_lower.contains(&query_lower);
+        if name_hit || author_hit {
+            matches.push(SkillMatch {
+                skill_index: si,
+                name_hit: true,
+                group_rank: group.rank,
+                group_label: group.label,
+            });
+        } else if desc_hit {
+            matches.push(SkillMatch {
+                skill_index: si,
+                name_hit: false,
+                group_rank: group.rank,
+                group_label: group.label,
+            });
         }
     }
-    matches.sort_by_key(|&(_, is_name)| !is_name);
+    // Rank → case-insensitive group → exact label (stable when case differs) →
+    // name hits before desc-only → A–Z label. Renderer keys headers on exact
+    // `group_label`, so case-differing names stay separate groups.
+    matches.sort_by_cached_key(|m| {
+        (
+            m.group_rank,
+            m.group_label.to_lowercase(),
+            m.group_label.clone(),
+            !m.name_hit,
+            skills[m.skill_index].label().to_lowercase(),
+            m.skill_index,
+        )
+    });
     SkillsEntryData { matches }
 }
 
@@ -2714,7 +2582,7 @@ pub fn render_extensions_modal(
     // force-expand all items of that tab. This ensures search filtering shows
     // every match explicitly, even inside groups that were collapsed before
     // the user switched tabs.
-    if !state.picker_state.query.is_empty() {
+    if !state.picker_state.query().is_empty() {
         state.picker_state.expand_all_for_search(8192);
     }
 
@@ -2780,51 +2648,90 @@ pub fn render_extensions_modal(
             ExtensionsTab::Skills => {
                 if let TabDataState::Loaded(ref skills) = state.skills_data {
                     let filtered =
-                        filter_and_sort_skills(skills, &state.picker_state.query, filter);
-                    for &(si, _) in &filtered.matches {
-                        let skill = &skills[si];
-                        let source = skill_source_str(skill);
-                        entry_labels.push(skill.label().to_string());
-                        let right = match &skill.author {
-                            Some(a) if !a.is_empty() => format!("({} · {})", source, a),
-                            _ => format!("({})", source),
-                        };
-                        entry_right_labels.push(right);
-                        // Short description as description_lines.
-                        let desc = skill
-                            .short_description
-                            .as_deref()
-                            .unwrap_or(&skill.description);
-                        if desc.is_empty() {
-                            entry_desc_lines.push(vec![]);
-                        } else {
-                            entry_desc_lines.push(vec![desc.to_string()]);
+                        filter_and_sort_skills(skills, state.picker_state.query(), filter);
+                    let searching = !state.picker_state.query().is_empty();
+                    // Bucket matches by group while preserving filter order.
+                    let mut group_order: Vec<String> = Vec::new();
+                    let mut by_group: std::collections::HashMap<String, Vec<&SkillMatch>> =
+                        std::collections::HashMap::new();
+                    for m in &filtered.matches {
+                        if !by_group.contains_key(&m.group_label) {
+                            group_order.push(m.group_label.clone());
                         }
+                        by_group.entry(m.group_label.clone()).or_default().push(m);
+                    }
+                    for group_label in &group_order {
+                        let members = by_group
+                            .get(group_label)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]);
+                        let collapsed =
+                            !searching && state.skills_collapsed_groups.contains(group_label);
+                        let count = members.len();
+                        entry_labels.push(if count == 1 {
+                            format!("{group_label} (1 skill)")
+                        } else {
+                            format!("{group_label} ({count} skills)")
+                        });
+                        entry_right_labels.push(String::new());
+                        entry_desc_lines.push(vec![]);
                         entry_summary_lines.push(vec![]);
-                        // Fields for expanded view.
-                        let mut fields = vec![("path".to_string(), skill.path.clone())];
-                        if let Some(ref a) = skill.author
-                            && !a.is_empty()
-                        {
-                            fields.push(("author".to_string(), a.clone()));
-                        }
-                        if let Some(ref tools) = skill.allowed_tools
-                            && !tools.is_empty()
-                        {
-                            fields.push(("tools".to_string(), tools.join(", ")));
-                        }
-                        entry_fields.push(fields);
+                        entry_fields.push(vec![]);
+                        // Selectable collapsible header (same as MCP / plugins).
                         entry_is_header.push(false);
-                        entry_dimmed.push(!skill.enabled);
+                        entry_dimmed.push(false);
                         entry_indent.push(0);
-                        entry_data_indices.push(Some(si));
-                        entry_group_keys.push(None);
-                        if !skill.enabled {
-                            entry_badge_text.push("[disabled]".into());
-                            entry_badge_color.push(Some(theme.accent_error));
-                        } else {
-                            entry_badge_text.push(String::new());
-                            entry_badge_color.push(None);
+                        entry_data_indices.push(None);
+                        entry_group_keys.push(Some(group_label.clone()));
+                        entry_badge_text.push(String::new());
+                        entry_badge_color.push(None);
+                        if collapsed {
+                            continue;
+                        }
+                        for m in members {
+                            let si = m.skill_index;
+                            let skill = &skills[si];
+                            let source = skill_source_str(skill);
+                            entry_labels.push(skill.label().to_string());
+                            let right = match &skill.author {
+                                Some(a) if !a.is_empty() => format!("({} · {})", source, a),
+                                _ => format!("({})", source),
+                            };
+                            entry_right_labels.push(right);
+                            let desc = skill
+                                .short_description
+                                .as_deref()
+                                .unwrap_or(&skill.description);
+                            if desc.is_empty() {
+                                entry_desc_lines.push(vec![]);
+                            } else {
+                                entry_desc_lines.push(vec![desc.to_string()]);
+                            }
+                            entry_summary_lines.push(vec![]);
+                            let mut fields = vec![("path".to_string(), skill.path.clone())];
+                            if let Some(ref a) = skill.author
+                                && !a.is_empty()
+                            {
+                                fields.push(("author".to_string(), a.clone()));
+                            }
+                            if let Some(ref tools) = skill.allowed_tools
+                                && !tools.is_empty()
+                            {
+                                fields.push(("tools".to_string(), tools.join(", ")));
+                            }
+                            entry_fields.push(fields);
+                            entry_is_header.push(false);
+                            entry_dimmed.push(!skill.enabled);
+                            entry_indent.push(1);
+                            entry_data_indices.push(Some(si));
+                            entry_group_keys.push(None);
+                            if !skill.enabled {
+                                entry_badge_text.push("[disabled]".into());
+                                entry_badge_color.push(Some(theme.accent_error));
+                            } else {
+                                entry_badge_text.push(String::new());
+                                entry_badge_color.push(None);
+                            }
                         }
                     }
                 } else if let TabDataState::Error(ref msg) = state.skills_data {
@@ -2841,13 +2748,93 @@ pub fn render_extensions_modal(
                     entry_badge_text.push(String::new());
                     entry_badge_color.push(None);
                 }
+                match state.workflows_data {
+                    TabDataState::Loaded(ref workflows) => {
+                        let query_lower = state.picker_state.query().to_lowercase();
+                        let mut visible: Vec<&WorkflowInfo> = workflows
+                            .iter()
+                            .filter(|workflow| workflow.has_usable_command_name())
+                            .filter(|w| {
+                                query_lower.is_empty()
+                                    || w.name.to_lowercase().contains(&query_lower)
+                                    || w.description.to_lowercase().contains(&query_lower)
+                            })
+                            .collect();
+                        visible.sort_by(|a, b| cmp_str_ci(&a.name, &b.name));
+                        if !visible.is_empty() {
+                            let searching = !state.picker_state.query().is_empty();
+                            let collapsed = !searching
+                                && state
+                                    .skills_collapsed_groups
+                                    .contains(SKILLS_WORKFLOWS_GROUP_KEY);
+                            let count = visible.len();
+                            entry_labels.push(if count == 1 {
+                                "Workflows (1 workflow)".to_string()
+                            } else {
+                                format!("Workflows ({count} workflows)")
+                            });
+                            entry_right_labels.push(String::new());
+                            entry_desc_lines.push(vec![]);
+                            entry_summary_lines.push(vec![]);
+                            entry_fields.push(vec![]);
+                            entry_is_header.push(false);
+                            entry_dimmed.push(false);
+                            entry_indent.push(0);
+                            entry_data_indices.push(None);
+                            entry_group_keys.push(Some(SKILLS_WORKFLOWS_GROUP_KEY.to_string()));
+                            entry_badge_text.push(String::new());
+                            entry_badge_color.push(None);
+                            if !collapsed {
+                                for wf in visible {
+                                    entry_labels.push(wf.name.clone());
+                                    entry_right_labels.push(format!("({})", wf.source));
+                                    if wf.description.is_empty() {
+                                        entry_desc_lines.push(vec![]);
+                                    } else {
+                                        entry_desc_lines.push(vec![wf.description.clone()]);
+                                    }
+                                    entry_summary_lines.push(vec![]);
+                                    let mut fields = Vec::new();
+                                    if let Some(ref p) = wf.path {
+                                        fields.push(("path".to_string(), p.clone()));
+                                    }
+                                    if let Some(ref w) = wf.when_to_use {
+                                        fields.push(("when to use".to_string(), w.clone()));
+                                    }
+                                    entry_fields.push(fields);
+                                    entry_is_header.push(false);
+                                    entry_dimmed.push(false);
+                                    entry_indent.push(1);
+                                    entry_data_indices.push(None);
+                                    entry_group_keys.push(None);
+                                    entry_badge_text.push(String::new());
+                                    entry_badge_color.push(None);
+                                }
+                            }
+                        }
+                    }
+                    TabDataState::Error(ref msg) => {
+                        entry_labels.push(format!("workflows: {}", msg));
+                        entry_right_labels.push(String::new());
+                        entry_desc_lines.push(vec![]);
+                        entry_summary_lines.push(vec![]);
+                        entry_fields.push(vec![]);
+                        entry_is_header.push(false);
+                        entry_dimmed.push(true);
+                        entry_indent.push(0);
+                        entry_data_indices.push(None);
+                        entry_group_keys.push(None);
+                        entry_badge_text.push(String::new());
+                        entry_badge_color.push(None);
+                    }
+                    TabDataState::Loading => {}
+                }
             }
             ExtensionsTab::Plugins => {
                 if let TabDataState::Loaded(ref response) = state.plugins_data {
-                    // Group plugins by source.
                     let mut groups = GroupedPlugins::new();
                     for (pi, plugin) in response.plugins.iter().enumerate() {
-                        if !fuzzy_matches(&plugin.name, &state.picker_state.query) {
+                        if !fuzzy_matches(&plugin.name, state.picker_state.query()) {
                             continue;
                         }
                         if !filter.matches(plugin.enabled) {
@@ -2855,14 +2842,21 @@ pub fn render_extensions_modal(
                         }
                         let group = plugin_group(plugin);
                         groups
-                            .entry((group.rank, group.label, group.key))
+                            .entry(group.into_sort_key())
                             .or_default()
                             .push((pi, plugin));
                     }
-                    for ((_, label, group_key), plugins) in &groups {
+                    for plugins in groups.values_mut() {
+                        plugins.sort_by(|a, b| {
+                            cmp_str_ci(&a.1.name, &b.1.name).then_with(|| a.0.cmp(&b.0))
+                        });
+                    }
+                    for (group_key, plugins) in &groups {
+                        let label = &group_key.label;
+                        let group_key = &group_key.key;
                         // While searching we ignore previous collapse state so
                         // every plugin inside the group can be seen and matched.
-                        let searching = !state.picker_state.query.is_empty();
+                        let searching = !state.picker_state.query().is_empty();
                         let collapsed =
                             !searching && state.plugins_collapsed_groups.contains(group_key);
                         entry_labels.push(format!(
@@ -2943,31 +2937,21 @@ pub fn render_extensions_modal(
             }
             ExtensionsTab::Hooks => {
                 if let TabDataState::Loaded(ref data) = state.hooks_data {
-                    // Group hooks by source_dir.
-                    let mut groups: std::collections::BTreeMap<
-                        String,
-                        Vec<(usize, &xai_hooks_plugins_types::HookInfo)>,
-                    > = std::collections::BTreeMap::new();
-                    for (i, hook) in data.hooks.iter().enumerate() {
-                        if !fuzzy_matches_hook(hook, &state.picker_state.query) {
-                            continue;
-                        }
-                        if !state.hooks_filter.matches(!hook.disabled) {
-                            continue;
-                        }
-                        groups
-                            .entry(hook.source_dir.clone())
-                            .or_default()
-                            .push((i, hook));
-                    }
-                    for (source_dir, hooks) in &groups {
-                        let (label, _is_custom) = derive_source_label(source_dir);
+                    let groups = build_hook_groups(
+                        &data.hooks,
+                        state.hooks_filter,
+                        state.picker_state.query(),
+                    );
+                    for group in &groups {
+                        let source_dir = group.source_dir;
+                        let label = &group.label;
+                        let indices = &group.indices;
                         // While searching we ignore previous collapse state so
                         // every hook inside the group can be seen and matched.
-                        let searching = !state.picker_state.query.is_empty();
+                        let searching = !state.picker_state.query().is_empty();
                         let collapsed =
                             !searching && state.hooks_collapsed_groups.contains(source_dir);
-                        entry_labels.push(format!("{} ({} hooks)", label, hooks.len()));
+                        entry_labels.push(format!("{} ({} hooks)", label, indices.len()));
                         entry_right_labels.push(String::new());
                         entry_desc_lines.push(vec![]);
                         entry_summary_lines.push(vec![]);
@@ -2976,20 +2960,15 @@ pub fn render_extensions_modal(
                         entry_dimmed.push(false); // headers
                         entry_indent.push(0);
                         entry_data_indices.push(None);
-                        entry_group_keys.push(Some(source_dir.clone()));
+                        entry_group_keys.push(Some(source_dir.to_string()));
                         entry_badge_text.push(String::new());
                         entry_badge_color.push(None);
                         if collapsed {
                             continue;
                         }
-                        for &(hi, hook) in hooks {
-                            let event_str = hook.event.to_string();
-                            let matcher_str = hook
-                                .matcher
-                                .as_deref()
-                                .map(|m| format!(" /{m}"))
-                                .unwrap_or_default();
-                            entry_labels.push(format!("on:{}{}", event_str, matcher_str));
+                        for &hi in indices {
+                            let hook = &data.hooks[hi];
+                            entry_labels.push(hook_row_label(hook));
                             let cmd = hook
                                 .command
                                 .as_deref()
@@ -3032,10 +3011,13 @@ pub fn render_extensions_modal(
             }
             ExtensionsTab::Marketplace => {
                 if let TabDataState::Loaded(ref data) = state.marketplace_data {
-                    for (si, source) in data.sources.iter().enumerate() {
+                    for view in ordered_marketplace_view(&data.sources) {
+                        let si = view.source_index;
+                        let plugin_order = &view.plugin_indices;
+                        let source = &data.sources[si];
                         // Force all marketplace sources open while searching so their
                         // plugins are considered for matching and displayed.
-                        let searching = !state.picker_state.query.is_empty();
+                        let searching = !state.picker_state.query().is_empty();
                         let collapsed =
                             !searching && state.marketplace_collapsed_sources.contains(&si);
                         entry_labels.push(format!(
@@ -3066,8 +3048,9 @@ pub fn render_extensions_modal(
                         if collapsed {
                             continue;
                         }
-                        for plugin in &source.plugins {
-                            if !fuzzy_matches(&plugin.name, &state.picker_state.query) {
+                        for &pi in plugin_order {
+                            let plugin = &source.plugins[pi];
+                            if !fuzzy_matches(&plugin.name, state.picker_state.query()) {
                                 continue;
                             }
                             let status_label = match plugin.install_status.as_str() {
@@ -3175,14 +3158,14 @@ pub fn render_extensions_modal(
                         servers,
                     );
 
-                    let searching = !state.picker_state.query.is_empty();
+                    let searching = !state.picker_state.query().is_empty();
                     let mut sections: std::collections::BTreeMap<
                         McpSectionId,
                         Vec<(usize, &crate::views::mcps_modal::McpServerInfo)>,
                     > = std::collections::BTreeMap::new();
                     for (si, server) in servers.iter().enumerate() {
                         let display_name = server.display_name.as_deref().unwrap_or(&server.name);
-                        if !fuzzy_matches(display_name, &state.picker_state.query) {
+                        if !fuzzy_matches(display_name, state.picker_state.query()) {
                             continue;
                         }
                         if !state.mcps_filter.matches(server.enabled) {
@@ -3362,18 +3345,13 @@ pub fn render_extensions_modal(
     let non_selectable = build_entry_non_selectable(&entry_is_header, &entry_group_keys);
     let non_selectable_clickable = build_entry_non_selectable_clickable(&entry_group_keys);
 
-    // Clamp selection against this frame's entry list for footer labels.
-    // Do not write it to `state` until after `render_modal_window` succeeds:
-    // an early return below would otherwise leave `picker_state.selected`
-    // clamped while `entry_data_indices` / `entry_group_keys` stay stale
-    // (published only post-paint), desyncing `selected_data_index()` and
-    // toggle dispatch until a later full frame.
+    // Min-clamp and skip rows marked non-selectable for this frame's footer +
+    // highlight. Do not write to `state` until after `render_modal_window`
+    // succeeds — early return would desync `selected` from entry maps
+    // published only post-paint.
     let entry_count = entry_labels.len();
-    let selected = if entry_count == 0 {
-        0
-    } else {
-        state.picker_state.selected.min(entry_count - 1)
-    };
+    let selected =
+        picker::first_selectable_index(state.picker_state.selected, entry_count, &non_selectable);
 
     // Build per-tab action keys for the footer shortcuts.
     // Space enable/disable uses the freshly built entry-mapping locals
@@ -3419,9 +3397,7 @@ pub fn render_extensions_modal(
     // The overlay above is shortened to leave the footer line visible.
     let modal_msg_kind = state.modal_message.as_ref().map(|m| match m {
         ModalMessage::Error(_) => ModalMsgKind::Error,
-        ModalMessage::Confirmation { .. } | ModalMessage::MarketplaceConfirmation { .. } => {
-            ModalMsgKind::Confirm
-        }
+        ModalMessage::Confirmation { .. } => ModalMsgKind::Confirm,
     });
     let mut shortcuts: Vec<Shortcut<'_>> = Vec::new();
     if modal_msg_kind.is_some() {
@@ -3569,16 +3545,15 @@ pub fn render_extensions_modal(
     if !in_input_mode {
         // Search bar at top of content area.
         let search_active_render = state.picker_state.search_active;
-        picker::render_search_bar(
+        picker::render_picker_search_bar(
             buf,
             content_area.x,
             content_area.y,
             search_width,
             &theme,
-            &state.picker_state.query,
+            &state.picker_state,
             search_active_render,
             true, // show_search_hint
-            state.picker_state.query_cursor,
             Some(theme.bg_base),
         );
     }
@@ -3679,7 +3654,8 @@ pub fn render_extensions_modal(
                     badge: entry_badge_text.get(i).map(|s| s.as_str()).unwrap_or(""),
                     badge_color: entry_badge_color.get(i).copied().flatten(),
                     collapsible: is_collapsible,
-                    underline_last_desc: group_key.is_some_and(|k| *k == managed_section_key),
+                    underline_last_desc: state.modal_message.is_none()
+                        && group_key.is_some_and(|k| *k == managed_section_key),
                 })
             }
         })
@@ -3715,6 +3691,7 @@ pub fn render_extensions_modal(
             &non_selectable_clickable,
             Some(theme.bg_base),
             loading,
+            0,
             inner_x + inner_width - 1,
         );
         (content_hit.item_rects, content_hit.entry_indices)
@@ -3777,22 +3754,21 @@ pub fn render_extensions_modal(
                 msg_content_width,
                 msg_content_height,
             );
+            // Buffer::set_string merges styles; Style::reset clears UNDERLINED/BOLD
+            // left by the list underneath (e.g. Managed connectors URL).
+            let clear_style = Style::reset().bg(theme.bg_base);
+            let text_style = Style::reset().fg(theme.accent_tool).bg(theme.bg_base);
             for y in msg_area.y..msg_area.y + msg_area.height {
                 buf.set_string(
                     msg_area.x,
                     y,
                     " ".repeat(msg_area.width as usize),
-                    Style::default().bg(theme.bg_base),
+                    clear_style,
                 );
             }
             let msg_y = msg_area.y + msg_area.height / 2;
             let msg_x = msg_area.x + msg_area.width.saturating_sub(display.width() as u16) / 2;
-            buf.set_string(
-                msg_x,
-                msg_y,
-                &display,
-                Style::default().fg(theme.accent_tool).bg(theme.bg_base),
-            );
+            buf.set_string(msg_x, msg_y, &display, text_style);
         }
     }
 
@@ -3800,10 +3776,7 @@ pub fn render_extensions_modal(
     if let Some(ref msg) = state.modal_message {
         let (text, fg) = match msg {
             ModalMessage::Error(e) => (e.as_str(), theme.accent_error),
-            ModalMessage::Confirmation { message, .. }
-            | ModalMessage::MarketplaceConfirmation { message, .. } => {
-                (message.as_str(), theme.accent_tool)
-            }
+            ModalMessage::Confirmation { message, .. } => (message.as_str(), theme.accent_tool),
         };
         if let Some(popup_rect) = state.window.popup_area {
             let msg_content_y = popup_rect.y + 2;
@@ -3821,12 +3794,14 @@ pub fn render_extensions_modal(
                     msg_content_width,
                     msg_content_height,
                 );
+                let clear_style = Style::reset().bg(theme.bg_base);
+                let text_style = Style::reset().fg(fg).bg(theme.bg_base);
                 for y in msg_area.y..msg_area.y + msg_area.height {
                     buf.set_string(
                         msg_area.x,
                         y,
                         " ".repeat(msg_area.width as usize),
-                        Style::default().bg(theme.bg_base),
+                        clear_style,
                     );
                 }
                 let pad = 2u16;
@@ -3835,12 +3810,7 @@ pub fn render_extensions_modal(
                 let msg_height = wrapped_lines.len().min(msg_area.height as usize);
                 let msg_y = msg_area.y + (msg_area.height.saturating_sub(msg_height as u16)) / 2;
                 for (i, wline) in wrapped_lines.iter().enumerate().take(msg_height) {
-                    buf.set_string(
-                        msg_area.x + pad,
-                        msg_y + i as u16,
-                        wline,
-                        Style::default().fg(fg).bg(theme.bg_base),
-                    );
+                    buf.set_string(msg_area.x + pad, msg_y + i as u16, wline, text_style);
                 }
                 // Dismissal hints (for both errors and confirmations)
                 // are rendered into the footer below, not inline.
@@ -4037,7 +4007,7 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
 
     // Per field: 1 label row + 3 rows for the bordered input
     // (top border + content + bottom border).
-    let field_count = input.fields.len() as u16;
+    let field_count = input.fields().len() as u16;
     const ROWS_PER_FIELD: u16 = 4;
     let separators = field_count.saturating_sub(1); // 1 blank row between fields
     let form_rows = field_count * ROWS_PER_FIELD + separators;
@@ -4072,12 +4042,12 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
     let prompt_w = prompt_prefix.width() as u16;
 
     let mut cur_y = form_top;
-    for (fi, field) in input.fields.iter().enumerate() {
+    for (fi, field) in input.fields().iter().enumerate() {
         if cur_y >= area.y + area.height {
             break;
         }
 
-        let is_focused = fi == input.focused;
+        let is_focused = fi == input.focused_index();
 
         // Row 1: Label (sits above the bordered input, not inside).
         let ls = if is_focused {
@@ -4085,7 +4055,7 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         } else {
             label_dim_style
         };
-        buf.set_string(label_x, cur_y, &field.label, ls);
+        buf.set_string(label_x, cur_y, field.label(), ls);
         cur_y += 1;
 
         // Rows 2-4: Rounded border around the single-line input.
@@ -4119,11 +4089,11 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         buf.set_string(content_x, content_y, prompt_prefix, prompt_style);
         let text_x = content_x + prompt_w;
 
-        if field.text.is_empty() {
+        if field.text().is_empty() {
             // Placeholder only renders when the field is NOT focused —
             // matches the prompt widget convention so the cursor isn't
             // overlapping placeholder text on the active row.
-            if !is_focused && let Some(ref ph) = field.placeholder {
+            if !is_focused && let Some(ph) = field.placeholder() {
                 let display: String = take_by_width(ph, max_text_w);
                 buf.set_string(text_x, content_y, &display, placeholder_style);
             }
@@ -4131,31 +4101,12 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
                 cell.set_style(Style::default().fg(theme.bg_base).bg(theme.text_primary));
             }
         } else {
-            // Compute scroll offset once, tracking actual display widths
-            // so wide characters (CJK, emoji) don't misalign the cursor.
-            let cursor_col = field.text[..field.cursor].width();
-            let scroll = cursor_col.saturating_sub(max_text_w.saturating_sub(1));
-
-            // Skip `scroll` display-width columns, tracking the actual
-            // width skipped (may differ from `scroll` when a wide char
-            // straddles the boundary).
-            let mut skipped_w = 0;
-            let visible: String = field
-                .text
-                .chars()
-                .skip_while(|c| {
-                    if skipped_w >= scroll {
-                        return false;
-                    }
-                    skipped_w += unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
-                    true
-                })
-                .collect();
-            let visible = take_by_width(&visible, max_text_w);
-            buf.set_string(text_x, content_y, &visible, text_style);
+            let viewport = field.viewport(max_text_w);
+            let visible = &field.text()[viewport.visible_byte_range];
+            buf.set_string(text_x, content_y, visible, text_style);
 
             if is_focused {
-                let cx = text_x + (cursor_col.saturating_sub(skipped_w)) as u16;
+                let cx = text_x + viewport.cursor_display_column as u16;
                 if cx < inner.x + inner.width
                     && let Some(cell) = buf.cell_mut((cx, content_y))
                 {
@@ -4167,7 +4118,7 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         cur_y += 3; // top border + content + bottom border
 
         // Blank separator between fields (skip after last field).
-        if fi + 1 < input.fields.len() {
+        if fi + 1 < input.fields().len() {
             cur_y += 1;
         }
     }
@@ -4186,6 +4137,7 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyModifiers;
 
     #[test]
     fn derive_source_label_detects_project_scoped_plugins() {
@@ -4441,7 +4393,7 @@ mod tests {
         state
             .mcps_collapsed_sections
             .insert("mcp-section:managed".to_string());
-        state.picker_state.query = "linear".into();
+        state.picker_state.set_query("linear");
         assert!(state.is_group_expanded(0, "mcp-section:managed"));
     }
 
@@ -4549,7 +4501,7 @@ mod tests {
         assert!(
             rows.labels
                 .iter()
-                .any(|l| l.starts_with("Managed by Chutes Build")),
+                .any(|l| l.starts_with("Managed by chutes.ai")),
             "managed section header must appear"
         );
         assert!(
@@ -4951,7 +4903,7 @@ mod tests {
         // Only enabled skills: native + hello (lint is disabled).
         assert_eq!(result.matches.len(), 2);
         // Verify the correct skills are returned: native (index 0) and hello (index 1).
-        let indices: Vec<usize> = result.matches.iter().map(|m| m.0).collect();
+        let indices: Vec<usize> = result.matches.iter().map(|m| m.skill_index).collect();
         assert!(indices.contains(&0), "native skill should be present");
         assert!(
             indices.contains(&1),
@@ -4971,7 +4923,7 @@ mod tests {
         ];
         let result = filter_and_sort_skills(&skills, "hello", StatusFilter::All);
         assert_eq!(result.matches.len(), 1);
-        assert_eq!(result.matches[0].0, 1); // index of hello
+        assert_eq!(result.matches[0].skill_index, 1); // index of hello
     }
 
     #[test]
@@ -5009,6 +4961,68 @@ mod tests {
             selected = selected.min(match_count - 1);
         }
         assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn skills_tab_renders_workflows_group() {
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.skills_data = TabDataState::Loaded(vec![]);
+        state.workflows_data = TabDataState::Loaded(vec![WorkflowInfo {
+            name: "fix-ci".to_string(),
+            description: "Fix failing CI on the current PR".to_string(),
+            when_to_use: Some("when CI is red".to_string()),
+            source: "builtin".to_string(),
+            path: None,
+        }]);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+
+        assert!(
+            buffer_count(&buf, "Workflows") >= 1,
+            "the Workflows group header must render on the Skills tab"
+        );
+        assert_eq!(
+            buffer_count(&buf, "fix-ci"),
+            1,
+            "the workflow name must render as a row"
+        );
+        assert_eq!(
+            buffer_count(&buf, "(builtin)"),
+            1,
+            "the workflow source must render as the right label"
+        );
+        assert!(
+            state.entry_data_indices.iter().all(|d| d.is_none()),
+            "workflow rows (and the header) must not map to skill data indices"
+        );
+    }
+
+    #[test]
+    fn skills_tab_hides_unusable_workflow_names() {
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.skills_data = TabDataState::Loaded(vec![]);
+        state.workflows_data = TabDataState::Loaded(vec![
+            WorkflowInfo {
+                name: "valid-workflow".into(),
+                description: "Valid".into(),
+                when_to_use: None,
+                source: "project".into(),
+                path: None,
+            },
+            WorkflowInfo {
+                name: "Not Launchable".into(),
+                description: "Invalid".into(),
+                when_to_use: None,
+                source: "project".into(),
+                path: None,
+            },
+        ]);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+        assert_eq!(buffer_count(&buf, "valid-workflow"), 1);
+        assert_eq!(buffer_count(&buf, "Not Launchable"), 0);
     }
 
     // ── Plugin fixtures ─────────────────────────────────────────────
@@ -5244,34 +5258,37 @@ mod tests {
     #[test]
     fn apply_paste_inserts_url_into_focused_field_and_strips_newline() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
-        let mut input = single_field_input("test");
-        input.focused = 0;
-        state.input = Some(input);
+        state.input = Some(single_field_input("test"));
         assert!(state.apply_paste("https://mcp.linear.app/mcp\n"));
-        let field = &state.input.as_ref().unwrap().fields[0];
-        assert_eq!(field.text, "https://mcp.linear.app/mcp");
-        assert_eq!(field.cursor, "https://mcp.linear.app/mcp".len());
+        let field = state.input.as_ref().unwrap().field(0).unwrap();
+        assert_eq!(field.text(), "https://mcp.linear.app/mcp");
+        assert_eq!(field.cursor_byte(), "https://mcp.linear.app/mcp".len());
     }
 
     #[test]
     fn apply_paste_inserts_at_cursor_position() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         let mut input = single_field_input("test");
-        input.fields[0].text = "AB".into();
-        input.fields[0].cursor = 1;
+        input.field_mut(0).unwrap().set_text("AB");
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(1);
         state.input = Some(input);
         assert!(state.apply_paste("XY"));
-        let field = &state.input.as_ref().unwrap().fields[0];
-        assert_eq!(field.text, "AXYB");
-        assert_eq!(field.cursor, 3);
+        let field = state.input.as_ref().unwrap().field(0).unwrap();
+        assert_eq!(field.text(), "AXYB");
+        assert_eq!(field.cursor_byte(), 3);
     }
 
     #[test]
     fn apply_paste_strips_crlf() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         state.input = Some(single_field_input("test"));
+        state.input.as_mut().unwrap().error = Some("Required: URL".to_owned());
         assert!(state.apply_paste("foo\r\nbar"));
-        assert_eq!(state.input.as_ref().unwrap().fields[0].text, "foobar");
+        assert_eq!(
+            state.input.as_ref().unwrap().field(0).unwrap().text(),
+            "foobar"
+        );
+        assert!(state.input.as_ref().unwrap().error.is_none());
     }
 
     #[test]
@@ -5279,8 +5296,9 @@ mod tests {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         state.input = Some(single_field_input("test"));
         assert!(!state.apply_paste("\n\r"));
-        assert_eq!(state.input.as_ref().unwrap().fields[0].text, "");
-        assert_eq!(state.input.as_ref().unwrap().fields[0].cursor, 0);
+        let field = state.input.as_ref().unwrap().field(0).unwrap();
+        assert_eq!(field.text(), "");
+        assert_eq!(field.cursor_byte(), 0);
     }
 
     #[test]
@@ -5288,14 +5306,14 @@ mod tests {
         let mut state = ExtensionsModalState::new(ExtensionsTab::Plugins);
         state.picker_state.search_active = true;
         assert!(state.apply_paste("query"));
-        assert_eq!(state.picker_state.query, "query");
+        assert_eq!(state.picker_state.query(), "query");
     }
 
     #[test]
     fn apply_paste_ignored_when_idle() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::Plugins);
         assert!(!state.apply_paste("hello"));
-        assert_eq!(state.picker_state.query, "");
+        assert_eq!(state.picker_state.query(), "");
         assert!(state.input.is_none());
     }
 
@@ -5305,28 +5323,30 @@ mod tests {
         state.input = Some(single_field_input("test"));
         state.picker_state.search_active = true;
         assert!(state.apply_paste("url"));
-        assert_eq!(state.input.as_ref().unwrap().fields[0].text, "url");
-        assert_eq!(state.picker_state.query, "");
+        assert_eq!(
+            state.input.as_ref().unwrap().field(0).unwrap().text(),
+            "url"
+        );
+        assert_eq!(state.picker_state.query(), "");
     }
 
     #[test]
     fn apply_paste_targets_focused_field_in_multi_field() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         let mut input = mcp_add_input();
-        input.focused = 0; // URL field (first in the new order)
+        let _ = input.handle_key(&key_event(KeyCode::Tab, KeyModifiers::NONE));
         state.input = Some(input);
-        assert!(state.apply_paste("https://example.com"));
-        let fields = &state.input.as_ref().unwrap().fields;
-        assert_eq!(fields[0].text, "https://example.com");
-        assert_eq!(fields[1].text, "");
+        assert!(state.apply_paste("my-server"));
+        let input = state.input.as_ref().unwrap();
+        assert_eq!(input.field(0).unwrap().text(), "");
+        assert_eq!(input.field(1).unwrap().text(), "my-server");
     }
 
     #[test]
     fn multi_field_form_field_texts() {
         let mut input = mcp_add_input();
-        // Field order: [URL, Name].
-        input.fields[0].text = "https://example.com".into();
-        input.fields[1].text = "my-server".into();
+        input.field_mut(0).unwrap().set_text("https://example.com");
+        input.field_mut(1).unwrap().set_text("my-server");
         let texts = input.field_texts();
         assert_eq!(texts, vec!["https://example.com", "my-server"]);
     }
@@ -5334,108 +5354,12 @@ mod tests {
     #[test]
     fn from_specs_creates_empty_fields() {
         let input = mcp_add_input();
-        assert_eq!(input.fields.len(), 2);
-        assert!(input.fields[0].text.is_empty());
-        assert!(input.fields[1].text.is_empty());
-        // New order: [URL (required), Name (optional)].
-        assert!(input.fields[0].required);
-        assert!(!input.fields[1].required);
-        assert_eq!(input.focused, 0);
-    }
-
-    // ── Word boundary helpers ───────────────────────────────────────
-
-    #[test]
-    fn prev_word_boundary_basic() {
-        assert_eq!(prev_word_boundary("hello world", 11), 6);
-        assert_eq!(prev_word_boundary("hello world", 6), 0);
-        assert_eq!(prev_word_boundary("hello world", 5), 0);
-        assert_eq!(prev_word_boundary("hello world", 0), 0);
-    }
-
-    #[test]
-    fn prev_word_boundary_multiple_spaces() {
-        assert_eq!(prev_word_boundary("a  b  c", 7), 6);
-        assert_eq!(prev_word_boundary("a  b  c", 6), 3);
-        assert_eq!(prev_word_boundary("a  b  c", 3), 0);
-    }
-
-    #[test]
-    fn prev_word_boundary_url() {
-        let url = "https://mcp.linear.app/mcp";
-        assert_eq!(prev_word_boundary(url, url.len()), 0);
-    }
-
-    #[test]
-    fn next_word_boundary_basic() {
-        assert_eq!(next_word_boundary("hello world", 0), 5);
-        assert_eq!(next_word_boundary("hello world", 5), 11);
-        assert_eq!(next_word_boundary("hello world", 6), 11);
-        assert_eq!(next_word_boundary("hello world", 11), 11);
-    }
-
-    #[test]
-    fn next_word_boundary_multiple_spaces() {
-        assert_eq!(next_word_boundary("a  b  c", 0), 1);
-        assert_eq!(next_word_boundary("a  b  c", 1), 4);
-        assert_eq!(next_word_boundary("a  b  c", 4), 7);
-    }
-
-    #[test]
-    fn next_word_boundary_url() {
-        let url = "https://mcp.linear.app/mcp";
-        assert_eq!(next_word_boundary(url, 0), url.len());
-    }
-
-    #[test]
-    fn prev_word_boundary_mid_word() {
-        assert_eq!(prev_word_boundary("hello world", 3), 0);
-    }
-
-    #[test]
-    fn next_word_boundary_mid_word() {
-        assert_eq!(next_word_boundary("hello world", 3), 5);
-    }
-
-    #[test]
-    fn prev_word_boundary_in_whitespace_run() {
-        assert_eq!(prev_word_boundary("a   b", 3), 0);
-    }
-
-    // ── delete_word_backward ────────────────────────────────────────
-
-    fn make_field(text: &str, cursor: usize) -> ModalInputField {
-        ModalInputField {
-            label: String::new(),
-            text: text.into(),
-            cursor,
-            required: false,
-            placeholder: None,
-        }
-    }
-
-    #[test]
-    fn delete_word_backward_at_end() {
-        let mut f = make_field("hello world", 11);
-        f.delete_word_backward();
-        assert_eq!(f.text, "hello ");
-        assert_eq!(f.cursor, 6);
-    }
-
-    #[test]
-    fn delete_word_backward_mid_word() {
-        let mut f = make_field("hello world", 8);
-        f.delete_word_backward();
-        assert_eq!(f.text, "hello rld");
-        assert_eq!(f.cursor, 6);
-    }
-
-    #[test]
-    fn delete_word_backward_at_start_is_noop() {
-        let mut f = make_field("hello", 0);
-        f.delete_word_backward();
-        assert_eq!(f.text, "hello");
-        assert_eq!(f.cursor, 0);
+        assert_eq!(input.fields().len(), 2);
+        assert!(input.field(0).unwrap().text().is_empty());
+        assert!(input.field(1).unwrap().text().is_empty());
+        assert!(input.field(0).unwrap().required());
+        assert!(!input.field(1).unwrap().required());
+        assert_eq!(input.focused_index(), 0);
     }
 
     // ── build_action_from_input / parse_mcp_add_fields ──────────────
@@ -5526,7 +5450,7 @@ mod tests {
     #[test]
     fn handle_key_esc_cancels() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "some text".into();
+        input.field_mut(0).unwrap().set_text("some text");
         assert!(matches!(
             input.handle_key(&key_event(KeyCode::Esc, KeyModifiers::NONE)),
             ModalInputOutcome::Cancel
@@ -5537,8 +5461,8 @@ mod tests {
     fn handle_key_char_inserts() {
         let mut input = single_field_input("test");
         input.handle_key(&key_event(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert_eq!(input.fields[0].text, "a");
-        assert_eq!(input.fields[0].cursor, 1);
+        assert_eq!(input.field(0).unwrap().text(), "a");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 1);
     }
 
     #[test]
@@ -5546,57 +5470,72 @@ mod tests {
         let mut input = single_field_input("test");
         let result = input.handle_key(&key_event(KeyCode::Char('x'), KeyModifiers::CONTROL));
         assert!(matches!(result, ModalInputOutcome::Unchanged));
-        assert!(input.fields[0].text.is_empty());
+        assert!(input.field(0).unwrap().text().is_empty());
     }
 
     #[test]
     fn handle_key_backspace_deletes() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "ab".into();
-        input.fields[0].cursor = 2;
+        input.field_mut(0).unwrap().set_text("ab");
         input.handle_key(&key_event(KeyCode::Backspace, KeyModifiers::NONE));
-        assert_eq!(input.fields[0].text, "a");
-        assert_eq!(input.fields[0].cursor, 1);
+        assert_eq!(input.field(0).unwrap().text(), "a");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 1);
     }
 
     #[test]
     fn handle_key_delete_forward() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "ab".into();
-        input.fields[0].cursor = 0;
+        input.field_mut(0).unwrap().set_text("ab");
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(0);
         input.handle_key(&key_event(KeyCode::Delete, KeyModifiers::NONE));
-        assert_eq!(input.fields[0].text, "b");
-        assert_eq!(input.fields[0].cursor, 0);
+        assert_eq!(input.field(0).unwrap().text(), "b");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 0);
     }
 
     #[test]
     fn handle_key_ctrl_u_kills_to_start() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "hello world".into();
-        input.fields[0].cursor = 5;
+        input.field_mut(0).unwrap().set_text("hello world");
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(5);
         input.handle_key(&key_event(KeyCode::Char('u'), KeyModifiers::CONTROL));
-        assert_eq!(input.fields[0].text, " world");
-        assert_eq!(input.fields[0].cursor, 0);
+        assert_eq!(input.field(0).unwrap().text(), " world");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 0);
     }
 
     #[test]
     fn handle_key_ctrl_k_kills_to_end() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "hello world".into();
-        input.fields[0].cursor = 5;
+        input.field_mut(0).unwrap().set_text("hello world");
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(5);
         input.handle_key(&key_event(KeyCode::Char('k'), KeyModifiers::CONTROL));
-        assert_eq!(input.fields[0].text, "hello");
-        assert_eq!(input.fields[0].cursor, 5);
+        assert_eq!(input.field(0).unwrap().text(), "hello");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 5);
     }
 
     #[test]
     fn handle_key_tab_navigates_multi_field() {
         let mut input = mcp_add_input();
-        assert_eq!(input.focused, 0);
+        assert_eq!(input.focused_index(), 0);
         input.handle_key(&key_event(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(input.focused, 1);
-        input.handle_key(&key_event(KeyCode::Tab, KeyModifiers::NONE));
-        assert_eq!(input.focused, 0);
+        assert_eq!(input.focused_index(), 1);
+        input.handle_key(&key_event(KeyCode::Tab, KeyModifiers::SHIFT));
+        assert_eq!(input.focused_index(), 0);
+        input.handle_key(&key_event(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(input.focused_index(), 1);
+    }
+
+    #[test]
+    fn modified_tab_chords_do_not_navigate_multi_field() {
+        for modifiers in [
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+            KeyModifiers::SUPER,
+        ] {
+            let mut input = mcp_add_input();
+            let outcome = input.handle_key(&key_event(KeyCode::Tab, modifiers));
+            assert!(matches!(outcome, ModalInputOutcome::Unchanged));
+            assert_eq!(input.focused_index(), 0);
+        }
     }
 
     #[test]
@@ -5611,8 +5550,7 @@ mod tests {
     #[test]
     fn handle_key_submit_succeeds() {
         let mut input = mcp_add_input();
-        // URL is the first (required) field in the new order.
-        input.fields[0].text = "https://example.com".into();
+        input.field_mut(0).unwrap().set_text("https://example.com");
         let result = input.handle_key(&key_event(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(result, ModalInputOutcome::Submit { .. }));
     }
@@ -5620,12 +5558,211 @@ mod tests {
     #[test]
     fn handle_key_home_end() {
         let mut input = single_field_input("test");
-        input.fields[0].text = "hello".into();
-        input.fields[0].cursor = 3;
+        input.field_mut(0).unwrap().set_text("hello");
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(3);
         input.handle_key(&key_event(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(input.fields[0].cursor, 0);
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 0);
         input.handle_key(&key_event(KeyCode::End, KeyModifiers::NONE));
-        assert_eq!(input.fields[0].cursor, 5);
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 5);
+    }
+
+    #[test]
+    fn handle_key_tab_completes_single_field_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let completed = directory.path().join("plugin-source");
+        std::fs::write(&completed, "").unwrap();
+        let partial = directory.path().join("plugin-s");
+
+        let mut input = single_field_input("test");
+        input
+            .field_mut(0)
+            .unwrap()
+            .set_text(partial.to_string_lossy());
+        let outcome = input.handle_key(&key_event(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        let field = input.field(0).unwrap();
+        assert_eq!(field.text(), completed.to_string_lossy().as_ref());
+        assert_eq!(field.cursor_byte(), field.text().len());
+    }
+
+    #[test]
+    fn modified_tab_chords_do_not_complete_single_field_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let completed = directory.path().join("plugin-source");
+        std::fs::write(&completed, "").unwrap();
+        let partial = directory
+            .path()
+            .join("plugin-s")
+            .to_string_lossy()
+            .into_owned();
+
+        for key in [
+            key_event(KeyCode::Tab, KeyModifiers::SHIFT),
+            key_event(KeyCode::BackTab, KeyModifiers::NONE),
+            key_event(KeyCode::Tab, KeyModifiers::CONTROL),
+            key_event(KeyCode::Tab, KeyModifiers::ALT),
+            key_event(KeyCode::Tab, KeyModifiers::SUPER),
+        ] {
+            let mut input = single_field_input("test");
+            input.field_mut(0).unwrap().set_text(&partial);
+            let outcome = input.handle_key(&key);
+            assert!(matches!(outcome, ModalInputOutcome::Unchanged));
+            assert_eq!(input.field(0).unwrap().text(), partial);
+            assert_eq!(input.focused_index(), 0);
+        }
+    }
+
+    #[test]
+    fn canonical_paste_shortcuts_include_super_and_exclude_altgr() {
+        crate::clipboard::set_clipboard_probe_hook(
+            crate::clipboard::ClipboardProbeHook::no_raster(Some("foo\r\nbar")),
+        );
+        let mut super_paste = single_field_input("test");
+        let outcome = super_paste.handle_key(&key_event(KeyCode::Char('v'), KeyModifiers::SUPER));
+        crate::clipboard::clear_clipboard_probe_hook();
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        assert_eq!(super_paste.field(0).unwrap().text(), "foobar");
+
+        crate::clipboard::set_clipboard_probe_hook(
+            crate::clipboard::ClipboardProbeHook::no_raster(Some("clipboard")),
+        );
+        let mut altgr = single_field_input("test");
+        let _ = altgr.handle_key(&key_event(
+            KeyCode::Char('v'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ));
+        crate::clipboard::clear_clipboard_probe_hook();
+        assert_eq!(
+            altgr.field(0).unwrap().text(),
+            if cfg!(target_os = "windows") { "v" } else { "" }
+        );
+    }
+
+    #[test]
+    fn canonical_small_word_delete_differs_from_ctrl_w() {
+        const URL: &str = "https://mcp.linear.app/mcp";
+        for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL] {
+            let mut input = single_field_input("test");
+            input.field_mut(0).unwrap().set_text(URL);
+            let outcome = input.handle_key(&key_event(KeyCode::Backspace, modifiers));
+            assert!(matches!(outcome, ModalInputOutcome::Changed));
+            assert_eq!(input.field(0).unwrap().text(), "https://mcp.linear.app/");
+        }
+
+        let mut input = single_field_input("test");
+        input.field_mut(0).unwrap().set_text(URL);
+        let outcome = input.handle_key(&key_event(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        assert_eq!(input.field(0).unwrap().text(), "");
+    }
+
+    #[test]
+    fn alt_word_arrows_and_readline_bindings_are_equivalent() {
+        for key in [
+            key_event(KeyCode::Left, KeyModifiers::ALT),
+            key_event(KeyCode::Char('b'), KeyModifiers::ALT),
+            key_event(KeyCode::Left, KeyModifiers::CONTROL),
+        ] {
+            let mut input = single_field_input("test");
+            input.field_mut(0).unwrap().set_text("hello-world");
+            assert!(matches!(input.handle_key(&key), ModalInputOutcome::Changed));
+            assert_eq!(input.field(0).unwrap().cursor_byte(), "hello-".len());
+        }
+
+        for key in [
+            key_event(KeyCode::Right, KeyModifiers::ALT),
+            key_event(KeyCode::Char('f'), KeyModifiers::ALT),
+            key_event(KeyCode::Right, KeyModifiers::CONTROL),
+        ] {
+            let mut input = single_field_input("test");
+            input.field_mut(0).unwrap().set_text("hello-world");
+            let _ = input.field_mut(0).unwrap().set_cursor_byte(0);
+            assert!(matches!(input.handle_key(&key), ModalInputOutcome::Changed));
+            assert_eq!(input.field(0).unwrap().cursor_byte(), "hello".len());
+        }
+    }
+
+    #[test]
+    fn grapheme_delete_and_middle_insert_are_atomic() {
+        let grapheme = "👩🏽\u{200d}💻";
+        let mut input = single_field_input("test");
+        input
+            .field_mut(0)
+            .unwrap()
+            .set_text(format!("a{grapheme}b"));
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(1);
+
+        assert!(matches!(
+            input.handle_key(&key_event(KeyCode::Delete, KeyModifiers::NONE)),
+            ModalInputOutcome::Changed
+        ));
+        assert_eq!(input.field(0).unwrap().text(), "ab");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 1);
+
+        assert!(matches!(
+            input.handle_key(&key_event(KeyCode::Char('X'), KeyModifiers::NONE)),
+            ModalInputOutcome::Changed
+        ));
+        assert_eq!(input.field(0).unwrap().text(), "aXb");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 2);
+    }
+
+    #[test]
+    fn cursor_and_handled_noop_edits_redraw_without_validation_changes() {
+        let mut input = single_field_input("test");
+        input.field_mut(0).unwrap().set_text("abc");
+        input.error = Some("Required: URL".to_owned());
+
+        let outcome = input.handle_key(&key_event(KeyCode::Left, KeyModifiers::NONE));
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        assert_eq!(input.field(0).unwrap().text(), "abc");
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 2);
+        assert_eq!(input.focused_index(), 0);
+        assert_eq!(input.error.as_deref(), Some("Required: URL"));
+
+        let _ = input.handle_key(&key_event(KeyCode::Home, KeyModifiers::NONE));
+        let outcome = input.handle_key(&key_event(KeyCode::Left, KeyModifiers::NONE));
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        assert_eq!(input.field(0).unwrap().cursor_byte(), 0);
+        assert_eq!(input.error.as_deref(), Some("Required: URL"));
+
+        let outcome = input.handle_key(&key_event(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(matches!(outcome, ModalInputOutcome::Changed));
+        assert_eq!(input.field(0).unwrap().text(), "xabc");
+        assert!(input.error.is_none());
+    }
+
+    #[test]
+    fn narrow_form_viewport_keeps_unicode_and_cursor_visible() {
+        let grapheme = "👩🏽\u{200d}💻";
+        let text = format!("1234567中e\u{301}{grapheme}b");
+        let mut input = single_field_input("test");
+        input.field_mut(0).unwrap().set_text(&text);
+        let _ = input.field_mut(0).unwrap().set_cursor_byte(text.len() - 1);
+
+        let area = Rect::new(0, 0, 20, 4);
+        let theme = Theme::current();
+        let mut buffer = Buffer::empty(area);
+        let prompt_width = crate::glyphs::prompt_arrow().width();
+        let editor_width = (area.width as usize - 8 - prompt_width).max(1);
+        let viewport = input.field(0).unwrap().viewport(editor_width);
+        let visible = &input.field(0).unwrap().text()[viewport.visible_byte_range.clone()];
+        assert!(visible.contains('中'));
+        assert!(visible.contains("e\u{301}"));
+        assert!(visible.contains(grapheme));
+
+        render_input_form(&mut buffer, area, &input, &theme);
+        let rendered = (0..area.width).fold(String::new(), |mut line, x| {
+            line.push_str(buffer[(x, 2)].symbol());
+            line
+        });
+        assert!(rendered.contains('中'));
+        assert!(rendered.contains("e\u{301}"));
+        assert!(rendered.contains(grapheme));
+        let text_x = 4 + prompt_width as u16;
+        let cursor_x = text_x + viewport.cursor_display_column as u16;
+        assert_eq!(buffer[(cursor_x, 2)].bg, theme.text_primary);
     }
 
     // ── Hook helpers with StatusFilter ───────────────────────────────
@@ -5649,94 +5786,6 @@ mod tests {
     }
 
     #[test]
-    fn next_visible_hook_filter_enabled() {
-        let hooks = vec![
-            make_hook("a", "/src", true),  // disabled
-            make_hook("b", "/src", false), // enabled
-            make_hook("c", "/src", true),  // disabled
-        ];
-        let collapsed = std::collections::HashSet::new();
-        // From index 0, next enabled hook is index 1.
-        assert_eq!(
-            next_visible_hook(&hooks, 0, &collapsed, StatusFilter::Enabled, ""),
-            Some(1)
-        );
-        // From index 1, no enabled hook after it.
-        assert_eq!(
-            next_visible_hook(&hooks, 1, &collapsed, StatusFilter::Enabled, ""),
-            None
-        );
-    }
-
-    #[test]
-    fn prev_visible_hook_filter_enabled() {
-        let hooks = vec![
-            make_hook("a", "/src", false), // enabled
-            make_hook("b", "/src", true),  // disabled
-            make_hook("c", "/src", false), // enabled
-        ];
-        let collapsed = std::collections::HashSet::new();
-        // From index 2, prev enabled hook is index 0.
-        assert_eq!(
-            prev_visible_hook(&hooks, 2, &collapsed, StatusFilter::Enabled, ""),
-            Some(0)
-        );
-        // From index 0, no enabled hook before it.
-        assert_eq!(
-            prev_visible_hook(&hooks, 0, &collapsed, StatusFilter::Enabled, ""),
-            None
-        );
-    }
-
-    #[test]
-    fn next_visible_hook_filter_disabled() {
-        let hooks = vec![
-            make_hook("a", "/src", false), // enabled
-            make_hook("b", "/src", true),  // disabled
-            make_hook("c", "/src", false), // enabled
-        ];
-        let collapsed = std::collections::HashSet::new();
-        // From index 0, next disabled hook is index 1.
-        assert_eq!(
-            next_visible_hook(&hooks, 0, &collapsed, StatusFilter::Disabled, ""),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn next_visible_hook_filter_all_same_as_unfiltered() {
-        let hooks = vec![
-            make_hook("a", "/src", false),
-            make_hook("b", "/src", true),
-            make_hook("c", "/src", false),
-        ];
-        let collapsed = std::collections::HashSet::new();
-        assert_eq!(
-            next_visible_hook(&hooks, 0, &collapsed, StatusFilter::All, ""),
-            Some(1)
-        );
-        assert_eq!(
-            next_visible_hook(&hooks, 1, &collapsed, StatusFilter::All, ""),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn next_visible_hook_filter_across_groups() {
-        let hooks = vec![
-            make_hook("a", "/src1", true),  // disabled, group 1
-            make_hook("b", "/src2", false), // enabled, group 2
-        ];
-        let collapsed = std::collections::HashSet::new();
-        // With Enabled filter, hook 0 is excluded. Only hook 1 is in groups.
-        // Starting from hook 0 (filtered out), should find hook 1.
-        assert_eq!(
-            next_visible_hook(&hooks, 0, &collapsed, StatusFilter::Enabled, ""),
-            Some(1)
-        );
-    }
-
-    #[test]
     fn build_hook_groups_respects_filter() {
         let hooks = vec![
             make_hook("a", "/src", false),   // enabled
@@ -5744,15 +5793,17 @@ mod tests {
             make_hook("c", "/other", false), // enabled
         ];
         let groups = build_hook_groups(&hooks, StatusFilter::Enabled, "");
-        // Two groups: /src with [0], /other with [2]. Hook 1 excluded.
+        // Two custom groups, ordered A–Z by display label: /other before /src.
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].1, vec![0]);
-        assert_eq!(groups[1].1, vec![2]);
+        assert_eq!(groups[0].source_dir, "/other");
+        assert_eq!(groups[0].indices, vec![2]);
+        assert_eq!(groups[1].source_dir, "/src");
+        assert_eq!(groups[1].indices, vec![0]);
 
         let groups_disabled = build_hook_groups(&hooks, StatusFilter::Disabled, "");
         // One group: /src with [1].
         assert_eq!(groups_disabled.len(), 1);
-        assert_eq!(groups_disabled[0].1, vec![1]);
+        assert_eq!(groups_disabled[0].indices, vec![1]);
     }
 
     #[test]
@@ -5809,28 +5860,6 @@ mod tests {
                     name: "subagent-driven-development",
                     description: Some("Fast iteration with two-stage review"),
                     has_agents: true,
-                    ..Default::default()
-                }
-                .build(),
-            ],
-            error: None,
-        }
-    }
-
-    /// Second marketplace source for multi-source tests.
-    fn local_plugins_source() -> xai_hooks_plugins_types::MarketplaceScanResult {
-        xai_hooks_plugins_types::MarketplaceScanResult {
-            source_name: "local-plugins".into(),
-            source_kind: "local".into(),
-            source_url_or_path: "/home/user/.chutes-build/marketplace/local".into(),
-            plugins: vec![
-                TestPlugin {
-                    name: "my-linter",
-                    version: Some("0.1.0"),
-                    description: Some("Custom linting rules"),
-                    author: None,
-                    has_hooks: true,
-                    install_status: "installed",
                     ..Default::default()
                 }
                 .build(),
@@ -5903,235 +5932,6 @@ mod tests {
                 remote_subdir: None,
             }
         }
-    }
-
-    // ── Marketplace: filtered_marketplace_count ─────────────────────
-
-    #[test]
-    fn marketplace_count_no_query_returns_total_slots() {
-        let sources = vec![superpowers_source()];
-        // With no query: 1 header + 5 plugins = 6
-        assert_eq!(filtered_marketplace_count(&sources, ""), 6);
-    }
-
-    #[test]
-    fn marketplace_count_query_matches_subset() {
-        let sources = vec![superpowers_source()];
-        // "debug" matches "systematic-debugging" — source has matching plugins,
-        // so it contributes 1 header + 5 plugin slots = 6.
-        assert_eq!(filtered_marketplace_count(&sources, "debug"), 6);
-    }
-
-    #[test]
-    fn marketplace_count_query_no_matches_uses_plugin_len() {
-        let sources = vec![superpowers_source()];
-        // "zzzzz" matches nothing. Source has no matching plugins,
-        // so it contributes plugins.len().max(1) = 5.
-        assert_eq!(filtered_marketplace_count(&sources, "zzzzz"), 5);
-    }
-
-    #[test]
-    fn marketplace_count_multi_source() {
-        let sources = vec![superpowers_source(), local_plugins_source()];
-        // No query: source0 = 1 + 5 = 6, source1 = 1 + 1 = 2 → 8
-        assert_eq!(filtered_marketplace_count(&sources, ""), 8);
-    }
-
-    // ── Marketplace: next_matching_marketplace ──────────────────────
-
-    #[test]
-    fn marketplace_next_from_start_finds_header() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // First selectable item is the source header at index 0.
-        assert_eq!(
-            next_matching_marketplace(&sources, 0, "", &collapsed),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn marketplace_next_skips_to_plugin() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // From index 1, next match is the first plugin "superpowers" at index 1.
-        assert_eq!(
-            next_matching_marketplace(&sources, 1, "", &collapsed),
-            Some(1)
-        );
-        // Index 2 = "brainstorming"
-        assert_eq!(
-            next_matching_marketplace(&sources, 2, "", &collapsed),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn marketplace_next_with_query_skips_non_matching_plugins() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // "debug" matches only "systematic-debugging" (index 4 in flat layout:
-        // header=0, superpowers=1, brainstorming=2, tdd=3, debugging=4).
-        // Starting from 0, first hit is the header (source has matches).
-        let first = next_matching_marketplace(&sources, 0, "debug", &collapsed);
-        assert_eq!(first, Some(0));
-        // Starting from 1, find the matching plugin at index 4 ("systematic-debugging").
-        let plugin = next_matching_marketplace(&sources, 1, "debug", &collapsed);
-        assert_eq!(plugin, Some(4));
-    }
-
-    #[test]
-    fn marketplace_next_past_end_returns_none() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        assert_eq!(
-            next_matching_marketplace(&sources, 100, "", &collapsed),
-            None
-        );
-    }
-
-    // ── Marketplace: prev_matching_marketplace ──────────────────────
-
-    #[test]
-    fn marketplace_prev_from_last_finds_last_plugin() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // Last plugin "subagent-driven-development" is at index 5.
-        let last = prev_matching_marketplace(&sources, 5, "", &collapsed);
-        assert_eq!(last, Some(5));
-    }
-
-    #[test]
-    fn marketplace_prev_from_plugin_finds_header() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // From index 0 (header), prev should be the header itself.
-        assert_eq!(
-            prev_matching_marketplace(&sources, 0, "", &collapsed),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn marketplace_prev_with_query_skips_non_matching() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // "brainstorming" matches only plugin at index 2.
-        let prev = prev_matching_marketplace(&sources, 5, "brainstorming", &collapsed);
-        // "brainstorming" is at index 2 (header=0, superpowers=1, brainstorming=2).
-        assert_eq!(prev, Some(2));
-    }
-
-    // ── Marketplace: resolve_marketplace_index ──────────────────────
-
-    #[test]
-    fn resolve_index_zero_is_source_header() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        let hit = resolve_marketplace_index(&sources, 0, "", &collapsed);
-        assert!(matches!(
-            hit,
-            Some(MarketplaceHit::SourceHeader { source_index: 0 })
-        ));
-    }
-
-    #[test]
-    fn resolve_index_one_is_first_plugin() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        let hit = resolve_marketplace_index(&sources, 1, "", &collapsed);
-        match hit {
-            Some(MarketplaceHit::Plugin {
-                source_index,
-                plugin,
-                ..
-            }) => {
-                assert_eq!(source_index, 0);
-                assert_eq!(plugin.name, "superpowers");
-            }
-            other => panic!("expected Plugin hit for 'superpowers', got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_index_last_plugin() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        // Index 5 = last plugin "subagent-driven-development".
-        let hit = resolve_marketplace_index(&sources, 5, "", &collapsed);
-        match hit {
-            Some(MarketplaceHit::Plugin {
-                source_index,
-                plugin,
-                ..
-            }) => {
-                assert_eq!(source_index, 0);
-                assert_eq!(plugin.name, "subagent-driven-development");
-            }
-            other => panic!("expected Plugin hit for 'subagent-driven-development', got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_index_out_of_range_returns_none() {
-        let sources = vec![superpowers_source()];
-        let collapsed = std::collections::HashSet::new();
-        assert!(resolve_marketplace_index(&sources, 99, "", &collapsed).is_none());
-    }
-
-    #[test]
-    fn resolve_index_multi_source_second_header() {
-        let sources = vec![superpowers_source(), local_plugins_source()];
-        let collapsed = std::collections::HashSet::new();
-        // Source 0: header(0) + 5 plugins(1..5) = indices 0..5
-        // Source 1: header(6) + 1 plugin(7) = indices 6..7
-        let hit = resolve_marketplace_index(&sources, 6, "", &collapsed);
-        assert!(matches!(
-            hit,
-            Some(MarketplaceHit::SourceHeader { source_index: 1 })
-        ));
-        let hit = resolve_marketplace_index(&sources, 7, "", &collapsed);
-        match hit {
-            Some(MarketplaceHit::Plugin {
-                source_index,
-                plugin,
-                ..
-            }) => {
-                assert_eq!(source_index, 1);
-                assert_eq!(plugin.name, "my-linter");
-            }
-            other => panic!("expected Plugin hit for 'my-linter', got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_index_with_query_skips_non_matching_source() {
-        let sources = vec![superpowers_source(), local_plugins_source()];
-        let collapsed = std::collections::HashSet::new();
-        // "linter" matches only the local-plugins source. The superpowers source
-        // has no matching plugins, so it contributes plugins.len().max(1)=5 slots
-        // that are all None. The local-plugins header starts at index 5.
-        let hit = resolve_marketplace_index(&sources, 5, "linter", &collapsed);
-        assert!(matches!(
-            hit,
-            Some(MarketplaceHit::SourceHeader { source_index: 1 })
-        ));
-    }
-
-    #[test]
-    fn resolve_index_collapsed_source_skips_plugins() {
-        let sources = vec![superpowers_source()];
-        let mut collapsed = std::collections::HashSet::new();
-        collapsed.insert(0usize); // collapse the superpowers source
-        // Header is still at index 0.
-        let hit = resolve_marketplace_index(&sources, 0, "", &collapsed);
-        assert!(matches!(
-            hit,
-            Some(MarketplaceHit::SourceHeader { source_index: 0 })
-        ));
-        // Index 1 is no longer a plugin — plugins are skipped when collapsed.
-        let hit = resolve_marketplace_index(&sources, 1, "", &collapsed);
-        assert!(hit.is_none());
     }
 
     // ── Marketplace: resolve_marketplace_selection ───────────────────
@@ -6395,7 +6195,7 @@ mod tests {
     fn marketplace_is_group_expanded_forced_open_during_search() {
         let mut state = ExtensionsModalState::new(ExtensionsTab::Marketplace);
         state.marketplace_collapsed_sources.insert(0);
-        state.picker_state.query = "debug".into();
+        state.picker_state.set_query("debug");
         // During search, collapsed sources are forced open.
         assert!(state.is_group_expanded(0, "0"));
     }
@@ -6403,7 +6203,7 @@ mod tests {
     // ── Marketplace: error source rendering ─────────────────────────
 
     #[test]
-    fn marketplace_error_source_has_zero_plugins() {
+    fn marketplace_error_source_renders_header_with_error_badge() {
         let error_source = xai_hooks_plugins_types::MarketplaceScanResult {
             source_name: "broken-source".into(),
             source_kind: "git".into(),
@@ -6411,10 +6211,10 @@ mod tests {
             plugins: vec![],
             error: Some("failed to clone: repository not found".into()),
         };
-        let sources = vec![superpowers_source(), error_source];
-        // No query: source0 = 1+5=6, error_source = 1+0=1 (has_matching=true
-        // because query is empty, so 1 header + 0 plugins) → 7
-        assert_eq!(filtered_marketplace_count(&sources, ""), 7);
+        let mut state = marketplace_modal_state(error_source);
+        let buf = render_marketplace_into_buffer(&mut state, 100, 40);
+        assert!(buffer_count(&buf, "broken-source") >= 1);
+        assert!(buffer_count(&buf, "[error]") >= 1);
     }
 
     // ── Marketplace: components rendering + search ──────────────────
@@ -6553,38 +6353,6 @@ mod tests {
                 "lsp servers"
             ]
         );
-    }
-
-    #[test]
-    fn marketplace_nav_and_resolve_agree_with_count_on_name_query() {
-        let sources = vec![superpowers_source(), local_plugins_source()];
-        let collapsed = std::collections::HashSet::new();
-        let query = "linter";
-        // source0 (no match) = 5 slots; source1 = 1 header + 1 plugin.
-        assert_eq!(filtered_marketplace_count(&sources, query), 7);
-        assert_eq!(
-            next_matching_marketplace(&sources, 0, query, &collapsed),
-            Some(5)
-        );
-        assert_eq!(
-            next_matching_marketplace(&sources, 6, query, &collapsed),
-            Some(6)
-        );
-        assert_eq!(
-            prev_matching_marketplace(&sources, 6, query, &collapsed),
-            Some(6)
-        );
-        match resolve_marketplace_index(&sources, 6, query, &collapsed) {
-            Some(MarketplaceHit::Plugin {
-                source_index,
-                plugin,
-                ..
-            }) => {
-                assert_eq!(source_index, 1);
-                assert_eq!(plugin.name, "my-linter");
-            }
-            other => panic!("expected name-matched plugin hit, got {other:?}"),
-        }
     }
 
     // ── Marketplace: collapsed/expanded row rendering ────────────────
@@ -6907,10 +6675,12 @@ mod tests {
                 None,
             ]
         );
+        // Within the shared marketplace group, children are A–Z by name:
+        // catalog-tool (1) before installed-tool (2).
         assert_eq!(
             state.entry_data_indices,
             vec![None, Some(0), None, Some(1), Some(2)],
-            "children keep data order within their group"
+            "children A–Z by name within their group (catalog before installed)"
         );
 
         state
@@ -6938,7 +6708,7 @@ mod tests {
         assert_eq!(buffer_count(&buf, "User (1 plugin)"), 1);
         assert_eq!(buffer_count(&buf, "user-tool"), 0);
 
-        state.picker_state.query = "user".into();
+        state.picker_state.set_query("user");
         let buf = render_plugins_into_buffer(&mut state, 100, 40);
         assert_eq!(
             buffer_count(&buf, "user-tool"),
@@ -7022,6 +6792,424 @@ mod tests {
             buffer_count(&expanded_buf, "contents shown after install"),
             1,
             "expanded view shows the install hint placeholder exactly once"
+        );
+    }
+
+    #[test]
+    fn confirmation_overlay_suppresses_managed_url_underline() {
+        use crate::views::mcps_modal::McpWireSource;
+
+        // Tall list so the Managed connectors URL sits above the centered
+        // confirmation text (not only cells the message string overwrites).
+        let mut managed = Vec::new();
+        for i in 0..20 {
+            managed.push(make_mcp_server_for_rows(
+                &format!("grok_com_srv_{i}"),
+                McpWireSource::Managed,
+                vec![],
+            ));
+        }
+        managed.push(make_mcp_server_for_rows(
+            "local-grafana",
+            McpWireSource::Local,
+            vec![],
+        ));
+
+        let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
+        state.mcps_data = TabDataState::Loaded(managed);
+        state.session_team_id = Some("team-1".into());
+
+        let area = Rect::new(0, 0, 100, 40);
+        let mut open_buf = Buffer::empty(area);
+        render_extensions_modal(&mut open_buf, area, &mut state, None, false, 0);
+
+        let underlined = |buf: &Buffer| -> usize {
+            let mut n = 0usize;
+            for y in 0..area.height {
+                for x in 0..area.width {
+                    if buf
+                        .cell((x, y))
+                        .is_some_and(|c| c.modifier.contains(Modifier::UNDERLINED))
+                    {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+
+        assert!(
+            underlined(&open_buf) > 0,
+            "precondition: managed connectors URL paints UNDERLINED cells"
+        );
+        assert!(
+            state.picker_state.link_band.is_some(),
+            "precondition: link hit band recorded for connectors URL"
+        );
+
+        state.modal_message = Some(ModalMessage::Confirmation {
+            message: "Remove MCP server \"local-grafana\"?".into(),
+            action: ConfirmationAction::DeleteMcpServer {
+                server_name: "local-grafana".into(),
+            },
+            pending_entry_index: Some(0),
+        });
+        state.picker_state.link_band = None;
+
+        let mut confirm_buf = Buffer::empty(area);
+        render_extensions_modal(&mut confirm_buf, area, &mut state, None, false, 0);
+
+        assert_eq!(
+            buffer_count(&confirm_buf, "Remove MCP server \"local-grafana\"?"),
+            1,
+            "confirmation message must be painted"
+        );
+        assert_eq!(
+            underlined(&confirm_buf),
+            0,
+            "confirmation must not paint UNDERLINED under the full overlay"
+        );
+        assert!(
+            state.picker_state.link_band.is_none(),
+            "confirmation must not record a connectors link hit band"
+        );
+    }
+
+    #[test]
+    fn first_selectable_index_skips_headers() {
+        // Generic list with a non-selectable first row, then two selectable rows.
+        let non_sel = [true, false, false];
+        assert_eq!(picker::first_selectable_index(0, 3, &non_sel), 1);
+        assert_eq!(picker::first_selectable_index(1, 3, &non_sel), 1);
+        assert_eq!(picker::first_selectable_index(5, 3, &non_sel), 2); // min-clamp to last
+        assert_eq!(picker::first_selectable_index(0, 1, &[true]), 0); // only non-selectable
+        assert_eq!(picker::first_selectable_index(0, 0, &[]), 0);
+    }
+
+    #[test]
+    fn skills_groups_default_collapsed_and_selectable() {
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        let skills = vec![make_skill("alpha", "a"), make_skill("beta", "b")];
+        state.seed_skills_groups_once(&skills);
+        state.skills_data = TabDataState::Loaded(skills);
+        state.workflows_data = TabDataState::Loaded(vec![]);
+        state.picker_state.selected = 0;
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+        assert_eq!(
+            state.entry_group_keys.first().and_then(|k| k.as_deref()),
+            Some("User"),
+            "first row is collapsible User group"
+        );
+        assert!(
+            !state.entry_non_selectable.first().copied().unwrap_or(true),
+            "group headers are selectable"
+        );
+        assert_eq!(
+            state
+                .entry_data_indices
+                .iter()
+                .filter(|d| d.is_some())
+                .count(),
+            0,
+            "children hidden while collapsed"
+        );
+        assert!(
+            state
+                .entry_labels_cache
+                .iter()
+                .any(|l| l.starts_with("User (")),
+            "collapsed header still visible"
+        );
+        // Expand User and re-render.
+        state.skills_collapsed_groups.remove("User");
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+        assert!(
+            state.entry_data_indices.iter().any(|d| d.is_some()),
+            "children visible after expand"
+        );
+    }
+
+    #[test]
+    fn workflows_default_collapsed_when_skills_loading_or_error() {
+        let mk_wf = || WorkflowInfo {
+            name: "fix-ci".into(),
+            description: "Fix CI".into(),
+            when_to_use: None,
+            source: "builtin".into(),
+            path: None,
+        };
+        // Skills still loading: tab is a spinner (no list), but seed must still
+        // mark Workflows collapsed so the first paint after skills fails is collapsed.
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.seed_workflows_group_once();
+        state.skills_data = TabDataState::Loading;
+        state.workflows_data = TabDataState::Loaded(vec![mk_wf()]);
+        assert!(
+            state
+                .skills_collapsed_groups
+                .contains(SKILLS_WORKFLOWS_GROUP_KEY),
+            "workflows seed independent of skills load"
+        );
+
+        // Skills failed: list paints; workflows children stay hidden.
+        let mut state_err = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state_err.seed_workflows_group_once();
+        state_err.skills_data = TabDataState::Error("boom".into());
+        state_err.workflows_data = TabDataState::Loaded(vec![mk_wf()]);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state_err, None, false, 0);
+        assert!(
+            state_err
+                .entry_labels_cache
+                .iter()
+                .any(|l| l.starts_with("Workflows (")),
+            "workflows header visible when skills Error"
+        );
+        assert!(
+            !state_err.entry_labels_cache.iter().any(|l| l == "fix-ci"),
+            "workflows children hidden while collapsed (skills Error)"
+        );
+    }
+
+    #[test]
+    fn seed_skills_unions_without_wiping_workflows_expand() {
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.seed_workflows_group_once();
+        // User expanded Workflows before skills arrived.
+        state
+            .skills_collapsed_groups
+            .remove(SKILLS_WORKFLOWS_GROUP_KEY);
+        let skills = vec![make_skill("alpha", "a")];
+        state.seed_skills_groups_once(&skills);
+        assert!(
+            !state
+                .skills_collapsed_groups
+                .contains(SKILLS_WORKFLOWS_GROUP_KEY),
+            "skills seed must not re-collapse a user-expanded Workflows group"
+        );
+        assert!(
+            state.skills_collapsed_groups.contains("User"),
+            "skills seed still collapses skill source groups"
+        );
+    }
+
+    #[test]
+    fn plugins_sort_az_by_name_within_group() {
+        use xai_hooks_plugins_types::PluginOrigin;
+        let mut state = plugins_modal_state(vec![
+            make_plugin_with_origin("Zebra", PluginOrigin::UserGrok),
+            make_plugin_with_origin("alpha", PluginOrigin::UserGrok),
+            make_plugin_with_origin("MID", PluginOrigin::UserGrok),
+        ]);
+        let _buf = render_plugins_into_buffer(&mut state, 100, 40);
+        assert_eq!(
+            state.entry_labels_cache,
+            vec![
+                "User (3 plugins)".to_string(),
+                "alpha".to_string(),
+                "MID".to_string(),
+                "Zebra".to_string(),
+            ]
+        );
+        // Display order is A–Z; indices still point at original data slots.
+        assert_eq!(
+            state.entry_data_indices,
+            vec![None, Some(1), Some(2), Some(0)]
+        );
+    }
+
+    #[test]
+    fn ordered_marketplace_view_pins_official_then_az() {
+        let mp = |name: &str, url: &str, err: Option<&str>, plugins: &[&'static str]| {
+            xai_hooks_plugins_types::MarketplaceScanResult {
+                source_name: name.into(),
+                source_kind: "git".into(),
+                source_url_or_path: url.into(),
+                plugins: plugins
+                    .iter()
+                    .copied()
+                    .map(|n| {
+                        TestPlugin {
+                            name: n,
+                            install_status: "installed",
+                            ..Default::default()
+                        }
+                        .build()
+                    })
+                    .collect(),
+                error: err.map(str::to_string),
+            }
+        };
+        let sources = vec![
+            mp("zeta-mp", "https://example.com/zeta", Some("boom"), &[]),
+            mp(
+                "xAI Official",
+                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
+                None,
+                &["zeta", "alpha"],
+            ),
+            mp("alpha-mp", "https://example.com/alpha", None, &[]),
+        ];
+        let view = ordered_marketplace_view(&sources);
+        let names: Vec<_> = view
+            .iter()
+            .map(|v| sources[v.source_index].source_name.as_str())
+            .collect();
+        assert_eq!(names, ["xAI Official", "alpha-mp", "zeta-mp"]);
+        let plugin_names: Vec<_> = view[0]
+            .plugin_indices
+            .iter()
+            .map(|&pi| sources[view[0].source_index].plugins[pi].name.as_str())
+            .collect();
+        assert_eq!(plugin_names, ["alpha", "zeta"]);
+    }
+
+    #[test]
+    fn skills_groups_then_az_by_label() {
+        let mut project_z = make_skill("zzz-proj", "project skill");
+        project_z.scope = xai_grok_tools::implementations::skills::types::SkillScope::Local;
+        project_z.config_source = Some(
+            xai_grok_tools::types::config_source::ConfigSource::Project {
+                path: std::path::PathBuf::from("/repo/.chutes-build/skills/zzz"),
+            },
+        );
+        project_z.display_name = Some("zeta-proj".into());
+
+        let mut project_a = make_skill("aaa-proj", "other project");
+        project_a.scope = xai_grok_tools::implementations::skills::types::SkillScope::Repo;
+        project_a.config_source = Some(
+            xai_grok_tools::types::config_source::ConfigSource::Project {
+                path: std::path::PathBuf::from("/repo/.chutes-build/skills/aaa"),
+            },
+        );
+        project_a.display_name = Some("alpha-proj".into());
+
+        let mut user_a = make_skill("user-alpha", "user a");
+        user_a.display_name = Some("alpha-user".into());
+        let plugin = make_plugin_skill("pb", "plugin b", "beta-plugin");
+
+        let skills = vec![user_a, plugin, project_z, project_a];
+        let result = filter_and_sort_skills(&skills, "", StatusFilter::All);
+        let labels: Vec<_> = result
+            .matches
+            .iter()
+            .map(|m| skills[m.skill_index].label().to_string())
+            .collect();
+        assert_eq!(labels, ["alpha-proj", "zeta-proj", "alpha-user", "pb"]);
+
+        // Headers come from render; keep one check that they appear.
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.skills_data = TabDataState::Loaded(skills);
+        state.workflows_data = TabDataState::Loaded(vec![]);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+        assert!(
+            state
+                .entry_labels_cache
+                .iter()
+                .any(|l| l.starts_with("Project ("))
+        );
+        assert!(
+            state
+                .entry_labels_cache
+                .iter()
+                .any(|l| l.starts_with("User ("))
+        );
+        assert!(
+            state
+                .entry_labels_cache
+                .iter()
+                .any(|l| l.starts_with("Plugin: beta-plugin ("))
+        );
+    }
+
+    #[test]
+    fn skills_sort_az_uses_label_not_slash_name() {
+        let mut a = make_skill("zzz", "desc a");
+        a.display_name = Some("aaa".into());
+        let b = make_skill("mmm", "desc b");
+        let skills = vec![a, b];
+        let result = filter_and_sort_skills(&skills, "", StatusFilter::All);
+        assert_eq!(skills[result.matches[0].skill_index].label(), "aaa");
+        assert_eq!(skills[result.matches[1].skill_index].label(), "mmm");
+    }
+
+    #[test]
+    fn workflows_sort_az_by_name() {
+        let mut state = ExtensionsModalState::new(ExtensionsTab::Skills);
+        state.skills_data = TabDataState::Loaded(vec![]);
+        state.workflows_data = TabDataState::Loaded(vec![
+            WorkflowInfo {
+                name: "zeta-wf".into(),
+                description: "Z".into(),
+                when_to_use: None,
+                source: "builtin".into(),
+                path: None,
+            },
+            WorkflowInfo {
+                name: "alpha-wf".into(),
+                description: "A".into(),
+                when_to_use: None,
+                source: "builtin".into(),
+                path: None,
+            },
+        ]);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
+        assert_eq!(
+            state.entry_labels_cache,
+            ["Workflows (2 workflows)", "alpha-wf", "zeta-wf"]
+        );
+    }
+
+    #[test]
+    fn hooks_group_and_row_order() {
+        let mut h_stop = make_hook("stop-hook", "/tmp/hooks-src", false);
+        h_stop.event = xai_hooks_plugins_types::HookEvent::Stop;
+        let mut h_pre = make_hook("pre-hook", "/tmp/hooks-src", false);
+        h_pre.event = xai_hooks_plugins_types::HookEvent::PreToolUse;
+        h_pre.matcher = Some("Bash".into());
+        let mut h_notify = make_hook("notify-hook", "/tmp/hooks-src", false);
+        h_notify.event = xai_hooks_plugins_types::HookEvent::Notification;
+
+        let hooks = vec![
+            make_hook("c", "/zzz/custom", false),
+            h_stop,
+            make_hook("a", "/repo/.chutes-build/hooks", false),
+            h_pre,
+            h_notify,
+            make_hook("b", "/aaa/custom", false),
+        ];
+        let groups = build_hook_groups(&hooks, StatusFilter::All, "");
+        // Project first, then Custom groups A–Z by path (incl. /tmp/hooks-src).
+        let dirs: Vec<_> = groups.iter().map(|g| g.source_dir).collect();
+        assert_eq!(
+            dirs,
+            [
+                "/repo/.chutes-build/hooks",
+                "/aaa/custom",
+                "/tmp/hooks-src",
+                "/zzz/custom"
+            ]
+        );
+
+        let custom_group = groups
+            .iter()
+            .find(|g| g.source_dir == "/tmp/hooks-src")
+            .expect("custom source");
+        let labels: Vec<_> = custom_group
+            .indices
+            .iter()
+            .map(|&i| hook_row_label(&hooks[i]))
+            .collect();
+        assert_eq!(
+            labels,
+            ["on:Notification", "on:Pre-Tool Use /Bash", "on:Stop"]
         );
     }
 }

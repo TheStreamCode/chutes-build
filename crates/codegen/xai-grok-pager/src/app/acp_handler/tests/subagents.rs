@@ -157,7 +157,7 @@
         );
     }
 
-    /// Regression: replay from `updates.jsonl` emits `chutes.build/session/update` (not
+    /// Regression: replay from `updates.jsonl` emits `chutes.ai/session/update` (not
     /// `session_notification`). Subagent lifecycle events must still populate
     /// `subagent_sessions` and the parent scrollback `SubagentBlock`.
     #[test]
@@ -819,7 +819,7 @@
 
         assert!(
             !affected,
-            "malformed chutes.build/session/update params must not redraw"
+            "malformed chutes.ai/session/update params must not redraw"
         );
         assert!(
             app.agents.get(&AgentId(0)).unwrap().scrollback.is_empty(),

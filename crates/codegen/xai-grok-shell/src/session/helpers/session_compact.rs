@@ -45,6 +45,15 @@ pub(crate) enum CompactFailure {
     /// Failure may resolve on retry. The caller follows its existing
     /// N-attempt + backoff loop.
     Transient(acp::Error),
+    /// User/stop cancelled the in-flight compact. Do not retry or suppress AUTO.
+    Cancelled,
+}
+/// Stable error payload for a user-cancelled compact (pager + retry loop).
+pub(crate) const COMPACT_CANCELLED_MSG: &str = "compact cancelled";
+impl CompactFailure {
+    pub(crate) fn cancelled_error() -> acp::Error {
+        acp::Error::internal_error().data(COMPACT_CANCELLED_MSG)
+    }
 }
 pub(crate) use xai_grok_sampling_types::is_context_length_error;
 /// Classify an upstream `SamplingError` for the compaction retry loop.
@@ -58,7 +67,7 @@ pub(crate) use xai_grok_sampling_types::is_context_length_error;
 fn classify_sampling_error(err: SamplingError) -> CompactFailure {
     let acp_err = acp::Error::internal_error().data(format!("compact failed: {err}"));
     let deterministic = match &err {
-        SamplingError::Auth(_)
+        SamplingError::Auth { .. }
         | SamplingError::InvalidConfiguration(_)
         | SamplingError::Serialization(_)
         | SamplingError::IdleTimeout { .. } => true,
@@ -71,12 +80,8 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
                     && *status != StatusCode::TOO_MANY_REQUESTS)
         }
         SamplingError::MaxTokensTruncation => true,
-        SamplingError::Http(error) => error.status().is_some_and(|status| {
-            status.is_client_error()
-                && status != StatusCode::REQUEST_TIMEOUT
-                && status != StatusCode::TOO_MANY_REQUESTS
-        }),
-        SamplingError::EventStreamError(_)
+        SamplingError::Http(_)
+        | SamplingError::EventStreamError(_)
         | SamplingError::StreamError { .. }
         | SamplingError::EmptyResponse { .. }
         | SamplingError::DoomLoopDetected { .. } => false,
@@ -319,14 +324,75 @@ enum StreamStep<T> {
     Ended,
     IdleTimeout,
 }
-async fn next_stream_step<S, T>(stream: &mut S, idle_timeout: std::time::Duration) -> StreamStep<T>
+async fn next_stream_step<S, T>(
+    stream: &mut S,
+    idle_timeout: std::time::Duration,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<StreamStep<T>, CompactFailure>
 where
     S: futures_util::Stream<Item = T> + Unpin,
 {
-    match tokio::time::timeout(idle_timeout, stream.next()).await {
-        Ok(Some(item)) => StreamStep::Item(item),
-        Ok(None) => StreamStep::Ended,
-        Err(_) => StreamStep::IdleTimeout,
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(CompactFailure::Cancelled),
+        step = tokio::time::timeout(idle_timeout, stream.next()) => Ok(match step {
+            Ok(Some(item)) => StreamStep::Item(item),
+            Ok(None) => StreamStep::Ended,
+            Err(_) => StreamStep::IdleTimeout,
+        }),
+    }
+}
+/// Abort `fut` if stop wins while the compact HTTP stream is still opening.
+async fn await_unless_cancelled<F, T>(
+    cancel: &tokio_util::sync::CancellationToken,
+    fut: F,
+) -> Result<T, CompactFailure>
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(CompactFailure::Cancelled),
+        result = fut => Ok(result),
+    }
+}
+#[cfg(test)]
+mod compact_cancel_await_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
+    #[tokio::test]
+    async fn pre_cancelled_token_skips_fut() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let err = await_unless_cancelled(&cancel, async {
+            panic!("fut must not run when already cancelled");
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CompactFailure::Cancelled));
+    }
+    #[tokio::test]
+    async fn cancel_aborts_pending_open() {
+        let cancel = CancellationToken::new();
+        let cancel2 = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel2.cancel();
+        });
+        let started = std::time::Instant::now();
+        let err = await_unless_cancelled(&cancel, async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            0u8
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CompactFailure::Cancelled));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "stop must abort stream-open wait, elapsed {:?}",
+            started.elapsed()
+        );
     }
 }
 /// Generates a summary of the conversation for compaction.
@@ -343,9 +409,7 @@ where
 /// prefix and force a full prefill on the summarizer call — attaching them
 /// keeps the request prefix byte-identical to the turn requests so the
 /// engine reuses the session's KV cache (the whole point of the verbatim
-/// input path). Tool *use* is forbidden via `tool_choice: none` where the
-/// backend can express it (ChatCompletions, Responses); the Messages wire
-/// enum has no `none`, so that path relies on the prompt instruction alone.
+/// input path).
 ///
 /// Errors carry a [`CompactFailure`] classification so the caller can
 /// short-circuit retries on deterministic failures (4xx schema violations,
@@ -360,8 +424,21 @@ pub(crate) async fn generate_session_compact(
     sampling_config: &SamplingConfig,
     idle_timeout: std::time::Duration,
     wall_clock_budget_secs: u64,
+    tool_choice: crate::util::config::CompactionToolChoice,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<CompactOutput, CompactFailure> {
+    if cancel.is_cancelled() {
+        return Err(CompactFailure::Cancelled);
+    }
     let num_messages = chat_history.len();
+    let wire_tool_choice = match tool_choice {
+        crate::util::config::CompactionToolChoice::Auto => ToolChoice::auto(),
+        crate::util::config::CompactionToolChoice::None => ToolChoice::none(),
+    };
+    let conversation_tool_choice = match tool_choice {
+        crate::util::config::CompactionToolChoice::Auto => ConversationToolChoice::Auto,
+        crate::util::config::CompactionToolChoice::None => ConversationToolChoice::None,
+    };
     let output = match sampling_config.api_backend {
         ApiBackend::ChatCompletions => {
             let chat_messages: Vec<ChatRequestMessage> =
@@ -377,7 +454,7 @@ pub(crate) async fn generate_session_compact(
                             .map(|t| ToolDefinition::function(t.name, t.description, t.parameters))
                             .collect(),
                     )
-                    .with_tool_choice(ToolChoice::none());
+                    .with_tool_choice(wire_tool_choice);
             }
             let sid = session_id.to_string();
             message.x_grok_conv_id = Some(sid.clone());
@@ -385,10 +462,12 @@ pub(crate) async fn generate_session_compact(
             message.x_grok_session_id = Some(sid);
             message.x_grok_agent_id = Some(xai_grok_telemetry::id::agent_id());
             tracing::info!(
-                compact_model = % sampling_config.model, num_messages = num_messages,
+                compact_model = %sampling_config.model,
+                num_messages = num_messages,
                 "Sending compact request (streaming)"
             );
-            let stream_result = client.chat_completion_stream(message).await;
+            let stream_result =
+                await_unless_cancelled(cancel, client.chat_completion_stream(message)).await?;
             let mut stream = match stream_result {
                 Ok((s, _metadata)) => s,
                 Err(e) => return Err(classify_sampling_error(e)),
@@ -400,7 +479,9 @@ pub(crate) async fn generate_session_compact(
             let mut last_progress_at = std::time::Instant::now();
             loop {
                 let idle_remaining = idle_timeout.saturating_sub(last_progress_at.elapsed());
-                let chunk_result = match next_stream_step(&mut stream, idle_remaining).await {
+                let chunk_result = match next_stream_step(&mut stream, idle_remaining, cancel)
+                    .await?
+                {
                     StreamStep::Item(item) => item,
                     StreamStep::Ended => break,
                     StreamStep::IdleTimeout => {
@@ -409,9 +490,9 @@ pub(crate) async fn generate_session_compact(
                                 acp::Error::internal_error()
                                     .data(
                                         format!(
-                                            "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
-                                            content.chars().count()
-                                        ),
+                                "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
+                                content.chars().count()
+                            ),
                                     ),
                             ),
                         );
@@ -423,8 +504,8 @@ pub(crate) async fn generate_session_compact(
                             acp::Error::internal_error()
                                 .data(
                                     format!(
-                                        "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
-                                    ),
+                            "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
+                        ),
                                 ),
                         ),
                     );
@@ -471,7 +552,7 @@ pub(crate) async fn generate_session_compact(
         ApiBackend::Responses => {
             let request = ConversationRequest {
                 items: chat_history,
-                tool_choice: (!tools.is_empty()).then_some(ConversationToolChoice::None),
+                tool_choice: (!tools.is_empty()).then_some(conversation_tool_choice),
                 tools,
                 hosted_tools,
                 model: Some(sampling_config.model.to_owned()),
@@ -482,7 +563,9 @@ pub(crate) async fn generate_session_compact(
                 x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
                 ..Default::default()
             };
-            let stream_result = client.conversation_stream_responses(request).await;
+            let stream_result =
+                await_unless_cancelled(cancel, client.conversation_stream_responses(request))
+                    .await?;
             let mut stream = match stream_result {
                 Ok((s, _metadata, _doom_loop)) => s,
                 Err(e) => return Err(classify_sampling_error(e)),
@@ -494,7 +577,9 @@ pub(crate) async fn generate_session_compact(
             let mut last_progress_at = std::time::Instant::now();
             loop {
                 let idle_remaining = idle_timeout.saturating_sub(last_progress_at.elapsed());
-                let chunk_result = match next_stream_step(&mut stream, idle_remaining).await {
+                let chunk_result = match next_stream_step(&mut stream, idle_remaining, cancel)
+                    .await?
+                {
                     StreamStep::Item(item) => item,
                     StreamStep::Ended => break,
                     StreamStep::IdleTimeout => {
@@ -503,9 +588,9 @@ pub(crate) async fn generate_session_compact(
                                 acp::Error::internal_error()
                                     .data(
                                         format!(
-                                            "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
-                                            content.chars().count()
-                                        ),
+                                "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
+                                content.chars().count()
+                            ),
                                     ),
                             ),
                         );
@@ -517,8 +602,8 @@ pub(crate) async fn generate_session_compact(
                             acp::Error::internal_error()
                                 .data(
                                     format!(
-                                        "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
-                                    ),
+                            "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
+                        ),
                                 ),
                         ),
                     );
@@ -545,8 +630,9 @@ pub(crate) async fn generate_session_compact(
                                     .map(|e| e.message.as_str())
                                     .unwrap_or("unknown error");
                                 tracing::warn!(
-                                    code = code.unwrap_or("none"), message = % message, status =
-                                    ? failed_event.response.status,
+                                    code = code.unwrap_or("none"),
+                                    message = %message,
+                                    status = ?failed_event.response.status,
                                     "compact: response.failed event"
                                 );
                                 return Err(classify_response_event_error(code, message));
@@ -554,8 +640,9 @@ pub(crate) async fn generate_session_compact(
                             ResponseStreamEvent::ResponseError(error_event) => {
                                 let code = error_event.code.as_deref();
                                 tracing::warn!(
-                                    code = code.unwrap_or("none"), message = % error_event
-                                    .message, "compact: stream error event"
+                                    code = code.unwrap_or("none"),
+                                    message = %error_event.message,
+                                    "compact: stream error event"
                                 );
                                 return Err(classify_response_event_error(
                                     code,
@@ -570,7 +657,8 @@ pub(crate) async fn generate_session_compact(
                                     .map(|d| d.reason.clone())
                                     .unwrap_or_else(|| "unknown".to_string());
                                 tracing::warn!(
-                                    reason = % reason, "compact: response.incomplete event"
+                                    reason = %reason,
+                                    "compact: response.incomplete event"
                                 );
                                 stop_reason = Some(reason);
                                 truncated = true;
@@ -604,7 +692,9 @@ pub(crate) async fn generate_session_compact(
                 x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
                 ..Default::default()
             };
-            let stream_result = client.conversation_stream_messages(request).await;
+            let stream_result =
+                await_unless_cancelled(cancel, client.conversation_stream_messages(request))
+                    .await?;
             let mut stream = match stream_result {
                 Ok((s, _metadata)) => s,
                 Err(e) => return Err(classify_sampling_error(e)),
@@ -616,7 +706,9 @@ pub(crate) async fn generate_session_compact(
             let mut last_progress_at = std::time::Instant::now();
             loop {
                 let idle_remaining = idle_timeout.saturating_sub(last_progress_at.elapsed());
-                let chunk_result = match next_stream_step(&mut stream, idle_remaining).await {
+                let chunk_result = match next_stream_step(&mut stream, idle_remaining, cancel)
+                    .await?
+                {
                     StreamStep::Item(item) => item,
                     StreamStep::Ended => break,
                     StreamStep::IdleTimeout => {
@@ -625,9 +717,9 @@ pub(crate) async fn generate_session_compact(
                                 acp::Error::internal_error()
                                     .data(
                                         format!(
-                                            "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
-                                            content.chars().count()
-                                        ),
+                                "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
+                                content.chars().count()
+                            ),
                                     ),
                             ),
                         );
@@ -639,8 +731,8 @@ pub(crate) async fn generate_session_compact(
                             acp::Error::internal_error()
                                 .data(
                                     format!(
-                                        "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
-                                    ),
+                            "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
+                        ),
                                 ),
                         ),
                     );
@@ -669,10 +761,10 @@ pub(crate) async fn generate_session_compact(
                             } => {
                                 if let Some(sr) = delta.stop_reason {
                                     truncated = matches!(
-                                        sr, xai_grok_sampling_types::messages::StopReason::MaxTokens
-                                        |
-                                        xai_grok_sampling_types::messages::StopReason::ModelContextWindowExceeded
-                                    );
+                                    sr,
+                                    xai_grok_sampling_types::messages::StopReason::MaxTokens
+                                        | xai_grok_sampling_types::messages::StopReason::ModelContextWindowExceeded
+                                );
                                     stop_reason = Some(
                                         match sr {
                                             xai_grok_sampling_types::messages::StopReason::EndTurn => {
@@ -764,9 +856,9 @@ mod classify_tests {
     }
     #[test]
     fn sampling_non_api_variants_classify_correctly() {
-        assert!(is_det(&classify_sampling_error(SamplingError::Auth(
-            "expired".into()
-        ))));
+        assert!(is_det(&classify_sampling_error(
+            SamplingError::auth_unknown("expired")
+        )));
         assert!(is_det(&classify_sampling_error(
             SamplingError::InvalidConfiguration("missing key")
         )));
@@ -856,33 +948,6 @@ mod classify_tests {
         assert!(!is_det(&classify_sampling_error(SamplingError::Http(
             http_err
         ))));
-    }
-    #[tokio::test]
-    async fn sampling_http_client_error_is_deterministic() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            axum::serve(
-                listener,
-                axum::Router::new().fallback(|| async {
-                    (
-                        axum::http::StatusCode::BAD_REQUEST,
-                        "invalid request payload",
-                    )
-                }),
-            )
-            .await
-            .unwrap();
-        });
-        let http_err = reqwest::get(format!("http://{addr}"))
-            .await
-            .unwrap()
-            .error_for_status()
-            .expect_err("HTTP 400 must become a reqwest status error");
-        assert!(is_det(&classify_sampling_error(SamplingError::Http(
-            http_err
-        ))));
-        server.abort();
     }
     #[test]
     fn sampling_serialization_is_deterministic() {
@@ -1013,10 +1078,11 @@ mod compacted_history_shape_tests {
             ConversationItem::tool_result("tc1", "fn login() { /* buggy code */ }"),
             ConversationItem::Assistant(AssistantItem {
                 content: "Found the bug, applying fix.".into(),
-                tool_calls: vec![ToolCall { id :
-            "tc2".into(), name : "search_replace".into(), arguments :
-            r#"{"file_path": "src/auth.rs", "old_string": "buggy", "new_string": "fixed"}"#
-            .into(), }],
+                tool_calls: vec![ToolCall {
+                    id: "tc2".into(),
+                    name: "search_replace".into(),
+                    arguments: r#"{"file_path": "src/auth.rs", "old_string": "buggy", "new_string": "fixed"}"#.into(),
+                }],
                 model_id: None,
                 model_fingerprint: None,
                 reasoning_effort: None,
@@ -1241,7 +1307,9 @@ mod compacted_history_shape_tests {
         let raw = vec![
             ConversationItem::system("sys"),
             ConversationItem::user("<user_query>\ntask\n</user_query>"),
+            // Orphan: no preceding assistant with call_ORPHAN
             ConversationItem::tool_result("call_ORPHAN", "Tool call omitted..."),
+            // Valid pair
             ConversationItem::assistant_tool_calls(vec![ToolCall {
                 id: "call_OK".into(),
                 name: "edit".to_string(),
@@ -1265,6 +1333,8 @@ mod compacted_history_shape_tests {
     fn fallback_minimal_history_has_no_tool_results() {
         use xai_chat_state::compaction_utils::validate_compacted_history;
         let state_context = CompactionStateContext {
+            cwd_generation: 0,
+            destination_project_instructions: None,
             recent_messages: vec![],
             last_user_query: Some("fix the bug".to_string()),
             agent_edited_paths: vec!["src/main.rs".to_string()],
@@ -1475,6 +1545,8 @@ mod compacted_history_shape_tests {
     #[test]
     fn fallback_preserves_subagents() {
         let original = CompactionStateContext {
+            cwd_generation: 0,
+            destination_project_instructions: None,
             recent_messages: vec![ConversationItem::assistant("working")],
             last_user_query: Some("fix the bug".to_string()),
             agent_edited_paths: vec!["src/main.rs".to_string()],
@@ -1502,6 +1574,8 @@ mod compacted_history_shape_tests {
             todos: vec![],
         };
         let fallback = CompactionStateContext {
+            cwd_generation: original.cwd_generation,
+            destination_project_instructions: original.destination_project_instructions.clone(),
             recent_messages: vec![],
             last_user_query: original.last_user_query.clone(),
             agent_edited_paths: original.agent_edited_paths.clone(),
@@ -1535,10 +1609,17 @@ mod reasoning_compaction_regression_tests {
     fn summary_stream() -> Vec<Event> {
         vec![
             Event::default().data(
-                json!({ "id" : "chatcmpl-test", "object" :
-            "chat.completion.chunk", "created" : 1234567890, "model" : "test-model",
-            "choices" : [{ "index" : 0, "delta" : { "role" : "assistant", "content" :
-            "<summary>ok</summary>" }, "finish_reason" : "stop" }] })
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "created": 1234567890,
+                    "model": "test-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "role": "assistant", "content": "<summary>ok</summary>" },
+                        "finish_reason": "stop"
+                    }]
+                })
                 .to_string(),
             ),
             Event::default().data("[DONE]"),
@@ -1548,18 +1629,31 @@ mod reasoning_compaction_regression_tests {
     fn reasoning_then_summary_stream() -> Vec<Event> {
         vec![
             Event::default().data(
-                json!({ "id" : "chatcmpl-test", "object" :
-            "chat.completion.chunk", "created" : 1234567890, "model" : "test-model",
-            "choices" : [{ "index" : 0, "delta" : { "role" : "assistant",
-            "reasoning_content" : "let me think about the summary" }, "finish_reason" :
-            null }] })
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "created": 1234567890,
+                    "model": "test-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "role": "assistant", "reasoning_content": "let me think about the summary" },
+                        "finish_reason": null
+                    }]
+                })
                 .to_string(),
             ),
             Event::default().data(
-                json!({ "id" :
-            "chatcmpl-test", "object" : "chat.completion.chunk", "created" : 1234567890,
-            "model" : "test-model", "choices" : [{ "index" : 0, "delta" : { "content" :
-            "<summary>ok</summary>" }, "finish_reason" : "stop" }] })
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "created": 1234567890,
+                    "model": "test-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "content": "<summary>ok</summary>" },
+                        "finish_reason": "stop"
+                    }]
+                })
                 .to_string(),
             ),
             Event::default().data("[DONE]"),
@@ -1609,6 +1703,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_secs(30),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap_or_else(|_| panic!("compaction must succeed"));
@@ -1626,6 +1722,8 @@ mod reasoning_compaction_regression_tests {
             api_backend: ApiBackend::ChatCompletions,
             auth_scheme: Default::default(),
             extra_headers: Default::default(),
+            query_params: Default::default(),
+            env_http_headers: Default::default(),
             context_window: 256_000,
             client_version: None,
             force_http1: false,
@@ -1697,6 +1795,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_secs(30),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
         let output = result
@@ -1704,12 +1804,8 @@ mod reasoning_compaction_regression_tests {
         assert_eq!(output.content, "<summary>ok</summary>");
         let _ = shutdown_tx.send(());
     }
-    /// The compaction request must carry the turn loop's tool definitions
-    /// (prompt-prefix/KV-cache alignment) with `tool_choice: "none"`, and
-    /// must omit both keys when no tools are passed (Chat Completions rejects a bare
-    /// `tool_choice`).
     #[tokio::test]
-    async fn chat_completions_compaction_attaches_tools_with_tool_choice_none() {
+    async fn chat_completions_compaction_attaches_tools_with_tool_choice_auto() {
         use std::sync::{Arc, Mutex};
         let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
         let cap = captured.clone();
@@ -1750,7 +1846,7 @@ mod reasoning_compaction_regression_tests {
         let tools = vec![ToolSpec {
             name: "read_file".to_string(),
             description: Some("Reads a file".to_string()),
-            parameters: json!({ "type" : "object", "properties" : {} }),
+            parameters: json!({"type": "object", "properties": {}}),
         }];
         let client = Client::new(config.clone()).unwrap();
         generate_session_compact(
@@ -1762,6 +1858,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_secs(30),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap_or_else(|_| panic!("compaction with tools must succeed"));
@@ -1775,6 +1873,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_secs(30),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap_or_else(|_| panic!("compaction without tools must succeed"));
@@ -1783,8 +1883,8 @@ mod reasoning_compaction_regression_tests {
         let with_tools = &bodies[0];
         assert_eq!(
             with_tools["tool_choice"],
-            json!("none"),
-            "tool use must be disabled at decode time"
+            json!("auto"),
+            "default compaction tool_choice is auto"
         );
         let sent_tools = with_tools["tools"]
             .as_array()
@@ -1799,6 +1899,170 @@ mod reasoning_compaction_regression_tests {
         assert!(
             without_tools.get("tool_choice").is_none(),
             "tool_choice without tools is rejected by OpenAI-compat backends"
+        );
+        let _ = shutdown_tx.send(());
+    }
+    fn responses_summary_stream() -> Vec<Event> {
+        vec![
+            Event::default().data(
+                json!({
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {
+                        "id": "resp_test",
+                        "object": "response",
+                        "created_at": 1234567890,
+                        "model": "test-model",
+                        "status": "in_progress",
+                        "output": []
+                    }
+                })
+                .to_string(),
+            ),
+            Event::default().data(
+                json!({
+                    "type": "response.output_text.delta",
+                    "sequence_number": 1,
+                    "item_id": "msg_test",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": "<summary>ok</summary>"
+                })
+                .to_string(),
+            ),
+            Event::default().data(
+                json!({
+                    "type": "response.completed",
+                    "sequence_number": 2,
+                    "response": {
+                        "id": "resp_test",
+                        "object": "response",
+                        "created_at": 1234567890,
+                        "model": "test-model",
+                        "status": "completed",
+                        "output": []
+                    }
+                })
+                .to_string(),
+            ),
+        ]
+    }
+    fn test_config_responses(base_url: &str) -> SamplerConfig {
+        let mut config = test_config(base_url);
+        config.api_backend = ApiBackend::Responses;
+        config
+    }
+    #[tokio::test]
+    async fn responses_compaction_attaches_tools_with_tool_choice_auto() {
+        use std::sync::{Arc, Mutex};
+        let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let cap = captured.clone();
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move |body: axum::Json<serde_json::Value>| {
+                let cap = cap.clone();
+                async move {
+                    cap.lock().unwrap().push(body.0);
+                    let stream = stream::iter(
+                        responses_summary_stream()
+                            .into_iter()
+                            .map(Ok::<_, std::convert::Infallible>),
+                    );
+                    Sse::new(stream).keep_alive(KeepAlive::default())
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+        let base_url = format!("http://{addr}/v1");
+        let config = test_config_responses(&base_url);
+        let chat_history = vec![
+            ConversationItem::system("You are a helpful assistant."),
+            ConversationItem::user("<user_query>\nfix the bug\n</user_query>"),
+            ConversationItem::assistant("I fixed it."),
+            ConversationItem::user("Summarize the conversation so far."),
+        ];
+        let tools = vec![ToolSpec {
+            name: "read_file".to_string(),
+            description: Some("Reads a file".to_string()),
+            parameters: json!({"type": "object", "properties": {}}),
+        }];
+        let hosted = vec![HostedTool::WebSearch { options: None }];
+        let client = Client::new(config.clone()).unwrap();
+        generate_session_compact(
+            chat_history.clone(),
+            tools,
+            hosted,
+            client,
+            acp::SessionId::new("test-session"),
+            &config,
+            std::time::Duration::from_secs(30),
+            0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("Responses compaction with tools must succeed"));
+        let client = Client::new(config.clone()).unwrap();
+        generate_session_compact(
+            chat_history,
+            vec![],
+            vec![],
+            client,
+            acp::SessionId::new("test-session"),
+            &config,
+            std::time::Duration::from_secs(30),
+            0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("Responses compaction without tools must succeed"));
+        let bodies = captured.lock().unwrap();
+        assert_eq!(bodies.len(), 2, "mock must have served both requests");
+        let with_tools = &bodies[0];
+        assert_eq!(
+            with_tools["tool_choice"],
+            json!("auto"),
+            "default Responses compaction tool_choice is auto"
+        );
+        let sent_tools = with_tools["tools"]
+            .as_array()
+            .expect("tools must be attached for prefix-cache alignment");
+        let has_read_file = sent_tools.iter().any(|t| {
+            t.get("name") == Some(&json!("read_file"))
+                || t.pointer("/name") == Some(&json!("read_file"))
+        });
+        assert!(
+            has_read_file,
+            "client function tool must be present: {sent_tools:?}"
+        );
+        assert!(
+            sent_tools
+                .iter()
+                .any(|t| t.get("type") == Some(&json!("web_search"))),
+            "hosted web_search must be present for prefix alignment: {sent_tools:?}"
+        );
+        let without_tools = &bodies[1];
+        assert!(
+            without_tools
+                .get("tools")
+                .map(|t| t.as_array().is_none_or(|a| a.is_empty()))
+                .unwrap_or(true),
+            "no tools when none are passed"
+        );
+        assert!(
+            without_tools.get("tool_choice").is_none(),
+            "tool_choice without tools should be omitted"
         );
         let _ = shutdown_tx.send(());
     }
@@ -1838,6 +2102,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_millis(150),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
         match result {
@@ -1852,8 +2118,10 @@ mod reasoning_compaction_regression_tests {
                     "expected an idle-timeout transient failure, got: {data}"
                 );
             }
-            Err(CompactFailure::Deterministic(_)) => {
-                panic!("a stalled stream must be retryable (Transient), not Deterministic")
+            Err(CompactFailure::Deterministic(_) | CompactFailure::Cancelled) => {
+                panic!(
+                    "a stalled stream must be retryable (Transient), not Deterministic/Cancelled"
+                )
             }
             Ok(_) => panic!("a stalled stream must not produce a summary"),
         }
@@ -1861,23 +2129,34 @@ mod reasoning_compaction_regression_tests {
     }
     #[tokio::test]
     async fn completed_then_stalled_stream_errors_no_salvage() {
-        let app = Router::new().route(
-            "/v1/chat/completions",
-            post(|| async {
-                let events = stream::iter(vec![Ok::<_, std::convert::Infallible>(
+        let app = Router::new()
+            .route(
+                "/v1/chat/completions",
+                post(|| async {
+                    let events = stream::iter(
+                            vec![Ok::<_, std::convert::Infallible>(
                     Event::default().data(
-                        json!({ "id" : "chatcmpl-test", "object" :
-                                "chat.completion.chunk", "created" : 1234567890, "model" :
-                                "test-model", "choices" : [{ "index" : 0, "delta" : { "role"
-                                : "assistant", "content" : "<summary>ok</summary>" },
-                                "finish_reason" : "stop" }] })
+                        json!({
+                            "id": "chatcmpl-test",
+                            "object": "chat.completion.chunk",
+                            "created": 1234567890,
+                            "model": "test-model",
+                            "choices": [{
+                                "index": 0,
+                                "delta": { "role": "assistant", "content": "<summary>ok</summary>" },
+                                "finish_reason": "stop"
+                            }]
+                        })
                         .to_string(),
                     ),
-                )])
-                .chain(stream::pending::<Result<Event, std::convert::Infallible>>());
-                Sse::new(events)
-            }),
-        );
+                )],
+                        )
+                        .chain(
+                            stream::pending::<Result<Event, std::convert::Infallible>>(),
+                        );
+                    Sse::new(events)
+                }),
+            );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -1905,6 +2184,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_millis(150),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
         match result {
@@ -1919,7 +2200,7 @@ mod reasoning_compaction_regression_tests {
                     "expected an idle-timeout transient failure, got: {data}"
                 );
             }
-            Err(CompactFailure::Deterministic(_)) => {
+            Err(CompactFailure::Deterministic(_) | CompactFailure::Cancelled) => {
                 panic!("a stalled stream must be retryable (Transient), not Deterministic")
             }
             Ok(_) => {
@@ -1938,10 +2219,16 @@ mod reasoning_compaction_regression_tests {
                 let body = "x".repeat(2500);
                 let events = stream::iter(vec![Ok::<_, std::convert::Infallible>(
                     Event::default().data(
-                        json!({ "id" : "chatcmpl-test", "object" :
-                                "chat.completion.chunk", "created" : 1234567890, "model" :
-                                "test-model", "choices" : [{ "index" : 0, "delta" : { "role"
-                                : "assistant", "content" : body } }] })
+                        json!({
+                            "id": "chatcmpl-test",
+                            "object": "chat.completion.chunk",
+                            "created": 1234567890,
+                            "model": "test-model",
+                            "choices": [{
+                                "index": 0,
+                                "delta": { "role": "assistant", "content": body }
+                            }]
+                        })
                         .to_string(),
                     ),
                 )])
@@ -1976,6 +2263,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_millis(150),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
         match result {
@@ -1990,7 +2279,7 @@ mod reasoning_compaction_regression_tests {
                     "expected an idle-timeout transient failure, got: {data}"
                 );
             }
-            Err(CompactFailure::Deterministic(_)) => {
+            Err(CompactFailure::Deterministic(_) | CompactFailure::Cancelled) => {
                 panic!("a stalled stream must be retryable (Transient), not Deterministic")
             }
             Ok(_) => {
@@ -2006,10 +2295,16 @@ mod reasoning_compaction_regression_tests {
             post(|| async {
                 let events = stream::iter(vec![Ok::<_, std::convert::Infallible>(
                     Event::default().data(
-                        json!({ "id" : "chatcmpl-test", "object" :
-                                "chat.completion.chunk", "created" : 1234567890, "model" :
-                                "test-model", "choices" : [{ "index" : 0, "delta" : { "role"
-                                : "assistant", "content" : "partial" } }] })
+                        json!({
+                            "id": "chatcmpl-test",
+                            "object": "chat.completion.chunk",
+                            "created": 1234567890,
+                            "model": "test-model",
+                            "choices": [{
+                                "index": 0,
+                                "delta": { "role": "assistant", "content": "partial" }
+                            }]
+                        })
                         .to_string(),
                     ),
                 )])
@@ -2044,6 +2339,8 @@ mod reasoning_compaction_regression_tests {
             &config,
             std::time::Duration::from_millis(150),
             0,
+            crate::util::config::CompactionToolChoice::Auto,
+            &tokio_util::sync::CancellationToken::new(),
         )
         .await;
         match result {

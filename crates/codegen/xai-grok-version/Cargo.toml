@@ -1,9 +1,9 @@
 [package]
 license = "Apache-2.0"
 name = "xai-grok-version"
-version = "0.4.3"
+version = "1.0.0"
 edition.workspace = true
-description = "Lockstepped Chutes Build CLI version."
+description = "Lockstepped chutes-build CLI version."
 
 [dependencies]
 semver = { workspace = true }

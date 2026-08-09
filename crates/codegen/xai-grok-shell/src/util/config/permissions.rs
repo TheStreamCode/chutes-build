@@ -26,7 +26,7 @@ pub fn parse_permission_mode_canonical(mode_str: &str) -> PermissionMode {
 ///
 /// Inverse of [`parse_permission_mode_canonical`] for the real variants, so
 /// `parse_permission_mode_canonical(permission_mode_canonical_str(m)) == m`.
-pub fn permission_mode_canonical_str(mode: PermissionMode) -> &'static str {
+pub(crate) fn permission_mode_canonical_str(mode: PermissionMode) -> &'static str {
     match mode {
         PermissionMode::AlwaysApprove => "always-approve",
         PermissionMode::Auto => "auto",
@@ -213,7 +213,7 @@ pub fn effective_auto_for_launch(
 /// `SetAutoMode`) is unit-testable without a live session. This is the
 /// authoritative agent-side gate: when it returns `false`, the permission
 /// manager is never flipped to auto and the classifier never wires.
-pub fn auto_mode_session_active(
+pub(crate) fn auto_mode_session_active(
     gate_enabled: bool,
     requested_auto: bool,
     session_yolo: bool,
@@ -267,29 +267,6 @@ pub fn load_require_plan_approval() -> bool {
         .and_then(|ui| ui.get("require_plan_approval"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
-}
-
-/// Synchronously load the remote agent secret from the config file.
-/// Looks for [remote] section with secret field.
-///
-/// Example config.toml:
-/// ```toml
-/// [remote]
-/// secret = "my-secret-token"
-/// ```
-pub fn load_remote_secret_sync() -> Option<String> {
-    let root: TomlValue = crate::config::load_effective_config().ok()?;
-
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(remote)) = table.get("remote")
-    {
-        remote
-            .get("secret")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -347,7 +324,7 @@ mod tests {
 
     #[test]
     fn permission_mode_from_ui_if_set_none_when_no_keys() {
-        let theme: TomlValue = toml::from_str("[ui]\ntheme = \"groknight\"\n").unwrap();
+        let theme: TomlValue = toml::from_str("[ui]\ntheme = \"chutesnight\"\n").unwrap();
         assert_eq!(
             permission_mode_from_ui_if_set(theme.get("ui").unwrap()),
             None,
@@ -462,7 +439,11 @@ mod tests {
                 "ask",
             ),
             // No permission keys → Ask.
-            ("[ui]\ntheme = \"groknight\"\n", PermissionMode::Ask, "ask"),
+            (
+                "[ui]\ntheme = \"chutesnight\"\n",
+                PermissionMode::Ask,
+                "ask",
+            ),
         ];
         for (toml_str, expected_mode, expected_canonical) in cases {
             let root: TomlValue = toml::from_str(toml_str).unwrap();

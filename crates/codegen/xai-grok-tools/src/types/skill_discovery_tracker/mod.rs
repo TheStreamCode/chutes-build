@@ -141,6 +141,11 @@ pub struct SkillManager {
     /// `paths:`-gated skills held back from the listing until a matching file
     /// is touched, plus their activation state. See [`ConditionalSkills`].
     conditional: ConditionalSkills,
+
+    /// Every skill name from session-start discovery, set once by
+    /// `ToolRegistryBuilder::finalize` from the unfiltered
+    /// `SessionContext.skills`. The `paths:` gate never applies here.
+    discovery_snapshot_names: Vec<String>,
 }
 
 /// Canonicalize a skill path, falling back to the raw path for not-yet-created
@@ -313,14 +318,8 @@ impl SkillManager {
         skill_budget_percent: Option<f64>,
     ) {
         let percent = skill_budget_percent.unwrap_or(SKILL_BUDGET_CONTEXT_PERCENT);
-        self.listing_budget_chars = context_window_tokens.map(|tokens| {
-            let context_budget = (tokens as f64 * 4.0 * percent) as usize;
-            if skill_budget_percent.is_some() {
-                context_budget
-            } else {
-                context_budget.min(listing::DEFAULT_CHAR_BUDGET)
-            }
-        });
+        self.listing_budget_chars =
+            context_window_tokens.map(|tokens| (tokens as f64 * 4.0 * percent) as usize);
         // Store the real cwd as string for path prefix rewriting.
         if let Some(ref display) = display_cwd {
             if let Some(ref c) = cwd {
@@ -473,6 +472,19 @@ impl SkillManager {
     /// for slash command advertisement.
     pub fn slash_skills(&self) -> Vec<SkillInfo> {
         dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills)
+    }
+
+    /// Set the full-discovery snapshot (see `discovery_snapshot_names`).
+    /// Write-once by design: the only caller is `ToolRegistryBuilder::finalize`.
+    pub(crate) fn set_discovery_snapshot_names(&mut self, names: Vec<String>) {
+        self.discovery_snapshot_names = names;
+    }
+
+    /// Every skill name from session-start discovery. Set only by
+    /// `ToolRegistryBuilder::finalize`; empty for a manager seeded
+    /// without it.
+    pub fn discovery_snapshot_names(&self) -> &[String] {
+        &self.discovery_snapshot_names
     }
 
     /// Render the canonical listing for the entire current skill set, for
@@ -1302,7 +1314,7 @@ mod tests {
                 s
             })
             .collect();
-        // 128k context window → budget = 128_000 * 4 * 0.005 = 2560 chars.
+        // 128k context window → budget = 128_000 * 4 * 0.5 = 256000 chars
         let context_window: u64 = 128_000;
         let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
         mgr.seed(None, None, skills, None, Some(context_window), None);
@@ -1325,7 +1337,7 @@ mod tests {
                 s
             })
             .collect();
-        // 300 token context window → budget = 300 * 4 * 0.005 = 6 chars.
+        // 300 token context window → budget = 300 * 4 * 0.5 = 600 chars.
         // 200 skills with 500-char descriptions can't fit.
         let context_window: u64 = 300;
         let expected_budget = (context_window as f64 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
@@ -1347,7 +1359,7 @@ mod tests {
             make_skill("commit", "/s/commit/SKILL.md"),
             make_skill("review", "/s/review/SKILL.md"),
         ];
-        // 200k context window reaches the 4000-character default ceiling.
+        // 200k context window → 12000 char budget, 2 skills fit easily.
         mgr.seed(None, None, skills, None, Some(200_000), None);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();

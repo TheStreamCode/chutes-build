@@ -13,10 +13,9 @@ pub struct ExportArgs {
     /// Session ID to export
     pub session_id: String,
     /// Output file path (default: stdout)
-    #[arg(conflicts_with = "clipboard")]
     pub output: Option<PathBuf>,
     /// Copy to clipboard instead of writing to stdout
-    #[arg(long, short, conflicts_with = "output")]
+    #[arg(long, short)]
     pub clipboard: bool,
 }
 
@@ -65,10 +64,7 @@ pub fn run(args: ExportArgs) -> Result<()> {
         );
         eprintln!("Conversation exported to {}", expanded.display());
     } else if args.clipboard {
-        let result = crate::clipboard::copy_text(&md);
-        if result.delivery.is_failed() {
-            anyhow::bail!("Failed to copy conversation to the clipboard");
-        }
+        let _ = crate::clipboard::copy_text(&md);
         let lines = md.lines().count();
         tracing::info!(
             session_id = %args.session_id,

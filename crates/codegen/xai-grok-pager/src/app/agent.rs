@@ -75,6 +75,8 @@ pub struct QueuedPrompt {
     /// All chip elements captured from the textarea at send time.
     /// Threaded into `InFlightPrompt` so rewind restores collapsed chips.
     pub chip_elements: Vec<ChipElement>,
+    /// Combined-turn display segments (len ≥ 2); drain paints one bubble each.
+    pub combined_texts: Vec<String>,
 }
 impl QueuedPrompt {
     /// Base row with every optional field at its default. Sites needing
@@ -93,6 +95,7 @@ impl QueuedPrompt {
             task_id: None,
             human_schedule: None,
             chip_elements: Vec::new(),
+            combined_texts: Vec::new(),
         }
     }
     /// Whether the wire payload is exactly the display text.
@@ -133,7 +136,7 @@ pub enum AgentCommand {
     RestoreCode,
     /// Forking the current session into a peer (no-worktree path).
     /// Drives the spinner shown on the placeholder agent while the
-    /// `chutes.build/session/fork` request is in flight.
+    /// `chutes.ai/session/fork` request is in flight.
     ForkSession,
 }
 impl AgentCommand {
@@ -163,6 +166,10 @@ pub const BG_TASK_MAX_STDOUT: usize = 10 * 1024 * 1024;
 /// How long to wait for a kill response before auto-clearing `pending_kill`
 /// so the user can retry. Applied to both bg tasks and subagents.
 pub const PENDING_KILL_TIMEOUT_SECS: u64 = 10;
+/// Prefix baked into monitor commands by backends predating the structured
+/// `monitor_description` field (and by reparented monitors). Shared
+/// convention with the shell's task notifications.
+pub const MONITOR_PREFIX: &str = "[monitor] ";
 /// Status of a background task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BgTaskStatus {
@@ -274,6 +281,82 @@ impl BgTaskState {
         }
         self.stdout_line_count = self.stdout.lines().count();
     }
+    /// Terminal state recorded when a `TaskCompleted` arrives for a task with
+    /// no `bg_tasks` entry (its `TaskBackgrounded` hasn't arrived yet — short
+    /// bg shells can exit on the terminal's first poll). Keeps the late
+    /// `TaskBackgrounded` from inserting a fresh Running entry that nothing
+    /// would ever complete; see [`Self::absorb_late_backgrounded`].
+    pub fn tombstone_from_snapshot(
+        snapshot: &xai_grok_tools::types::TaskSnapshot,
+        status: BgTaskStatus,
+        description: Option<String>,
+        restored_from_replay: bool,
+    ) -> Self {
+        let is_monitor = matches!(
+            snapshot.kind,
+            xai_grok_tools::computer::types::TaskKind::Monitor
+        ) || snapshot
+            .display_command
+            .as_deref()
+            .is_some_and(|d| d.starts_with(MONITOR_PREFIX));
+        let mut tombstone = Self {
+            task_id: snapshot.task_id.clone(),
+            tool_call_id: String::new(),
+            command: snapshot.command.clone(),
+            description,
+            cwd: snapshot.cwd.clone(),
+            output_file: snapshot.output_file.to_string_lossy().into_owned(),
+            status,
+            start_time: snapshot.start_time,
+            end_time: Some(snapshot.end_time.unwrap_or_else(SystemTime::now)),
+            exit_code: snapshot.exit_code,
+            signal: snapshot.signal.clone(),
+            stdout: String::new(),
+            stdout_line_count: 0,
+            truncated: snapshot.truncated,
+            pending_kill: false,
+            kill_requested_at: None,
+            scrollback_entry_id: None,
+            is_monitor,
+            restored_from_replay,
+        };
+        if !snapshot.output.is_empty() {
+            let end = crate::render::line_utils::floor_char_boundary(
+                &snapshot.output,
+                BG_TASK_MAX_STDOUT,
+            );
+            tombstone.set_stdout(snapshot.output[..end].to_string());
+            if end < snapshot.output.len() {
+                tombstone.truncated = true;
+            }
+        }
+        tombstone
+    }
+    /// Fold a late `TaskBackgrounded` into an already-terminal entry: keep the
+    /// terminal status/exit/timing, backfill only what the completion snapshot
+    /// couldn't know (blank fields, demoted-Execute stdout, scrollback entry).
+    pub fn absorb_late_backgrounded(&mut self, fresh: BgTaskState, entry_id: Option<EntryId>) {
+        self.tool_call_id = fresh.tool_call_id;
+        if self.command.trim().is_empty() {
+            self.command = fresh.command;
+        }
+        if self
+            .description
+            .as_ref()
+            .is_none_or(|d| d.trim().is_empty())
+        {
+            self.description = fresh.description;
+        }
+        self.is_monitor |= fresh.is_monitor;
+        if self.stdout.is_empty() && !fresh.stdout.is_empty() {
+            self.stdout = fresh.stdout;
+            self.stdout_line_count = fresh.stdout_line_count;
+            self.truncated |= fresh.truncated;
+        }
+        if self.scrollback_entry_id.is_none() {
+            self.scrollback_entry_id = entry_id;
+        }
+    }
 }
 /// State for a scheduled (loop) task, displayed in the tasks pane.
 #[derive(Debug, Clone)]
@@ -285,6 +368,7 @@ pub struct ScheduledTaskInfo {
     pub next_fire_at: Option<String>,
     /// Tag shown in the tasks pane (e.g. "loop", "check").
     pub tag: String,
+    pub last_subagent_id: Option<String>,
 }
 /// Parsed goal status from `GoalUpdated` session notifications.
 ///
@@ -305,6 +389,8 @@ pub enum GoalDisplayStatus {
     NoProgressPaused,
     /// Infrastructure turn failure paused the goal automatically.
     InfraPaused,
+    Failed,
+    Interrupted,
     /// The model determined the goal is blocked in this environment;
     /// `pause_message` on [`GoalDisplayState`] carries the reason text.
     Blocked,
@@ -332,6 +418,8 @@ impl GoalDisplayStatus {
             "back_off_paused" => Self::BackOffPaused,
             "no_progress_paused" => Self::NoProgressPaused,
             "infra_paused" => Self::InfraPaused,
+            "failed" => Self::Failed,
+            "interrupted" => Self::Interrupted,
             "blocked" => Self::Blocked,
             "paused" => Self::UserPaused,
             "budget_limited" => Self::BudgetLimited,
@@ -352,7 +440,11 @@ impl GoalDisplayStatus {
             Self::NoProgressPaused => "Paused (no progress)",
             Self::InfraPaused => "Paused (error)",
             Self::Blocked => "Paused (verification blocked)",
-            Self::Active | Self::BudgetLimited | Self::Complete => "",
+            Self::Active
+            | Self::Failed
+            | Self::Interrupted
+            | Self::BudgetLimited
+            | Self::Complete => "",
         }
     }
     /// True for any paused variant — cause-agnostic check used by the
@@ -364,7 +456,11 @@ impl GoalDisplayStatus {
             | Self::NoProgressPaused
             | Self::InfraPaused
             | Self::Blocked => true,
-            Self::Active | Self::BudgetLimited | Self::Complete => false,
+            Self::Active
+            | Self::Failed
+            | Self::Interrupted
+            | Self::BudgetLimited
+            | Self::Complete => false,
         }
     }
 }
@@ -426,13 +522,6 @@ pub struct GoalDisplayState {
     pub finished_subagent_tokens: i64,
     /// Retained for wire backwards compat; always empty in the simplified model.
     pub deliverables: Vec<()>,
-    /// Human-readable explanation set when the goal entered a paused
-    /// state with a meaningful reason (today only
-    /// [`GoalDisplayStatus::Blocked`]). `None` for paused variants that
-    /// don't carry a message (user / doom-loop / back-off pauses) and
-    /// for any non-paused status. The shell guarantees this is `Some`
-    /// only alongside a paused status string; the modal additionally
-    /// gates rendering on `status.is_paused()` for defence in depth.
     pub pause_message: Option<String>,
     /// Number of classifier runs the shell has performed. `None` when
     /// no run has happened yet.
@@ -515,11 +604,6 @@ impl GoalDisplayState {
             elapsed_floor_ms: 0,
         }
     }
-    /// Return real-time token usage by combining the pager's context state
-    /// (which updates on every streamed chunk) with the goal baseline and
-    /// subagent tokens.  `active_subagent_tokens` is the sum of
-    /// `tokens_used` from currently-running subagents so their consumption
-    /// is reflected in real time (not just after they finish).
     pub fn live_tokens_used(&self, context_used: Option<u64>, active_subagent_tokens: u64) -> i64 {
         if self.status == GoalDisplayStatus::Active {
             let parent_delta = context_used
@@ -604,6 +688,16 @@ impl AgentState {
         }
     }
 }
+/// A model switch stashed while no session exists, applied once the session
+/// id materialises (`apply_deferred_model_switch`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeferredModelSwitch {
+    pub model_id: acp::ModelId,
+    pub effort: Option<ReasoningEffort>,
+    /// Displayed model at stash time — the rollback target
+    /// (`Effect::SwitchModel.prev_model_id`) if the switch fails.
+    pub prev_model_id: Option<acp::ModelId>,
+}
 /// Per-agent business logic (ACP session, models, state).
 ///
 /// External code should use the facade methods (`handle_update`,
@@ -637,11 +731,11 @@ pub struct AgentSession {
     /// `yolo_mode` (yolo wins).
     pub(crate) auto_mode: bool,
     /// Prompt history for the current session, fetched from ACP
-    /// (`chutes.build/prompt_history` scoped via `filter_session_id`). Most-recent-first.
+    /// (`chutes.ai/prompt_history` scoped via `filter_session_id`). Most-recent-first.
     /// Fetched on session create/load; prompts sent in this session are
     /// additionally front-inserted locally on send.
     pub prompt_history: Vec<String>,
-    /// True until the session's startup/load `chutes.build/prompt_history` fetch completes.
+    /// True until the session's startup/load `chutes.ai/prompt_history` fetch completes.
     pub prompt_history_loading: bool,
     /// Session is currently replaying historical updates from `session/load`.
     /// Used to suppress live-style redraw/render work until the load completes.
@@ -705,7 +799,7 @@ pub struct AgentSession {
     /// applies live remote switches and updates this field to match.
     pub user_model_preference: Option<acp::ModelId>,
     /// `/model X [effort]` issued before the session was ready, applied on SessionCreated.
-    pub deferred_model_switch: Option<(acp::ModelId, Option<ReasoningEffort>)>,
+    pub deferred_model_switch: Option<DeferredModelSwitch>,
     /// Central bg task state, keyed by task_id.
     pub bg_tasks: BTreeMap<String, BgTaskState>,
     /// Correlation map: tool_call_id → task_id.
@@ -720,6 +814,9 @@ pub struct AgentSession {
     /// the input box if the user cancels before any response arrives.
     /// `None` for skill-injected prompts (cannot be reversed) and bash/cron.
     pub in_flight_prompt: Option<InFlightPrompt>,
+    /// Prompt held across auto-compact for reauth resubmit after `/login`.
+    /// `in_flight_prompt` is cleared on compact start so cancel cannot rewind.
+    pub compact_held_prompt: Option<InFlightPrompt>,
     /// Stable id for the prompt currently in flight. Generated client-side
     /// at `Effect::SendPrompt` time and threaded through `PromptRequest._meta`
     /// to the agent, which echoes it back on every `SessionNotification` and
@@ -742,7 +839,10 @@ pub struct AgentSession {
 pub struct InFlightPrompt {
     pub text: String,
     pub images: Vec<crate::prompt_images::PastedImage>,
+    /// Primary (last) user-prompt block for restore/cancel.
     pub scrollback_entry: EntryId,
+    /// Earlier segment blocks for a combined multi-bubble turn (oldest first).
+    pub combined_scrollback_entries: Vec<EntryId>,
     /// All chip elements (paste blocks, @-file refs, image chips) that were
     /// active in the textarea at send time. Restored on rewind so collapsed
     /// chips render correctly instead of raw text.
@@ -793,6 +893,7 @@ impl AgentSession {
     /// Called by `maybe_drain_queue` when a prompt is being sent.
     pub fn start_turn(&mut self, scrollback: &mut ScrollbackState) {
         self.tracker.finish_turn(scrollback);
+        self.compact_held_prompt = None;
         self.tracker.set_session_cwd(&self.cwd);
         self.tracker.expect_user_echo();
         self.state = AgentState::TurnRunning;
@@ -809,6 +910,7 @@ impl AgentSession {
         self.credit_limit_blocked = false;
         self.free_usage_blocked = false;
         self.in_flight_prompt = None;
+        self.compact_held_prompt = None;
         self.current_prompt_id = None;
     }
     /// Whether any background task is still running (vs. completed/failed).
@@ -971,6 +1073,66 @@ impl AgentSession {
     pub fn dequeue_prompt(&mut self) -> Option<QueuedPrompt> {
         self.pending_prompts.pop_front()
     }
+    /// Pop the front entry, merging consecutive plain `Prompt` followers via
+    /// [`xai_prompt_queue::combine_prefix_len`]. `editing_id` is held out of the
+    /// merge (composer draft must not vanish). Front may keep images.
+    pub fn dequeue_combined_prompt(&mut self, editing_id: Option<u64>) -> Option<QueuedPrompt> {
+        use xai_prompt_queue::{CombineGate, TEXT_SEPARATOR, combine_prefix_len, join_texts};
+        if self.pending_prompts.is_empty() {
+            return None;
+        }
+        let skip_id = editing_id.map(|id| id.to_string());
+        let skip_refs: Vec<&str> = skip_id.iter().map(String::as_str).collect();
+        let id_strings: Vec<String> = self
+            .pending_prompts
+            .iter()
+            .map(|p| p.id.to_string())
+            .collect();
+        let gates: Vec<CombineGate<'_>> = self
+            .pending_prompts
+            .iter()
+            .zip(id_strings.iter())
+            .map(|(p, id)| CombineGate {
+                id: id.as_str(),
+                is_plain_prompt: p.kind == QueueEntryKind::Prompt,
+                is_synthetic: false,
+                is_expanded_skill: !p.wire_matches_display(),
+                is_bash: p.kind == QueueEntryKind::BashCommand,
+                has_images: !p.images.is_empty(),
+                text: p.text.as_str(),
+            })
+            .collect();
+        let n = combine_prefix_len(gates, &skip_refs).max(1);
+        let mut merged = self.pending_prompts.pop_front()?;
+        if n == 1 {
+            return Some(merged);
+        }
+        let mut segments = vec![merged.text.clone()];
+        for _ in 1..n {
+            let next = self
+                .pending_prompts
+                .pop_front()
+                .expect("prefix length checked");
+            let shift =
+                join_texts(segments.iter().map(String::as_str)).len() + TEXT_SEPARATOR.len();
+            segments.push(next.text.clone());
+            merged
+                .chip_elements
+                .extend(next.chip_elements.into_iter().map(|c| ChipElement {
+                    range: (c.range.start + shift)..(c.range.end + shift),
+                    kind: c.kind,
+                    display: c.display,
+                }));
+            merged.wire_blocks = None;
+            merged.display_as_skill = false;
+            merged.task_id = None;
+            merged.human_schedule = None;
+        }
+        merged.text = join_texts(segments.iter().map(String::as_str));
+        merged.skill_token_ranges.clear();
+        merged.combined_texts = segments;
+        Some(merged)
+    }
     /// Number of prompts currently queued.
     pub fn queue_len(&self) -> usize {
         self.pending_prompts.len()
@@ -1033,6 +1195,7 @@ mod tests {
             bg_tool_call_to_task: HashMap::new(),
             scheduled_tasks: HashMap::new(),
             in_flight_prompt: None,
+            compact_held_prompt: None,
             current_prompt_id: None,
             created_via_new: false,
         }
@@ -1062,6 +1225,14 @@ mod tests {
         assert_eq!(
             GoalDisplayStatus::parse("infra_paused"),
             GoalDisplayStatus::InfraPaused
+        );
+        assert_eq!(
+            GoalDisplayStatus::parse("failed"),
+            GoalDisplayStatus::Failed
+        );
+        assert_eq!(
+            GoalDisplayStatus::parse("interrupted"),
+            GoalDisplayStatus::Interrupted
         );
         assert_eq!(
             GoalDisplayStatus::parse("blocked"),
@@ -1134,6 +1305,8 @@ mod tests {
             "Paused (verification blocked)"
         );
         assert_eq!(GoalDisplayStatus::Active.pause_label(), "");
+        assert_eq!(GoalDisplayStatus::Failed.pause_label(), "");
+        assert_eq!(GoalDisplayStatus::Interrupted.pause_label(), "");
         assert_eq!(GoalDisplayStatus::BudgetLimited.pause_label(), "");
         assert_eq!(GoalDisplayStatus::Complete.pause_label(), "");
     }
@@ -1145,6 +1318,8 @@ mod tests {
         assert!(GoalDisplayStatus::InfraPaused.is_paused());
         assert!(GoalDisplayStatus::Blocked.is_paused());
         assert!(!GoalDisplayStatus::Active.is_paused());
+        assert!(!GoalDisplayStatus::Failed.is_paused());
+        assert!(!GoalDisplayStatus::Interrupted.is_paused());
         assert!(!GoalDisplayStatus::BudgetLimited.is_paused());
         assert!(!GoalDisplayStatus::Complete.is_paused());
     }
@@ -1341,15 +1516,9 @@ mod tests {
     #[test]
     fn enqueue_prompt_with_skill_tokens_preserves_ranges() {
         let mut s = test_session();
-        s.enqueue_prompt_with_skill_tokens(
-            "great /commit now".into(),
-            std::iter::once(6..13).collect(),
-        );
+        s.enqueue_prompt_with_skill_tokens("great /commit now".into(), vec![6..13]);
         let p = s.dequeue_prompt().unwrap();
-        assert_eq!(
-            p.skill_token_ranges,
-            std::iter::once(6..13).collect::<Vec<_>>()
-        );
+        assert_eq!(p.skill_token_ranges, vec![6..13]);
         assert_eq!(p.kind, QueueEntryKind::Prompt);
         assert!(p.wire_blocks.is_none());
     }
@@ -1378,6 +1547,7 @@ mod tests {
             text: "look [Image #1]".into(),
             images: vec![image],
             scrollback_entry: EntryId::new(1),
+            combined_scrollback_entries: Vec::new(),
             chip_elements: vec![ChipElement {
                 range: 5..15,
                 kind: crate::views::prompt_widget::KIND_IMAGE,
@@ -1472,5 +1642,275 @@ mod tests {
         let e3 = s.dequeue_prompt().unwrap();
         assert!(e3.wire_blocks.is_none());
         assert_eq!(e3.kind, QueueEntryKind::BashCommand);
+    }
+    #[test]
+    fn dequeue_combined_prompt_merges_three_consecutive_prompts() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_prompt("third".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond\n\nthird");
+        assert_eq!(merged.combined_texts, vec!["first", "second", "third"]);
+        assert_eq!(merged.kind, QueueEntryKind::Prompt);
+        assert!(s.dequeue_prompt().is_none(), "all three must be consumed");
+    }
+    #[test]
+    fn dequeue_combined_prompt_stops_at_bash_command() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_bash_command("ls".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond");
+        assert_eq!(s.queue_len(), 1, "the bash command must stay queued");
+        let remaining = s.dequeue_prompt().unwrap();
+        assert_eq!(remaining.kind, QueueEntryKind::BashCommand);
+        assert_eq!(remaining.text, "ls");
+    }
+    #[test]
+    fn dequeue_combined_prompt_stops_at_command() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_command("/compact".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond");
+        assert_eq!(s.queue_len(), 1, "the slash command must stay queued");
+        let remaining = s.dequeue_prompt().unwrap();
+        assert_eq!(remaining.kind, QueueEntryKind::Command);
+        assert_eq!(remaining.text, "/compact");
+    }
+    #[test]
+    fn dequeue_combined_prompt_stops_at_cron() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_cron_prompt("check status".into(), "task-1".into(), "every 5m".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond");
+        assert_eq!(s.queue_len(), 1, "the cron entry must stay queued");
+        let remaining = s.dequeue_prompt().unwrap();
+        assert_eq!(remaining.kind, QueueEntryKind::Cron);
+        assert_eq!(remaining.text, "check status");
+    }
+    #[test]
+    fn dequeue_combined_prompt_single_leading_prompt_returns_unchanged() {
+        let mut s = test_session();
+        s.enqueue_prompt("only".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "only");
+        assert!(!merged.text.contains("\n\n"), "no merge means no separator");
+        assert!(s.dequeue_prompt().is_none());
+    }
+    #[test]
+    fn dequeue_combined_prompt_front_non_prompt_returns_single_entry_queue_intact() {
+        let mut s = test_session();
+        s.enqueue_bash_command("ls".into());
+        s.enqueue_prompt("follow-up".into());
+        let front = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(front.kind, QueueEntryKind::BashCommand);
+        assert_eq!(front.text, "ls");
+        assert_eq!(
+            s.queue_len(),
+            1,
+            "the trailing prompt must stay queued, not merged into the bash entry"
+        );
+        let remaining = s.dequeue_prompt().unwrap();
+        assert_eq!(remaining.text, "follow-up");
+    }
+    #[test]
+    fn dequeue_combined_prompt_stops_before_row_under_edit() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_prompt("third".into());
+        let second_id = s.pending_prompts[1].id;
+        let merged = s.dequeue_combined_prompt(Some(second_id)).unwrap();
+        assert_eq!(
+            merged.text, "first",
+            "merge stops before the edited follower"
+        );
+        assert_eq!(
+            s.queue_len(),
+            2,
+            "edited row and everything after it stay queued"
+        );
+        let next = s.dequeue_prompt().unwrap();
+        assert_eq!(
+            next.id, second_id,
+            "edited row preserved at the front, id intact"
+        );
+        assert_eq!(next.text, "second");
+    }
+    #[test]
+    fn dequeue_combined_prompt_merges_up_to_row_under_edit() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        s.enqueue_prompt("second".into());
+        s.enqueue_prompt("third".into());
+        let third_id = s.pending_prompts[2].id;
+        let merged = s.dequeue_combined_prompt(Some(third_id)).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond");
+        assert_eq!(s.queue_len(), 1, "only the edited row stays queued");
+        let next = s.dequeue_prompt().unwrap();
+        assert_eq!(next.id, third_id, "edited row preserved, id intact");
+        assert_eq!(next.text, "third");
+    }
+    #[test]
+    fn dequeue_combined_prompt_stops_at_expanded_wire_prompt() {
+        let mut s = test_session();
+        s.enqueue_prompt("first".into());
+        let id = s.next_queue_id;
+        s.next_queue_id += 1;
+        s.pending_prompts.push_back(QueuedPrompt {
+            wire_blocks: Some(vec![acp::ContentBlock::Text(acp::TextContent::new(
+                "<skill>body</skill>",
+            ))]),
+            ..QueuedPrompt::plain(id, "/imagine cat", QueueEntryKind::Prompt)
+        });
+        s.enqueue_prompt("third".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first");
+        assert_eq!(
+            s.queue_len(),
+            2,
+            "the expanded-wire prompt and its follower must stay queued"
+        );
+    }
+    #[test]
+    fn dequeue_combined_prompt_reoffsets_chip_ranges_for_second_entry() {
+        let mut s = test_session();
+        let id0 = s.next_queue_id;
+        s.next_queue_id += 1;
+        s.pending_prompts.push_back(QueuedPrompt {
+            chip_elements: vec![ChipElement {
+                range: 0..5,
+                kind: crate::views::prompt_widget::KIND_IMAGE,
+                display: None,
+            }],
+            ..QueuedPrompt::plain(id0, "first", QueueEntryKind::Prompt)
+        });
+        let id1 = s.next_queue_id;
+        s.next_queue_id += 1;
+        s.pending_prompts.push_back(QueuedPrompt {
+            chip_elements: vec![ChipElement {
+                range: 2..6,
+                kind: crate::views::prompt_widget::KIND_IMAGE,
+                display: None,
+            }],
+            ..QueuedPrompt::plain(id1, "second!", QueueEntryKind::Prompt)
+        });
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "first\n\nsecond!");
+        assert_eq!(merged.chip_elements.len(), 2);
+        assert_eq!(merged.chip_elements[0].range, 0..5);
+        assert_eq!(merged.chip_elements[1].range, 9..13);
+        assert_eq!(&merged.text[9..13], "cond");
+    }
+    /// An image-bearing follower must NOT be folded in — merging two image
+    /// sets would require renumbering `[Image #N]` placeholders, which this
+    /// v1 does not do. The front entry's own image is unaffected.
+    #[test]
+    fn dequeue_combined_prompt_stops_at_image_bearing_follower_keeps_own_image() {
+        let mut s = test_session();
+        let own_image = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+            data: vec![1, 2, 3],
+            mime_type: "image/png".into(),
+        });
+        let follower_image =
+            crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
+                data: vec![4, 5, 6],
+                mime_type: "image/png".into(),
+            });
+        let id0 = s.next_queue_id;
+        s.next_queue_id += 1;
+        s.pending_prompts.push_back(QueuedPrompt {
+            images: vec![own_image],
+            ..QueuedPrompt::plain(id0, "front [Image #1]", QueueEntryKind::Prompt)
+        });
+        let id1 = s.next_queue_id;
+        s.next_queue_id += 1;
+        s.pending_prompts.push_back(QueuedPrompt {
+            images: vec![follower_image],
+            ..QueuedPrompt::plain(id1, "follower [Image #1]", QueueEntryKind::Prompt)
+        });
+        s.enqueue_prompt("plain follow-up".into());
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(
+            merged.text, "front [Image #1]",
+            "image-bearing follower must not merge in"
+        );
+        assert_eq!(
+            merged.images.len(),
+            1,
+            "the front entry's own image is preserved"
+        );
+        assert_eq!(
+            s.queue_len(),
+            2,
+            "the image-bearing follower and the plain prompt after it must stay queued \
+             (the run stops at the first ineligible entry, it doesn't skip past it)"
+        );
+        let next = s.dequeue_prompt().unwrap();
+        assert_eq!(next.text, "follower [Image #1]");
+        assert_eq!(next.images.len(), 1);
+    }
+    #[test]
+    fn dequeue_combined_prompt_clears_skill_token_ranges_on_multi() {
+        let mut s = test_session();
+        s.enqueue_prompt_with_skill_tokens("hi /commit".into(), vec![3..10]);
+        s.enqueue_prompt_with_skill_tokens("go /push now".into(), vec![3..8]);
+        let merged = s.dequeue_combined_prompt(None).unwrap();
+        assert_eq!(merged.text, "hi /commit\n\ngo /push now");
+        assert!(merged.skill_token_ranges.is_empty());
+        assert_eq!(
+            merged.combined_texts,
+            vec!["hi /commit".to_string(), "go /push now".to_string()]
+        );
+    }
+    /// Folding a late `TaskBackgrounded` into a terminal tombstone keeps the
+    /// terminal state and backfills only what the snapshot couldn't know —
+    /// including a blank command (gateway-bridge completions synthesize one).
+    #[test]
+    fn absorb_late_backgrounded_backfills_without_resurrecting() {
+        let snapshot = xai_grok_tools::types::TaskSnapshot {
+            task_id: "t1".into(),
+            command: String::new(),
+            display_command: None,
+            cwd: "/tmp".into(),
+            start_time: SystemTime::now(),
+            end_time: None,
+            output: String::new(),
+            output_file: "/tmp/out.log".into(),
+            truncated: false,
+            exit_code: Some(0),
+            signal: None,
+            completed: true,
+            kind: Default::default(),
+            block_waited: false,
+            explicitly_killed: false,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: true,
+            output_total_bytes: 0,
+        };
+        let mut tombstone =
+            BgTaskState::tombstone_from_snapshot(&snapshot, BgTaskStatus::Done, None, false);
+        assert_eq!(tombstone.status, BgTaskStatus::Done);
+        assert!(tombstone.end_time.is_some(), "end_time falls back to now");
+        let mut fresh =
+            BgTaskState::tombstone_from_snapshot(&snapshot, BgTaskStatus::Running, None, false);
+        fresh.tool_call_id = "tc-1".into();
+        fresh.command = "echo hi".into();
+        fresh.description = Some("say hi".into());
+        fresh.set_stdout("demoted output".into());
+        tombstone.absorb_late_backgrounded(fresh, None);
+        assert_eq!(tombstone.status, BgTaskStatus::Done, "terminal status kept");
+        assert_eq!(tombstone.tool_call_id, "tc-1");
+        assert_eq!(tombstone.command, "echo hi", "blank command backfilled");
+        assert_eq!(tombstone.description.as_deref(), Some("say hi"));
+        assert_eq!(tombstone.stdout, "demoted output");
+        assert_eq!(tombstone.stdout_line_count, 1);
     }
 }

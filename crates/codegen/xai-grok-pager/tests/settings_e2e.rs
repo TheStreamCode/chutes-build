@@ -32,6 +32,9 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "screen_mode",
     "show_timestamps",
     "show_timeline",
+    "page_flip_on_send",
+    "confirm_before_rewind",
+    "combine_queued_prompts",
     "simple_mode",
     "vim_mode",
     "remember_tool_approvals",
@@ -50,9 +53,11 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "scroll_lines",
     "invert_scroll",
     "display_refresh_auto_cadence",
+    "coding_data_sharing",
     "default_selected_permission",
     "plan_mode",
     "show_tips",
+    "auto_update",
     "fork_secondary_model",
     "show_thinking_blocks",
     "prompt_suggestions",
@@ -60,6 +65,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "collapsed_edit_blocks",
     "respect_manual_folds",
     "hunk_tracker_mode",
+    "voice_keybind_enabled",
     "voice_capture_mode",
     "voice_stt_language",
     // Contextual-hints group + its per-tip child toggles (exercised via the
@@ -207,6 +213,21 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
         ("show_timeline", Action::SetTimeline(b)) => {
             assert_eq!(b, expected, "SetTimeline value differs from expected")
         }
+        ("page_flip_on_send", Action::SetPageFlipOnSend(b)) => {
+            assert_eq!(b, expected, "SetPageFlipOnSend value differs from expected")
+        }
+        ("confirm_before_rewind", Action::SetConfirmBeforeRewind(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetConfirmBeforeRewind value differs from expected"
+            )
+        }
+        ("combine_queued_prompts", Action::SetCombineQueuedPrompts(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetCombineQueuedPrompts value differs from expected"
+            )
+        }
         ("simple_mode", Action::SetSimpleMode(b)) => {
             assert_eq!(b, expected, "SetSimpleMode value differs from expected")
         }
@@ -220,6 +241,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetRememberToolApprovals value differs from expected"
+            )
+        }
+        ("voice_keybind_enabled", Action::SetVoiceKeybindEnabled(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetVoiceKeybindEnabled value differs from expected"
             )
         }
         (
@@ -331,11 +358,11 @@ fn cmd_comma_closes_modal_on_macos() {
 fn esc_in_filter_mode_exits_filter_not_modal() {
     let mut s = make_state();
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
     // Esc inside filter should NOT close the modal.
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +393,33 @@ fn space_on_show_timeline_dispatches_typed_setter() {
     // Toggling flips the default; derived so it follows SHOW_TIMELINE_DEFAULT.
     let default_on = UiConfig::default().show_timeline_enabled();
     assert_set_bool_action(outcome, "show_timeline", !default_on);
+}
+
+#[test]
+fn space_on_page_flip_on_send_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "page_flip_on_send");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    let default_on = UiConfig::default().page_flip_on_send_enabled();
+    assert_set_bool_action(outcome, "page_flip_on_send", !default_on);
+}
+
+#[test]
+fn space_on_confirm_before_rewind_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "confirm_before_rewind");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    let default_on = UiConfig::default().confirm_before_rewind_enabled();
+    assert_set_bool_action(outcome, "confirm_before_rewind", !default_on);
+}
+
+#[test]
+fn space_on_combine_queued_prompts_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "combine_queued_prompts");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    let default_on = UiConfig::default().combine_queued_prompts.unwrap_or(false);
+    assert_set_bool_action(outcome, "combine_queued_prompts", !default_on);
 }
 
 #[test]
@@ -422,7 +476,7 @@ fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
     let out = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(matches!(
-        s.mode,
+        s.mode(),
         SettingsModalMode::PickingGroup { child_idx: 0, .. }
     ));
 
@@ -459,7 +513,7 @@ fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
     // Esc returns to Browse.
     let out = handle_settings_key(&mut s, &press(KeyCode::Esc));
     assert!(matches!(out, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Mouse parity for the group: clicking the group row's value column opens the
@@ -479,9 +533,9 @@ fn mouse_click_on_contextual_hints_group_opens_sub_sheet_and_toggles_child() {
     );
     assert!(matches!(out, SettingsKeyOutcome::Changed));
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingGroup { .. }),
+        matches!(s.mode(), SettingsModalMode::PickingGroup { .. }),
         "click on the group value column must open the sub-sheet, got {:?}",
-        s.mode,
+        s.mode(),
     );
 
     // Synthesize child hit-rects (the renderer doesn't run in tests) and click
@@ -600,6 +654,51 @@ fn mouse_click_on_show_timeline_indicator_toggles_in_one_click() {
     );
     let default_on = UiConfig::default().show_timeline_enabled();
     assert_set_bool_action(outcome, "show_timeline", !default_on);
+}
+
+#[test]
+fn mouse_click_on_page_flip_on_send_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "page_flip_on_send") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    let default_on = UiConfig::default().page_flip_on_send_enabled();
+    assert_set_bool_action(outcome, "page_flip_on_send", !default_on);
+}
+
+#[test]
+fn mouse_click_on_combine_queued_prompts_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "combine_queued_prompts") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    let default_on = UiConfig::default().combine_queued_prompts.unwrap_or(false);
+    assert_set_bool_action(outcome, "combine_queued_prompts", !default_on);
+}
+
+#[test]
+fn mouse_click_on_confirm_before_rewind_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "confirm_before_rewind") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    let default_on = UiConfig::default().confirm_before_rewind_enabled();
+    assert_set_bool_action(outcome, "confirm_before_rewind", !default_on);
 }
 
 /// Value-column click toggles `remember_tool_approvals` in one click.
@@ -761,14 +860,14 @@ fn mouse_scroll_up_returns_selection_to_first() {
 // Filter mode
 // ---------------------------------------------------------------------------
 
-/// Filter mode accepts chars into `state.query` and must never leak
+/// Filter mode accepts chars into the query editor and must never leak
 /// an `Action`.
 #[test]
 fn slash_enters_filter_mode_and_chars_go_to_query_no_action_leak() {
     let mut s = make_state();
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
 
     for c in "compact density".chars() {
         let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
@@ -780,15 +879,18 @@ fn slash_enters_filter_mode_and_chars_go_to_query_no_action_leak() {
             SettingsKeyOutcome::ActionPair(a, b) => {
                 panic!("filter mode leaked ActionPair({a:?}, {b:?}) for char {c:?}");
             }
+            SettingsKeyOutcome::ActionThenClose(a) => {
+                panic!("filter mode leaked ActionThenClose({a:?}) for char {c:?}");
+            }
             SettingsKeyOutcome::Close => {
                 panic!("filter mode unexpectedly closed on char {c:?}");
             }
         }
     }
-    assert_eq!(s.query, "compact density");
+    assert_eq!(s.query(), "compact density");
 
     let reg = SettingsRegistry::defaults();
-    let hits = reg.search(&s.query);
+    let hits = reg.search(s.query());
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].key, "compact_mode");
 }
@@ -798,7 +900,7 @@ fn slash_enters_filter_mode_and_chars_go_to_query_no_action_leak() {
 fn ctrl_comma_from_filter_mode_closes_modal() {
     let mut s = make_state();
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
     let outcome = handle_settings_key(
         &mut s,
         &press_with(KeyCode::Char(','), KeyModifiers::CONTROL),
@@ -811,7 +913,7 @@ fn ctrl_comma_from_filter_mode_closes_modal() {
 fn f2_from_filter_mode_closes_modal() {
     let mut s = make_state();
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::F(2)));
     assert!(matches!(outcome, SettingsKeyOutcome::Close));
 }
@@ -877,13 +979,13 @@ fn filter_esc_clears_query_and_returns_to_browse() {
     for c in "stamp".chars() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
-    assert_eq!(s.query, "stamp");
+    assert_eq!(s.query(), "stamp");
     assert_eq!(s.filtered_indices().len(), 2);
 
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
-    assert_eq!(s.query, "", "Esc must clear the query");
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+    assert_eq!(s.query(), "", "Esc must clear the query");
     // Filter is inert again — full set restored in original order.
     let expected: Vec<usize> = (0..s.rows.len()).collect();
     assert_eq!(
@@ -967,18 +1069,18 @@ fn filter_backspace_broadens_visible_set() {
     // Pop trailing 'p' → "stam". Still matches only show_timestamps
     // (substring of "timestamps"); same 2 visible rows.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
-    assert_eq!(s.query, "stam");
+    assert_eq!(s.query(), "stam");
     assert_eq!(s.filtered_indices().len(), 2);
 
     // Empty the query out — now everything is visible. We pop one at
     // a time and check at each step that the cache regenerates
     // (rather than just shrinks).
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // → "sta"
-    assert_eq!(s.query, "sta");
+    assert_eq!(s.query(), "sta");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // → "st"
-    assert_eq!(s.query, "st");
+    assert_eq!(s.query(), "st");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // → "s"
-    assert_eq!(s.query, "s");
+    assert_eq!(s.query(), "s");
     // "s" matches multiple settings (compact_mode via "messages" in
     // its description, show_timestamps via "show"/"timestamps",
     // simple_mode via "simple"/"ascii"). So the filtered set MUST be
@@ -998,13 +1100,22 @@ fn filter_backspace_broadens_visible_set() {
 
     // Final pop → "". Filter inert, full set restored in order.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
-    assert_eq!(s.query, "");
+    assert_eq!(s.query(), "");
     let expected: Vec<usize> = (0..s.rows.len()).collect();
     assert_eq!(
         s.filtered_indices(),
         expected.as_slice(),
         "empty query must re-broaden to (0..rows.len()) in row order",
     );
+}
+
+#[test]
+fn programmatic_filter_query_is_single_line_and_cursor_ends() {
+    let mut state = make_state();
+    state.set_query("sta\r\nmp\n");
+    assert_eq!(state.query(), "stamp");
+    assert_eq!(state.query_cursor(), state.query().len());
+    assert_eq!(state.filtered_indices().len(), 2);
 }
 
 /// Multi-keyword AND query narrows correctly.
@@ -1055,7 +1166,7 @@ fn filter_with_multiple_matches_navigates_between_settings() {
     for _ in 0..8 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     }
-    assert_eq!(s.query, "ascii");
+    assert_eq!(s.query(), "ascii");
     let filtered_after_pop = s.filtered_indices();
     let after_pop_keys: Vec<&str> = filtered_after_pop
         .iter()
@@ -1080,17 +1191,21 @@ fn filter_enter_commits_and_preserves_query() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
     let show_ts_idx = row_idx_for(&s, "show_timestamps");
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
-    assert_eq!(s.query, "stamp");
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
+    assert_eq!(s.query(), "stamp");
     assert_eq!(s.selected, show_ts_idx);
 
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter must exit FilterFocused"
     );
-    assert_eq!(s.query, "stamp", "Enter must PRESERVE the query (Issue 1)");
+    assert_eq!(
+        s.query(),
+        "stamp",
+        "Enter must PRESERVE the query (Issue 1)"
+    );
     assert_eq!(
         s.filtered_indices().len(),
         2,
@@ -1111,25 +1226,161 @@ fn browse_backspace_pops_query_after_filter_commit() {
     for c in "stamp".chars() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Home));
+    assert_eq!(s.query_cursor(), 0);
     // Commit
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
-    assert_eq!(s.query, "stamp");
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+    assert_eq!(s.query(), "stamp");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Left));
+    assert_eq!(
+        s.query(),
+        "stamp",
+        "unfocused Browse navigation must not edit the query",
+    );
 
     // Backspace in Browse pops one char, stays in Browse, re-runs
     // invalidate_filter.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
-    assert_eq!(s.query, "stam");
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+    assert_eq!(s.query(), "stam");
     assert_eq!(s.filtered_indices().len(), 2);
 
+    let grapheme = "👩🏽\u{200d}💻";
+    for modifiers in [
+        KeyModifiers::ALT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::SUPER,
+        KeyModifiers::SHIFT,
+    ] {
+        s.set_query(format!("x{grapheme}"));
+        let outcome = handle_settings_key(&mut s, &press_with(KeyCode::Backspace, modifiers));
+        assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+        assert_eq!(
+            s.query(),
+            "x",
+            "{modifiers:?}+Backspace must remove exactly one trailing grapheme",
+        );
+        assert!(matches!(s.mode(), SettingsModalMode::Browse));
+    }
+
     // Backspace on empty query is Unchanged (and the query stays "").
-    s.query.clear();
+    s.set_query("");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Unchanged),
         "Backspace on empty query must be Unchanged"
+    );
+}
+
+#[test]
+fn filter_uses_canonical_word_keys_without_cursor_side_effects() {
+    let mut state = make_state();
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Char('/')));
+
+    for key in [
+        press_with(KeyCode::Left, KeyModifiers::ALT),
+        press_with(KeyCode::Char('b'), KeyModifiers::ALT),
+        press_with(KeyCode::Left, KeyModifiers::CONTROL),
+    ] {
+        state.set_query("alpha-beta");
+        let outcome = handle_settings_key(&mut state, &key);
+        assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+        assert_eq!(state.query(), "alpha-beta");
+        assert_eq!(state.query_cursor(), "alpha-".len());
+    }
+    for key in [
+        press_with(KeyCode::Right, KeyModifiers::ALT),
+        press_with(KeyCode::Char('f'), KeyModifiers::ALT),
+    ] {
+        state.set_query("alpha-beta");
+        let _ = handle_settings_key(&mut state, &press(KeyCode::Home));
+        let outcome = handle_settings_key(&mut state, &key);
+        assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+        assert_eq!(state.query_cursor(), "alpha".len());
+    }
+
+    state.set_query("stamp");
+    let compact_idx = row_idx_for(&state, "compact_mode");
+    let show_timestamps_idx = row_idx_for(&state, "show_timestamps");
+    let filtered_before = state.filtered_indices().to_vec();
+    state.selected = compact_idx;
+    let _ = handle_settings_key(&mut state, &press_with(KeyCode::Left, KeyModifiers::ALT));
+    assert_eq!(state.filtered_indices(), filtered_before.as_slice());
+    assert_eq!(
+        state.selected, compact_idx,
+        "cursor-only motion must not clamp selection",
+    );
+    let _ = handle_settings_key(&mut state, &press(KeyCode::End));
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Backspace));
+    assert_eq!(state.query(), "stam");
+    assert_eq!(
+        state.selected, show_timestamps_idx,
+        "text mutation must recompute filtering and clamp selection",
+    );
+
+    state.set_query("alpha-beta");
+    let _ = handle_settings_key(
+        &mut state,
+        &press_with(KeyCode::Backspace, KeyModifiers::ALT),
+    );
+    assert_eq!(state.query(), "alpha-");
+}
+
+#[test]
+fn filter_grapheme_and_line_commands_are_canonical() {
+    let mut state = make_state();
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Char('/')));
+    let grapheme = "👩🏽\u{200d}💻";
+    state.set_query(format!("a{grapheme}b"));
+
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Home));
+    assert_eq!(state.query_cursor(), 0);
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Right));
+    assert_eq!(state.query_cursor(), 1);
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Delete));
+    assert_eq!(state.query(), "ab");
+    let _ = handle_settings_key(&mut state, &press(KeyCode::End));
+    assert_eq!(state.query_cursor(), state.query().len());
+    let _ = handle_settings_key(&mut state, &press_with(KeyCode::Left, KeyModifiers::SUPER));
+    assert_eq!(state.query_cursor(), 0);
+    let _ = handle_settings_key(&mut state, &press_with(KeyCode::Right, KeyModifiers::SUPER));
+    assert_eq!(state.query_cursor(), state.query().len());
+}
+
+#[test]
+fn filter_ctrl_kill_keys_and_unsafe_insert_policy() {
+    let mut state = make_state();
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Char('/')));
+
+    state.set_query("alpha beta");
+    let _ = handle_settings_key(
+        &mut state,
+        &press_with(KeyCode::Char('w'), KeyModifiers::CONTROL),
+    );
+    assert_eq!(state.query(), "alpha ");
+
+    state.set_query("alpha beta");
+    let _ = handle_settings_key(
+        &mut state,
+        &press_with(KeyCode::Char('u'), KeyModifiers::CONTROL),
+    );
+    assert!(state.query().is_empty());
+
+    state.set_query("alpha beta");
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Home));
+    let _ = handle_settings_key(
+        &mut state,
+        &press_with(KeyCode::Char('k'), KeyModifiers::CONTROL),
+    );
+    assert!(state.query().is_empty());
+
+    let outcome = handle_settings_key(&mut state, &press(KeyCode::Char('\u{202e}')));
+    assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    assert!(
+        state.query().is_empty(),
+        "unsafe display characters must be consumed without insertion",
     );
 }
 
@@ -1139,7 +1390,7 @@ fn filter_pageup_pagedown_navigates_in_filter_mode() {
     let mut s = make_state();
     // Enter filter mode without typing — filtered_cache stays full.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
-    assert!(matches!(s.mode, SettingsModalMode::FilterFocused));
+    assert!(matches!(s.mode(), SettingsModalMode::FilterFocused));
 
     // PageDown from compact_mode advances toward the last row.
     let compact_idx = row_idx_for(&s, "compact_mode");
@@ -1223,7 +1474,7 @@ fn g_jumps_to_first_filtered_row_under_active_filter() {
     }
     // Commit filter into Browse with query preserved.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 
     // Selection is already on show_timestamps (snapped by
     // clamp_selected_to_visible). g should be a no-op (Unchanged)
@@ -1515,30 +1766,22 @@ fn render_no_matches_placeholder_includes_query() {
 #[test]
 fn esc_in_picking_enum_mode_returns_to_browse() {
     let mut s = make_state();
-    s.mode = SettingsModalMode::PickingEnum {
-        key: "compact_mode",
-        choices_idx: 0,
-        original_value: SettingValue::Bool(false),
-        supports_preview: true,
-    };
+    navigate_to(&mut s, "scroll_mode");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Esc in `EditingValue` returns to Browse.
 #[test]
 fn esc_in_editing_value_mode_returns_to_browse() {
     let mut s = make_state();
-    s.mode = SettingsModalMode::EditingValue {
-        key: "compact_mode",
-        buffer: String::new(),
-        cursor_byte: 0,
-        validation_error: None,
-    };
+    navigate_to(&mut s, "max_thoughts_width");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,11 +1830,16 @@ fn registry_kind_membership_through_pr_14() {
             "show_thinking_blocks",
             "show_timeline",
             "show_timestamps",
+            "page_flip_on_send",
+            "confirm_before_rewind",
+            "combine_queued_prompts",
             "simple_mode",
             "vim_mode",
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
+            "auto_update",
             "show_tips",
+            "voice_keybind_enabled",
             // Per-tip contextual-hint children (hidden from the top-level list,
             // toggled inside the group sub-sheet) are still Bool settings.
             "contextual_hints.undo",
@@ -1615,6 +1863,7 @@ fn registry_kind_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
+            "coding_data_sharing",
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
@@ -1683,6 +1932,7 @@ fn enum_settings_membership_through_pr_14() {
         vec![
             "auto_dark_theme",
             "auto_light_theme",
+            "coding_data_sharing",
             "default_selected_permission",
             "hunk_tracker_mode",
             "keep_text_selection",
@@ -1715,6 +1965,8 @@ fn defaults_round_trip_through_registry() {
     xai_grok_pager::appearance::cache::set_show_thinking_blocks(true);
     xai_grok_pager::appearance::cache::set_prompt_suggestions(true);
     xai_grok_pager::appearance::cache::set_group_tool_verbs(true);
+    xai_grok_pager::appearance::cache::set_page_flip_on_send(true);
+    xai_grok_pager::appearance::cache::set_combine_queued_prompts(false);
     xai_grok_pager::appearance::cache::set_scroll_mode(
         xai_grok_pager::appearance::ScrollMode::Auto,
     );
@@ -1729,6 +1981,9 @@ fn defaults_round_trip_through_registry() {
             "screen_mode" => SettingValue::Enum("fullscreen"),
             "show_timestamps" => SettingValue::Bool(true),
             "show_timeline" => SettingValue::Bool(false),
+            "page_flip_on_send" => SettingValue::Bool(true),
+            "confirm_before_rewind" => SettingValue::Bool(true),
+            "combine_queued_prompts" => SettingValue::Bool(false),
             "simple_mode" => SettingValue::Bool(true),
             "vim_mode" => SettingValue::Bool(false),
             "remember_tool_approvals" => SettingValue::Bool(false),
@@ -1747,12 +2002,15 @@ fn defaults_round_trip_through_registry() {
             "scroll_lines" => SettingValue::Int(3),
             "invert_scroll" => SettingValue::Bool(false),
             "display_refresh_auto_cadence" => SettingValue::Bool(false),
+            "coding_data_sharing" => SettingValue::Enum("opt-out"),
             "default_selected_permission" => SettingValue::Enum("always_allow_all_sessions"),
             "hunk_tracker_mode" => SettingValue::Enum("agent_only"),
+            "voice_keybind_enabled" => SettingValue::Bool(true),
             "voice_capture_mode" => SettingValue::Enum("hold"),
             "voice_stt_language" => SettingValue::Enum("en"),
             "plan_mode" => SettingValue::Enum("off"),
             "show_tips" => SettingValue::Bool(true),
+            "auto_update" => SettingValue::Bool(true),
             "fork_secondary_model" => SettingValue::String(String::new()),
             "show_thinking_blocks" => SettingValue::Bool(true),
             "prompt_suggestions" => SettingValue::Bool(true),
@@ -1824,6 +2082,9 @@ fn settings_value_payload_matches_kind() {
             SettingsKeyOutcome::Action(Action::SetCompactMode(_))
             | SettingsKeyOutcome::Action(Action::SetTimestamps(_))
             | SettingsKeyOutcome::Action(Action::SetTimeline(_))
+            | SettingsKeyOutcome::Action(Action::SetPageFlipOnSend(_))
+            | SettingsKeyOutcome::Action(Action::SetConfirmBeforeRewind(_))
+            | SettingsKeyOutcome::Action(Action::SetCombineQueuedPrompts(_))
             | SettingsKeyOutcome::Action(Action::SetSimpleMode(_))
             | SettingsKeyOutcome::Action(Action::SetMultilineMode(_))
             | SettingsKeyOutcome::Action(Action::SetVimMode(_))
@@ -1837,7 +2098,8 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetGroupToolVerbs(_))
             | SettingsKeyOutcome::Action(Action::SetCollapsedEditBlocks(_))
             | SettingsKeyOutcome::Action(Action::SetInvertScroll(_))
-            | SettingsKeyOutcome::Action(Action::SetDisplayRefreshAutoCadence(_)) => {}
+            | SettingsKeyOutcome::Action(Action::SetDisplayRefreshAutoCadence(_))
+            | SettingsKeyOutcome::Action(Action::SetVoiceKeybindEnabled(_)) => {}
             other => panic!(
                 "expected a typed bool setter for `{}`, got {:?}",
                 meta.key, other
@@ -2146,7 +2408,7 @@ fn pr3_esc_in_picker_reverts_to_original() {
     );
 
     // Sanity: modal starts in Browse on the synthetic Enum row.
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
     match &s.rows[s.selected] {
         RowEntry::Setting { key, .. } => assert_eq!(*key, "test_enum"),
         _ => panic!("initial selection must be the synthetic Enum row"),
@@ -2160,7 +2422,7 @@ fn pr3_esc_in_picker_reverts_to_original() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on Enum row should produce Changed, got {outcome:?}"
     );
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             choices_idx,
@@ -2178,7 +2440,7 @@ fn pr3_esc_in_picker_reverts_to_original() {
     // dispatch via action_for_enum, returns None here → Changed).
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum { choices_idx, .. } => assert_eq!(choices_idx, 1),
         ref other => panic!("expected PickingEnum mode after Down, got {other:?}"),
     }
@@ -2193,7 +2455,7 @@ fn pr3_esc_in_picker_reverts_to_original() {
         "Esc revert outcome should be Changed (or Action when arms exist), got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must transition the modal back to Browse"
     );
 }
@@ -2257,7 +2519,7 @@ fn pr4_theme_preview_and_commit_e2e() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on theme row should transition to PickingEnum, got {outcome:?}"
     );
-    let original_canonical = match &s.mode {
+    let original_canonical = match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             choices_idx,
@@ -2289,7 +2551,7 @@ fn pr4_theme_preview_and_commit_e2e() {
         }
         other => panic!("expected Action::PreviewTheme(\"{next_canonical}\"), got {other:?}"),
     }
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum { choices_idx, .. } => assert_eq!(choices_idx, next_idx),
         ref other => panic!("expected PickingEnum after Down, got {other:?}"),
     }
@@ -2321,7 +2583,7 @@ fn pr4_theme_preview_and_commit_e2e() {
         other => panic!("expected Action::SetTheme(\"{next_canonical}\") commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -2350,7 +2612,7 @@ fn pr4_theme_picker_esc_dispatches_revert_action() {
 
     // Enter PickingEnum.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+    assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
     // Preview-navigate so the original/current distinction is visible.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -2370,7 +2632,7 @@ fn pr4_theme_picker_esc_dispatches_revert_action() {
         }
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -2529,12 +2791,8 @@ fn pr4_mouse_click_on_auto_light_theme_row_selects_without_emitting_action() {
 #[test]
 fn pr4_mouse_click_in_theme_picker_is_no_op() {
     let mut s = make_state();
-    s.mode = SettingsModalMode::PickingEnum {
-        key: "theme",
-        choices_idx: 0,
-        original_value: SettingValue::Enum("groknight"),
-        supports_preview: true,
-    };
+    navigate_to(&mut s, "theme");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     synth_rects(&mut s);
     let outcome = handle_settings_mouse(
         &mut s,
@@ -2546,7 +2804,7 @@ fn pr4_mouse_click_in_theme_picker_is_no_op() {
         matches!(outcome, SettingsKeyOutcome::Unchanged),
         "picker mode must ignore mouse clicks in PR 4, got {outcome:?}",
     );
-    assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+    assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 }
 
 // ---------------------------------------------------------------------------
@@ -2772,7 +3030,7 @@ fn pr6_enter_on_permission_mode_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on permission_mode row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -2807,7 +3065,7 @@ fn pr6_permission_mode_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "permission_mode");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         // For "retreat" keys (Up/k) at choices_idx=0, the outcome is
         // Unchanged (clamp at first). We pre-navigate down so retreat
@@ -2823,7 +3081,7 @@ fn pr6_permission_mode_picker_nav_does_not_dispatch_preview() {
              Action — that would persist on every keystroke and drain the \
              permission_queue. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -2855,9 +3113,9 @@ fn pr6_permission_mode_picker_enter_dispatches_set_permission_mode_commit() {
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
 
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
         "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode,
+        s.mode(),
     );
     // Navigate from the seeded default canonical to "always-approve".
     let steps = always_idx as isize - initial_idx as isize;
@@ -2881,7 +3139,7 @@ fn pr6_permission_mode_picker_enter_dispatches_set_permission_mode_commit() {
         ),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -2903,7 +3161,7 @@ fn pr6_permission_mode_picker_esc_does_not_dispatch_action() {
          doing so would re-persist on every Esc. Got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -2932,7 +3190,7 @@ fn pr6_picker_seeds_choices_idx_from_pager_snapshot_yolo_true() {
             .expect("permission_mode must have 'always-approve' choice"),
         _ => panic!("permission_mode must be Enum"),
     };
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum {
             choices_idx,
             ref original_value,
@@ -3034,9 +3292,9 @@ fn pr6_mouse_click_on_unselected_permission_mode_row_only_selects() {
     );
 
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "first body-click must NOT enter the picker (two-stage UX), mode is {:?}",
-        s.mode,
+        s.mode(),
     );
 }
 
@@ -3055,7 +3313,7 @@ fn pr6_mouse_click_on_selected_permission_mode_row_opens_picker() {
         row_y,
     );
     assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 
     // Second click on the now-focused row: open the picker.
     let outcome = handle_settings_mouse(
@@ -3068,7 +3326,7 @@ fn pr6_mouse_click_on_selected_permission_mode_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused Enum row must open picker (Changed), got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "permission_mode");
         }
@@ -3095,7 +3353,7 @@ fn pr6_mouse_click_on_permission_mode_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "permission_mode");
         }
@@ -3136,9 +3394,9 @@ fn pr11_picker_commit_for_default_dispatches_set_permission_mode_default() {
     navigate_to(&mut s, "permission_mode");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
         "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode,
+        s.mode(),
     );
     let steps = default_idx as isize - initial_idx as isize;
     let nav_key = if steps > 0 {
@@ -3157,7 +3415,7 @@ fn pr11_picker_commit_for_default_dispatches_set_permission_mode_default() {
         ),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -3181,9 +3439,9 @@ fn pr11_picker_commit_for_ask_dispatches_set_permission_mode_ask() {
     navigate_to(&mut s, "permission_mode");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "permission_mode"),
         "Enter on permission_mode row must open the picker, got {:?}",
-        s.mode,
+        s.mode(),
     );
 
     let reg = SettingsRegistry::defaults();
@@ -3589,7 +3847,7 @@ fn docs_footer_renders_for_browse_and_picker() {
     let area = Rect {
         x: 0,
         y: 0,
-        width: 180,
+        width: 120,
         height: 30,
     };
     for fixture_label in ["browse", "picker"] {
@@ -3598,7 +3856,7 @@ fn docs_footer_renders_for_browse_and_picker() {
             // Navigate to a row with an Enum kind (theme).
             navigate_to(&mut s, "theme");
             let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-            assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+            assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
         }
         let mut buf = Buffer::empty(area);
         xai_grok_pager::views::settings_modal::render_settings_modal(
@@ -3991,22 +4249,18 @@ fn pr15_int_stepper_commit_dispatches_typed_setter() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on Int row must transition to EditingValue, got {outcome:?}"
     );
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "120", "buffer must seed from default");
-        }
-        other => panic!("expected EditingValue mode, got {other:?}"),
-    }
+    assert_eq!(
+        s.editing_buffer(),
+        Some("120"),
+        "buffer must seed from default",
+    );
 
     // Stepper: Up = +5 → 125. Right = +10 → 135. Down x3 = -15
     // → 120. Up x16 = +80 → 200.
     for _ in 0..16 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     }
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => assert_eq!(buffer, "200"),
-        other => panic!("expected EditingValue, got {other:?}"),
-    }
+    assert_eq!(s.editing_buffer(), Some("200"));
 
     // Enter commits at 200.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -4015,7 +4269,7 @@ fn pr15_int_stepper_commit_dispatches_typed_setter() {
         other => panic!("expected SetMaxThoughtsWidth(200), got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "successful commit must return to Browse"
     );
 }
@@ -4049,7 +4303,7 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
         "Enter on DynamicEnum row must transition to PickingEnum, got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingEnum { key, .. } if key == "default_model"),
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "default_model"),
         "Enter must transition to PickingEnum for default_model"
     );
 
@@ -4073,7 +4327,7 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
         other => panic!("expected SetDefaultModel(<id>) on commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "successful commit must return to Browse"
     );
 }
@@ -4098,7 +4352,7 @@ fn pr14_default_model_picker_row_zero_commits_clear_action() {
     // Picker opens with choices_idx at the snapshot's current model,
     // OR at 0 when current_model_name is None. The fixture above
     // leaves current_model_name as None → picker opens on row 0.
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { choices_idx, .. } => {
             assert_eq!(
                 *choices_idx, 0,
@@ -4164,9 +4418,9 @@ fn pr14_mouse_click_on_dynamic_enum_row_opens_picker() {
         "second click on DynamicEnum row must open picker, got {outcome:?}",
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::PickingEnum { key, .. } if key == "default_model"),
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "default_model"),
         "second click on DynamicEnum row must transition to PickingEnum, got {:?}",
-        s.mode,
+        s.mode(),
     );
 }
 
@@ -4208,9 +4462,9 @@ fn pr8_mouse_click_on_int_row_opens_editor() {
         "second click on Int row must be Changed, got {outcome:?}",
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::EditingValue { key, .. } if key == "max_thoughts_width"),
+        matches!(s.mode(), SettingsModalMode::EditingValue { key, .. } if key == "max_thoughts_width"),
         "second click on Int row must transition to EditingValue, got {:?}",
-        s.mode,
+        s.mode(),
     );
 }
 
@@ -4222,46 +4476,25 @@ fn pr15_int_stepper_up_down_left_right_steps_and_clamps() {
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     // Default 120. Up: 120 + 5 = 125.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => assert_eq!(buffer, "125"),
-        _ => panic!("expected EditingValue"),
-    }
+    assert_eq!(s.editing_buffer(), Some("125"));
     // Right: 125 + 10 = 135.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => assert_eq!(buffer, "135"),
-        _ => panic!("expected EditingValue"),
-    }
+    assert_eq!(s.editing_buffer(), Some("135"));
     // Down 20x: 135 - 100 = 35 → clamps to min (40).
     for _ in 0..20 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
     }
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "40", "must clamp to min");
-        }
-        _ => panic!("expected EditingValue"),
-    }
+    assert_eq!(s.editing_buffer(), Some("40"), "must clamp to min");
     // Right 100x: 40 + 1000 = 1040 → clamps to max (500).
     for _ in 0..100 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
     }
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "500", "must clamp to max");
-        }
-        _ => panic!("expected EditingValue"),
-    }
+    assert_eq!(s.editing_buffer(), Some("500"), "must clamp to max");
     // Left 100x: 500 - 1000 = -500 → clamps to min (40).
     for _ in 0..100 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Left));
     }
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "40", "Left must clamp to min");
-        }
-        _ => panic!("expected EditingValue"),
-    }
+    assert_eq!(s.editing_buffer(), Some("40"), "Left must clamp to min",);
 }
 
 /// Int stepper rejects all text-input keys.
@@ -4270,10 +4503,10 @@ fn pr15_int_stepper_rejects_text_input_keys() {
     let mut s = make_state();
     navigate_to(&mut s, "max_thoughts_width");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    let initial_buffer = match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => buffer.clone(),
-        _ => panic!("expected EditingValue"),
-    };
+    let initial_buffer = s
+        .editing_buffer()
+        .expect("expected EditingValue")
+        .to_owned();
     assert_eq!(initial_buffer, "120", "buffer seeds from default");
 
     let reject_keys = &[
@@ -4298,15 +4531,11 @@ fn pr15_int_stepper_rejects_text_input_keys() {
             matches!(outcome, SettingsKeyOutcome::Unchanged),
             "Int stepper must reject {k:?} (got {outcome:?})",
         );
-        match &s.mode {
-            SettingsModalMode::EditingValue { buffer, .. } => {
-                assert_eq!(
-                    buffer, &initial_buffer,
-                    "buffer must stay at {initial_buffer:?} after {k:?}",
-                );
-            }
-            _ => panic!("mode must remain EditingValue"),
-        }
+        assert_eq!(
+            s.editing_buffer(),
+            Some(initial_buffer.as_str()),
+            "buffer must stay at {initial_buffer:?} after {k:?}",
+        );
     }
 
     // Ctrl-modifier chords are also rejected.
@@ -4321,15 +4550,35 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         matches!(outcome, SettingsKeyOutcome::Unchanged),
         "Int stepper must reject Ctrl+c (got {outcome:?})",
     );
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(
-                buffer, &initial_buffer,
-                "buffer must stay unchanged after Ctrl+c"
-            );
-        }
-        _ => panic!("mode must remain EditingValue"),
+    assert_eq!(
+        s.editing_buffer(),
+        Some(initial_buffer.as_str()),
+        "buffer must stay unchanged after Ctrl+c",
+    );
+}
+
+#[test]
+fn int_stepper_rejects_modified_esc_but_plain_esc_cancels() {
+    let mut state = make_state();
+    navigate_to(&mut state, "max_thoughts_width");
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Enter));
+    for modifiers in [
+        KeyModifiers::ALT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::SUPER,
+    ] {
+        let outcome = handle_settings_key(&mut state, &press_with(KeyCode::Esc, modifiers));
+        assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
+        assert!(matches!(
+            state.mode(),
+            SettingsModalMode::EditingValue { .. }
+        ));
+        assert_eq!(state.editing_buffer(), Some("120"));
     }
+
+    let outcome = handle_settings_key(&mut state, &press(KeyCode::Esc));
+    assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    assert!(matches!(state.mode(), SettingsModalMode::Browse));
 }
 
 /// Esc in EditingValue returns to Browse without dispatching.
@@ -4348,7 +4597,7 @@ fn pr8_esc_in_editing_value_cancels_without_dispatch() {
         "Esc in EditingValue must be Changed (mode swap), got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -4399,24 +4648,9 @@ fn pr8_default_model_and_max_thoughts_width_defaults_roundtrip() {
 // coding_data_sharing (Privacy Enum, no preview — async ACP)
 // ---------------------------------------------------------------------------
 
-fn coding_data_sharing_is_unavailable() -> bool {
-    if chutes_build_core::product::CODING_DATA_RETENTION_CONTROLS {
-        return false;
-    }
-    let registry = SettingsRegistry::defaults();
-    assert!(
-        registry.find("coding_data_sharing").is_none(),
-        "the remote coding-data control must not be registered in Chutes Build"
-    );
-    true
-}
-
 /// `coding_data_sharing` lives under `Privacy`.
 #[test]
 fn pr9_coding_data_sharing_renders_under_privacy_category() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let reg = SettingsRegistry::defaults();
     let meta = reg
         .find("coding_data_sharing")
@@ -4436,9 +4670,6 @@ fn pr9_coding_data_sharing_renders_under_privacy_category() {
 /// `coding_data_sharing` must be `supports_preview: false` (async ACP).
 #[test]
 fn pr9_coding_data_sharing_does_not_support_preview() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let reg = SettingsRegistry::defaults();
     let meta = reg
         .find("coding_data_sharing")
@@ -4489,9 +4720,6 @@ fn pr9_current_value_for_reads_pager_snapshot_inverts_opt_out() {
 /// Enter opens picker seeded to current state.
 #[test]
 fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let mut s = make_state();
     navigate_to(&mut s, "coding_data_sharing");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -4499,7 +4727,7 @@ fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on coding_data_sharing row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -4508,8 +4736,8 @@ fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
             assert_eq!(*key, "coding_data_sharing");
             assert_eq!(
                 original_value,
-                &SettingValue::Enum("opt-in"),
-                "default snapshot opt_out=false → original 'opt-in'"
+                &SettingValue::Enum("opt-out"),
+                "default snapshot opt_out=true → original 'opt-out'"
             );
         }
         other => panic!("expected PickingEnum mode, got {other:?}"),
@@ -4519,9 +4747,6 @@ fn pr9_enter_on_coding_data_sharing_row_enters_picking_enum() {
 /// Nav in picker must NOT dispatch preview (async ACP).
 #[test]
 fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     for nav_key in &[
         KeyCode::Down,
         KeyCode::Char('j'),
@@ -4531,10 +4756,15 @@ fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "coding_data_sharing");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
+        // Pre-position so the nav key under test has room to move no matter
+        // which choice the registry default opens the picker on (Up needs
+        // idx > 0, Down needs idx < last).
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
+        } else {
+            let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
         }
 
         let outcome = handle_settings_key(&mut s, &press(*nav_key));
@@ -4543,16 +4773,13 @@ fn pr9_coding_data_sharing_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in coding_data_sharing picker MUST NOT dispatch a preview \
              Action — that would fire a network round-trip per keystroke. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
 /// Enter commits `SetCodingDataSharing { opted_in }` (opt-in→true).
 #[test]
 fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let reg = SettingsRegistry::defaults();
     let meta = reg.find("coding_data_sharing").unwrap();
     let (default_canonical, choices) = match &meta.kind {
@@ -4577,8 +4804,22 @@ fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
     let mut s = make_state();
     navigate_to(&mut s, "coding_data_sharing");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Nav to the OTHER choice.
-    let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
+    // Nav to the OTHER choice — direction depends on where the registry
+    // default opened the picker, so derive it instead of hardcoding Down.
+    let default_idx = choices
+        .iter()
+        .position(|c| c.canonical == default_canonical)
+        .expect("default must be a registry choice");
+    let other_idx = choices
+        .iter()
+        .position(|c| c.canonical == other_canonical)
+        .expect("other choice must be in the registry");
+    let nav = if other_idx > default_idx {
+        KeyCode::Down
+    } else {
+        KeyCode::Up
+    };
+    let _ = handle_settings_key(&mut s, &press(nav));
     // Enter → commit.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
@@ -4591,7 +4832,7 @@ fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetCodingDataSharing commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -4599,9 +4840,6 @@ fn pr9_coding_data_sharing_picker_enter_dispatches_set_commit() {
 /// Esc in non-preview picker returns to Browse without Action.
 #[test]
 fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let mut s = make_state();
     navigate_to(&mut s, "coding_data_sharing");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -4614,7 +4852,7 @@ fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
          doing so would fire an ACP round-trip on every Esc. Got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -4622,9 +4860,6 @@ fn pr9_coding_data_sharing_picker_esc_does_not_dispatch_action() {
 /// Picker seeds at "opt-out" when `coding_data_sharing_opt_out: true`.
 #[test]
 fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let snapshot = PagerLocalSnapshot {
         coding_data_sharing_opt_out: true,
         ..PagerLocalSnapshot::default()
@@ -4644,7 +4879,7 @@ fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
             .expect("coding_data_sharing must have 'opt-out' choice"),
         _ => panic!("coding_data_sharing must be Enum"),
     };
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum {
             choices_idx,
             ref original_value,
@@ -4667,9 +4902,6 @@ fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
 /// Exactly 2 canonical choices: {opt-in, opt-out}.
 #[test]
 fn pr9_coding_data_sharing_choices_use_canonical_strings() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let reg = SettingsRegistry::defaults();
     let meta = reg.find("coding_data_sharing").unwrap();
     let canonicals: Vec<&str> = match &meta.kind {
@@ -4696,9 +4928,6 @@ fn pr9_coding_data_sharing_choices_use_canonical_strings() {
 /// Search "privacy" finds exactly `coding_data_sharing`.
 #[test]
 fn pr9_search_privacy_matches_coding_data_sharing() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let reg = SettingsRegistry::defaults();
     let hits = reg.search("privacy");
     // The category label "Privacy" appears as a header but is not
@@ -4730,9 +4959,6 @@ fn pr9_search_privacy_matches_coding_data_sharing() {
 /// First click on unselected row only selects.
 #[test]
 fn pr9_mouse_click_on_unselected_coding_data_sharing_row_only_selects() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -4748,15 +4974,12 @@ fn pr9_mouse_click_on_unselected_coding_data_sharing_row_only_selects() {
         "first body-click on unselected coding_data_sharing row should only select, got: {outcome:?}",
     );
     assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Second click on selected row opens picker.
 #[test]
 fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -4781,7 +5004,7 @@ fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused Enum row must open picker, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "coding_data_sharing");
         }
@@ -4792,9 +5015,6 @@ fn pr9_mouse_click_on_selected_coding_data_sharing_row_opens_picker() {
 /// Value-column click opens picker in one click.
 #[test]
 fn pr9_mouse_click_on_coding_data_sharing_indicator_opens_picker_in_one_click() {
-    if coding_data_sharing_is_unavailable() {
-        return;
-    }
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "coding_data_sharing") as u16;
@@ -4809,7 +5029,7 @@ fn pr9_mouse_click_on_coding_data_sharing_indicator_opens_picker_in_one_click() 
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "coding_data_sharing");
         }
@@ -4888,7 +5108,7 @@ fn default_selected_permission_enter_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on default_selected_permission row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -4917,7 +5137,7 @@ fn default_selected_permission_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "default_selected_permission");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -4929,7 +5149,7 @@ fn default_selected_permission_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in default_selected_permission picker MUST NOT dispatch an \
              Action (no preview). Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -4974,7 +5194,7 @@ fn default_selected_permission_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetDefaultSelectedPermission commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -4993,7 +5213,7 @@ fn default_selected_permission_picker_esc_does_not_dispatch_action() {
         "Esc on non-preview Enum picker must NOT emit an Action. Got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -5020,7 +5240,7 @@ fn default_selected_permission_mouse_click_on_unselected_row_only_selects() {
         "first body-click on unselected default_selected_permission row should only select, got: {outcome:?}",
     );
     assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Second click on selected row opens picker.
@@ -5050,7 +5270,7 @@ fn default_selected_permission_mouse_click_on_selected_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused Enum row must open picker, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "default_selected_permission");
         }
@@ -5077,7 +5297,7 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "default_selected_permission");
         }
@@ -5087,51 +5307,23 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
     }
 }
 
-/// The `/privacy` slash command's argument parser
-/// is case-insensitive and supports a deliberately-pared-down list of
-/// unambiguous-semantic aliases. The unit-level coverage lives in the
-/// slash command module; this e2e test pins the integration contract
-/// (the parser is reachable from the slash command and produces the
-/// expected `Action`).
-///
-/// Ambiguous aliases
-/// (`on/off/true/false/enable/disable`) were DROPPED because they
-/// could be read either as "turn on privacy" (=opt-out) or "turn on
-/// sharing" (=opt-in). For a privacy-critical setting we err on the
-/// side of explicit, unambiguous arguments. The test below verifies
-/// both the accept list AND the reject list.
+/// `/privacy` takes no arguments: it opens the settings page and nothing
+/// else. The alias parser it used to carry (`opt-in`, `share`, `out`, …) is
+/// gone — a one-word prompt alias could flip a privacy preference with none
+/// of the disclosure copy in front of the user, and the ambiguous forms
+/// (`on`/`off`) risked landing on the opposite of the intent.
 #[test]
-fn pr9_privacy_slash_command_parses_aliases() {
-    use xai_grok_pager::slash::commands::privacy::parse_privacy_arg;
+fn pr9_privacy_slash_command_takes_no_arguments() {
+    use xai_grok_pager::slash::commands::builtin_commands;
+    use xai_grok_pager::slash::registry::CommandRegistry;
 
-    // Canonical names.
-    assert_eq!(parse_privacy_arg("opt-in"), Some(true));
-    assert_eq!(parse_privacy_arg("opt-out"), Some(false));
-
-    // Case-insensitive (sample).
-    assert_eq!(parse_privacy_arg("Opt-In"), Some(true));
-    assert_eq!(parse_privacy_arg("OPT-OUT"), Some(false));
-
-    // Unambiguous-semantic aliases (pruned list).
-    assert_eq!(parse_privacy_arg("in"), Some(true));
-    assert_eq!(parse_privacy_arg("out"), Some(false));
-    assert_eq!(parse_privacy_arg("share"), Some(true));
-    assert_eq!(parse_privacy_arg("private"), Some(false));
-
-    // Ambiguous aliases MUST be rejected. `/privacy on`
-    // could be read as "turn on privacy" (=opt-out, the OPPOSITE of
-    // what an earlier mapping returned). For a privacy
-    // setting, ambiguity = silent data-exfiltration risk.
-    for ambiguous in &["on", "off", "true", "false", "enable", "disable"] {
-        assert_eq!(
-            parse_privacy_arg(ambiguous),
-            None,
-            "ambiguous alias `{ambiguous}` MUST be rejected (PR 9 R1, Security Issue 10)",
-        );
-    }
-
-    // Unknown.
-    assert_eq!(parse_privacy_arg("maybe"), None);
+    let reg = CommandRegistry::new(builtin_commands());
+    let cmd = reg.get("privacy").expect("/privacy must be registered");
+    assert!(
+        !cmd.takes_args(),
+        "/privacy must not advertise an argument slot"
+    );
+    assert_eq!(cmd.usage(), "/privacy");
 }
 
 // ---------------------------------------------------------------------------
@@ -5235,7 +5427,7 @@ fn pr10_enter_on_plan_mode_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on plan_mode row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -5268,7 +5460,7 @@ fn pr10_plan_mode_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "plan_mode");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -5280,7 +5472,7 @@ fn pr10_plan_mode_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in plan_mode picker MUST NOT dispatch a preview \
              Action — that would fire an ACP round-trip per keystroke. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -5311,7 +5503,7 @@ fn pr10_plan_mode_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetPlanMode commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -5334,7 +5526,7 @@ fn pr10_plan_mode_picker_esc_does_not_dispatch_action() {
          doing so would fire an ACP round-trip on every Esc. Got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -5363,7 +5555,7 @@ fn pr10_picker_seeds_choices_idx_from_pager_snapshot_plan_mode_active() {
             .expect("plan_mode must have 'on' choice"),
         _ => panic!("plan_mode must be Enum"),
     };
-    match s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum {
             choices_idx,
             ref original_value,
@@ -5439,7 +5631,7 @@ fn pr10_mouse_click_on_unselected_plan_mode_row_only_selects() {
         "first body-click on unselected plan_mode row should only select, got: {outcome:?}",
     );
     assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Second mouse-click on the selected row opens the picker for the
@@ -5470,7 +5662,7 @@ fn pr10_mouse_click_on_selected_plan_mode_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused Enum row must open picker, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "plan_mode");
         }
@@ -5497,7 +5689,7 @@ fn pr10_mouse_click_on_plan_mode_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => {
             assert_eq!(*key, "plan_mode");
         }
@@ -5574,7 +5766,7 @@ fn enter_on_render_mermaid_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on render_mermaid row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -5605,7 +5797,7 @@ fn render_mermaid_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "render_mermaid");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -5617,7 +5809,7 @@ fn render_mermaid_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in render_mermaid picker MUST NOT dispatch a preview \
              Action. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -5646,7 +5838,7 @@ fn render_mermaid_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetRenderMermaid commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -5667,7 +5859,7 @@ fn render_mermaid_picker_esc_does_not_dispatch_action() {
         "Esc on non-preview Enum picker must NOT emit an Action. Got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Esc must return to Browse"
     );
 }
@@ -5716,7 +5908,7 @@ fn mouse_click_on_unselected_render_mermaid_row_only_selects() {
         "first body-click on unselected render_mermaid row should only select, got: {outcome:?}",
     );
     assert_eq!(s.selected, row_y as usize);
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 /// Second mouse-click on the selected row opens the picker for the Enum row —
@@ -5745,7 +5937,7 @@ fn mouse_click_on_selected_render_mermaid_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused Enum row must open picker, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "render_mermaid"),
         _ => panic!("second click on focused render_mermaid row must enter PickingEnum"),
     }
@@ -5768,7 +5960,7 @@ fn mouse_click_on_render_mermaid_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "render_mermaid"),
         _ => panic!("value click on render_mermaid must enter PickingEnum"),
     }
@@ -5791,16 +5983,16 @@ fn enter_on_screen_mode_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on screen_mode row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
             ..
         } => {
-            assert_eq!(*key, "screen_mode");
+            assert_eq!(key, "screen_mode");
             assert_eq!(
                 original_value,
-                &SettingValue::Enum("fullscreen"),
+                SettingValue::Enum("fullscreen"),
                 "default UiConfig screen_mode=None → original 'fullscreen'"
             );
         }
@@ -5821,7 +6013,7 @@ fn screen_mode_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "screen_mode");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -5833,7 +6025,7 @@ fn screen_mode_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in screen_mode picker MUST NOT dispatch a preview \
              Action. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -5857,7 +6049,7 @@ fn screen_mode_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetScreenMode commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -5910,8 +6102,8 @@ fn mouse_click_on_screen_mode_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
-        SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "screen_mode"),
+    match s.mode() {
+        SettingsModalMode::PickingEnum { key, .. } => assert_eq!(key, "screen_mode"),
         _ => panic!("value click on screen_mode must enter PickingEnum"),
     }
 }
@@ -5933,7 +6125,7 @@ fn enter_on_hunk_tracker_mode_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on hunk_tracker_mode row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -5964,7 +6156,7 @@ fn hunk_tracker_mode_picker_nav_does_not_dispatch_preview() {
         let mut s = make_state();
         navigate_to(&mut s, "hunk_tracker_mode");
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
@@ -5976,7 +6168,7 @@ fn hunk_tracker_mode_picker_nav_does_not_dispatch_preview() {
             "Nav key {nav_key:?} in hunk_tracker_mode picker MUST NOT dispatch a preview \
              Action. Got {outcome:?}",
         );
-        assert!(matches!(s.mode, SettingsModalMode::PickingEnum { .. }));
+        assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
     }
 }
 
@@ -6002,7 +6194,7 @@ fn hunk_tracker_mode_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetHunkTrackerMode commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
 }
@@ -6044,7 +6236,7 @@ fn mouse_click_on_hunk_tracker_mode_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "hunk_tracker_mode"),
         _ => panic!("value click on hunk_tracker_mode must enter PickingEnum"),
     }
@@ -6065,7 +6257,7 @@ fn enter_on_voice_stt_language_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on voice_stt_language row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -6099,9 +6291,34 @@ fn voice_stt_language_picker_enter_dispatches_set_commit() {
         other => panic!("expected Action::SetVoiceSttLanguage commit, got {other:?}"),
     }
     assert!(
-        matches!(s.mode, SettingsModalMode::Browse),
+        matches!(s.mode(), SettingsModalMode::Browse),
         "Enter commit must return to Browse"
     );
+}
+
+/// Space-toggle on `voice_keybind_enabled` dispatches the typed setter.
+/// Default is ON (the chord works out of the box), so toggling flips it off.
+#[test]
+fn space_on_voice_keybind_enabled_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "voice_keybind_enabled");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "voice_keybind_enabled", false);
+}
+
+/// Value-column click toggles `voice_keybind_enabled` in one click.
+#[test]
+fn mouse_click_on_voice_keybind_enabled_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "voice_keybind_enabled") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    assert_set_bool_action(outcome, "voice_keybind_enabled", false);
 }
 
 /// Value-column click on the voice_stt_language row opens the picker in ONE
@@ -6122,14 +6339,14 @@ fn mouse_click_on_voice_stt_language_indicator_opens_picker_in_one_click() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "value click must open picker in one click, got: {outcome:?}",
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "voice_stt_language"),
         _ => panic!("value click on voice_stt_language must enter PickingEnum"),
     }
 }
 
 // ---------------------------------------------------------------------------
-// CLI batch: show_tips (SHELL Bool, restart_required)
+// CLI batch: show_tips, auto_update (SHELL Bool, restart_required)
 // ---------------------------------------------------------------------------
 
 /// Space-toggle on `show_tips` dispatches typed setter.
@@ -6142,12 +6359,11 @@ fn pr13_space_on_show_tips_dispatches_typed_setter() {
 }
 
 #[test]
-fn automatic_self_update_is_not_registered() {
-    let registry = SettingsRegistry::defaults();
-    assert!(
-        registry.find("auto_update").is_none(),
-        "manual release channels must not expose an auto-update setting"
-    );
+fn pr13_space_on_auto_update_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "auto_update");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "auto_update", false);
 }
 
 /// Value-column click on `show_tips` toggles in one click.
@@ -6165,35 +6381,53 @@ fn pr13_mouse_click_on_show_tips_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "show_tips", false);
 }
 
-/// The retired auto-update setting is not rendered in the modal.
+/// Two-stage select-then-toggle on `auto_update`.
 #[test]
-fn automatic_self_update_is_not_visible_in_modal() {
-    let s = make_state();
-    assert!(
-        s.rows
-            .iter()
-            .all(|row| !matches!(row, RowEntry::Setting { key, .. } if *key == "auto_update")),
-        "manual release channels must not render an auto-update row"
+fn pr13_mouse_click_on_auto_update_two_stage_select_then_toggle() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "auto_update") as u16;
+
+    // First click: select-only (the focused row was compact_mode).
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        10,
+        row_y,
     );
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "first click on a different row body should only select, got: {outcome:?}"
+    );
+
+    // Second click on the SAME row should now toggle.
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        10,
+        row_y,
+    );
+    assert_set_bool_action(outcome, "auto_update", false);
 }
 
 /// CLI-batch settings are all `restart_required: true`.
 #[test]
 fn pr13_cli_batch_all_settings_are_restart_required() {
     let reg = SettingsRegistry::defaults();
-    let key = "show_tips";
-    let meta = reg
-        .find(key)
-        .unwrap_or_else(|| panic!("registry must contain `{key}` (PR 13)"));
-    assert!(
-        meta.restart_required,
-        "PR-13 setting `{key}` must have restart_required: true \
-         (consumer reads value once at startup; the modal renders \
-         the restart pill when this row is expanded)",
-    );
-    // Sanity: this CLI-batch setting is SHELL-owned and Boolean.
-    assert_eq!(meta.owner, SettingOwner::Shell);
-    assert!(matches!(meta.kind, SettingKind::Bool { .. }));
+    for key in ["show_tips", "auto_update"] {
+        let meta = reg
+            .find(key)
+            .unwrap_or_else(|| panic!("registry must contain `{key}` (PR 13)"));
+        assert!(
+            meta.restart_required,
+            "PR-13 setting `{key}` must have restart_required: true \
+             (consumer reads value once at startup; the modal renders \
+             the restart pill when this row is expanded)",
+        );
+        // Sanity: these CLI-batch settings are all SHELL-owned Bool.
+        assert_eq!(meta.owner, SettingOwner::Shell);
+        assert!(matches!(meta.kind, SettingKind::Bool { .. }));
+    }
 }
 
 /// CLI-batch defaults round-trip through `current_value_for`.
@@ -6202,22 +6436,23 @@ fn pr13_cli_batch_defaults_roundtrip_via_current_value_for() {
     use xai_grok_pager::settings::current_value_for;
     let ui = UiConfig::default();
     let pager = PagerLocalSnapshot::default();
-    let (key, expected) = ("show_tips", true);
-    let value = current_value_for(key, &ui, &pager)
-        .unwrap_or_else(|| panic!("current_value_for(`{key}`) must resolve"));
-    assert_eq!(
-        value,
-        SettingValue::Bool(expected),
-        "PR 13: `{key}` defaults to {expected} (matches the consumer's \
-         .unwrap_or(...) at the original read site)",
-    );
+    for (key, expected) in [("show_tips", true), ("auto_update", true)] {
+        let value = current_value_for(key, &ui, &pager)
+            .unwrap_or_else(|| panic!("current_value_for(`{key}`) must resolve"));
+        assert_eq!(
+            value,
+            SettingValue::Bool(expected),
+            "PR 13: `{key}` defaults to {expected} (matches the consumer's \
+             .unwrap_or(...) at the original read site)",
+        );
+    }
 }
 
 /// CLI-batch settings are discoverable via search.
 #[test]
 fn pr13_cli_batch_settings_are_discoverable_via_search() {
     let reg = SettingsRegistry::defaults();
-    let cases = [("tip", "show_tips")];
+    let cases = [("tip", "show_tips"), ("auto-update", "auto_update")];
     for (query, expected_key) in cases {
         let hits = reg.search(query);
         assert!(
@@ -6483,7 +6718,7 @@ fn enter_on_keep_text_selection_row_enters_picking_enum() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on keep_text_selection row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -6612,7 +6847,7 @@ fn mouse_click_on_selected_keep_text_selection_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused keep_text_selection row must enter PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "keep_text_selection"),
         _ => panic!("second click on focused keep_text_selection row must enter PickingEnum"),
     }
@@ -6630,7 +6865,7 @@ fn mouse_click_on_keep_text_selection_indicator_opens_picker_in_one_click() {
         70,
         row_y,
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "keep_text_selection"),
         _ => panic!("value click on keep_text_selection must enter PickingEnum, got {outcome:?}"),
     }
@@ -6652,7 +6887,7 @@ fn keep_text_selection_hold_snapshot_seeds_picker_at_hold() {
     );
     navigate_to(&mut s, "keep_text_selection");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             original_value,
             choices_idx,
@@ -6680,27 +6915,23 @@ fn scroll_speed_int_stepper_commit_dispatches_typed_setter() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on Int row must transition to EditingValue, got {outcome:?}"
     );
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "50", "buffer must seed from default 50");
-        }
-        other => panic!("expected EditingValue mode, got {other:?}"),
-    }
+    assert_eq!(
+        s.editing_buffer(),
+        Some("50"),
+        "buffer must seed from default 50",
+    );
 
     // Up = +1 → 51. Right = +5 → 56.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => assert_eq!(buffer, "56"),
-        other => panic!("expected EditingValue, got {other:?}"),
-    }
+    assert_eq!(s.editing_buffer(), Some("56"));
 
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::SetScrollSpeed(56)) => {}
         other => panic!("expected SetScrollSpeed(56), got {other:?}"),
     }
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 #[test]
@@ -6728,9 +6959,9 @@ fn scroll_speed_mouse_click_opens_editor() {
         "second click on focused Int row must enter the editor, got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::EditingValue { key, .. } if key == "scroll_speed"),
+        matches!(s.mode(), SettingsModalMode::EditingValue { key, .. } if key == "scroll_speed"),
         "mode must be EditingValue(scroll_speed) after Enter-equivalent click, got {:?}",
-        s.mode,
+        s.mode(),
     );
 }
 
@@ -6796,7 +7027,7 @@ fn scroll_mode_picker_enter_dispatches_set_commit() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on scroll_mode row must transition to PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum {
             key,
             original_value,
@@ -6840,7 +7071,7 @@ fn mouse_click_on_selected_scroll_mode_row_opens_picker() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "second click on focused scroll_mode row must enter PickingEnum, got {outcome:?}"
     );
-    match &s.mode {
+    match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "scroll_mode"),
         _ => panic!("second click on focused scroll_mode row must enter PickingEnum"),
     }
@@ -6878,26 +7109,22 @@ fn scroll_lines_int_stepper_commit_dispatches_typed_setter() {
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter on Int row must transition to EditingValue, got {outcome:?}"
     );
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => {
-            assert_eq!(buffer, "3", "buffer must seed from default 3");
-        }
-        other => panic!("expected EditingValue mode, got {other:?}"),
-    }
+    assert_eq!(
+        s.editing_buffer(),
+        Some("3"),
+        "buffer must seed from default 3",
+    );
 
     // Narrow-range policy: Up = +1 → 4 (unit steps so every 1..=10 is reachable).
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
-    match &s.mode {
-        SettingsModalMode::EditingValue { buffer, .. } => assert_eq!(buffer, "4"),
-        other => panic!("expected EditingValue, got {other:?}"),
-    }
+    assert_eq!(s.editing_buffer(), Some("4"));
 
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::SetScrollLines(4)) => {}
         other => panic!("expected SetScrollLines(4), got {other:?}"),
     }
-    assert!(matches!(s.mode, SettingsModalMode::Browse));
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
 #[test]
@@ -6922,9 +7149,9 @@ fn scroll_lines_mouse_click_opens_editor() {
         "second click on focused Int row must enter the editor, got {outcome:?}"
     );
     assert!(
-        matches!(s.mode, SettingsModalMode::EditingValue { key, .. } if key == "scroll_lines"),
+        matches!(s.mode(), SettingsModalMode::EditingValue { key, .. } if key == "scroll_lines"),
         "mode must be EditingValue(scroll_lines), got {:?}",
-        s.mode,
+        s.mode(),
     );
 }
 

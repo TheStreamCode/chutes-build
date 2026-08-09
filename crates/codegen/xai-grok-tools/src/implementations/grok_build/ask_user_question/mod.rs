@@ -160,7 +160,7 @@ pub struct QuestionOption {
     )]
     pub preview: Option<String>,
 
-    /// Opaque id; hidden from the model. Grok callers leave it `None`.
+    /// Opaque id; hidden from the model. Chutes Build callers leave it `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(skip)]
     pub id: Option<String>,
@@ -236,7 +236,7 @@ impl crate::types::tool_metadata::ToolMetadata for AskUserQuestionTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn emitted_notifications(&self) -> &'static [&'static str] {
@@ -329,7 +329,7 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
     ) -> xai_tool_types::ToolDescription {
         xai_tool_types::ToolDescription::new(
             "ask_user_question",
-            crate::types::tool_metadata::ToolMetadata::description_template(self),
+            crate::types::tool_metadata::ToolMetadata::sanitized_description_template(self),
         )
     }
 

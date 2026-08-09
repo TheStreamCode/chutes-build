@@ -1,3 +1,4 @@
+mod debug_redact;
 pub mod find_protoc;
 
 use anyhow::Context;
@@ -36,6 +37,7 @@ pub struct XaiProtoBuilder {
     gen_pbjson: bool,
     pbjson_ignore_unknown_fields: bool,
     pbjson_preserve_proto_field_names: bool,
+    honor_debug_redact: bool,
 }
 
 impl XaiProtoBuilder {
@@ -47,6 +49,10 @@ impl XaiProtoBuilder {
             builder: f(self.builder),
             ..self
         }
+    }
+
+    pub fn btree_map<S: AsRef<str>>(self, paths: impl IntoIterator<Item = S>) -> Self {
+        self.map_builder(|b| paths.into_iter().fold(b, |b, path| b.btree_map(path)))
     }
 
     pub fn bytes<S: AsRef<str>>(self, paths: impl IntoIterator<Item = S>) -> Self {
@@ -85,6 +91,13 @@ impl XaiProtoBuilder {
         self.map_builder(|b| b.generate_default_stubs(enable))
     }
 
+    /// Honor the protobuf `debug_redact` field option: annotated fields
+    /// print as `***` in `Debug`. The crate must also depend on `veil`.
+    pub fn honor_debug_redact(mut self) -> Self {
+        self.honor_debug_redact = true;
+        self
+    }
+
     pub fn type_attribute(self, path: impl AsRef<str>, attr: impl AsRef<str>) -> Self {
         self.map_builder(|b| b.type_attribute(path, attr))
     }
@@ -114,6 +127,9 @@ impl XaiProtoBuilder {
 
         // Can only process one input file when using --dependency_out=FILE.
         for proto in protos {
+            // `/dev/stdout` and `/dev/null` do not exist on Windows, so the
+            // dependency scan writes into a temporary directory and reads it
+            // back instead of capturing protoc's stdout.
             let output_dir = tempfile::TempDir::new()?;
             let dependency_path = output_dir.path().join("dependencies.d");
             let descriptor_path = output_dir.path().join("descriptor.pb");
@@ -156,14 +172,14 @@ impl XaiProtoBuilder {
                 return Err(anyhow::anyhow!("protoc command failed"));
             }
 
-            let output = fs::read_to_string(&dependency_path)
+            let output = std::fs::read_to_string(&dependency_path)
                 .context("protoc dependency output not UTF-8")?;
 
             let mut lines = output.lines();
             let first_line = lines.next().context("protoc command output is empty")?;
             // Make dependency output starts with `<descriptor path>: `. Split
-            // on colon-space instead of a bare colon so Windows drive letters
-            // are not mistaken for the target separator.
+            // on colon-space rather than a bare colon so a Windows drive letter
+            // is not mistaken for the target separator.
             let (_, rem) = first_line
                 .split_once(": ")
                 .with_context(|| format!("invalid protoc dependency output: {output:?}"))?;
@@ -209,6 +225,7 @@ impl XaiProtoBuilder {
             file_descriptor_set_path,
             pbjson_ignore_unknown_fields,
             pbjson_preserve_proto_field_names,
+            honor_debug_redact,
         } = self;
         let mut config = prost_build::Config::new();
         config.enable_type_names();
@@ -257,6 +274,29 @@ impl XaiProtoBuilder {
 
         let protos: Vec<&Path> = protos.iter().map(|p| p.as_ref()).collect();
 
+        {
+            let plain_includes: Vec<&Path> = includes.iter().map(|i| i.as_ref()).collect();
+            if honor_debug_redact {
+                debug_redact::apply(
+                    &mut config,
+                    protoc.as_deref(),
+                    protoc_include_dir.as_deref(),
+                    &plain_includes,
+                    &protos,
+                )?;
+            } else if let Some(field) = debug_redact::first_marked_field(
+                protoc.as_deref(),
+                protoc_include_dir.as_deref(),
+                &plain_includes,
+                &protos,
+            )? {
+                anyhow::bail!(
+                    "{field} sets `debug_redact = true` but redaction is not active: \
+                     call `.honor_debug_redact()` on the builder"
+                );
+            }
+        }
+
         builder
             .compile_with_config(config, &protos, &all_includes)
             .context("tonic_build failed")?;
@@ -301,5 +341,6 @@ pub fn configure() -> XaiProtoBuilder {
         pbjson_ignore_unknown_fields: false,
         pbjson_preserve_proto_field_names: false,
         file_descriptor_set_path: None,
+        honor_debug_redact: false,
     }
 }

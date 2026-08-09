@@ -13,7 +13,7 @@ const MAX_RESULTS: usize = 10;
 pub(crate) struct PathProvider;
 
 impl PathProvider {
-    pub async fn suggest(&self, ctx: &SuggestContext) -> Vec<RankedSuggestion> {
+    pub(crate) async fn suggest(&self, ctx: &SuggestContext) -> Vec<RankedSuggestion> {
         // shell_token quoting is POSIX-only: cmd/pwsh would misparse the
         // escaped line, so Windows serves no deterministic completions.
         if cfg!(windows) {
@@ -400,10 +400,7 @@ mod tests {
             }
         }
 
-        let path_var = std::env::join_paths([&bin1, &bin2])
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
+        let path_var = format!("{}:{}", bin1.to_str().unwrap(), bin2.to_str().unwrap());
         let result = scan_path_from(&path_var);
         assert_eq!(result, vec!["shared_cmd"]);
     }

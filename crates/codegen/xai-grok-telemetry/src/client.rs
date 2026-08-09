@@ -34,6 +34,16 @@ fn event_value(event_name: &str) -> &str {
     event_name
 }
 
+/// Product-analytics `$insert_id`: unique per emit, ≤36 bytes, `[A-Za-z0-9-]`.
+///
+/// Do not put the event name in this field. The analytics sink truncates to 36
+/// chars and rejects most other characters; a name-prefixed id either collapses
+/// to a constant (long names → per-user same-second dedup) or is dropped and
+/// regenerated (shorter names with `:`). A bare UUID always validates.
+fn product_analytics_insert_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 #[derive(Clone)]
 pub struct TelemetryClient {
     mode: TelemetryMode,
@@ -114,6 +124,7 @@ impl TelemetryClient {
 fn normalize_tier(tier: &str) -> String {
     match tier {
         "SuperGrok Heavy" | "supergrok_heavy" => "supergrok_heavy",
+        "SuperGrok Plus" | "supergrok_plus" => "supergrok_plus",
         "SuperGrok" | "supergrok" => "supergrok",
         "SuperGrok Lite" | "supergrok_lite" => "supergrok_lite",
         "X Premium+" | "x_premium_plus" => "x_premium_plus",
@@ -132,13 +143,19 @@ static TELEMETRY_CLIENT: OnceLock<Mutex<Option<TelemetryClient>>> = OnceLock::ne
 /// Returns `true` when telemetry mode is `Enabled`.
 /// Used by `log_event` — product analytics events only fire in `Enabled` mode.
 pub fn is_enabled() -> bool {
-    false
+    TELEMETRY_CLIENT
+        .get()
+        .and_then(|m| m.lock().ok())
+        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.is_enabled()))
 }
 
 /// Returns `true` when telemetry mode is `Enabled` or `SessionMetrics`.
 /// Used by `session_metrics` — lifecycle events fire in both modes.
 pub fn is_session_metrics_enabled() -> bool {
-    false
+    TELEMETRY_CLIENT
+        .get()
+        .and_then(|m| m.lock().ok())
+        .is_some_and(|g| g.as_ref().is_some_and(|c| c.mode.session_metrics_enabled()))
 }
 
 pub struct UserContext {
@@ -230,7 +247,7 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
     // Mixpanel path
     if let Some(ref mixpanel) = client.mixpanel {
         let time_secs = chrono::Utc::now().timestamp();
-        let insert_id = format!("{event_name}:{request_id}:{time_secs}");
+        let insert_id = product_analytics_insert_id();
 
         // Convert serde_json::Map to HashMap for mixpanel
         let mut props: std::collections::HashMap<String, serde_json::Value> =
@@ -312,36 +329,71 @@ pub fn sync_profile() {
 /// shell's `shared_client()`) so the shared TLS-warmed pool is reused for
 /// telemetry posts.
 pub fn init(
-    _config: TelemetryConfig,
-    _mode: TelemetryMode,
-    _user_id: Option<String>,
-    _team_id: Option<String>,
-    _deployment_key: Option<String>,
-    _origin_client: Option<OriginClientInfo>,
-    _shell_version: String,
-    _subscription_tier: Option<String>,
-    _http_client: reqwest::Client,
+    config: TelemetryConfig,
+    mode: TelemetryMode,
+    user_id: Option<String>,
+    team_id: Option<String>,
+    deployment_key: Option<String>,
+    origin_client: Option<OriginClientInfo>,
+    shell_version: String,
+    subscription_tier: Option<String>,
+    http_client: reqwest::Client,
 ) {
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
     let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
-    *guard = None;
+    *guard = if mode.is_disabled() {
+        None
+    } else {
+        Some(TelemetryClient::from_config(
+            config,
+            mode,
+            user_id,
+            team_id,
+            deployment_key,
+            origin_client,
+            shell_version,
+            subscription_tier,
+            http_client,
+        ))
+    };
+    drop(guard);
+    sync_profile();
 }
 
 /// Re-initialize the telemetry client if it was not created at startup
 /// (e.g. because auth was not yet available). No-op when the client
 /// is already set, so safe to call unconditionally after auth succeeds.
 pub fn init_if_needed(
-    _config: TelemetryConfig,
-    _mode: TelemetryMode,
-    _user_id: Option<String>,
-    _team_id: Option<String>,
-    _deployment_key: Option<String>,
-    _origin_client: Option<OriginClientInfo>,
-    _shell_version: String,
-    _subscription_tier: Option<String>,
-    _http_client: reqwest::Client,
+    config: TelemetryConfig,
+    mode: TelemetryMode,
+    user_id: Option<String>,
+    team_id: Option<String>,
+    deployment_key: Option<String>,
+    origin_client: Option<OriginClientInfo>,
+    shell_version: String,
+    subscription_tier: Option<String>,
+    http_client: reqwest::Client,
 ) {
-    // Intentionally unavailable: telemetry cannot be enabled at runtime.
+    if mode.is_disabled() {
+        return;
+    }
+    let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
+    let mut guard = lock.lock().unwrap_or_else(|err| err.into_inner());
+    if guard.is_none() {
+        *guard = Some(TelemetryClient::from_config(
+            config,
+            mode,
+            user_id,
+            team_id,
+            deployment_key,
+            origin_client,
+            shell_version,
+            subscription_tier,
+            http_client,
+        ));
+        drop(guard);
+        sync_profile();
+    }
 }
 
 #[cfg(test)]
@@ -454,6 +506,8 @@ mod tests {
         assert_eq!(normalize_tier("X Premium+"), "x_premium_plus");
         assert_eq!(normalize_tier("X Premium"), "x_premium");
         assert_eq!(normalize_tier("SuperGrok Lite"), "supergrok_lite");
+        assert_eq!(normalize_tier("SuperGrok Plus"), "supergrok_plus");
+        assert_eq!(normalize_tier("supergrok_plus"), "supergrok_plus");
         // API key is a dedicated Mixpanel segment — never free.
         assert_eq!(normalize_tier("API Key"), "api_key");
         assert_eq!(normalize_tier("api_key"), "api_key");

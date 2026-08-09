@@ -12,6 +12,12 @@ pub const REMOTE_SESSION_REGISTRY: bool = false;
 /// Remote workspace exposure through the inherited Computer Hub is not part of Chutes Build.
 pub const REMOTE_WORKSPACE_EXPOSURE: bool = false;
 
+/// Product analytics and event reporting are not part of Chutes Build. The
+/// telemetry crates are retained so upstream merges stay reviewable, but no
+/// configuration or remote setting can switch them on: this constant is the
+/// floor every consumer applies.
+pub const TELEMETRY: bool = false;
+
 /// Trace archives can be exported locally but are never uploaded by Chutes Build.
 pub const REMOTE_TRACE_UPLOAD: bool = false;
 

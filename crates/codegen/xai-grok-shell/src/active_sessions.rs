@@ -10,7 +10,6 @@ use agent_client_protocol as acp;
 use chrono::{DateTime, Utc};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use xai_grok_workspace::util::is_lock_contended;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveSession {
@@ -24,16 +23,11 @@ const DATA_FILENAME: &str = "active_sessions.json";
 const LOCK_FILENAME: &str = "active_sessions.lock";
 const TMP_FILENAME: &str = "active_sessions.json.tmp";
 
-// -- Public API (delegates to `_in` variants with default grok home) --------
+// -- Public API (delegates to `_in` variants with default Chutes Build home) --------
 
 /// Register a session as active (idempotent by session_id).
 pub fn register(session: ActiveSession) -> io::Result<()> {
     register_in(&crate::util::grok_home::grok_home(), session)
-}
-
-/// Unregister a session (clean exit). No-op if not found.
-pub fn unregister(session_id: &acp::SessionId) -> io::Result<()> {
-    unregister_in(&crate::util::grok_home::grok_home(), session_id)
 }
 
 /// Non-blocking unregister for signal handlers. Returns `Ok(false)` on
@@ -120,7 +114,7 @@ where
             let _ = lock_file.unlock();
             result.map(Some)
         }
-        Err(e) if is_lock_contended(&e) => Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
         Err(e) => Err(e),
     }
 }

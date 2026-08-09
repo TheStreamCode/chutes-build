@@ -1,87 +1,32 @@
-# Contributing to Chutes Build
+# Contributing
 
-Thank you for improving Chutes Build. Focused issues and pull requests are
-welcome.
+Chutes Build is a fork of [`xai-org/grok-build`](https://github.com/xai-org/grok-build),
+maintained by [TheStreamCode](https://github.com/TheStreamCode) under the Apache
+License, Version 2.0 (see [`LICENSE`](LICENSE)).
 
-Repository-wide product invariants, upstream-port rules, and the complete local
-verification matrix are maintained in [AGENTS.md](AGENTS.md).
+**Before opening a pull request, please open an issue first.** Most of this tree
+is upstream's code, and it is kept close to upstream on purpose so their fixes
+arrive by merge rather than by hand — see
+[`docs/upstream-sync.md`](docs/upstream-sync.md). A change that diverges from
+upstream without needing to makes every future sync harder, so it is worth
+agreeing on the approach before the work.
 
-## Before opening a change
+Changes that fit this fork's purpose are the Chutes ecosystem integration, the
+privacy posture, and the platform gaps upstream leaves open (Windows in
+particular). A fix that belongs upstream is better sent upstream: it reaches more
+people, and it comes back here by merge.
 
-1. Search existing issues and pull requests.
-2. Keep the proposal specific to Chutes Build and its supported runtime.
-3. Discuss major architecture changes in an issue before implementation.
-4. Report security vulnerabilities through the private process in
-   [SECURITY.md](SECURITY.md), never in a public issue.
+Anything touching credentials, endpoints, or the privacy constants in
+`chutes-build-core::product` needs the reasoning in the PR description, not just
+the diff.
 
-## Development workflow
+## Security reports
 
-Chutes Build is a Rust workspace. Use the toolchain and dependency versions
-already selected by the repository and do not mix package managers or regenerate
-unrelated lockfiles.
+Please report security issues through the process described in
+[`SECURITY.md`](SECURITY.md). Do not open a public issue for vulnerabilities.
 
-The root `Cargo.toml` is generated and treated as read-only. Update the owning
-crate manifest or generator source instead. Keep retained `xai-*` crate names
-stable unless a migration has an explicit upstream-sync benefit.
+## Licensing of this source
 
-```powershell
-cargo check -p chutes-build --locked
-cargo test -p chutes-build-core --locked
-cargo fmt --all -- --check
-```
-
-Run the smallest relevant tests first, then expand verification according to the
-risk of the change. Network-dependent tests must not require a contributor's
-personal credentials or make billable calls by default.
-
-## Documentation workflow
-
-Public documentation is indexed in [`docs/README.md`](docs/README.md):
-
-- keep the root README concise and product-oriented;
-- put setup and environment details in `docs/getting-started.md` and
-  `docs/configuration.md`;
-- update the matching embedded guide under
-  `crates/codegen/xai-grok-pager/docs/user-guide/` when `/docs` behavior
-  changes; and
-- label design records and incomplete plans explicitly instead of presenting
-  them as shipped user features.
-
-Validate relative Markdown links, code fences, `git diff --check`, and any
-changed YAML before opening a pull request. Documentation claims about Chutes
-APIs or OAuth must cite current official Chutes documentation.
-
-## Model compatibility changes
-
-Reasoning compatibility belongs in the centralized registry at
-`crates/chutes-build-core/src/reasoning.rs`. When adding or updating a model:
-
-1. verify the exact deployed model ID against the Chutes catalog;
-2. verify controls and defaults against the official model card or chat
-   template;
-3. add registry and sampler tests, including fallback-family isolation when
-   relevant; and
-4. update `docs/model-reasoning-compatibility.md` with primary-source links and
-   the verification date.
-
-Do not infer controls for a future generation from a provider or family prefix.
-An explicit capability menu from the catalog or user configuration is the
-forward-compatibility mechanism.
-
-## Pull-request expectations
-
-- Keep changes narrow and preserve unrelated behavior.
-- Add tests for new public behavior and regressions where practical.
-- Update documentation when commands, configuration, privacy boundaries, or
-  network behavior change.
-- Never commit credentials, session data, browser profiles, traces, or generated
-  media containing sensitive information.
-- Do not add telemetry, tracking, remote error reporting, automatic upload, or
-  a new outbound service without explicit project discussion and an updated
-  privacy review.
-- Preserve Apache-2.0 attribution when modifying or moving upstream code.
-- Use professional English for code, documentation, and commit messages.
-- Do not add generated-by footers or AI co-author trailers.
-
-By contributing, you agree that your contribution is licensed under the
-repository's Apache License 2.0.
+By downloading or using this source, you agree that your use is governed by the
+Apache License, Version 2.0. Contributions are accepted under the same licence;
+there is no separate contributor licence agreement.

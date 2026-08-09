@@ -42,7 +42,8 @@ use xai_grok_pager::appearance::LayoutConfig;
 use xai_grok_pager::minimal_api;
 use xai_grok_pager::render::SafeBuf as _;
 use xai_grok_pager::theme::Theme;
-use xai_grok_pager::views::prompt_widget::{PromptStyle, PromptWidget};
+use xai_grok_pager::views::prompt_widget::{PromptBg, PromptInfo, PromptStyle, PromptWidget};
+use xai_grok_pager::views::question_view::{feedback_input, inline_text_width};
 
 /// Which prompt-anchored dropdown is currently shown.
 ///
@@ -218,11 +219,11 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
     // Ctrl+T "force-show" pin; effective visibility (auto-hide) is computed per
     // agent by `todo_panel_height`.
     let force_todos = minimal_api::minimal_show_todos(app);
-    // Snapshot appearance-derived inputs before borrowing `agents` mutably.
-    let style = super::live::prompt_style(&app.appearance);
     // Committed appearance (timestamps off) so the measured tail height matches
     // exactly what `draw_tail` renders.
     let commit_app = super::commit::committed_appearance(&app.appearance);
+    // Theme + prompt style: built after the agent is known so bash/feedback/
+    // remember chrome matches `draw_live` (same `prompt_style` inputs).
     // Minimal is flush-left (W-38): prompt-replacing modals span the live
     // region's full width (no outer horizontal padding), so measure their
     // height at that same width — it must match `live::draw_live`'s
@@ -242,6 +243,16 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
         return needed.max(base).min(ceiling);
     };
     let id = *id;
+    // Snapshot mode/multiline before the mut agent borrow so `prompt_style` can
+    // still read `app.appearance` (same inputs as `draw_live`).
+    let (input_mode, multiline) = app
+        .agents
+        .get(&id)
+        .map(|a| (a.prompt_input_mode, a.multiline_mode))
+        .unwrap_or_default();
+    let theme = xai_grok_pager::theme::Theme::current();
+    let style = super::live::prompt_style(&app.appearance, input_mode, &theme, multiline);
+
     let Some(agent) = app.agents.get_mut(&id) else {
         return base;
     };
@@ -293,27 +304,50 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
         .max(1);
 
     // Size the viewport to exactly its content — tail (uncommitted streaming
-    // output) + todo panel + status + overlay + prompt — so the prompt sits
-    // directly after the conversation with no gap, whether idle or mid-turn.
-    // When a turn is "thinking" the tail is empty, so the prompt stays right
-    // under the content instead of floating below a fixed empty region; as
-    // output streams the tail grows and the viewport grows downward with it.
-    // The region is not bottom-pinned, so the rest of the screen below stays
-    // empty (the app "owns" the window from the top down).
+    // output) + todo panel + /btw panel + status + overlay + prompt — so the
+    // prompt sits directly after the conversation with no gap, whether idle or
+    // mid-turn. When a turn is "thinking" the tail is empty, so the prompt
+    // stays right under the content instead of floating below a fixed empty
+    // region; as output streams the tail grows and the viewport grows downward
+    // with it. The region is not bottom-pinned, so the rest of the screen below
+    // stays empty (the app "owns" the window from the top down).
     let tail_h = super::live::tail_height(agent, width, &commit_app);
     let todos_h = super::todo::todo_panel_height(agent, force_todos);
     // Below the prompt sits either the dropdown overlay or the 1-row info bar
     // (model · context usage · turn time/tokens); reserve at least the info row
     // when no dropdown is open so it isn't clipped / doesn't scroll content.
     let below_h = overlay_h.max(1);
-    content_target(tail_h, todos_h, below_h, prompt_h, ceiling)
+    // `/btw` is a non-blocking side panel above the status/prompt (same place
+    // as the full TUI). Height is measured at full viewport width so wrap
+    // matches `live::draw_live`. Only reserve rows the shared minimal paint
+    // policy accepts, otherwise a narrow or short terminal leaves a blank strip.
+    let raw_btw = if minimal_api::minimal_btw_surface_available(agent) {
+        xai_grok_pager::views::btw_overlay::btw_panel_height(agent.btw_state.as_ref(), width)
+    } else {
+        0
+    };
+    let chrome = 1u16 // status row
+        .saturating_add(below_h)
+        .saturating_add(prompt_h);
+    let available = ceiling.saturating_sub(chrome);
+    let btw_h = minimal_api::minimal_btw_visible_height(raw_btw, width, available);
+    content_target(tail_h, todos_h, btw_h, below_h, prompt_h, ceiling)
 }
 
-/// Live-viewport height sized to exactly its content: tail + todo panel + status
-/// row + overlay + prompt. Floored at 2 (status + prompt), capped at the screen.
-fn content_target(tail_h: u16, todos_h: u16, overlay_h: u16, prompt_h: u16, ceiling: u16) -> u16 {
+/// Live-viewport height sized to exactly its content: tail + todo panel + /btw
+/// panel + status row + overlay + prompt. Floored at 2 (status + prompt), capped
+/// at the screen.
+fn content_target(
+    tail_h: u16,
+    todos_h: u16,
+    btw_h: u16,
+    overlay_h: u16,
+    prompt_h: u16,
+    ceiling: u16,
+) -> u16 {
     tail_h
         .saturating_add(todos_h)
+        .saturating_add(btw_h)
         .saturating_add(1) // status row
         .saturating_add(overlay_h)
         .saturating_add(prompt_h)
@@ -595,6 +629,7 @@ fn render_permission(
         area,
         perm,
         &followup,
+        agent.permission_pattern_edit.as_ref(),
         minimal_api::hovered_permission_item(agent),
         theme,
         true,
@@ -678,6 +713,10 @@ fn render_question(
         );
     }
 
+    if input_mode && is_feedback_pane(agent) {
+        return render_feedback_editor(buf, area, agent, theme, input_h);
+    }
+
     if input_mode {
         let row_y = area.y + area.height.saturating_sub(input_h);
         let is_multi = minimal_api::question_view(agent)
@@ -739,19 +778,108 @@ fn render_question(
     None
 }
 
+/// Whether the open question pane is the bare `/feedback` report box.
+fn is_feedback_pane(agent: &AgentView) -> bool {
+    minimal_api::question_view(agent).is_some_and(|qv| qv.is_feedback())
+}
+
+/// The bare `/feedback` report box, painted over the bottom `input_h` rows of the question card.
+fn render_feedback_editor(
+    buf: &mut Buffer,
+    area: Rect,
+    agent: &mut AgentView,
+    theme: &Theme,
+    input_h: u16,
+) -> Option<(u16, u16)> {
+    // The box lives inside `area`: the inline viewport can be shorter than the height request, and drawing past it indexes outside the frame.
+    let box_h = input_h.min(area.height);
+    if box_h == 0 {
+        return None;
+    }
+    let input_area = Rect {
+        x: area.x + 3,
+        y: area.y + area.height.saturating_sub(box_h),
+        width: feedback_input::width(area.width),
+        height: box_h,
+    };
+
+    // Carry the card's surface and accent bar down the report rows.
+    buf.set_style(
+        Rect {
+            x: area.x,
+            y: input_area.y,
+            width: area.width,
+            height: box_h,
+        },
+        Style::default().bg(theme.bg_light),
+    );
+    for y in input_area.y..input_area.y.saturating_add(box_h) {
+        if let Some(cell) = buf.cell_mut((area.x, y)) {
+            cell.set_symbol(xai_grok_pager::glyphs::accent_bar());
+            cell.set_style(Style::default().fg(theme.accent_user).bg(theme.bg_light));
+        }
+    }
+
+    // Drop the outline when the box is too squeezed for it, so the text stays visible.
+    let outlined = box_h >= feedback_input::MIN_HEIGHT;
+    let style = if outlined {
+        feedback_input::style(theme)
+    } else {
+        feedback_input::flat_style(theme)
+    };
+    agent
+        .prompt
+        .draw(
+            buf,
+            input_area,
+            None,
+            &style,
+            outlined.then_some(&PromptInfo::default()),
+            None,
+        )
+        .cursor_pos
+}
+
 /// Height cap for the inline question editor — the full TUI's policy
 /// (`agent_view/render.rs`, `inline_prompt_max`).
 fn question_editor_cap(screen_h: u16) -> u16 {
     ((screen_h as u32) / 3).clamp(3, 15) as u16
 }
 
-/// Desired height of the inline question editor (InputMode), bounded by
-/// `cap`.
+/// Desired height of the inline question editor (InputMode), bounded by `cap`.
 fn question_editor_h(agent: &AgentView, area_w: u16, cap: u16, theme: &Theme) -> u16 {
-    let text_w = xai_grok_pager::views::question_view::inline_text_width(area_w);
+    if is_feedback_pane(agent) {
+        feedback_editor_h(agent, area_w, cap, theme)
+    } else {
+        freeform_editor_h(agent, area_w, cap, theme)
+    }
+}
+
+/// The bare `/feedback` report box: its rules plus at least one text row, growing with the report.
+/// Unlike the full TUI it reserves no rows up front, because `cap` is all the room the inline viewport has.
+fn feedback_editor_h(agent: &AgentView, area_w: u16, cap: u16, theme: &Theme) -> u16 {
+    let min_h = feedback_input::MIN_HEIGHT.min(cap.max(1));
     agent
         .prompt
-        .desired_height(text_w, &inline_input_style(theme), false, cap.max(1))
+        .desired_height(
+            feedback_input::width(area_w),
+            &feedback_input::style(theme),
+            true,
+            cap.max(min_h),
+        )
+        .max(min_h)
+}
+
+/// The one-line freeform answer row, growing with what the user types.
+fn freeform_editor_h(agent: &AgentView, area_w: u16, cap: u16, theme: &Theme) -> u16 {
+    agent
+        .prompt
+        .desired_height(
+            inline_text_width(area_w),
+            &inline_input_style(theme),
+            false,
+            cap.max(1),
+        )
         .max(1)
 }
 
@@ -766,10 +894,11 @@ fn inline_input_style(theme: &Theme) -> PromptStyle {
         chrome: false,
         chrome_pad_left: 0,
         chrome_pad_right: 0,
-        bg_override: Some(theme.bg_visual),
+        bg: PromptBg::Panel(theme.bg_visual),
         accent_color_override: None,
         border_color_override: None,
         prefix_override: None,
+        placeholder_when_focused: false,
         placeholder_override: None,
         show_accent_line: false,
         show_borders: false,
@@ -990,18 +1119,24 @@ mod tests {
 
     #[test]
     fn content_target_fits_content_with_no_gap() {
-        // Viewport = tail + todos + status(1) + overlay + prompt — no base
+        // Viewport = tail + todos + btw + status(1) + overlay + prompt — no base
         // floor, so the prompt sits right after the conversation. Idle (tail 0,
         // empty prompt) is just status + prompt.
-        assert_eq!(content_target(0, 0, 0, 1, 40), 2); // status + 1-row prompt
-        assert_eq!(content_target(0, 3, 0, 1, 40), 5); // + 3 todo rows
-        assert_eq!(content_target(0, 3, 5, 2, 40), 11); // + overlay(5) + 2-row prompt
+        assert_eq!(content_target(0, 0, 0, 0, 1, 40), 2); // status + 1-row prompt
+        assert_eq!(content_target(0, 3, 0, 0, 1, 40), 5); // + 3 todo rows
+        assert_eq!(content_target(0, 3, 0, 5, 2, 40), 11); // + overlay(5) + 2-row prompt
+        // /btw Loading is 3 rows; Done/Error grow with the content.
+        assert_eq!(content_target(0, 0, 3, 0, 1, 40), 5); // + btw(3)
+        // Production idle always reserves ≥1 below the prompt (info bar).
+        assert_eq!(content_target(0, 0, 3, 1, 1, 40), 6); // btw+status+info+prompt
+        // todos + btw stack without collapsing either.
+        assert_eq!(content_target(0, 3, 3, 0, 1, 40), 8);
         // The streaming tail grows the viewport (no fixed empty gap while
         // "thinking": tail 0 → just status + prompt).
-        assert_eq!(content_target(6, 0, 0, 1, 40), 8); // tail(6) + status + prompt
+        assert_eq!(content_target(6, 0, 0, 0, 1, 40), 8); // tail(6) + status + prompt
         // Floored at 2 (status + prompt) and capped at the screen ceiling.
-        assert_eq!(content_target(0, 0, 0, 0, 40), 2);
-        assert_eq!(content_target(50, 0, 0, 0, 20), 20);
+        assert_eq!(content_target(0, 0, 0, 0, 0, 40), 2);
+        assert_eq!(content_target(50, 0, 0, 0, 0, 20), 20);
     }
 
     #[test]
@@ -1036,7 +1171,25 @@ mod tests {
     fn content_target_clamps_to_screen() {
         // Content taller than the screen clamps to the ceiling (then the tail
         // scrolls / clips); a tiny terminal still yields at least the floor.
-        assert_eq!(content_target(30, 0, 0, 1, 24), 24);
-        assert_eq!(content_target(5, 0, 0, 1, 2), 2);
+        assert_eq!(content_target(30, 0, 0, 0, 1, 24), 24);
+        assert_eq!(content_target(5, 0, 0, 0, 1, 2), 2);
+        // A tall /btw Done answer still clamps rather than overflowing.
+        assert_eq!(content_target(0, 0, 20, 0, 1, 10), 10);
+    }
+
+    #[test]
+    fn btw_height_policy_matches_draw_live_boundaries() {
+        let visible = minimal_api::minimal_btw_visible_height;
+        assert_eq!(visible(3, 80, 40), 3);
+        assert_eq!(visible(12, 80, 40), 12);
+        assert_eq!(visible(20, 80, 10), 10);
+        assert_eq!(visible(0, 80, 40), 0);
+        // Width 11/12 and available rows 2/3 are the production boundary.
+        assert_eq!(visible(3, 11, 40), 0);
+        assert_eq!(visible(3, 12, 40), 3);
+        assert_eq!(visible(3, 80, 2), 0);
+        assert_eq!(visible(3, 80, 3), 3);
+        assert_eq!(content_target(0, 0, visible(3, 11, 40), 1, 1, 40), 3);
+        assert_eq!(content_target(0, 0, visible(3, 80, 2), 1, 1, 5), 3);
     }
 }

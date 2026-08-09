@@ -18,6 +18,7 @@ use crate::theme::Theme;
 const FIRST_LINES: usize = 5;
 const LAST_LINES: usize = 3;
 
+use crate::appearance::AppearanceConfig;
 use xai_grok_tools::implementations::skills::types::skill_name_from_path;
 
 /// What kind of non-text media this read produced.
@@ -269,7 +270,9 @@ impl ReadToolCallBlock {
         let gutter_width = digit_count(base_line + raw_lines.len().saturating_sub(1));
         let content_width = width.saturating_sub(gutter_width + 2).max(20);
 
-        let gutter_style = Style::default().fg(theme.gray_dim);
+        // Use Theme::dim/primary so terminal-native (minimal) maps grays to
+        // SGR dim / default fg instead of raw gray_dim slots.
+        let gutter_style = theme.dim();
         let text_style = theme.primary();
 
         let syntect = get_syntect();
@@ -413,7 +416,7 @@ impl BlockContent for ReadToolCallBlock {
         }
     }
 
-    fn has_vpad(&self, _ctx: &BlockContext) -> bool {
+    fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         false
     }
 
@@ -529,13 +532,9 @@ mod tests {
 
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
-        let cwd = if cfg!(windows) {
-            std::path::PathBuf::from(r"C:\Users\me\project")
-        } else {
-            std::path::PathBuf::from("/Users/me/project")
-        };
-        let abs = cwd.join("src").join("main.rs");
-        let block = ReadToolCallBlock::new(abs.to_string_lossy()).with_content("hello".into(), 1);
+        let abs = "/Users/me/project/src/main.rs";
+        let cwd = std::path::PathBuf::from("/Users/me/project");
+        let block = ReadToolCallBlock::new(abs).with_content("hello".into(), 1);
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
         ctx.cwd = Some(cwd.clone());
@@ -546,13 +545,7 @@ mod tests {
             .iter()
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(
-            header,
-            format!(
-                "Read {}",
-                std::path::PathBuf::from("src").join("main.rs").display()
-            )
-        );
+        assert_eq!(header, "Read src/main.rs");
 
         let preamble = block.preamble(&ctx).unwrap();
         let preamble_text: String = preamble
@@ -561,7 +554,7 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(preamble_text, format!("Read {}", abs.display()));
+        assert_eq!(preamble_text, "Read /Users/me/project/src/main.rs");
     }
 
     #[test]
@@ -616,35 +609,20 @@ mod tests {
     fn expanded_header_selection_matches_relative_path() {
         use crate::scrollback::types::derive_selection_text;
 
-        let cwd = if cfg!(windows) {
-            std::path::PathBuf::from(r"C:\Users\me\project")
-        } else {
-            std::path::PathBuf::from("/Users/me/project")
-        };
-        let block = ReadToolCallBlock::new(cwd.join("src").join("main.rs").to_string_lossy());
+        let block = ReadToolCallBlock::new("/Users/me/project/src/main.rs");
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
-        ctx.cwd = Some(cwd);
+        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
         let header = &block.output(&ctx).lines[0];
-        assert_eq!(
-            derive_selection_text(header),
-            std::path::PathBuf::from("src")
-                .join("main.rs")
-                .to_string_lossy()
-        );
+        assert_eq!(derive_selection_text(header), "src/main.rs");
     }
 
     #[test]
     fn header_link_target_is_absolute_file_for_collapsed_and_expanded() {
-        let cwd = if cfg!(windows) {
-            std::path::PathBuf::from(r"C:\Users\me\project")
-        } else {
-            std::path::PathBuf::from("/Users/me/project")
-        };
-        let abs = cwd.join("src").join("main.rs");
-        let block = ReadToolCallBlock::new(abs.to_string_lossy());
+        let abs = "/Users/me/project/src/main.rs";
+        let block = ReadToolCallBlock::new(abs);
         let mut ctx = make_ctx();
-        ctx.cwd = Some(cwd);
+        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
 
         let collapsed = block.output(&ctx);
         let target = collapsed.lines[0]
@@ -653,16 +631,17 @@ mod tests {
             .expect("link target");
         assert_eq!(
             target,
-            &crate::render::osc8::LinkTarget::File(std::sync::Arc::from(abs.as_path(),))
+            &crate::render::osc8::LinkTarget::File(
+                std::sync::Arc::from(std::path::Path::new(abs),)
+            )
         );
-        let expected_url = url::Url::from_file_path(&abs).expect("absolute file URL");
         assert_eq!(
             crate::render::osc8::resolve_link_target(target)
                 .unwrap()
                 .osc8_url
                 .unwrap()
                 .as_ref(),
-            expected_url.as_str()
+            "file:///Users/me/project/src/main.rs"
         );
         assert_eq!(
             collapsed.lines[0].content.spans[1].content.as_ref(),
@@ -673,9 +652,7 @@ mod tests {
         let expanded = block.output(&ctx);
         assert_eq!(
             expanded.lines[0].content.spans[1].content.as_ref(),
-            std::path::PathBuf::from("src")
-                .join("main.rs")
-                .to_string_lossy()
+            "src/main.rs"
         );
         assert_eq!(expanded.lines[0].link_target.as_ref(), Some(target));
     }

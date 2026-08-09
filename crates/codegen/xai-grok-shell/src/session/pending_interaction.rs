@@ -28,7 +28,7 @@ use crate::extensions::notification::{SessionNotification, SessionUpdate as XaiS
 /// [`crate::session::handle::SessionHandle`]: the same `Arc` is shared between
 /// the session actor (which mutates it) and the handle (which the roster reads
 /// synchronously).
-pub type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
+pub(crate) type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 
 /// Which kind of blocking reverse-request is pending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -36,15 +36,15 @@ pub type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 pub enum PendingKind {
     /// `request_permission` for a tool action.
     Permission,
-    /// `chutes.build/ask_user_question`.
+    /// `chutes.ai/ask_user_question`.
     Question,
-    /// `chutes.build/exit_plan_mode` plan approval.
+    /// `chutes.ai/exit_plan_mode` plan approval.
     PlanApproval,
 }
 
 /// Whether a blocking plan-approval reverse-request is parked in `pending`.
 ///
-/// The resume re-park issues `chutes.build/exit_plan_mode` from a detached task
+/// The resume re-park issues `chutes.ai/exit_plan_mode` from a detached task
 /// with no running turn, making it the one parked interaction that also carries a
 /// persisted gate (`awaiting_plan_approval`). `session_has_live_work` consults
 /// this to keep such a session resident until the decision is answered or a real
@@ -85,7 +85,7 @@ fn broadcast(gateway: &GatewaySender, session_id: &acp::SessionId, update: XaiSe
 /// actually removed one) broadcasts `interaction_resolved`. The
 /// remove-or-no-op makes resolution **idempotent / first-answer-wins**: a
 /// second drop / already-removed key is silent.
-pub struct PendingInteractionGuard {
+pub(crate) struct PendingInteractionGuard {
     pending: PendingInteractions,
     gateway: GatewaySender,
     session_id: acp::SessionId,
@@ -94,7 +94,7 @@ pub struct PendingInteractionGuard {
 
 impl PendingInteractionGuard {
     /// Register a pending interaction and broadcast `pending_interaction`.
-    pub fn new(
+    pub(crate) fn new(
         pending: PendingInteractions,
         gateway: GatewaySender,
         session_id: acp::SessionId,

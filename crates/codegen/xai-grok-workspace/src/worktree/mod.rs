@@ -486,8 +486,9 @@ pub const MAX_LABEL_LEN: usize = 64;
 pub const MAX_COLLISION_SUFFIX: u32 = 100;
 
 /// Metadata key for the human-readable worktree label.
-pub const META_KEY_LABEL: &str = "label";
-/// Metadata key for whether the label was user-provided.
+pub use xai_fast_worktree::META_KEY_LABEL;
+/// Metadata key for whether the label was user-provided. Unlike
+/// META_KEY_LABEL, no record consumer below this crate reads it.
 pub const META_KEY_USER_PROVIDED: &str = "user_provided";
 
 /// Sanitize a user-provided label into a filesystem-safe directory name.
@@ -618,9 +619,9 @@ pub fn resolve_label_collision(base_dir: &Path, label: &str) -> String {
 // Worktree Base Directory Resolution
 // ============================================================================
 
-/// Resolve the grok home for worktree paths via the **same** resolver used for
+/// Resolve the Chutes Build home for worktree paths via the **same** resolver used for
 /// `worktrees.db` (`xai_fast_worktree::resolve_grok_home`), so checkout dirs and
-/// the metadata DB always live under the same `.chutes-build` tree. That resolver
+/// the metadata DB always live under the same `.grok` tree. That resolver
 /// canonicalizes its `$HOME` fallback to match `xai_grok_config::grok_home()`,
 /// so worktree paths also agree with trust/hooks and other grok-home paths.
 fn grok_home() -> std::path::PathBuf {
@@ -649,7 +650,7 @@ pub fn worktree_base_dir(git_root: &Path) -> std::path::PathBuf {
 /// as the main repo root (returning the worktree itself instead of the
 /// original repo).
 ///
-/// For paths outside the grok worktree directory, falls back to
+/// For paths outside the chutes-build worktree directory, falls back to
 /// `find_main_repo_root_from_path` + `worktree_base_dir`.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     let worktrees_dir = grok_home().join("worktrees");
@@ -739,12 +740,7 @@ pub(crate) fn source_repo_for_cwd(cwd: &str) -> Option<std::path::PathBuf> {
 /// non-worktree paths or when the DB is unavailable.
 pub fn lookup_worktree_label(cwd: &str) -> Option<String> {
     let (_db, record) = worktree_record_for_cwd(cwd)?;
-    record
-        .metadata
-        .as_ref()
-        .and_then(|m| m.get(META_KEY_LABEL))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    record.label().map(String::from)
 }
 
 /// Record activity on the worktree containing `cwd` (best-effort, infallible).
@@ -2296,7 +2292,7 @@ pub struct ResumeSessionInWorktreeRequest {
     pub git_ref: Option<String>,
 }
 
-/// Response from `chutes.build/git/worktree/resume_session`.
+/// Response from `chutes.ai/git/worktree/resume_session`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeSessionInWorktreeResponse {
@@ -2339,7 +2335,7 @@ pub struct RehydrateSessionRequest {
     pub worktree_path: Option<String>,
 }
 
-/// Response from `chutes.build/session/rehydrate`.
+/// Response from `chutes.ai/session/rehydrate`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RehydrateSessionResponse {
@@ -2360,8 +2356,9 @@ pub struct RehydrateSessionResponse {
 // ============================================================================
 
 use xai_fast_worktree::{
-    DbStats, GcOptions, GcReport, ListFilter, WorktreeDb, WorktreeKind, WorktreeRecord,
-    gc_worktrees as fw_gc_worktrees, rebuild_worktree_db, resolve_grok_home,
+    AutoGcOptions, DbStats, GcOptions, GcReport, ListFilter, WorktreeAutoGcLayer, WorktreeDb,
+    WorktreeKind, WorktreeRecord, gc_worktrees as fw_gc_worktrees, maybe_auto_gc,
+    rebuild_worktree_db, resolve_grok_home, resolve_worktree_auto_gc_from_layers,
 };
 
 pub fn open_db() -> Result<WorktreeDb> {
@@ -2414,8 +2411,83 @@ pub fn gc_worktrees_mgmt(
         max_age_secs,
         force,
         dry_run,
+        ..Default::default()
     };
     fw_gc_worktrees(&db, &opts)
+}
+
+/// Map settings → resolve layer (shared by shell + workspace).
+pub fn worktree_auto_gc_layer_from_settings(
+    s: &xai_grok_config_types::WorktreeAutoGcSettings,
+) -> WorktreeAutoGcLayer {
+    use std::collections::BTreeMap;
+    use xai_grok_config_types::WorktreeKindMaxAge;
+
+    let max_age_by_kind = s
+        .max_age_by_kind
+        .as_ref()
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| {
+                    let kind = WorktreeKind::from_str_opt(k)?;
+                    let age = match v {
+                        WorktreeKindMaxAge::Secs(n) => Some(*n),
+                        WorktreeKindMaxAge::Never => None,
+                    };
+                    Some((kind, age))
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    WorktreeAutoGcLayer {
+        enabled: s.enabled,
+        max_age_secs: s.max_age_secs,
+        min_interval_secs: s.min_interval_secs,
+        dry_run: s.dry_run,
+        include_orphan_snapshots: s.include_orphan_snapshots,
+        max_age_by_kind,
+        include_rebuild: s.include_rebuild,
+        rebuild_min_interval_secs: s.rebuild_min_interval_secs,
+    }
+}
+
+/// Env + `$CHUTES_BUILD_HOME/config.toml` only — **`remote=None` is intentional**.
+///
+/// Workspace handle startup has no remote-settings blob (unlike shell agent
+/// init, which resolves env > TOML > remote). Remote `worktree_auto_gc`
+/// kill-switch / staged rollout therefore does not apply on pure-workspace
+/// processes; use `CHUTES_BUILD_WORKTREE_AUTO_GC=0` / `CHUTES_BUILD_WORKTREE_AUTO_GC_DRY_RUN=1`
+/// or local TOML until remote is plumbed into `make_workspace_handle`.
+fn resolve_worktree_auto_gc_local() -> xai_fast_worktree::ResolvedWorktreeAutoGc {
+    use xai_grok_config_types::WorktreeAutoGcSettings;
+
+    let local = if let Ok(home) = resolve_grok_home() {
+        let path = home.join("config.toml");
+        if let Ok(text) = std::fs::read_to_string(&path)
+            && let Ok(root) = text.parse::<toml::Value>()
+        {
+            root.get("worktree")
+                .and_then(|w| w.get("auto_gc"))
+                // toml::Value only deserializes by value (no &Value Deserializer).
+                .and_then(|v| WorktreeAutoGcSettings::deserialize(v.clone()).ok())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let layer = local.as_ref().map(worktree_auto_gc_layer_from_settings);
+    // remote=None: see doc comment on this function.
+    resolve_worktree_auto_gc_from_layers(layer.as_ref(), None)
+}
+
+/// Sync auto-GC for handle startup (caller must `spawn_blocking`).
+pub fn run_auto_gc_best_effort() {
+    let opts = AutoGcOptions::from_resolved(resolve_worktree_auto_gc_local());
+    if let Err(e) = WorktreeDb::open_default().and_then(|db| maybe_auto_gc(&db, &opts)) {
+        tracing::warn!(error = %e, "auto worktree gc failed");
+    }
 }
 
 pub fn worktree_db_stats() -> Result<DbStats> {
@@ -2431,7 +2503,7 @@ pub fn worktree_db_rebuild() -> Result<xai_fast_worktree::RebuildReport> {
 
 pub fn worktree_db_path() -> Result<std::path::PathBuf> {
     let home = resolve_grok_home()?;
-    Ok(home.join("worktrees.db"))
+    Ok(WorktreeDb::resolve_db_path(&home))
 }
 
 /// Resolve an ID-or-path string to a worktree path via DB lookup,

@@ -22,7 +22,7 @@ impl crate::types::tool_metadata::ToolMetadata for GetChutesUsageTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {

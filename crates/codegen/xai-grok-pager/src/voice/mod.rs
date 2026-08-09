@@ -1,10 +1,11 @@
 //! Voice input: STT pipeline integration and prompt-box dictation.
 //!
 //! Layering (pager-owned):
-//! - **Voice gate** — default **off** until a compatible STT endpoint is configured.
-//!   Remote `voice_mode_enabled: false` is
+//! - **Voice gate** — GA default **on**. Remote `voice_mode_enabled: false` is
 //!   a kill switch (every voice surface unavailable and silent — no toast).
-//!   `CHUTES_BUILD_VOICE_MODE` overrides for local development.
+//!   Absent remote falls through to on. `CHUTES_BUILD_VOICE_MODE` overrides for local
+//!   dev (env > remote > default on). Free/X Basic still get SuperGrok upsell
+//!   via tier gates (not this flag).
 //! - **Session mode** (`voice_ui_active`) — this CLI run only; shows the mic.
 //! - **Capture chord** — `/voice` or `Ctrl+Space` start dictation (Esc/Enter
 //!   stop). `Ctrl+Space` decodes identically on every terminal, so the
@@ -18,9 +19,15 @@
 //! dashboard's dispatch (new-agent) input, captured at start via
 //! [`crate::app::app_view::VoiceTarget`] — while capture stays open across
 //! speech pauses. The user always submits with Enter; nothing is auto-sent.
+//! Submit promotes any remaining interim into the bound prompt, then hard-resets.
 
 mod auth;
 mod handle;
 
 pub use auth::build_voice_auth;
 pub use handle::handle_voice_event;
+pub(crate) use handle::{combine_prompt_with_voice_text, commit_interim_into_prompt};
+// Hidden `__mic-capture` helper intercept (macOS out-of-process capture),
+// re-exported for the composition-root binary, which links the pager library
+// rather than the voice crate. Called at the very top of `main`.
+pub use xai_grok_voice::maybe_run_capture_subprocess;

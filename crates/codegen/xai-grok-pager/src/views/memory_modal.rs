@@ -24,6 +24,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::actions::Action;
 use crate::app::app_view::InputOutcome;
+use crate::input::line_editor::{LineEditOutcome, LineEditor};
 
 use crate::render::SafeBuf;
 use crate::render::scrollbar::{ScrollbarClickResult, render_scrollbar, scrollbar_click_to_offset};
@@ -69,7 +70,7 @@ pub struct MemoryModalState {
     pub preview_markdown: Option<MarkdownContent>,
     pub preview_scroll: usize,
     pub mode: MemoryModalMode,
-    pub query: String,
+    query: LineEditor,
     /// Whether memory is currently enabled for this session.
     pub memory_enabled: bool,
     /// Whether the modal is rendered in fullscreen mode (persisted to config).
@@ -96,7 +97,7 @@ impl MemoryModalState {
             preview_markdown: None,
             preview_scroll: 0,
             mode: MemoryModalMode::Browse,
-            query: String::new(),
+            query: LineEditor::default(),
             memory_enabled: true,
             fullscreen: load_fullscreen_pref(),
             filtered_cache,
@@ -115,8 +116,31 @@ impl MemoryModalState {
         &self.filtered_cache
     }
 
+    pub fn query(&self) -> &str {
+        self.query.text()
+    }
+
+    pub fn query_cursor_byte(&self) -> usize {
+        self.query.cursor_byte()
+    }
+
+    #[cfg(test)]
+    fn set_query(&mut self, query: impl Into<String>) {
+        self.query.set_text(query);
+    }
+
+    #[cfg(test)]
+    fn set_query_cursor_byte(&mut self, cursor_byte: usize) -> LineEditOutcome {
+        self.query.set_cursor_byte(cursor_byte)
+    }
+
+    #[cfg(test)]
+    fn query_viewport(&self, width: usize) -> xai_ratatui_textarea::SingleLineViewport {
+        self.query.viewport(width)
+    }
+
     fn invalidate_filter(&mut self) {
-        self.filtered_cache = compute_filtered(&self.entries, &self.query);
+        self.filtered_cache = compute_filtered(&self.entries, self.query());
     }
 
     pub fn selected_entry(&self) -> Option<&MemoryFileEntry> {
@@ -307,7 +331,7 @@ pub fn build_entries(
 
     for f in files {
         let label = file_label(&f.path);
-        let size = format_size(f.size_bytes);
+        let size = crate::util::format_bytes(f.size_bytes);
         let modified = format_modified(f.modified_epoch_secs, now_secs);
         let meta_display = format!("{size} \u{00B7} {modified}");
         let bucket = match f.source.as_str() {
@@ -448,40 +472,46 @@ pub fn render_memory_modal(
 fn render_file_list(buf: &mut Buffer, area: Rect, state: &mut MemoryModalState, theme: &Theme) {
     let search_y = area.y;
     let filter_focused = matches!(state.mode, MemoryModalMode::FilterFocused);
-    let (query_display, query_style) = if state.query.is_empty() {
+    let viewport = state.query.viewport(area.width as usize);
+    if state.query().is_empty() {
         let placeholder = if filter_focused {
             "type to filter..."
         } else {
             "/ to filter..."
         };
-        (
-            placeholder,
-            Style::default().fg(theme.gray_dim).bg(theme.bg_base),
-        )
+        buf.set_span(
+            area.x,
+            search_y,
+            &Span::styled(
+                placeholder,
+                Style::default().fg(theme.gray_dim).bg(theme.bg_base),
+            ),
+            area.width,
+        );
     } else {
-        (
-            state.query.as_str(),
-            Style::default().fg(theme.text_primary).bg(theme.bg_base),
-        )
-    };
-    buf.set_span(
-        area.x,
-        search_y,
-        &Span::styled(query_display, query_style),
-        area.width,
-    );
+        let leading;
+        let visible = if filter_focused {
+            &state.query()[viewport.visible_byte_range.clone()]
+        } else {
+            leading = crate::render::line_utils::truncate_str(state.query(), area.width as usize);
+            &leading
+        };
+        buf.set_span(
+            area.x,
+            search_y,
+            &Span::styled(
+                visible,
+                Style::default().fg(theme.text_primary).bg(theme.bg_base),
+            ),
+            area.width,
+        );
+    }
     if filter_focused {
-        let cursor_x = area.x + state.query.width() as u16;
-        if cursor_x < area.x + area.width {
-            buf.set_span(
-                cursor_x,
-                search_y,
-                &Span::styled(
-                    "\u{2588}",
-                    Style::default().fg(theme.accent_user).bg(theme.bg_base),
-                ),
-                1,
-            );
+        let cursor_x = area.x + viewport.cursor_display_column as u16;
+        if cursor_x < area.x + area.width
+            && let Some(cell) = buf.cell_mut((cursor_x, search_y))
+        {
+            cell.set_style(Style::default().fg(theme.bg_base).bg(theme.text_primary));
         }
     }
 
@@ -710,6 +740,14 @@ pub fn handle_memory_key(state: &mut MemoryModalState, key: &KeyEvent) -> InputO
     }
 }
 
+pub fn handle_memory_paste(state: &mut MemoryModalState, text: &str) -> InputOutcome {
+    if state.mode != MemoryModalMode::FilterFocused {
+        return InputOutcome::Unchanged;
+    }
+    let outcome = state.query.insert_paste(text);
+    finish_filter_edit(state, outcome)
+}
+
 /// Saturating cast from `usize` to `u16` (caps at `u16::MAX`).
 fn sat_u16(v: usize) -> u16 {
     v.min(u16::MAX as usize) as u16
@@ -880,22 +918,23 @@ fn handle_filter_focused(state: &mut MemoryModalState, key: &KeyEvent) -> InputO
             state.select_prev();
             InputOutcome::Changed
         }
-        KeyCode::Char(c) if crate::input::key::is_text_input_key(key) => {
-            state.query.push(c);
+        _ => {
+            let outcome = state.query.handle_key(key);
+
+            finish_filter_edit(state, outcome)
+        }
+    }
+}
+
+fn finish_filter_edit(state: &mut MemoryModalState, outcome: LineEditOutcome) -> InputOutcome {
+    match outcome {
+        LineEditOutcome::TextChanged => {
             state.invalidate_filter();
             state.clamp_selected();
             InputOutcome::Changed
         }
-        KeyCode::Backspace => {
-            if state.query.pop().is_some() {
-                state.invalidate_filter();
-                state.clamp_selected();
-                InputOutcome::Changed
-            } else {
-                InputOutcome::Unchanged
-            }
-        }
-        _ => InputOutcome::Unchanged,
+        LineEditOutcome::CursorChanged | LineEditOutcome::HandledNoChange => InputOutcome::Changed,
+        LineEditOutcome::Unhandled => InputOutcome::Unchanged,
     }
 }
 
@@ -974,7 +1013,7 @@ fn handle_browse(state: &mut MemoryModalState, key: &KeyEvent) -> InputOutcome {
             InputOutcome::Changed
         }
         KeyCode::Backspace => {
-            if state.query.pop().is_some() {
+            if state.query.delete_last_grapheme() == LineEditOutcome::TextChanged {
                 state.invalidate_filter();
                 state.clamp_selected();
                 InputOutcome::Changed
@@ -1086,18 +1125,6 @@ fn file_label(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        return format!("{bytes}B");
-    }
-    let kb = bytes as f64 / 1024.0;
-    if kb < 1024.0 {
-        return format!("{kb:.1}KB");
-    }
-    let mb = kb / 1024.0;
-    format!("{mb:.1}MB")
-}
-
 fn format_modified(epoch_secs: Option<u64>, now_secs: u64) -> String {
     let Some(modified) = epoch_secs else {
         return "unknown".to_string();
@@ -1137,15 +1164,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_size_ranges() {
-        assert_eq!(format_size(0), "0B");
-        assert_eq!(format_size(512), "512B");
-        assert_eq!(format_size(1024), "1.0KB");
-        assert_eq!(format_size(1536), "1.5KB");
-        assert_eq!(format_size(1048576), "1.0MB");
-    }
-
-    #[test]
     fn format_modified_relative() {
         let now = 1_700_000_000u64;
         assert_eq!(format_modified(None, now), "unknown");
@@ -1159,8 +1177,8 @@ mod tests {
     #[test]
     fn file_label_extracts_filename() {
         assert_eq!(
-            file_label("/home/user/.chutes-build/memory/memories.md"),
-            "memories.md"
+            file_label("/home/user/.chutes-build/memory/MEMORY.md"),
+            "MEMORY.md"
         );
         assert_eq!(
             file_label("/workspace/.chutes-build/memory/sessions/2026-01-15-fix-bug.md"),
@@ -1174,13 +1192,13 @@ mod tests {
 
         let files = vec![
             MemoryFileInfo {
-                path: "/global/memories.md".into(),
+                path: "/global/MEMORY.md".into(),
                 source: "global".into(),
                 size_bytes: 100,
                 modified_epoch_secs: Some(1_700_000_000),
             },
             MemoryFileInfo {
-                path: "/workspace/memories.md".into(),
+                path: "/workspace/MEMORY.md".into(),
                 source: "workspace".into(),
                 size_bytes: 200,
                 modified_epoch_secs: Some(1_700_000_000),
@@ -1218,20 +1236,20 @@ mod tests {
     fn filtered_indices_preserves_headers_for_matching_entries() {
         let entries = build_test_entries();
         let mut state = MemoryModalState::new(entries);
-        state.query = "memories".to_string();
+        state.set_query("memory");
         state.invalidate_filter();
 
         let indices = state.filtered_indices();
         assert_eq!(indices.len(), 2);
         assert_eq!(indices[0], 0); // Global header
-        assert_eq!(indices[1], 1); // memories.md
+        assert_eq!(indices[1], 1); // MEMORY.md
     }
 
     #[test]
     fn delete_only_allowed_for_session_entries() {
         let entries = build_test_entries();
         let mut state = MemoryModalState::new(entries);
-        // Select the global entry (index 1 in filtered, which is "memories.md" source="global")
+        // Select the global entry (index 1 in filtered, which is "MEMORY.md" source="global")
         state.selected = 1;
         // Try to delete — should NOT enter confirming mode because source is "global".
         let key = crossterm::event::KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
@@ -1316,12 +1334,12 @@ mod tests {
         let mut state = MemoryModalState::new(entries);
         assert_eq!(state.filtered_indices().len(), 4); // all entries
 
-        state.query = "session".to_string();
+        state.set_query("session");
         state.invalidate_filter();
         // Only the Sessions header + session-log.md should match.
         assert_eq!(state.filtered_indices().len(), 2);
 
-        state.query.clear();
+        state.set_query("");
         state.invalidate_filter();
         assert_eq!(state.filtered_indices().len(), 4);
     }
@@ -1463,6 +1481,143 @@ mod tests {
     }
 
     #[test]
+    fn filter_text_changes_recompute_preview_but_cursor_moves_do_not() {
+        let mut state = MemoryModalState::new(build_test_entries());
+        state.mode = MemoryModalMode::FilterFocused;
+        state.preview_scroll = 7;
+
+        let outcome = handle_memory_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "m");
+        assert_eq!(state.preview_scroll, 0);
+        let filtered = state.filtered_indices().to_vec();
+
+        state.preview_scroll = 7;
+        let outcome = handle_memory_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "m");
+        assert_eq!(state.query_cursor_byte(), 0);
+        assert_eq!(state.filtered_indices(), filtered);
+        assert_eq!(state.preview_scroll, 7);
+    }
+
+    #[test]
+    fn filter_paste_recomputes_once_and_consumes_empty_input() {
+        let mut state = MemoryModalState::new(build_test_entries());
+        state.mode = MemoryModalMode::FilterFocused;
+        state.preview_scroll = 7;
+        let outcome = handle_memory_paste(&mut state, "mem\r\n");
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "mem");
+        assert_eq!(state.preview_scroll, 0);
+
+        state.preview_scroll = 7;
+        let outcome = handle_memory_paste(&mut state, "\r\n");
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "mem");
+        assert_eq!(state.preview_scroll, 7);
+
+        state.mode = MemoryModalMode::Browse;
+        let outcome = handle_memory_paste(&mut state, "ignored");
+        assert!(matches!(outcome, InputOutcome::Unchanged));
+        assert_eq!(state.query(), "mem");
+    }
+
+    #[test]
+    fn filter_escape_preserves_query_and_enter_stays_focused() {
+        let mut state = MemoryModalState::new(build_test_entries());
+        state.mode = MemoryModalMode::FilterFocused;
+        state.set_query("memory");
+
+        let outcome = handle_memory_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, InputOutcome::Unchanged));
+        assert_eq!(state.mode, MemoryModalMode::FilterFocused);
+        assert_eq!(state.query(), "memory");
+
+        let outcome =
+            handle_memory_key(&mut state, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.mode, MemoryModalMode::Browse);
+        assert_eq!(state.query(), "memory");
+    }
+
+    #[test]
+    fn filter_uses_canonical_word_and_grapheme_editing() {
+        for key in [
+            KeyEvent::new(KeyCode::Left, KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
+        ] {
+            let mut state = MemoryModalState::new(build_test_entries());
+            state.mode = MemoryModalMode::FilterFocused;
+            state.set_query("hello-world");
+            let outcome = handle_memory_key(&mut state, &key);
+            assert!(matches!(outcome, InputOutcome::Changed));
+            assert_eq!(state.query(), "hello-world");
+            assert_eq!(state.query_cursor_byte(), "hello-".len());
+        }
+
+        let grapheme = "👩🏽\u{200d}💻";
+        let mut state = MemoryModalState::new(build_test_entries());
+        state.mode = MemoryModalMode::FilterFocused;
+        state.set_query(format!("a{grapheme}b"));
+        let _ = state.set_query_cursor_byte(1);
+        let outcome = handle_memory_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "ab");
+        assert_eq!(state.query_cursor_byte(), 1);
+    }
+
+    #[test]
+    fn browse_backspace_deletes_trailing_grapheme_independent_of_cursor_and_modifiers() {
+        let mut state = MemoryModalState::new(build_test_entries());
+        let grapheme = "👩🏽\u{200d}💻";
+        state.set_query(format!("a{grapheme}"));
+        let _ = state.set_query_cursor_byte(0);
+        let outcome = handle_memory_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL),
+        );
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(state.query(), "a");
+        assert_eq!(state.query_cursor_byte(), 1);
+    }
+
+    #[test]
+    fn filter_render_keeps_unicode_query_and_cursor_visible() {
+        let mut state = MemoryModalState::new(build_test_entries());
+        state.mode = MemoryModalMode::FilterFocused;
+        let grapheme = "👩🏽\u{200d}💻";
+        let text = format!("123456789012中e\u{301}{grapheme}z");
+        state.set_query(&text);
+        let _ = state.set_query_cursor_byte(text.len() - 1);
+        let area = Rect::new(0, 0, 12, 3);
+        let theme = Theme::current();
+        let mut buffer = Buffer::empty(area);
+        let viewport = state.query_viewport(area.width as usize);
+        let visible = &state.query()[viewport.visible_byte_range.clone()];
+        assert!(visible.contains('中'));
+        assert!(visible.contains("e\u{301}"));
+        assert!(visible.contains(grapheme));
+
+        render_file_list(&mut buffer, area, &mut state, &theme);
+        let cursor_x = viewport.cursor_display_column as u16;
+        assert_eq!(buffer[(cursor_x, 0)].bg, theme.text_primary);
+    }
+
+    #[test]
     fn apply_scrollbar_jump_edges() {
         let mut offset = 50;
         // Top click → offset 0.
@@ -1484,10 +1639,10 @@ mod tests {
                 is_header: true,
             },
             MemoryFileEntry {
-                path: PathBuf::from("/test/memories.md"),
+                path: PathBuf::from("/test/MEMORY.md"),
                 source: "global".into(),
                 meta_display: "1KB \u{00B7} 1d ago".into(),
-                label: "memories.md".to_string(),
+                label: "MEMORY.md".to_string(),
                 is_header: false,
             },
             MemoryFileEntry {

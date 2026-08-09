@@ -34,7 +34,7 @@ pub struct VoiceProbeReport {
     pub transcript: Option<String>,
 }
 
-/// Capture mic audio and stream it to the configured STT endpoint.
+/// Capture mic audio and stream it to xAI STT, reporting the transcript.
 #[cfg(feature = "audio")]
 pub async fn run_streaming_probe(opts: VoiceProbeOptions) -> Result<VoiceProbeReport, VoiceError> {
     let bearer = crate::auth::require_bearer(&opts.auth).await?;
@@ -152,14 +152,13 @@ pub fn input_device_info() -> Result<InputDeviceInfo, VoiceError> {
     ))
 }
 
-/// Platform-specific fix text for a silent mic. On macOS the grant is for the
-/// terminal app and only applies after that app restarts.
-pub fn mic_silence_help() -> &'static str {
+/// Platform-specific fix text for a mic that isn't being picked up. On macOS
+/// the grant is for the terminal app and only applies after that app restarts.
+pub fn mic_fix_help() -> &'static str {
     if cfg!(target_os = "macos") {
-        "grant your terminal app microphone access in System Settings → \
-         Privacy & Security → Microphone, then restart the terminal. If it's \
-         already allowed, check the input device and level in System Settings \
-         → Sound → Input."
+        "Allow microphone access for your terminal in System Settings → Privacy & Security → \
+         Microphone, then restart the terminal. If access is already on, check the input device \
+         and level in System Settings → Sound → Input."
     } else if cfg!(target_os = "windows") {
         "allow microphone access in Settings → Privacy & security → \
          Microphone, and check the input device and level in Settings → \
@@ -172,7 +171,7 @@ pub fn mic_silence_help() -> &'static str {
 
 /// Human-readable multi-line report for terminal output.
 pub fn format_probe_report(report: &VoiceProbeReport) -> String {
-    let mut out = String::from("=== Chutes Build voice probe ===\n\n");
+    let mut out = String::from("=== xai-grok-voice probe ===\n\n");
 
     out.push_str(&format!(
         "Mic capture (streamed)\n  pcm_bytes: {}\n",

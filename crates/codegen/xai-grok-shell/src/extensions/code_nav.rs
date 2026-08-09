@@ -7,11 +7,11 @@
 //!
 //! | Method | Description |
 //! |--------|-------------|
-//! | `chutes.build/code/goto-definition` | Definition location(s) for symbol at position |
-//! | `chutes.build/code/goto-references` | Reference location(s) for symbol at position |
-//! | `chutes.build/code/find-definitions` | All definitions of a symbol by name |
-//! | `chutes.build/code/find-references` | All references to a symbol by name |
-//! | `chutes.build/code/status` | Indexing status |
+//! | `chutes.ai/code/goto-definition` | Definition location(s) for symbol at position |
+//! | `chutes.ai/code/goto-references` | Reference location(s) for symbol at position |
+//! | `chutes.ai/code/find-definitions` | All definitions of a symbol by name |
+//! | `chutes.ai/code/find-references` | All references to a symbol by name |
+//! | `chutes.ai/code/status` | Indexing status |
 
 use std::path::{Path, PathBuf};
 
@@ -57,7 +57,7 @@ type ExtResult = Result<acp::ExtResponse, acp::Error>;
 /// receive `reason: sessionRequired` in the error response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GotoRequest {
+pub(crate) struct GotoRequest {
     /// Session ID — required for code navigation.
     pub session_id: Option<acp::SessionId>,
     /// Working directory (optional when session_id is provided).
@@ -75,7 +75,7 @@ pub struct GotoRequest {
 /// **`sessionId` is required** — same contract as [`GotoRequest`].
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FindSymbolRequest {
+pub(crate) struct FindSymbolRequest {
     /// Session ID — required for code navigation.
     pub session_id: Option<acp::SessionId>,
     /// Working directory (optional when session_id is provided).
@@ -91,7 +91,7 @@ pub struct FindSymbolRequest {
 /// **`sessionId` is required** — same contract as [`GotoRequest`].
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StatusRequest {
+pub(crate) struct StatusRequest {
     /// Session ID — required for code navigation.
     pub session_id: Option<acp::SessionId>,
     /// Working directory (optional when session_id is provided).
@@ -129,12 +129,12 @@ pub struct SymbolLocation {
     pub matched_symbol: Option<String>,
 }
 
-/// Reason string for the `chutes.build/code/status` response.
+/// Reason string for the `chutes.ai/code/status` response.
 ///
 /// Serialised as a camelCase string so clients can pattern-match on it.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum IndexStatusReason {
+pub(crate) enum IndexStatusReason {
     /// Index is running and ready.
     Active,
     /// Index is eligible but has not been started yet (first code-nav request
@@ -142,7 +142,7 @@ pub enum IndexStatusReason {
     NotStarted,
     /// Client type is not web (web-only for initial rollout).
     ClientNotWeb,
-    /// Client did not advertise `chutes.build/codeNavigation.enabled`.
+    /// Client did not advertise `chutes.ai/codeNavigation.enabled`.
     CapabilityNotAdvertised,
     /// `codebase_indexing` feature is disabled in config.
     DisabledByConfig,
@@ -155,7 +155,7 @@ pub enum IndexStatusReason {
 /// Response for status query.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StatusResponse {
+pub(crate) struct StatusResponse {
     /// Whether an index is currently active for this cwd.
     pub indexed: bool,
     /// Whether this client is eligible to use codebase indexing.
@@ -425,7 +425,7 @@ fn eligibility_error(reason: CodeNavEligibility) -> acp::Error {
             "code navigation is currently only enabled for grok-web clients"
         }
         CodeNavEligibility::CapabilityNotAdvertised => {
-            "client must advertise chutes.build/codeNavigation.enabled to use code navigation"
+            "client must advertise chutes.ai/codeNavigation.enabled to use code navigation"
         }
         CodeNavEligibility::DisabledByConfig => "code navigation is disabled by configuration",
         CodeNavEligibility::NotGitRepo => {

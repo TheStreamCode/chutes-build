@@ -1,4 +1,4 @@
-//! ACP extension handler for session search (`chutes.build/session/search`).
+//! ACP extension handler for session search (`chutes.ai/session/search`).
 //!
 //! Exposes session full-text search as an ACP extension method.
 //! The client sends a query and receives ranked results across all
@@ -21,7 +21,7 @@ use super::ExtResult;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchSessionsRequest {
+pub(crate) struct SearchSessionsRequest {
     /// The search query string.
     pub query: String,
     /// Optional workspace directory to scope results to.
@@ -44,7 +44,7 @@ fn default_limit() -> usize {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchSessionsResponse {
+pub(crate) struct SearchSessionsResponse {
     pub results: Vec<SearchSessionHit>,
     pub next_offset: Option<usize>,
     pub total_estimate: Option<usize>,
@@ -67,7 +67,7 @@ pub struct SearchSessionHit {
     pub snippet: Option<String>,
 }
 
-/// Route `chutes.build/session/search` extension method calls.
+/// Route `chutes.ai/session/search` extension method calls.
 pub async fn handle(args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/session/search" => {

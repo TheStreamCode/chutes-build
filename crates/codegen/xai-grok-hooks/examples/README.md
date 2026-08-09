@@ -2,10 +2,6 @@
 
 Sample hooks for Chutes Build. Copy to `~/.chutes-build/hooks/` to enable globally, or to `<project>/.chutes-build/hooks/` for project-scoped hooks (requires `/hooks-trust`).
 
-The shell-script examples require Bash (for example Git for Windows Bash, WSL,
-or a Unix host). The Python guard requires `python3`. On Windows, copy the
-files with PowerShell; executable-bit changes are not required on NTFS.
-
 ## Available Examples
 
 ### 1. Safe Shell Guard (`safe-shell.json`)
@@ -15,15 +11,7 @@ files with PowerShell; executable-bit changes are not required on NTFS.
 Denies obviously destructive shell commands before they execute:
 - `rm -rf /`, `sudo rm -rf`, `mkfs`, `dd` to devices, fork bombs
 
-**Install (PowerShell):**
-```powershell
-$hooks = Join-Path $HOME ".chutes-build\hooks"
-New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
-Copy-Item "examples\hooks\safe-shell.json" $hooks
-Copy-Item "examples\hooks\bin\safe-shell-guard.sh" (Join-Path $hooks "bin")
-```
-
-**Install (Bash):**
+**Install:**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/safe-shell.json ~/.chutes-build/hooks/
@@ -48,15 +36,7 @@ It is careful to avoid false positives: `ls -R | grep foo` (the `-R` belongs to
 `ls`), `grep -e -r file` (`-r` is the pattern), and `grep -- -r file` are all
 allowed.
 
-**Install (PowerShell):**
-```powershell
-$hooks = Join-Path $HOME ".chutes-build\hooks"
-New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
-Copy-Item "examples\hooks\no-recursive-grep.json" $hooks
-Copy-Item "examples\hooks\bin\no-recursive-grep-guard.py" (Join-Path $hooks "bin")
-```
-
-**Install (Bash):**
+**Install:**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/no-recursive-grep.json ~/.chutes-build/hooks/
@@ -71,15 +51,7 @@ chmod +x ~/.chutes-build/hooks/bin/no-recursive-grep-guard.py
 
 Appends session metadata to `~/.chutes-build/session-audit.log` — event, session ID, cwd, timestamp.
 
-**Install (PowerShell):**
-```powershell
-$hooks = Join-Path $HOME ".chutes-build\hooks"
-New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
-Copy-Item "examples\hooks\session-log.json" $hooks
-Copy-Item "examples\hooks\bin\session-log.sh" (Join-Path $hooks "bin")
-```
-
-**Install (Bash):**
+**Install:**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/session-log.json ~/.chutes-build/hooks/
@@ -93,20 +65,26 @@ chmod +x ~/.chutes-build/hooks/bin/session-log.sh
 
 Logs all tool calls to `~/.chutes-build/tool-activity.log` — tool name, event type, effective tool name, backgrounded status.
 
-**Install (PowerShell):**
-```powershell
-$hooks = Join-Path $HOME ".chutes-build\hooks"
-New-Item -ItemType Directory -Force -Path (Join-Path $hooks "bin")
-Copy-Item "examples\hooks\tool-logger.json" $hooks
-Copy-Item "examples\hooks\bin\tool-logger.sh" (Join-Path $hooks "bin")
-```
-
-**Install (Bash):**
+**Install:**
 ```sh
 mkdir -p ~/.chutes-build/hooks/bin
 cp examples/hooks/tool-logger.json ~/.chutes-build/hooks/
 cp examples/hooks/bin/tool-logger.sh ~/.chutes-build/hooks/bin/
 chmod +x ~/.chutes-build/hooks/bin/tool-logger.sh
+```
+
+### 5. Stop Gate: verify before finishing (`stop-verify.json`)
+
+**Type:** blocking (`Stop`)
+
+Keeps the agent working until `cargo build` passes. A `Stop` hook runs when the agent is about to finish its turn; returning `{"decision":"block","reason":"…"}` feeds the reason back to the model and runs another round. The built-in cap ends the turn after 8 continuations. The hook sets a 300-second timeout because a timed-out Stop hook fails open and lets the agent stop.
+
+**Install:**
+```sh
+mkdir -p ~/.chutes-build/hooks/bin
+cp examples/hooks/stop-verify.json ~/.chutes-build/hooks/
+cp examples/hooks/bin/stop-verify.sh ~/.chutes-build/hooks/bin/
+chmod +x ~/.chutes-build/hooks/bin/stop-verify.sh
 ```
 
 ## Format
@@ -128,10 +106,8 @@ Hook files use the Claude-compatible JSON format:
 }
 ```
 
-- **Event names:** `SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`
-- **Matcher:** regex on tool name. Claude-compatible names like `Bash`, `Read`,
-  and `Edit` are auto-expanded to the runtime names (`run_terminal_cmd`,
-  `read_file`, and `search_replace`).
+- **Event names:** `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `SessionEnd` (see the [user guide](../../xai-grok-pager/docs/user-guide/10-hooks.md) for the full set)
+- **Matcher:** regex on tool name. Claude names like `Bash`, `Read`, `Edit` are auto-expanded to also match Chutes Build names (`run_terminal_cmd`, `read_file`, `search_replace`)
 - **Timeout:** in seconds (default: 5)
 - **Command:** path to script (relative to hook file directory) or inline shell command
 
@@ -139,7 +115,7 @@ Hook files use the Claude-compatible JSON format:
 
 Scripts receive the hook event envelope as JSON on **stdin** and should write a response to **stdout**:
 
-**For blocking hooks (`PreToolUse`):**
+**For tool gates (`PreToolUse`):**
 ```json
 {"decision":"allow"}
 ```
@@ -148,7 +124,19 @@ or
 {"decision":"deny","reason":"Explanation for the user"}
 ```
 
-**Exit codes:** `0` = allow, `2` = deny, other = fail-open.
+**For stop gates (`Stop` / `SubagentStop`):** keep the agent working or force it to stop:
+```json
+{"decision":"block","reason":"Feedback fed back to the model"}
+```
+```json
+{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"Non-error feedback"}}
+```
+```json
+{"continue":false,"stopReason":"Shown to the user; overrides any block"}
+```
+The turn ends after 8 consecutive continuations. The input carries `stopHookActive` (true once a block has already continued this turn) so a hook can give up.
+
+**Exit codes:** `0` = allow / no decision, `2` = deny (`PreToolUse`) or block-stop with stderr as the feedback, other = fail-open. Valid decision JSON on stdout wins over the exit code.
 
 **For passive hooks:** stdout is informational only. Exit `0` for success.
 

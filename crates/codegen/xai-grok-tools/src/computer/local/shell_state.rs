@@ -90,7 +90,7 @@ dump_bash_state() {
     if [[ -n "$content" ]]; then
       builtin printf 'grok_snap_%s=$(command base64 -d <<'"'"'CHUTES_BUILD_SNAP_EOF_%s'"'"'\n' "$var_name" "$var_name"
       command base64 <<<"$content" | command tr -d '\n'
-      builtin printf '\nCHUTES_BUILD_SNAP_EOF_%s\n' "$var_name"
+      builtin printf '\nGROK_SNAP_EOF_%s\n' "$var_name"
       builtin printf ')\n'
       builtin printf 'eval "$grok_snap_%s"\n' "$var_name"
     fi
@@ -104,8 +104,10 @@ dump_bash_state() {
   env_vars=$(builtin export -p 2>/dev/null | command grep -viE '_proxy=|CHUTES_BUILD_SANDBOX|CHUTES_BUILD_AGENT=|SUDO_ASKPASS|CHUTES_BUILD_ASKPASS|ELECTRON_RUN_AS_NODE|SSH_AUTH_SOCK|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|WAYLAND_DISPLAY|GPG_TTY' || true)
   _emit_encoded "$env_vars" "ENV_VARS_B64"
 
+  # errexit/pipefail here are this function's own `set -euo pipefail` (set is
+  # shell-global in bash); replaying them would abort later user commands.
   local posix_opts
-  posix_opts=$(builtin shopt -po 2>/dev/null | command grep -v '^set -o nounset$' | command grep -v '^set +o nounset$' || true)
+  posix_opts=$(builtin shopt -po 2>/dev/null | command grep -vE '^set [-+]o (nounset|errexit|pipefail)$' || true)
   _emit_encoded "$posix_opts" "POSIX_OPTS_B64"
 
   local bash_opts
@@ -144,7 +146,7 @@ function dump_zsh_state() {
     if [[ -n "$content" ]]; then
       builtin printf 'grok_snap_%s=$(command base64 -d <<'"'"'CHUTES_BUILD_SNAP_EOF_%s'"'"'\n' "$var_name" "$var_name"
       command base64 <<<"$content" | command tr -d '\n'
-      builtin printf '\nCHUTES_BUILD_SNAP_EOF_%s\n' "$var_name"
+      builtin printf '\nGROK_SNAP_EOF_%s\n' "$var_name"
       builtin printf ')\n'
       builtin printf 'eval "$grok_snap_%s"\n' "$var_name"
     fi
@@ -158,8 +160,11 @@ function dump_zsh_state() {
   env_vars=$(builtin typeset -xp 2>/dev/null | command grep -viE '_proxy=|CHUTES_BUILD_SANDBOX|CHUTES_BUILD_AGENT=|SUDO_ASKPASS|CHUTES_BUILD_ASKPASS|ELECTRON_RUN_AS_NODE|SSH_AUTH_SOCK|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|WAYLAND_DISPLAY|GPG_TTY' || true)
   _emit_encoded "$env_vars" "ENV_VARS_B64"
 
+  # errreturn/pipefail here are this function's own `emulate -L` options
+  # (setopt lists them while inside); replaying them would abort later user
+  # commands.
   local zsh_opts
-  zsh_opts=$(setopt 2>/dev/null | command grep -v '^nounset$' | command awk '{printf "builtin setopt %s 2>/dev/null || true\n", $0}' || true)
+  zsh_opts=$(setopt 2>/dev/null | command grep -vE '^(nounset|errexit|errreturn|pipefail)$' | command awk '{printf "builtin setopt %s 2>/dev/null || true\n", $0}' || true)
   _emit_encoded "$zsh_opts" "ZSH_OPTS_B64"
 
   local all_functions
@@ -267,6 +272,7 @@ impl ShellState {
     pub async fn init(
         shell: ShellKind,
         cwd: &Path,
+        shell_env_policy: Option<&crate::util::ShellEnvironmentPolicy>,
     ) -> Result<Self, crate::computer::types::ComputerError> {
         let dump_script = shell.dump_script();
         let dump_fn = shell.dump_function_name();
@@ -292,7 +298,23 @@ impl ShellState {
             .stderr(Stdio::null())
             .kill_on_drop(true);
         crate::util::detach_command(&mut cmd);
+        // Apply the policy before the `export -p` snapshot so the replayed state
+        // is already filtered; otherwise the restore would undo it. No-op unless set.
+        //
+        // SECURITY: this filters the base env only. Variables an rc file exports
+        // during login are captured in the replay snapshot and are not
+        // re-filtered by `exclude`/`include_only` on the persistent backend, so
+        // warn when a policy is active. The non-persistent backend has no such
+        // gap (it filters login capture directly).
+        if shell_env_policy.is_some_and(|p| !p.is_noop()) {
+            tracing::warn!(
+                "shell_environment_policy filters the persistent shell's base env only; \
+                 variables exported by rc files enter the replay snapshot unfiltered"
+            );
+        }
+        crate::util::apply_shell_environment_policy(&mut cmd, shell_env_policy);
         cmd.envs(crate::util::pager_env());
+        #[allow(clippy::disallowed_methods)] // one-shot init run, waited on here
         let mut child = cmd.spawn().map_err(|e| {
             crate::computer::types::ComputerError::io(format!(
                 "failed to spawn {shell:?} for shell state init: {e}"
@@ -361,6 +383,7 @@ impl ShellState {
         user_command: &str,
         cwd_override: Option<&Path>,
         search_shadows: super::SearchShadowConfig,
+        spawn_notice: Option<&str>,
     ) -> std::io::Result<PreparedCommand> {
         let dump_script = self.shell.dump_script();
         let dump_fn = self.shell.dump_function_name();
@@ -402,16 +425,37 @@ impl ShellState {
                 // Re-export CHUTES_BUILD_AGENT=1 after snapshot eval so agent-definition
                 // selectors (or other values) from prior shells cannot clear the
                 // agent sentinel (process env alone is insufficient).
+                //
+                // Copy $1/$2 into plain variables and clear the positional
+                // parameters (`builtin set --`) BEFORE eval'ing the user
+                // command: `source <script>` with no arguments makes the
+                // sourced script inherit the caller's positional parameters,
+                // so e.g. conda's `bin/activate` (which forwards "$@" to
+                // `conda activate`) would receive the entire wrapped command
+                // string as an environment name. Clearing them matches the
+                // plain `bash -c "<command>"` execution path, where $# is 0.
+                //
+                // The snapshot can restore `allexport` (set -a), which would
+                // auto-export the temp variable — so strip the export
+                // attribute post-assignment (`declare +x`; inline `declare +x
+                // var=value` does NOT beat allexport) and unset it after the
+                // eval so it can never reach child processes or the state
+                // dump (`export -p`).
                 "{dump_script} \
                  snap=$(command cat <&3) && builtin shopt -s extglob && builtin eval -- \"$snap\" && \
                  {{ builtin set +u 2>/dev/null || true; \
                  builtin export CHUTES_BUILD_AGENT=1; \
                  builtin export PWD=\"$(builtin pwd)\"; \
                  builtin shopt -s expand_aliases 2>/dev/null; {sudo_inject}{search_inject}\
-                 builtin eval \"$1\" 2>&1; }}; \
-                 COMMAND_EXIT_CODE=$?; {dump_fn} >&4; builtin exit $COMMAND_EXIT_CODE"
+                 builtin printf '%s' \"${{2:-}}\"; \
+                 __grok_user_cmd=\"$1\"; builtin declare +x __grok_user_cmd 2>/dev/null; builtin set --; \
+                 builtin eval \"$__grok_user_cmd\" 2>&1; }}; \
+                 COMMAND_EXIT_CODE=$?; builtin unset __grok_user_cmd 2>/dev/null; {dump_fn} >&4; builtin exit $COMMAND_EXIT_CODE"
             ),
             // After snapshot restore: force nonomatch so login dumps cannot re-arm NOMATCH for model globs.
+            // See the bash wrapper comment for why positional parameters are
+            // cleared before the user-command eval (zsh's `source`/`.` inherits
+            // them identically).
             ShellKind::Zsh => format!(
                 "{dump_script} \
                  snap=$(command cat <&3); \
@@ -423,14 +467,16 @@ impl ShellState {
                  builtin export CHUTES_BUILD_AGENT=1; \
                  builtin export PWD=\"$(builtin pwd)\"; \
                  builtin setopt aliases 2>/dev/null; {sudo_inject}{search_inject}\
-                 builtin eval \"$1\" 2>&1; }}; \
-                 COMMAND_EXIT_CODE=$?; {dump_fn} >&4; builtin exit $COMMAND_EXIT_CODE"
+                 builtin printf '%s' \"${{2:-}}\"; \
+                 __grok_user_cmd=\"$1\"; builtin typeset +x __grok_user_cmd 2>/dev/null; builtin set --; \
+                 builtin eval \"$__grok_user_cmd\" 2>&1; }}; \
+                 COMMAND_EXIT_CODE=$?; builtin unset __grok_user_cmd 2>/dev/null; {dump_fn} >&4; builtin exit $COMMAND_EXIT_CODE"
             ),
         };
 
         let effective_cwd = cwd_override.unwrap_or(&self.cwd);
 
-        let args: Vec<String> = match self.shell {
+        let mut args: Vec<String> = match self.shell {
             ShellKind::Bash => vec![
                 "-O".into(),
                 "extglob".into(),
@@ -441,6 +487,9 @@ impl ShellState {
             ],
             ShellKind::Zsh => vec!["-c".into(), wrapper, "--".into(), user_command.into()],
         };
+        if let Some(notice) = spawn_notice {
+            args.push(notice.into());
+        }
 
         let fd_mappings = vec![
             FdMapping {
@@ -830,7 +879,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
         assert!(state.cwd.is_absolute());
         // The snapshot should contain at least some env var exports
         assert!(
@@ -849,7 +898,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // Run "export CHUTES_BUILD_TEST_VAR=hello" and capture the new state
         let prep = state
@@ -857,6 +906,7 @@ mod tests {
                 "export CHUTES_BUILD_TEST_VAR=hello",
                 None,
                 crate::computer::local::SearchShadowConfig::default(),
+                None,
             )
             .unwrap();
 
@@ -870,6 +920,7 @@ mod tests {
 
         cmd.fd_mappings(prep.fd_mappings).unwrap();
 
+        #[allow(clippy::disallowed_methods)] // test fixture; the test reaps it
         let child = cmd.spawn().unwrap();
         // Drop cmd to release the FdMapping OwnedFds held in its pre_exec closure.
         // Without this, the parent keeps the write-end of the state-out pipe open,
@@ -916,6 +967,7 @@ mod tests {
                 command,
                 None,
                 crate::computer::local::SearchShadowConfig::default(),
+                None,
             )
             .unwrap();
         let mut cmd = tokio::process::Command::new(&prep.binary);
@@ -926,6 +978,7 @@ mod tests {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         cmd.fd_mappings(prep.fd_mappings).unwrap();
+        #[allow(clippy::disallowed_methods)] // test fixture; the test reaps it
         let child = cmd.spawn().unwrap();
         drop(cmd);
 
@@ -953,7 +1006,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // cd to /tmp (macOS resolves to /private/tmp via symlink)
         let (code, _) = run_command(&mut state, "cd /tmp").await;
@@ -976,7 +1029,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // Export a variable
         let (code, _) = run_command(&mut state, "export MY_TEST_VAR=persistent_value").await;
@@ -995,7 +1048,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         let (code, _) = run_command(&mut state, "export GPG_TTY=/grok-sentinel-tty").await;
         assert_eq!(code, 0);
@@ -1015,7 +1068,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Zsh, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Zsh, &cwd, None).await.unwrap();
 
         let (code, _) = run_command(&mut state, "export GPG_TTY=/grok-sentinel-tty").await;
         assert_eq!(code, 0);
@@ -1035,13 +1088,14 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Zsh, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Zsh, &cwd, None).await.unwrap();
 
         let prep = state
             .prepare_command(
                 "true",
                 None,
                 crate::computer::local::SearchShadowConfig::default(),
+                None,
             )
             .unwrap();
         let wrapper = prep
@@ -1079,7 +1133,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // Define a function
         let (code, _) = run_command(&mut state, "greet() { echo \"hello $1\"; }").await;
@@ -1091,13 +1145,104 @@ mod tests {
         assert_eq!(stdout.trim(), "hello world");
     }
 
+    /// Regression test: a script sourced WITHOUT arguments by the user command
+    /// must not see the wrapper's positional parameters ($1 = the whole
+    /// command string, $2 = the spawn notice). Conda's `bin/activate` forwards
+    /// "$@" to `conda activate`, so a leak makes every `activate_conda`-
+    /// prefixed command fail with `EnvironmentLocationNotFound: Not a conda
+    /// environment: <cwd>/<the entire command string>`.
+    #[tokio::test]
+    async fn test_sourced_script_does_not_inherit_wrapper_positional_args_bash() {
+        if !bash_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let probe = dir.path().join("activate_probe.sh");
+        std::fs::write(&probe, "echo \"SOURCED_ARGC=$#\"\n").unwrap();
+
+        let cwd = std::env::current_dir().unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
+
+        let (code, stdout) = run_command(
+            &mut state,
+            &format!("source {} && echo AFTER_SOURCE_OK", probe.display()),
+        )
+        .await;
+        assert_eq!(code, 0, "command failed, stdout={stdout:?}");
+        assert!(
+            stdout.contains("SOURCED_ARGC=0"),
+            "sourced script must see zero positional args, got: {stdout:?}"
+        );
+        assert!(stdout.contains("AFTER_SOURCE_OK"), "got: {stdout:?}");
+    }
+
+    /// Regression test: with `allexport` active (restored from the snapshot
+    /// after the model runs `set -a`), the wrapper's `__grok_user_cmd` temp
+    /// variable must not leak into child-process environments or persist into
+    /// subsequent commands via the state dump.
+    #[tokio::test]
+    async fn test_user_cmd_var_not_exported_under_allexport_bash() {
+        if !bash_available() {
+            return;
+        }
+        let cwd = std::env::current_dir().unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
+
+        // Turn on allexport; the option is captured by the dump and replayed
+        // into every subsequent command's shell.
+        let (code, _) = run_command(&mut state, "set -a").await;
+        assert_eq!(code, 0);
+
+        // This command's wrapper assigns __grok_user_cmd under allexport.
+        // printenv only sees exported vars — it must not see the temp var
+        // (neither from this command's own assignment nor re-exported from a
+        // previous command's state dump).
+        let (code, stdout) = run_command(
+            &mut state,
+            "printenv __grok_user_cmd >/dev/null 2>&1 && echo LEAKED_TO_ENV || echo ENV_CLEAN",
+        )
+        .await;
+        assert_eq!(code, 0);
+        assert!(
+            stdout.contains("ENV_CLEAN") && !stdout.contains("LEAKED_TO_ENV"),
+            "temp var must not be exported to child processes under allexport, got: {stdout:?}"
+        );
+    }
+
+    /// Same as the bash variant: zsh's `source`/`.` also inherits the caller's
+    /// positional parameters when invoked without arguments.
+    #[tokio::test]
+    async fn test_sourced_script_does_not_inherit_wrapper_positional_args_zsh() {
+        if !zsh_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let probe = dir.path().join("activate_probe.sh");
+        std::fs::write(&probe, "echo \"SOURCED_ARGC=$#\"\n").unwrap();
+
+        let cwd = std::env::current_dir().unwrap();
+        let mut state = ShellState::init(ShellKind::Zsh, &cwd, None).await.unwrap();
+
+        let (code, stdout) = run_command(
+            &mut state,
+            &format!("source {} && echo AFTER_SOURCE_OK", probe.display()),
+        )
+        .await;
+        assert_eq!(code, 0, "command failed, stdout={stdout:?}");
+        assert!(
+            stdout.contains("SOURCED_ARGC=0"),
+            "sourced script must see zero positional args, got: {stdout:?}"
+        );
+        assert!(stdout.contains("AFTER_SOURCE_OK"), "got: {stdout:?}");
+    }
+
     #[tokio::test]
     async fn test_alias_persists_across_commands() {
         if !bash_available() {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // Define an alias
         let (code, _) = run_command(&mut state, "alias ll='ls -la'").await;
@@ -1124,9 +1269,9 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
-        let prep = state.prepare_command("true", None, shadows).unwrap();
+        let prep = state.prepare_command("true", None, shadows, None).unwrap();
         // Shadows enabled → the self-resolving find/grep functions are always
         // installed (they fall back to the OS binary if bfs/ugrep aren't found).
         assert!(
@@ -1163,7 +1308,7 @@ mod tests {
             return;
         }
         let cwd = std::env::current_dir().unwrap();
-        let mut state = ShellState::init(ShellKind::Bash, &cwd).await.unwrap();
+        let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
         // Set up some state
         let (_, _) = run_command(&mut state, "export SURVIVE_TEST=yes").await;

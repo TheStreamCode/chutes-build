@@ -1,15 +1,13 @@
 //! Headless single-turn mode (`chutes-build -p "prompt"`).
 //!
-//! Runs the agent in-process via
-//! `spawn_grok_shell`, sends the ACP lifecycle (init → auth → session → prompt),
-//! streams text to stdout, and exits cleanly via `CancellationToken`.
+//! Runs the agent in-process via `spawn_grok_shell`, drives the ACP lifecycle
+//! (init, auth, session, prompt), streams to stdout, and exits via `CancellationToken`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use clap::ValueEnum;
 use tokio_util::sync::CancellationToken;
 
 use agent_client_protocol as acp;
@@ -26,147 +24,34 @@ use xai_grok_shell::sampling::types::{
 use xai_grok_shell::util::config as cli_config;
 
 use crate::acp::model_state::{EffortTokenError, ModelState};
-use crate::acp::spawn::spawn_grok_shell;
+use crate::acp::spawn::{AgentShutdownGuard, spawn_grok_shell};
 use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_VERSION};
+use crate::headless::reducer::{
+    Lifecycle, McpServer, Reducer, SessionContext, StreamEvent, TurnEnd, map_session_update,
+    reducer_for,
+};
 
-// ── Types ────────────────────────────────────────────────────────────────
+mod ext_protocol;
+mod reducer;
+use ext_protocol::{ExtEvent, handle_ext_notification};
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum)]
-pub enum OutputFormat {
-    #[default]
-    Plain,
-    Json,
-    /// NDJSON of the agent's native ACP session updates.
-    #[value(name = "streaming-json")]
-    StreamingJson,
-    /// NDJSON in the Anthropic Messages API wire format, for tooling written
-    /// against that shape.
-    #[value(name = "streaming-messages-json")]
-    StreamingMessagesJson,
-}
-
-pub fn parse_json_schema(input: &str) -> anyhow::Result<serde_json::Value> {
-    let schema: serde_json::Value = serde_json::from_str(input)
-        .map_err(|e| anyhow::anyhow!("--json-schema: invalid JSON: {e}"))?;
-    if !schema.is_object() {
-        anyhow::bail!("--json-schema: must be a JSON object describing a JSON Schema");
-    }
-    Ok(schema)
-}
-
-#[derive(Debug, Clone)]
-pub enum HeadlessPrompt {
-    Text(String),
-    Blocks(Vec<acp::ContentBlock>),
-}
-
-impl HeadlessPrompt {
-    /// Build from mutually-exclusive CLI prompt args. `None` = interactive mode.
-    pub fn from_args(
-        single: Option<&str>,
-        prompt_json: Option<&str>,
-        prompt_file: Option<&Path>,
-    ) -> anyhow::Result<Option<Self>> {
-        if let Some(text) = single {
-            Self::from_text(text)
-                .map(Some)
-                .map_err(|e| anyhow::anyhow!("--single: {e}"))
-        } else if let Some(json_str) = prompt_json {
-            Self::from_json(json_str)
-                .map(Some)
-                .map_err(|e| anyhow::anyhow!("--prompt-json: {e}"))
-        } else if let Some(path) = prompt_file {
-            Self::from_file(path).map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// `.json` files are parsed as content blocks, everything else as text.
-    pub fn from_file(path: &Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read '{}': {e}", path.display()))?;
-
-        let context = |e| anyhow::anyhow!("'{}': {e}", path.display());
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            Self::from_json(&content).map_err(context)
-        } else {
-            Self::from_text(&content).map_err(context)
-        }
-    }
-
-    fn from_text(text: &str) -> anyhow::Result<Self> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            anyhow::bail!("prompt is empty");
-        }
-        Ok(Self::Text(trimmed.to_string()))
-    }
-
-    fn from_json(json_str: &str) -> anyhow::Result<Self> {
-        let blocks = parse_prompt_json(json_str)?;
-        Ok(Self::Blocks(blocks))
-    }
-
-    pub fn into_content_blocks(self) -> Vec<acp::ContentBlock> {
-        match self {
-            Self::Text(text) => vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
-            Self::Blocks(blocks) => blocks,
-        }
-    }
-}
-
-/// Parse a JSON string into ACP content blocks.
-///
-/// Accepts an array (`[...]`) or typed wrapper (`{"type":"acp","content":[...]}`).
-fn parse_prompt_json(json_str: &str) -> anyhow::Result<Vec<acp::ContentBlock>> {
-    let value: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| anyhow::anyhow!("Invalid JSON: {e}"))?;
-
-    let blocks: Vec<acp::ContentBlock> = match value {
-        serde_json::Value::Array(_) => serde_json::from_value(value)
-            .map_err(|e| anyhow::anyhow!("Invalid ACP content blocks: {e}"))?,
-
-        serde_json::Value::Object(ref map) => {
-            let format_type = map.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "JSON object must have a \"type\" field \
-                         (e.g., {{\"type\": \"acp\", \"content\": [...]}})"
-                )
-            })?;
-            let content = map
-                .get("content")
-                .ok_or_else(|| anyhow::anyhow!("JSON object must have a \"content\" field"))?;
-
-            match format_type {
-                "acp" => serde_json::from_value(content.clone()).map_err(|e| {
-                    anyhow::anyhow!("Invalid ACP content blocks in \"content\": {e}")
-                })?,
-                other => anyhow::bail!(
-                    "Unsupported prompt format type: \"{other}\". Supported types: \"acp\""
-                ),
-            }
-        }
-
-        _ => {
-            anyhow::bail!("Expected JSON array or {{\"type\": \"...\", \"content\": [...]}} object")
-        }
-    };
-
-    if blocks.is_empty() {
-        anyhow::bail!("content blocks array is empty");
-    }
-    Ok(blocks)
-}
+mod cli;
+pub use cli::{HeadlessPrompt, OutputFormat, parse_json_schema, parse_permission_rules_lenient};
+pub(crate) use cli::{ResolvedAgent, resolve_agent_arg};
+use cli::{apply_agent_flag, parse_cli_agents, parse_comma_list, parse_permission_rules_strict};
 
 #[derive(Debug, Clone)]
 pub struct HeadlessOptions {
     pub session_id: Option<String>,
     pub resume: Option<String>,
+    /// Resume was pinned pre-sandbox; materialization must not re-run title selection.
+    pub resume_title_pinned: bool,
     pub cwd: Option<PathBuf>,
     pub yolo: bool,
     pub trust: bool,
     pub output_format: OutputFormat,
+    /// Emit `stream_event` deltas for `streaming-messages-json`.
+    pub include_partial_messages: bool,
     pub json_schema: Option<serde_json::Value>,
     pub model: Option<String>,
     pub rules: Option<String>,
@@ -175,11 +60,7 @@ pub struct HeadlessOptions {
     /// Fork on resume/continue (`--fork-session`).
     pub fork_session: bool,
     pub worktree: Option<String>,
-    pub worktree_ref: Option<String>,
     pub restore_code: bool,
-    pub no_subagents: bool,
-    pub experimental_memory: bool,
-    pub no_memory: bool,
     pub agent: Option<String>,
     pub agents_json: Option<String>,
     pub cli_tools: Option<String>,
@@ -191,211 +72,10 @@ pub struct HeadlessOptions {
     pub permission_mode_flag: Option<String>,
     /// Effort token (`--reasoning-effort` / `--effort`); resolved like `/effort` after models load.
     pub reasoning_effort: Option<String>,
-    /// Append a self-verification loop after the prompt completes.
-    pub self_verify: bool,
-    /// Run the task N ways in parallel and pick the best.
-    pub best_of_n: Option<u32>,
-    /// Wait for background tasks (bash, subagent, monitor) to report
-    /// `task_completed` before exiting. Default: true. Does not wait for
-    /// server-side auto-wake (that runs inside the shell). Use
-    /// `--no-wait-for-background` for fast smoke tests; long-lived monitors
-    /// are capped by `background_wait_timeout`.
+    /// Wait for background tasks to report `task_completed` before exiting (default true).
     pub wait_for_background: bool,
     /// Max time to wait for background quiescence after the first turn ends.
     pub background_wait_timeout: Duration,
-}
-
-// ── CLI flag helpers ─────────────────────────────────────────────────────
-
-/// Parse a comma-separated list into a vec, or None if empty.
-fn parse_comma_list(s: Option<&str>) -> Option<Vec<String>> {
-    s.and_then(|s| {
-        let v: Vec<String> = s
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect();
-        if v.is_empty() { None } else { Some(v) }
-    })
-}
-
-pub fn parse_permission_rules_strict(
-    allow: &[String],
-    deny: &[String],
-) -> anyhow::Result<Vec<xai_grok_workspace::permission::types::PermissionRule>> {
-    let (rules, errors) = parse_permission_rules_inner(allow, deny);
-    if !errors.is_empty() {
-        let msgs: Vec<String> = errors
-            .into_iter()
-            .map(|(flag, rule, err)| format!("{flag} \"{rule}\": {err}"))
-            .collect();
-        anyhow::bail!("{}", msgs.join("; "));
-    }
-    Ok(rules)
-}
-
-pub fn parse_permission_rules_lenient(
-    allow: &[String],
-    deny: &[String],
-) -> Vec<xai_grok_workspace::permission::types::PermissionRule> {
-    let (rules, errors) = parse_permission_rules_inner(allow, deny);
-    for (flag, rule, err) in errors {
-        eprintln!("warning: {flag} \"{rule}\": {err}, skipping");
-    }
-    rules
-}
-
-// Deny rules are processed before allow rules so that after prepending
-// to the config's rule list the order is [cli_deny, cli_allow, config_rules...].
-// The policy evaluator is order-independent (deny > ask > allow), so this
-// ordering is cosmetic for logging/provenance, not functional.
-pub(crate) fn parse_permission_rules_inner(
-    allow: &[String],
-    deny: &[String],
-) -> (
-    Vec<xai_grok_workspace::permission::types::PermissionRule>,
-    Vec<(&'static str, String, String)>,
-) {
-    use xai_grok_workspace::permission::rules::parse_permission_rule;
-    use xai_grok_workspace::permission::types::RuleAction;
-
-    let mut rules = Vec::new();
-    let mut errors = Vec::new();
-    for rule_str in deny {
-        match parse_permission_rule(rule_str, RuleAction::Deny) {
-            Ok(rule) => rules.push(rule),
-            Err(e) => errors.push(("--deny", rule_str.clone(), e.to_string())),
-        }
-    }
-    for rule_str in allow {
-        match parse_permission_rule(rule_str, RuleAction::Allow) {
-            Ok(rule) => rules.push(rule),
-            Err(e) => errors.push(("--allow", rule_str.clone(), e.to_string())),
-        }
-    }
-    (rules, errors)
-}
-
-pub(crate) enum ResolvedAgent {
-    FilePath(PathBuf),
-    Name(String),
-}
-
-pub(crate) fn resolve_agent_arg(agent: &str) -> ResolvedAgent {
-    let path = std::path::Path::new(agent);
-    if path.exists() && path.is_file() {
-        ResolvedAgent::FilePath(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
-    } else {
-        ResolvedAgent::Name(agent.to_string())
-    }
-}
-
-fn parse_cli_agents(
-    json: &str,
-) -> anyhow::Result<Vec<xai_grok_shell::agent::config::AgentDefinition>> {
-    let map: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_str(json).map_err(|e| anyhow::anyhow!("--agents: invalid JSON: {e}"))?;
-    let mut agents = Vec::with_capacity(map.len());
-    for (name, mut value) in map {
-        if let serde_json::Value::Object(ref mut obj) = value {
-            // Accept "prompt" as an alias for "promptBody".
-            if !obj.contains_key("promptBody")
-                && let Some(prompt) = obj.remove("prompt")
-            {
-                obj.insert("promptBody".to_string(), prompt);
-            }
-            obj.entry("name".to_string())
-                .or_insert_with(|| serde_json::Value::String(name.clone()));
-            obj.entry("description".to_string())
-                .or_insert_with(|| serde_json::Value::String(name.clone()));
-        }
-        let mut def = xai_grok_shell::agent::config::AgentDefinition::from_json(&value)
-            .map_err(|e| anyhow::anyhow!("--agents: failed to parse '{name}': {e}"))?;
-        def.name = name;
-        agents.push(def);
-    }
-    Ok(agents)
-}
-
-fn apply_agent_flag(agent: &Option<String>, config: &mut xai_grok_shell::agent::config::Config) {
-    if let Some(agent) = agent {
-        match resolve_agent_arg(agent) {
-            ResolvedAgent::FilePath(path) => config.agent_profile_path = Some(path),
-            ResolvedAgent::Name(name) => config.agent.name = Some(name),
-        }
-    }
-}
-
-// ── Emitter ──────────────────────────────────────────────────────────────
-
-/// Something headless has to report, stated independently of how it is
-/// rendered.
-///
-/// Every output format is a projection of this one stream. Before, each site
-/// matched on [`OutputFormat`] and wrote its own line, so the formats were
-/// defined by a dozen scattered `match` arms and adding one meant revisiting
-/// all of them. Producers now describe *what happened* and
-/// [`HeadlessEmitter::emit`] is the only place that decides how it is
-/// serialized.
-enum HeadlessEvent<'a> {
-    /// A chunk of the agent's reply.
-    TextChunk(&'a str),
-    /// A chunk of the agent's reasoning.
-    ThoughtChunk(&'a str),
-    /// The agent started a tool call.
-    ToolCall {
-        id: &'a str,
-        title: &'a str,
-        kind: &'a str,
-        status: &'a str,
-        input: Option<&'a serde_json::Value>,
-    },
-    /// A tool call changed status, produced output, or both.
-    ToolCallUpdate {
-        id: &'a str,
-        status: Option<&'a str>,
-        output: Option<&'a serde_json::Value>,
-    },
-    /// The turn stopped because it hit the turn limit.
-    MaxTurnsReached,
-    AutoCompactStarted {
-        percentage: u8,
-    },
-    AutoCompactCompleted,
-    AutoCompactFailed {
-        error: &'a str,
-    },
-    AutoCompactCancelled,
-    AutoContinueCompleted {
-        total_tokens: u64,
-    },
-    ImageCompressed {
-        message: &'a str,
-    },
-}
-
-/// Assembles the Messages API wire format.
-///
-/// That format is message-shaped, not chunk-shaped: an `assistant` line carries
-/// a whole message whose `content[]` holds the text, thinking and `tool_use`
-/// blocks it produced, and each tool's output comes back as a `user` line with
-/// a matching `tool_result`. So the chunks are accumulated here and flushed
-/// when the message ends — when a tool reports its result, or when the turn
-/// does.
-#[derive(Default)]
-struct MessagesState {
-    session_id: String,
-    model: String,
-    cwd: String,
-    /// Advertised by `AvailableCommandsUpdate`; reported in the `system` line.
-    tools: Vec<String>,
-    slash_commands: Vec<String>,
-    init_emitted: bool,
-    text: String,
-    thinking: String,
-    /// `tool_use` blocks for the message being assembled, in call order.
-    pending_tools: Vec<serde_json::Value>,
-    message_seq: u64,
 }
 
 struct HeadlessEmitter {
@@ -403,13 +83,18 @@ struct HeadlessEmitter {
     parse_structured_output: bool,
     text_buffer: String,
     thought_buffer: String,
-    /// Agent's schema-validated output (both backends), read from the
-    /// prompt-response `_meta`.
+    /// Schema-validated output read from the prompt-response `_meta`.
     structured_output: Option<Result<serde_json::Value, String>>,
-    /// From `_meta.usage`, projected onto the final result when present.
     usage: Option<serde_json::Value>,
-    /// Only populated for [`OutputFormat::StreamingMessagesJson`].
-    messages: MessagesState,
+    /// Reducer for the streaming formats; `None` for `plain`/`json`.
+    reducer: Option<Box<dyn Reducer>>,
+    /// Set when the prompt is sent; the terminal `result.duration_ms` wall-clock.
+    prompt_started: Option<Instant>,
+    out: std::io::Stdout,
+    /// Latched once stdout is unwritable so later writes are dropped instead of panicking.
+    output_closed: bool,
+    /// First hard stdout IO error (not a broken pipe), surfaced so the process exits non-zero.
+    write_error: Option<std::io::Error>,
 }
 
 impl HeadlessEmitter {
@@ -421,148 +106,119 @@ impl HeadlessEmitter {
             thought_buffer: String::new(),
             structured_output: None,
             usage: None,
-            messages: MessagesState::default(),
+            reducer: reducer_for(format),
+            prompt_started: None,
+            out: std::io::stdout(),
+            output_closed: false,
+            write_error: None,
         }
     }
 
-    /// Session identity for the Messages wire format. Ignored by every other
-    /// format, which carries these fields on the final line instead.
-    fn set_messages_context(&mut self, session_id: &str, model: &str, cwd: &str) {
-        if self.format != OutputFormat::StreamingMessagesJson {
+    /// Checked write to stdout: broken pipe latches a clean stop, any other error is latched and returned.
+    fn write_out(&mut self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+        if self.output_closed {
+            return Ok(());
+        }
+        use std::io::Write as _;
+        let result = {
+            let mut handle = self.out.lock();
+            handle
+                .write_all(bytes)
+                .and_then(|()| if flush { handle.flush() } else { Ok(()) })
+        };
+        self.record_write_result(result)
+    }
+
+    /// Fold a write result into the latches: broken pipe is a clean stop, any other error is surfaced.
+    fn record_write_result(&mut self, result: std::io::Result<()>) -> std::io::Result<()> {
+        let Err(e) = result else {
+            return Ok(());
+        };
+        self.output_closed = true;
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            tracing::debug!("headless: stdout closed (broken pipe); halting output");
+            return Ok(());
+        }
+        tracing::error!(error = %e, "headless: stdout write failed; halting output");
+        if self.write_error.is_none() {
+            self.write_error = Some(std::io::Error::new(e.kind(), e.to_string()));
+        }
+        Err(e)
+    }
+
+    /// Take the latched hard stdout error, if any.
+    fn take_output_error(&mut self) -> Option<std::io::Error> {
+        self.write_error.take()
+    }
+
+    /// Emit one compact NDJSON wire line plus newline.
+    fn emit_line(&mut self, line: &serde_json::Value) {
+        let mut buf = line.to_string();
+        buf.push('\n');
+        let _ = self.write_out(buf.as_bytes(), false);
+    }
+
+    /// Mark the wall-clock start of the run for `result.duration_ms`.
+    fn mark_prompt_started(&mut self) {
+        self.prompt_started = Some(Instant::now());
+    }
+
+    fn duration_ms(&self) -> u64 {
+        self.prompt_started
+            .map_or(0, |t| t.elapsed().as_millis() as u64)
+    }
+
+    /// Emit the reducer preamble once the session context is known.
+    fn begin_session(&mut self, ctx: SessionContext) {
+        let Some(reducer) = self.reducer.as_mut() else {
             return;
-        }
-        self.messages.session_id = session_id.to_owned();
-        self.messages.model = model.to_owned();
-        self.messages.cwd = cwd.to_owned();
+        };
+        let lines = reducer.begin(ctx);
+        self.emit_lines(lines);
     }
 
-    /// Record the tool and command names the session advertised, for the
-    /// `system` line.
-    fn set_available(&mut self, tools: Vec<String>, slash_commands: Vec<String>) {
-        if self.format != OutputFormat::StreamingMessagesJson {
-            return;
-        }
-        if !tools.is_empty() {
-            self.messages.tools = tools;
-        }
-        if !slash_commands.is_empty() {
-            self.messages.slash_commands = slash_commands;
+    /// Emit a batch of NDJSON wire lines produced by the reducer.
+    fn emit_lines(&mut self, lines: Vec<serde_json::Value>) {
+        for line in lines {
+            self.emit_line(&line);
         }
     }
 
-    /// The `system`/`init` line, or `None` if it has already been emitted.
-    /// Split from the printing so the shape can be asserted in tests.
-    fn messages_init_line(&mut self) -> Option<serde_json::Value> {
-        if self.messages.init_emitted {
-            return None;
-        }
-        self.messages.init_emitted = true;
-        Some(serde_json::json!({
-            "type": "system",
-            "subtype": "init",
-            "session_id": self.messages.session_id,
-            "model": self.messages.model,
-            "cwd": self.messages.cwd,
-            "tools": self.messages.tools,
-            "slash_commands": self.messages.slash_commands,
-            "uuid": uuid::Uuid::new_v4().to_string(),
-        }))
-    }
-
-    /// Emit the `system`/`init` line once, before the first assistant message.
-    fn emit_messages_init(&mut self) {
-        if let Some(line) = self.messages_init_line() {
-            println!("{line}");
-        }
-    }
-
-    /// Flush the message being assembled as one `assistant` line.
-    ///
-    /// `stop_reason` is `None` for a message that ends because a tool ran: the
-    /// turn is not over, and reporting `end_turn` there would tell a consumer
-    /// the assistant was finished.
-    fn flush_messages_assistant(&mut self, stop_reason: Option<&str>) {
-        let init = self.messages_init_line();
-        let Some(line) = self.messages_assistant_line(stop_reason) else {
-            // Nothing to flush; an init produced here would be emitted by the
-            // next line that needs it, so put it back.
-            if init.is_some() {
-                self.messages.init_emitted = false;
+    /// Render an `chutes.ai/*` lifecycle notification for the active format.
+    fn on_lifecycle(&mut self, event: Lifecycle) {
+        match self.format {
+            OutputFormat::Plain => {
+                eprintln!("{}", event.plain_message());
             }
+            OutputFormat::Json => {}
+            OutputFormat::StreamingJson | OutputFormat::StreamingMessagesJson => {
+                self.reduce_and_emit(StreamEvent::Lifecycle(event));
+            }
+        }
+    }
+
+    /// Fold one event through the reducer and emit its lines; a no-op for `plain`/`json`.
+    fn reduce_and_emit(&mut self, event: StreamEvent) {
+        let Some(reducer) = self.reducer.as_mut() else {
             return;
         };
-        if let Some(init) = init {
-            println!("{init}");
-        }
-        println!("{line}");
+        let lines = reducer.reduce(event);
+        self.emit_lines(lines);
     }
 
-    /// The `assistant` line for the message being assembled, or `None` when
-    /// there is nothing to report. Clears the accumulated state.
-    fn messages_assistant_line(&mut self, stop_reason: Option<&str>) -> Option<serde_json::Value> {
-        if self.messages.text.is_empty()
-            && self.messages.thinking.is_empty()
-            && self.messages.pending_tools.is_empty()
-        {
+    /// Schema output for a terminal line: `Ok`, `Err`, or `None` when not requested.
+    fn resolved_structured_output(&self) -> Option<Result<serde_json::Value, String>> {
+        if !self.parse_structured_output {
             return None;
         }
-        let mut content: Vec<serde_json::Value> = Vec::new();
-        if !self.messages.thinking.is_empty() {
-            content.push(serde_json::json!({
-                "type": "thinking",
-                "thinking": std::mem::take(&mut self.messages.thinking),
-                "signature": "",
-            }));
-        }
-        if !self.messages.text.is_empty() {
-            content.push(serde_json::json!({
-                "type": "text",
-                "text": std::mem::take(&mut self.messages.text),
-            }));
-        }
-        content.append(&mut self.messages.pending_tools);
-        self.messages.message_seq += 1;
-        Some(serde_json::json!({
-            "type": "assistant",
-            "message": {
-                "id": format!("msg_{:012}", self.messages.message_seq),
-                "type": "message",
-                "role": "assistant",
-                "model": self.messages.model,
-                "content": content,
-                "stop_reason": stop_reason,
-                "stop_sequence": serde_json::Value::Null,
-                "usage": self.messages_usage(),
-            },
-            "parent_tool_use_id": serde_json::Value::Null,
-            "session_id": self.messages.session_id,
-            "uuid": uuid::Uuid::new_v4().to_string(),
-        }))
+        Some(
+            self.structured_output
+                .clone()
+                .unwrap_or_else(|| Err("model did not produce structured output".to_string())),
+        )
     }
 
-    /// `message.usage`, projected from the shell's `_meta.usage` when it has
-    /// arrived. Zeros before then rather than a missing field, which the wire
-    /// format requires to be present.
-    fn messages_usage(&self) -> serde_json::Value {
-        let get = |key: &str| -> u64 {
-            self.usage
-                .as_ref()
-                .and_then(|usage| usage.get(key))
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-        };
-        serde_json::json!({
-            "input_tokens": get("input_tokens"),
-            "output_tokens": get("output_tokens"),
-            "cache_read_input_tokens": get("cache_read_input_tokens"),
-            "cache_creation_input_tokens": get("cache_creation_input_tokens"),
-        })
-    }
-
-    /// Read structured output from the prompt-response `_meta` — the same
-    /// object headless awaits for `sessionId`/`requestId`, so delivery is
-    /// deterministic (no side-channel race). `structuredOutput` carries the
-    /// value, `structuredOutputError` the failure; absence leaves `None`.
+    /// Read structured output (or its error) from the prompt-response `_meta`.
     fn set_structured_output_from_meta(&mut self, meta: Option<&acp::Meta>) {
         if !self.parse_structured_output {
             return;
@@ -580,245 +236,46 @@ impl HeadlessEmitter {
         self.usage = meta.get("usage").cloned();
     }
 
-    /// Render one event in the active output format. The single place that
-    /// decides what each format puts on stdout.
-    fn emit(&mut self, event: HeadlessEvent<'_>) {
-        match event {
-            HeadlessEvent::TextChunk(text) => match self.format {
-                OutputFormat::Plain => {
-                    use std::io::Write as _;
-                    print!("{text}");
-                    let _ = std::io::stdout().flush();
-                }
-                OutputFormat::StreamingJson => {
-                    println!("{}", serde_json::json!({"type":"text","data": text}));
-                    if self.parse_structured_output {
-                        self.text_buffer.push_str(text);
-                    }
-                }
-                OutputFormat::Json => {
-                    self.text_buffer.push_str(text);
-                }
-                OutputFormat::StreamingMessagesJson => {
-                    self.messages.text.push_str(text);
-                    if self.parse_structured_output {
-                        self.text_buffer.push_str(text);
-                    }
-                }
-            },
-            HeadlessEvent::ThoughtChunk(text) => match self.format {
-                OutputFormat::Plain => { /* no-op */ }
-                OutputFormat::StreamingJson => {
-                    println!("{}", serde_json::json!({"type":"thought","data": text}));
-                }
-                OutputFormat::Json => {
-                    self.thought_buffer.push_str(text);
-                }
-                OutputFormat::StreamingMessagesJson => {
-                    self.messages.thinking.push_str(text);
-                }
-            },
-            HeadlessEvent::ToolCall {
-                id,
-                title,
-                kind,
-                status,
-                input,
-            } => match self.format {
-                // Plain output is the agent's prose; tool activity is chatter
-                // there, and Json reports only the final result.
-                OutputFormat::Plain | OutputFormat::Json => {}
-                OutputFormat::StreamingJson => {
-                    let mut line = serde_json::json!({
-                        "type": "tool_call",
-                        "id": id,
-                        "title": title,
-                        "kind": kind,
-                        "status": status,
-                    });
-                    if let Some(input) = input
-                        && let Some(map) = line.as_object_mut()
-                    {
-                        map.insert("input".to_owned(), input.clone());
-                    }
-                    println!("{line}");
-                }
-                OutputFormat::StreamingMessagesJson => {
-                    // Held until the message is flushed: `tool_use` is a block
-                    // inside the assistant message, not a line of its own.
-                    self.messages.pending_tools.push(serde_json::json!({
-                        "type": "tool_use",
-                        "id": id,
-                        "name": title,
-                        "input": input.cloned().unwrap_or(serde_json::json!({})),
-                    }));
-                }
-            },
-            HeadlessEvent::ToolCallUpdate { id, status, output } => match self.format {
-                OutputFormat::Plain | OutputFormat::Json => {}
-                OutputFormat::StreamingJson => {
-                    let mut line = serde_json::json!({"type": "tool_call_update", "id": id});
-                    if let Some(map) = line.as_object_mut() {
-                        if let Some(status) = status {
-                            map.insert("status".to_owned(), serde_json::json!(status));
-                        }
-                        if let Some(output) = output {
-                            map.insert("output".to_owned(), output.clone());
-                        }
-                    }
-                    println!("{line}");
-                }
-                OutputFormat::StreamingMessagesJson => {
-                    // A terminal status closes the assistant message that
-                    // requested the tool, then reports the result as the `user`
-                    // turn the wire format expects.
-                    let finished = matches!(status, Some("completed") | Some("failed"));
-                    if !finished {
-                        return;
-                    }
-                    self.flush_messages_assistant(None);
-                    self.emit_messages_init();
-                    let content = output
-                        .map(|value| match value {
-                            serde_json::Value::String(text) => text.clone(),
-                            other => other.to_string(),
-                        })
-                        .unwrap_or_default();
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "type": "user",
-                            "message": {
-                                "role": "user",
-                                "content": [{
-                                    "type": "tool_result",
-                                    "tool_use_id": id,
-                                    "content": content,
-                                    "is_error": status == Some("failed"),
-                                }],
-                            },
-                            "parent_tool_use_id": serde_json::Value::Null,
-                            "session_id": self.messages.session_id,
-                            "uuid": uuid::Uuid::new_v4().to_string(),
-                        })
-                    );
-                }
-            },
-            HeadlessEvent::MaxTurnsReached => match self.format {
-                OutputFormat::Plain => eprintln!("Max turns reached"),
-                OutputFormat::StreamingJson => {
-                    println!("{}", serde_json::json!({"type": "max_turns_reached"}));
-                }
-                // Conveyed by stopReason in the final JSON.
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::AutoCompactStarted { percentage } => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!(
-                        "{}",
-                        serde_json::json!({"type": "auto_compact_started", "percentage": percentage})
-                    );
-                }
-                OutputFormat::Plain => {
-                    eprintln!("Auto-compacting conversation ({percentage}% full)...");
-                }
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::AutoCompactCompleted => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!("{}", serde_json::json!({"type": "auto_compact_completed"}));
-                }
-                OutputFormat::Plain => eprintln!("Conversation compacted."),
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::AutoCompactFailed { error } => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!(
-                        "{}",
-                        serde_json::json!({"type": "auto_compact_failed", "error": error})
-                    );
-                }
-                OutputFormat::Plain => {
-                    if error.trim().is_empty() {
-                        eprintln!("Auto-compact failed.");
-                    } else {
-                        eprintln!("Auto-compact failed: {error}");
-                    }
-                }
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::AutoCompactCancelled => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!("{}", serde_json::json!({"type": "auto_compact_cancelled"}));
-                }
-                OutputFormat::Plain => eprintln!("Auto-compact cancelled."),
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::AutoContinueCompleted { total_tokens } => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!(
-                        "{}",
-                        serde_json::json!({"type": "auto_continue_completed", "total_tokens": total_tokens})
-                    );
-                }
-                OutputFormat::Plain => eprintln!("Resumed after compaction."),
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
-            HeadlessEvent::ImageCompressed { message } => match self.format {
-                OutputFormat::StreamingJson => {
-                    println!(
-                        "{}",
-                        serde_json::json!({"type": "image_compressed", "message": message})
-                    );
-                }
-                OutputFormat::Plain => eprintln!("{message}"),
-                // The Messages wire format has no line for session-lifecycle
-                // notices; inventing one would break consumers of the real format.
-                OutputFormat::Json | OutputFormat::StreamingMessagesJson => {}
-            },
+    fn on_text_chunk(&mut self, text: &str) {
+        match self.format {
+            OutputFormat::Plain => {
+                let _ = self.write_out(text.as_bytes(), true);
+            }
+            OutputFormat::Json => {
+                self.text_buffer.push_str(text);
+            }
+            OutputFormat::StreamingMessagesJson => {
+                self.text_buffer.push_str(text);
+                self.reduce_and_emit(StreamEvent::AgentMessage(text.to_string()));
+            }
+            OutputFormat::StreamingJson => {
+                self.reduce_and_emit(StreamEvent::AgentMessage(text.to_string()));
+            }
         }
     }
 
-    fn on_text_chunk(&mut self, text: &str) {
-        self.emit(HeadlessEvent::TextChunk(text));
-    }
-
     fn on_thought_chunk(&mut self, text: &str) {
-        self.emit(HeadlessEvent::ThoughtChunk(text));
+        match self.format {
+            OutputFormat::Plain => { /* no-op */ }
+            OutputFormat::Json => {
+                self.thought_buffer.push_str(text);
+            }
+            OutputFormat::StreamingJson | OutputFormat::StreamingMessagesJson => {
+                self.reduce_and_emit(StreamEvent::AgentThought(text.to_string()));
+            }
+        }
     }
 
     fn attach_structured_output(&self, target: &mut serde_json::Value) {
         if !self.parse_structured_output {
             return;
         }
-        // The agent is the only source of validated output; never parse the raw
-        // text buffer (that would bypass validation). Absent `_meta` output
-        // (max-turns/cancel) → a clean error, never unvalidated JSON.
+        // Only the agent's validated `_meta` output is trusted; never parse the raw text buffer.
         let result = self
             .structured_output
             .clone()
             .unwrap_or_else(|| Err("model did not produce structured output".to_string()));
-        match result {
-            Ok(value) => {
-                target["structuredOutput"] = value;
-            }
-            Err(e) => {
-                target["structuredOutput"] = serde_json::Value::Null;
-                target["structuredOutputError"] = e.into();
-            }
-        }
+        crate::headless::reducer::attach_structured_output(target, Some(result));
     }
 
     /// Final object for `--output-format json`, including spend fields when present.
@@ -847,113 +304,123 @@ impl HeadlessEmitter {
     fn on_end(&mut self, stop_reason: &str, session_id: &str, request_id: &str) {
         match self.format {
             OutputFormat::Plain => {
-                println!();
-            }
-            OutputFormat::StreamingJson => {
-                let mut end = serde_json::json!({
-                    "type": "end",
-                    "stopReason": stop_reason,
-                    "sessionId": session_id,
-                    "requestId": request_id
-                });
-                if let Some(usage) = &self.usage {
-                    attach_result_usage(&mut end, usage);
-                }
-                self.attach_structured_output(&mut end);
-                println!("{end}");
+                let _ = self.write_out(b"\n", false);
             }
             OutputFormat::Json => {
                 let result = self.build_json_result(stop_reason, session_id, request_id);
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-                );
+                let mut rendered =
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+                rendered.push('\n');
+                let _ = self.write_out(rendered.as_bytes(), false);
             }
-            OutputFormat::StreamingMessagesJson => {
-                if self.messages.session_id.is_empty() {
-                    self.messages.session_id = session_id.to_owned();
-                }
-                // Close the message still being assembled; this one really is
-                // the end of the turn, so it carries the stop reason.
-                self.flush_messages_assistant(Some(stop_reason));
-                self.emit_messages_init();
-                let mut result = serde_json::json!({
-                    "type": "result",
-                    "subtype": "success",
-                    "is_error": false,
-                    "session_id": session_id,
-                    "request_id": request_id,
-                    "stop_reason": stop_reason,
-                    "usage": self.messages_usage(),
-                    "uuid": uuid::Uuid::new_v4().to_string(),
+            OutputFormat::StreamingJson | OutputFormat::StreamingMessagesJson => {
+                let usage = self.usage.clone();
+                let structured_output = self.resolved_structured_output();
+                let result_text = self.text_buffer.clone();
+                let duration_ms = self.duration_ms();
+                let lines = self.reducer.as_mut().map(|reducer| {
+                    let end = TurnEnd {
+                        stop_reason,
+                        session_id,
+                        request_id,
+                        usage: usage.as_ref(),
+                        structured_output,
+                        result_text: result_text.as_str(),
+                        duration_ms,
+                    };
+                    reducer.finish(&end)
                 });
-                self.attach_structured_output(&mut result);
-                println!("{result}");
+                if let Some(lines) = lines {
+                    self.emit_lines(lines);
+                }
             }
         }
     }
 
-    fn on_error(&self, message: &str) {
+    /// Emit the max turns marker for the active format.
+    fn on_max_turns(&mut self) {
+        match self.format {
+            OutputFormat::Plain => eprintln!("Max turns reached"),
+            // Conveyed by `stopReason` in the terminal JSON and result.
+            OutputFormat::Json => {}
+            OutputFormat::StreamingJson | OutputFormat::StreamingMessagesJson => {
+                let lines = self.reducer.as_mut().map(|reducer| reducer.max_turns());
+                if let Some(lines) = lines {
+                    self.emit_lines(lines);
+                }
+            }
+        }
+    }
+
+    /// Emit the terminal error; `stop_reason_override` stamps a Messages stop reason (e.g. `max_tokens`).
+    fn on_error(&mut self, message: &str, stop_reason_override: Option<&str>) {
         match self.format {
             OutputFormat::Plain => eprintln!("{message}"),
-            OutputFormat::StreamingJson | OutputFormat::Json => {
+            OutputFormat::Json => {
                 let mut err = serde_json::json!({"type":"error","message": message});
                 if let Some(usage) = &self.usage {
                     attach_result_usage(&mut err, usage);
                 }
-                println!("{err}");
+                self.emit_line(&err);
             }
-            OutputFormat::StreamingMessagesJson => {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "type": "result",
-                        "subtype": "error_during_execution",
-                        "is_error": true,
-                        "result": message,
-                        "session_id": self.messages.session_id,
-                        "usage": self.messages_usage(),
-                        "uuid": uuid::Uuid::new_v4().to_string(),
-                    })
-                );
+            OutputFormat::StreamingJson | OutputFormat::StreamingMessagesJson => {
+                let usage = self.usage.clone();
+                let duration_ms = self.duration_ms();
+                let lines = self.reducer.as_mut().map(|reducer| {
+                    reducer.error(message, usage.as_ref(), duration_ms, stop_reason_override)
+                });
+                if let Some(lines) = lines {
+                    self.emit_lines(lines);
+                }
             }
         }
     }
 }
 
-/// Stable wire name for an ACP tool kind. Spelled out rather than derived from
-/// `Debug` so the emitted stream is a contract, not a rename away from breaking.
-fn tool_kind_name(kind: acp::ToolKind) -> &'static str {
-    match kind {
-        acp::ToolKind::Read => "read",
-        acp::ToolKind::Edit => "edit",
-        acp::ToolKind::Delete => "delete",
-        acp::ToolKind::Move => "move",
-        acp::ToolKind::Search => "search",
-        acp::ToolKind::Execute => "execute",
-        acp::ToolKind::Think => "think",
-        acp::ToolKind::Fetch => "fetch",
-        acp::ToolKind::SwitchMode => "switch_mode",
-        _ => "other",
-    }
-}
-
-/// Stable wire name for an ACP tool-call status.
-fn tool_status_name(status: acp::ToolCallStatus) -> &'static str {
-    match status {
-        acp::ToolCallStatus::Pending => "pending",
-        acp::ToolCallStatus::InProgress => "in_progress",
-        acp::ToolCallStatus::Completed => "completed",
-        acp::ToolCallStatus::Failed => "failed",
-        _ => "unknown",
-    }
-}
-
-fn attach_result_usage(result: &mut serde_json::Value, usage: &serde_json::Value) {
+pub(crate) fn attach_result_usage(result: &mut serde_json::Value, usage: &serde_json::Value) {
     xai_grok_shell::extensions::notification::attach_result_usage_fail_closed(result, usage);
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
+/// Snake_case wire token for an ACP stop reason.
+fn stop_reason_wire(reason: acp::StopReason) -> String {
+    match reason {
+        acp::StopReason::EndTurn => "end_turn",
+        acp::StopReason::MaxTokens => "max_tokens",
+        acp::StopReason::MaxTurnRequests => "max_turn_requests",
+        acp::StopReason::Refusal => "refusal",
+        acp::StopReason::Cancelled => "cancelled",
+        // Fail loud on an unknown future variant, then degrade to `end_turn`.
+        other => {
+            tracing::warn!(
+                stop_reason = ?other,
+                "headless: unknown ACP StopReason; defaulting wire token to end_turn"
+            );
+            "end_turn"
+        }
+    }
+    .to_string()
+}
+
+/// Configured MCP servers for the `init` line; all report `"connected"` (status is not resolved here).
+fn mcp_server_names(cwd: &Path) -> Vec<McpServer> {
+    let servers =
+        cli_config::load_mcp_servers(cwd, &xai_grok_tools::types::compat::CompatConfig::default());
+    servers
+        .iter()
+        .filter_map(|s| {
+            let name = match s {
+                acp::McpServer::Http(h) => h.name.clone(),
+                acp::McpServer::Sse(h) => h.name.clone(),
+                acp::McpServer::Stdio(h) => h.name.clone(),
+                _ => return None,
+            };
+            Some(McpServer {
+                name,
+                status: "connected".to_string(),
+            })
+        })
+        .collect()
+}
 
 fn auto_respond_to_permissions(
     args: &acp::RequestPermissionRequest,
@@ -988,11 +455,8 @@ fn auth_required_message(interactive: bool) -> String {
     }
 }
 
-/// Authenticate using the agent's `defaultAuthMethodId` (source of truth for
-/// `[auth] preferred_method`). Fail closed when no method is available — do not
-/// invent api_key vs session ordering client-side.
-///
-/// Returns whether the selected method is API-key auth (for rate-limit copy).
+/// Authenticate via the agent's `defaultAuthMethodId`, failing closed when none is available.
+/// Returns whether the selected method is API-key auth.
 async fn authenticate(
     acp_tx: &AcpAgentTx,
     auths: &[acp::AuthMethod],
@@ -1052,23 +516,11 @@ fn build_headless_init_request(
         .meta(meta.as_object().cloned())
 }
 
-/// Extract the body of a compiled-in SKILL.md (strip YAML frontmatter).
-fn skill_body(raw: &str) -> &str {
-    let trimmed = raw.trim_start();
-    if !trimmed.starts_with("---") {
-        return trimmed;
-    }
-    if let Some(rest) = trimmed.get(3..)
-        && let Some(end) = rest.find("\n---")
-    {
-        return rest[end + 4..].trim_start();
-    }
-    trimmed
-}
-
 struct OpenedSession {
     session_id: acp::SessionId,
     models: ModelState,
+    /// Directory the session is anchored to (launch cwd, resume `original_cwd`, or fork `write_cwd`).
+    cwd: PathBuf,
 }
 
 async fn open_session(
@@ -1077,9 +529,7 @@ async fn open_session(
     session_id_flag: Option<&str>,
     restore_code: Option<bool>,
 ) -> anyhow::Result<OpenedSession> {
-    // Pager opens sessions before the agent resolves per-vendor compat;
-    // default (all-on) preserves existing behavior — the agent applies
-    // the resolved config once the session is live.
+    // Sessions open before the agent resolves per-vendor compat; default all-on until it does.
     let mcp_servers =
         cli_config::load_mcp_servers(cwd, &xai_grok_tools::types::compat::CompatConfig::default());
 
@@ -1090,10 +540,10 @@ async fn open_session(
                 .meta({
                     let mut m = acp::Meta::new();
                     m.insert("noReplay".into(), serde_json::Value::Bool(true));
-                    if let Some(true) = restore_code {
+                    if let Some(rc) = restore_code {
                         m.insert(
                             "chutes.build/restore_code".into(),
-                            serde_json::Value::Bool(true),
+                            serde_json::Value::Bool(rc),
                         );
                     }
                     Some(m)
@@ -1105,6 +555,7 @@ async fn open_session(
             return Ok(OpenedSession {
                 session_id: acp::SessionId::new(sid.to_string()),
                 models: ModelState::from(resp.models),
+                cwd: cwd.to_path_buf(),
             });
         }
         anyhow::bail!("Session does not exist");
@@ -1118,6 +569,7 @@ async fn open_session(
     Ok(OpenedSession {
         session_id: new_resp.session_id,
         models: ModelState::from(new_resp.models),
+        cwd: cwd.to_path_buf(),
     })
 }
 
@@ -1144,6 +596,7 @@ async fn open_session_with_id(
     Ok(OpenedSession {
         session_id: new_resp.session_id,
         models: ModelState::from(new_resp.models),
+        cwd: cwd.to_path_buf(),
     })
 }
 
@@ -1160,8 +613,7 @@ async fn fork_then_open(
         fork_response_new_session_id, fork_session_params, parent_session_is_worktree,
     };
     let launch_cwd_str = launch_cwd.to_string_lossy().into_owned();
-    // Align with interactive: child lands under parent session cwd when the
-    // parent was resolved from another directory (`newCwd` = parent_cwd).
+    // Match interactive: child lands under the parent session cwd, not the launch cwd.
     let new_cwd_str = effective_fork_new_cwd(&launch_cwd_str, parent_cwd);
     let write_cwd = PathBuf::from(&new_cwd_str);
     if let Some(nid) = new_id {
@@ -1169,12 +621,9 @@ async fn fork_then_open(
     }
     let parent_is_worktree = parent_session_is_worktree(parent_id, &write_cwd);
     let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
-    let req = acp::ExtRequest::new(
-        "chutes.build/session/fork",
-        serde_json::value::to_raw_value(&payload)
-            .expect("serialize fork params")
-            .into(),
-    );
+    let fork_params = serde_json::value::to_raw_value(&payload)
+        .map_err(|e| anyhow::anyhow!("serialize fork params: {e}"))?;
+    let req = acp::ExtRequest::new("chutes.build/session/fork", fork_params.into());
     let resp = acp_send(req, acp_tx).await?;
     if let Some(err) = fork_response_error(resp.0.get()) {
         anyhow::bail!("fork failed: {err}");
@@ -1189,14 +638,8 @@ async fn fork_then_open(
     }
 }
 
-/// Apply `-m` / effort after session open (via `resolve_effort_for_model`, then
-/// SetSessionModel).
-///
-/// Headless maps the classified [`EffortTokenError`] differently from the TUI: a
-/// one-shot run soft-ignores effort on a non-supporting model (still applying
-/// `-m`) but hard-fails on a genuinely unknown token. The TUI instead keeps the
-/// `-m` switch and only toasts — intentional, since headless has no scrollback
-/// to carry a non-fatal warning.
+/// Apply `-m` / effort after session open. Effort is soft-ignored on a non-supporting
+/// model (still applying `-m`) but hard-fails on a genuinely unknown token.
 async fn apply_headless_model_and_effort(
     acp_tx: &AcpAgentTx,
     session_id: &acp::SessionId,
@@ -1220,13 +663,9 @@ async fn apply_headless_model_and_effort(
 
     let effort = match effort_token {
         None => None,
-        // Pre-catalog: the canonical token was already stamped into the agent
-        // config; a remapped menu id can't resolve without a loaded catalog.
+        // Pre-catalog: canonical tokens are already stamped; remapped menu ids can't resolve yet.
         Some(token) if models.available.is_empty() => {
             if parse_canonical_effort_token(token).is_none() {
-                // Do not hardcode a level list here: without a catalog we cannot
-                // know what the model offers, and advertising none/minimal/… has
-                // led users to try values that then 400 on the API.
                 anyhow::bail!(
                     "--effort/--reasoning-effort: unknown effort level '{token}' \
                      (model catalog unavailable; remapped menu ids require a loaded catalog)"
@@ -1236,7 +675,6 @@ async fn apply_headless_model_and_effort(
         }
         Some(token) => match models.resolve_effort_for_model(&model_id, token) {
             Ok(effort) => Some(effort),
-            // Soft-ignore effort on a non-supporting model; still apply `-m`.
             Err(EffortTokenError::Unsupported) => {
                 tracing::warn!(
                     model = %model_id.0,
@@ -1249,8 +687,6 @@ async fn apply_headless_model_and_effort(
         },
     };
 
-    // Nothing to apply (effort pre-stamped or ignored, and no model override):
-    // skip the no-op SetSessionModel.
     if model_name.is_none() && effort.is_none() {
         return Ok(());
     }
@@ -1288,164 +724,35 @@ async fn apply_headless_model_and_effort(
     Ok(())
 }
 
-// ── Main entry point ─────────────────────────────────────────────────────
-
-/// Startup-materialization context for headless (`-p`) runs. Never chat:
-/// `HeadlessOptions` carries no chat flag, so headless resume targets are
-/// always disk/GCS Build sessions.
-fn headless_materialize_ctx(has_worktree: bool) -> crate::app::session_startup::MaterializeCtx {
-    crate::app::session_startup::MaterializeCtx {
-        has_worktree,
-        allow_remote_restore: false,
-        chat_mode: false,
-    }
-}
-
-async fn prepare_headless_worktree(
-    acp_tx: &AcpAgentTx,
-    source_cwd: &Path,
-    materialized: crate::app::session_startup::MaterializedStartup,
-    label: Option<&str>,
-    git_ref: Option<&str>,
+/// Startup-materialization context for headless (`-p`) runs; never chat mode.
+/// `--worktree` is ignored here: headless never creates a worktree, so remote
+/// miss must not take `DeferToWorktree`.
+fn headless_materialize_ctx(
+    resume_title_pinned: bool,
     restore_code: bool,
-) -> Result<(crate::app::session_startup::MaterializedStartup, PathBuf)> {
-    use crate::app::session_startup::MaterializedStartup;
-
-    let copy_mode = if git_ref.is_some() { "clean" } else { "dirty" };
-    match materialized {
-        MaterializedStartup::Resume {
-            session_id, title, ..
-        } => {
-            let mut payload = serde_json::json!({
-                "sessionId": session_id,
-                "sourceCwd": source_cwd.to_string_lossy(),
-                "copyMode": copy_mode,
-                "worktreeType": xai_grok_shell::util::config::worktree_type(),
-                "restoreCode": restore_code,
-            });
-            if let Some(reference) = git_ref {
-                payload["gitRef"] = serde_json::Value::String(reference.to_owned());
-            }
-            let response: acp::ExtResponse = acp_send(
-                acp::ExtRequest::new(
-                    "chutes.build/git/worktree/resume_session",
-                    serde_json::value::to_raw_value(&payload)?.into(),
-                ),
-                acp_tx,
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!("couldn't resume session in worktree: {error}"))?;
-            let value: serde_json::Value = serde_json::from_str(response.0.get())?;
-            let result = worktree_result(&value)?;
-            let new_session_id = result
-                .get("sessionId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(&session_id)
-                .to_owned();
-            let effective_cwd = result
-                .get("effectiveCwd")
-                .or_else(|| result.get("worktreePath"))
-                .and_then(serde_json::Value::as_str)
-                .map(PathBuf::from)
-                .ok_or_else(|| anyhow::anyhow!("worktree response is missing effectiveCwd"))?;
-            Ok((
-                MaterializedStartup::Resume {
-                    session_id: new_session_id,
-                    original_cwd: Some(effective_cwd.clone()),
-                    title,
-                },
-                effective_cwd,
-            ))
-        }
-        MaterializedStartup::NewAuto | MaterializedStartup::NewWithId { .. } => {
-            let preferred_id = match materialized {
-                MaterializedStartup::NewWithId { session_id } => session_id,
-                _ => format!(
-                    "headless-{}",
-                    &uuid::Uuid::new_v4().simple().to_string()[..12]
-                ),
-            };
-            let mut payload = serde_json::json!({
-                "sourceWorktreePath": source_cwd.to_string_lossy(),
-                "newSessionId": preferred_id,
-                "copyMode": copy_mode,
-            });
-            if let Some(label) = label.filter(|value| !value.is_empty()) {
-                payload["label"] = serde_json::Value::String(label.to_owned());
-            }
-            if let Some(reference) = git_ref {
-                payload["gitRef"] = serde_json::Value::String(reference.to_owned());
-            }
-            let response: acp::ExtResponse = acp_send(
-                acp::ExtRequest::new(
-                    "chutes.build/git/worktree/create_from_worktree_sync",
-                    serde_json::value::to_raw_value(&payload)?.into(),
-                ),
-                acp_tx,
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!("couldn't create worktree: {error}"))?;
-            let value: serde_json::Value = serde_json::from_str(response.0.get())?;
-            let result = worktree_result(&value)?;
-            let worktree_root = result
-                .get("worktreePath")
-                .and_then(serde_json::Value::as_str)
-                .map(PathBuf::from)
-                .ok_or_else(|| anyhow::anyhow!("worktree response is missing worktreePath"))?;
-            let effective_cwd = worktree_effective_cwd(source_cwd, &worktree_root, result);
-            Ok((
-                MaterializedStartup::NewWithId {
-                    session_id: preferred_id,
-                },
-                effective_cwd,
-            ))
-        }
-        MaterializedStartup::Fork { .. } => {
-            anyhow::bail!("--fork-session cannot be combined with --worktree")
-        }
+) -> crate::app::session_startup::MaterializeCtx {
+    crate::app::session_startup::MaterializeCtx {
+        has_worktree: false,
+        allow_remote_restore:
+            crate::app::session_startup::MaterializeCtx::default_allow_remote_restore(),
+        chat_mode: false,
+        title_resolution: if resume_title_pinned {
+            crate::app::session_startup::TitleResolution::PinnedPreSandbox
+        } else {
+            crate::app::session_startup::TitleResolution::Allowed
+        },
+        restore_code,
+        restore_progress_on_stdout: false,
     }
 }
 
-fn worktree_result(value: &serde_json::Value) -> Result<&serde_json::Value> {
-    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
-        anyhow::bail!("worktree operation failed: {error}");
-    }
-    Ok(value.get("result").unwrap_or(value))
-}
-
-fn worktree_effective_cwd(
-    source_cwd: &Path,
-    worktree_root: &Path,
-    result: &serde_json::Value,
-) -> PathBuf {
-    let Some(source_git_root) = result
-        .get("sourceGitRoot")
-        .and_then(serde_json::Value::as_str)
-        .map(Path::new)
-    else {
-        return worktree_root.to_owned();
-    };
-    source_cwd
-        .strip_prefix(source_git_root)
-        .ok()
-        .filter(|relative| !relative.as_os_str().is_empty())
-        .map_or_else(
-            || worktree_root.to_owned(),
-            |relative| worktree_root.join(relative),
-        )
-}
-
-/// Run a headless single-turn prompt.
-///
-/// Spawns the agent in-process, runs the full ACP lifecycle (init → auth →
-/// session → prompt), streams output to stdout, and returns cleanly.
+/// Run a headless single-turn prompt: spawn the agent, drive the ACP lifecycle, stream to stdout.
 pub async fn run_single_turn(
     prompt: HeadlessPrompt,
     verbatim: bool,
     options: HeadlessOptions,
 ) -> Result<()> {
-    // Stamp proxy requests as headless before the agent spawns and issues
-    // its first request (auth enrichment, model list, etc.).
+    // Stamp proxy requests as headless before the agent issues its first request.
     xai_grok_shell::http::set_process_client_mode_headless();
 
     let cwd = match options.cwd {
@@ -1455,7 +762,14 @@ pub async fn run_single_turn(
 
     let mut emitter = HeadlessEmitter::new(options.output_format, options.json_schema.is_some());
 
-    // Load config and spawn agent
+    if options.include_partial_messages
+        && options.output_format != OutputFormat::StreamingMessagesJson
+    {
+        eprintln!(
+            "warning: --include-partial-messages only affects --output-format streaming-messages-json; ignoring it"
+        );
+    }
+
     let t_spawn = Instant::now();
     let raw_config = xai_grok_shell::config::load_effective_config()
         .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
@@ -1468,7 +782,7 @@ pub async fn run_single_turn(
     {
         agent_config.reasoning_effort_override = Some(effort);
     }
-    // So initial system prompt / `system_prompt_label` use `-m`, not a later SetSessionModel.
+    // Stamp `-m` early so the initial system prompt uses it, not a later SetSessionModel.
     if let Some(ref model) = options.model {
         agent_config.default_model_override = Some(model.clone());
     }
@@ -1476,36 +790,25 @@ pub async fn run_single_turn(
     agent_config.resolve_runtime_fields(&xai_grok_shell::agent::config::RuntimeResolutionContext {
         raw_config: &raw_config,
         remote_settings: None,
-        cwd: Some(&cwd),
         is_headless: true,
         cli_subagents: None,
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: options.experimental_memory,
-        cli_no_memory: options.no_memory,
+        cli_experimental_memory: false,
+        cli_no_memory: false,
         disable_web_search: options.disable_web_search,
         todo_gate: false,
         laziness_debug_log: None,
         storage_mode: None,
     });
-    if options.no_subagents {
-        agent_config.subagents_enabled = false;
-        agent_config.cli_subagents = Some(false);
-    }
 
     agent_config.mode = xai_grok_shell::agent::config::AgentMode::Headless;
     agent_config.default_yolo_mode = options.yolo;
-    // Remote arg is None: the remote settings permission_mode soft-default is
-    // TUI-only; headless runs must not change permission behavior on a
-    // remote flag flip.
     agent_config.default_auto_mode = xai_grok_shell::util::config::effective_auto_for_launch(
         options.yolo,
         options.permission_mode_flag.as_deref(),
         None,
     );
-
-    // No agent-level hub client URL (gateway-only cloud; workspace provider
-    // hub_url lives on `chutes-build workspace` / WorkspaceStartArgs only).
 
     apply_agent_flag(&options.agent, &mut agent_config);
 
@@ -1528,21 +831,32 @@ pub async fn run_single_turn(
             .transpose()?,
     };
 
-    // Persist an explicit --trust grant before the agent starts.
     if options.trust {
         xai_grok_shell::agent::folder_trust::grant_folder_trust(&cwd);
     }
 
     let cancel = CancellationToken::new();
     let memory_config = agent_config.memory_config.clone();
+    let timer = xai_grok_telemetry::startup::begin(crate::acp::Owner::Client);
+    let report_startup_failure = |timer: &crate::acp::StartupTimer| {
+        timer.emit_telemetry(
+            crate::acp::AgentKind::Embedded,
+            crate::acp::StartupOutcome::Error,
+            None,
+            false,
+        );
+        xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error);
+    };
     let spawned = match spawn_grok_shell(agent_config, &cancel, memory_config).await {
         Ok(s) => s,
         Err(e) => {
+            report_startup_failure(&timer);
             let msg = format!("Couldn't start session: {e}");
-            emitter.on_error(&msg);
+            emitter.on_error(&msg, None);
             anyhow::bail!("{msg}");
         }
     };
+    let _agent_guard = AgentShutdownGuard::new(cancel.clone(), Some(spawned.thread_handle));
     let (acp_tx, mut acp_rx) = (spawned.channel.tx, spawned.channel.rx);
     crate::unified_log::init(acp_tx.clone());
     crate::unified_log::info(
@@ -1552,17 +866,17 @@ pub async fn run_single_turn(
     );
     crate::unified_log::flush();
 
-    // Initialize with headless hints
     let init_req = build_headless_init_request(
         options.rules.as_deref(),
         options.system_prompt_override.as_deref(),
     );
+    xai_grok_telemetry::startup::enter(crate::acp::StartupPhase::AcpInitialize);
     let init_resp: acp::InitializeResponse = match acp_send(init_req, &acp_tx).await {
         Ok(r) => r,
         Err(e) => {
+            report_startup_failure(&timer);
             let msg = format!("Couldn't initialize: {e}");
-            emitter.on_error(&msg);
-            cancel.cancel();
+            emitter.on_error(&msg, None);
             anyhow::bail!("{msg}");
         }
     };
@@ -1571,8 +885,8 @@ pub async fn run_single_turn(
         "headless: spawn + initialize complete"
     );
 
-    // Authenticate using agent defaultAuthMethodId (preferred_method pin).
     let t_auth = Instant::now();
+    xai_grok_telemetry::startup::enter(crate::acp::StartupPhase::EagerAuth);
     let default_auth_method_id = crate::acp::parse_default_auth_method_id(init_resp.meta.as_ref());
     let is_api_key_auth = match authenticate(
         &acp_tx,
@@ -1583,8 +897,8 @@ pub async fn run_single_turn(
     {
         Ok(is_api_key) => is_api_key,
         Err(e) => {
-            emitter.on_error(&e.to_string());
-            cancel.cancel();
+            report_startup_failure(&timer);
+            emitter.on_error(&e.to_string(), None);
             return Err(e);
         }
     };
@@ -1592,8 +906,14 @@ pub async fn run_single_turn(
         elapsed_ms = t_auth.elapsed().as_millis() as u64,
         "headless: authenticate complete"
     );
+    // Connect ends here; session phases stay out of the phase histogram.
+    timer.emit_telemetry(
+        crate::acp::AgentKind::Embedded,
+        crate::acp::StartupOutcome::Ok,
+        None,
+        false,
+    );
 
-    // Same intent + materialize path as interactive (shared SSOT).
     use crate::app::session_startup::{self, MaterializedStartup, SessionStartupFlags};
     let has_resume_id = options.resume.as_deref().filter(|s| !s.is_empty());
     let resume_most_recent = options.resume.as_deref() == Some("");
@@ -1603,45 +923,46 @@ pub async fn run_single_turn(
         resume_most_recent,
         continue_last_session: options.continue_last_session,
         fork_session: options.fork_session,
-        has_worktree: options.worktree.is_some(),
+        // Headless never creates a worktree from `-w`.
+        has_worktree: false,
     })
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let cwd_str = cwd.to_string_lossy().to_string();
     let materialized = session_startup::materialize_startup_for_cwd(
-        headless_materialize_ctx(options.worktree.is_some()),
+        headless_materialize_ctx(options.resume_title_pinned, options.restore_code),
         intent,
         &cwd_str,
     )
-    .await?;
-    let (materialized, session_cwd) = if let Some(label) = options.worktree.as_deref() {
-        prepare_headless_worktree(
-            &acp_tx,
-            &cwd,
-            materialized,
-            Some(label),
-            options.worktree_ref.as_deref(),
-            options.restore_code,
-        )
-        .await?
-    } else {
-        (materialized, cwd.clone())
-    };
+    .await
+    .inspect_err(|_| {
+        xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error)
+    })?;
 
-    // Open session
-    let restore_code = (options.restore_code && options.worktree.is_none()).then_some(true);
+    let restore_code = match &materialized {
+        MaterializedStartup::Resume {
+            suppress_code_restore: true,
+            ..
+        }
+        | MaterializedStartup::Fork {
+            suppress_code_restore: true,
+            ..
+        } => Some(false),
+        _ => options.restore_code.then_some(true),
+    };
     let t_session = Instant::now();
+    xai_grok_telemetry::startup::enter(crate::acp::StartupPhase::SessionCreate);
     let opened = match materialized {
-        MaterializedStartup::NewAuto => open_session(&acp_tx, &session_cwd, None, None).await,
+        MaterializedStartup::NewAuto => open_session(&acp_tx, &cwd, None, None).await,
         MaterializedStartup::NewWithId { session_id } => {
-            open_session_with_id(&acp_tx, &session_cwd, &session_id).await
+            open_session_with_id(&acp_tx, &cwd, &session_id).await
         }
         MaterializedStartup::Resume {
             session_id,
             original_cwd,
             ..
         } => {
-            let load_cwd = original_cwd.as_deref().unwrap_or(session_cwd.as_path());
+            let load_cwd = original_cwd.as_deref().unwrap_or(cwd.as_path());
             open_session(&acp_tx, load_cwd, Some(session_id.as_str()), restore_code).await
         }
         MaterializedStartup::Fork {
@@ -1652,7 +973,7 @@ pub async fn run_single_turn(
         } => {
             fork_then_open(
                 &acp_tx,
-                &session_cwd,
+                &cwd,
                 &parent_session_id,
                 parent_cwd.as_deref(),
                 new_session_id.as_deref(),
@@ -1664,29 +985,23 @@ pub async fn run_single_turn(
     let OpenedSession {
         session_id,
         models: session_models,
+        cwd: session_cwd,
     } = match opened {
         Ok(v) => v,
         Err(e) => {
+            xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error);
             let msg = format!("Couldn't create session: {e}");
-            emitter.on_error(&msg);
-            cancel.cancel();
+            emitter.on_error(&msg, None);
             anyhow::bail!("{msg}");
         }
     };
+    xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Ok);
     tracing::debug!(
         elapsed_ms = t_session.elapsed().as_millis() as u64,
         session_id = %session_id.0,
         "headless: open_session complete"
     );
-    // The Messages wire format stamps session identity on every line, so it
-    // needs these before the first chunk arrives, not at the end of the turn.
-    emitter.set_messages_context(
-        session_id.0.as_ref(),
-        options.model.as_deref().unwrap_or_default(),
-        &cwd.display().to_string(),
-    );
 
-    // Debug: track headless sessions in active_sessions.json when env var is set.
     let track_active = std::env::var("CHUTES_BUILD_TRACK_HEADLESS").is_ok();
     if track_active {
         let _ = xai_grok_shell::active_sessions::register(
@@ -1699,6 +1014,28 @@ pub async fn run_single_turn(
         );
     }
 
+    // Seed the reducer's session context BEFORE applying model/effort so a later failure carries it.
+    {
+        let model = options
+            .model
+            .clone()
+            .or_else(|| session_models.current_model_id_str().map(str::to_string));
+        let permission_mode = options
+            .permission_mode_flag
+            .clone()
+            .or_else(|| options.yolo.then(|| "bypassPermissions".to_string()));
+        emitter.begin_session(SessionContext {
+            session_id: session_id.0.to_string(),
+            model,
+            cwd: session_cwd.to_string_lossy().to_string(),
+            permission_mode,
+            mcp_servers: mcp_server_names(&session_cwd),
+            include_partial_messages: options.include_partial_messages,
+            api_key_auth: is_api_key_auth,
+            context_window: session_models.get_context_window(),
+        });
+    }
+
     if let Err(e) = apply_headless_model_and_effort(
         &acp_tx,
         &session_id,
@@ -1709,36 +1046,11 @@ pub async fn run_single_turn(
     .await
     {
         let msg = e.to_string();
-        emitter.on_error(&msg);
-        cancel.cancel();
+        emitter.on_error(&msg, None);
         anyhow::bail!("{msg}");
     }
 
-    // Send prompt and stream response
-    let mut prompt_blocks = prompt.into_content_blocks();
-
-    // --check / --self-verify: append the check skill AFTER the user prompt
-    // so the model completes the task first, then runs verification.
-    if options.self_verify {
-        prompt_blocks.push(acp::ContentBlock::Text(acp::TextContent::new(
-            skill_body(xai_grok_shell::builtin::CHECK_SKILL_MD).to_string(),
-        )));
-    }
-
-    // --best-of-n N: prefix the user prompt with the compiled-in best-of-n
-    // skill content and the candidate count.
-    if let Some(n) = options.best_of_n {
-        let n = n.clamp(2, 10);
-        {
-            prompt_blocks.insert(
-                0,
-                acp::ContentBlock::Text(acp::TextContent::new(format!(
-                    "{}\n\n## Number of candidates: {n}",
-                    skill_body(xai_grok_shell::builtin::BEST_OF_N_SKILL_MD)
-                ))),
-            );
-        }
-    }
+    let prompt_blocks = prompt.into_content_blocks();
 
     let prompt_meta = {
         let mut meta = serde_json::Map::new();
@@ -1748,8 +1060,6 @@ pub async fn run_single_turn(
         if let Some(ref schema) = options.json_schema {
             meta.insert("outputSchema".to_string(), schema.clone());
         }
-        // Screen-mode telemetry (`prompt_submitted.screen_mode`): headless is
-        // its own mode, distinct from the TUI's fullscreen/inline/minimal.
         meta.insert(
             "screenMode".to_string(),
             serde_json::Value::String("headless".to_string()),
@@ -1759,45 +1069,40 @@ pub async fn run_single_turn(
 
     let request = acp::PromptRequest::new(session_id.clone(), prompt_blocks).meta(prompt_meta);
     let t_prompt = Instant::now();
+    emitter.mark_prompt_started();
     let mut ttf_logged = false;
     let mut prompt_fut = Box::pin(acp_send(request, &acp_tx));
     let mut prompt_result = None;
-    // Pending background work: bash/monitor via chutes.build/task_backgrounded +
-    // task_completed; background subagents via SubagentSpawned + SubagentFinished
-    // on chutes.build/session_notification (prefixed `subagent:{id}` in pending_bg).
-    // Tracked regardless of wait_for_background so the exit reaper always
-    // sees still-running work; the flag only gates waiting.
-    // No idle/quiet polling and no wait for server-side auto-wake text — exit
-    // when lifecycle sets are empty. Auto-wake may still be in flight at exit.
-    let mut pending_bg: HashSet<String> = HashSet::new();
-    // task_completed can arrive before task_backgrounded; remember those IDs
-    // so a late backgrounded does not re-arm waiting.
-    let mut completed_before_bg: HashSet<String> = HashSet::new();
+    // Tracked regardless of wait_for_background so the exit reaper always sees running work.
+    let mut pending_bg: HashSet<BackgroundWork> = HashSet::new();
+    // Tombstone of completed ids so an out-of-order backgrounded never re-arms them.
+    let mut completed_bg: HashSet<BackgroundWork> = HashSet::new();
     let mut prompt_done_at: Option<Instant> = None;
+    // On mid-turn channel close, break (not bail) so the exit path still drains and reaps.
+    let mut connection_closed = false;
 
     loop {
-        // First turn done and no tracked bg/monitor tasks still running.
-        // Drain buffered ACP first: PromptResponse can complete while
-        // task_backgrounded is still queued on acp_rx (never reached select!).
+        if emitter.write_error.is_some() {
+            tracing::warn!("headless: stdout write failed; stopping the stream loop");
+            break;
+        }
+        // Drain buffered ACP first: PromptResponse can complete while task_backgrounded is still queued.
         if options.wait_for_background && prompt_result.is_some() && pending_bg.is_empty() {
-            while let Ok(msg) = acp_rx.try_recv() {
-                handle_headless_acp_message(
-                    msg.boxed(),
-                    &mut emitter,
-                    t_prompt,
-                    &mut ttf_logged,
-                    options.yolo,
-                    &mut pending_bg,
-                    &mut completed_before_bg,
-                );
-            }
+            drain_pending_acp_messages(
+                &mut acp_rx,
+                &mut emitter,
+                t_prompt,
+                &mut ttf_logged,
+                options.yolo,
+                &mut pending_bg,
+                &mut completed_bg,
+            );
             if pending_bg.is_empty() {
                 tracing::debug!("headless: no pending background tasks, exiting");
                 break;
             }
         }
 
-        // Safety valve so evals don't hang on long-lived monitors or stuck tasks.
         if options.wait_for_background
             && let Some(done_at) = prompt_done_at
             && done_at.elapsed() >= options.background_wait_timeout
@@ -1810,8 +1115,6 @@ pub async fn run_single_turn(
             break;
         }
 
-        // Only needed while waiting on tasks (timeout enforcement); otherwise
-        // the loop blocks on ACP until task_completed or PromptResponse.
         let timeout_deadline = if options.wait_for_background
             && prompt_result.is_some()
             && !pending_bg.is_empty()
@@ -1833,9 +1136,9 @@ pub async fn run_single_turn(
             biased;
             msg = acp_rx.recv() => {
                 let Some(msg) = msg else {
-                    emitter.on_error("Connection closed unexpectedly");
-                    cancel.cancel();
-                    anyhow::bail!("Connection closed unexpectedly");
+                    emitter.on_error("Connection closed unexpectedly", None);
+                    connection_closed = true;
+                    break;
                 };
                 handle_headless_acp_message(
                     msg.boxed(),
@@ -1844,7 +1147,7 @@ pub async fn run_single_turn(
                     &mut ttf_logged,
                     options.yolo,
                     &mut pending_bg,
-                    &mut completed_before_bg,
+                    &mut completed_bg,
                 );
             }
             res = &mut prompt_fut, if prompt_result.is_none() => {
@@ -1859,38 +1162,42 @@ pub async fn run_single_turn(
                         &mut ttf_logged,
                         options.yolo,
                         &mut pending_bg,
-                        &mut completed_before_bg,
+                        &mut completed_bg,
                     )
                     .await;
                     break;
                 }
-                // With wait_for_background: keep draining ACP for task_completed.
+                // Drain now so a task_backgrounded around completion is recorded before the empty-check.
+                drain_pending_acp_messages(
+                    &mut acp_rx,
+                    &mut emitter,
+                    t_prompt,
+                    &mut ttf_logged,
+                    options.yolo,
+                    &mut pending_bg,
+                    &mut completed_bg,
+                );
             }
             _ = tokio::time::sleep(timeout_deadline), if options.wait_for_background
                 && prompt_result.is_some()
                 && !pending_bg.is_empty() =>
             {
-                // Wake to re-check background_wait_timeout at the top of the loop.
+                // Wake to re-check the timeout at the top of the loop.
             }
         }
     }
 
-    // Track lifecycle notifications still queued at loop exit so the reaper
-    // sees them (the timeout path breaks without draining).
-    while let Ok(msg) = acp_rx.try_recv() {
-        handle_headless_acp_message(
-            msg.boxed(),
-            &mut emitter,
-            t_prompt,
-            &mut ttf_logged,
-            options.yolo,
-            &mut pending_bg,
-            &mut completed_before_bg,
-        );
-    }
+    // Final drain-to-empty so the reaper sees work buffered right at exit (the timeout path skips draining).
+    drain_pending_acp_messages(
+        &mut acp_rx,
+        &mut emitter,
+        t_prompt,
+        &mut ttf_logged,
+        options.yolo,
+        &mut pending_bg,
+        &mut completed_bg,
+    );
 
-    // Kill background tasks/subagents still pending at exit (background-wait
-    // timeout or --no-wait-for-background) so they don't outlive the process.
     if !pending_bg.is_empty() {
         tracing::warn!(
             pending_bg = pending_bg.len(),
@@ -1899,32 +1206,44 @@ pub async fn run_single_turn(
         reap_pending_background_tasks(&pending_bg, &session_id, &acp_tx).await;
     }
 
-    // Flush buffered unified log entries before exit.
     crate::unified_log::flush_blocking().await;
 
-    // Handle result
     if track_active {
         // Non-blocking flock so a slow/network ~/.chutes-build can't hang exit.
         let _ = xai_grok_shell::active_sessions::try_unregister(&session_id);
     }
-    cancel.cancel();
-    match prompt_result {
+    // A mid-turn ACP close already reaped above; return that error before the normal outcome.
+    if connection_closed {
+        anyhow::bail!("Connection closed unexpectedly");
+    }
+    let outcome: Result<()> = match prompt_result {
         Some(Ok(resp)) => {
-            let stop_reason = format!("{:?}", resp.stop_reason);
+            let stop_reason = stop_reason_wire(resp.stop_reason);
             emitter.set_structured_output_from_meta(resp.meta.as_ref());
             emitter.set_usage_from_meta(resp.meta.as_ref());
+            // Prefer the response `_meta` ids, falling back to the typed session id rather than "".
             let sid = resp
                 .meta
                 .as_ref()
                 .and_then(|m| m.get("sessionId"))
                 .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let rid = resp
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| session_id.0.as_ref());
+            let rid = match resp
                 .meta
                 .as_ref()
                 .and_then(|m| m.get("requestId"))
                 .and_then(|v| v.as_str())
-                .unwrap_or_default();
+                .filter(|s| !s.is_empty())
+            {
+                Some(r) => r,
+                None => {
+                    tracing::warn!(
+                        "headless: prompt response carried no requestId; emitting an empty requestId"
+                    );
+                    ""
+                }
+            };
             let is_max_turns = resp
                 .meta
                 .as_ref()
@@ -1932,105 +1251,129 @@ pub async fn run_single_turn(
                 .and_then(|v| v.as_str())
                 == Some("max_turns_reached");
             if is_max_turns {
-                emitter.emit(HeadlessEvent::MaxTurnsReached);
+                emitter.on_max_turns();
                 emitter.on_end(&stop_reason, sid, rid);
-                anyhow::bail!("max turns reached");
+                Err(anyhow::anyhow!("max turns reached"))
+            } else {
+                emitter.on_end(&stop_reason, sid, rid);
+                Ok(())
             }
-            emitter.on_end(&stop_reason, sid, rid);
-            Ok(())
         }
         Some(Err(err)) => {
             let msg = if i32::from(err.code) == RATE_LIMITED_ERROR_CODE {
                 let detail = err.data.as_ref().and_then(error_detail_from_data);
-                format_rate_limited_user_message(detail.as_deref(), is_api_key_auth)
+                crate::app::sanitize_user_error(&format_rate_limited_user_message(
+                    detail.as_deref(),
+                    is_api_key_auth,
+                ))
             } else {
                 err.to_string()
             };
-            if let Some(usage) = xai_grok_shell::sampling::error::prompt_usage_from_error(&err)
-                && let Ok(v) = serde_json::to_value(&usage)
-            {
-                emitter.usage = Some(v);
+            if let Some(usage) = xai_grok_shell::sampling::error::prompt_usage_from_error(&err) {
+                match serde_json::to_value(&usage) {
+                    Ok(v) => emitter.usage = Some(v),
+                    // Log rather than swallow: a serialize failure would drop the frozen spend fields.
+                    Err(e) => tracing::warn!(
+                        error = %e,
+                        "headless: failed to serialize prompt-error usage; spend fields dropped"
+                    ),
+                }
             }
-            emitter.on_error(&msg);
-            anyhow::bail!("{msg}")
+            let stop_reason_override =
+                (xai_grok_shell::sampling::error::stop_reason_for_turn_error(&err) == "MaxTokens")
+                    .then_some("max_tokens");
+            emitter.on_error(&msg, stop_reason_override);
+            Err(anyhow::anyhow!("{msg}"))
         }
         None => Ok(()),
+    };
+
+    // A hard stdout write error outranks the normal outcome: output is dead, so exit non-zero.
+    if let Some(err) = emitter.take_output_error() {
+        return Err(anyhow::Error::new(err).context("headless: stdout write failed"));
     }
+    outcome
 }
 
-/// Ext request that kills pending background work `key` (a `pending_bg`
-/// entry): `subagent:{id}` cancels the subagent, anything else kills the
-/// bash/monitor task with that id.
-fn reap_request_for_key(
-    key: &str,
+/// Background work tracked for exit: bash/monitor tasks and background subagents, keyed by id.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum BackgroundWork {
+    Task(String),
+    Subagent(String),
+}
+
+/// Ext request that kills one unit of background work (subagent cancel or task kill).
+fn reap_request_for_work(
+    work: &BackgroundWork,
     session_id: &acp::SessionId,
 ) -> serde_json::Result<acp::ExtRequest> {
-    let (method, params) = match key.strip_prefix("subagent:") {
-        Some(id) => (
+    let (method, params) = match work {
+        BackgroundWork::Subagent(id) => (
             "chutes.build/subagent/cancel",
             serde_json::value::to_raw_value(&CancelSubagentRequest {
-                subagent_id: id.to_string(),
+                subagent_id: id.clone(),
             })?,
         ),
-        None => (
+        BackgroundWork::Task(id) => (
             "chutes.build/task/kill",
             serde_json::value::to_raw_value(&KillTaskRequest {
                 session_id: session_id.0.to_string(),
-                task_id: key.to_string(),
+                task_id: id.clone(),
             })?,
         ),
     };
     Ok(acp::ExtRequest::new(method, params.into()))
 }
 
-/// Best-effort kill of background work still pending when headless exits
-/// (background-wait timeout or `--no-wait-for-background`) so model-spawned
-/// processes never outlive the process. Failures are logged, never fatal.
+/// Best-effort kill of background work still pending at exit so it never outlives the process.
 async fn reap_pending_background_tasks(
-    pending_bg: &HashSet<String>,
+    pending_bg: &HashSet<BackgroundWork>,
     session_id: &acp::SessionId,
     acp_tx: &AcpAgentTx,
 ) {
-    for key in pending_bg {
-        let request = match reap_request_for_key(key, session_id) {
+    for work in pending_bg {
+        let request = match reap_request_for_work(work, session_id) {
             Ok(request) => request,
             Err(e) => {
-                tracing::warn!(key = %key, error = %e, "headless: failed to build reap request");
+                tracing::warn!(?work, error = %e, "headless: failed to build reap request");
                 continue;
             }
         };
         let method = request.method.clone();
         match tokio::time::timeout(Duration::from_secs(10), acp_send(request, acp_tx)).await {
             Ok(Ok(_)) => {
-                tracing::debug!(key = %key, %method, "headless: reaped pending background work")
+                tracing::debug!(?work, %method, "headless: reaped pending background work")
             }
             Ok(Err(e)) => {
-                tracing::warn!(key = %key, %method, error = %e, "headless: failed to reap background work")
+                tracing::warn!(?work, %method, error = %e, "headless: failed to reap background work")
             }
             Err(_) => {
-                tracing::warn!(key = %key, %method, "headless: timed out reaping background work")
+                tracing::warn!(?work, %method, "headless: timed out reaping background work")
             }
         }
     }
 }
 
-/// Track a background lifecycle event in the pending set.
-///
-/// Tracking is unconditional — independent of `--no-wait-for-background` — so
-/// the exit reaper sees everything still running. `wait_for_background` only
-/// gates whether the loop waits for this set to drain.
+/// Track a background lifecycle event. `completed_bg` tombstones finished ids so a late or
+/// out-of-order backgrounded/spawned cannot resurrect them into `pending_bg`.
 fn track_background_lifecycle(
     event: ExtEvent,
-    pending_bg: &mut HashSet<String>,
-    completed_before_bg: &mut HashSet<String>,
+    pending_bg: &mut HashSet<BackgroundWork>,
+    completed_bg: &mut HashSet<BackgroundWork>,
 ) {
     match event {
         ExtEvent::TaskBackgrounded {
             task_id,
             is_monitor,
         } => {
-            if !completed_before_bg.remove(&task_id) {
-                pending_bg.insert(task_id);
+            let work = BackgroundWork::Task(task_id);
+            if completed_bg.contains(&work) {
+                tracing::debug!(
+                    is_monitor,
+                    "headless: ignoring task_backgrounded for already-completed task"
+                );
+            } else {
+                pending_bg.insert(work);
                 tracing::debug!(
                     pending = pending_bg.len(),
                     is_monitor,
@@ -2039,19 +1382,24 @@ fn track_background_lifecycle(
             }
         }
         ExtEvent::TaskCompleted { task_id } => {
-            if pending_bg.remove(&task_id) {
+            let work = BackgroundWork::Task(task_id);
+            let was_pending = pending_bg.remove(&work);
+            completed_bg.insert(work);
+            if was_pending {
                 tracing::debug!(
                     pending = pending_bg.len(),
                     "headless: background task completed"
                 );
-            } else {
-                completed_before_bg.insert(task_id);
             }
         }
         ExtEvent::SubagentSpawned { subagent_id } => {
-            let key = format!("subagent:{subagent_id}");
-            if !completed_before_bg.remove(&key) {
-                pending_bg.insert(key);
+            let work = BackgroundWork::Subagent(subagent_id);
+            if completed_bg.contains(&work) {
+                tracing::debug!(
+                    "headless: ignoring subagent_spawned for already-finished subagent"
+                );
+            } else {
+                pending_bg.insert(work);
                 tracing::debug!(
                     pending = pending_bg.len(),
                     "headless: tracking background subagent"
@@ -2059,21 +1407,45 @@ fn track_background_lifecycle(
             }
         }
         ExtEvent::SubagentFinished { subagent_id } => {
-            let key = format!("subagent:{subagent_id}");
-            if pending_bg.remove(&key) {
+            let work = BackgroundWork::Subagent(subagent_id);
+            let was_pending = pending_bg.remove(&work);
+            completed_bg.insert(work);
+            if was_pending {
                 tracing::debug!(
                     pending = pending_bg.len(),
                     "headless: background subagent finished"
                 );
-            } else {
-                completed_before_bg.insert(key);
             }
         }
-        ExtEvent::MonitorEvent | ExtEvent::None => {}
+        // Routed to the emitter by the caller, never tracked.
+        ExtEvent::MonitorEvent | ExtEvent::None | ExtEvent::Lifecycle(_) | ExtEvent::Stream(_) => {}
     }
 }
 
-// ── ACP client message handling (select arm + pre-exit drain) ────────────
+/// Non-blocking drain-to-empty of `acp_rx`, so background work buffered around prompt
+/// completion is recorded in `pending_bg` before the empty-check decides whether to exit.
+#[allow(clippy::too_many_arguments)]
+fn drain_pending_acp_messages(
+    acp_rx: &mut AcpClientRx,
+    emitter: &mut HeadlessEmitter,
+    t_prompt: Instant,
+    ttf_logged: &mut bool,
+    yolo: bool,
+    pending_bg: &mut HashSet<BackgroundWork>,
+    completed_bg: &mut HashSet<BackgroundWork>,
+) {
+    while let Ok(msg) = acp_rx.try_recv() {
+        handle_headless_acp_message(
+            msg.boxed(),
+            emitter,
+            t_prompt,
+            ttf_logged,
+            yolo,
+            pending_bg,
+            completed_bg,
+        );
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 async fn drain_acp_with_grace(
@@ -2083,8 +1455,8 @@ async fn drain_acp_with_grace(
     t_prompt: Instant,
     ttf_logged: &mut bool,
     yolo: bool,
-    pending_bg: &mut HashSet<String>,
-    completed_before_bg: &mut HashSet<String>,
+    pending_bg: &mut HashSet<BackgroundWork>,
+    completed_bg: &mut HashSet<BackgroundWork>,
 ) {
     let deadline = Instant::now() + grace;
     loop {
@@ -2096,7 +1468,7 @@ async fn drain_acp_with_grace(
                 ttf_logged,
                 yolo,
                 pending_bg,
-                completed_before_bg,
+                completed_bg,
             );
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -2114,7 +1486,7 @@ async fn drain_acp_with_grace(
                     ttf_logged,
                     yolo,
                     pending_bg,
-                    completed_before_bg,
+                    completed_bg,
                 );
             }
             _ = tokio::time::sleep(remaining) => {
@@ -2124,9 +1496,7 @@ async fn drain_acp_with_grace(
     }
 }
 
-/// Process one inbound ACP client message. Used by both `acp_rx.recv()` and
-/// `try_recv()` so buffered `task_backgrounded` is not dropped when
-/// `PromptResponse` completes first.
+/// Process one inbound ACP client message; shared by `recv()` and `try_recv()`.
 #[allow(clippy::too_many_arguments)]
 fn handle_headless_acp_message(
     msg: AcpClientMessageBox,
@@ -2134,8 +1504,8 @@ fn handle_headless_acp_message(
     t_prompt: Instant,
     ttf_logged: &mut bool,
     yolo: bool,
-    pending_bg: &mut HashSet<String>,
-    completed_before_bg: &mut HashSet<String>,
+    pending_bg: &mut HashSet<BackgroundWork>,
+    completed_bg: &mut HashSet<BackgroundWork>,
 ) {
     match msg {
         AcpClientMessageBox::SessionNotification(boxed) => {
@@ -2155,7 +1525,9 @@ fn handle_headless_acp_message(
                     }
                 }
                 acp::SessionUpdate::AgentThoughtChunk(chunk) => {
-                    if let acp::ContentBlock::Text(text) = &chunk.content {
+                    if let acp::ContentBlock::Text(text) = &chunk.content
+                        && !text.text.is_empty()
+                    {
                         if !*ttf_logged {
                             *ttf_logged = true;
                             tracing::debug!(
@@ -2166,43 +1538,13 @@ fn handle_headless_acp_message(
                         emitter.on_thought_chunk(&text.text);
                     }
                 }
-                acp::SessionUpdate::AvailableCommandsUpdate(update) => {
-                    // The only place the session advertises what it can do;
-                    // the Messages `system` line reports both lists.
-                    let tools = update
-                        .meta
-                        .as_ref()
-                        .and_then(|meta| meta.get("tools"))
-                        .and_then(serde_json::Value::as_array)
-                        .map(|tools| {
-                            tools
-                                .iter()
-                                .filter_map(|tool| tool.as_str().map(str::to_owned))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let commands = update
-                        .available_commands
-                        .iter()
-                        .map(|command| command.name.clone())
-                        .collect();
-                    emitter.set_available(tools, commands);
-                }
-                acp::SessionUpdate::ToolCall(tc) => {
-                    emitter.emit(HeadlessEvent::ToolCall {
-                        id: tc.tool_call_id.0.as_ref(),
-                        title: &tc.title,
-                        kind: tool_kind_name(tc.kind),
-                        status: tool_status_name(tc.status),
-                        input: tc.raw_input.as_ref(),
-                    });
-                }
-                acp::SessionUpdate::ToolCallUpdate(tcu) => {
-                    emitter.emit(HeadlessEvent::ToolCallUpdate {
-                        id: tcu.tool_call_id.0.as_ref(),
-                        status: tcu.fields.status.map(tool_status_name),
-                        output: tcu.fields.raw_output.as_ref(),
-                    });
+                acp::SessionUpdate::ToolCall(_)
+                | acp::SessionUpdate::ToolCallUpdate(_)
+                | acp::SessionUpdate::Plan(_)
+                | acp::SessionUpdate::AvailableCommandsUpdate(_) => {
+                    if let Some(event) = map_session_update(&boxed.request.update) {
+                        emitter.reduce_and_emit(event);
+                    }
                 }
                 _ => {}
             }
@@ -2230,9 +1572,13 @@ fn handle_headless_acp_message(
             }
         }
         AcpClientMessageBox::ExtNotification(notif) => {
-            let event = handle_ext_notification(&notif, emitter);
+            let event = handle_ext_notification(&notif);
             let _ = notif.response_tx.send(Ok(()));
-            track_background_lifecycle(event, pending_bg, completed_before_bg);
+            match event {
+                ExtEvent::Lifecycle(l) => emitter.on_lifecycle(l),
+                ExtEvent::Stream(event) => emitter.reduce_and_emit(*event),
+                other => track_background_lifecycle(other, pending_bg, completed_bg),
+            }
         }
         AcpClientMessageBox::WaitForTerminalExit(args) => {
             args.response_tx
@@ -2245,677 +1591,6 @@ fn handle_headless_acp_message(
     }
 }
 
-// ── Extension notification handling ──────────────────────────────────────
-
-enum ExtEvent {
-    None,
-    TaskBackgrounded {
-        task_id: String,
-        is_monitor: bool,
-    },
-    TaskCompleted {
-        task_id: String,
-    },
-    SubagentSpawned {
-        subagent_id: String,
-    },
-    SubagentFinished {
-        subagent_id: String,
-    },
-    /// Monitor emitted a line (or ended streaming). Does not complete the task;
-    /// completion still arrives via `TaskCompleted`.
-    MonitorEvent,
-}
-
-fn handle_ext_notification(
-    notif: &xai_acp_lib::AcpArgsBox<acp::ExtNotification>,
-    emitter: &mut HeadlessEmitter,
-) -> ExtEvent {
-    let method = notif.request.method.as_ref();
-
-    // Background task lifecycle uses dedicated methods (not session_notification).
-    if method == "chutes.build/task_backgrounded" {
-        #[derive(serde::Deserialize)]
-        struct TaskBgEnvelope {
-            update: TaskBgUpdate,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "snake_case", tag = "sessionUpdate")]
-        enum TaskBgUpdate {
-            TaskBackgrounded {
-                task_id: String,
-                #[serde(default)]
-                monitor_description: Option<String>,
-            },
-            #[serde(other)]
-            Other,
-        }
-        if let Ok(env) = serde_json::from_str::<TaskBgEnvelope>(notif.request.params.get())
-            && let TaskBgUpdate::TaskBackgrounded {
-                task_id,
-                monitor_description,
-            } = env.update
-        {
-            return ExtEvent::TaskBackgrounded {
-                task_id,
-                is_monitor: monitor_description.is_some(),
-            };
-        }
-        return ExtEvent::None;
-    }
-
-    if method == "chutes.build/task_completed" {
-        #[derive(serde::Deserialize)]
-        struct TaskDoneEnvelope {
-            update: TaskDoneUpdate,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "snake_case", tag = "sessionUpdate")]
-        enum TaskDoneUpdate {
-            TaskCompleted {
-                task_snapshot: TaskSnapshotLite,
-            },
-            #[serde(other)]
-            Other,
-        }
-        #[derive(serde::Deserialize)]
-        struct TaskSnapshotLite {
-            task_id: String,
-        }
-        if let Ok(env) = serde_json::from_str::<TaskDoneEnvelope>(notif.request.params.get())
-            && let TaskDoneUpdate::TaskCompleted { task_snapshot } = env.update
-        {
-            return ExtEvent::TaskCompleted {
-                task_id: task_snapshot.task_id,
-            };
-        }
-        return ExtEvent::None;
-    }
-
-    if method == "chutes.build/monitor_event" {
-        return ExtEvent::MonitorEvent;
-    }
-
-    match method {
-        "chutes.build/session_notification" | "chutes.build/session/update" => {}
-        _ => return ExtEvent::None,
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "snake_case", tag = "sessionUpdate")]
-    enum XaiUpdate {
-        AutoCompactStarted {
-            percentage: u8,
-        },
-        AutoCompactCompleted {},
-        AutoCompactFailed {
-            error: String,
-        },
-        AutoCompactCancelled {},
-        AutoContinueCompleted {
-            total_tokens: u64,
-        },
-        ImageCompressed {
-            message: String,
-        },
-        SubagentSpawned {
-            subagent_id: String,
-        },
-        SubagentFinished {
-            subagent_id: String,
-        },
-        #[serde(other)]
-        Other,
-    }
-    #[derive(serde::Deserialize)]
-    struct XaiNotif {
-        update: XaiUpdate,
-    }
-
-    let Ok(xai_notif) = serde_json::from_str::<XaiNotif>(notif.request.params.get()) else {
-        return ExtEvent::None;
-    };
-
-    match xai_notif.update {
-        XaiUpdate::AutoCompactStarted { percentage } => {
-            emitter.emit(HeadlessEvent::AutoCompactStarted { percentage });
-        }
-        XaiUpdate::AutoCompactCompleted {} => {
-            emitter.emit(HeadlessEvent::AutoCompactCompleted);
-        }
-        XaiUpdate::AutoCompactFailed { error } => {
-            emitter.emit(HeadlessEvent::AutoCompactFailed { error: &error });
-        }
-        XaiUpdate::AutoCompactCancelled {} => {
-            emitter.emit(HeadlessEvent::AutoCompactCancelled);
-        }
-        XaiUpdate::AutoContinueCompleted { total_tokens } => {
-            emitter.emit(HeadlessEvent::AutoContinueCompleted { total_tokens });
-        }
-        XaiUpdate::ImageCompressed { message } => {
-            emitter.emit(HeadlessEvent::ImageCompressed { message: &message });
-        }
-        XaiUpdate::SubagentSpawned { subagent_id } => {
-            return ExtEvent::SubagentSpawned { subagent_id };
-        }
-        XaiUpdate::SubagentFinished { subagent_id, .. } => {
-            return ExtEvent::SubagentFinished { subagent_id };
-        }
-        XaiUpdate::Other => {}
-    }
-    ExtEvent::None
-}
-
 #[cfg(test)]
-mod tests {
-    use super::{HeadlessEmitter, HeadlessEvent, OutputFormat};
-
-    fn messages_emitter() -> HeadlessEmitter {
-        let mut emitter = HeadlessEmitter::new(OutputFormat::StreamingMessagesJson, false);
-        emitter.set_messages_context("sess-1", "kimi-k2.6", "/workspace");
-        emitter
-    }
-
-    /// The `system`/`init` line carries session identity and what the session
-    /// advertised, and is emitted exactly once.
-    #[test]
-    fn messages_init_reports_session_identity_once() {
-        let mut emitter = messages_emitter();
-        emitter.set_available(vec!["read_file".into()], vec!["compact".into()]);
-        let init = emitter.messages_init_line().expect("first call emits init");
-        assert_eq!(init["type"], serde_json::json!("system"));
-        assert_eq!(init["subtype"], serde_json::json!("init"));
-        assert_eq!(init["session_id"], serde_json::json!("sess-1"));
-        assert_eq!(init["model"], serde_json::json!("kimi-k2.6"));
-        assert_eq!(init["cwd"], serde_json::json!("/workspace"));
-        assert_eq!(init["tools"], serde_json::json!(["read_file"]));
-        assert_eq!(init["slash_commands"], serde_json::json!(["compact"]));
-        assert!(
-            emitter.messages_init_line().is_none(),
-            "init must not repeat"
-        );
-    }
-
-    /// Thinking, text and tool_use ride in one assistant message, in that
-    /// order, and the accumulated state is cleared afterwards.
-    #[test]
-    fn assistant_message_carries_thinking_text_and_tool_use() {
-        let mut emitter = messages_emitter();
-        emitter.emit(HeadlessEvent::ThoughtChunk("weighing options"));
-        emitter.emit(HeadlessEvent::TextChunk("Reading the file"));
-        emitter.emit(HeadlessEvent::ToolCall {
-            id: "call-1",
-            title: "read_file",
-            kind: "read",
-            status: "pending",
-            input: Some(&serde_json::json!({"path": "a.rs"})),
-        });
-
-        let line = emitter
-            .messages_assistant_line(None)
-            .expect("a message was assembled");
-        assert_eq!(line["type"], serde_json::json!("assistant"));
-        assert_eq!(line["session_id"], serde_json::json!("sess-1"));
-        let content = line["message"]["content"].as_array().unwrap();
-        assert_eq!(content[0]["type"], serde_json::json!("thinking"));
-        assert_eq!(
-            content[0]["thinking"],
-            serde_json::json!("weighing options")
-        );
-        assert_eq!(content[1]["type"], serde_json::json!("text"));
-        assert_eq!(content[1]["text"], serde_json::json!("Reading the file"));
-        assert_eq!(content[2]["type"], serde_json::json!("tool_use"));
-        assert_eq!(content[2]["id"], serde_json::json!("call-1"));
-        assert_eq!(content[2]["name"], serde_json::json!("read_file"));
-        assert_eq!(content[2]["input"], serde_json::json!({"path": "a.rs"}));
-        // A message ended by a tool has no stop reason: the turn continues.
-        assert_eq!(line["message"]["stop_reason"], serde_json::Value::Null);
-        assert!(
-            emitter.messages_assistant_line(None).is_none(),
-            "flushing must clear the accumulated message"
-        );
-    }
-
-    /// `usage` is always present, even before the shell reports any.
-    #[test]
-    fn assistant_message_always_reports_usage_fields() {
-        let mut emitter = messages_emitter();
-        emitter.emit(HeadlessEvent::TextChunk("hi"));
-        let line = emitter.messages_assistant_line(Some("end_turn")).unwrap();
-        let usage = &line["message"]["usage"];
-        for field in [
-            "input_tokens",
-            "output_tokens",
-            "cache_read_input_tokens",
-            "cache_creation_input_tokens",
-        ] {
-            assert_eq!(usage[field], serde_json::json!(0), "{field}");
-        }
-        assert_eq!(
-            line["message"]["stop_reason"],
-            serde_json::json!("end_turn")
-        );
-    }
-
-    /// Only a terminal tool status closes the message; a pending or in-progress
-    /// update must not split it.
-    #[test]
-    fn only_a_finished_tool_closes_the_message() {
-        let mut emitter = messages_emitter();
-        emitter.emit(HeadlessEvent::TextChunk("working"));
-        emitter.emit(HeadlessEvent::ToolCallUpdate {
-            id: "call-1",
-            status: Some("in_progress"),
-            output: None,
-        });
-        assert!(
-            emitter
-                .messages_assistant_line(None)
-                .expect("message still open")["message"]["content"]
-                .as_array()
-                .is_some_and(|content| !content.is_empty()),
-            "an in-progress update must leave the message intact"
-        );
-    }
-
-    /// Session-lifecycle notices have no Messages equivalent, so they must not
-    /// invent a line or disturb the message being assembled.
-    #[test]
-    fn lifecycle_notices_do_not_touch_the_messages_stream() {
-        let mut emitter = messages_emitter();
-        emitter.emit(HeadlessEvent::TextChunk("kept"));
-        emitter.emit(HeadlessEvent::AutoCompactStarted { percentage: 91 });
-        emitter.emit(HeadlessEvent::AutoCompactCompleted);
-        emitter.emit(HeadlessEvent::MaxTurnsReached);
-        let line = emitter.messages_assistant_line(None).unwrap();
-        assert_eq!(
-            line["message"]["content"][0]["text"],
-            serde_json::json!("kept")
-        );
-    }
-
-    #[test]
-    fn lifecycle_tracking_is_independent_of_wait_flag() {
-        let mut pending = std::collections::HashSet::new();
-        let mut completed = std::collections::HashSet::new();
-        super::track_background_lifecycle(
-            super::ExtEvent::TaskBackgrounded {
-                task_id: "t1".into(),
-                is_monitor: false,
-            },
-            &mut pending,
-            &mut completed,
-        );
-        super::track_background_lifecycle(
-            super::ExtEvent::SubagentSpawned {
-                subagent_id: "s1".into(),
-            },
-            &mut pending,
-            &mut completed,
-        );
-        assert!(pending.contains("t1"));
-        assert!(pending.contains("subagent:s1"));
-
-        super::track_background_lifecycle(
-            super::ExtEvent::TaskCompleted {
-                task_id: "t1".into(),
-            },
-            &mut pending,
-            &mut completed,
-        );
-        super::track_background_lifecycle(
-            super::ExtEvent::SubagentFinished {
-                subagent_id: "s1".into(),
-            },
-            &mut pending,
-            &mut completed,
-        );
-        assert!(pending.is_empty());
-    }
-
-    #[test]
-    fn completion_before_backgrounded_never_rearms_pending() {
-        let mut pending = std::collections::HashSet::new();
-        let mut completed = std::collections::HashSet::new();
-        super::track_background_lifecycle(
-            super::ExtEvent::TaskCompleted {
-                task_id: "t1".into(),
-            },
-            &mut pending,
-            &mut completed,
-        );
-        super::track_background_lifecycle(
-            super::ExtEvent::TaskBackgrounded {
-                task_id: "t1".into(),
-                is_monitor: false,
-            },
-            &mut pending,
-            &mut completed,
-        );
-        assert!(pending.is_empty());
-    }
-
-    #[test]
-    fn reap_request_for_task_kills_with_session_scope() {
-        let session_id = acp::SessionId::new("sess-1");
-        let request = super::reap_request_for_key("task-42", &session_id).unwrap();
-        assert_eq!(request.method.as_ref(), "chutes.build/task/kill");
-        let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
-        assert_eq!(params["sessionId"], "sess-1");
-        assert_eq!(params["taskId"], "task-42");
-    }
-
-    #[test]
-    fn reap_request_for_subagent_cancels_with_stripped_id() {
-        let session_id = acp::SessionId::new("sess-1");
-        let request = super::reap_request_for_key("subagent:sub-7", &session_id).unwrap();
-        assert_eq!(request.method.as_ref(), "chutes.build/subagent/cancel");
-        let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
-        assert_eq!(params["subagentId"], "sub-7");
-    }
-
-    use super::*;
-    use xai_grok_workspace::permission::types::{RuleAction, ToolFilter};
-
-    fn s(v: &str) -> String {
-        v.to_owned()
-    }
-
-    /// Headless materialization is never chat, regardless of worktree flag —
-    /// resume targets stay disk/GCS Build sessions.
-    #[test]
-    fn headless_materialize_ctx_stays_non_chat() {
-        for has_worktree in [false, true] {
-            let ctx = headless_materialize_ctx(has_worktree);
-            assert!(!ctx.chat_mode);
-            assert!(!ctx.allow_remote_restore);
-            assert_eq!(ctx.has_worktree, has_worktree);
-        }
-    }
-
-    #[test]
-    fn strict_valid_rules_parse_deny_before_allow() {
-        let allow = vec![s("Bash(npm*)")];
-        let deny = vec![s("Bash(rm*)"), s("Edit(/etc/**)")];
-        let rules = parse_permission_rules_strict(&allow, &deny).unwrap();
-        assert_eq!(rules.len(), 3);
-        assert_eq!(rules[0].action, RuleAction::Deny);
-        assert!(matches!(rules[0].tool, ToolFilter::Bash));
-        assert_eq!(rules[1].action, RuleAction::Deny);
-        assert!(matches!(rules[1].tool, ToolFilter::Edit));
-        assert_eq!(rules[2].action, RuleAction::Allow);
-        assert!(matches!(rules[2].tool, ToolFilter::Bash));
-    }
-
-    #[test]
-    fn strict_invalid_rule_errors() {
-        let result = parse_permission_rules_strict(&[], &[s("EnterWorktree(foo)")]);
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("--deny"));
-        assert!(msg.contains("EnterWorktree"));
-    }
-
-    #[test]
-    fn strict_reports_all_invalid_rules() {
-        let result = parse_permission_rules_strict(
-            &[s("BadTool(x)")],
-            &[s("EnterWorktree(foo)"), s("Bash(rm*)")],
-        );
-        assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("EnterWorktree"),
-            "should mention first bad deny"
-        );
-        assert!(msg.contains("BadTool"), "should mention bad allow");
-    }
-
-    #[test]
-    fn lenient_skips_invalid_keeps_valid() {
-        let allow = vec![s("Bash(npm*)")];
-        let deny = vec![s("EnterWorktree(foo)"), s("Bash(rm*)")];
-        let rules = parse_permission_rules_lenient(&allow, &deny);
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0].action, RuleAction::Deny);
-        assert_eq!(rules[0].pattern.as_deref(), Some("rm*"));
-        assert_eq!(rules[1].action, RuleAction::Allow);
-        assert_eq!(rules[1].pattern.as_deref(), Some("npm*"));
-    }
-
-    #[test]
-    fn empty_inputs_produce_empty_rules() {
-        let rules = parse_permission_rules_strict(&[], &[]).unwrap();
-        assert!(rules.is_empty());
-        let rules = parse_permission_rules_lenient(&[], &[]);
-        assert!(rules.is_empty());
-    }
-
-    #[test]
-    fn domain_mode_web_fetch() {
-        let rules = parse_permission_rules_strict(&[], &[s("WebFetch(domain:evil.com)")]).unwrap();
-        assert_eq!(rules.len(), 1);
-        assert!(matches!(rules[0].tool, ToolFilter::WebFetch));
-        assert_eq!(
-            rules[0].pattern_mode,
-            xai_grok_workspace::permission::types::PatternMode::Domain
-        );
-        assert_eq!(rules[0].pattern.as_deref(), Some("evil.com"));
-    }
-
-    #[test]
-    fn bash_colon_wildcard_deny_translates_to_prefix() {
-        let rules = parse_permission_rules_strict(&[], &[s("Bash(sed:*)")]).unwrap();
-        assert_eq!(rules.len(), 1);
-        assert!(matches!(rules[0].tool, ToolFilter::Bash));
-        assert_eq!(rules[0].pattern.as_deref(), Some("sed"));
-    }
-
-    #[test]
-    fn structured_output_without_meta_errors_never_parses_text() {
-        // No `_meta` structured output (e.g. max-turns/cancel): emit a clean
-        // error, never an unvalidated parse of the raw text buffer.
-        let mut emitter = HeadlessEmitter::new(OutputFormat::Json, true);
-        emitter.text_buffer = r#"{"name":"alice","age":30}"#.into();
-        emitter.set_structured_output_from_meta(serde_json::json!({}).as_object());
-        let result = emitter.build_json_result("EndTurn", "sess-1", "req-1");
-        assert!(result["structuredOutput"].is_null());
-        assert_eq!(
-            result["structuredOutputError"],
-            "model did not produce structured output"
-        );
-    }
-
-    #[test]
-    fn structured_output_from_meta_wins_over_text_buffer() {
-        // The agent's validated output (from `_meta`) must override accumulated
-        // prose (the multi-round corruption bug).
-        let mut emitter = HeadlessEmitter::new(OutputFormat::Json, true);
-        emitter.text_buffer = "thinking out loud...".into();
-        emitter.set_structured_output_from_meta(
-            serde_json::json!({"structuredOutput": {"name": "carol"}}).as_object(),
-        );
-        let result = emitter.build_json_result("EndTurn", "sess-1", "req-1");
-        assert_eq!(result["structuredOutput"]["name"], "carol");
-        assert!(result.get("structuredOutputError").is_none());
-
-        let mut emitter = HeadlessEmitter::new(OutputFormat::Json, true);
-        emitter.set_structured_output_from_meta(
-            serde_json::json!({
-                "structuredOutputError": "output does not match the required schema"
-            })
-            .as_object(),
-        );
-        let result = emitter.build_json_result("EndTurn", "sess-1", "req-1");
-        assert!(result["structuredOutput"].is_null());
-        assert_eq!(
-            result["structuredOutputError"],
-            "output does not match the required schema"
-        );
-    }
-
-    #[test]
-    fn streaming_json_structured_output_emits_from_meta() {
-        let mut emitter = HeadlessEmitter::new(OutputFormat::StreamingJson, true);
-        emitter.on_text_chunk(r#"{"name":"#);
-        emitter.on_text_chunk(r#""bob"}"#);
-        assert_eq!(emitter.text_buffer, r#"{"name":"bob"}"#);
-
-        // structuredOutput comes from the prompt-response `_meta`, not the buffer.
-        emitter.set_structured_output_from_meta(
-            serde_json::json!({"structuredOutput": {"name": "bob"}}).as_object(),
-        );
-        let mut target = serde_json::json!({});
-        emitter.attach_structured_output(&mut target);
-        assert_eq!(target["structuredOutput"]["name"], "bob");
-        assert!(target.get("structuredOutputError").is_none());
-    }
-
-    #[test]
-    fn parse_json_schema_rejects_non_objects_and_invalid_json() {
-        assert!(super::parse_json_schema(r#"{"type":"object"}"#).is_ok());
-        assert!(
-            super::parse_json_schema(r#"[1,2,3]"#)
-                .unwrap_err()
-                .to_string()
-                .contains("must be a JSON object")
-        );
-        assert!(
-            super::parse_json_schema(r#"{not json"#)
-                .unwrap_err()
-                .to_string()
-                .contains("invalid JSON")
-        );
-    }
-
-    fn make_ext_notif(
-        method: &str,
-        update: serde_json::Value,
-    ) -> xai_acp_lib::AcpArgsBox<acp::ExtNotification> {
-        let payload = serde_json::json!({
-            "sessionId": "sess-1",
-            "update": update,
-        });
-        let raw = serde_json::value::to_raw_value(&payload).unwrap();
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        xai_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new(method, raw.into()),
-            response_tx: tx,
-        }
-        .boxed()
-    }
-
-    #[test]
-    fn headless_task_backgrounded_parses_task_id() {
-        // `make_ext_notif` wraps the arg under `update`, so pass
-        // the inner update object (matching the real `chutes.build/task_backgrounded`
-        // wire shape: `{ "update": { "sessionUpdate": ..., "task_id": ... } }`).
-        let notif = make_ext_notif(
-            "chutes.build/task_backgrounded",
-            serde_json::json!({
-                "sessionUpdate": "task_backgrounded",
-                "task_id": "task-abc",
-            }),
-        );
-        assert!(matches!(
-            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
-            ExtEvent::TaskBackgrounded { task_id, is_monitor: false } if task_id == "task-abc"
-        ));
-    }
-
-    #[test]
-    fn headless_task_backgrounded_with_monitor_description_is_monitor() {
-        let notif = make_ext_notif(
-            "chutes.build/task_backgrounded",
-            serde_json::json!({
-                "sessionUpdate": "task_backgrounded",
-                "task_id": "mon-1",
-                "monitor_description": "watching logs",
-            }),
-        );
-        assert!(matches!(
-            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
-            ExtEvent::TaskBackgrounded { task_id, is_monitor: true } if task_id == "mon-1"
-        ));
-    }
-
-    #[test]
-    fn headless_task_completed_parses_task_id() {
-        // `task_completed` nests the id under `task_snapshot`. The
-        // internally-tagged `rename_all = "snake_case"` renames only the
-        // `sessionUpdate` tag, so `task_id` / `task_snapshot` stay snake_case;
-        // this test guards against a future `rename_all = "camelCase"` on
-        // `TaskSnapshot` silently turning waiting into a no-op.
-        let notif = make_ext_notif(
-            "chutes.build/task_completed",
-            serde_json::json!({
-                "sessionUpdate": "task_completed",
-                "task_snapshot": { "task_id": "task-abc" }
-            }),
-        );
-        assert!(matches!(
-            handle_ext_notification(&notif, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
-            ExtEvent::TaskCompleted { task_id } if task_id == "task-abc"
-        ));
-    }
-
-    #[test]
-    fn headless_subagent_spawned_and_finished_parse() {
-        let spawned = make_ext_notif(
-            "chutes.build/session_notification",
-            serde_json::json!({
-                "sessionUpdate": "subagent_spawned",
-                "subagent_id": "sub-1",
-                "parent_session_id": "p",
-                "child_session_id": "c",
-                "subagent_type": "explore",
-                "description": "test"
-            }),
-        );
-        assert!(matches!(
-            handle_ext_notification(&spawned, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
-            ExtEvent::SubagentSpawned { subagent_id } if subagent_id == "sub-1"
-        ));
-        let finished = make_ext_notif(
-            "chutes.build/session_notification",
-            serde_json::json!({
-                "sessionUpdate": "subagent_finished",
-                "subagent_id": "sub-1",
-                "child_session_id": "c",
-                "status": "completed",
-                "tool_calls": 0,
-                "turns": 1,
-                "duration_ms": 5
-            }),
-        );
-        assert!(matches!(
-            handle_ext_notification(&finished, &mut HeadlessEmitter::new(OutputFormat::Plain, false)),
-            ExtEvent::SubagentFinished { subagent_id } if subagent_id == "sub-1"
-        ));
-    }
-
-    #[test]
-    fn headless_session_update_unknown_method_is_none() {
-        let payload = serde_json::json!({
-            "sessionId": "sess-1",
-            "update": {
-                "sessionUpdate": "subagent_spawned",
-                "subagent_id": "sub-1"
-            }
-        });
-        let raw = serde_json::value::to_raw_value(&payload).unwrap();
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        let notif = xai_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("chutes.build/other", raw.into()),
-            response_tx: tx,
-        }
-        .boxed();
-        assert!(matches!(
-            handle_ext_notification(
-                &notif,
-                &mut HeadlessEmitter::new(OutputFormat::Plain, false)
-            ),
-            ExtEvent::None
-        ));
-    }
-}
+#[path = "headless_tests.rs"]
+mod tests;

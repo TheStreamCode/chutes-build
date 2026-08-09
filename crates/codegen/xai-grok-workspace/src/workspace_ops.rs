@@ -36,6 +36,7 @@ pub use xai_grok_workspace_types::rpc::code_nav::{
     CodeFindDefinitionsReq, CodeFindReferencesReq, CodeGotoDefinitionReq, CodeGotoReferencesReq,
     CodeIndexStats, CodeIndexStatusReq, CodeIndexStatusResponse, CodeNavLocation, CodeNavResponse,
 };
+pub use xai_grok_workspace_types::rpc::export_github::ExportGithubReq;
 pub use xai_grok_workspace_types::rpc::fs::{
     ClientFsListNode, ClientFsListReq, ClientFsListRes, ClientFsReadFileReq, ClientFsReadFileRes,
     ClientFsStatReq, ClientFsStatRes, GetFileEntry, GetFileResult, GetFilesReq, GetFilesRes,
@@ -46,9 +47,9 @@ pub use xai_grok_workspace_types::rpc::git::{
     DiffStatsSummary, GitBranchesReq, GitCheckoutCommitReq, GitCheckoutReq, GitCollectChangesReq,
     GitCollectChangesResponse, GitCommitReq, GitCurrentCommitReq, GitDiffReq, GitDiscardReq,
     GitFilesReq, GitInfoReq, GitResolveRootReq, GitStageContentReq, GitStageReq, GitStashReq,
-    GitStatusExtReq, GitStatusExtResponse, GitStatusFormat, GitStatusReq, GitUnstageReq,
-    IdentityData, PublicBaseData, RepoInfo, UNTRACKED_CONTENT_THRESHOLD, UncommittedChangesData,
-    UntrackedFileData,
+    GitStatusExtReq, GitStatusExtResponse, GitStatusFormat, GitStatusReq, GitSyncBaseReq,
+    GitUnstageReq, IdentityData, PublicBaseData, RepoInfo, UNTRACKED_CONTENT_THRESHOLD,
+    UncommittedChangesData, UntrackedFileData,
 };
 pub use xai_grok_workspace_types::rpc::hooks::{
     HookEventNameWire, HookRegistryReq, HookRegistryWire, HookSpecWire,
@@ -60,6 +61,9 @@ pub use xai_grok_workspace_types::rpc::hunks::{
     HunkGetFileSummariesReq, HunkGetFilteredHunksReq, HunkGetSessionSummaryReq,
     HunkGetStagedFilesReq, HunkLineInfoWire, HunkSingleActionReq, HunkSourceWire,
     HunkTurnActionReq, HunkWire, SessionStatsWire, SessionSummaryWire, TurnSummaryWire,
+};
+pub use xai_grok_workspace_types::rpc::repos::{
+    ProvisionedRepo, RepoManifest, ReposListReq, ReposListResponse,
 };
 pub use xai_grok_workspace_types::rpc::search::{FuzzyChangeReq, FuzzyCloseReq, FuzzyOpenReq};
 pub use xai_grok_workspace_types::rpc::session::{BeginPromptReq, EndPromptReq, RewindToReq};
@@ -97,6 +101,37 @@ pub trait WorkspaceOp: WorkspaceRpc + DeserializeOwned + Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareWorktreeFromWorktreeReq {
     pub inner: crate::worktree::CreateWorktreeFromWorktreeRequest,
+}
+#[async_trait]
+impl WorkspaceOp for ExportGithubReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        if std::path::Path::new(&self.project_dir).is_absolute() {
+            return Err(WorkspaceError::HubError(
+                "project_dir must be relative to the workspace root".into(),
+            ));
+        }
+        let canonical_root = ws.canonical_root().await?;
+        let project_dir = ws
+            .resolve_service_path(&self.project_dir, &canonical_root)
+            .await?;
+        crate::export_github::run_export(crate::export_github::ExportGithubParams {
+            project_dir: &project_dir,
+            repo_full_name: self.repo_full_name.as_deref(),
+            remote_url_base: "https://github.com",
+            web_url_base: "https://github.com",
+            branch: self.branch.as_deref(),
+            commit_message: self.commit_message.as_deref(),
+        })
+        .await
+        .map_err(|failure| WorkspaceError::ExportGithub {
+            kind: failure.kind,
+            message: failure.message,
+        })
+    }
 }
 /// Get all rewind points for the session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +254,88 @@ fn session_tracker(
         .session(sid)
         .ok_or_else(|| WorkspaceError::SessionNotFound(sid.to_owned()))?;
     Ok(session.hunk_tracker().clone())
+}
+/// Ancestor hop budget when locating `.chutes-build/repos.json`.
+///
+/// Grove rewrite is one hop (`/workspace/app` → `/workspace`). Desktop
+/// workspaces can sit deeper than that; this is a backstop only. Primary
+/// bounds are the sandbox root (`/workspace`) and the user-global chutes-build home.
+const REPOS_MANIFEST_MAX_ANCESTOR_HOPS: usize = 16;
+/// Directories to probe for [`REPOS_MANIFEST_RELATIVE_PATH`], starting at
+/// `root_cwd` (post-grove-rewrite agent cwd) and walking up.
+///
+/// Does not escape the sandbox workspace or load `~/.chutes-build/repos.json` /
+/// `$CHUTES_BUILD_HOME/repos.json` (user-global, not a provisioned workspace).
+fn repos_manifest_search_dirs(start: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let rel = xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH;
+    #[allow(deprecated)]
+    let home = std::env::home_dir();
+    let mut global_manifests = Vec::with_capacity(2);
+    if let Some(v) = std::env::var_os("CHUTES_BUILD_HOME")
+        && !v.is_empty()
+    {
+        global_manifests.push(std::path::PathBuf::from(v).join("repos.json"));
+    }
+    if let Some(user_home) = xai_grok_config::user_grok_home() {
+        global_manifests.push(user_home.join("repos.json"));
+    }
+    let mut out = Vec::new();
+    let mut dir = Some(start);
+    for _ in 0..=REPOS_MANIFEST_MAX_ANCESTOR_HOPS {
+        let Some(d) = dir else {
+            break;
+        };
+        let manifest = d.join(rel);
+        if global_manifests.iter().any(|g| g == &manifest) {
+            break;
+        }
+        if home.as_deref() == Some(d) || crate::trust::is_home_dir(d) {
+            break;
+        }
+        out.push(d.to_path_buf());
+        if d == std::path::Path::new("/workspace") {
+            break;
+        }
+        dir = d.parent();
+    }
+    out
+}
+#[async_trait]
+impl WorkspaceOp for ReposListReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let rel = xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH;
+        let start = ws.root_cwd()?;
+        let mut manifest = RepoManifest::new(Vec::new());
+        for d in repos_manifest_search_dirs(&start) {
+            let path = d.join(rel);
+            match tokio::fs::read(&path).await {
+                Ok(bytes) => {
+                    manifest = RepoManifest::from_json_bytes(&bytes).map_err(|e| {
+                        WorkspaceError::HubError(format!(
+                            "invalid repos manifest at {}: {e}",
+                            path.display()
+                        ))
+                    })?;
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(WorkspaceError::HubError(format!(
+                        "failed to read repos manifest at {}: {e}",
+                        path.display()
+                    )));
+                }
+            }
+        }
+        Ok(ReposListResponse {
+            version: manifest.version,
+            repos: manifest.repos,
+        })
+    }
 }
 /// Resolve the directory a git op runs in: the explicit `git_root` when the
 /// caller provides one (the per-session repo, which the desktop sends per
@@ -357,13 +474,24 @@ impl WorkspaceOp for GitCommitReq {
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
         let cwd = git_op_cwd(ws, &self.git_root)?;
-        crate::session::git::commit(
+        crate::session::git::commit(&cwd, self)
+            .await
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for GitSyncBaseReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let cwd = git_op_cwd(ws, &self.git_root)?;
+        crate::session::git::sync_base(
             &cwd,
-            &self.message,
-            self.amend,
-            self.signoff,
-            self.push,
-            self.sync,
+            self.base_ref.as_deref(),
+            self.abort,
+            self.expected_branch.as_deref(),
         )
         .await
         .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -472,64 +600,12 @@ impl WorkspaceOp for GitCheckoutCommitReq {
         _ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        use crate::session::git::git_cli;
-        let git_root = &self.git_root;
-        let head_commit = &self.head_commit;
-        if let Some(current) = crate::session::git::get_current_commit(git_root).await
-            && current == *head_commit
-        {
-            return Ok(CheckoutCommitResponse {
-                checked_out: true,
-                stashed: false,
-                fetched: false,
-                error: None,
-            });
-        }
-        let mut stashed = false;
-        if self.stash_if_dirty {
-            let status = git_cli(git_root, &["status", "--porcelain"]).await;
-            if let Ok(output) = &status
-                && !output.trim().is_empty()
-            {
-                let msg = format!("auto-stash before checkout {head_commit}");
-                if git_cli(git_root, &["stash", "push", "-m", &msg])
-                    .await
-                    .is_ok()
-                {
-                    stashed = true;
-                }
-            }
-        }
-        match git_cli(git_root, &["checkout", head_commit]).await {
-            Ok(_) => Ok(CheckoutCommitResponse {
-                checked_out: true,
-                stashed,
-                fetched: false,
-                error: None,
-            }),
-            Err(_) => {
-                let _ = git_cli(git_root, &["fetch", "origin"]).await;
-                match git_cli(git_root, &["checkout", head_commit]).await {
-                    Ok(_) => Ok(CheckoutCommitResponse {
-                        checked_out: true,
-                        stashed,
-                        fetched: true,
-                        error: None,
-                    }),
-                    Err(e) => {
-                        if stashed {
-                            let _ = git_cli(git_root, &["stash", "pop"]).await;
-                        }
-                        Ok(CheckoutCommitResponse {
-                            checked_out: false,
-                            stashed: false,
-                            fetched: true,
-                            error: Some(e.to_string()),
-                        })
-                    }
-                }
-            }
-        }
+        Ok(crate::session::git::checkout_commit_with_fetch(
+            &self.git_root,
+            &self.head_commit,
+            self.stash_if_dirty,
+        )
+        .await)
     }
 }
 workspace_rpc!(
@@ -856,10 +932,8 @@ impl WorkspaceOp for ContentSearchRequest {
         ws.run_content_search(cwd, context_id, params).await
     }
 }
-/// Convert the heavy `HookRegistry` to its wire mirror via a serde round-trip.
-/// The registry's `hooks` map is private, so reconstructing field-by-field
-/// isn't possible; the round-trip is faithful because the wire type mirrors the
-/// serde shape exactly (the compiled `matcher` is `#[serde(skip)]` either way).
+/// Convert `HookRegistry` to its wire mirror. The `hooks` map is private, so a
+/// serde round-trip stands in for field-by-field construction.
 fn hook_registry_to_wire(
     registry: &xai_grok_hooks::discovery::HookRegistry,
 ) -> WorkspaceResult<HookRegistryWire> {
@@ -867,13 +941,37 @@ fn hook_registry_to_wire(
         serde_json::to_value(registry).map_err(|e| WorkspaceError::HubError(e.to_string()))?;
     serde_json::from_value(value).map_err(|e| WorkspaceError::HubError(e.to_string()))
 }
-/// Inverse of [`hook_registry_to_wire`]. Rebuilds compiled matchers via
-/// [`HookRegistry::recompile_matchers`] so invalid patterns fail closed
-/// (match nothing) rather than widening to match-all after the wire hop.
+/// Inverse of [`hook_registry_to_wire`]. Unknown event keys (a newer peer) are
+/// dropped so one can't fail the whole decode, and matchers are recompiled
+/// fail-closed after the hop.
 fn wire_to_hook_registry(
     wire: &HookRegistryWire,
 ) -> WorkspaceResult<xai_grok_hooks::discovery::HookRegistry> {
-    let value = serde_json::to_value(wire).map_err(|e| WorkspaceError::HubError(e.to_string()))?;
+    let dropped: Vec<&str> = wire
+        .hooks
+        .keys()
+        .filter_map(|event| match event {
+            HookEventNameWire::Unknown(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    if !dropped.is_empty() {
+        tracing::debug!(
+            dropped_count = dropped.len(),
+            dropped_events = ?dropped,
+            "dropping unknown hook event keys from peer wire registry"
+        );
+    }
+    let known = HookRegistryWire {
+        hooks: wire
+            .hooks
+            .iter()
+            .filter(|(event, _)| !matches!(event, HookEventNameWire::Unknown(_)))
+            .map(|(event, specs)| (event.clone(), specs.clone()))
+            .collect(),
+    };
+    let value =
+        serde_json::to_value(&known).map_err(|e| WorkspaceError::HubError(e.to_string()))?;
     let mut registry: xai_grok_hooks::discovery::HookRegistry =
         serde_json::from_value(value).map_err(|e| WorkspaceError::HubError(e.to_string()))?;
     registry.recompile_matchers();
@@ -1304,10 +1402,7 @@ impl WorkspaceOps {
         };
         handle.on_session_ended(session_id);
         if let Err(e) = handle.drop_session(session_id, session_id) {
-            tracing::debug!(
-                % session_id, error = % e,
-                "end_local_session: drop_session failed (expected if never bound)"
-            );
+            tracing::debug!(%session_id, error = %e, "end_local_session: drop_session failed (expected if never bound)");
         }
     }
     pub async fn on_before_turn(
@@ -1406,6 +1501,10 @@ impl WorkspaceOps {
         req: &GitStatusExtReq,
     ) -> WorkspaceResult<GitStatusExtResponse> {
         self.dispatch(req, None).await
+    }
+    /// List provisioned repos from the in-sandbox manifest.
+    pub async fn repos_list(&self) -> WorkspaceResult<ReposListResponse> {
+        self.dispatch(&ReposListReq {}, None).await
     }
     pub async fn hook_registry(&self) -> WorkspaceResult<xai_grok_hooks::discovery::HookRegistry> {
         let wire = self.dispatch(&HookRegistryReq {}, None).await?;
@@ -1547,6 +1646,7 @@ mod tests {
     /// the wire contract.
     #[test]
     fn pinned_workspace_method_wire_names() {
+        assert_eq!(ReposListReq::METHOD, "workspace.repos_list");
         assert_eq!(HookRegistryReq::METHOD, "workspace.hook_registry");
         assert_eq!(HunkGetAllHunksReq::METHOD, "workspace.get_all_hunks");
         assert_eq!(
@@ -1587,6 +1687,171 @@ mod tests {
             window_b
         );
         assert_eq!(git_op_cwd(handle, &None).unwrap(), workspace_root);
+    }
+    #[tokio::test]
+    async fn repos_list_reads_real_manifest_empty_one_and_many() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ops = WorkspaceOps::for_test_in(tmp.path());
+        let empty = ops.repos_list().await.expect("empty list");
+        assert!(empty.repos.is_empty(), "missing manifest → empty list");
+        assert_eq!(
+            empty.version,
+            xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_VERSION
+        );
+        let one = RepoManifest::new(vec![ProvisionedRepo {
+            name: "app".into(),
+            repository: "acme/app".into(),
+            mount_path: "/workspace/app".into(),
+            base_branch: "main".into(),
+            session_branch: "conv/1".into(),
+        }]);
+        std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
+        std::fs::write(
+            tmp.path()
+                .join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH),
+            one.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        let listed = ops.repos_list().await.expect("one repo");
+        assert_eq!(one.repos, listed.repos);
+        assert_eq!(one.version, listed.version);
+        let many = RepoManifest::new(vec![
+            ProvisionedRepo {
+                name: "app".into(),
+                repository: "acme/app".into(),
+                mount_path: "/workspace/app".into(),
+                base_branch: "main".into(),
+                session_branch: "conv/1".into(),
+            },
+            ProvisionedRepo {
+                name: "lib".into(),
+                repository: "acme/lib".into(),
+                mount_path: "/workspace/lib".into(),
+                base_branch: "develop".into(),
+                session_branch: "feat/x".into(),
+            },
+        ]);
+        std::fs::write(
+            tmp.path()
+                .join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH),
+            many.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        let listed = ops.repos_list().await.expect("many repos");
+        assert_eq!(many.repos, listed.repos);
+        assert_eq!(many.version, listed.version);
+    }
+    #[tokio::test]
+    async fn repos_list_walks_up_from_rewritten_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sandbox_ws = tmp.path();
+        let agent_cwd = sandbox_ws.join("app");
+        std::fs::create_dir_all(&agent_cwd).unwrap();
+        let one = RepoManifest::new(vec![ProvisionedRepo {
+            name: "app".into(),
+            repository: "acme/app".into(),
+            mount_path: "/workspace/app".into(),
+            base_branch: "".into(),
+            session_branch: "conv/1".into(),
+        }]);
+        std::fs::create_dir_all(sandbox_ws.join(".chutes-build")).unwrap();
+        std::fs::write(
+            sandbox_ws.join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH),
+            one.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        let ops = WorkspaceOps::for_test_in(&agent_cwd);
+        let listed = ops.repos_list().await.expect("walk up to sandbox ws");
+        assert_eq!(one.repos, listed.repos);
+    }
+    #[test]
+    fn repos_manifest_search_dirs_stops_at_sandbox_workspace_root() {
+        let _lock = crate::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::TestEnvGuard::set("HOME", home.path());
+        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let dirs = repos_manifest_search_dirs(std::path::Path::new("/workspace/app"));
+        assert_eq!(
+            dirs,
+            vec![
+                std::path::PathBuf::from("/workspace/app"),
+                std::path::PathBuf::from("/workspace"),
+            ]
+        );
+    }
+    #[test]
+    fn repos_manifest_search_dirs_keeps_sandbox_root_when_home_unset() {
+        let _lock = crate::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _home = crate::TestEnvGuard::unset("HOME");
+        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let dirs = repos_manifest_search_dirs(std::path::Path::new("/workspace/app"));
+        assert!(
+            dirs.contains(&std::path::PathBuf::from("/workspace/app")),
+            "agent cwd must still be probed: {dirs:?}"
+        );
+        assert!(
+            dirs.contains(&std::path::PathBuf::from("/workspace")),
+            "sandbox root manifest must not be treated as user-global when HOME is unset: {dirs:?}"
+        );
+    }
+    #[test]
+    fn repos_manifest_search_dirs_skips_user_global_grok_home() {
+        let _lock = crate::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::TestEnvGuard::set("HOME", home.path());
+        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let start = home.path().join("src").join("org").join("app");
+        let dirs = repos_manifest_search_dirs(&start);
+        assert!(dirs.contains(&start));
+        assert!(dirs.contains(&home.path().join("src").join("org")));
+        assert!(dirs.contains(&home.path().join("src")));
+        assert!(
+            !dirs.iter().any(|d| d == home.path()),
+            "must not probe $HOME/.chutes-build/repos.json: {dirs:?}"
+        );
+    }
+    /// Sync + `block_on` so `ENV_TEST_LOCK` is not held across `.await`
+    /// (clippy `await_holding_lock`).
+    #[test]
+    fn repos_list_does_not_load_user_global_manifest() {
+        let _lock = crate::ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _home = crate::TestEnvGuard::set("HOME", home.path());
+        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let global = RepoManifest::new(vec![ProvisionedRepo {
+            name: "global".into(),
+            repository: "acme/global".into(),
+            mount_path: "/unrelated".into(),
+            base_branch: "main".into(),
+            session_branch: "x".into(),
+        }]);
+        std::fs::create_dir_all(home.path().join(".chutes-build")).unwrap();
+        std::fs::write(
+            home.path().join(".chutes-build").join("repos.json"),
+            global.to_json_bytes().unwrap(),
+        )
+        .unwrap();
+        let agent_cwd = home.path().join("src").join("app");
+        std::fs::create_dir_all(&agent_cwd).unwrap();
+        let ops = WorkspaceOps::for_test_in(&agent_cwd);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let listed = rt.block_on(ops.repos_list()).expect("list");
+        assert!(
+            listed.repos.is_empty(),
+            "missing workspace manifest must not fall back to ~/.chutes-build/repos.json: {:?}",
+            listed.repos
+        );
     }
     /// Regression: a long-lived (leader) workspace must reclaim the per-session
     /// `FinalizedToolset` — and the MCP tools / `McpState` / `events.jsonl`
@@ -1755,7 +2020,7 @@ mod tests {
         let spec = xai_grok_hooks::config::HookSpec {
             name: "global/safety".to_string(),
             event: xai_grok_hooks::event::HookEventName::PreToolUse,
-            handler_type: "command".to_string(),
+            handler_type: xai_grok_hooks::config::HandlerType::Command,
             configured_matcher: Some("Bash".to_string()),
             matcher: None,
             enabled: true,
@@ -1766,6 +2031,7 @@ mod tests {
             timeout_ms: 5000,
             source_dir: std::path::PathBuf::from("/home/u/.chutes-build/hooks"),
             extra_env: std::collections::HashMap::from([("FOO".to_string(), "bar".to_string())]),
+            layer: xai_grok_hooks::config::HookProvenance::File,
         };
         let mut registry = xai_grok_hooks::discovery::HookRegistry::default();
         registry.append_specs(vec![spec]);
@@ -1860,12 +2126,13 @@ mod tests {
                 timeout_ms,
                 source_dir,
                 extra_env,
+                layer,
             } = spec;
             let event = serde_json::from_value(serde_json::to_value(event).unwrap()).unwrap();
             HookSpecWire {
                 name,
                 event,
-                handler_type,
+                handler_type: handler_type.as_str().to_string(),
                 configured_matcher,
                 enabled,
                 command,
@@ -1875,12 +2142,13 @@ mod tests {
                 timeout_ms,
                 source_dir,
                 extra_env,
+                layer: layer.as_str().to_string(),
             }
         }
         let spec = HookSpec {
             name: "global/safety".to_string(),
             event: xai_grok_hooks::event::HookEventName::PreToolUse,
-            handler_type: "command".to_string(),
+            handler_type: xai_grok_hooks::config::HandlerType::Command,
             configured_matcher: Some("Bash".to_string()),
             matcher: None,
             enabled: true,
@@ -1891,6 +2159,7 @@ mod tests {
             timeout_ms: 5000,
             source_dir: std::path::PathBuf::from("/home/u/.chutes-build/hooks"),
             extra_env: std::collections::HashMap::from([("FOO".to_string(), "bar".to_string())]),
+            layer: xai_grok_hooks::config::HookProvenance::Managed,
         };
         assert_eq!(
             serde_json::to_value(&spec).unwrap(),
@@ -2044,9 +2313,10 @@ mod tests {
     /// PutFileEntry serde round-trip with defaults.
     #[test]
     fn put_file_entry_defaults() {
-        let json = serde_json::json!(
-            { "path" : "src/main.rs", "content" : "fn main() {}" }
-        );
+        let json = serde_json::json!({
+            "path": "src/main.rs",
+            "content": "fn main() {}"
+        });
         let entry: PutFileEntry = serde_json::from_value(json).unwrap();
         assert_eq!(entry.path, "src/main.rs");
         assert_eq!(entry.content, "fn main() {}");
@@ -2092,7 +2362,7 @@ mod tests {
     /// GetFileEntry serde round-trip with defaults.
     #[test]
     fn get_file_entry_defaults() {
-        let json = serde_json::json!({ "path" : "lib.rs" });
+        let json = serde_json::json!({ "path": "lib.rs" });
         let entry: GetFileEntry = serde_json::from_value(json).unwrap();
         assert_eq!(entry.path, "lib.rs");
         assert!(entry.if_none_match.is_none());
@@ -2127,7 +2397,10 @@ mod tests {
     /// GetFileResult serialization skips None fields, defaults matched to false.
     #[test]
     fn get_file_result_defaults_and_skip() {
-        let json = serde_json::json!({ "path" : "a.txt", "exists" : true, });
+        let json = serde_json::json!({
+            "path": "a.txt",
+            "exists": true,
+        });
         let result: GetFileResult = serde_json::from_value(json).unwrap();
         assert!(!result.matched, "matched should default to false");
         assert!(result.content.is_none());

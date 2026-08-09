@@ -1,4 +1,4 @@
-//! `chutes.build/privacy/setCodingDataRetention` extension handler.
+//! `chutes.ai/privacy/setCodingDataRetention` extension handler.
 //!
 //! PUTs the new opt-out flag to cli-chat-proxy and updates local auth state
 //! to match. The local update is fire-and-forget (best-effort cache refresh).

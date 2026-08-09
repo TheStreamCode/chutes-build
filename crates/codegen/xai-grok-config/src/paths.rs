@@ -1,4 +1,4 @@
-//! Filesystem locations for Chutes Build config files and binaries.
+//! Filesystem locations for grok config files and binaries.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -11,8 +11,8 @@ const CLAUDE_MANAGED_SETTINGS_PATH: &str =
 #[cfg(target_os = "linux")]
 const CLAUDE_MANAGED_SETTINGS_PATH: &str = "/etc/claude-code/managed-settings.json";
 
-/// The default user directory (`~/.chutes-build`, canonicalized) used when
-/// `CHUTES_BUILD_HOME` is unset. Exposed so callers can detect
+/// The default user grok directory (`~/.chutes-build`, canonicalized) used when
+/// `CHUTES_BUILD_HOME` is unset. Exposed so callers (e.g. display helpers) can detect
 /// whether [`grok_home()`] is the default without duplicating the computation.
 ///
 /// Uses [`dunce::canonicalize`] instead of [`std::fs::canonicalize`]: on
@@ -33,7 +33,7 @@ pub fn default_grok_home() -> PathBuf {
         .join(".chutes-build")
 }
 
-/// Per-user config directory: `$CHUTES_BUILD_HOME` or `~/.chutes-build`.
+/// Per-user config directory: `$CHUTES_BUILD_HOME` or `~/.chutes-build`. Created if needed.
 pub fn grok_home() -> PathBuf {
     CHUTES_BUILD_HOME
         .get_or_init(|| {
@@ -48,7 +48,7 @@ pub fn grok_home() -> PathBuf {
         .clone()
 }
 
-/// The user-global grok home, but only when one genuinely resolves: `Some` when
+/// The user-global Chutes Build home, but only when one genuinely resolves: `Some` when
 /// `$CHUTES_BUILD_HOME` is set or a home directory is found, `None` otherwise. Unlike
 /// [`grok_home()`], this never falls back to a cwd-relative `.chutes-build`, so callers
 /// that *scan* user-global grok resources (hooks, marketplace sources, ...) don't
@@ -60,25 +60,21 @@ pub fn user_grok_home() -> Option<PathBuf> {
     resolvable.then(grok_home)
 }
 
-/// Canonical application path under `$CHUTES_BUILD_HOME/bin`.
+/// Canonical grok application path: `$CHUTES_BUILD_HOME/bin/grok` (Unix) or `grok.exe` (Windows).
 pub fn grok_application() -> PathBuf {
     grok_application_in(&grok_home())
 }
 
-/// [`grok_application`] under an explicit home.
+/// [`grok_application`] under an explicit home instead of `$CHUTES_BUILD_HOME`.
 pub fn grok_application_in(home: &std::path::Path) -> PathBuf {
-    let name = if cfg!(windows) {
-        "chutes-build.exe"
-    } else {
-        "chutes-build"
-    };
+    let name = if cfg!(windows) { "grok.exe" } else { "grok" };
     home.join("bin").join(name)
 }
 
-/// System-wide config directory: `/etc/chutes-build/` on Unix, `None` on Windows.
+/// System-wide config directory: `/etc/grok/` on Unix, `None` on Windows.
 pub fn system_config_dir() -> Option<PathBuf> {
     if cfg!(unix) {
-        Some(PathBuf::from("/etc/chutes-build"))
+        Some(PathBuf::from("/etc/grok"))
     } else {
         None
     }

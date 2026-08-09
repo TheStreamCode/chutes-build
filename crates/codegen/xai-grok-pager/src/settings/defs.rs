@@ -120,6 +120,32 @@ const PERMISSION_MODE_CHOICES: &[EnumChoice] = &[
 ];
 
 // ---------------------------------------------------------------------------
+// Coding-data-sharing catalog.
+//
+// Persisted in auth metadata (`AuthEntry::coding_data_retention_opt_out`),
+// NOT config.toml. Two choices only — the pager has no `Option`/`Unset`
+// representation for this field.
+//
+// `supports_preview: false` — toggling fires an async ACP call that
+// can fail. Commit on Enter only.
+// ---------------------------------------------------------------------------
+
+// The setting's own description carries the full explanation, so the choices
+// are bare labels — an empty description collapses each to a single line.
+const CODING_DATA_SHARING_CHOICES: &[EnumChoice] = &[
+    EnumChoice {
+        canonical: "opt-in",
+        display: "Opt in",
+        description: "",
+    },
+    EnumChoice {
+        canonical: "opt-out",
+        display: "Opt out",
+        description: "",
+    },
+];
+
+// ---------------------------------------------------------------------------
 // Plan-mode catalog.
 //
 // PAGER-owned, per-session, ACP-mediated via `session/set_mode`.
@@ -290,9 +316,10 @@ const SCREEN_MODE_CHOICES: &[EnumChoice] = &[
 ];
 
 // Voice-capture-mode catalog. SHELL-owned, persisted to `[ui].voice_capture_mode`.
-// `hold` is only offered on terminals that report key releases (Kitty keyboard
-// protocol); `effective_enum_choices` hides it elsewhere, and it falls back to
-// `toggle` at runtime.
+// `hold` is gated on `kitty_releases_reported`; `effective_enum_choices` hides it
+// elsewhere, and it falls back to `toggle` at runtime. "Kitty-protocol terminal"
+// in the copy below is a deliberate user-facing simplification: Alacritty <= 0.14
+// negotiates the protocol yet never reports releases, so hold stays hidden there.
 const VOICE_CAPTURE_MODE_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "toggle",
@@ -308,8 +335,8 @@ const VOICE_CAPTURE_MODE_CHOICES: &[EnumChoice] = &[
 
 // Voice STT language choices for the settings modal.
 //
-// Concrete codes must match `xai_grok_voice::STT_LANGUAGES` (official Grok STT
-// live Chutes model catalog).
+// Concrete codes must match `xai_grok_voice::STT_LANGUAGES` (official Chutes Build STT
+// catalog — https://docs.chutes.ai/developers/model-capabilities/audio/speech-to-text).
 // `auto` is client-only; the voice crate resolves it to a concrete code before
 // the STT handshake. Order: English (default), System, then remaining languages
 // A–Z by English name. A registry unit test locks this list to the voice crate.
@@ -571,6 +598,53 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             // Minimal mode has no interactive scrollback pane for the rail.
             hidden_in_minimal: true,
+        },
+        SettingMeta {
+            key: "page_flip_on_send",
+            category: SettingCategory::Appearance,
+            owner: SettingOwner::Shared,
+            label: "Snap prompt to top on send",
+            description: "When you send a prompt, scroll it to the top of the screen so the \
+                          response starts on a fresh page (default). Turn off to leave the scroll \
+                          position unchanged when you send.",
+            keywords: &[
+                "page", "flip", "send", "prompt", "scroll", "top", "jump", "auto", "snap",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.page_flip_on_send_enabled(),
+            },
+            restart_required: false,
+            hidden_in_minimal: true,
+        },
+        SettingMeta {
+            key: "combine_queued_prompts",
+            category: SettingCategory::Editor,
+            owner: SettingOwner::Shared,
+            label: "Combine queued prompts",
+            description: "Merge consecutive plain follow-ups into one model turn \
+                          (TUI shows one bubble each). Stops at bash, slash commands, \
+                          cron, expanded skills, image follow-ups, or a row under edit. \
+                          Default off; applies on local drain and shell promote.",
+            keywords: &["queue", "combine", "batch", "follow-up", "merge", "pending"],
+            kind: SettingKind::Bool {
+                default: ui_default.combine_queued_prompts.unwrap_or(false),
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
+        SettingMeta {
+            key: "confirm_before_rewind",
+            category: SettingCategory::Editor,
+            owner: SettingOwner::Shared,
+            label: "Confirm before rewind",
+            description: "Ask before rewinding conversation history. Turn off to rewind \
+                          immediately when you pick a turn.",
+            keywords: &["rewind", "confirm", "undo", "history", "ask", "prompt"],
+            kind: SettingKind::Bool {
+                default: ui_default.confirm_before_rewind_enabled(),
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
         },
         SettingMeta {
             // Persisted key stays `simple_mode`; the user-facing label
@@ -1081,6 +1155,43 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
+        // SHELL-owned. Persisted in auth metadata (not config.toml).
+        // Reads from `PagerLocalSnapshot.coding_data_sharing_opt_out`.
+        // Default "opt-out" matches `AuthEntry::coding_data_retention_opt_out = true`
+        // (safer consumer default; server enrichment may still opt the user in).
+        // ZDR / non-admin guards are enforced at dispatch time.
+        // Do not put "telemetry" in keywords — that word is the config-file
+        // analytics toggle (Monitoring / Configuration docs).
+        SettingMeta {
+            key: "coding_data_sharing",
+            category: SettingCategory::Privacy,
+            owner: SettingOwner::Shell,
+            label: "Coding data, retention, and training",
+            // Upstream's copy offers the vendor a data-retention relationship
+            // Chutes Build does not have. The row stays — locked, with a reason
+            // (`CodingDataSharingLock::ProductPolicy`) — because a setting that
+            // vanishes leaves people wondering; one that says why does not.
+            description: "Chutes Build does not retain or train on your coding data, and \
+                          this build ships with no way to opt in. Prompts, traces and \
+                          metrics stay on this machine.",
+            keywords: &[
+                "privacy",
+                "data",
+                "sharing",
+                "coding",
+                "retention",
+                "training",
+                "opt-in",
+                "opt-out",
+            ],
+            kind: SettingKind::Enum {
+                default: "opt-out",
+                choices: CODING_DATA_SHARING_CHOICES,
+                supports_preview: false,
+            },
+            restart_required: false,
+            hidden_in_minimal: false,
+        },
         // SHELL-owned, persisted to `[ui].default_selected_permission` in
         // config.toml. Read by the pager via `appearance::permission_cursor`.
         // Canonical `always_allow_all_sessions` (the effective default) lands
@@ -1226,6 +1337,20 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
             hidden_in_minimal: false,
         },
+        SettingMeta {
+            key: "auto_update",
+            category: SettingCategory::Advanced,
+            owner: SettingOwner::Shell,
+            label: "Auto-update",
+            description: "Automatically download and install pager updates on startup. \
+                          Restart required.",
+            keywords: &[
+                "auto", "update", "updates", "upgrade", "version", "install", "channel",
+            ],
+            kind: SettingKind::Bool { default: true },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
         // SHELL-owned, persisted to `[ui].hunk_tracker_mode`. Restart-required:
         // the mode is read once when the session connects.
         SettingMeta {
@@ -1245,6 +1370,36 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 supports_preview: false,
             },
             restart_required: true,
+            hidden_in_minimal: false,
+        },
+        // SHELL-owned, persisted to `[ui].voice_keybind_enabled`. Default ON —
+        // `None` (inherit) reads as `true`. Disables only the Ctrl+Space / F8
+        // chord; `/voice` (and Esc / the recording-row `[stop]`) keep working.
+        SettingMeta {
+            key: "voice_keybind_enabled",
+            category: SettingCategory::Editor,
+            owner: SettingOwner::Shell,
+            label: "Voice shortcut",
+            description: "Enable the Ctrl+Space / F8 shortcut for voice dictation. \
+                          When off, the keys are ignored; /voice still starts \
+                          dictation.",
+            keywords: &[
+                "voice",
+                "dictation",
+                "mic",
+                "microphone",
+                "speech",
+                "stt",
+                "keybinding",
+                "hotkey",
+                "ctrl+space",
+                "f8",
+                "disable",
+            ],
+            kind: SettingKind::Bool {
+                default: ui_default.voice_keybind_enabled.unwrap_or(true),
+            },
+            restart_required: false,
             hidden_in_minimal: false,
         },
         // SHELL-owned, persisted to `[ui].voice_capture_mode`. The `hold` choice
@@ -1282,14 +1437,14 @@ pub fn default_settings() -> Vec<SettingMeta> {
         },
         // SHELL-owned, persisted to `[ui].voice_stt_language`. Live-applied to
         // the next voice capture (no restart). Default English; System (`auto`)
-        // follows the process locale when it maps to a Grok STT language.
+        // follows the process locale when it maps to a Chutes Build STT language.
         // Catalog = official STT languages (see xai_grok_voice::STT_LANGUAGES).
         SettingMeta {
             key: "voice_stt_language",
             category: SettingCategory::Editor,
             owner: SettingOwner::Shell,
             label: "Voice language",
-            description: "Speech-to-text language for voice dictation (Grok STT). \
+            description: "Speech-to-text language for voice dictation (Chutes Build STT). \
                           English by default; System uses your locale when supported. \
                           Sets formatting language for numbers and currencies.",
             keywords: &["voice", "language", "locale", "dictation", "stt", "speech"],
@@ -1410,8 +1565,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             category: SettingCategory::Advanced,
             owner: SettingOwner::Shell,
             label: "SSH wrap",
-            description: "At session load over SSH, recommend `chutes-build wrap ssh` for \
-                          clipboard forwarding and terminal restore.",
+            description: "Show a `/doctor` tip when an SSH session is not using `chutes-build wrap`.",
             keywords: &[
                 "ssh",
                 "wrap",

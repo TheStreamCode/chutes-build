@@ -9,13 +9,15 @@ use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::{Action, Effect};
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState};
 use crate::app::agent_view::AgentView;
+#[cfg(feature = "local-workspace")]
+use crate::app::app_view::ActiveView;
 use crate::app::app_view::AppView;
 use crate::app::dispatch::ctx::{
     SwitchCause, get_active_agent, get_active_agent_mut, switch_to_agent, with_active_agent,
 };
 use crate::app::dispatch::modes::inherit_auto_mode;
 use crate::app::dispatch::prompt::{defer_to_open_reload_window, supersede_open_reload_window};
-use crate::app::dispatch::queue::{maybe_drain_queue, note_peek_page_flip_after_drain};
+use crate::app::dispatch::queue::{maybe_drain_queue, note_peek_page_flip};
 use crate::app::dispatch::router::dispatch;
 use crate::app::dispatch::status::notify_session_ready;
 use crate::app::dispatch::transcript::extensions_modal_tab_fetches;
@@ -34,6 +36,11 @@ pub(in crate::app::dispatch) fn dispatch_load_session(
     chat_kind: bool,
 ) -> Vec<Effect> {
     if !app.session_startup_allowed() {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.deferred_startup.history_load_as_build = app.welcome_history_load_as_build;
+            app.welcome_history_load_as_build = false;
+        }
         app.deferred_startup.session =
             Some(crate::app::session_startup::DeferredSessionStartup::Load {
                 session_id,
@@ -57,7 +64,7 @@ pub(in crate::app::dispatch) fn clear_stale_session_id(
     let sid = acp::SessionId::new(session_id);
     for agent in app.agents.values_mut() {
         if agent.session.session_id.as_ref() == Some(&sid) {
-            agent.session.session_id = None;
+            agent.unbind_session_id();
         }
     }
     sid
@@ -117,17 +124,31 @@ fn dispatch_load_session_ungated(
     session_cwd: Option<std::path::PathBuf>,
     chat_kind: bool,
 ) -> Vec<Effect> {
-    if crate::app::session_startup::chat_mode_refuses_local_build_load(
-        app.chat_mode,
-        chat_kind,
-        &session_id,
-        &app.cwd,
-    ) {
+    #[cfg(feature = "local-workspace")]
+    let bypass_chat_refusal = app.welcome_history_load_as_build;
+    #[cfg(not(feature = "local-workspace"))]
+    let bypass_chat_refusal = false;
+    if !bypass_chat_refusal
+        && crate::app::session_startup::chat_mode_refuses_local_build_load(
+            app.chat_mode,
+            chat_kind,
+            &session_id,
+            &app.cwd,
+        )
+    {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         app.show_toast(crate::app::session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL);
         return vec![];
     }
     invalidate_picker_fetch_on_dismiss(app);
     if focus_if_session_already_open(app, &session_id, chat_kind).is_some() {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         return vec![];
     }
     let acp_session_id = clear_stale_session_id(app, &session_id);
@@ -174,6 +195,7 @@ fn dispatch_load_session_ungated(
             bg_tool_call_to_task: std::collections::HashMap::new(),
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
+            compact_held_prompt: None,
             current_prompt_id: None,
             created_via_new: false,
         },
@@ -188,6 +210,9 @@ fn dispatch_load_session_ungated(
     agent_mut.prompt.adopt_slash_mru(app.slash_mru.clone());
     agent_mut
         .prompt
+        .adopt_command_tags(app.command_tags.clone());
+    agent_mut
+        .prompt
         .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
     agent_mut.set_session_recap_available(app.session_recap_available);
     agent_mut.set_voice_mode_available(app.voice_mode_enabled);
@@ -197,26 +222,54 @@ fn dispatch_load_session_ungated(
         agent_mut.turn_started_at = Some(std::time::Instant::now());
     }
     agent_mut.apply_app_scoped_gates(
+        app.sharing_enabled,
         app.usage_visible,
-        app.subscription_tier.as_deref(),
+        !app.has_external_auth_provider,
         app.chat_mode,
         app.screen_mode,
         &app.active_announcements,
         &app.tier_restricted_commands,
     );
     agent_mut.chat_kind = chat_kind || app.chat_mode;
+    #[cfg(feature = "local-workspace")]
+    {
+        let history_build = app.welcome_history_load_as_build;
+        let local_intent = match &app.welcome_session_local_workspace {
+            Some(Some(_)) => true,
+            Some(None) => false,
+            None => {
+                if chat_kind {
+                    false
+                } else {
+                    crate::app::session_startup::active_local_workspace()
+                        .ok()
+                        .flatten()
+                        .is_some()
+                }
+            }
+        };
+        let (mode, cli_locked) =
+            crate::views::welcome::workspace_mode::indicator_for_opening_session(
+                chat_kind,
+                history_build,
+                app.local_workspace_startup_locked,
+                local_intent,
+            );
+        agent_mut.workspace_mode = mode;
+        agent_mut.workspace_mode_cli_locked = cli_locked;
+    }
     agent_mut.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     agent_mut
         .prompt
         .slash_controller
         .registry_mut()
         .set_plugins_visible(!app.appearance.disable_plugins);
-    app.mark_project_picker_done();
     switch_to_agent(app, agent_id, SwitchCause::Load);
     vec![Effect::LoadSession {
         agent_id,
         session_id,
         session_cwd,
+        // Conversation-entry bit; effects OR SessionFlags.chat_mode for meta.
         chat_kind,
     }]
 }
@@ -280,8 +333,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
             };
             let d = (entry.id.clone(), entry.source.clone(), entry.cwd.clone());
             app.session_picker_loading = false;
-            app.session_picker_state.query.clear();
-            app.session_picker_state.query_cursor = 0;
+            app.session_picker_state.set_query("");
             app.session_picker_state.search_active = false;
             app.session_picker_state.expanded.clear();
             app.session_picker_content_results = None;
@@ -308,6 +360,29 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
         return effects;
     }
     let chat_kind = source == "conversation";
+    #[cfg(feature = "local-workspace")]
+    if app.chat_mode && matches!(app.active_view, ActiveView::Welcome) {
+        if app.local_workspace_startup_locked {
+            crate::views::welcome::workspace_mode::log_cli_lock_wins(app.welcome_workspace_mode);
+        } else {
+            let mode = crate::views::welcome::WelcomeWorkspaceMode::from_history_source(&source);
+            if app.welcome_workspace_mode != mode {
+                crate::views::welcome::workspace_mode::log_history_source(
+                    "history_auto_switch",
+                    Some(mode),
+                    None,
+                    Some(source.as_str()),
+                );
+                app.welcome_workspace_mode = mode;
+            }
+            if chat_kind {
+                app.welcome_session_local_workspace = None;
+            }
+        }
+        if !chat_kind {
+            app.welcome_history_load_as_build = true;
+        }
+    }
     if chat_kind {
         return dispatch_load_session(app, session_id, None, true);
     }
@@ -326,11 +401,19 @@ pub(in crate::app::dispatch) fn dispatch_pick_session(
     }
     if source == "remote" || source == "both" {
         if focus_if_session_already_open(app, &session_id, false).is_some() {
+            #[cfg(feature = "local-workspace")]
+            {
+                app.welcome_history_load_as_build = false;
+            }
             return vec![];
         }
         app.show_toast("Restoring session from remote...");
         dispatch_load_session_with_restore(app, session_id, cwd)
     } else {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         app.show_toast("Session not found locally");
         vec![]
     }
@@ -397,8 +480,7 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
             };
             let d = (entry.id.clone(), entry.source.clone());
             app.session_picker_loading = false;
-            app.session_picker_state.query.clear();
-            app.session_picker_state.query_cursor = 0;
+            app.session_picker_state.set_query("");
             app.session_picker_state.search_active = false;
             app.session_picker_state.expanded.clear();
             d
@@ -408,7 +490,37 @@ pub(in crate::app::dispatch) fn dispatch_pick_session_in_worktree(
         app.show_toast("Chat conversations can't be resumed in a worktree");
         return vec![];
     }
+    #[cfg(feature = "local-workspace")]
+    if app.chat_mode && matches!(app.active_view, ActiveView::Welcome) {
+        if app.local_workspace_startup_locked {
+            crate::views::welcome::workspace_mode::log_cli_lock_wins(app.welcome_workspace_mode);
+        } else {
+            let mode = crate::views::welcome::WelcomeWorkspaceMode::from_history_source(&source);
+            if app.welcome_workspace_mode != mode {
+                crate::views::welcome::workspace_mode::log_history_source(
+                    "history_auto_switch",
+                    Some(mode),
+                    None,
+                    Some(source.as_str()),
+                );
+                app.welcome_workspace_mode = mode;
+            }
+        }
+        app.welcome_history_load_as_build = true;
+    }
     dispatch_new_worktree_session(app, Some(session_id), None, None, None, None, None)
+}
+fn keep_picker_entry(
+    entry: &crate::app::app_view::SessionPickerEntry,
+    source: &str,
+    session_id: &str,
+    match_id_only: bool,
+) -> bool {
+    if match_id_only {
+        entry.id != session_id
+    } else {
+        entry.source != source || entry.id != session_id
+    }
 }
 /// Remove a deleted session identity from the modal session picker and the
 /// welcome-screen picker, then re-anchor the selection on a real row.
@@ -419,6 +531,7 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
     app: &mut AppView,
     source: &str,
     session_id: &str,
+    match_id_only: bool,
 ) {
     use crate::views::modal::ActiveModal;
     use crate::views::session_picker::build_entry_map;
@@ -437,14 +550,12 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
     {
         if pending_delete
             .as_ref()
-            .is_some_and(|(pending_source, pending_id, _)| {
-                pending_source == source && pending_id == session_id
-            })
+            .is_some_and(|pd| pd.source == source && pd.session_id == session_id)
         {
             *pending_delete = None;
         }
         if let Some(list) = entries.as_mut() {
-            list.retain(|entry| entry.source != source || entry.id != session_id);
+            list.retain(|entry| keep_picker_entry(entry, source, session_id, match_id_only));
         }
         if let Some(hits) = content_results.as_mut() {
             hits.retain(|h| h.session_id != session_id);
@@ -455,7 +566,7 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
             entries.as_deref(),
             content_results.as_deref(),
             crate::views::session_picker::effective_filter_query(
-                &state.query,
+                state.query(),
                 entries_query.as_deref(),
             ),
             true,
@@ -465,8 +576,15 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
         );
         reanchor_grouped_selection(state, &map);
     }
+    if app
+        .session_picker_pending_delete
+        .as_ref()
+        .is_some_and(|pd| pd.source == source && pd.session_id == session_id)
+    {
+        app.session_picker_pending_delete = None;
+    }
     if let Some(list) = app.session_picker_entries.as_mut() {
-        list.retain(|entry| entry.source != source || entry.id != session_id);
+        list.retain(|entry| keep_picker_entry(entry, source, session_id, match_id_only));
     }
     if let Some(hits) = app.session_picker_content_results.as_mut() {
         hits.retain(|h| h.session_id != session_id);
@@ -477,7 +595,7 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
         app.session_picker_entries.as_deref(),
         app.session_picker_content_results.as_deref(),
         crate::views::session_picker::effective_filter_query(
-            &app.session_picker_state.query,
+            app.session_picker_state.query(),
             app.session_picker_entries_query.as_deref(),
         ),
         app.session_picker_grouped,
@@ -581,7 +699,7 @@ pub(in crate::app::dispatch) fn dispatch_trigger_deep_search(
             state.expanded.clear();
             return vec![];
         }
-        let query = state.query.trim().to_string();
+        let query = state.query().trim().to_string();
         *deep_search_seq += 1;
         let seq = *deep_search_seq;
         if query.len() < 2 {
@@ -602,7 +720,7 @@ pub(in crate::app::dispatch) fn dispatch_trigger_deep_search(
         app.session_picker_state.expanded.clear();
         return vec![];
     }
-    let query = app.session_picker_state.query.trim().to_string();
+    let query = app.session_picker_state.query().trim().to_string();
     app.session_picker_deep_search_seq += 1;
     let seq = app.session_picker_deep_search_seq;
     if query.len() < 2 {
@@ -618,7 +736,7 @@ pub(in crate::app::dispatch) fn dispatch_trigger_deep_search(
     }
 }
 /// Chat-mode replacement for local deep search: refetch the session list
-/// with the picker query pushed down as `chutes.build/session/list` `query`.
+/// with the picker query pushed down as `chutes.ai/session/list` `query`.
 /// Keystrokes are coalesced through [`Effect::DebounceSessionSearch`]; a
 /// forced search (Ctrl+/) or a cleared query fetches immediately. Every
 /// trigger bumps `session_picker_list_seq`, so stale in-flight debounces
@@ -628,21 +746,26 @@ fn dispatch_chat_search_refetch(app: &mut AppView, force: bool) -> Vec<Effect> {
     let query = if let Some(agent) = get_active_agent(app)
         && let Some(ActiveModal::SessionPicker { state, .. }) = agent.active_modal.as_ref()
     {
-        state.query.trim().to_string()
+        state.query().trim().to_string()
     } else {
-        app.session_picker_state.query.trim().to_string()
+        app.session_picker_state.query().trim().to_string()
     };
     app.session_picker_list_seq += 1;
     let seq = app.session_picker_list_seq;
     if query.is_empty() {
         set_chat_search_loading(app, false);
-        return vec![Effect::FetchSessionList { query: None, seq }];
+        return vec![Effect::FetchSessionList {
+            query: None,
+            seq,
+            kind_filter: super::foreign::welcome_history_kind_filter(app),
+        }];
     }
     set_chat_search_loading(app, true);
     if force {
         vec![Effect::FetchSessionList {
             query: Some(query),
             seq,
+            kind_filter: super::foreign::welcome_history_kind_filter(app),
         }]
     } else {
         vec![Effect::DebounceSessionSearch { query, seq }]
@@ -772,16 +895,30 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
     session_id: String,
     session_cwd: String,
 ) -> Vec<Effect> {
-    if crate::app::session_startup::chat_mode_refuses_local_build_load(
-        app.chat_mode,
-        false,
-        &session_id,
-        &app.cwd,
-    ) {
+    #[cfg(feature = "local-workspace")]
+    let bypass_chat_refusal = app.welcome_history_load_as_build;
+    #[cfg(not(feature = "local-workspace"))]
+    let bypass_chat_refusal = false;
+    if !bypass_chat_refusal
+        && crate::app::session_startup::chat_mode_refuses_local_build_load(
+            app.chat_mode,
+            false,
+            &session_id,
+            &app.cwd,
+        )
+    {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         app.show_toast(crate::app::session_startup::CHAT_MODE_LOCAL_BUILD_REFUSAL);
         return vec![];
     }
     if focus_if_session_already_open(app, &session_id, false).is_some() {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         return vec![];
     }
     let agent_id = AgentId(app.next_agent_id);
@@ -824,6 +961,7 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
             bg_tool_call_to_task: std::collections::HashMap::new(),
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
+            compact_held_prompt: None,
             current_prompt_id: None,
             created_via_new: false,
         },
@@ -836,20 +974,43 @@ pub(in crate::app::dispatch) fn dispatch_load_session_with_restore(
         agent.begin_replay_window();
         agent.prompt.set_compact(app.appearance.prompt.compact);
         agent.prompt.adopt_slash_mru(app.slash_mru.clone());
+        agent.prompt.adopt_command_tags(app.command_tags.clone());
         agent
             .prompt
             .set_contextual_hints(app.contextual_hints.undo, app.contextual_hints.plan_mode);
         agent.set_session_recap_available(app.session_recap_available);
         agent.set_voice_mode_available(app.voice_mode_enabled);
         agent.apply_app_scoped_gates(
+            app.sharing_enabled,
             app.usage_visible,
-            app.subscription_tier.as_deref(),
+            !app.has_external_auth_provider,
             app.chat_mode,
             app.screen_mode,
             &app.active_announcements,
             &app.tier_restricted_commands,
         );
         agent.chat_kind = app.chat_mode;
+        #[cfg(feature = "local-workspace")]
+        {
+            let history_build = app.welcome_history_load_as_build;
+            let local_intent = match &app.welcome_session_local_workspace {
+                Some(Some(_)) => true,
+                Some(None) => false,
+                None => crate::app::session_startup::active_local_workspace()
+                    .ok()
+                    .flatten()
+                    .is_some(),
+            };
+            let (mode, cli_locked) =
+                crate::views::welcome::workspace_mode::indicator_for_opening_session(
+                    false,
+                    history_build,
+                    app.local_workspace_startup_locked,
+                    local_intent,
+                );
+            agent.workspace_mode = mode;
+            agent.workspace_mode_cli_locked = cli_locked;
+        }
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
         agent
             .prompt
@@ -874,6 +1035,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
     restore_summary: Option<String>,
     restore_degree: Option<xai_grok_workspace::session::git::RestoreDegree>,
     running_prompt_id: Option<String>,
+    scheduler_background_loops: Option<bool>,
 ) -> Vec<Effect> {
     tracing::info!(
         "Session loaded for agent {:?} session {:?}",
@@ -886,6 +1048,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         }
         let hydrate_sid = session_id.clone();
         agent.bind_session_id(session_id);
+        agent.scheduler_background_loops = scheduler_background_loops;
         agent.scrollback.end_batch();
         agent.session.loading_replay = false;
         agent.session.restore_degree = restore_degree;
@@ -947,12 +1110,15 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         if let Some(directive) = agent.pending_first_prompt.take() {
             agent.session.enqueue_prompt_front(directive);
         }
-        effects.extend(maybe_drain_queue(agent));
+        let drain = maybe_drain_queue(agent);
+        let page_flip_entry = drain.page_flip_entry;
+        effects.extend(drain.effects);
         let cwd = agent.session.cwd.clone();
-        effects.push(Effect::HydrateSessionTitleFromDisk {
+        effects.push(Effect::HydrateSessionMetaFromDisk {
             agent_id,
             session_id: hydrate_sid.clone(),
             cwd: cwd.clone(),
+            last_turn_summary_gen: agent.last_turn_summary_gen,
         });
         agent.session.prompt_history_loading = true;
         effects.push(Effect::FetchPromptHistory {
@@ -973,19 +1139,26 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         effects.push(Effect::FetchBilling {
             agent_id,
             silent: true,
+            nonce: 0,
         });
-        if let Some((model_id, effort)) = deferred {
+        if let Some(switch) = deferred {
             agent.session.model_switch_pending = true;
             effects.push(Effect::SwitchModel {
                 agent_id,
                 session_id: hydrate_sid.clone(),
-                model_id,
-                effort,
-                prev_model_id: None,
+                model_id: switch.model_id,
+                effort: switch.effort,
+                prev_model_id: switch.prev_model_id,
             });
         }
-        if std::mem::take(&mut agent.pending_extensions_fetch) && agent.extensions_modal.is_some() {
-            effects.extend(extensions_modal_tab_fetches(agent_id, hydrate_sid.clone()));
+        if std::mem::take(&mut agent.pending_extensions_fetch)
+            && let Some(modal) = agent.extensions_modal.as_mut()
+        {
+            effects.extend(extensions_modal_tab_fetches(
+                modal,
+                agent_id,
+                hydrate_sid.clone(),
+            ));
         }
         effects.push(Effect::RegisterActiveSession {
             session_id: hydrate_sid,
@@ -993,7 +1166,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
         });
         notify_session_ready(&app.notification_service, agent);
         crate::memory_release::release_retained_memory_with("session-load-replay");
-        note_peek_page_flip_after_drain(app, agent_id);
+        note_peek_page_flip(app, agent_id, page_flip_entry);
         return effects;
     }
     vec![]
@@ -1004,10 +1177,7 @@ pub(in crate::app::dispatch) fn handle_session_load_failed(
     session_id: acp::SessionId,
     error: String,
 ) -> Vec<Effect> {
-    tracing::error!(
-        agent = ? agent_id, session = ? session_id, error = % error,
-        "Session load failed"
-    );
+    tracing::error!(agent = ?agent_id, session = ?session_id, error = %error, "Session load failed");
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         if defer_to_open_reload_window(agent, agent_id, "SessionLoadFailed") {
             return vec![];
@@ -1041,6 +1211,7 @@ pub(in crate::app::dispatch) fn handle_session_search_debounce_expired(
         return vec![Effect::FetchSessionList {
             query: (!query.is_empty()).then_some(query),
             seq,
+            kind_filter: super::foreign::welcome_history_kind_filter(app),
         }];
     }
     if live_deep_search_seq(app) != Some(seq) {
@@ -1109,12 +1280,22 @@ pub(in crate::app::dispatch) fn handle_session_restored(
     agent_id: AgentId,
     local_session_id: String,
 ) -> Vec<Effect> {
-    if crate::app::session_startup::chat_mode_refuses_local_build_load(
-        app.chat_mode,
-        false,
-        &local_session_id,
-        &app.cwd,
-    ) {
+    #[cfg(feature = "local-workspace")]
+    let bypass_chat_refusal = app.welcome_history_load_as_build;
+    #[cfg(not(feature = "local-workspace"))]
+    let bypass_chat_refusal = false;
+    if !bypass_chat_refusal
+        && crate::app::session_startup::chat_mode_refuses_local_build_load(
+            app.chat_mode,
+            false,
+            &local_session_id,
+            &app.cwd,
+        )
+    {
+        #[cfg(feature = "local-workspace")]
+        {
+            app.welcome_history_load_as_build = false;
+        }
         refuse_chat_mode_build_agent(app, agent_id);
         return vec![];
     }
@@ -1123,6 +1304,27 @@ pub(in crate::app::dispatch) fn handle_session_restored(
         supersede_open_reload_window(agent, agent_id, "SessionRestored");
         agent.bind_session_id(sid);
         agent.chat_kind = app.chat_mode;
+        #[cfg(feature = "local-workspace")]
+        {
+            let history_build = app.welcome_history_load_as_build;
+            let local_intent = match &app.welcome_session_local_workspace {
+                Some(Some(_)) => true,
+                Some(None) => false,
+                None => crate::app::session_startup::active_local_workspace()
+                    .ok()
+                    .flatten()
+                    .is_some(),
+            };
+            let (mode, cli_locked) =
+                crate::views::welcome::workspace_mode::indicator_for_opening_session(
+                    false,
+                    history_build,
+                    app.local_workspace_startup_locked,
+                    local_intent,
+                );
+            agent.workspace_mode = mode;
+            agent.workspace_mode_cli_locked = cli_locked;
+        }
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
         agent.scrollback.push_block(RenderBlock::system(format!(
             "Session restored. Loading {local_session_id}..."
@@ -1133,6 +1335,7 @@ pub(in crate::app::dispatch) fn handle_session_restored(
         agent_id,
         session_id: local_session_id,
         session_cwd: Some(cwd),
+        // Never a conversation entry (effects OR SessionFlags.chat_mode).
         chat_kind: false,
     }]
 }
@@ -1141,7 +1344,11 @@ pub(in crate::app::dispatch) fn handle_session_restore_failed(
     agent_id: AgentId,
     error: String,
 ) -> Vec<Effect> {
-    tracing::error!(agent = ? agent_id, error = % error, "Session restore failed");
+    tracing::error!(agent = ?agent_id, error = %error, "Session restore failed");
+    #[cfg(feature = "local-workspace")]
+    {
+        app.welcome_history_load_as_build = false;
+    }
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         if defer_to_open_reload_window(agent, agent_id, "SessionRestoreFailed") {
             return vec![];
@@ -1222,12 +1429,20 @@ pub(in crate::app::dispatch) fn dispatch_session_picker_closed(app: &mut AppView
 /// Fetch invalidation shared by EVERY picker-dismissal path:
 /// modal Esc/mouse close, modal and welcome picks (all variants), and the
 /// welcome-screen Esc. Only chat mode can have a query-stamped search in
-/// flight; Build mode must NOT bump — only the plain list fetch exists there
-/// and its responses keep their pre-existing last-write-wins behavior.
+/// flight; a Build-mode MODAL close must NOT bump — only the plain list
+/// fetch exists there and its response lands on the hidden welcome fields
+/// (pre-existing last-write-wins behavior). A WELCOME dismissal must bump
+/// and drop the loading flag: the welcome view survives the close, so a
+/// still-loading flag holds `show_picker` in a spinner limbo that ignores
+/// input until the late response lands and resurrects the picker.
 fn invalidate_picker_fetch_on_dismiss(app: &mut AppView) {
     invalidate_foreign_picker(app);
-    if app.chat_mode {
+    let welcome_dismissal = matches!(app.active_view, crate::app::app_view::ActiveView::Welcome);
+    if app.chat_mode || welcome_dismissal {
         app.session_picker_list_seq += 1;
+    }
+    if welcome_dismissal {
+        app.session_picker_loading = false;
     }
     app.session_picker_deep_search_seq += 1;
     app.session_picker_content_loading = false;

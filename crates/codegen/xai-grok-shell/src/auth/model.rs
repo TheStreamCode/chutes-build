@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use xai_grok_auth::bearer_suffix;
 
 use super::is_xai_oauth2_issuer;
 
@@ -11,10 +12,17 @@ const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes
 pub(super) const LEGACY_SCOPE: &str = "disabled::legacy-auth";
 
 /// auth.json scope key for plain API key auth (desktop login, `chutes-build login --api-key`).
-pub const API_KEY_SCOPE: &str = "chutes::api_key";
+pub(super) const API_KEY_SCOPE: &str = "chutes::api_key";
 
 const BLOCKED_REASON_NO_LOGS: &str = "BLOCKED_REASON_NO_LOGS";
 const BLOCKED_REASON_NO_LOGS_MODERATED: &str = "BLOCKED_REASON_NO_LOGS_MODERATED";
+
+/// Fresh-credential / missing-field default: opted out until the user or
+/// server enrichment opts in. Single source for `GrokAuth`, `AuthMeta`, and
+/// every login-path constructor so the sides cannot drift.
+pub(crate) fn default_coding_data_retention_opt_out() -> bool {
+    true
+}
 
 /// Token provenance (debugging/auth.json only -- no code branches on this).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,7 +77,9 @@ pub struct GrokAuth {
     pub user_blocked_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub team_blocked_reasons: Vec<String>,
-    #[serde(default)]
+    /// Defaults to `true` (opted out) for safer consumer privacy until the
+    /// user explicitly shares or server enrichment sets the team preference.
+    #[serde(default = "default_coding_data_retention_opt_out")]
     pub coding_data_retention_opt_out: bool,
 
     /// Deprecated. Kept for deserializing existing auth.json files.
@@ -100,13 +110,13 @@ pub struct GrokAuth {
 impl std::fmt::Debug for GrokAuth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GrokAuth")
-            .field("key", &token_suffix(&self.key))
+            .field("key", &bearer_suffix(&self.key))
             .field("auth_mode", &self.auth_mode)
             .field("user_id", &self.user_id)
             .field("expires_at", &self.expires_at)
             .field(
                 "refresh_token",
-                &self.refresh_token.as_deref().map(token_suffix),
+                &self.refresh_token.as_deref().map(bearer_suffix),
             )
             .finish_non_exhaustive()
     }
@@ -123,10 +133,10 @@ impl GrokAuth {
             .num_seconds()
     }
 
-    /// `true` when the token comes from the built-in Chutes identity provider —
-    /// either an OIDC login against the production issuer (or its local-dev
-    /// equivalent), or an external auth provider that declared that issuer
-    /// for its token.
+    /// `true` when the token comes from a first-party xAI account —
+    /// either an OIDC login against https://auth.x.ai (or the local-dev
+    /// equivalent), or an external auth provider that declared an xAI
+    /// issuer for its token.
     ///
     /// The issuer is a client-side hint, not a trust assertion: everything
     /// it unlocks still authenticates the actual token server-side, and it
@@ -152,7 +162,7 @@ impl GrokAuth {
     /// qualify; external-provider credentials qualify only when first-party
     /// (`is_xai_auth`), matching the built-in devbox login they replace.
     /// Plain API keys never do.
-    pub fn is_session_auth(&self) -> bool {
+    pub(crate) fn is_session_auth(&self) -> bool {
         match self.auth_mode {
             AuthMode::WebLogin | AuthMode::Oidc => true,
             AuthMode::External => self.is_xai_auth(),
@@ -175,7 +185,7 @@ impl GrokAuth {
     /// retention. Use this for trace-upload and research-data gates.
     /// Product analytics (`telemetry_enabled`) and user-facing sync
     /// features should use `is_zdr_team()` directly.
-    pub fn is_data_collection_disabled(&self) -> bool {
+    pub(crate) fn is_data_collection_disabled(&self) -> bool {
         self.is_zdr_team() || self.coding_data_retention_opt_out
     }
 
@@ -218,7 +228,7 @@ impl Default for GrokAuth {
             organization_role: None,
             user_blocked_reason: None,
             team_blocked_reasons: vec![],
-            coding_data_retention_opt_out: false,
+            coding_data_retention_opt_out: default_coding_data_retention_opt_out(),
             has_grok_code_access: None,
             refresh_token: None,
             expires_at: None,
@@ -235,10 +245,13 @@ impl GrokAuth {
     /// ```ignore
     /// GrokAuth { key: "my-key".into(), ..GrokAuth::test_default() }
     /// ```
-    pub fn test_default() -> Self {
+    pub(crate) fn test_default() -> Self {
         Self {
             key: "test-key".into(),
             user_id: "test-user".into(),
+            // Tests that exercise collection gates need sharing enabled by
+            // default; opt out explicitly when asserting the privacy path.
+            coding_data_retention_opt_out: false,
             ..Default::default()
         }
     }
@@ -285,16 +298,6 @@ pub(crate) struct UserInfo {
     /// `?include=subscription` is passed to `/user`).
     #[serde(default)]
     pub(crate) subscription_tier: Option<String>,
-}
-
-/// Last 12 chars of a token string, safe for diagnostic logging.
-/// Uses the tail because JWT access tokens all share the same base64
-/// header prefix (`eyJ0eXAiOiJh…`); the tail (signature bytes) is
-/// unique per token and makes `key_changed` / `is_stale_snapshot`
-/// diagnostics meaningful.
-pub(crate) fn token_suffix(t: &str) -> &str {
-    let len = t.len();
-    if len > 12 { &t[len - 12..] } else { t }
 }
 
 /// Look up auth from the store by scope key.
@@ -485,5 +488,24 @@ mod tests {
         let json = r#"{"userId": "u1", "subscriptionTier": ""}"#;
         let info: UserInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.subscription_tier.as_deref(), Some(""));
+    }
+
+    /// Pre-default auth.json (no coding_data_retention_opt_out key) must
+    /// deserialize as opted-out, not the old fail-open false.
+    #[test]
+    fn missing_coding_data_retention_opt_out_deserializes_opted_out() {
+        let json = r#"{
+            "key": "k",
+            "auth_mode": "oidc",
+            "create_time": "2020-01-01T00:00:00Z",
+            "user_id": "u"
+        }"#;
+        let auth: GrokAuth = serde_json::from_str(json).unwrap();
+        assert!(
+            auth.coding_data_retention_opt_out,
+            "missing field must default to opted-out"
+        );
+        assert!(default_coding_data_retention_opt_out());
+        assert!(GrokAuth::default().coding_data_retention_opt_out);
     }
 }

@@ -274,6 +274,16 @@ pub fn first_session_announcement<'a>(
     first_session_announcement_at(announcements, hidden_ids, chrono::Utc::now())
 }
 
+/// Whether a live critical session announcement exists. Used by the banner
+/// slot ranking: critical outranks the privacy upsell banner (an outage
+/// notice must not be hidden by a persistent nag), promo does not.
+pub fn has_critical_session_announcement(
+    announcements: &[xai_grok_announcements::RemoteAnnouncement],
+    hidden_ids: &BTreeSet<String>,
+) -> bool {
+    first_critical_session_announcement_at(announcements, hidden_ids, chrono::Utc::now()).is_some()
+}
+
 /// [`first_session_announcement`] with an injectable clock.
 pub fn first_session_announcement_at<'a>(
     announcements: &'a [xai_grok_announcements::RemoteAnnouncement],
@@ -1506,7 +1516,7 @@ mod tests {
         let mut ann = promo(
             "p",
             "New promo",
-            Some(("View Chutes pricing", "https://chutes.ai/pricing")),
+            Some(("Get SuperGrok", "https://chutes.ai/grok")),
         );
         ann.cta.as_mut().unwrap().caption = Some("or use Ctrl+O".into());
         let anns = [ann];
@@ -1515,7 +1525,7 @@ mod tests {
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
 
         let row0 = buf_row(&buf, area, 0);
-        assert!(row0.starts_with("[View Chutes pricing]"), "row0={row0:?}");
+        assert!(row0.starts_with("[Get SuperGrok]"), "row0={row0:?}");
         assert!(
             !row0.contains("New promo"),
             "message must not paint on the banner; row0={row0:?}"
@@ -1527,9 +1537,9 @@ mod tests {
         assert!(row0.ends_with(HIDE_BUTTON), "row0={row0:?}");
         assert!(row0.contains(HIDE_CTA), "row0={row0:?}");
 
-        // [Label] = 21 cols at x 0; [hide] right-aligned at 80−6=74; the hide
+        // [Label] = 15 cols at x 0; [hide] right-aligned at 80−6=74; the hide
         // CTA ends gap-adjacent to it (74−2−25=47).
-        assert_eq!(hits.cta, Some(Rect::new(0, 0, 21, 1)), "[Label] hit rect");
+        assert_eq!(hits.cta, Some(Rect::new(0, 0, 15, 1)), "[Label] hit rect");
         assert_eq!(hits.hide, Some(Rect::new(74, 0, 6, 1)), "[hide] hit rect");
 
         let theme = Theme::current();

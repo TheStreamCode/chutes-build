@@ -4,13 +4,20 @@ use super::session::lifecycle::dispatch_new_session;
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView, VoiceState, VoiceTarget};
 
-/// Tear down voice when a prompt box is **submitted** (Enter / send): release
-/// the mic and forget the session entirely (no trailing final) so a late
-/// in-flight final can't refill the box the user just sent, and a queued
-/// cold-start can't open the mic afterwards. Used by the agent prompt and every
-/// dashboard submit path (dispatch / peek reply / new-agent / slash).
-pub(super) fn voice_stop_on_submit(app: &mut AppView) {
+/// Promote live interim into the bound prompt, then hard-reset (no trailing
+/// final). Returns the fragment for callers that captured text earlier.
+pub(super) fn voice_stop_on_submit(app: &mut AppView) -> Option<String> {
+    let interim = crate::voice::commit_interim_into_prompt(app);
     app.voice_reset();
+    interim
+}
+
+/// Merge interim into a payload captured before [`voice_stop_on_submit`].
+pub(super) fn merge_prompt_with_voice_interim(existing: String, interim: Option<String>) -> String {
+    match interim {
+        Some(interim) => crate::voice::combine_prompt_with_voice_text(&existing, &interim),
+        None => existing,
+    }
 }
 
 /// The prompt box dictation should target for the current surface: a top-level
@@ -40,8 +47,7 @@ fn voice_target_for_view(app: &AppView) -> Option<VoiceTarget> {
     }
 }
 
-/// Explain that voice is unavailable when an inherited tier restriction blocks it.
-/// This path is retained for compatibility with older session metadata when a user tries
+/// Show the SuperGrok upsell when a tier-restricted (free / X Basic) user tries
 /// to start voice via the Ctrl+Space / F8 keybinding, which bypasses the slash
 /// registry (`/voice` is instead hidden + upsold via the deny list). Mirrors the
 /// slash-command upsell surfaces: a Q&A modal on an agent screen
@@ -60,7 +66,7 @@ fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
         ActiveView::AgentDashboard => {
             if let Some(d) = app.dashboard.as_mut() {
                 d.set_error_toast(&format!(
-                    "/voice is unavailable for the current Chutes configuration — see {}",
+                    "/voice requires SuperGrok — upgrade at {}",
                     super::billing::UPSELL_URL_UPGRADE
                 ));
             }
@@ -77,8 +83,8 @@ fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
 /// **Gated on the remote remote settings flag and the subscription tier.** When
 /// voice isn't available (flag off, or a build without audio capture) this is a
 /// **silent no-op** — no toast — so users who don't have the feature see
-/// nothing. When the feature IS available but the user is on a restricted tier,
-/// it shows an availability notice instead of starting a session
+/// nothing. When the feature IS available but the user is on a restricted tier
+/// (free / X Basic), it shows the SuperGrok upsell instead of starting a session
 /// (see [`open_voice_tier_upsell`]) — this is the enforcement point for the
 /// keybinding, which bypasses the slash registry. Otherwise dictation routes
 /// into a prompt box: the active agent's prompt, or the dashboard's dispatch
@@ -96,8 +102,11 @@ pub(super) fn dispatch_enable_voice_mode(app: &mut AppView, from_hold: bool) -> 
     if !app.voice_mode_enabled || !xai_grok_voice::AUDIO_SUPPORTED {
         return vec![];
     }
-    // Compatibility gate for older session metadata. The Ctrl+Space / F8
-    // keybinding bypasses the slash registry, so enforce the restriction here.
+    // Tier gate: free / X Basic personal users can't use voice (the server
+    // zero-limits these tiers). The Ctrl+Space / F8 keybinding bypasses the
+    // slash registry, so this is the enforcement point for it — show the
+    // SuperGrok upsell instead of starting a doomed session (`/voice` itself is
+    // separately hidden + upsold via the deny list).
     if app.is_voice_tier_restricted() {
         return open_voice_tier_upsell(app);
     }

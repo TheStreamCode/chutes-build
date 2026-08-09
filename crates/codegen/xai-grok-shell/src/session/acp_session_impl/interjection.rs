@@ -21,8 +21,12 @@ pub(crate) type PendingInterjection = xai_interjection_core::PendingInterjection
 /// converted into standalone prompt turns (arrived while idle, or after the
 /// running turn's final drain). The prefix keeps the turn's user echo
 /// persist-only: every pane already rendered the text from the
-/// `chutes.build/session/interjection` broadcast, so a live echo would duplicate it.
+/// `chutes.ai/session/interjection` broadcast, so a live echo would duplicate it.
 pub(crate) const INTERJECT_FALLBACK_PROMPT_PREFIX: &str = "interject-fallback-";
+
+pub(crate) fn is_interject_fallback(prompt_id: &str) -> bool {
+    prompt_id.starts_with(INTERJECT_FALLBACK_PROMPT_PREFIX)
+}
 
 impl SessionActor {
     /// Convert a stranded interjection into a queued prompt turn.
@@ -61,7 +65,7 @@ impl SessionActor {
         };
         let (respond_to, _) = tokio::sync::oneshot::channel();
         // User message (skips queue_input); invalidate in-flight recap now.
-        self.cancel_pending_recap_for_new_prompt();
+        self.invalidate_side_calls_for_new_prompt();
         let item = InputItem {
             prompt_id,
             prompt_blocks,
@@ -73,6 +77,8 @@ impl SessionActor {
             verbatim: false,
             json_schema: None,
             origin: super::super::PromptOrigin::User,
+            task_wake_fallback: None,
+            tool_overrides_update: None,
             respond_to,
             persist_ack: None,
             parsed_prompt_tx: None,
@@ -96,21 +102,17 @@ impl SessionActor {
         tracing::info!("Converted stranded interjection into a queued prompt turn");
     }
 
-    /// Flush interjections that missed the completed turn's final drain into
-    /// queued prompt turns (front of the queue, original order). Returns
-    /// whether anything was flushed; the caller kicks
-    /// `maybe_start_running_task`.
-    pub(super) async fn flush_stranded_interjections(&self) -> bool {
+    /// Convert interjections that missed their turn's final drain into queued
+    /// prompt turns, front of the queue in original order. Returns the count.
+    pub(super) async fn flush_stranded_interjections(&self) -> usize {
         let stranded = self.pending_interjections.drain_all();
-        if stranded.is_empty() {
-            return false;
-        }
+        let count = stranded.len();
         // Reversed push_fronts keep entry 0 front-most.
         for entry in stranded.into_iter().rev() {
             self.queue_interjection_fallback_prompt(entry.text, entry.attachments, true)
                 .await;
         }
-        true
+        count
     }
     /// Normalize interjection images for injection (shared pipeline above);
     /// notices append to `wrapped` (TEXT side only). Returns the images to
@@ -241,12 +243,12 @@ impl SessionActor {
         if !text.trim_start().starts_with('/') {
             return None;
         }
-        let bridge = self.agent.borrow().tool_bridge().clone();
-        let slash_skills = bridge.slash_skills().await;
+        let slash_skills = self.slash_skills_for_resolve().await;
         // Availability without `command_availability()`'s goal-reconciliation
         // side effects — this runs mid-turn inside the drain.
         let tool_names = self.registered_tool_names().await;
-        let availability = self.build_command_availability(&tool_names);
+        let has_workflow_runs = !self.workflow_tracker().await.lock().list().is_empty();
+        let availability = self.build_command_availability(&tool_names, has_workflow_runs);
         let parsed = slash_commands::parse_skill_references(text, &slash_skills, availability)?;
         // Deliberately lighter telemetry than turn start: no `skill.activated`
         // span, `PluginUsed`, or `active_skill` stamp — those attribute the
@@ -263,6 +265,7 @@ impl SessionActor {
                 xai_grok_telemetry::events::SkillDispatched {
                     skill_name: sk.name.clone(),
                     plugin_source: sk.plugin_name.clone(),
+                    trigger: xai_grok_telemetry::events::SkillTrigger::SlashCommand,
                 },
             );
         }

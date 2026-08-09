@@ -415,8 +415,14 @@ mod tests {
 
         write_agent_md(&source, "new");
         assert!(!installed.repo_path.join("agents/new.md").exists());
+        // Trust is granted explicitly rather than inherited from the fixture's
+        // location: a fake home under the system temp directory used to be
+        // auto-trusted on Windows, and these tests are about refresh mechanics,
+        // not about the trust policy.
 
-        let trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+        let mut trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+
+        trust.grant_trust(&source).unwrap();
         let summary = refresh_local_installs(&mut registry, &trust, false);
         assert_eq!(summary.refreshed, 1, "{summary:?}");
         assert!(installed.repo_path.join("agents/new.md").exists());
@@ -465,8 +471,14 @@ mod tests {
             source.join("agents/renamed.md"),
         )
         .unwrap();
+        // Trust is granted explicitly rather than inherited from the fixture's
+        // location: a fake home under the system temp directory used to be
+        // auto-trusted on Windows, and these tests are about refresh mechanics,
+        // not about the trust policy.
 
-        let trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+        let mut trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+
+        trust.grant_trust(&source).unwrap();
         let summary = refresh_local_installs(&mut registry, &trust, false);
         assert_eq!(
             summary.refreshed, 1,
@@ -491,7 +503,12 @@ mod tests {
         // Change the source so a refresh attempts a re-copy, then force the
         // promote rename to fail and assert the prior snapshot is restored.
         write_agent_md(&source, "new");
-        let trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+        // Trust is granted explicitly rather than inherited from the fixture's
+        // location: a fake home under the system temp directory used to be
+        // auto-trusted on Windows, and these tests are about refresh mechanics,
+        // not about the trust policy.
+        let mut trust = TrustStore::load_from(home.join(".chutes-build").join("trusted-plugins"));
+        trust.grant_trust(&source).unwrap();
         let summary = {
             let _fail = EnvVarGuard::set("XAI_CHUTES_BUILD_TEST_FAIL_REFRESH_PROMOTE", "1");
             refresh_local_installs(&mut registry, &trust, false)
@@ -504,13 +521,6 @@ mod tests {
         assert!(!installed.repo_path.join("agents/new.md").exists());
     }
 
-    /// Unix-only: the auto-trust rule resolves the home through
-    /// `dirs::home_dir`, which reads `$HOME` only on Unix. On Windows it
-    /// queries the real user profile, and the process temp dir lives *under*
-    /// it (`%LOCALAPPDATA%\Temp`), so a tempdir source is genuinely under-home
-    /// and the outside-home case cannot be staged. The rule itself is covered
-    /// on every platform by `config_path_auto_trust_follows_the_injected_home`.
-    #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn refresh_skips_untrusted_source_outside_home() {
@@ -563,8 +573,14 @@ mod tests {
         let installed = register_local_install(&mut registry, &workspace, Some("plugins/a"));
 
         write_agent_md(&workspace.join("plugins/a"), "x");
+        // Trust is granted explicitly rather than inherited from the fixture's
+        // location: a fake home under the system temp directory used to be
+        // auto-trusted on Windows, and these tests are about refresh mechanics,
+        // not about the trust policy.
 
-        let trust = TrustStore::load_from(home.join("trusted-plugins"));
+        let mut trust = TrustStore::load_from(home.join("trusted-plugins"));
+
+        trust.grant_trust(&workspace).unwrap();
         let summary = refresh_local_installs(&mut registry, &trust, false);
         assert_eq!(summary.refreshed, 1, "{summary:?}");
         assert!(installed.repo_path.join("plugins/a/agents/x.md").exists());
@@ -596,7 +612,12 @@ mod tests {
         assert!(!installed.repo_path.join("link-out/secret.txt").exists());
 
         std::fs::write(source.join("extra.txt"), "x").unwrap();
-        let trust = TrustStore::load_from(home.join("trusted-plugins"));
+        // Trust is granted explicitly rather than inherited from the fixture's
+        // location: a fake home under the system temp directory used to be
+        // auto-trusted on Windows, and these tests are about refresh mechanics,
+        // not about the trust policy.
+        let mut trust = TrustStore::load_from(home.join("trusted-plugins"));
+        trust.grant_trust(&source).unwrap();
         let summary = refresh_local_installs(&mut registry, &trust, false);
         assert_eq!(summary.refreshed, 1, "{summary:?}");
         assert!(!installed.repo_path.join("link-out/secret.txt").exists());

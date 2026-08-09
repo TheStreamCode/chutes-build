@@ -1,16 +1,16 @@
 [package]
 name = "xai-grok-pager"
-version = "0.4.3"
+version = "1.0.0"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
 
 [dependencies]
 # TTY safety — detach subprocesses from the controlling terminal
+chutes-build-core = { path = "../../chutes-build-core" }
 dunce = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-grok-version = { workspace = true }
-chutes-build-core = { path = "../../chutes-build-core" }
 
 # Shared prompt-queue wire types
 xai-prompt-queue = { workspace = true }
@@ -55,6 +55,7 @@ portable-pty = "0.9"
 # Utilities
 derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 anyhow = { workspace = true }
+shlex = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
 rand = { workspace = true }
@@ -83,6 +84,9 @@ nucleo = { workspace = true }
 xai-ratatui-textarea = { workspace = true }
 xai-ratatui-inline = { workspace = true }
 
+# Update
+xai-grok-update = { path = "../xai-grok-update" }
+
 # ACP
 agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
@@ -107,6 +111,7 @@ xai-grok-agent = { workspace = true }
 xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
 xai-hooks-plugins-types = { path = "../xai-hooks-plugins-types" }
 wait-timeout = { workspace = true }
+walkdir = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 
 # Base64 encoding for image data
@@ -124,7 +129,7 @@ shellexpand = "3.1"
 
 # libgit2 for the startup git-info populator (no fork/exec, runs once on launch
 # in spawn_blocking; the render path never touches git directly).
-git2 = { version = "0.21", default-features = false, features = [
+git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
 urlencoding = { workspace = true }
@@ -158,8 +163,8 @@ core-foundation = { workspace = true }
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
-# Enable the render crate's test-only helpers for the pager's test build.
 xai-grok-pager-render = { path = "../xai-grok-pager-render", features = ["test-support"] }
+xai-grok-shell = { workspace = true, features = ["test-support"] }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }
@@ -193,9 +198,18 @@ harness = false
 name = "edit_highlight"
 harness = false
 
+[[bench]]
+name = "resize"
+harness = false
+
 # PTY integration tests are split into coherent scheduling families. The test
 # modules remain under tests/pty_e2e/; these roots only define which cases share
 # one Cargo/Bazel process. All cases stay #[ignore]d for ordinary Cargo runs.
+# Selected Cargo runs must provide PAGER_BINARY; Bazel wires the sibling binary.
+[[test]]
+name = "doctor_early_dispatch"
+path = "tests/doctor_early_dispatch.rs"
+
 [[test]]
 name = "pty_e2e_smoke"
 path = "tests/pty_e2e_smoke.rs"
@@ -266,13 +280,21 @@ path = "src/bin/question_view_playground.rs"
 name = "todo-pane-playground"
 path = "src/bin/todo_pane_playground.rs"
 
+# Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
+# `cargo clippy --workspace -- -D warnings` on this package is stricter than
+# the workspace-default clippy allows used in CI.
+[lints]
+workspace = true
+
 [features]
 default = ["jemalloc", "sandbox-enforce"]
 default-bazel = [
     "jemalloc",
     "sandbox-enforce",
     "test-support",
+    "local-workspace",
     ]
+local-workspace = ["xai-grok-shell/local-workspace"]
 # No-op on this crate: the actual `#[global_allocator]` (and the
 # `tikv-jemallocator` dep) live on the composition-root binary
 # `xai-grok-pager-bin`, which owns `main.rs`. Kept as an empty feature so the

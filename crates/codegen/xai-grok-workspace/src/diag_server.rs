@@ -51,7 +51,20 @@ pub enum DiagState {
     Starting,
     Connected,
     Disconnected,
+    Failed,
 }
+
+/// `/ready` `error_class` when [`DiagState::Failed`] (`hub_auth` / `hub_connect` / `unknown`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorClass {
+    HubAuth,
+    HubConnect,
+    Unknown,
+}
+
+/// Soft cap on `/ready` `error_detail` so guest-local messages stay short.
+const MAX_ERROR_DETAIL_BYTES: usize = 256;
 
 /// Response body for `/ready`. The field set is a frozen contract with the
 /// sandbox readiness gate: never rename or remove fields; additions are
@@ -66,6 +79,12 @@ struct ReadyBody {
     connected_at: Option<u64>,
     state_changed_at: u64,
     version: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_class: Option<ErrorClass>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_close_code: Option<u16>,
 }
 
 /// Response body for `/statusz`: the `/ready` fields plus debug extras.
@@ -82,6 +101,15 @@ struct Inner {
     connected_at: Option<u64>,
     state_changed_at: u64,
     shutting_down: bool,
+    error_class: Option<ErrorClass>,
+    error_detail: Option<String>,
+    last_close_code: Option<u16>,
+}
+
+impl Inner {
+    fn is_failed(&self) -> bool {
+        matches!(self.state, DiagState::Failed)
+    }
 }
 
 /// Cloneable handle publishing hub lifecycle transitions to the server.
@@ -102,37 +130,76 @@ impl DiagHandle {
                 connected_at: None,
                 state_changed_at: now_ms(),
                 shutting_down: false,
+                error_class: None,
+                error_detail: None,
+                last_close_code: None,
             })),
         }
     }
 
     /// Initial hello completed, or a reconnect's serve replay settled.
-    /// Ignored after [`Self::set_shutting_down`]: a reconnect that settles
-    /// during the shutdown drain must not republish `connected`.
+    /// No-op after [`Self::set_shutting_down`] or [`Self::set_failed`], and
+    /// while a terminal close code is latched: a stale reconnect settle must
+    /// not clear `last_close_code` or republish connected. Terminal closes do
+    /// not reconnect on this handle.
     pub fn set_connected(&self) {
         let mut inner = self.lock();
-        if inner.shutting_down {
+        if inner.shutting_down || inner.is_failed() || inner.last_close_code.is_some() {
             return;
         }
         inner.state = DiagState::Connected;
         let now = now_ms();
         inner.connected_at.get_or_insert(now);
         inner.state_changed_at = now;
+        inner.last_close_code = None;
     }
 
-    /// Server socket dropped.
+    /// Server socket dropped. No-op after [`Self::set_failed`].
+    /// Does not clear `last_close_code`: the SDK fires this after a terminal
+    /// close, and the sandbox gate still needs the code.
     pub fn set_disconnected(&self) {
         let mut inner = self.lock();
+        if inner.is_failed() {
+            return;
+        }
         inner.state = DiagState::Disconnected;
         inner.state_changed_at = now_ms();
     }
 
-    /// Latch `disconnected` for process shutdown: reported as `disconnected`
-    /// on `/ready`, and later `set_connected` calls become no-ops.
+    /// Hub sent a terminal close (4100–4199). Latches disconnected and records
+    /// the code on `/ready`. [`Self::set_disconnected`] must not clear it —
+    /// the SDK also fires `on_disconnect` after this callback.
+    pub fn set_terminal_close(&self, code: u16) {
+        let mut inner = self.lock();
+        if inner.is_failed() {
+            return;
+        }
+        inner.state = DiagState::Disconnected;
+        inner.last_close_code = Some(code);
+        inner.state_changed_at = now_ms();
+    }
+
+    /// Latch disconnected for process shutdown; later `set_connected` no-ops.
+    /// No-op after [`Self::set_failed`]. Leaves `last_close_code` so a drain
+    /// after hub CLEANUP still reports 4103 to the reconnect gate.
     pub fn set_shutting_down(&self) {
         let mut inner = self.lock();
+        if inner.is_failed() {
+            return;
+        }
         inner.shutting_down = true;
         inner.state = DiagState::Disconnected;
+        inner.state_changed_at = now_ms();
+    }
+
+    /// Terminal connect failure on `/ready`. Sticky; callers dwell before exit.
+    /// Clears `last_close_code`: failed is its own class, not a hub close.
+    pub fn set_failed(&self, error_class: ErrorClass, error_detail: impl Into<String>) {
+        let mut inner = self.lock();
+        inner.state = DiagState::Failed;
+        inner.error_class = Some(error_class);
+        inner.error_detail = Some(truncate_error_detail(error_detail.into()));
+        inner.last_close_code = None;
         inner.state_changed_at = now_ms();
     }
 
@@ -142,6 +209,7 @@ impl DiagHandle {
 
     fn ready_body(&self) -> ReadyBody {
         let inner = self.lock();
+        let failed = inner.is_failed();
         ReadyBody {
             launch_id: self.launch_id.clone(),
             state: inner.state,
@@ -149,6 +217,15 @@ impl DiagHandle {
             connected_at: inner.connected_at,
             state_changed_at: inner.state_changed_at,
             version: xai_grok_version::VERSION,
+            error_class: failed.then_some(inner.error_class).flatten(),
+            error_detail: if failed {
+                inner.error_detail.clone()
+            } else {
+                None
+            },
+            last_close_code: matches!(inner.state, DiagState::Disconnected)
+                .then_some(inner.last_close_code)
+                .flatten(),
         }
     }
 
@@ -158,6 +235,17 @@ impl DiagHandle {
             os: env::consts::OS,
         }
     }
+}
+
+fn truncate_error_detail(detail: String) -> String {
+    if detail.len() <= MAX_ERROR_DETAIL_BYTES {
+        return detail;
+    }
+    let mut end = MAX_ERROR_DETAIL_BYTES;
+    while end > 0 && !detail.is_char_boundary(end) {
+        end -= 1;
+    }
+    detail[..end].to_owned()
 }
 
 fn now_ms() -> u64 {
@@ -357,6 +445,10 @@ mod tests {
         assert_eq!(body["launch_id"], "nonce-1");
         assert_eq!(body["state"], "starting");
         assert_eq!(body["connected_at"], Value::Null);
+        assert!(
+            obj.get("last_close_code").is_none(),
+            "last_close_code must be omitted unless a terminal close was recorded"
+        );
     }
 
     #[tokio::test]
@@ -378,6 +470,10 @@ mod tests {
         let (status, disconnected) = get_json(port, "/ready").await;
         assert_eq!(status, 503);
         assert_eq!(disconnected["state"], "disconnected");
+        assert!(
+            disconnected.get("last_close_code").is_none(),
+            "plain disconnect must omit last_close_code"
+        );
         assert_eq!(
             disconnected["connected_at"], connected["connected_at"],
             "connected_at is frozen at first connect and echoed on disconnect"
@@ -410,6 +506,196 @@ mod tests {
         let (status, body) = get_json(port, "/ready").await;
         assert_eq!(status, 503);
         assert_eq!(body["state"], "disconnected");
+    }
+
+    #[tokio::test]
+    async fn ready_reports_last_close_code_only_when_set() {
+        let handle = DiagHandle::new(None);
+        let bound = serve(DiagListener::Tcp(0), handle.clone(), None)
+            .await
+            .expect("bind");
+        let port = bound.port.expect("tcp port");
+
+        handle.set_connected();
+        handle.set_terminal_close(4103);
+        handle.set_disconnected();
+        let (status, body) = get_json(port, "/ready").await;
+        assert_eq!(status, 503);
+        assert_eq!(body["state"], "disconnected");
+        assert_eq!(body["last_close_code"], 4103);
+    }
+
+    #[tokio::test]
+    async fn stale_settle_after_terminal_close_keeps_ready_disconnected_with_4103() {
+        let handle = DiagHandle::new(None);
+        let bound = serve(DiagListener::Tcp(0), handle.clone(), None)
+            .await
+            .expect("bind");
+        let port = bound.port.expect("tcp port");
+
+        handle.set_connected();
+        // on_terminal_close, then a settle that still held the pre-close epoch,
+        // then on_disconnect — `/ready` must keep 4103.
+        handle.set_terminal_close(4103);
+        handle.set_connected();
+        handle.set_disconnected();
+
+        let (status, body) = get_json(port, "/ready").await;
+        assert_eq!(status, 503);
+        assert_eq!(body["state"], "disconnected");
+        assert_eq!(body["last_close_code"], 4103);
+    }
+
+    #[test]
+    fn ready_body_omits_last_close_code_until_terminal_close() {
+        let handle = DiagHandle::new(None);
+        assert!(handle.ready_body().last_close_code.is_none());
+        handle.set_disconnected();
+        assert!(handle.ready_body().last_close_code.is_none());
+        handle.set_terminal_close(4103);
+        assert_eq!(handle.ready_body().last_close_code, Some(4103));
+        handle.set_disconnected();
+        assert_eq!(
+            handle.ready_body().last_close_code,
+            Some(4103),
+            "set_disconnected must not wipe a recorded terminal close"
+        );
+        handle.set_connected();
+        assert_eq!(
+            handle.ready_body().last_close_code,
+            Some(4103),
+            "stale set_connected must not clear a latched terminal close"
+        );
+        assert_eq!(handle.ready_body().state, DiagState::Disconnected);
+
+        handle.set_terminal_close(4103);
+        handle.set_shutting_down();
+        assert_eq!(
+            handle.ready_body().last_close_code,
+            Some(4103),
+            "shutdown drain after CLEANUP still reports the close code"
+        );
+
+        handle.set_failed(ErrorClass::Unknown, "late fail");
+        assert_eq!(handle.ready_body().state, DiagState::Failed);
+        assert!(
+            handle.ready_body().last_close_code.is_none(),
+            "failed must not advertise last_close_code"
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_reports_failed_with_error_fields() {
+        let handle = DiagHandle::new(Some("nonce-fail".to_owned()));
+        let bound = serve(DiagListener::Tcp(0), handle.clone(), None)
+            .await
+            .expect("bind");
+        let port = bound.port.expect("tcp port");
+
+        handle.set_failed(ErrorClass::HubAuth, "handshake auth failed: HTTP 401");
+        let (status, body) = get_json(port, "/ready").await;
+
+        assert_eq!(status, 503, "failed is not ready");
+        assert_eq!(body["launch_id"], "nonce-fail");
+        assert_eq!(body["state"], "failed");
+        assert_eq!(body["error_class"], "hub_auth");
+        assert_eq!(body["error_detail"], "handshake auth failed: HTTP 401");
+        assert!(body["state_changed_at"].is_u64());
+        assert!(body["pid"].is_u64());
+        assert!(body["version"].is_string());
+        let starting = DiagHandle::new(None);
+        let bound2 = serve(DiagListener::Tcp(0), starting, None)
+            .await
+            .expect("bind");
+        let (_, start_body) = get_json(bound2.port.expect("tcp port"), "/ready").await;
+        assert_eq!(start_body["state"], "starting");
+        assert!(
+            start_body.get("error_class").is_none(),
+            "error_class must be omitted unless failed"
+        );
+        assert!(
+            start_body.get("error_detail").is_none(),
+            "error_detail must be omitted unless failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_failed_hub_connect_and_unknown_classes() {
+        let handle = DiagHandle::new(None);
+        let bound = serve(DiagListener::Tcp(0), handle.clone(), None)
+            .await
+            .expect("bind");
+        let port = bound.port.expect("tcp port");
+
+        handle.set_failed(ErrorClass::HubConnect, "network error: connection refused");
+        let (status, body) = get_json(port, "/ready").await;
+        assert_eq!(status, 503);
+        assert_eq!(body["state"], "failed");
+        assert_eq!(body["error_class"], "hub_connect");
+        assert_eq!(body["error_detail"], "network error: connection refused");
+
+        handle.set_failed(ErrorClass::Unknown, "something else");
+        let (status, body) = get_json(port, "/ready").await;
+        assert_eq!(status, 503);
+        assert_eq!(body["state"], "failed");
+        assert_eq!(body["error_class"], "unknown");
+        assert_eq!(body["error_detail"], "something else");
+    }
+
+    #[tokio::test]
+    async fn failed_is_sticky_against_later_lifecycle_transitions() {
+        let handle = DiagHandle::new(None);
+        let bound = serve(DiagListener::Tcp(0), handle.clone(), None)
+            .await
+            .expect("bind");
+        let port = bound.port.expect("tcp port");
+
+        handle.set_failed(ErrorClass::HubAuth, "handshake auth failed: HTTP 401");
+        handle.set_connected();
+        handle.set_disconnected();
+        handle.set_shutting_down();
+        handle.set_terminal_close(4103);
+
+        let (status, body) = get_json(port, "/ready").await;
+        assert_eq!(status, 503);
+        assert_eq!(body["state"], "failed");
+        assert_eq!(body["error_class"], "hub_auth");
+        assert_eq!(body["error_detail"], "handshake auth failed: HTTP 401");
+        assert!(
+            body.get("last_close_code").is_none(),
+            "failed must not advertise last_close_code after set_terminal_close"
+        );
+    }
+
+    #[test]
+    fn error_detail_is_truncated_to_cap() {
+        let handle = DiagHandle::new(None);
+        let long = "x".repeat(MAX_ERROR_DETAIL_BYTES + 64);
+        handle.set_failed(ErrorClass::Unknown, long);
+        let body = handle.ready_body();
+        let detail = body.error_detail.expect("detail");
+        assert_eq!(detail.len(), MAX_ERROR_DETAIL_BYTES);
+    }
+
+    #[test]
+    fn error_detail_truncation_respects_utf8_char_boundary() {
+        let mut long = "a".repeat(MAX_ERROR_DETAIL_BYTES - 1);
+        long.push('é');
+        assert_eq!(long.len(), MAX_ERROR_DETAIL_BYTES + 1);
+
+        let handle = DiagHandle::new(None);
+        handle.set_failed(ErrorClass::Unknown, long);
+        let detail = handle.ready_body().error_detail.expect("detail");
+        assert!(
+            detail.len() <= MAX_ERROR_DETAIL_BYTES,
+            "truncated length {}",
+            detail.len()
+        );
+        assert!(
+            detail.is_char_boundary(detail.len()),
+            "must not split a multi-byte char"
+        );
+        assert!(detail.ends_with('a') || detail.ends_with('é'));
     }
 
     #[cfg(unix)]

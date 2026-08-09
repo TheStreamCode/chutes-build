@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -86,9 +88,12 @@ pub enum RefreshTokenFailedReason {
     RefreshTokenRejected,
     /// `invalid_client` — the client/app credential was rejected.
     ClientRejected,
-    /// Escalation from repeated transient failures (OIDC) or a single
-    /// external-binary failure. Never a raw IdP code: an unrecognized terminal
-    /// code is classified transient, not `Other` (see `classify_terminal`).
+    /// The operator's `auth_provider_command` could not mint a credential in a
+    /// headless run (`CHUTES_BUILD_AUTH_EXPIRED=1`).
+    ProviderInteractiveRequired,
+    /// Escalation from repeated transient failures (OIDC). Never a raw IdP
+    /// code: an unrecognized terminal code is classified transient, not
+    /// `Other` (see `classify_terminal`).
     Other,
 }
 
@@ -99,24 +104,50 @@ impl RefreshTokenFailedReason {
     pub(crate) fn is_sticky(self) -> bool {
         match self {
             Self::RefreshTokenRejected => true,
+            Self::ClientRejected | Self::ProviderInteractiveRequired | Self::Other => false,
+        }
+    }
+
+    /// Whether the verdict rules out an unattended retry for as long as it
+    /// stands. Orthogonal to [`Self::is_sticky`], which is about whether the
+    /// verdict ever ages out.
+    pub(crate) fn blocks_unattended_retry(self) -> bool {
+        match self {
+            Self::RefreshTokenRejected | Self::ProviderInteractiveRequired => true,
             Self::ClientRejected | Self::Other => false,
         }
     }
 
     /// User-facing copy for a terminal refresh failure; the raw IdP code stays
     /// in logs.
-    pub(crate) fn user_message(self) -> &'static str {
+    pub(crate) fn user_message(self) -> Cow<'static, str> {
         match self {
             Self::RefreshTokenRejected => {
-                "Your session has expired. Run `chutes-build login` to sign in again."
+                "Your session has expired. Run `chutes-build login` to sign in again.".into()
             }
             Self::ClientRejected => {
                 "Authentication is temporarily unavailable. Run `chutes-build login` if this persists."
+                    .into()
             }
+            Self::ProviderInteractiveRequired => provider_login_message(None),
             Self::Other => {
-                "Authentication could not be refreshed. Run `chutes-build login` to sign in again."
+                "Authentication could not be refreshed. Run `chutes-build login` to sign in again.".into()
             }
         }
+    }
+}
+
+/// `label` is the operator's `auth_provider_label`, where the surface has one.
+pub(crate) fn provider_login_message(label: Option<&str>) -> Cow<'static, str> {
+    match label {
+        Some(label) => format!(
+            "Your session expired and {label} could not renew it in the background. \
+             Run /login to sign in again."
+        )
+        .into(),
+        None => "Your session expired and your sign-in helper could not renew it in the \
+                 background. Run /login to sign in again."
+            .into(),
     }
 }
 
@@ -142,5 +173,11 @@ impl AuthError {
     /// A terminal refresh failure for an already-classified `reason`.
     pub(crate) fn permanent(reason: RefreshTokenFailedReason) -> Self {
         AuthError::Refresh(RefreshTokenError::Permanent(reason.into()))
+    }
+
+    /// Retryable refresh failure (network, 5xx, sleep/dark-wake defer, etc.).
+    /// Permanent failures, NotLoggedIn, and policy rejects are not transient.
+    pub(crate) fn is_transient(&self) -> bool {
+        matches!(self, AuthError::Refresh(RefreshTokenError::Transient(_)))
     }
 }

@@ -18,7 +18,7 @@ use crate::terminal::{TerminalName, terminal_context};
 /// Fed from three places, all off the render path:
 ///   - [`cwd_git_info_lazy`] — a lazy, throttled refresh when a view reads a cwd.
 ///   - [`populate_from_cwd_async`] — an eager warm at startup / on a cwd change.
-///   - [`update_from_notification`] — the `chutes.build/git_head_changed` ACP
+///   - [`update_from_notification`] — the `chutes.ai/git_head_changed` ACP
 ///     notification, so a branch switch inside an agent reflects immediately
 ///     instead of waiting out [`CWD_GIT_REFRESH_TTL`].
 type CwdCacheEntry = (Option<CwdGitInfo>, Instant);
@@ -225,7 +225,6 @@ fn compute_snapshot(cwd: &Path) -> GitSnapshot {
     // path uses the same convention.
     let branch = repo.head().ok().map(|head| {
         head.shorthand()
-            .ok()
             .filter(|s| *s != "HEAD")
             .map(str::to_string)
             .unwrap_or_default()
@@ -261,17 +260,12 @@ pub fn worktree_label_index() -> std::collections::HashMap<PathBuf, String> {
         return map;
     };
     for rec in records {
-        let Some(label) = rec
-            .metadata
-            .as_ref()
-            .and_then(|m| m.get(xai_grok_shell::session::worktree::META_KEY_LABEL))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-        else {
+        let Some(label) = rec.label() else {
             continue;
         };
+        let label = label.to_owned();
         let key = dunce::canonicalize(&rec.path).unwrap_or(rec.path);
-        map.insert(key, label.to_string());
+        map.insert(key, label);
     }
     map
 }
@@ -285,14 +279,7 @@ fn lookup_worktree_label(cwd: &Path) -> Option<String> {
     // Try exact match first, then walk up ancestors to find the worktree root.
     for ancestor in cwd.ancestors() {
         if let Ok(Some(record)) = db.get(&ancestor.to_string_lossy()) {
-            let label = record
-                .metadata
-                .as_ref()?
-                .get(xai_grok_shell::session::worktree::META_KEY_LABEL)?
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-            return label;
+            return record.label().map(String::from);
         }
     }
     None

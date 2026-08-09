@@ -76,6 +76,7 @@ pub enum PromptAudience {
     Subagent,
 }
 use xai_grok_tools::bridge::ToolBridge;
+use xai_grok_tools::types::template_renderer::TemplateRenderer;
 /// Agent-specific inputs for system prompt rendering.
 ///
 /// Serializable (JSON/YAML) so users can dump it and inspect fields.
@@ -144,12 +145,12 @@ pub struct PromptContext {
     /// stdio / generic-ACP).
     #[serde(default)]
     pub is_non_interactive: bool,
-    /// Identity in the primary Chutes Build system prompt (`You are <label>…`).
+    /// Identity in the primary chutes-build system prompt (`You are <label>…`).
     /// Not the UI picker name. Defaults to [`DEFAULT_SYSTEM_PROMPT_LABEL`].
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
 }
-/// Default identity used by the primary Chutes Build prompt.
+/// Default identity on trim-tool-descriptions (`You are Chutes Build released by xAI`).
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Chutes Build";
 fn default_system_prompt_label() -> String {
     DEFAULT_SYSTEM_PROMPT_LABEL.to_string()
@@ -235,18 +236,19 @@ impl PromptContext {
     /// These are the agent-specific values that get merged with the
     /// tool context in `TemplateRenderer::render_with_extra()`.
     pub fn placeholders(&self) -> serde_json::Value {
-        serde_json::json!(
-            { "memory_enabled" : self.memory_enabled, "memory_global_path" : self
-            .memory_global_path.as_deref().unwrap_or(""), "memory_workspace_path" : self
-            .memory_workspace_path.as_deref().unwrap_or(""), "role_instructions" : self
-            .role_instructions.as_deref().unwrap_or(""), "persona_instructions" : self
-            .persona_instructions.as_deref().unwrap_or(""), "os_name" : self.os_name
-            .as_deref().unwrap_or(""), "shell_path" : self.shell_path.as_deref()
-            .unwrap_or(""), "working_directory" : self.working_directory.as_deref()
-            .unwrap_or(""), "current_date" : self.current_date.as_deref().unwrap_or(""),
-            "is_non_interactive" : self.is_non_interactive, "system_prompt_label" : self
-            .system_prompt_label.as_str(), }
-        )
+        serde_json::json!({
+            "memory_enabled": self.memory_enabled,
+            "memory_global_path": self.memory_global_path.as_deref().unwrap_or(""),
+            "memory_workspace_path": self.memory_workspace_path.as_deref().unwrap_or(""),
+            "role_instructions": self.role_instructions.as_deref().unwrap_or(""),
+            "persona_instructions": self.persona_instructions.as_deref().unwrap_or(""),
+            "os_name": self.os_name.as_deref().unwrap_or(""),
+            "shell_path": self.shell_path.as_deref().unwrap_or(""),
+            "working_directory": self.working_directory.as_deref().unwrap_or(""),
+            "current_date": self.current_date.as_deref().unwrap_or(""),
+            "is_non_interactive": self.is_non_interactive,
+            "system_prompt_label": self.system_prompt_label.as_str(),
+        })
     }
     /// Render the full system prompt via `ToolBridge`.
     ///
@@ -258,12 +260,21 @@ impl PromptContext {
     /// MiniJinja so that `${{ tools.by_kind.* }}` variables resolve
     /// correctly regardless of prompt mode.
     pub async fn render(&self, tool_bridge: &ToolBridge) -> Option<String> {
+        let renderer = tool_bridge.template_renderer_snapshot().await?;
+        self.render_with_renderer(&renderer)
+    }
+    /// Render the full system prompt from a finalized tool-name renderer.
+    ///
+    /// Hosts that do not own a [`ToolBridge`] use this path so they still
+    /// consume the production base-template and prompt-body composition.
+    pub fn render_with_renderer(&self, renderer: &TemplateRenderer) -> Option<String> {
         let placeholders = self.placeholders();
+        let render = |template: &str| renderer.render_with_extra(template, &placeholders).ok();
         let prompt = match self.prompt_mode {
             PromptMode::Extend => {
                 let decrypted;
                 let base = match &self.system_prompt {
-                    TemplateOverride::Custom(s) => s.as_str(),
+                    TemplateOverride::Custom(template) => template.as_str(),
                     TemplateOverride::Codex => {
                         decrypted = apply_patch_template();
                         &decrypted
@@ -277,30 +288,15 @@ impl PromptContext {
                         &decrypted
                     }
                 };
-                let mut p = tool_bridge.render_prompt(base, &placeholders).await?;
-                if let Some(ref body) = self.prompt_body {
-                    p.push_str("\n\n");
-                    let rendered_body = tool_bridge
-                        .render_prompt(body, &placeholders)
-                        .await
-                        .unwrap_or_else(|| body.clone());
-                    p.push_str(&rendered_body);
+                let mut prompt = render(base)?;
+                if let Some(body) = &self.prompt_body {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(&render(body).unwrap_or_else(|| body.clone()));
                 }
-                p
+                prompt
             }
-            PromptMode::Full => {
-                let body = self.prompt_body.as_deref().unwrap_or("");
-                tool_bridge.render_prompt(body, &placeholders).await?
-            }
+            PromptMode::Full => render(self.prompt_body.as_deref().unwrap_or(""))?,
         };
-        tracing::debug!(
-            target: "chutes_build::prompt_efficiency",
-            audience = ?self.audience,
-            prompt_chars = prompt.len(),
-            estimated_prompt_tokens = xai_token_estimation::estimate_tokens(&prompt),
-            project_instruction_files = self.agents_md_files.len(),
-            "rendered local prompt metrics"
-        );
         Some(prompt)
     }
 }
@@ -435,9 +431,9 @@ mod tests {
     #[test]
     fn test_placeholders_system_prompt_label_override() {
         let mut ctx = test_context();
-        ctx.system_prompt_label = "Grok Internal".into();
+        ctx.system_prompt_label = "Chutes Build Internal".into();
         let p = ctx.placeholders();
-        assert_eq!(p["system_prompt_label"], "Grok Internal");
+        assert_eq!(p["system_prompt_label"], "Chutes Build Internal");
     }
     #[test]
     fn test_missing_system_prompt_label_deserializes_to_default() {
@@ -787,13 +783,24 @@ mod tests {
     }
     fn base_template_ctx() -> minijinja::Value {
         minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => true,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read =>
-            "hashline_read", edit => "hashline_edit", search => "hashline_grep", execute
-            => "run_terminal_cmd", background_task_action => "get_task_output",
-            memory_search => "memory_search", memory_get => "memory_get", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => true,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "hashline_read",
+                    edit => "hashline_edit",
+                    search => "hashline_grep",
+                    execute => "run_terminal_cmd",
+                    background_task_action => "get_task_output",
+                    memory_search => "memory_search",
+                    memory_get => "memory_get",
+                }
+            },
         }
     }
     #[test]
@@ -850,13 +857,23 @@ mod tests {
     #[test]
     fn child_rendered_prompt_includes_role_and_persona_sections() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "Follow Rust conventions", persona_instructions =>
-            "You are a code reviewer", tools => minijinja::context! { by_kind =>
-            minijinja::context! { read => "hashline_read", edit => "hashline_edit",
-            search => "hashline_grep", execute => "run_terminal_cmd",
-            background_task_action => "get_task_output", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "Follow Rust conventions",
+            persona_instructions => "You are a code reviewer",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "hashline_read",
+                    edit => "hashline_edit",
+                    search => "hashline_grep",
+                    execute => "run_terminal_cmd",
+                    background_task_action => "get_task_output",
+                }
+            },
+
         };
         let rendered = render_subagent_template(ctx);
         assert!(rendered.contains("<role-instructions>"));
@@ -907,11 +924,20 @@ mod tests {
     #[test]
     fn child_rendered_prompt_omits_background_tasks_without_execute() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read =>
-            "hashline_read", edit => "hashline_edit", search => "hashline_grep", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "hashline_read",
+                    edit => "hashline_edit",
+                    search => "hashline_grep",
+                }
+            },
         };
         let rendered = render_subagent_template(ctx);
         assert!(
@@ -923,33 +949,34 @@ mod tests {
             "hashline guidance should still be present"
         );
     }
-    /// Rendered size with line endings normalized.
-    ///
-    /// The templates are `include_str!`-ed, so they carry whatever the checkout
-    /// produced: a CRLF working tree (the Windows default) adds one byte per
-    /// line and would push every budget below over its ceiling for a reason
-    /// that has nothing to do with prompt content.
-    fn rendered_size(rendered: &str) -> usize {
-        rendered.replace("\r\n", "\n").len()
-    }
     #[test]
     fn child_rendered_template_is_compact() {
         let rendered = render_subagent_template(base_template_ctx());
         assert!(
-            rendered_size(&rendered) < 4200,
+            rendered.len() < 3700,
             "rendered child template too large: {} chars",
-            rendered_size(&rendered)
+            rendered.len()
         );
     }
     #[test]
     fn child_rendered_prompt_omits_code_change_rules_without_edit_tools() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read =>
-            "hashline_read", search => "hashline_grep", execute => "run_terminal_cmd",
-            background_task_action => "get_task_output", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "hashline_read",
+                    search => "hashline_grep",
+                    execute => "run_terminal_cmd",
+                    background_task_action => "get_task_output",
+                }
+            },
+
         };
         let rendered = render_subagent_template(ctx);
         assert!(
@@ -964,26 +991,36 @@ mod tests {
     fn rendered_prompt_size_general_purpose() {
         let rendered = render_subagent_template(base_template_ctx());
         assert!(
-            rendered_size(&rendered) < 4200,
-            "general-purpose rendered prompt: {} chars (ceiling 4200)",
-            rendered_size(&rendered)
+            rendered.len() < 3700,
+            "general-purpose rendered prompt: {} chars (ceiling 3700)",
+            rendered.len()
         );
     }
     #[test]
     fn rendered_prompt_size_read_only() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read =>
-            "hashline_read", search => "hashline_grep", execute => "run_terminal_cmd",
-            background_task_action => "get_task_output", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "hashline_read",
+                    search => "hashline_grep",
+                    execute => "run_terminal_cmd",
+                    background_task_action => "get_task_output",
+                }
+            },
+
         };
         let rendered = render_subagent_template(ctx);
         assert!(
-            rendered_size(&rendered) < 3300,
-            "read-only rendered prompt: {} chars (ceiling 3300)",
-            rendered_size(&rendered)
+            rendered.len() < 2800,
+            "read-only rendered prompt: {} chars (ceiling 2800)",
+            rendered.len()
         );
         let full = render_subagent_template(base_template_ctx());
         assert!(
@@ -996,12 +1033,22 @@ mod tests {
     #[test]
     fn child_rendered_prompt_omits_edit_references_without_edit_tool() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read => "read_file",
-            search => "grep", execute => "run_terminal_cmd", background_task_action =>
-            "get_task_output", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "read_file",
+                    search => "grep",
+                    execute => "run_terminal_cmd",
+                    background_task_action => "get_task_output",
+                }
+            },
+
         };
         let rendered = render_subagent_template(ctx);
         assert!(
@@ -1012,11 +1059,20 @@ mod tests {
     #[test]
     fn child_rendered_prompt_omits_execute_references_without_execute_tool() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read => "read_file",
-            edit => "search_replace", search => "grep", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "read_file",
+                    edit => "search_replace",
+                    search => "grep",
+                }
+            },
         };
         let rendered = render_subagent_template(ctx);
         assert!(
@@ -1031,11 +1087,19 @@ mod tests {
     #[test]
     fn child_rendered_prompt_omits_both_edit_and_execute_references() {
         let ctx = minijinja::context! {
-            os_name => "linux", shell_path => "/bin/bash", working_directory =>
-            "/workspace", current_date => "2026-03-26", memory_enabled => false,
-            role_instructions => "", persona_instructions => "", tools =>
-            minijinja::context! { by_kind => minijinja::context! { read => "read_file",
-            search => "grep", } },
+            os_name => "linux",
+            shell_path => "/bin/bash",
+            working_directory => "/workspace",
+            current_date => "2026-03-26",
+            memory_enabled => false,
+            role_instructions => "",
+            persona_instructions => "",
+            tools => minijinja::context! {
+                by_kind => minijinja::context! {
+                    read => "read_file",
+                    search => "grep",
+                }
+            },
         };
         let rendered = render_subagent_template(ctx);
         assert!(
@@ -1246,7 +1310,7 @@ mod tests {
             ("plan", plan),
         ] {
             assert!(
-                !prompt.contains("You are a Grok Build agent"),
+                !prompt.contains("You are a Chutes Build agent"),
                 "{name} prompt should not duplicate base template identity"
             );
         }

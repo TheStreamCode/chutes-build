@@ -1,73 +1,35 @@
 # Security Policy
 
-## Supported versions
+Chutes Build is a fork of
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build). Where to report
+depends on which part is affected, and if you are not sure, report it here first.
 
-Chutes Build is currently a development preview. Security fixes are applied to
-the latest revision of the default branch; older source snapshots are not
-supported.
+## Report it here
 
-## Reporting a vulnerability
+Use GitHub's private vulnerability reporting on this repository:
+<https://github.com/TheStreamCode/chutes-build/security/advisories/new>.
 
-Use the repository's private GitHub Security Advisory reporting flow. Do not
-open a public issue and do not include live credentials, private source code,
-session archives, or personal data in a report.
+Please do not open a public issue for a vulnerability.
 
-Include:
+Anything in the fork's own surface belongs here:
 
-- the affected revision and platform;
-- a concise description of the impact and trust boundary;
-- minimal reproduction steps using synthetic data;
-- whether exploitation requires user approval, repository control, browser
-  access, or a malicious model/tool response;
-- any proposed mitigation.
+- credential resolution and storage (`CHUTES_API_KEY`, `auth.json`, the OAuth
+  flow against the Chutes IdP);
+- which endpoints may receive a credential (`chutes-build-core::endpoint_policy`);
+- the plugin trust boundary, permission rules, and the sandbox;
+- the Chutes tools — media generation, OCR, the isolated browser, Context7;
+- memory storage and the secret filter.
 
-You should receive an acknowledgement when the report is reviewed. Disclosure
-and remediation timing will be coordinated according to severity and the
-availability of a safe fix.
+## Report it upstream too
 
-## Security boundaries
+If the flaw is in code inherited from upstream and reproduces on Grok Build, it
+affects their users as well: please also report it through their process. A fix
+landing upstream reaches more people, and it comes back here by merge.
 
-Chutes Build can execute commands, modify files, invoke models, start subagents,
-and control an isolated browser. Model output, repository contents, web pages,
-MCP servers, tool responses, and downloaded documents are untrusted input. Keep
-permission prompts enabled, use trusted repositories, and never expose secrets
-in prompts or committed files.
+## What this build does not do
 
-The project intentionally disables telemetry, remote trace uploads, automatic
-updates, upstream session sharing/search, remote workspace exposure, and
-upstream managed configuration. These are compile-time product policies, not
-server-controlled feature flags. Any change to those guarantees requires an
-explicit security and privacy review.
-
-Ambient Chutes credentials are restricted to allowlisted official HTTPS hosts.
-Custom inference and model-catalog endpoints require dedicated credentials.
-OAuth client secrets are read from the environment, used for token exchange
-and refresh when configured, and are never persisted by Chutes Build.
-
-Credential-bearing and download clients reject URL credentials, unexpected
-ports, insecure schemes, redirects, and private, loopback, link-local, or
-special-use DNS results. Development endpoint overrides require the explicit
-`CHUTES_ALLOW_INSECURE_ENDPOINTS=1` opt-in; the opt-in does not make ambient
-Chutes credentials transferable to arbitrary model endpoints. Custom Context7
-endpoints require their own opt-in and never receive `CONTEXT7_API_KEY`.
-
-Machine-readable MCP listings redact environment/header values and URL
-credentials. Destructive session, memory, plugin, marketplace, and worktree
-operations require an interactive confirmation unless an explicit `--yes`
-flag is provided. Media responses stream to bounded temporary storage, default
-to 128 MiB with a 512 MiB hard ceiling, and use transactional create-new
-artifact writes. Automatic permission mode only fast-paths deterministic
-read-only shell commands; classifier failure returns to the normal user prompt.
-
-## Automated release checks
-
-CI scans the complete Git history for known secret patterns and evaluates the
-resolved Rust dependency graph for advisories, licenses, duplicate versions,
-and unapproved sources. Release packaging additionally executes every native
-binary, creates SHA-256 sidecars for native npm archives, verifies those
-sidecars after artifact download, and runs the assembled launcher with its
-native Linux package before publication can begin.
-
-Documented advisory exceptions must include a bounded rationale in `deny.toml`.
-New advisories or source-policy violations fail CI by default. The current
-review record is maintained in [docs/security-review.md](docs/security-review.md).
+Some classes of report do not apply, because the behaviour is compiled out rather
+than merely disabled: telemetry, remote error reporting, session sharing, remote
+workspace exposure, trace upload, and self-update. See
+[`PRIVACY.md`](PRIVACY.md) and `chutes-build-core::product`. If you find one of
+them active, that *is* a vulnerability and we want to hear about it.

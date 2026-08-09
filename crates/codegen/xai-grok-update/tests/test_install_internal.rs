@@ -104,7 +104,7 @@ async fn install_internal_pinned_version_writes_binary_and_symlink() {
         format!("grok-0.1.181-{platform}").as_str()
     );
 
-    // `chutes-build` and `agent` move together — see `swap_managed_bin_links`.
+    // `grok` and `agent` move together — see `swap_managed_bin_links`.
     let agent_link = home.join("bin").join("agent");
     assert!(agent_link.is_symlink(), "agent symlink created");
     let agent_target = std::fs::read_link(&agent_link).unwrap();
@@ -149,8 +149,8 @@ async fn install_internal_updates_stale_agent_symlink_to_new_version() {
     );
 }
 
-/// Rollback regression: if `agent` swap fails after `chutes-build` succeeded,
-/// `chutes-build` must roll back to its prior target (all-or-nothing).
+/// Rollback regression: if `agent` swap fails after `grok` succeeded,
+/// `grok` must roll back to its prior target (all-or-nothing).
 #[tokio::test]
 #[serial]
 async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
@@ -191,8 +191,8 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
     );
 }
 
-/// Absent-prior rollback regression: fresh install (no prior `chutes-build` /
-/// `agent`), sabotaged `agent` swap must *remove* the just-created `chutes-build`
+/// Absent-prior rollback regression: fresh install (no prior `grok` /
+/// `agent`), sabotaged `agent` swap must *remove* the just-created `grok`
 /// link so we don't leave it on the new binary while `agent` is absent.
 #[tokio::test]
 #[serial]
@@ -207,7 +207,7 @@ async fn install_internal_rollback_removes_absent_prior_grok_link() {
     let bin_dir = home.join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
 
-    // No prior `chutes-build`. Sabotage `agent` swap: non-empty directory → EISDIR.
+    // No prior `grok`. Sabotage `agent` swap: non-empty directory → EISDIR.
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -557,6 +557,54 @@ async fn install_internal_from_bases_falls_back_to_secondary_when_primary_fails(
             .join(format!("grok-0.1.181-{platform}"))
             .exists(),
         "fallback should produce a downloaded binary"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn install_internal_from_bases_does_not_fallback_on_smoke_failure() {
+    // A --version failure is a property of the artifact, not the CDN. The
+    // fallback base must not be contacted (a dead fallback would fail
+    // differently if we retried).
+    let _ = test_home();
+    reset_home();
+    let platform = host_platform();
+
+    let primary = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/stable"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("0.1.181"))
+        .mount(&primary)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/grok-0.1.181-{platform}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"#!/bin/sh\nexit 1\n".to_vec()))
+        .mount(&primary)
+        .await;
+
+    // Live fallback so we can assert it was never contacted.
+    let fallback = MockServer::start().await;
+
+    let cfg = make_config("stable");
+    let err = install_internal_from_bases(
+        Some("0.1.181"),
+        &cfg,
+        &[primary.uri().as_str(), fallback.uri().as_str()],
+    )
+    .await
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("failed to run") || msg.contains("exited"),
+        "expected smoke failure, got: {msg}"
+    );
+    assert!(
+        fallback
+            .received_requests()
+            .await
+            .expect("request recording enabled")
+            .is_empty(),
+        "smoke failure must not trigger a fallback-base retry"
     );
 }
 

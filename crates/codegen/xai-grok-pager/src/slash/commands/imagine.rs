@@ -1,11 +1,15 @@
 use agent_client_protocol as acp;
+use xai_grok_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use xai_grok_tools::implementations::grok_build::{
-    IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
+    IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
-const REQUIRED_TOOLS: &[&str] = &[IMAGE_GEN_TOOL_NAME];
+// The command is hidden unless its tool is advertised, so this is also the
+// switch that made `/imagine` disappear: it named a tool no Chutes deployment
+// has.
+const REQUIRED_TOOLS: &[&str] = &[GENERATE_MEDIA_TOOL_NAME];
 
 pub struct ImagineCommand;
 
@@ -60,7 +64,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_chutes_media_tool() {
+    fn requires_the_chutes_media_tool() {
         assert_eq!(ImagineCommand.required_tools(), &["generate_media"]);
     }
 
@@ -100,6 +104,10 @@ mod tests {
                     _ => panic!("expected Text block"),
                 };
                 assert!(text.contains("generate_media"));
+                assert!(
+                    text.contains("describe_media_model"),
+                    "the instruction must teach describe-before-generate: schemas differ per model"
+                );
                 assert!(text.contains("a golden sunset"));
             }
             other => panic!("expected InjectSkill, got {other:?}"),

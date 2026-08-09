@@ -76,6 +76,7 @@ mod tests {
         assert_eq!(std::fs::read(&dest).unwrap(), data);
     }
 
+    // POSIX mode bits; Windows has no `set_mode`.
     #[cfg(unix)]
     #[test]
     fn test_clone_preserves_permissions() {

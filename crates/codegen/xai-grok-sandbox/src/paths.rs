@@ -1,14 +1,12 @@
 //! Filesystem path tables for sandbox profiles.
 //!
-//! Collects device files, temp directories, sensitive deny-paths, and
-//! ecosystem (package-manager / toolchain) writable paths into helpers
-//! consumed by [`super::profiles`].
+//! Collects device files, temp directories, and essential writable paths.
 
 use std::path::{Path, PathBuf};
 
-// ── Grok state directory ────────────────────────────────────────────────────
+// ── Chutes Build state directory ────────────────────────────────────────────────────
 
-/// Grok state directory — always writable (`$CHUTES_BUILD_HOME` or `~/.chutes-build`).
+/// Chutes Build state directory — always writable (`$CHUTES_BUILD_HOME` or `~/.chutes-build`).
 pub(crate) fn grok_home() -> PathBuf {
     xai_grok_config::grok_home()
 }
@@ -22,7 +20,7 @@ pub(crate) fn grok_home() -> PathBuf {
 /// or seed RNGs.
 ///
 /// These are individual files (use `allow_file`, not `allow_path`).
-/// `/dev/pts` is a directory (PTY slaves on Linux) so it uses `allow_path`.
+/// Directory nodes under `/dev` belong in [`DEVICE_DIRS`].
 #[cfg(all(feature = "enforce", unix))]
 pub(crate) const DEVICE_FILES: &[&str] = &[
     "/dev/null",    // output sink — used by virtually every CLI tool
@@ -31,13 +29,13 @@ pub(crate) const DEVICE_FILES: &[&str] = &[
     "/dev/urandom", // entropy — used by crypto/TLS
     "/dev/tty",     // controlling terminal — used by git, ssh, gpg
     "/dev/ptmx",    // PTY allocation — used by terminal spawning
-    "/dev/fd",      // file descriptor access (symlink to /proc/self/fd on Linux)
 ];
 
-/// Device directories that need write access.
+/// Device directories that need write access (use `allow_path`, not `allow_file`).
 #[cfg(all(feature = "enforce", unix))]
 pub(crate) const DEVICE_DIRS: &[&str] = &[
     "/dev/pts", // PTY slaves (Linux)
+    "/dev/fd",  // fd table (symlink to /proc/self/fd on Linux; a directory)
 ];
 
 // ── Temporary directories ───────────────────────────────────────────────────

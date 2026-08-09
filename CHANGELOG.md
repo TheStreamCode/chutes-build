@@ -6,6 +6,382 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-07
+
+Chutes Build is re-based onto `xai-org/grok-build` 1.0.0 (`afbc0fb`) and adopts
+its version, so the number now says which upstream this build actually is.
+
+### Why the re-base
+
+`.github/upstream.json` recorded `lastReviewedVersion: 0.2.117`, but those
+commits had been *reviewed and not taken* — the records said "nothing safe to
+port in isolation". For the retained crates the tree was still at the 2026-07-17
+fork point, 2075 files and roughly 440k lines behind upstream. Cherry-picking
+could not close that: upstream added 94k lines in five days. Measuring the fork
+showed why re-basing was the cheaper path — only 102 files existed here and not
+upstream, and only 26 actually consume `chutes-build-core`.
+
+### Added
+
+Everything upstream shipped between the fork point and 1.0.0 arrives at once:
+1348 files of work from the never-taken window, plus the roughly 110 changes
+between 0.2.117 and 1.0.0. Highlights users will notice: session recaps that
+follow the language of the conversation, narrow markdown tables that reflow
+inside their cells with hard splits on grapheme boundaries, a plan-viewer
+scrollbar that is easier to grab, `--output-format streaming-messages-json`,
+tabbed usage and session-info, and a large batch of terminal, tmux and session
+fixes.
+
+### Security
+
+Carried forward and, where upstream had since fixed them differently, taken from
+upstream instead:
+
+- Permission rules for Read, Edit and Grep lexically normalize the tool's path
+  before the glob match, so `Read(src/**)` can no longer be escaped with
+  `src/../../etc/passwd`.
+- `NotebookEdit` / `NotebookRead` no longer alias onto `Edit` / `Read`.
+- A client-forwarded MCP server matching an on-disk Claude or Cursor config is
+  rejected while that vendor's `mcps` switch is off.
+- Diagnostic logging of a credential fragment no longer panics on a non-ASCII
+  token.
+- Chutes API keys (`cpk_`) are recognised by the secret redactor.
+- Memory passes through the secret filter at every write path, and every write
+  path now creates its file owner-only. Three of the four created files with the
+  process umask, so a fresh install's `MEMORY.md` and both bootstrap templates
+  were world-readable — and memory holds whatever you asked the agent to
+  remember.
+- `model-router` dispatch validates `CHUTES_ROUTER_BASE_URL` through the
+  endpoint policy before a session credential is sent to it.
+- The default inference endpoint is `llm.chutes.ai` again. The re-base had left
+  upstream's `api.x.ai/v1`, so any model entry without an explicit base URL
+  would have sent a Chutes API key to xAI.
+- The relay and gateway WebSocket endpoints are loopback sentinels again, not
+  `code.grok.com` and `grok.com`. Chutes Build has no vendor relay; those paths
+  must fail closed.
+- The changelog fetch, the update check and the remote-session/workspace clients
+  point at a closed loopback port, so none of them can phone home.
+- The npm scaffold that would install `@xai-official/grok-<platform>` binaries on
+  postinstall is gone, along with the version check that compared this build
+  against upstream's package.
+
+### Fixed
+
+- Cloudflare edge failures (520–524, 529, 530) are retried instead of ending the
+  turn, while origin-TLS 525/526 stay fatal.
+- A server `Retry-After` is clamped to 30s and jittered.
+- Failed requests no longer dump a Cloudflare HTML error page into the terminal.
+- The sandbox starts on large workspaces (deny-glob entry budget 200k → 2M).
+- `bin/protoc` is a DotSlash wrapper Windows cannot execute from a build script;
+  a vendored platform binary is now the fallback.
+
+### Fixed (the Chutes tool layer was unreachable)
+
+- **`generate_media`, `list_media_models`, `describe_media_model`, `browser`,
+  `ocr_page` and `get_chutes_usage` were in no toolset.** The re-base kept every
+  implementation and dropped every registration, so six thousand lines of working
+  code compiled, passed their own tests, and could not be called. Upstream's
+  toolsets carried its Imagine tools instead, which talk to an endpoint Chutes has
+  no equivalent for.
+- **`/imagine` and `/imagine-video` had disappeared**, for the same reason: the
+  pager hides a command whose required tools are not advertised, and they required
+  the xAI Imagine tools. Both now use `generate_media`, and their instructions
+  teach the Chutes workflow — list the catalog, describe the model, compose the
+  payload from the cord's own example — because no two Chutes media models share a
+  schema. `/imagine-video` is rewritten rather than renamed: upstream's guidance
+  opens with "there is no text-to-video tool", which is true of that API and false
+  here.
+- **Plugin sources in the system temp directory were auto-trusted on Windows.**
+  Auto-trust covers anything under the user's home, and on Windows temp *is* under
+  the home — so a plugin unpacked there skipped the explicit trust step entirely.
+  Found by a test that had been failing on Windows since before the re-base.
+- Five upstream test failures on Windows are gone; `xai-grok-agent` now passes all
+  578. Two were real defects rather than test bugs: the trust hole above, and a
+  home-directory guard no test on Windows could reach.
+
+### Authentication
+
+Upstream ships an OAuth application everyone signs in through, so its
+documentation and defaults put browser login first and treat the API key as a
+fallback. Chutes does not work that way: OAuth needs an application you register in
+your own account area at [chutes.ai/app/api](https://chutes.ai/app/api), so there is
+no client ID that could serve anyone but its owner.
+
+- **The compiled-in OAuth client ID is gone.** It offered a sign-in that would fail
+  for every user but one. `OAuth2ProviderConfig::from_env` now returns `None` unless
+  `CHUTES_BUILD_OAUTH2_CLIENT_ID` names an app, which is also upstream's shape and
+  so one seam fewer at the next merge. With no app configured, `login` already said
+  the right thing — "Sign-in is not available for this deployment. Set
+  CHUTES_API_KEY instead." — and now that message is reachable.
+- **A cached session survives a shell with no OAuth app configured.** The
+  compatibility check compares a credential's issuer against the configured one;
+  with no provider configured there is nothing to compare against, and the question
+  becomes which credentials are self-sufficient. A session is: `oidc::refresh`
+  renews it from the issuer and client id stored in the credential itself, not from
+  the config. So exporting `CHUTES_BUILD_OAUTH2_CLIENT_ID`, signing in, and then
+  launching from a desktop shortcut or a cron entry that lacks the variable keeps
+  working — discarding the session there would strand the user in the one state
+  where interactive login is unavailable. The legacy issuer-less `WebLogin`
+  credential is still rejected, now for either config shape, because it has neither
+  issuer nor client id to renew with.
+- **The documentation was rewritten around the API key**, which is the primary and
+  always-valid credential rather than a fallback: the authentication chapter, the
+  first-launch section of the getting-started guide, `docs/getting-started.md` and
+  the README. `docs/getting-started.md` had also described a "bundled client ID"
+  that no longer exists.
+- **Six example keys read `CHUTES_API_KEY="xai-..."`** — upstream's prefix, left
+  behind when the rebrand renamed the variable but not its value. A Chutes key is
+  `cpk_`-prefixed, which the redactor already knew and the docs did not.
+
+The API key also has to be *enterable*, and on this branch it was not:
+
+- **`/apikey` did not exist.** `slash/commands/apikey.rs` came across in the
+  re-base and was never declared in `slash/commands/mod.rs`, so it was not
+  compiled — the same registration gap as the Chutes tool layer, in a third
+  registry, and invisible for the same reason: an unreferenced module is not
+  built, so nothing warns. Everything it needs went with it —
+  `Action::EnterApiKey`/`SubmitApiKey`, `Effect::SubmitApiKey`,
+  `AuthMode::ApiKeyEntry`, the dispatchers, the welcome-screen arm, the `k` key.
+  The shell half was intact the whole time: `chutes.build/setApiKey` is handled in
+  `extensions/auth.rs` and allow-listed in `acp_agent.rs`. Nothing could reach it.
+- **`/login` jumped straight into OAuth** instead of asking, because
+  `Action::ShowLoginMenu` went the same way. It now opens the choice menu
+  ("Login with …" / "Enter API key" / "Quit") that the fork's `/login` always did.
+- Together these meant a fresh install advertised exactly one login method —
+  browser sign-in — which without a registered app cannot run. The only way in was
+  to set the environment variable before starting the program.
+- Four registries now, and the fourth caught itself: the pager's
+  `pager_builtin_triggers_are_reserved_in_shell` failed the moment `/apikey`
+  became real, because `apikey` was not in the shell's `PAGER_COMMAND_KEYS` and a
+  skill of that name could have shadowed it. Reserved. The new
+  `apikey_registered_in_builtin_commands` is the test that would have caught the
+  original gap.
+
+The documentation had described `/apikey` and the in-app entry all along, in
+`docs/slash-commands.md` and `docs/getting-started.md`. Third time in this release
+that auditing the docs against the code found the code wrong.
+
+### Fixed (voice had no working transport)
+
+- **Speech-to-text could not work at all.** The re-base took upstream's 1.0.0 voice
+  crate, which is streaming-only — it opens a WebSocket to `{api_base}/v1/stt` — and
+  the rebrand pointed that at `api.chutes.ai`, where the route does not exist. Chutes
+  serves Whisper-family models as ordinary chutes over request/response HTTP, which
+  is exactly why the fork wrote a batch transport and made it the default. The two
+  files implementing it, `pcm.rs` and `stt/batch.rs`, came across in Fase 1 and were
+  never declared in any module, so neither was compiled; `SttMode`, `batch_api_base`
+  and the pipeline's batch branch were not copied at all. What shipped was a feature
+  whose only transport was a route the backend does not serve.
+- Restored as a graft onto upstream's newer pipeline rather than a copy over it:
+  the subprocess capture that replaced the in-process one no longer exposes
+  `peak_meter()`, so the silence guard takes its running peak from the chunks with
+  `pcm::peak_abs_i16_le` — which is what that module is for, and the batch path holds
+  every sample anyway.
+- `[voice].api_base` goes back to a closed loopback address. Streaming has no Chutes
+  backend, so the default must fail immediately rather than resolve to a real host
+  that cannot answer.
+- Batch STT now posts through `xai_grok_http::shared_client()` instead of building a
+  bare `reqwest::Client`. The fork's version skipped `CHUTES_EXTRA_CA_BUNDLE` — a
+  proxy-terminated corporate network is precisely where that request would otherwise
+  fail — and the connection health-checks.
+- The STT transport is documented in `docs/configuration.md`, which had listed the
+  media variables and said nothing about how speech is transcribed. The 0.4.x
+  changelog had mentioned `stt_mode = "streaming"` all along.
+- `xai-grok-http/src/extra_ca.rs` deleted: upstream 1.0.0 ships `xai-grok-extra-ca`,
+  reading the same `CHUTES_EXTRA_CA_BUNDLE` with a size cap and rustls validation the
+  fork's copy lacked, and `xai-grok-http` already calls it. The old module was dead
+  code that a reader would have taken for the live one.
+
+A sweep for the same failure mode — a source file that no `mod` declaration
+reaches, and so is never compiled — found four in total across the tree, honouring
+`#[path]` and `include!` to avoid false positives. All four are addressed in this
+release; the sweep now returns nothing.
+
+### Added (the Advisor is back)
+
+The fourth undeclared file was `/advisor`, and unlike the others its backend had
+not come across either — so this is a feature port rather than a registration,
+though a small one, because the `[subagents.roles]` model-pin mechanism it hangs
+off is upstream's and was already here.
+
+- **The `advisor` built-in subagent**, invoked like any other through `task` with
+  `subagent_type: "advisor"`: an on-demand senior reviewer for architecture,
+  correctness, security and trade-offs. Read-only by construction — repository
+  inspection, Context7, memory and web fetch, with no shell, no edit and no nested
+  agents — so it can review a claim without being able to act on it. Defaults to
+  maximum reasoning effort, because it is called sparingly for plans, blockers and
+  completion claims, where review quality matters more than latency.
+- **`/advisor`** turns it on or off and pins the model it uses, writing
+  `[subagents.toggle].advisor` and `[subagents.roles.advisor].model`. An empty pin
+  clears it and the advisor inherits the session's model. `true` is removed rather
+  than written, so an untouched config file stays untouched.
+- `advisor` is reserved in the shell's `PAGER_COMMAND_KEYS` — the check that caught
+  the same omission for `/apikey`.
+
+### Security (`agent serve` authentication)
+
+Two CodeQL alerts pointed at `print_serve_startup_info` writing a secret to stderr.
+Following them found the token itself was the problem, and the printing was the
+least of it:
+
+```rust
+let raw = uuid::Uuid::new_v4().to_string().replace('-', "");
+raw.chars().cycle().take(len).collect()   // len = 12
+```
+
+- **The token was 48 bits.** Twelve characters of a v4 UUID's hex, for a credential
+  that authorises a server which runs shell commands and edits files, on a `/ws`
+  endpoint with no rate limit. Now 32 bytes from the OS CSPRNG, base64url without
+  padding. The `cycle()` also meant any length above 32 repeated the same UUID while
+  looking like it added entropy.
+- **The comparison was not constant-time.** `token == expected_secret` on `&str`
+  returns at the first differing byte, so an unauthenticated caller could recover the
+  token one byte at a time — roughly 12 x 16 attempts instead of 2^48. Now
+  `ring::constant_time::verify_slices_are_equal`, with the length compared separately
+  because it is not secret. `ring` moves from dev-dependency to dependency, which
+  costs nothing: it was already in this crate's normal build graph via aws-config.
+- **The token is printed only when stderr is a terminal.** An operator reading their
+  own console still gets it; a redirected stderr — a systemd journal, a CI log,
+  `2>serve.log` — no longer persists a live credential to disk. That was CodeQL's
+  actual finding.
+- **A non-loopback `--bind` now warns.** The transport is `ws://` and the token
+  travels as a query parameter, so binding to a routable address puts both on the
+  wire in cleartext. Previously silent.
+
+Eight tests, including that a correct prefix does not authenticate and that an empty
+presented token is rejected.
+
+The other 308 open alerts were triaged by reading each flagged line on `main`: 263
+are test fixtures, and the rest are `session_id` values (a UUID naming a local file,
+not a credential), closed-loopback sentinels for the features policy disables, or
+URLs whose `https` scheme `endpoint_policy::validate_endpoint_url` enforces where
+CodeQL cannot see it through a `format!`. One more real finding needs no fix here:
+`bin/trace_classify.rs` logged an API key, and this release deletes that binary.
+
+Those 308 are now dismissed on GitHub, each with the reasoning for its group rather
+than a blanket note; the 3 real ones stay open so the next scan closes them as fixed,
+which is a truer record. The two Dependabot `lru` alerts are dismissed as `not_used`:
+the advisory is an `IterMut` Stacked Borrows violation, and neither crate holding an
+`LruCache` ever iterates it — `ratatui 0.29` memoizes layouts through `get`/`put`,
+`aws-sdk-s3` has no `iter_mut()` at all. Bumping `aws-sdk-s3` to the release that
+does require the patched `lru` was tried and reverted: it drags the aws-smithy stack
+forward, wants rustc 1.94.1 against this repo's 1.94.0 pin, and still leaves
+`ratatui 0.29` as a source. `docs/code-review-2026-08-01.md` CR-003 records the
+evidence and what closing it would actually cost.
+
+### Documentation
+
+The documentation was audited against the code rather than proofread, which is a
+different exercise and found things a read-through would not:
+
+- **The README presented the project as SpaceXAI's, under SpaceXAI's logo.** This
+  is a fork; upstream wrote most of the code and is credited for it, but not with
+  authorship of this tree, and their mark is theirs. `CONTRIBUTING.md` likewise
+  described upstream's "no external patches" policy as if it were ours.
+- **`SECURITY.md` sent vulnerability reports to xAI's HackerOne programme** — to
+  people who do not maintain this code and cannot fix it, disclosing our issue to
+  a third party on the way.
+- **Every install instruction was a 404.** `chutes.ai/cli/install.sh`,
+  `install.ps1`, `chutes.ai/cli`, `chutes.ai/build/changelog`,
+  `console.chutes.ai`, and the `docs.chutes.ai/build/overview` that `/docs` itself
+  opened. Each replacement was checked with a request.
+- **Config examples named `grok-4.5`**, which this build cannot serve, and
+  `chutes-build update` was documented as the way to upgrade when it installs
+  nothing.
+- **The ACP extension methods were documented under `x.ai/`** while the handlers
+  answer on `chutes.build/` — the page integrators read to know what to call.
+- **Version pinning, the telemetry knobs and the coding-data row were documented
+  as working controls.** All four version keys parse and nothing acts on them; the
+  telemetry switches are compiled out; the privacy row is locked. Each now says so.
+- **Two guide chapters existed on disk and shipped nowhere.** `USER_GUIDE` lists
+  what `/docs` shows and what is extracted to `$CHUTES_BUILD_HOME/docs`, and the
+  fork's Chutes-ecosystem and browser chapters were not in it — the same
+  registration gap as the tool layer, in a different registry. Renumbered to 25 and
+  26 and registered.
+- Memory's owner-only file permissions and the absence of any coding-data
+  retention control are now stated in `PRIVACY.md`, where a reader looks for them.
+
+One code defect came out of the audit, in the direction that matters — the docs
+were right and the code was not:
+
+- **A custom model-catalog endpoint received the ambient `CHUTES_API_KEY`.**
+  `PRIVACY.md` promises it never does and documents `CHUTES_MODELS_API_KEY` for
+  that case; the re-base dropped the separate auth arm, so pointing
+  `CHUTES_BUILD_MODELS_LIST_URL` at any host sent it your Chutes credential during
+  startup. Restored, with the test asserting the separation.
+
+### Changed
+
+- The upstream sync procedure changes from "port selectively, never merge" to a
+  merge of `upstream/main` with conflicts expected in the Chutes seams. See
+  `docs/upstream-sync.md`.
+- `project_picker` and the bundled `SKILL.md` files follow upstream and are
+  removed.
+- The coding-data retention row in settings is locked with a reason instead of
+  offered: this build has no such control, and the extension behind the row
+  already refused the call. The data-sharing banner never renders for the same
+  reason.
+- Rate-limit and tier-restriction messages no longer pitch an upstream
+  subscription. The 429 message named SuperGrok and linked to it; the media
+  tools told the model to sell it.
+- `scripts/seam_sweep.py` (new) compares the values the previous release shipped
+  against a re-based tree. It exists because a constant whose value came from
+  upstream compiles fine and its tests assert against the constant, which is how
+  the endpoint and credential defaults above survived a green gate.
+
+### Fixed (identity)
+
+Behavioural verification of the built binary, which the gate cannot do, found
+the product still calling itself Chutes Build in the places users actually look:
+
+- `--version` printed `grok 1.0.0`; `Usage:` printed `grok`, because `parse_cli`
+  filters `argv[0]` against a launcher allowlist that did not include our own
+  binary name.
+- 983 occurrences of the bare product word in CLI help and error text had no
+  rebrand rule at all, and 14 stderr diagnostics were prefixed `grok:` — the
+  name of a program that does not exist.
+- `models` offered `grok-4.5`: the model catalog had come across from upstream.
+- The built-in agent profiles parsed as `grok-build-plan` while every caller
+  asked for `chutes-build-plan`, so `--agent chutes-build-plan` resolved to
+  nothing and plan mode fell back to the default profile.
+- The session update and close notifications kept upstream's `_x.ai` extension
+  namespace in the replay filter, the session store and the pager's method table,
+  while the handlers answered on ours. (Written without the trailing slash on
+  purpose: the rebrand rule that fixes those names would otherwise rewrite this
+  sentence describing them, as it did once already.)
+
+Then a real Chutes API key went in, and found what no static check had:
+
+- **The ambient API key was read from `XAI_API_KEY`**, while every error message,
+  every doc page and the fork itself said `CHUTES_API_KEY`. Anyone following the
+  instructions was never authenticated. The auth-method id users write as
+  `preferred_method` in `config.toml` was upstream's too. 304 occurrences across
+  69 files.
+- **570 places told the user to run `grok login`, `grok doctor`, `grok wrap …`**
+  in help text, error messages and the bundled user guide. An instruction naming
+  a binary that does not exist is worse than no instruction.
+- **`update --check` reached `storage.googleapis.com`** for a channel pointer in a
+  bucket that does not exist — a third update endpoint, hidden from the seam
+  sweep because rustfmt had wrapped its value onto the next line. Deadened at
+  loopback like the other two.
+
+- **The notification-hook tests were writing the whole process environment,
+  API key included, into files in the crate root.** They interpolated an
+  unquoted Windows path into `sh -c`, so the redirect missed the temp directory.
+  Thirty such files had accumulated and been committed to the re-base branch;
+  history was purged, `.gitignore` now blocks the pattern, and the keys were
+  rotated. The branch had never been pushed.
+- **A blank `CHUTES_API_KEY` counted as set**, so a CI job exporting a secret
+  that does not exist was told it was using an API key and then failed to
+  authenticate. Blank is unset now, as it already was for per-model `env_key`.
+
+With those fixed, a live run authenticates, lists the 15 Chutes models from
+`llm.chutes.ai`, and completes a turn through the Auto router in about 13
+seconds, talking only to `api.chutes.ai`, `llm.chutes.ai` and the configured
+router — never to `x.ai` or `grok.com`, and writing nothing outside
+`$CHUTES_BUILD_HOME`.
+
+
 ## [0.4.3] - 2026-08-03
 
 ### Added
@@ -126,7 +502,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Reviewed Grok Build upstream through `0.2.117` and recorded the selective
+- Reviewed Chutes Build upstream through `0.2.117` and recorded the selective
   port and deferral decisions.
 - Removed the orphaned Dependabot auto-merge workflow after automated version
   update PRs were disabled.

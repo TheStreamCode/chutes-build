@@ -3,7 +3,7 @@
 //! A compact top-right overlay painting a per-frame snapshot of the scroll
 //! state machine ([`MouseScrollState::debug_snapshot`]) plus the active
 //! scrollback's viewport facts, inside a REAL session with the REAL event
-//! loop. Recipe: `CHUTES_BUILD_FPS=1 CHUTES_BUILD_SCROLL_DEBUG=1 grok --resume <session>`,
+//! loop. Recipe: `CHUTES_BUILD_FPS=1 CHUTES_BUILD_SCROLL_DEBUG=1 chutes-build --resume <session>`,
 //! then flip `scroll_mode` / `scroll_lines` / `invert_scroll` /
 //! `scroll_speed` in `/settings` to compare variants live. For event-exact
 //! capture beyond this per-frame sampling, add `CHUTES_BUILD_SCROLL_LOG=1` — the

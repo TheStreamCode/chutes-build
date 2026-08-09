@@ -5,10 +5,10 @@
     unreachable_code,
     dead_code
 )]
-//! Backend environment presets for Chutes Build: endpoint URL
+//! Backend environment presets for the Chutes Build CLI crate family: endpoint URL
 //! defaults, environment selection, and env-var test support.
 //!
-//! Public builds expose production endpoints. Values resolve as a `CHUTES_BUILD_*`
+//! Public builds expose production endpoints. Values resolve as a `GROK_*`
 //! env-var override when set, else the compiled production default.
 /// The endpoint set for one backend environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,7 +152,7 @@ impl Drop for EnvVarGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// The env-var prefix is part of the public operator interface.
+    /// The env-var prefixes are an operator interface; do not rename.
     #[test]
     fn test_env_prefix() {
         assert_eq!(
@@ -181,7 +181,7 @@ mod tests {
         );
     }
     /// Guards against conflating the relay and gateway endpoints (a relay
-    /// loop mistakenly connecting to `wss://example.invalid/ws/`).
+    /// loop mistakenly connecting to `wss://grok.com/ws/gw/`).
     #[test]
     fn relay_and_gateway_urls_are_distinct() {
         assert_ne!(

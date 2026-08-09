@@ -25,6 +25,19 @@ pub async fn set_show_timeline(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.show_timeline = Some(value)).await
 }
 
+pub async fn set_page_flip_on_send(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.page_flip_on_send = Some(value)).await
+}
+
+pub async fn set_confirm_before_rewind(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.confirm_before_rewind = Some(value)).await
+}
+
+/// Persist `[ui].combine_queued_prompts` via `update_config`.
+pub async fn set_combine_queued_prompts(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.combine_queued_prompts = Some(value)).await
+}
+
 /// Persist `[ui].simple_mode` via `update_config`. Same `Option<bool>`
 /// shape as `show_timestamps`.
 pub async fn set_simple_mode(value: bool) -> Result<()> {
@@ -68,7 +81,7 @@ pub async fn set_contextual_hint_ssh_wrap(value: bool) -> Result<()> {
 }
 
 /// Persist `[ui].theme` via `update_config`. Caller must pass the
-/// canonical theme name (`groknight`, `tokyonight`, `auto`, etc.).
+/// canonical theme name (`chutesnight`, `tokyonight`, `auto`, etc.).
 pub async fn set_theme(value: String) -> Result<()> {
     update_config(|cfg| cfg.ui.theme = Some(value)).await
 }
@@ -107,6 +120,14 @@ pub async fn set_default_model(value: String) -> Result<()> {
         if value.is_empty() { None } else { Some(value) },
         None,
     )
+    .await
+}
+
+/// Persist `[privacy].privacy_banner_acked` (RFC 3339 UTC dismiss time).
+pub async fn set_privacy_banner_acked(acked_at_rfc3339: String) -> Result<()> {
+    update_config(|cfg| {
+        cfg.privacy.privacy_banner_acked = Some(acked_at_rfc3339);
+    })
     .await
 }
 
@@ -250,6 +271,12 @@ pub async fn set_voice_stt_language(value: String) -> Result<()> {
     update_config(|cfg| cfg.ui.voice_stt_language = Some(value)).await
 }
 
+/// Persist `[ui].voice_keybind_enabled` via `update_config`. When `false` the
+/// Ctrl+Space / F8 voice chord is ignored (`/voice` still works).
+pub async fn set_voice_keybind_enabled(value: bool) -> Result<()> {
+    update_config(|cfg| cfg.ui.voice_keybind_enabled = Some(value)).await
+}
+
 /// Persist `[ui].default_selected_permission` via `update_config`. Value is
 /// one of the canonical strings from `DEFAULT_SELECTED_PERMISSION_CHOICES`
 /// (`default` | `allow_once` | `allow_always` | `reject`); `default` is the
@@ -287,15 +314,6 @@ pub async fn set_show_tips(value: bool) -> Result<()> {
 pub async fn set_auto_update(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.auto_update = Some(value)).await
 }
-
-// ---------------------------------------------------------------------------
-// `/advisor` — writes directly into `[subagents]`, bypassing the typed
-// `Config`/`update_config` path above. `[subagents.roles]`/`[subagents.toggle]`
-// are `HashMap`-shaped and `SubagentRole` doesn't derive `Serialize`, so they
-// don't fit `mcp::Config`; the runtime read side (`resolve_effective_overrides`,
-// `[subagents.toggle]`) already resolves these keys for every subagent,
-// built-in or custom, so only the write side is new here.
-// ---------------------------------------------------------------------------
 
 /// Read-modify-write helper scoped to the `[subagents]` table. Mirrors
 /// `save_config`'s lock + atomic-write dance without going through the typed

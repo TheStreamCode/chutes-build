@@ -1,6 +1,6 @@
 //! Subscription tier checks, credit-limit upsells, and auto-topup handling.
 
-use super::queue::{maybe_drain_queue, note_peek_page_flip_after_drain};
+use super::queue::{maybe_drain_queue, note_peek_page_flip};
 use crate::app::actions::Effect;
 use crate::app::agent::AgentId;
 use crate::app::agent_view::AgentView;
@@ -9,9 +9,6 @@ use crate::scrollback::block::RenderBlock;
 use std::time::Duration;
 use xai_grok_telemetry::events::{SuperGrokUpsell, SuperGrokUpsellClicked};
 use xai_grok_telemetry::session_ctx::log_event;
-
-// Free-usage detection lives in shell next to the well-known code + 429 copy.
-pub(crate) use xai_grok_shell::sampling::error::is_free_usage_exhausted_error;
 
 /// How long the pager auto-checks subscription status before stopping.
 /// After this, the user can still manually check via the [Refresh] button.
@@ -123,7 +120,7 @@ pub(super) fn open_credit_limit_upsell(
             "You hit your weekly limit.",
             "Upgrade to a higher tier for more usage",
             "Buy more credits",
-            "Review Chutes usage and credits",
+            "Purchase credits to keep using Chutes Build",
             CreditLimitCardAction::PurchaseCredits,
             xai_grok_telemetry::events::CreditLimitChoice::PurchaseCredits,
             false,
@@ -280,7 +277,7 @@ fn open_supergrok_upsell(
             "free-usage-upsell",
         ),
         UpsellReason::RestrictedCommand => (
-            "This feature is unavailable for the current Chutes model.",
+            "Unlock all features with SuperGrok.",
             SuperGrokUpsell::RestrictedCommand,
             "restricted-command-upsell",
         ),
@@ -293,15 +290,17 @@ fn open_supergrok_upsell(
 
     let options = vec![
         QuestionOption {
-            label: "Open Chutes".into(),
-            description: "Review available models, account usage, and credits".into(),
+            label: "Upgrade to SuperGrok".into(),
+            description: "For everyday coding and productivity tasks".into(),
             preview: None,
             id: Some(UPSELL_URL_UPGRADE.into()),
         },
         QuestionOption {
-            label: "Choose another model".into(),
-            description: "Return to Chutes Build and select a capable model".into(),
+            label: "Upgrade to SuperGrok Heavy".into(),
+            description: "Get the most out of Chutes Build. Highest usage limits.".into(),
             preview: None,
+            // No Heavy-specific URL exists; the /supergrok page lists
+            // both plans, so both upgrade options land there.
             id: Some(UPSELL_URL_UPGRADE.into()),
         },
     ];
@@ -349,6 +348,7 @@ pub(super) fn handle_billing_fetched(
     silent: bool,
     subscription_tier: Option<String>,
     autotopup: crate::views::credit_bar::AutoTopupFetch,
+    nonce: u64,
 ) -> Vec<Effect> {
     // Parse/transport failures route to `BillingError`, so a `None`
     // balance here means the response carried no billing config. Clear
@@ -366,22 +366,29 @@ pub(super) fn handle_billing_fetched(
     if let Some(tier) = subscription_tier {
         app.subscription_tier = Some(tier);
     }
-    let account_plan = app.subscription_tier.clone();
     // Render the `/usage` summary from the now-current cached rule.
     let summary_topup = app.auto_topup.clone();
+    let tier_now = app.subscription_tier.clone();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
-        agent.account_plan = account_plan;
         // Gateway/chat-kind: do not attach Build coding credits.
         let mut topup = agent.auto_topup.clone();
         apply_auto_topup(&mut topup, &autotopup);
         agent.apply_credit_balance(balance.clone(), topup);
+        // The open usage modal renders from the mirrors updated above; only
+        // its own fetch generation may settle the loading/error flags
+        // (background refreshes carry nonce 0).
+        if let Some(state) = super::status::usage_modal_state_mut(agent)
+            && state.fetch_nonce == nonce
+        {
+            state.billing_loading = false;
+            state.billing_error = None;
+            state.ctx.subscription_tier = tier_now;
+        }
         if !silent && !agent.chat_kind {
             let msg = match &balance {
-                Some(bal) => crate::views::credit_bar::format_account_usage_summary(
-                    agent.account_plan.as_deref(),
-                    bal,
-                    summary_topup.as_ref(),
-                ),
+                Some(bal) => {
+                    crate::views::credit_bar::format_usage_summary(bal, summary_topup.as_ref())
+                }
                 None => "No billing data available.".to_string(),
             };
             agent.scrollback.push_block(RenderBlock::System(
@@ -409,7 +416,7 @@ pub(super) fn handle_gate_refreshed(
     }
 }
 
-/// `chutes.build/auth/check_subscription` completed. Meta is authoritative
+/// `chutes.ai/auth/check_subscription` completed. Meta is authoritative
 /// (`apply_auth_meta` also drops any deferred gate). A failed check only
 /// promotes the deferred gate it was verifying (`verify` generation);
 /// generic watch/focus/paywall-chain failures never touch it.
@@ -525,13 +532,14 @@ pub(super) fn handle_credit_limit_recheck_complete(
     // Either way, drop the stashed prompt.
     agent.credit_limit_stashed_prompt = None;
 
-    let mut effects = maybe_drain_queue(agent);
-    effects.push(Effect::FetchBilling {
+    let mut drain = maybe_drain_queue(agent);
+    drain.effects.push(Effect::FetchBilling {
         agent_id,
         silent: true,
+        nonce: 0,
     });
-    note_peek_page_flip_after_drain(app, agent_id);
-    effects
+    note_peek_page_flip(app, agent_id, drain.page_flip_entry);
+    drain.effects
 }
 
 // Action handlers.
@@ -545,9 +553,14 @@ pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
         .gate
         .as_ref()
         .and_then(|g| g.url.as_deref())
-        .filter(|url| matches!(*url, "https://chutes.ai" | "https://chutes.ai/pricing"))
-        .unwrap_or(UPSELL_URL_UPGRADE)
-        .to_owned();
+        .unwrap_or("https://chutes.ai/supergrok?referrer=chutes-build");
+    // Funnel attribution: tag CLI-originated SuperGrok upsell clicks
+    // with `referrer=chutes-build`, matching the OAuth consent flow and
+    // chutes.ai/cli marketing links. Applied even when the URL came from
+    // remote settings's `gate_url`, so we don't depend on the remote flag
+    // being correctly configured. If the URL already specifies a
+    // referrer it's left alone.
+    let url = crate::app::link_opener::ensure_query_param(url, "referrer", "chutes-build");
     super::ctx::open_url_or_show(app, &url);
     vec![]
 }

@@ -1,60 +1,711 @@
 # Upstream synchronization
 
-Chutes Build is a specialized fork of `xai-org/grok-build`. Upstream changes
-are monitored, but they are never merged or released automatically.
+Chutes Build tracks `xai-org/grok-build`. As of 1.0.0 the relationship is a
+**merge**, not a cherry-pick.
 
-## Automated monitoring
+## Why this changed
 
-The daily `Upstream watch` workflow checks both the latest GitHub release and
-the head of upstream `main`. Upstream currently has no published releases or
-tags, so commit monitoring is the active signal. When the reviewed baseline is
-outdated, the workflow opens one review issue and refreshes its body while that
-issue remains open, so the recorded current commit/version never goes stale.
+The old procedure was "port selectively, never merge upstream wholesale". It
+was followed, and it still produced a fork that drifted: review records read
+"nothing safe to port in isolation" and "several candidates identified, none
+ported yet", so `.github/upstream.json` recorded a reviewed baseline of 0.2.117
+while the retained crates were still at the 2026-07-17 fork point — 2075 files
+and roughly 440k lines behind. Every individual port then had to be grafted into
+files that were thousands of lines stale, which is why so many of them found our
+copy *older* than the baseline rather than merely different.
 
-The last reviewed commit, upstream source version, and release are recorded in
-`.github/upstream.json`. These values are independent of the Chutes Build
-product version. Update them only after completing the review and verification
-below.
+Cherry-picking cannot converge on a project that adds 94k lines in five days.
+So 1.0.0 re-based onto upstream's tree and re-applied the Chutes layer on top.
+That layer is thin — 102 files exist only here, and only 26 consume
+`chutes-build-core` — which is what makes the merge model viable.
 
-## Review procedure
-
-1. Read the upstream release notes when a release exists, then inspect commits
-   between `lastReviewedCommit` and the current upstream head.
-2. Classify changes as runtime fixes, security fixes, performance improvements,
-   dependencies, tests, or upstream-specific product behavior.
-3. Port only changes that benefit Chutes Build. Preserve Chutes routing,
-   privacy defaults, disabled telemetry, product identity, terminal behavior,
-   and public license notices.
-4. Resolve changes in small, reviewable patches instead of merging upstream
-   `main` wholesale.
-5. Run focused tests for each port, followed by the repository CI gates. For
-   inference changes, compare time to first token, streaming cadence, token use,
-   fallback behavior, and output quality against the prior Chutes Build state.
-6. Record user-visible changes in `CHANGELOG.md` and update affected technical
-   documentation.
-7. Set `lastReviewedCommit`, `lastReviewedVersion`, `lastReviewedRelease`, and
-   `reviewedAt` to the state actually reviewed, then close the upstream review
-   issue.
-
-Do not advance the baseline when a required build/test gate times out or remains
-inconclusive. Record the port in `CHANGELOG.md`, keep the review issue current,
-and advance the baseline only after local or CI evidence closes the gap. The
-generated root `Cargo.toml` is not an upstream-port edit surface; change the
-owning crate manifest or generator instead.
-
-## Local inspection
-
-Keep `origin` pointed at Chutes Build and `upstream` pointed at the source fork:
+## The procedure
 
 ```powershell
-git remote -v
 git fetch upstream main
-$baseline = (Get-Content .github/upstream.json | ConvertFrom-Json).lastReviewedCommit
-git log --oneline "$baseline..upstream/main"
-git diff --stat "$baseline..upstream/main"
+git merge upstream/main
 ```
 
-Fetching is read-only; do not merge until the review scope is understood.
+Conflicts are expected, and only in three places:
+
+1. **The 26 seams** — the files that consume `chutes-build-core`: the routing
+   and endpoint policy in `xai-grok-sampler/src/client.rs`, the agent config /
+   init / models trio, the privacy and kill-switch call sites in
+   `xai-grok-shell/src/extensions/`, `leader/server.rs`, the session and pager
+   surfaces, and `xai-grok-memory/src/storage.rs`. Resolve these by hand, every
+   time. They are the product.
+2. **Branding** — re-run `python scripts/rebrand.py --apply`, then
+   `--check`. The script carries an explicit map and fails on any forbidden
+   token left outside its allowlist. It also reports four ambiguous token
+   families it will never rewrite; `scripts/rebrand_files.json` holds the
+   per-file decisions and can be regenerated.
+3. **Deliberate divergences** — listed below.
+
+Everything else should take upstream's side. If a conflict is not in one of
+those three categories, the default answer is upstream's version: that is the
+whole point.
+
+Then — and this step is not optional, it is where the 1.0.0 re-base leaked —
+run the seam sweep against the release you are coming from:
+
+```powershell
+python scripts/seam_sweep.py --base <previous-release-ref>
+```
+
+A clean merge and a green gate do **not** mean the seams survived: a constant
+whose value came across from upstream compiles fine and its tests assert against
+the constant. See the sweep section in the re-base record below for what that
+cost.
+
+Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
+`models`, `du`, and a confirmation that nothing was written outside
+`$CHUTES_BUILD_HOME`.
+
+## Non-negotiables during a merge
+
+- Never `git add -A` after running the test suite. It has committed live API
+  keys to this branch once already: a test that shells out to `env` writes the
+  whole environment somewhere, and on Windows that somewhere turned out to be the
+  crate root. Stage deliberately, and read what you staged. See the leak record
+  below.
+- No telemetry, remote error reporting, automatic upload, upstream session
+  sharing, remote workspace exposure or phone-home updates. These are enforced
+  by the compile-time constants in `crates/chutes-build-core/src/product.rs`
+  consumed at their call sites — **not** by deleting the crates, which would
+  make every future merge conflict.
+- Never send ambient Chutes credentials to an endpoint that has not passed
+  `chutes-build-core::endpoint_policy`. Env-overridable base URLs
+  (`CHUTES_ROUTER_BASE_URL` and friends) are the specific hazard.
+- Hostnames are logic, not branding. `sampling/error.rs` matches the literal
+  `grok.com/supergrok` on the way *in*, to recognise an upsell the upstream
+  server sends and suppress it for API-key users. Rewriting that string passes
+  every test and silently starts showing team users a personal-subscription
+  pitch.
+- Rust identifiers are not renamed. `grok_home()`, `default_grok_home()` and the
+  `xai-grok-*` crate names stay; only the strings they return become Chutes.
+  Renaming them makes upstream diffs unreadable for no gain.
+
+## Deliberate divergences to preserve
+
+- `crates/chutes-build-core/` and `xai-grok-tools/src/implementations/chutes/`
+  are ours outright.
+- Chutes routing: the virtual `model-router` model, `CHUTES_FALLBACK_MODELS`,
+  and the per-family reasoning normalisation.
+- `CHUTES_EXTRA_CA_BUNDLE` sits outside the `CHUTES_BUILD_*` family on purpose:
+  it configures the transport, not the product shell.
+- `cpk_` in the secret redactor, and the memory privacy filter.
+- The `chutesnight` / `chutesday` themes replace upstream's.
+- A vendored `protoc` fallback in `find_protoc`, because `bin/protoc` is a
+  DotSlash wrapper Windows cannot execute from a build script.
+- The endpoint table in `xai-grok-env`: the relay and gateway WebSocket URLs are
+  loopback sentinels, not upstream hosts. Chutes Build has no vendor relay and no
+  cloud-sandbox control plane, so those paths must fail closed rather than
+  resolve.
+- `LEGACY_AUTH_SCOPE` / `LEGACY_SCOPE` are `disabled::legacy-auth`: the pre-OIDC
+  relay login is disabled by pointing its scope at a key no server can mint,
+  rather than by deleting the code path.
+- The changelog fetch and the update check point at a closed loopback port. The
+  callers stay so merges stay clean; the requests fail locally and instantly.
+- `CodingDataSharingLock::ProductPolicy` and the privacy banner's floor: the
+  coding-data row is locked with a reason instead of removed, and the banner
+  never renders. The extension behind them already refuses the call — this is so
+  the product never *offers* what it will then refuse.
+
+## Landing this on `main`, and why it constrains branch protection
+
+`main` currently forbids non-linear history. That rule and the merge model above
+are incompatible, and the incompatibility is not cosmetic.
+
+A squash-merge of an upstream sync produces the right *tree* but keeps
+upstream's commits out of `main`'s *history*. The next `git merge upstream/main`
+would then still compute its merge base at the original 2026-07-17 fork point
+and replay the entire divergence as conflicts — which is exactly the failure
+this re-base exists to end. Squashing works once; it does not compose.
+
+For the merge model to hold, `main` has to accept merge commits from
+`upstream/main`. That is a repository-policy decision, not a code one, and it
+should be made before the first sync lands. If the linear-history rule is kept
+instead, the honest thing is to say so in this document and go back to
+cherry-picking with eyes open, rather than discover it at the next sync.
+
+## Recording a sync
+
+Update `.github/upstream.json` (`lastReviewedCommit`, `lastReviewedVersion`,
+`reviewedAt`) **only after the merge is complete and the gates pass** — the
+field means "this is the upstream this tree is", and its previous drift from
+reality is what made the re-base necessary. Record user-visible changes in
+`CHANGELOG.md` and add a record below.
+
+The daily `Upstream watch` workflow reads the version from the Cargo manifest
+named in `versionManifest`. Note that upstream publishes **no GitHub releases
+and no tags** — both endpoints were empty even at 1.0.0, and the major bump
+arrived inside an ordinary "Synced from monorepo" commit. The release/tag
+comparison is not evidence that upstream has not moved.
+
+## Re-base record: 2026-08-07 — Chutes Build 1.0.0
+
+The tree was re-based onto `xai-org/grok-build` 1.0.0 (`afbc0fb`) rather than
+continuing to cherry-pick, for the reason in "Why this changed" above.
+
+Measured before starting, `HEAD` against `upstream/main`: 102 files existed only
+here, 26 consumed `chutes-build-core`, 860 diverged only by branding, 89 were
+our own non-branding fixes, and 588 diverged purely because upstream's work had
+never been taken. That last number is the one that decided it.
+
+Sequence: the Chutes layer (77 files — the other 25 "only ours" turned out to be
+upstream files upstream had since restructured away), the mechanical rebrand
+(5944 lines / 766 files), the ambiguous tokens decided per file (2634 / 443),
+then the seams.
+
+Four fixes had to come forward because upstream has no equivalent:
+`detect_probable_secret` and the `cpk_` prefix in the redactor, the
+`MediaArtifact` output type, the vendored `protoc` fallback, and the proto
+dependency scan writing to a temp file instead of `/dev/stdout`.
+
+Three defects the compiler found that review had not:
+
+- `chutes-build-plugin` matched inside the crate name
+  `xai-grok-plugin-marketplace`, renaming a workspace member.
+- Bare `grok` was renamed in 25 files where it was a Rust identifier, producing
+  `let chutes-build = ...`. The per-file classifier had read "the fork has zero
+  occurrences" as "the fork renamed them all", when sometimes the fork had
+  simply deleted the code they lived in.
+- `xai-grok-pager-pty-harness` imported `process_has_exited_without_reap`
+  unconditionally while the function and every call site are `#[cfg(unix)]` —
+  an upstream bug visible only on Windows, worth sending back.
+
+Followed upstream, dropping features it removed: `project_picker`, the six
+bundled `SKILL.md` files, `search_remote_sync`, `upload/config_files`,
+`minimum_version`, and the `coordinator_lifecycle` / `coordinator_query` split.
+
+### Test parity, and why absolute numbers are useless here
+
+A pristine `upstream/main` worktree was built on the same Windows machine and
+measured, because upstream fails a lot of its own tests on this platform and
+without that baseline the failure counts here are unreadable:
+
+| Suite | pristine upstream 1.0.0 | this tree |
+| --- | ---: | ---: |
+| `xai-grok-pager --lib` | 82 failures | 82 — identical sets |
+| `xai-grok-shell --lib auth::` | 24 failures | 24 — identical sets |
+
+Zero regressions. The upstream failures are Windows platform gaps (path
+separators, `#[cfg(unix)]` helpers, shell-alias planners) and are not ours to
+fix here; three of them that broke *compilation* rather than assertions were
+fixed and are worth sending back: `process_has_exited_without_reap` and
+`parse_login_env_capture` are `#[cfg(unix)]` while their importers and tests are
+not, and the proto dependency scan writes to `/dev/stdout`.
+
+### What upstream's newer lints found in our code
+
+`clippy.toml` now disallows `tokio::process::Command::spawn` — "an unenrolled
+child outlives its session". The Chutes browser tool spawned headless Chrome
+exactly that way, so every session that was not cleanly torn down left a browser
+behind. It now enrols in the global process scope. This is the clearest argument
+for the re-base: three weeks of cherry-picking never surfaced it.
+
+### Behavioural verification, and why the gate is not enough
+
+The gate proves the tree compiles and its tests pass. It does not prove the
+product is Chutes Build. Running the built release binary found five things that
+were green in CI and wrong in the product:
+
+- `--version` printed `grok 1.0.0` — the name is a literal in `version_text`.
+- `Usage:` printed `grok`, because `parse_cli` filters `argv[0]` against a known
+  launcher allowlist and fell back to `"grok"` — our binary was rejected by our
+  own allowlist.
+- CLI help read "Run Chutes Build without the interactive UI", "Sign in to Chutes Build". 983
+  occurrences of the bare product word had no rebrand rule at all.
+- **The model catalog offered `grok-4.5`**, which Chutes does not serve.
+  `default_models.json` had come across from upstream.
+- The notification hook's test wrote `CHUTES_BUILD_MESSAGE=` labels while reading
+  `$CHUTES_BUILD_MESSAGE`.
+
+So the verification list below is not optional ceremony. At minimum, after every
+sync: `--version`, `--help`, `models`, `du`, and a check that nothing was written
+outside `$CHUTES_BUILD_HOME`.
+
+Four of the bugs were in `rebrand.py` itself. The one worth remembering: a rule
+and the identifier repair oscillated — one rewrote a path, the other reverted it
+— and the script reported "0 files changed" while the tree sat in the wrong
+state. A silent stable-but-wrong fixpoint is worse than a loud failure. Verify
+idempotence by running the script twice and confirming the *second* run changes
+nothing, not by trusting one clean report.
+
+### The seam sweep, and why the file heuristic was not enough
+
+Phase 3 identified the Chutes seams by asking *which files import
+`chutes-build-core`*. That question has a blind spot: a file whose structure is
+upstream's and whose values are ours. `scripts/seam_sweep.py` asks the other
+question — it compares the values the previous release shipped against the
+re-based tree — and found 55 identity divergences the first question could not
+see. The ones that would have shipped:
+
+| What | Was, after the re-base | Should be |
+| --- | --- | --- |
+| default inference endpoint | `https://api.x.ai/v1` | `https://llm.chutes.ai/v1` |
+| relay / gateway WebSocket | `wss://code.grok.com/…`, `wss://grok.com/ws/gw/` | loopback sentinels |
+| API-key auth.json scope | `xai::api_key` | `chutes::api_key` |
+| OAuth issuer + client id | `auth.x.ai`, upstream's compiled-in app | `api.chutes.ai`; client id must be configured |
+| session update/close method | `_chutes.build/session/*` | `_chutes.build/session/*` |
+| npm package checked for updates | `@xai-official/grok` | `chutes-build` |
+
+Run it after every sync, in both modes:
+
+```
+python scripts/seam_sweep.py --base <previous-release-ref>
+```
+
+`consts` mode reads like a table and is precise. `literals` mode is noisy but
+sees values inside struct initialisers — which is where the endpoint table hid
+while `consts` reported the file clean. Neither mode decides anything: several of
+the fork's values are simply older, and several of the re-based tree's are
+deliberate improvements. The output is for a person to read.
+
+Two lessons worth keeping:
+
+- **A wire name renamed in the handler but not the caller fails silently.**
+  `` does not match after an underscore, so `_chutes.build/session/update` was
+  invisible to the pass that normalised 1034 other ACP names.
+- **A constant's value is not covered by the test that names the constant.**
+  Every test around `XAI_API_BASE_URL_DEFAULT` asserted against the constant, so
+  the endpoint could point anywhere and the suite stayed green.
+
+### Known upstream failures on Windows
+
+Measured against a pristine `upstream/main` worktree on the same machine, so
+these are not re-base damage:
+
+- `xai-grok-pager --lib`: 82 failures against this tree's 79, stable across four
+  consecutive runs. One of those runs had previously produced an 80th: a
+  quote-bar test compares a span's style against the theme's, both read from the
+  process-global `Theme::current()` that the `set_theme` tests mutate. It holds
+  `pin_theme()` now, like the layout tests that had already met this.
+  `xai-grok-shell --lib auth::`: 24 — all 24 of which this tree now passes.
+- **`xai-grok-shell --lib` cannot be run whole on Windows**: it overflows a 1 MB
+  thread stack partway through the session tests, in the debug profile only. That
+  is why the gate runs `auth::` rather than the crate. `agent::config` was checked
+  separately and passes 334/334 after twelve fixtures were moved onto a
+  first-party host — upstream's asserted that `api.x.ai` is first-party and that a
+  session token attaches to `example.com`, both of which are false under
+  `endpoint_policy`. The fork had already rewritten every one of them; the re-base
+  kept upstream's. Anything else in that crate's non-`auth::` tests is unmeasured
+  here, and that is a gap, not a clean bill.
+- `xai-grok-agent --lib`: upstream fails 5 here; this tree passes all 578. The
+  five were worth fixing rather than documenting, and two of them were not test
+  bugs:
+  - Two skills tests compared a `String` path against a `/`-spelled suffix.
+    Normalised, not skipped — the behaviour matters on Windows too.
+  - `resolve_treats_home_git_repo_as_no_repo` set `HOME` and expected
+    `dirs::home_dir()` to read it. On Windows that calls `known_folder_profile`,
+    so no environment guard can redirect it. The comparison the guard performs is
+    now a separate function, tested on every platform; the unreachable line is the
+    lookup itself.
+  - `refresh_skips_untrusted_source_outside_home` was pointing at a real hole:
+    plugin sources are auto-trusted when under the user's home, and on Windows
+    the system temp directory **is** under the home
+    (`%USERPROFILE%\AppData\Local\Temp`) — so anything unpacked into temp was
+    auto-trusted, skipping the explicit trust step. Temp is now excluded, and the
+    five refresh-mechanics tests grant trust explicitly instead of inheriting it
+    from where `tempfile` happened to allocate.
+  - `test_encrypted_templates_not_stale` fails upstream too: their checked-in
+    encrypted prompt bytes are stale. Ours are regenerated.
+- Upstream 1.0.0 **cannot build on Windows at all**: `bin/protoc` is a DotSlash
+  wrapper (`not a valid Win32 application`) and the proto build script writes to
+  `/dev/stdout`. Both are fixed here, and the fix is what let the baseline above
+  be measured at all.
+
+### What a live API key found that nothing else could
+
+Every check above passed with the credential flows listed as unverified. Then a
+real `cpk_` key went in, and the first thing it proved was that **the key was not
+read at all**: `XAI_API_KEY_ENV_VAR` was still `"XAI_API_KEY"` while every error
+message, every doc page and the fork itself said `CHUTES_API_KEY`. A user
+following the instructions would simply never authenticate. Same for the
+auth-method id `xai.api_key`, which is what `preferred_method` takes in
+`config.toml`. 304 occurrences across 69 files.
+
+Three reasons the sweep had missed it, each now closed:
+
+1. **`consts` mode compares constants by name.** The fork had renamed the
+   constant *itself* (`CHUTES_API_KEY_ENV_VAR`), so the name intersection was
+   empty and there was nothing to compare.
+2. **The pattern was per-line.** rustfmt had wrapped
+   `CLI_BASE_URL_FALLBACK`'s value onto the next line, hiding a third update
+   channel that pointed at a non-existent GCS bucket — so `update --check` made a
+   real request to `storage.googleapis.com` and reported `NoSuchBucket`.
+   Allowing whitespace, newline included, around the `=` is the whole fix.
+3. **I filtered the `literals` output by upstream hostnames.** `XAI_API_KEY`
+   contains no host, so my own triage dropped it from a report that had found it.
+
+Then 570 places told the user to run `grok login`, `grok doctor`, `grok wrap …`
+— in help text, error messages, the bundled user guide and doc comments. An
+instruction naming a binary that does not exist is worse than no instruction.
+Now a rebrand rule, anchored on a following subcommand or flag so the internal
+`grok_home` / `xai-grok-*` / `implementations/grok_build/` names stay put.
+
+What the live run confirms:
+
+- API-key auth works, and the model catalogue comes from
+  `https://llm.chutes.ai/v1/models` — 15 Chutes models plus the `model-router`
+  virtual entry.
+- A real turn through the Auto router completes: ~12.9 s wall clock end to end,
+  first text event at ~13.2 s in the streaming run (a cold process start, model
+  resolution and routing included), then steady ~80 ms token cadence.
+- Only three hosts are contacted, all Chutes-ecosystem: `api.chutes.ai`,
+  `llm.chutes.ai`, `model-router-ten.vercel.app`. **No call to `x.ai` or
+  `grok.com`.**
+- Nothing was written outside `$CHUTES_BUILD_HOME`.
+
+One more thing the key surfaced: a variable exported from a CI secret that does
+not exist arrives as the empty string, and blank counted as *set* — so the
+product announced "You are using CHUTES_API_KEY" and then failed to
+authenticate, which is the least helpful pair of messages available. Blank now
+counts as unset, matching the "first set, non-blank value wins" rule the
+per-model `env_key` list already followed.
+
+One thing to decide, not a defect: `model-router-ten.vercel.app` is in
+`TRUSTED_HOSTS` in `chutes-build-core`, which is ours — so it is allowed to
+receive an ambient Chutes credential, and `resolve_inference_base_url` routes
+**session (OAuth) inference** through it. API-key auth goes straight to
+`llm.chutes.ai` and never touches it. Whoever operates that Vercel deployment can
+see the traffic that does go there. It was the fork's own choice; it deserves a
+conscious confirmation rather than inheritance.
+
+### Phase 4 triage: what came forward, and what did not
+
+The 89 non-branding files we had touched, decided one at a time against the new
+tree:
+
+**Came forward** — upstream has no equivalent: `detect_probable_secret` and the
+`cpk_` prefix in the redactor; the `MediaArtifact` output type; the vendored
+`protoc` fallback and the proto dependency scan writing to a temp file rather
+than `/dev/stdout`; the checkout-independent encrypted prompt templates
+(regenerated — upstream's own checked-in bytes are stale, and the rebrand changed
+the template text); voice and batch STT against the Chutes whisper endpoint; the
+native Advisor; API-key login inside the TUI; `CHUTES_EXTRA_CA_BUNDLE`; the
+unified secret detection; and the memory owner-only write paths.
+
+**Correction — four of those came forward as files, not as features.** This entry
+originally read as above and was wrong in the same way `.github/upstream.json` was:
+it recorded an intention as an outcome. Copying a file is not porting a feature, and
+a file that no `mod` declaration reaches is not even compiled, so nothing failed:
+
+- **Batch STT** (`pcm.rs`, `stt/batch.rs`) was copied and never declared. `SttMode`,
+  `batch_api_base` and the pipeline's batch branch were not copied at all, leaving
+  voice with only upstream's streaming transport — pointed by the rebrand at an
+  `api.chutes.ai/v1/stt` route Chutes does not serve.
+- **The native Advisor** was one file, `slash/commands/advisor.rs`, undeclared. The
+  built-in agent, its toolset, its prompt, the config writers and the two settings
+  actions were absent.
+- **API-key login inside the TUI** was one file, `slash/commands/apikey.rs`,
+  undeclared, and everything it calls was missing.
+- **`CHUTES_EXTRA_CA_BUNDLE`** did come forward, but through upstream's new
+  `xai-grok-extra-ca` crate rather than the fork's module — which was left behind as
+  dead code a reader would have taken for the live one, and is now deleted.
+
+All four are fixed as of 1.0.0. `scripts/dead_modules.py` is the check: it lists
+source files no `mod` declaration reaches, honouring `#[path]` and `include!`, and
+must return nothing. Run it after any file-copying phase of a future re-base — the
+"copied but unregistered" failure is silent by construction, and this re-base hit it
+in four separate registries (toolsets, guide chapters, slash commands, and the
+shell's reserved-name list).
+
+**Deliberately not carried:** `trace_classifier` and the `trace_classify`
+binary — 3278 lines of offline trace analysis with no consumer in the product.
+The `trace` subcommand does not use them (verified: no reference from
+`trace_cmd.rs` on either side), and `laziness_classifier` only mentions them in
+doc comments. They remain a clean copy away in `main` if the analysis is wanted
+again.
+
+**Dropped with the code they covered**, because upstream restructured or removed
+it: the Windows CI stabilisations in `ptyctl` and `xai-crash-handler` (upstream
+fixed them differently), the permission/exec-risk cluster (upstream carried it
+past our version), and the retry/permission work — which arrived with the re-base
+itself. The toolchain pin follows upstream: the
+fork had bumped to `1.94.1`, upstream 1.0.0 is on `1.94.0`, and the whole gate is
+green on `1.94.0` — so there is nothing left to hold the extra point version
+open.
+
+### Credential leak, 2026-08-08: how it happened and what closed it
+
+Two live Chutes API keys were committed to this branch, in files nobody wrote on
+purpose.
+
+The notification-hook tests interpolated an unquoted Windows path into `sh -c`.
+Under Git Bash the backslashes were eaten as escapes, so `env > C:\Users\...\env.txt`
+became `env > CUsersMike...env.txt` -- a redirect into the *crate root*. And
+`env` prints the whole environment, so each of those files held whatever was
+exported, including `CHUTES_API_KEY`. Thirty such files accumulated across the
+branch; ten carried a real key. A `git add -A` swept them into seven commits.
+`output/` went the same way: 42 generated media files, one of them a latency log
+with a second key, tracked on this branch only -- never on `main`, never
+upstream.
+
+The remediation, in order:
+
+1. The tests were fixed to quote the redirect target and hand the shell forward
+   slashes, so no new dump can be produced.
+2. `git filter-branch --index-filter` purged `output/` and every `*env.txt` from
+   the 17 commits of this branch. Verified afterwards: zero commits carry a
+   `cpk_`-shaped string, zero of the 10869 remaining blobs do, and the diff
+   against the pre-purge tree is exactly the purged paths and nothing else.
+3. `refs/original` deleted, reflogs expired, `gc --prune=now` -- the blobs are
+   out of the local object store, not merely unreferenced.
+4. `.gitignore` now covers `/output`, `CUsers*env.txt` and `*AppDataLocalTemp*`.
+   The tests are the fix; this is the second line of defence, because a
+   `git add -A` should never be able to sweep up a credential.
+5. Both keys were rotated by their owner.
+
+The branch had never been pushed, which is the only reason this was recoverable.
+Two lessons that are not about git:
+
+- **A test that dumps `env` is a test that dumps credentials.** The bug looked
+  cosmetic -- stray files with silly names -- and was tidied away twice before
+  anyone asked what was in them.
+- **`git add -A` on a tree known to produce stray files is not a shortcut, it is
+  a hazard.** Those files had already been noticed and deleted; that was treated
+  as housekeeping rather than as the signal it was.
+
+### The whole Chutes tool layer was registered nowhere
+
+Phase 1 copied the implementations. Phase 3 reapplied the seams that *consume*
+`chutes-build-core`. Neither step asked the third question — **which toolset lists
+these tools** — and the answer was none of them. `generate_media`,
+`list_media_models`, `describe_media_model`, `browser`, `ocr_page`,
+`get_chutes_usage`: some six thousand lines that compiled, whose unit tests
+passed, and which the model could never call.
+
+Upstream's toolsets carried its own Imagine tools instead (`image_gen`,
+`image_to_video`, `reference_to_video`), which talk to an xAI endpoint Chutes has
+no equivalent for. Their own tier message already said so: "This legacy image tool
+is unavailable. Use the native generate_media tool with a capable Chutes model."
+
+That also explains `/imagine`. The pager hides a slash command whose
+`required_tools()` are not advertised, so `/imagine` and `/imagine-video` had
+quietly disappeared — they gated on tools no Chutes deployment has. Both now gate
+on `generate_media`, and their injected instructions teach the catalog workflow
+(`list_media_models` → `describe_media_model` → `generate_media`, composing the
+payload from the cord's own `example`) because on Chutes the model is a catalog
+entry rather than a fixed endpoint, and FLUX, Qwen-Image, Wan, LTX and the TTS
+models share no schema. `/imagine-video` needed rewriting rather than renaming:
+upstream's text opens with "there is no text-to-video tool", which is true of that
+API and false here.
+
+Restored with it: `ensure_chutes_tools` for agents whose toolset came from a
+config file rather than a preset, and the lazy-discovery pair
+(`take_lazy_chutes_tools` / `register_lazy_chutes_tools`) that keeps these tools
+off the per-turn schema list while still registering them on the bridge for
+`use_tool` — taking them off without the second half would just delete the
+feature.
+
+Two tests now assert what nothing asserted before: that the ecosystem tools are
+in the default presets, and that the legacy Imagine tools are not. A tool's own
+unit tests pass whether or not anything can reach it, which is exactly how this
+survived a green gate.
+
+Verified live against Chutes with a real key: `search_tool` returns
+`chutes__list_media_models`, `chutes__describe_media_model`,
+`chutes__generate_media`, `chutes__ocr_page` and `chutes__get_chutes_usage` with
+their real descriptions, and `use_tool` invoked the catalog with
+`{"kind":"image"}` — 20 requests to `api.chutes.ai`, none to any xAI host. Before
+this change there was no `chutes` server in the session at all.
+
+**Not verified: a completed generation.** The headless runs end after two tool
+calls — the router model narrates its plan and stops rather than carrying the
+chain through to `generate_media`. That is a headless turn behaviour rather than
+evidence about the media path, and `/imagine` is a TUI command in any case, but it
+means the last step of this feature is unproven here and should be exercised by
+hand in the TUI.
+
+### Auditing the documentation found a credential leak
+
+The docs were checked against the code, not proofread. That direction matters: it
+turns the documentation into a set of assertions about the product, and one of them
+was true while the code was not.
+
+`PRIVACY.md` promises the ambient Chutes credential is "never reused for a custom
+endpoint" and that "a custom model-catalog endpoint uses `CHUTES_MODELS_API_KEY`".
+The re-base had dropped that variable's entire auth arm, so a custom endpoint fell
+into the `CHUTES_API_KEY` branch: pointing `CHUTES_BUILD_MODELS_LIST_URL` at any
+host sent it your Chutes credential during startup model discovery. The promise was
+the thing that caught it.
+
+The rest was documentation being wrong about a correct product, and worth listing
+because the shapes recur:
+
+- **Vendor attribution.** The README presented this fork as SpaceXAI's, under their
+  logo; `CONTRIBUTING.md` carried their "no external patches" policy;
+  `SECURITY.md` routed vulnerability reports to xAI's HackerOne programme. None of
+  these could be caught by any rebrand rule: "SpaceXAI" is upstream's own new name
+  for itself, so no `Grok`-derived pattern touches it.
+- **URLs that were assembled rather than checked.** Every install instruction was
+  a 404, including the one `/docs` itself opened. Each replacement here was
+  verified with a request; a plausible hostname is not evidence.
+- **Controls documented as working that are compiled out.** Version pinning, the
+  telemetry knobs, the coding-data row. Inheriting upstream's documentation for a
+  feature this build disables produces a page that is confidently false.
+- **A second registry with the same gap as the tool layer.** Two guide chapters sat
+  on disk, absent from `USER_GUIDE`, so `/docs` never listed them and they were
+  never extracted to `$CHUTES_BUILD_HOME/docs`. Whenever the fork adds something
+  the product exposes, the question is not "is it there" but "what lists it".
+
+### Still open
+
+**Verified live** with a real API key (see the sections above): API-key auth, the
+catalog from `llm.chutes.ai`, a complete turn through the Auto router with its
+timing, the set of hosts contacted, that nothing is written outside
+`$CHUTES_BUILD_HOME`, and that every Chutes tool is discoverable and the catalog
+tool invocable.
+
+**Still unverified**, and listed that way rather than assumed:
+
+- A completed media generation. The tools are reachable and the catalog answers,
+  but headless runs stop after two tool calls without reaching `generate_media`,
+  and `/imagine` is a TUI command. Exercise it by hand in the TUI.
+- Voice input and OCR — both need real audio and image input.
+- `chutes-build login`: the browser OAuth handoff against the Chutes IdP,
+  including the loopback callback and the `chutes.ai` CORS origin.
+- The usage and quota display in the status bar, and `/usage`.
+- The pre-stream fallback chain (`CHUTES_FALLBACK_MODELS`), which needs a model to
+  be genuinely unavailable to trigger.
+- `xai-grok-shell --lib` as a whole: it overflows a 1 MB thread stack on Windows in
+  debug, so that crate's non-`auth::` tests are unmeasured here. `agent::config`
+  and `remote::client` were checked per-module and pass.
+
+The seams in `agent/{config,init,models}.rs` and `extensions/billing.rs` are
+applied, and the memory store now writes every path through
+`write_secure_file` / `ensure_owner_only_permissions` (three of the four paths
+still created files with the process umask; the fourth already did not, and only
+the privacy filter had been wired up). `memory_files_are_owner_only` covers all
+of them on Unix.
+
+`main`'s branch protection still forbids the merge commits this model needs; see
+the section above. That is a decision, not a task.
+
+## Review record: 2026-08-07
+
+Upstream moved for the first time since the fork's last two passes, and it
+reached **1.0.0**: six `Synced from monorepo` commits carried `0.2.117` to
+`1.0.0` (`a4221165` → `afbc0fb`, 2026-08-03 to 2026-08-07), touching 748 files
+with roughly a hundred and ten changes.
+
+A note for future passes, because it misled this one: upstream still publishes
+**no GitHub releases and no tags** (both endpoints return empty at `1.0.0`), and
+the major-version bump has no commit of its own — it landed inside an ordinary
+`Synced from monorepo` commit alongside seven unrelated changes, one commit
+after "Drop the Beta label from the product". The version exists only in the
+lockstepped Cargo manifests. `.github/upstream.json`'s `versionManifest` field
+and the `Upstream watch` workflow read exactly that file, which is the correct
+signal; the release/tag comparison is not, and should not be read as evidence
+that upstream has not moved.
+
+Measured against the reviewed baseline at the time of the port work
+(`393430ee`, `0.2.121`), 81 of the touched files were still byte-identical in
+this fork and could be taken as-is; 491 had diverged and needed hand-merging;
+57 did not exist here at all. The `1.0.0` commit adds 77 more files and does
+not overlap the areas ported below.
+
+Ported — security:
+
+- Lexical path normalization before the permission glob match, with the
+  session cwd threaded through the manager and the shell-file gate. This is the
+  fix with real bite: `Read(src/**)` was escapable as `src/../../etc/passwd`
+  because `**` consumes `..`. Seven regression tests cover traversal escapes,
+  deny reach, the `*` catch-all, and the no-cwd path; their absolute fixtures
+  are built from a platform root, since `/etc/passwd` is not absolute on
+  Windows and would otherwise be cwd-joined and stop testing the escape.
+- `NotebookEdit` / `NotebookRead` rejected as rule prefixes instead of aliasing
+  onto `Edit` / `Read`.
+- Vendor-compat MCP kill switch actually enforced against client-forwarded
+  servers, including the on-disk attribution loader that bypasses the
+  import-marker cutoff, applied at all three ingress points.
+- Char-safe bearer fragment. Upstream extracted it into a new
+  `xai-grok-auth::bearer_fragment`; this fork had the same byte-slicing bug in
+  its own `token_suffix`, which now delegates to that one definition.
+- Sandbox deny-glob rework: the 200k visited-entry cap that refused startup on
+  ordinary large workspaces, symlink-target masking, and fail-closed walk
+  errors. `deny/glob.rs` was identical to the baseline, so it was taken whole;
+  only the caller's `Option` → `Result` seam and the caps struct were adapted.
+
+Ported — inference resilience, the highest-value area for this fork because
+Chutes is served through the Cloudflare edge:
+
+- `RetryPolicy::edge_client` (429 + any 5xx minus origin-TLS 525/526), and
+  `SamplingError::is_retryable` rebuilt on it. The previous hard-coded list
+  made 521–524, 529 and 530 fatal, so a transient edge failure ended the turn.
+- `Retry-After` clamped to a new `MAX_RETRY_BACKOFF` of 30s and jittered on the
+  generic path, leaving the 429 path to wait the full value under its own
+  attempt cap.
+- `x-should-retry` carried through `SamplingErrorInfo`, so the header survives
+  stream collection.
+- Clean non-200 banners. This one predates the reviewed baseline: upstream's
+  `provider_error.rs` and `user_facing_api_error_message` were never taken at
+  the fork point, so `parse_error_bytes` still fell back to the raw body —
+  meaning a Cloudflare HTML page went straight to the terminal. The module was
+  added and all nine client call sites now pass the status.
+
+Not portable: `gate_preflight.rs`. The module itself is small, but it is built
+on upstream's `GateDecision` provenance rework (`AskRuleMatch` vs
+`AskFailClosed`) and the `manager.rs` → `manager/` split, neither of which this
+fork has. The security value it carries — the cwd-aware evaluation — was taken
+directly instead, via `evaluate_with_cwd` at the manager and shell-file gates.
+
+Excluded by policy, as in previous passes: the three telemetry additions (Auto
+decision, `shortcut_used`, model-side skill reads) and `agent/otel_gate.rs`;
+the `/feedback` card changes; the "run chutes-build update before re-authenticating"
+copy; the cloud sandbox provisioning types and `remote/skills_client.rs`.
+Excluded as upstream-specific: dropping the Beta label, the `chutesday` /
+`chutesnight` themes, the Finance `ToolUsageCard` variant, and a deprecation-doc
+path fix for a file this fork does not have. Not applicable: the toolchain bump
+to 1.93.0 (this fork is on 1.94.1) and the workflow-subagent cap, which needs
+the upstream-only `xai-workflow` crate. Deliberately not taken: removing the
+project-directory picker, a feature this fork keeps.
+
+Ported — presentation and prompt:
+
+- Narrow markdown tables reflow inside their cells. The hard split walks
+  grapheme boundaries (CJK, VS16 emoji, ZWJ clusters stay intact) and the span
+  projection uses a monotonic cursor, so a plain run repeating an earlier
+  substring cannot inherit a link's style or hyperlink range. All four touched
+  files were identical to the baseline and taken whole; the crate gains
+  `unicode-segmentation`, already a workspace dependency.
+- Plan-viewer scrollbar: grab zone widened to the border column, striped thumb
+  fixed on Terminal.app.
+- Session recaps follow the language of the user's own chat messages instead of
+  always English. This fork's copy of the prompt was also older than the
+  baseline and had lost the explicit "do not call tools" guard, which came back
+  with it.
+
+Arrived with `1.0.0` itself and not yet ported: guarding the in-process git
+status/diff from client spam, memory traces bundled into the session trace
+export (local-only here, so no privacy conflict), a tabbed usage/session-info
+modal behind `/usage`, `/session-info` and `/context`, `startupHints` on
+session request metadata with the headless MCP connecting reminder fixed, and a
+plugin CTA debounce. Naming the Windows download `Chutes Build Setup.exe` is upstream
+distribution and excluded.
+
+Looked at and deliberately deferred rather than rushed: skipping nested
+checkouts in file watching. The visible half is a small new `checkout.rs`, but
+the fix that matters lands in `watcher.rs`, which upstream grew by 206 lines
+and which has diverged here (Sapling support sits behind
+`CHUTES_BUILD_FSNOTIFY_SAPLING`). It needs its own pass, not a hurried merge
+into a live filesystem watcher.
+
+Still open at the end of this pass, in rough value order: session-runtime work
+(streamed session fork, bounded post-kill reaps, the shared search-index lock,
+leader-disconnect eviction, the restored-child session registry behind
+`--resume`), tool and agent-loop fixes (MCP images extracted before truncation,
+read-only tool metadata, colliding skills, the goal evaluator, the stop gate),
+the TUI batch (scrollbar, CJK selection, markdown palette and table reflow,
+tmux/SSH theme detection, teardown resets, prompt-queue ordering), and the
+user-facing additions that would justify a minor release (`du`, ACP
+`session/resume` / `session/close`, conversation-only `/rewind`, the permission
+pattern editor, the dashboard batch).
+
+The baseline in `.github/upstream.json` is therefore **not** advanced by this
+pass: the procedure above only allows it once the selected ports are complete
+and the gates pass, and the selection is still open.
 
 ## Review record: 2026-08-02
 

@@ -11,13 +11,23 @@ where supported, sessions, logs, local exports, and user memory under
 `~/.chutes-build` (or `CHUTES_BUILD_HOME`). Plugins, user roles/personas, and
 managed bundled-agent definitions use that same root; setting
 `CHUTES_BUILD_HOME` does not fall back to those resources in the default home.
-Project memory is maintained in `memories.md`. Known secret formats are filtered
-before memory writes, but users should still avoid entering secrets into
-prompts.
+Project and global memory are maintained in `MEMORY.md` under that root, with
+per-session logs beside them. Known secret formats are filtered before every
+memory write, but users should still avoid entering secrets into prompts. Memory
+files are created owner-only (mode 0600 where the platform has POSIX
+permissions), including the bootstrap templates written on first run.
 
 `chutes-build trace` always creates a local archive. Remote session sharing and
 search, remote workspace exposure, upstream managed configuration commands, and
-automatic update checks are disabled. Session storage is forced to local mode
+automatic update checks are disabled — compiled out through
+`chutes-build-core::product`, with their endpoints pointed at a closed loopback
+port rather than left resolvable.
+
+There is no coding-data retention opt-in. Upstream offers one, both as a settings
+row and as a startup banner; here the setting is locked with the reason shown
+inline and the banner never appears, because the control would have nothing to
+enable. Nothing in this build sends your prompts, code, or traces to us or to
+anyone else for retention or training. Session storage is forced to local mode
 even if inherited write-back settings are present. Updates are installed
 manually.
 

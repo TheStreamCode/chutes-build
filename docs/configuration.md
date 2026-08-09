@@ -116,6 +116,22 @@ uses create-new writes and rolls back partial bundles.
 Voice recording is always manually activated. Use `/voice` for controls and
 `--no-memory` when a session must avoid local memory recall and writes.
 
+Speech-to-text is configured in `config.toml`, not by environment variable:
+
+```toml
+[voice]
+stt_mode = "batch"                                   # default
+batch_api_base = "https://vonkaiser-audiodojo.chutes.ai"
+language = "auto"                                    # or a catalog code
+```
+
+`batch` posts the whole utterance to a Whisper-shaped REST endpoint once you stop
+speaking — no live preview, and the only transport Chutes serves. `streaming` opens
+a WebSocket to `{api_base}/v1/stt` for interim results; Chutes' inference API has no
+such route, so it is only useful pointed at a proxy that provides one, and
+`api_base` deliberately defaults to a closed loopback address so the unconfigured
+case fails immediately instead of hanging on a host that cannot answer.
+
 ## Diagnostics
 
 `CHUTES_BUILD_LOG_SAMPLING=1` or `--log-sampling` enables local sampling

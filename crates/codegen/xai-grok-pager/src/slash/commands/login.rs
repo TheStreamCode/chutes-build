@@ -22,3 +22,31 @@ impl SlashCommand for LoginCommand {
         CommandResult::Action(Action::ShowLoginMenu)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acp::model_state::ModelState;
+    use crate::app::bundle::BundleState;
+
+    /// `/login` shows the menu instead of starting OAuth, because OAuth needs an
+    /// app the user registered and the API key does not.
+    #[test]
+    fn login_offers_a_choice_of_method() {
+        let models = ModelState::default();
+        let bundle = BundleState::default();
+        let mut ctx = CommandExecCtx {
+            models: &models,
+            session_id: None,
+            bundle_state: &bundle,
+            screen_mode: crate::app::ScreenMode::Inline,
+            billing_surface_visible: true,
+            usage_command_visible: true,
+            pager_state: crate::settings::PagerLocalSnapshot::default(),
+        };
+        assert!(matches!(
+            LoginCommand.run(&mut ctx, ""),
+            CommandResult::Action(Action::ShowLoginMenu)
+        ));
+    }
+}

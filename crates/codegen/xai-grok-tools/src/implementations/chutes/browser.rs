@@ -86,6 +86,9 @@ pub struct BrowserClient {
 
 struct BrowserSession {
     child: Child,
+    /// Keeps the process-scope enrollment alive for this child's lifetime; the
+    /// scope holds only a `Weak`, so dropping this would un-enroll the browser.
+    _process_group: std::sync::Arc<xai_tty_utils::ProcessGroup>,
     _profile: tempfile::TempDir,
     socket: CdpSocket,
     next_id: u64,
@@ -345,9 +348,17 @@ impl BrowserSession {
             use std::os::windows::process::CommandExt as _;
             command.as_std_mut().creation_flags(0x0800_0000);
         }
+        #[allow(clippy::disallowed_methods)] // enrolled in the process scope below
         let child = command
             .spawn()
             .map_err(|error| format!("Failed to start browser: {error}"))?;
+        // Enroll the browser in the process scope: an unenrolled child outlives
+        // the session that started it, leaving a headless Chrome behind for
+        // every browser tool call that is not cleanly torn down. The returned
+        // handle must be kept alive for as long as the child is.
+        let process_group = xai_tty_utils::global_process_scope()
+            .enroll(&child)
+            .map_err(|error| format!("Failed to enroll the browser process: {error}"))?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .build()
@@ -378,6 +389,7 @@ impl BrowserSession {
             .map_err(|error| format!("Failed to connect to browser DevTools: {error}"))?;
         let mut session = Self {
             child,
+            _process_group: process_group,
             _profile: profile,
             socket,
             next_id: 0,
@@ -563,7 +575,7 @@ impl crate::types::tool_metadata::ToolMetadata for BrowserTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::ChutesBuild
     }
 
     fn description_template(&self) -> &str {

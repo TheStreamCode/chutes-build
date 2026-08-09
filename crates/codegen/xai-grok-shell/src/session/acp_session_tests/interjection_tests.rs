@@ -199,7 +199,7 @@ mod interjection_broadcast_tests {
     /// Multi-client fix: a mid-turn interjection must be broadcast to every
     /// attached client (not just the originator) so all panes viewing the same
     /// session render it. This locks the wire contract the pager's
-    /// `handle_interjection` depends on: method `chutes.build/session/interjection`
+    /// `handle_interjection` depends on: method `chutes.ai/session/interjection`
     /// carrying `sessionId` + `text`.
     #[tokio::test]
     async fn broadcast_interjection_emits_sessionid_and_text() {
@@ -224,7 +224,7 @@ mod interjection_broadcast_tests {
                                 .ok();
                     }
                 }
-                let payload = payload.expect("an chutes.build/session/interjection broadcast");
+                let payload = payload.expect("an chutes.ai/session/interjection broadcast");
                 assert_eq!(
                     payload.get("sessionId").and_then(|v| v.as_str()),
                     Some("test-actor"),

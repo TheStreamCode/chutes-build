@@ -19,7 +19,7 @@ use crate::notification::types::ToolNotificationHandle;
 use serde::Serialize;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 /// Marker trait for types that can be stored in `Resources`.
@@ -425,15 +425,7 @@ pub(crate) fn resolve_plan_file_path(res: &Resources) -> (Option<PathBuf>, Strin
     let path = if let Some(configured) = res.get::<PlanFilePath>() {
         configured.0.clone()
     } else if let Some(cwd) = res.get::<Cwd>() {
-        // `PathBuf::join` only inserts the platform separator at this one
-        // join point; it never renormalizes the `/` already embedded inside
-        // `PLAN_FILE_RELATIVE_PATH` itself, so a naive `cwd.0.join(...)`
-        // produces a mixed-separator path on Windows (e.g.
-        // `C:\...\project\.chutes-build/plan.md`). Join component-by-component
-        // so every segment boundary gets the native separator.
-        Path::new(PLAN_FILE_RELATIVE_PATH)
-            .components()
-            .fold(cwd.0.clone(), |acc, component| acc.join(component))
+        cwd.0.join(PLAN_FILE_RELATIVE_PATH)
     } else {
         PathBuf::from(PLAN_FILE_RELATIVE_PATH)
     };
@@ -492,21 +484,15 @@ pub fn resolve_model_path(
     let input = sanitize_model_path_arg(input);
     let expanded = shellexpand::tilde(input);
     let input_path = std::path::Path::new(expanded.as_ref());
-    // `display_cwd` is always a Unix-style, forward-slash-rooted virtual path
-    // (the model's view of its sandbox/worktree), even when this binary runs
-    // on Windows. Use `has_root()` rather than `is_absolute()`: on Windows,
-    // `is_absolute()` also requires a drive-letter/UNC prefix, so a rooted
-    // path like `/home/user/project` would otherwise be misclassified as
-    // relative and silently skip the remap below.
     if let Some(display) = display_cwd
-        && input_path.has_root()
+        && input_path.is_absolute()
     {
         if let Ok(suffix) = input_path.strip_prefix(display) {
             return cwd.join(suffix);
         }
         return input_path.to_path_buf();
     }
-    if !input_path.has_root() && !expanded.is_empty() {
+    if !input_path.is_absolute() && !expanded.is_empty() {
         let as_absolute = std::path::PathBuf::from(format!("/{}", expanded.as_ref()));
         let effective_base = display_cwd.unwrap_or(cwd);
         if as_absolute.starts_with(effective_base)
@@ -666,6 +652,19 @@ impl Default for RespectGitignore {
 /// Default `false`. Hosts may enable this via remote config or local settings.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PathNotFoundHints(pub bool);
+/// Whether scheduled task fires execute in background loop subagents.
+///
+/// `false` forces every fire onto the legacy main-conversation path.
+/// Configured via `[scheduler] background_loops` in `config.toml`, the
+/// `CHUTES_BUILD_SCHEDULER_BACKGROUND_LOOPS` env var, or the
+/// `scheduler_background_loops` remote setting.
+#[derive(Debug, Clone, Copy)]
+pub struct SchedulerBackgroundLoops(pub bool);
+impl Default for SchedulerBackgroundLoops {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 /// Map of canonical tool names → model-facing tool names.
 #[derive(Debug, Clone, Default)]
 pub struct ToolNameMapping(pub HashMap<String, String>);
@@ -710,6 +709,35 @@ impl ParamNameMapping {
             .get(tool)
             .and_then(|m| m.get(canonical))
             .map(|s| s.as_str())
+            .unwrap_or(canonical)
+    }
+}
+/// Canonical → client-facing param names for the tool currently executing.
+///
+/// Stamped onto [`xai_tool_runtime::ToolCallContext::extensions`] by
+/// `prepare_dispatch` / `call_raw` from that tool's own
+/// `params_name_overrides`. Prefer this over kind-wide
+/// [`crate::types::template_renderer::TemplateRenderer::param_for_kind`] when
+/// naming params in that tool's own errors — multiple tools can share a
+/// `ToolKind` with different renames, and the kind map is first/last-wins.
+#[derive(Debug, Clone, Default)]
+pub struct InvokingToolParamNames(pub HashMap<String, String>);
+impl InvokingToolParamNames {
+    /// Build from a client→canonical reverse map (the dispatch remap direction).
+    pub fn from_reverse_params(reverse_params: &HashMap<String, String>) -> Self {
+        Self(
+            reverse_params
+                .iter()
+                .map(|(client, canonical)| (canonical.clone(), client.clone()))
+                .collect(),
+        )
+    }
+    /// Resolve a canonical parameter name for the invoking tool.
+    /// Falls back to the canonical name if not in the map.
+    pub fn resolve<'a>(&'a self, canonical: &'a str) -> &'a str {
+        self.0
+            .get(canonical)
+            .map(String::as_str)
             .unwrap_or(canonical)
     }
 }
@@ -1081,14 +1109,12 @@ mod tests {
         let mut state_map = HashMap::new();
         state_map.insert(
             "grok_build.ReadFile".to_string(),
-            serde_json::json!({ "files_read" : ["loaded.rs"] }),
+            serde_json::json!({"files_read": ["loaded.rs"]}),
         );
         let mut params_map = HashMap::new();
         params_map.insert(
             "grok_build.Edit".to_string(),
-            serde_json::json!(
-                { "skip_read_before_edit" : true, "max_file_size" : 512 }
-            ),
+            serde_json::json!({"skip_read_before_edit": true, "max_file_size": 512}),
         );
         let mut data = HashMap::new();
         data.insert("state".to_string(), state_map);
@@ -1107,11 +1133,11 @@ mod tests {
         let mut state_map = HashMap::new();
         state_map.insert(
             "unknown.Type".to_string(),
-            serde_json::json!({ "foo" : "bar" }),
+            serde_json::json!({"foo": "bar"}),
         );
         state_map.insert(
             "grok_build.ReadFile".to_string(),
-            serde_json::json!({ "files_read" : ["ok.rs"] }),
+            serde_json::json!({"files_read": ["ok.rs"]}),
         );
         let mut data = HashMap::new();
         data.insert("state".to_string(), state_map);
@@ -1148,7 +1174,7 @@ mod tests {
         let ok = res.set_json(
             "params",
             "grok_build.Edit",
-            serde_json::json!({ "skip_read_before_edit" : true }),
+            serde_json::json!({"skip_read_before_edit": true}),
         );
         assert!(ok);
         let config = res.get::<Params<EditConfig>>().unwrap();
@@ -1202,6 +1228,17 @@ mod tests {
             "new_string"
         );
         assert_eq!(mapping.resolve("other_tool", "old_string"), "old_string");
+    }
+    #[test]
+    fn invoking_tool_param_names_from_reverse_and_resolve() {
+        let reverse = HashMap::from([
+            ("start_line".to_string(), "offset".to_string()),
+            ("max_lines".to_string(), "limit".to_string()),
+        ]);
+        let names = InvokingToolParamNames::from_reverse_params(&reverse);
+        assert_eq!(names.resolve("offset"), "start_line");
+        assert_eq!(names.resolve("limit"), "max_lines");
+        assert_eq!(names.resolve("path"), "path");
     }
     #[test]
     fn params_deref() {
@@ -1430,6 +1467,17 @@ mod tests {
             result,
             std::path::PathBuf::from("/worktree/abc/src/main.rs")
         );
+    }
+    #[test]
+    fn resolve_model_path_sensitive_edit_spellings() {
+        let cwd = std::path::Path::new("/worktree/abc");
+        for input in ["  /etc/hosts  ", "\"/etc/hosts\\n\"", "'/etc/hosts\\r\\t'"] {
+            assert_eq!(
+                super::resolve_model_path(cwd, None, input),
+                std::path::PathBuf::from("/etc/hosts"),
+                "{input:?}"
+            );
+        }
     }
     /// An *unquoted* path keeps its backslashes: `\n` there may be a real
     /// path component (e.g. a Windows-style separator + dir named `n`).

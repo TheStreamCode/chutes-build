@@ -70,6 +70,8 @@ fn pending_input(prompt_id: &str) -> (InputItem, oneshot::Receiver<PromptTurnRes
         verbatim: false,
         json_schema: None,
         origin: crate::session::PromptOrigin::User,
+        task_wake_fallback: None,
+        tool_overrides_update: None,
         respond_to,
         persist_ack: None,
         parsed_prompt_tx: None,
@@ -154,6 +156,7 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
                         completion_kind: PromptCompletionKind::Completed,
                         structured_output: None,
                         usage: None,
+                        tool_overrides: None,
                     }),
                 )
                 .await;
@@ -257,8 +260,13 @@ async fn cancellation_persists_turn_completed_cancelled() {
                 state.pending_inputs.push_back(item);
             }
 
-            actor
-                .cancel_running_task(true, false, false, Some("ctrl_c".to_string()))
+            let _ = actor
+                .cancel_running_task(crate::session::CancelOptions {
+                    cancel_subagents: true,
+                    trigger: Some(crate::session::CancelTrigger::CtrlC),
+                    user_initiated: true,
+                    ..Default::default()
+                })
                 .await;
 
             let msgs = drain_persistence(&mut persistence_rx);
@@ -425,7 +433,7 @@ async fn send_now_cancel_stamps_cancel_trigger_on_turn_end() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn pristine_rewind_cancel_emits_no_turn_completed() {
+async fn no_output_rewind_cancel_emits_no_turn_completed() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -434,7 +442,7 @@ async fn pristine_rewind_cancel_emits_no_turn_completed() {
             let (persistence_tx, mut persistence_rx) = mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
 
-            // A pristine, rewindable in-flight turn at the front of the queue.
+            // An in-flight turn with no output yet at the front of the queue.
             *actor
                 .current_prompt_id
                 .lock()
@@ -453,16 +461,16 @@ async fn pristine_rewind_cancel_emits_no_turn_completed() {
                 state.pending_inputs.push_back(item);
             }
 
-            // rewind_if_pristine = true on a rewindable turn takes the rewind
+            // rewind_if_no_output = true on a rewindable turn takes the rewind
             // path: the turn is treated as UNSENT, so — in lock-step with the
             // legacy emit_turn_ended — NO durable terminal is emitted (else
             // replay would finalize a turn that was rewound, not completed).
-            actor.cancel_running_task(false, false, true, None).await;
+            let _ = actor.cancel_running_task(crate::session::CancelOptions { rewind_if_no_output: true, user_initiated: true, ..Default::default() }).await;
 
             let msgs = drain_persistence(&mut persistence_rx);
             assert!(
                 turn_completed_fields(&msgs).is_none(),
-                "a pristine rewind cancel treats the turn as unsent and must persist no TurnCompleted"
+                "a rewind cancel before any output treats the turn as unsent and must persist no TurnCompleted"
             );
         })
         .await;
@@ -500,6 +508,7 @@ async fn removed_from_queue_completion_emits_no_turn_completed() {
                         completion_kind: PromptCompletionKind::RemovedFromQueue,
                         structured_output: None,
                         usage: None,
+                        tool_overrides: None,
                     }),
                 )
                 .await;
@@ -543,6 +552,7 @@ async fn unknown_prompt_completion_emits_no_turn_completed() {
                         completion_kind: PromptCompletionKind::Completed,
                         structured_output: None,
                         usage: None,
+                        tool_overrides: None,
                     }),
                 )
                 .await;

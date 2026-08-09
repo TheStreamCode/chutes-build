@@ -37,12 +37,26 @@ use xai_grok_tools::types::{
     tool::{ToolKind, ToolNamespace},
     tool_metadata::ToolMetadata,
 };
-use xai_grok_tools::util::ProcessGroup;
+use xai_grok_tools::util::{ProcessGroup, ProcessScope};
 
 /// MCP tool name delimiter: server names are qualified as `"server__tool"`.
 /// Canonical definition lives in `xai_grok_workspace_types`; re-exported here
 /// for callers that historically imported it from this module.
 pub use xai_grok_workspace_types::MCP_TOOL_NAME_DELIMITER;
+
+/// Reqwest 0.13 adapter over `xai_grok_extra_ca::extra_root_ders` (DER is version-neutral).
+fn with_extra_root_certificates(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    for der in xai_grok_extra_ca::extra_root_ders() {
+        match reqwest::Certificate::from_der(der) {
+            Ok(cert) => builder = builder.add_root_certificate(cert),
+            Err(e) => tracing::warn!(
+                error = %e,
+                "CHUTES_EXTRA_CA_BUNDLE: validated DER rejected by reqwest 0.13; skipping cert"
+            ),
+        }
+    }
+    builder
+}
 
 /// Normalize an MCP server URL for comparison: strip trailing slashes.
 /// Must match the normalization the host's managed-config layer uses
@@ -310,7 +324,7 @@ impl InitProgress {
 }
 
 /// One in-process SDK MCP server registration: its tool-namespace name and the
-/// SDK-side id echoed back in `chutes.build/mcp/sdk_call`. A named struct (rather than a
+/// SDK-side id echoed back in `chutes.ai/mcp/sdk_call`. A named struct (rather than a
 /// `(String, String)` tuple) so callers can't transpose the two strings.
 ///
 /// `Deserialize`d straight from a `_meta["chutes.build/mcp/servers"]` entry, so the
@@ -332,7 +346,7 @@ struct AcpMcpRegistry {
     /// Registered servers (`name -> serverId`).
     servers: Vec<AcpServerEntry>,
     /// Shared reverse-RPC invoker all these servers' tools are called through (emits
-    /// `chutes.build/mcp/sdk_call` over the ACP connection).
+    /// `chutes.ai/mcp/sdk_call` over the ACP connection).
     invoker: Arc<dyn crate::acp_transport::AcpReverseInvoker>,
 }
 
@@ -381,7 +395,7 @@ pub struct McpState {
     /// task.  When `Some`, the state — and every [`McpClient`] reached
     /// through [`Self::all_clients`] / [`Self::get_client`] — forwards
     /// [`McpClientEvent`]s here for coalescing and fan-out as ACP
-    /// `chutes.build/mcp/server_status` notifications.
+    /// `chutes.ai/mcp/server_status` notifications.
     ///
     /// Intentionally `None` in subagent-pool / shared-pool snapshots
     /// ([`SharedMcpPool`]) where the **parent** session is the
@@ -1148,6 +1162,24 @@ impl McpError {
     }
 }
 
+/// True when a failed refresh-token grant was a **network-level** failure
+/// that never reached the IdP (RT validity unknown, presumed good); IdP
+/// rejections and missing credentials stay terminal (escalate to browser).
+/// rmcp 2.1 collapses the error into `TokenRefreshFailed(String)`, so this
+/// anchors on the `oauth2` crate's stable `Display` texts via
+/// `starts_with` (an IdP error description can't spoof a match):
+/// `"Request failed"` = network, `"Failed to parse server response"` =
+/// non-OAuth 5xx/proxy bodies; `"Server returned error response: …"` does
+/// NOT match.
+pub(crate) fn mcp_refresh_failure_is_transient(err: &rmcp::transport::auth::AuthError) -> bool {
+    match err {
+        rmcp::transport::auth::AuthError::TokenRefreshFailed(msg) => {
+            msg.starts_with("Request failed") || msg.starts_with("Failed to parse server response")
+        }
+        _ => false,
+    }
+}
+
 /// True if an MCP error *message* indicates an auth rejection (vs. a transport
 /// drop, timeout, or protocol error), so host recovery can decide whether a
 /// credential re-fetch would help.
@@ -1219,8 +1251,8 @@ pub struct McpTool {
 ///   so the LLM can invoke them during a conversation.
 /// - **App-visible only** (`["app"]`): not registered in `ToolBridge`, so the LLM
 ///   never sees them. These are UI-only actions (e.g. refresh buttons) surfaced to
-///   the frontend via `chutes.build/mcp/tools_changed` notifications and callable via
-///   `chutes.build/mcp/call`.
+///   the frontend via `chutes.ai/mcp/tools_changed` notifications and callable via
+///   `chutes.ai/mcp/call`.
 pub struct McpToolRegistration {
     pub name: String,
     pub description: String,
@@ -1253,36 +1285,24 @@ impl McpTool {
 
     /// Convert into the data needed for `ToolBridge::register_erased()`.
     ///
-    /// Returns `None` if the tool name is invalid (doesn't match LLM API requirements).
-    /// Invalid tools are logged and skipped — fix the upstream connector.
-    ///
-    /// Also rejects qualified names that contain the delimiter
-    /// (`MCP_TOOL_NAME_DELIMITER`) more than once. The underlying tool-name
-    /// regex permits underscores in each segment, so a server like
-    /// `"foo__bar"`, a tool like `"my__thing"`, or even a `"foo_"`/`"_bar"`
-    /// pair (which concatenates to `"foo___bar"` — two valid `__`
-    /// positions) would produce a qualified name that downstream
-    /// `split_once("__")` consumers would split at the wrong boundary.
-    /// The "exactly one delimiter" check covers all three cases with a
-    /// single rule.
+    /// Invalid or ambiguous qualified IDs and provider-invalid names are logged
+    /// and skipped; the upstream connector must provide non-empty `server` and
+    /// `tool` segments separated by exactly one `__` boundary.
     pub fn into_registration(self) -> Option<McpToolRegistration> {
-        // Qualify MCP tool name with server name: "server__tool"
         let qualified_name = format!(
             "{}{}{}",
             self.server_name, MCP_TOOL_NAME_DELIMITER, self.name
         );
 
-        // Reject ambiguous qualified names — see doc-comment above.
-        if qualified_name.matches(MCP_TOOL_NAME_DELIMITER).count() != 1 {
+        if parse_mcp_qualified_name(&qualified_name).is_none() {
             tracing::error!(
                 server = %self.server_name,
                 tool = %self.name,
                 qualified = %qualified_name,
-                "Skipping MCP tool: qualified name contains '{MCP_TOOL_NAME_DELIMITER}' more than once (server, tool, or their boundary collides with the reserved delimiter)"
+                "Skipping MCP tool with invalid or ambiguous qualified name"
             );
             return None;
         }
-
         if let Err(reason) = validate_tool_name(&qualified_name) {
             tracing::error!(
                 tool_name = %qualified_name,
@@ -2029,16 +2049,19 @@ where
 /// grandchildren (e.g. `npx` -> `node`) before reaping the leader.
 pub struct SafeTokioChildProcess {
     child: Option<tokio::process::Child>,
-    process_group: Option<ProcessGroup>,
+    /// Strong `Arc` owner; the scope holds only a `Weak`, dropped on reap.
+    process_group: Option<Arc<ProcessGroup>>,
     transport: ResilientRwTransport<tokio::process::ChildStdout, tokio::process::ChildStdin>,
 }
 
 impl SafeTokioChildProcess {
     /// `server_name` + `event_writer` are threaded into the transport so a
     /// skipped (undecodable) stdout line emits an `McpTransportDecodeError`
-    /// event for that server.
+    /// event for that server. `scope`, when set, enrolls the child's group for
+    /// session-close reaping.
     fn spawn(
         mut cmd: Command,
+        scope: Option<&ProcessScope>,
         server_name: String,
         event_writer: xai_file_utils::events::EventWriter,
     ) -> std::io::Result<(Self, Option<ChildStderr>)> {
@@ -2046,6 +2069,7 @@ impl SafeTokioChildProcess {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
+        #[allow(clippy::disallowed_methods)] // enrolled in the session scope below
         let mut child = cmd.spawn()?;
         let stdin = child
             .stdin
@@ -2060,7 +2084,7 @@ impl SafeTokioChildProcess {
         // Best-effort: a missing group just degrades to direct-child-only cleanup.
         let process_group = match ProcessGroup::new() {
             Ok(mut group) => match group.attach(&child) {
-                Ok(()) => Some(group),
+                Ok(()) => Some(Arc::new(group)),
                 Err(e) => {
                     tracing::warn!("Failed to attach MCP child to process group: {e}");
                     None
@@ -2071,6 +2095,30 @@ impl SafeTokioChildProcess {
                 None
             }
         };
+        // Enrollment ties this child to the *spawning* session's lifetime.
+        // `SharedMcpPool` may hand the resulting client Arc to subagent
+        // sessions, but subagents inherit the root session's scope, so the
+        // root's kill_all cannot strand an in-tree subagent. Residual: any
+        // detached holder of the Arc loses the transport when the spawning
+        // session closes — session close is deliberately the reap boundary.
+        if let (Some(scope), Some(group)) = (scope, process_group.as_ref())
+            && !scope.register(group)
+        {
+            // The scope latched closed (spawn raced session teardown), so
+            // `register` already killpg'd the child. Fail fast with a clear
+            // error instead of proceeding into a doomed rmcp handshake; the
+            // reap below mirrors `Drop`'s best-effort leader cleanup.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = child.kill().await;
+                });
+            } else if let Err(e) = child.start_kill() {
+                tracing::warn!("Error signaling MCP child killed by closed scope: {e}");
+            }
+            return Err(std::io::Error::other(
+                "session is closing (process scope already reclaimed); MCP server not started",
+            ));
+        }
 
         Ok((
             Self {
@@ -2208,7 +2256,7 @@ enum PendingTransport {
         auth_manager: Arc<tokio::sync::Mutex<rmcp::transport::auth::AuthorizationManager>>,
     },
     /// In-process SDK MCP server reached over the ACP reverse channel
-    /// (`chutes.build/mcp/sdk_call`). Rebuildable from its `server_id` + invoker, so handshake
+    /// (`chutes.ai/mcp/sdk_call`). Rebuildable from its `server_id` + invoker, so handshake
     /// failures restore like Http (unlike the consumed Stdio child).
     Acp {
         server_id: String,
@@ -2303,7 +2351,7 @@ pub enum LivenessCheck {
 /// 3. The session/managed-config layer when a server is added, removed,
 ///    or successfully (re-)initialized.
 ///
-/// Consumers fan these out to ACP `chutes.build/mcp/server_status` after 50 ms
+/// Consumers fan these out to ACP `chutes.ai/mcp/server_status` after 50 ms
 /// of tumbling-window coalescing keyed by `(server, kind)`; see the
 /// session-actor `StatusDispatcher`.
 #[derive(Debug, Clone)]
@@ -2795,7 +2843,12 @@ impl McpClient {
     /// Tries in order:
     /// 1. Reload from disk (picks up tokens from background auth task)
     /// 2. Refresh via refresh_token grant
-    /// 3. Full browser-based OAuth flow
+    /// 3. Full browser-based OAuth flow — unless the refresh failure was a
+    ///    pure network failure ([`mcp_refresh_failure_is_transient`]): the
+    ///    stored refresh token is then still presumed valid, and opening a
+    ///    browser tab / re-running DCR for a Wi-Fi blip right after
+    ///    wake-from-sleep is both useless (the IdP is unreachable for the
+    ///    browser too) and destructive (it discards a working credential).
     pub async fn force_reauth(&self, force: bool) -> bool {
         let (Some(auth_mgr), Some(config)) = (&self.auth_manager, &self.http_config) else {
             return false;
@@ -2846,22 +2899,43 @@ impl McpClient {
         }
 
         // Try token refresh.
-        let refresh_ok = {
+        let refresh_result = {
             let mgr = auth_mgr.lock().await;
-            mgr.refresh_token().await.is_ok()
+            mgr.refresh_token().await
         };
 
-        if refresh_ok {
-            tracing::info!(
-                server = self.server_name.as_str(),
-                "Token refreshed successfully (no browser)"
-            );
-            self.replace_state(ClientState::Pending(PendingTransport::HttpAuth {
-                config: config.clone(),
-                auth_manager: auth_mgr.clone(),
-            }))
-            .await;
-            return true;
+        match refresh_result {
+            Ok(_) => {
+                tracing::info!(
+                    server = self.server_name.as_str(),
+                    "Token refreshed successfully (no browser)"
+                );
+                self.replace_state(ClientState::Pending(PendingTransport::HttpAuth {
+                    config: config.clone(),
+                    auth_manager: auth_mgr.clone(),
+                }))
+                .await;
+                return true;
+            }
+            // Transient (network never reached the IdP): fail the attempt
+            // instead of discarding a presumed-good credential — the retry
+            // paths re-run the refresh once the network is back. An explicit
+            // user trigger (`force`) still opens the browser.
+            Err(ref e) if !force && mcp_refresh_failure_is_transient(e) => {
+                tracing::warn!(
+                    server = self.server_name.as_str(),
+                    error = %e,
+                    "Token refresh failed transiently (network); skipping browser escalation"
+                );
+                return false;
+            }
+            Err(e) => {
+                tracing::info!(
+                    server = self.server_name.as_str(),
+                    error = %e,
+                    "Token refresh failed terminally; falling back to browser auth"
+                );
+            }
         }
 
         // Full browser-based OAuth flow.
@@ -3033,7 +3107,7 @@ impl McpClient {
     }
 
     /// Build a client for an in-process SDK MCP server reached over the ACP reverse
-    /// channel. `server_id` is the id the agent echoes back in `chutes.build/mcp/sdk_call`; the
+    /// channel. `server_id` is the id the agent echoes back in `chutes.ai/mcp/sdk_call`; the
     /// `invoker` performs the reverse request. Same downstream path as HTTP/stdio.
     pub fn new_acp(
         server_name: String,
@@ -3401,12 +3475,11 @@ impl McpClient {
                     }
                 }
                 ensure_figma_user_agent(&mut headers, name, &config.url);
-                let http_client = reqwest::Client::builder()
-                    .default_headers(headers)
-                    .build()
-                    .map_err(|e| {
-                        McpError::ClientError(format!("Failed to build HTTP client: {e}"))
-                    })?;
+                let http_client = with_extra_root_certificates(
+                    reqwest::Client::builder().default_headers(headers),
+                )
+                .build()
+                .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
                 // `AuthClient::new` wants an owned manager, but ours is shared
                 // (`Arc`) with the OAuth flow; the struct is non_exhaustive, so
                 // build with a throwaway manager and swap in the shared one.
@@ -3438,7 +3511,7 @@ impl McpClient {
                     })
             }
             PendingTransport::Acp { server_id, invoker } => {
-                // Per-reverse-call backstop on `chutes.build/mcp/sdk_call`: the larger of the
+                // Per-reverse-call backstop on `chutes.ai/mcp/sdk_call`: the larger of the
                 // startup and tool timeouts, so it never undercuts the real outer bound
                 // (the handshake `initialize` is bounded by the serve `timeout` below;
                 // tool calls by `tool_timeout_for` in `try_call_tool`). The bridge
@@ -3611,10 +3684,10 @@ impl McpClient {
             }
         }
         ensure_figma_user_agent(&mut headers, server_name, &config.url);
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        let client =
+            with_extra_root_certificates(reqwest::Client::builder().default_headers(headers))
+                .build()
+                .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
         let mcp_http_client =
             crate::mcp_http_client::McpHttpClient::new(client, server_name, warn_budget);
         let transport_config = StreamableHttpClientTransportConfig::with_uri(config.url.as_str());
@@ -4055,14 +4128,45 @@ fn stdio_path_override(env: &[acp::EnvVariable]) -> Option<&str> {
         .map(|e| e.value.as_str())
 }
 
+/// Borrowed cross-cutting spawn context whose `scope`, when set, enrolls the stdio child for session-close reaping.
+pub struct McpSpawnCtx<'a> {
+    pub(crate) session_id: Option<&'a str>,
+    pub(crate) event_writer: &'a xai_file_utils::events::EventWriter,
+    pub(crate) mode: OauthInteractivity,
+    pub(crate) scope: Option<&'a ProcessScope>,
+}
+
+impl<'a> McpSpawnCtx<'a> {
+    pub fn for_session(
+        session_id: &'a str,
+        event_writer: &'a xai_file_utils::events::EventWriter,
+        mode: OauthInteractivity,
+        scope: Option<&'a ProcessScope>,
+    ) -> Self {
+        Self {
+            session_id: Some(session_id),
+            event_writer,
+            mode,
+            scope,
+        }
+    }
+
+    pub fn session_less(event_writer: &'a xai_file_utils::events::EventWriter) -> Self {
+        Self {
+            session_id: None,
+            event_writer,
+            mode: OauthInteractivity::Interactive,
+            scope: None,
+        }
+    }
+}
+
 pub async fn start_mcp_server(
     mcp_server: acp::McpServer,
-    session_id: Option<&str>,
     overrides: Option<&McpClientTimeoutOverrides>,
     meta_config: Option<&McpServerMetaConfig>,
     byo_config: Option<&McpOAuthConfig>,
-    event_writer: &xai_file_utils::events::EventWriter,
-    mode: OauthInteractivity,
+    ctx: &McpSpawnCtx<'_>,
 ) -> Result<McpClient, McpError> {
     let _per_server_timer = xai_grok_telemetry::instrumentation::timer("mcp_start_one_server");
     match mcp_server {
@@ -4098,24 +4202,27 @@ pub async fn start_mcp_server(
             }
             xai_grok_tools::util::detach_command(&mut cmd);
 
-            let (transport, stderr_handle) =
-                SafeTokioChildProcess::spawn(cmd, name.clone(), event_writer.clone()).map_err(
-                    |e| {
-                        tracing::error!("Failed to spawn MCP server '{}': {}", name, e);
-                        xai_grok_telemetry::session_ctx::log_event(
-                            xai_grok_telemetry::events::McpServerFailed {
-                                server_name: name.clone(),
-                                error_type: xai_grok_telemetry::events::McpErrorType::SpawnFailed,
-                                duration_ms: spawn_start.elapsed().as_millis() as u64,
-                                timeout_sec: startup_timeout,
-                            },
-                        );
-                        McpError::SpawnFailed {
-                            server: name.clone(),
-                            source: e,
-                        }
+            let (transport, stderr_handle) = SafeTokioChildProcess::spawn(
+                cmd,
+                ctx.scope,
+                name.clone(),
+                ctx.event_writer.clone(),
+            )
+            .map_err(|e| {
+                tracing::error!("Failed to spawn MCP server '{}': {}", name, e);
+                xai_grok_telemetry::session_ctx::log_event(
+                    xai_grok_telemetry::events::McpServerFailed {
+                        server_name: name.clone(),
+                        error_type: xai_grok_telemetry::events::McpErrorType::SpawnFailed,
+                        duration_ms: spawn_start.elapsed().as_millis() as u64,
+                        timeout_sec: startup_timeout,
                     },
-                )?;
+                );
+                McpError::SpawnFailed {
+                    server: name.clone(),
+                    source: e,
+                }
+            })?;
 
             tracing::debug!("MCP server '{}' spawned: PID={:?}", name, transport.id());
 
@@ -4140,7 +4247,7 @@ pub async fn start_mcp_server(
                 tracing::info!(server = %name, %url, ?mc, "MCP http: meta config override");
             }
 
-            let headers = expand_session_id_headers(headers, session_id);
+            let headers = expand_session_id_headers(headers, ctx.session_id);
             let http_config = HttpConfig {
                 url: url.clone(),
                 headers,
@@ -4162,7 +4269,7 @@ pub async fn start_mcp_server(
                     xai_grok_telemetry::instrumentation::timer("mcp_http_auth_discovery");
                 match tokio::time::timeout(
                     OAUTH_DISCOVERY_TIMEOUT,
-                    discover_and_prepare_auth(&name, &url, mode),
+                    discover_and_prepare_auth(&name, &url, ctx.mode),
                 )
                 .await
                 {
@@ -4171,17 +4278,17 @@ pub async fn start_mcp_server(
                         tracing::warn!(
                             server = %name,
                             url = %url,
-                            ?mode,
+                            mode = ?ctx.mode,
                             timeout_secs = OAUTH_DISCOVERY_TIMEOUT.as_secs(),
                             "OAuth discovery timed out"
                         );
-                        event_writer.emit(
+                        ctx.event_writer.emit(
                             xai_file_utils::events::Event::McpOAuthDiscoveryTimeout {
                                 server_name: name.clone(),
                                 url: url.clone(),
                             },
                         );
-                        HttpOauthPrep::on_probe_failure(mode)
+                        HttpOauthPrep::on_probe_failure(ctx.mode)
                     }
                 }
             };
@@ -4215,12 +4322,10 @@ pub async fn start_mcp_server(
 
 pub async fn start_mcp_servers(
     mcp_servers: Vec<acp::McpServer>,
-    session_id: Option<&str>,
     overrides_map: &HashMap<String, McpClientTimeoutOverrides>,
     meta_config_map: &McpMetaConfigMap,
     oauth_config_map: &crate::oauth_config::McpOAuthConfigMap,
-    event_writer: &xai_file_utils::events::EventWriter,
-    mode: OauthInteractivity,
+    ctx: &McpSpawnCtx<'_>,
 ) -> Vec<Result<McpClient, McpError>> {
     let _mcp_start_timer = xai_grok_telemetry::instrumentation::timer("mcp_start_servers");
 
@@ -4238,7 +4343,7 @@ pub async fn start_mcp_servers(
             let overrides = overrides_map.get(server_name);
             let mc = meta_config_map.get(server_name);
             let byo = oauth_config_map.get(server_name);
-            start_mcp_server(server, session_id, overrides, mc, byo, event_writer, mode)
+            start_mcp_server(server, overrides, mc, byo, ctx)
         })
         .buffer_unordered(8)
         .collect::<Vec<_>>()
@@ -4325,7 +4430,7 @@ impl McpClient {
 /// Plumbs server-pushed notifications through an
 /// [`tokio::sync::mpsc::UnboundedSender<McpClientEvent>`] so the
 /// session-actor dispatcher can fan them out as ACP
-/// `chutes.build/mcp/server_status` events.
+/// `chutes.ai/mcp/server_status` events.
 ///
 /// ## RPIT, not `#[async_trait]`
 ///
@@ -4600,6 +4705,7 @@ mod tests {
             xai_grok_tools::util::detach_command(&mut cmd);
             let (transport, _stderr) = SafeTokioChildProcess::spawn(
                 cmd,
+                None,
                 "test".to_string(),
                 xai_file_utils::events::EventWriter::noop(),
             )
@@ -4629,6 +4735,55 @@ mod tests {
             return true;
         }
         std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+
+    /// `scope.kill_all()` reaps an enrolled MCP child even when its owner never
+    /// runs Drop. Non-vacuous: dropping the `Some(&scope)` enrollment makes this
+    /// time out.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn scope_kill_all_reaps_enrolled_mcp_child_while_owner_wedged() {
+        use std::time::Duration;
+
+        let scope = ProcessScope::new();
+
+        let mut cmd = Command::new("sleep");
+        cmd.arg("600").kill_on_drop(true);
+        xai_grok_tools::util::detach_command(&mut cmd);
+        let (mut child_process, _stderr) = SafeTokioChildProcess::spawn(
+            cmd,
+            Some(&scope),
+            "wedge-test".to_string(),
+            xai_file_utils::events::EventWriter::noop(),
+        )
+        .expect("spawn enrolled MCP child");
+        assert_eq!(
+            scope.live_count(),
+            1,
+            "the enrolled MCP child group must be tracked by the scope"
+        );
+
+        // Wedge: owner never runs Drop, so kill_all is the only reclaim path.
+        scope.kill_all();
+
+        // Take only the handle, not the group, so kill-on-drop can't mask a
+        // missing enrollment.
+        let mut child = child_process.child.take().expect("child handle present");
+        // Null the strong Arc<ProcessGroup> before reaping the leader below:
+        // holding it across the reap would let `child_process`'s later Drop
+        // killpg a reusable pgid — the PID-reuse pattern the Weak ownership
+        // contract exists to prevent.
+        child_process.process_group = None;
+        let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("scope.kill_all must have SIGKILL'd the enrolled MCP child group")
+            .expect("wait on the reclaimed child succeeds");
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGKILL),
+            "the MCP child must have been SIGKILL'd by the scope, not have exited cleanly"
+        );
     }
 
     #[test]
@@ -5739,28 +5894,83 @@ mod tests {
     }
 
     #[test]
-    fn into_registration_accepts_well_formed_segments() {
-        // Positive guard: the count check rejects `__`-anywhere-but-the-delimiter
-        // names but must not reject legitimate ones. If the rejection rule is
-        // ever tightened too far, this test breaks before any of the negative
-        // cases below.
-        let tool = make_mcp_tool("linear", "list_issues");
-        let reg = tool.into_registration().expect("should register");
-        assert_eq!(reg.name, "linear__list_issues");
+    fn qualified_mcp_name_parser_accepts_structurally_valid_tool_ids() {
+        for (name, expected) in [
+            ("linear__list_issues", ("linear", "list_issues")),
+            ("123__lookup", ("123", "lookup")),
+            ("server:scope__tool", ("server:scope", "tool")),
+        ] {
+            let (id, server, tool) = parse_mcp_qualified_name(name).expect("valid qualified ID");
+            assert_eq!(id.as_str(), name);
+            assert_eq!((server, tool), expected);
+            assert_eq!(
+                parse_mcp_tool_name(name),
+                Some((expected.0.to_owned(), expected.1.to_owned()))
+            );
+        }
     }
 
     #[test]
-    fn into_registration_rejects_boundary_ambiguity() {
-        // `"foo_"` + `"__"` + `"_bar"` => `"foo___bar"` has two valid
-        // `__` positions (indices 3 and 4), so `split_once("__")` would
-        // misparse it as `("foo", "_bar")` and silently auto-allow a
-        // future legitimate `"foo"` server. The naïve per-segment check
-        // (each side individually has no `__`) misses this — the count
-        // check catches it. Same rule also rejects "__-in-segment" cases
-        // (`"weird__server"` + `"list"`, `"linear"` + `"my__weird__tool"`)
-        // which are covered by the same `count() != 1` line of code.
-        let tool = make_mcp_tool("foo_", "_bar");
-        assert!(tool.into_registration().is_none());
+    fn qualified_mcp_name_parser_rejects_malformed_names() {
+        for name in [
+            "server__part__tool",
+            "server__tool__part",
+            "foo___bar",
+            "foo____bar",
+            "__tool",
+            "server__",
+            "server",
+            "",
+            "server__bad.tool",
+        ] {
+            assert!(
+                parse_mcp_qualified_name(name).is_none(),
+                "unexpectedly accepted {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn into_registration_validates_qualified_name() {
+        let registration = make_mcp_tool("linear", "list_issues")
+            .into_registration()
+            .expect("should register");
+        assert_eq!(registration.name, "linear__list_issues");
+
+        for (server, tool) in [
+            ("server__part", "tool"),
+            ("server", "tool__part"),
+            ("foo_", "bar"),
+            ("foo", "_bar"),
+            ("foo_", "_bar"),
+            ("", "tool"),
+            ("server", ""),
+        ] {
+            assert!(
+                make_mcp_tool(server, tool).into_registration().is_none(),
+                "unexpectedly registered {server:?} and {tool:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn into_registration_preserves_provider_name_policy() {
+        for qualified in ["123__lookup", "server:scope__tool"] {
+            assert!(parse_mcp_qualified_name(qualified).is_some());
+            let (server, tool) = qualified.split_once("__").unwrap();
+            assert!(make_mcp_tool(server, tool).into_registration().is_none());
+        }
+
+        let server_61 = format!("a{}", "b".repeat(60));
+        let server_62 = format!("a{}", "b".repeat(61));
+        let valid_64 = format!("{server_61}__b");
+        let invalid_65 = format!("{server_62}__b");
+        assert_eq!(valid_64.len(), 64);
+        assert_eq!(invalid_65.len(), 65);
+        assert!(parse_mcp_qualified_name(&valid_64).is_some());
+        assert!(parse_mcp_qualified_name(&invalid_65).is_some());
+        assert!(make_mcp_tool(&server_61, "b").into_registration().is_some());
+        assert!(make_mcp_tool(&server_62, "b").into_registration().is_none());
     }
 
     // ── is_retriable_transport_error tests ───────────────────────────

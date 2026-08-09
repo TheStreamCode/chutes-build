@@ -18,10 +18,14 @@ use std::path::{Path, PathBuf};
 /// Total output is capped at ~1k characters.
 pub async fn git_status(working_directory: impl Into<PathBuf>) -> Result<String, FsError> {
     let working_directory = working_directory.into();
+    let permit = crate::git_odb::try_acquire_odb();
 
-    tokio::task::spawn_blocking(move || git_status_impl(&working_directory))
-        .await
-        .map_err(|e| FsError::Other(format!("git status task failed: {}", e)))?
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        git_status_impl(&working_directory)
+    })
+    .await
+    .map_err(|e| FsError::Other(format!("git status task failed: {e}")))?
 }
 
 /// Matches Node's default `execFile` `maxBuffer` (1 MiB). This cap is
@@ -64,24 +68,24 @@ fn collapse_status_spaces(s: &str) -> String {
     out
 }
 
-/// Short git status for the templated user message.
-///
-/// Runs `git status --short --branch` and returns its output with consecutive
-/// spaces collapsed via [`collapse_status_spaces`]: a leading `## <branch>`
-/// line followed by the file change list (or just `## <branch>` on a clean
-/// tree). This matches the body embedded in the `<git_status>` block
-/// byte-for-byte.
 pub async fn git_status_short(working_directory: impl Into<PathBuf>) -> Result<String, FsError> {
     let working_directory = working_directory.into();
+    let permit = crate::git_odb::try_acquire_odb();
 
     tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let output = xai_tty_utils::git_command()
-            .args(["status", "--short", "--branch"])
+            .args(["status", "--short", "--branch", "--untracked-files=normal"])
             .current_dir(&working_directory)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .output()
-            .map_err(|e| FsError::Other(format!("git status --short --branch failed: {}", e)))?;
+            .map_err(|e| {
+                FsError::Other(format!(
+                    "git status --short --branch --untracked-files=normal failed: {}",
+                    e
+                ))
+            })?;
 
         if !output.status.success() {
             return Err(FsError::Other(format!(

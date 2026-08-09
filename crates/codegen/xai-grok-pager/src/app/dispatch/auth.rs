@@ -1,7 +1,7 @@
 //! Login, logout, account switching, and auth-code submission dispatchers.
 
 use super::ctx::{restore_auth_return_view, show_welcome};
-use super::queue::{maybe_drain_queue, note_peek_page_flip_after_drain};
+use super::queue::{maybe_drain_queue, note_peek_page_flip};
 use super::router::dispatch;
 use super::session::lifecycle::{clear_startup_actions, drain_startup_actions};
 use crate::app::actions::{Action, Effect};
@@ -98,7 +98,7 @@ pub(super) fn dispatch_switch_account(app: &mut AppView) -> Vec<Effect> {
 
     let request_seq = app.next_auth_request_seq;
     app.next_auth_request_seq += 1;
-    app.auth_code_input.clear();
+    app.auth_code_input.reset();
     app.auth_state = AuthState::Authenticating {
         request_seq,
         handle: None,
@@ -123,23 +123,7 @@ pub(super) fn dispatch_switch_account(app: &mut AppView) -> Vec<Effect> {
 pub(super) fn scrollback_has_recent_reauth_prompt(
     scrollback: &crate::scrollback::state::ScrollbackState,
 ) -> bool {
-    use crate::scrollback::block::RenderBlock;
-    for idx in (0..scrollback.len()).rev() {
-        match scrollback.entry(idx).map(|e| &e.block) {
-            Some(RenderBlock::SessionEvent(ev)) => {
-                if matches!(ev.event, SessionEvent::ReAuthRequired) {
-                    return true;
-                }
-            }
-            // Tolerate interleaved system messages in the trailing run.
-            Some(RenderBlock::System(_)) => {}
-            // Stop at the first substantive block: any re-auth prompt for
-            // this turn lives in the trailing events pushed just before the
-            // PromptResponse arrived.
-            _ => break,
-        }
-    }
-    false
+    trailing_session_events(scrollback).any(|(_, ev)| matches!(ev, SessionEvent::ReAuthRequired))
 }
 
 /// True if the trailing run of session/system blocks contains a terminal
@@ -148,24 +132,72 @@ pub(super) fn scrollback_has_recent_reauth_prompt(
 pub(super) fn scrollback_has_recent_context_too_large(
     scrollback: &crate::scrollback::state::ScrollbackState,
 ) -> bool {
+    trailing_session_events(scrollback).any(|(_, ev)| {
+        matches!(
+            ev,
+            SessionEvent::ContextTooLarge | SessionEvent::CompactionFailed { .. }
+        )
+    })
+}
+
+pub(crate) fn scrollback_has_recent_disk_full(
+    scrollback: &crate::scrollback::state::ScrollbackState,
+) -> bool {
+    trailing_session_events(scrollback).any(|(_, ev)| matches!(ev, SessionEvent::DiskFull))
+}
+
+/// True if the trailing run already has a dedicated terminal error banner that
+/// replaces `TurnFailed` (re-auth, context overflow, disk-full, formatted
+/// request failure). `CompactionFailed` is deliberately excluded — it can
+/// appear mid-turn, and a stale one must not swallow an unrelated error's
+/// only surface on the reconcile/viewer rails.
+pub(in crate::app) fn scrollback_has_recent_error_banner(
+    scrollback: &crate::scrollback::state::ScrollbackState,
+) -> bool {
+    trailing_session_events(scrollback).any(|(_, ev)| {
+        matches!(
+            ev,
+            SessionEvent::ReAuthRequired
+                | SessionEvent::ContextTooLarge
+                | SessionEvent::DiskFull
+                | SessionEvent::RequestFailed { .. }
+        )
+    })
+}
+
+/// True if the trailing run already has a formatted [`SessionEvent::RequestFailed`]
+/// banner. Lets `PromptResponse` skip the redundant `TurnFailed`. Deliberately
+/// does NOT match `RetryFailed`: the special cases that keep it (legacy_auth,
+/// encrypted_content_mismatch) keep their pre-existing marker behavior.
+pub(super) fn scrollback_has_recent_request_failed(
+    scrollback: &crate::scrollback::state::ScrollbackState,
+) -> bool {
+    trailing_session_events(scrollback)
+        .any(|(_, ev)| matches!(ev, SessionEvent::RequestFailed { .. }))
+}
+
+/// The trailing run of session events, newest first: yields `(index, event)`
+/// for each session-event block at the tail of the scrollback, skipping
+/// interleaved system messages and stopping at the first substantive block.
+/// Banners for the finishing turn live in this run — pushed just before its
+/// `PromptResponse` arrived.
+pub(super) fn trailing_session_events(
+    scrollback: &crate::scrollback::state::ScrollbackState,
+) -> impl Iterator<Item = (usize, &SessionEvent)> {
     use crate::scrollback::block::RenderBlock;
-    for idx in (0..scrollback.len()).rev() {
-        match scrollback.entry(idx).map(|e| &e.block) {
-            Some(RenderBlock::SessionEvent(ev)) => {
-                if matches!(
-                    ev.event,
-                    SessionEvent::ContextTooLarge | SessionEvent::CompactionFailed { .. }
-                ) {
-                    return true;
-                }
-            }
-            // Tolerate interleaved system messages in the trailing run.
-            Some(RenderBlock::System(_)) => {}
-            // Stop at the first substantive block.
-            _ => break,
-        }
-    }
-    false
+    (0..scrollback.len())
+        .rev()
+        .map(|idx| (idx, scrollback.entry(idx).map(|e| &e.block)))
+        .take_while(|(_, block)| {
+            matches!(
+                block,
+                Some(RenderBlock::SessionEvent(_) | RenderBlock::System(_))
+            )
+        })
+        .filter_map(|(idx, block)| match block {
+            Some(RenderBlock::SessionEvent(ev)) => Some((idx, &ev.event)),
+            _ => None,
+        })
 }
 
 /// Strip the trailing run of auth-error blocks — the `ReAuthRequired`
@@ -174,34 +206,26 @@ pub(super) fn scrollback_has_recent_context_too_large(
 /// disappears once the user returns to the session. Mirrors the
 /// credit-limit upsell's stale-block strip.
 pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
-    use crate::scrollback::block::RenderBlock;
-    let mut to_remove = Vec::new();
-    for idx in (0..agent.scrollback.len()).rev() {
-        match agent.scrollback.entry(idx).map(|e| &e.block) {
-            Some(RenderBlock::SessionEvent(ev))
-                if matches!(
-                    &ev.event,
-                    SessionEvent::ReAuthRequired
-                        | SessionEvent::RetryFailed { .. }
-                        | SessionEvent::TurnFailed { .. }
-                ) =>
-            {
-                to_remove.push(idx);
-            }
-            // Skip over other trailing session-event / system blocks.
-            Some(RenderBlock::SessionEvent(_) | RenderBlock::System(_)) => continue,
-            // Stop at the first substantive block.
-            _ => break,
-        }
-    }
+    let to_remove: Vec<usize> = trailing_session_events(&agent.scrollback)
+        .filter(|(_, ev)| {
+            matches!(
+                ev,
+                SessionEvent::ReAuthRequired
+                    | SessionEvent::RequestFailed { .. }
+                    | SessionEvent::RetryFailed { .. }
+                    | SessionEvent::TurnFailed { .. }
+            )
+        })
+        .map(|(idx, _)| idx)
+        .collect();
     for idx in to_remove {
         agent.scrollback.remove_from(idx);
     }
 }
 
-/// Show the login choice menu ("Login with Chutes" / "Enter API key" /
-/// "Quit"). Triggered by the `/login` slash command, so the user picks a
-/// method instead of the command jumping straight into OAuth.
+/// Show the login choice menu ("Login with …" / "Enter API key" / "Quit").
+/// Triggered by `/login`, so the user picks a credential instead of the command
+/// jumping straight into OAuth — which on Chutes needs an app they registered.
 pub(super) fn dispatch_show_login_menu(app: &mut AppView) -> Vec<Effect> {
     if !matches!(app.active_view, ActiveView::Welcome) {
         app.auth_return_view = Some(app.active_view);
@@ -210,13 +234,43 @@ pub(super) fn dispatch_show_login_menu(app: &mut AppView) -> Vec<Effect> {
 
     abort_prior_auth(app);
     app.auth_show_raw_url = false;
-    // `/login` is typed into the chat/welcome prompt, which leaves it
-    // focused. Clear it so the Pending menu's key handling ('l'/'k'/'q')
-    // -- and, once a method is chosen, the Authenticating input box --
-    // actually receive keystrokes instead of them being typed into the
+    // `/login` is typed into the chat/welcome prompt, which leaves it focused.
+    // Clear it so the Pending menu's keys ('l'/'k'/'q') — and, once a method is
+    // chosen, the input box — receive keystrokes instead of them going into the
     // now-hidden prompt textarea.
     app.welcome_prompt_focused = false;
     app.auth_state = AuthState::Pending { error: None };
+
+    vec![]
+}
+
+/// Start API-key entry. Triggered by the welcome screen's "Enter API key" option
+/// or by `/apikey`. Unlike [`dispatch_login`] this never depends on an OAuth
+/// method being advertised or reachable: it prompts for text and stores it via
+/// `chutes.build/setApiKey`, which is why it is the path that always works.
+pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
+    if !matches!(app.active_view, ActiveView::Welcome) {
+        app.auth_return_view = Some(app.active_view);
+        show_welcome(app);
+    }
+
+    abort_prior_auth(app);
+    app.auth_show_raw_url = false;
+    app.welcome_prompt_focused = false;
+
+    app.login_method_id = Some(agent_client_protocol::AuthMethodId::new(
+        xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID,
+    ));
+
+    let request_seq = app.next_auth_request_seq;
+    app.next_auth_request_seq += 1;
+    app.auth_code_input.reset();
+    app.auth_state = AuthState::Authenticating {
+        request_seq,
+        handle: None,
+        auth_url: None,
+        mode: AuthMode::ApiKeyEntry,
+    };
 
     vec![]
 }
@@ -249,12 +303,10 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
     }
 
     abort_prior_auth(app);
-    app.auth_show_raw_url = false;
-    app.welcome_prompt_focused = false;
 
     let request_seq = app.next_auth_request_seq;
     app.next_auth_request_seq += 1;
-    app.auth_code_input.clear();
+    app.auth_code_input.reset();
     app.auth_state = AuthState::Authenticating {
         request_seq,
         handle: None,
@@ -271,38 +323,6 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
         },
         Effect::PollAuthUrl { request_seq },
     ]
-}
-
-/// Start API key entry. Triggered by the welcome-screen "Enter API key"
-/// option or the `/apikey` slash command. Unlike [`dispatch_login`], this
-/// never depends on an OAuth method being advertised or reachable -- it
-/// always works, since it just prompts for text and stores it via
-/// `chutes.build/setApiKey`.
-pub(super) fn dispatch_enter_api_key(app: &mut AppView) -> Vec<Effect> {
-    if !matches!(app.active_view, ActiveView::Welcome) {
-        app.auth_return_view = Some(app.active_view);
-        show_welcome(app);
-    }
-
-    abort_prior_auth(app);
-    app.auth_show_raw_url = false;
-    app.welcome_prompt_focused = false;
-
-    app.login_method_id = Some(agent_client_protocol::AuthMethodId::new(
-        xai_grok_shell::agent::auth_method::CHUTES_API_KEY_METHOD_ID,
-    ));
-
-    let request_seq = app.next_auth_request_seq;
-    app.next_auth_request_seq += 1;
-    app.auth_code_input.clear();
-    app.auth_state = AuthState::Authenticating {
-        request_seq,
-        handle: None,
-        auth_url: None,
-        mode: AuthMode::ApiKeyEntry,
-    };
-
-    vec![]
 }
 
 /// Cancel a login that was started from inside a session and restore the
@@ -326,7 +346,7 @@ pub(super) fn dispatch_cancel_login(app: &mut AppView) -> Vec<Effect> {
     app.next_auth_request_seq += 1;
     app.auth_state = AuthState::Done;
     app.auth_show_raw_url = false;
-    app.auth_code_input.clear();
+    app.auth_code_input.reset();
     restore_auth_return_view(app, return_view);
     // The user bailed out of re-auth — drop stashed prompts and strip the
     // stale re-auth prompt from scrollback (on all agents: the login may
@@ -393,7 +413,7 @@ pub(super) fn handle_auth_complete(
         app.auth_state = AuthState::Done;
         app.auth_show_raw_url = false;
         app.welcome_prompt_focused = !app.is_access_blocked();
-        app.auth_code_input.clear();
+        app.auth_code_input.reset();
 
         // Mid-session re-auth (`/login` or a 401 prompt): restore the
         // view the user was on instead of running the startup
@@ -415,7 +435,7 @@ pub(super) fn handle_auth_complete(
             // have been started from the dashboard, not the agent
             // that 401'd).
             let mut retry_effects = Vec::new();
-            let mut drained_ids = Vec::new();
+            let mut page_flips = Vec::new();
             for agent in app.agents.values_mut() {
                 strip_trailing_auth_error_blocks(agent);
                 // Auto-resubmit the prompt that failed on the expired
@@ -427,12 +447,13 @@ pub(super) fn handle_auth_complete(
                         "Re-authenticated. Retrying\u{2026}".to_string(),
                     ));
                     agent.session.enqueue_in_flight_prompt_front(prompt);
-                    retry_effects.extend(maybe_drain_queue(agent));
-                    drained_ids.push(agent.session.id);
+                    let drain = maybe_drain_queue(agent);
+                    retry_effects.extend(drain.effects);
+                    page_flips.push((agent.session.id, drain.page_flip_entry));
                 }
             }
-            for id in drained_ids {
-                note_peek_page_flip_after_drain(app, id);
+            for (id, page_flip_entry) in page_flips {
+                note_peek_page_flip(app, id, page_flip_entry);
             }
             let mut effects = dispatch(Action::RequestBundleStatus, app);
             if app.usage_visible {

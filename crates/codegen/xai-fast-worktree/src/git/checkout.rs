@@ -301,7 +301,7 @@ fn snapshot_worktree_to_ref_inner(
     message: &str,
 ) -> Result<String> {
     // Synthetic identity scoped to this call so it is never written to git config.
-    const NAME: &str = "Grok Snapshot";
+    const NAME: &str = "Chutes Build Snapshot";
     const EMAIL: &str = "grok-snapshot@example.com";
 
     // Stage against a throwaway index so the worktree's real index is untouched.
@@ -445,10 +445,6 @@ fn rehydrate_worktree_from_ref_inner(
 ) -> Result<WorktreeReport> {
     let dest_str = dest.to_string_lossy();
 
-    // A previously-disposed worktree can leave a stale registration for this
-    // path; prune it so re-adding the original `subagent-<id>` dir succeeds.
-    snapshot_git(source_repo, &["worktree", "prune"], &[])?;
-
     // The snapshot's first parent is the original base. Resolve it, then confirm
     // the object is actually present — a parent-repo `git reset --hard` + gc can
     // leave the parent pointer dangling, which `rev-parse` alone would not catch.
@@ -478,11 +474,14 @@ fn rehydrate_worktree_from_ref_inner(
     // A prior rehydrate may have failed after `worktree add` and left a partial dir; remove it so this attempt starts clean (worktree add fails on an existing path).
     if dest.exists() {
         let _ = crate::remove_worktree(dest);
-        let _ = snapshot_git(source_repo, &["worktree", "prune"], &[]);
         if dest.exists() {
             let _ = std::fs::remove_dir_all(dest);
         }
     }
+    // `git worktree add` refuses a path another registration still claims,
+    // so scrub `dest`'s stale registration (previously-disposed worktree, or
+    // the raw `remove_dir_all` fallback above) before adding.
+    crate::git::remove_stale_worktree_registration(source_repo, dest);
     snapshot_git(
         source_repo,
         &[
@@ -509,7 +508,7 @@ fn rehydrate_worktree_from_ref_inner(
         Err(e) => {
             // Best-effort cleanup; preserve the original error.
             let _ = crate::remove_worktree(dest);
-            let _ = snapshot_git(source_repo, &["worktree", "prune"], &[]);
+            crate::git::remove_stale_worktree_registration(source_repo, dest);
             return Err(e);
         }
     };
@@ -1121,6 +1120,50 @@ mod tests {
         );
     }
 
+    /// Rehydrate must clear its own stale registration (so re-adding the
+    /// same path succeeds) while leaving every other entry alone — its
+    /// cleanup once pruned repo-wide and destroyed user registrations whose
+    /// paths were not visible from the container mount namespace.
+    #[test]
+    fn test_rehydrate_clears_only_its_own_stale_registration() {
+        xai_test_utils::require_git!();
+        let temp = TempDir::new().unwrap();
+        let (repo_path, wt) = repo_with_worktree(&temp);
+
+        std::fs::write(wt.join("tracked.txt"), "edited").unwrap();
+        let snap = snapshot_worktree_to_ref(&wt, "refs/grok/snapshots/stalereg", "stale").unwrap();
+        crate::remove_worktree(&wt).unwrap();
+
+        rehydrate_worktree_from_ref(&wt, &repo_path, &snap, None).unwrap();
+        let registration = repo_path
+            .join(".git")
+            .join("worktrees")
+            .join(wt.file_name().unwrap());
+        assert!(registration.is_dir(), "linked registration expected");
+
+        let user_wt = temp.path().join("user-wt");
+        git_capture_in(
+            &repo_path,
+            &["worktree", "add", "--detach", user_wt.to_str().unwrap()],
+            &[],
+        )
+        .unwrap();
+        std::fs::rename(&user_wt, temp.path().join("user-wt-hidden")).unwrap();
+
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let report = rehydrate_worktree_from_ref(&wt, &repo_path, &snap, None).unwrap();
+        assert_eq!(report.worktree_path, wt);
+        assert_eq!(
+            std::fs::read_to_string(wt.join("tracked.txt")).unwrap(),
+            "edited"
+        );
+        assert!(
+            repo_path.join(".git/worktrees/user-wt").exists(),
+            "user registration must survive rehydrate even when its path is hidden"
+        );
+    }
+
     #[test]
     fn test_transfer_snapshot_to_repo_makes_standalone_ref_durable() {
         xai_test_utils::require_git!();
@@ -1207,7 +1250,9 @@ mod tests {
             rehydrate_worktree_from_ref(&dest, &repo_path, &snap, Some("subagent-42")).unwrap();
 
         // Filter to OUR record by path: concurrent open_default writers may add
-        // other subagent rows since CHUTES_BUILD_HOME is process-global.
+        // other subagent rows since CHUTES_BUILD_HOME is process-global. Match the
+        // canonical path register_worktree stores (/var → /private/var on macOS).
+        let dest_canon = dunce::canonicalize(&dest).unwrap_or_else(|_| dest.clone());
         let db = crate::db::WorktreeDb::open(&fx.home).unwrap();
         let mine: Vec<_> = db
             .list(&crate::db::ListFilter {
@@ -1216,7 +1261,7 @@ mod tests {
             })
             .unwrap()
             .into_iter()
-            .filter(|r| r.path == dest)
+            .filter(|r| r.path == dest || r.path == dest_canon)
             .collect();
         assert_eq!(mine.len(), 1, "exactly one rehydrated subagent record");
         assert_eq!(mine[0].kind, crate::db::WorktreeKind::Subagent);

@@ -1,6 +1,38 @@
 /// Default auto-compact threshold (% of context window) when no source sets it.
 pub const DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT: u8 = 85;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CompactionToolChoice {
+    #[default]
+    Auto,
+    None,
+}
+
+impl std::str::FromStr for CompactionToolChoice {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "none" => Ok(Self::None),
+            _ => Err(()),
+        }
+    }
+}
+
+pub(crate) const ENV_COMPACTION_TOOL_CHOICE: &str = "CHUTES_BUILD_COMPACTION_TOOL_CHOICE";
+
+pub(crate) fn resolve_compaction_tool_choice_from(
+    env: Option<&str>,
+    config: Option<&str>,
+    remote: Option<&str>,
+) -> CompactionToolChoice {
+    env.and_then(|s| s.parse().ok())
+        .or_else(|| config.and_then(|s| s.parse().ok()))
+        .or_else(|| remote.and_then(|s| s.parse().ok()))
+        .unwrap_or_default()
+}
+
 /// Env-var override for `auto_compact_threshold_percent`. Parsed as `u8`;
 /// out-of-range or unparseable values are ignored.
 pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str =
@@ -30,7 +62,7 @@ pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str =
 /// Values outside `0..=100` from the env var are ignored with a debug log and
 /// the resolver falls through to the next tier. TOML/remote fields are typed
 /// `u8` and so naturally constrained.
-pub fn resolve_auto_compact_threshold_percent(
+pub(crate) fn resolve_auto_compact_threshold_percent(
     cfg: &crate::agent::config::Config,
     model_id: &str,
     model: Option<&crate::agent::config::ModelInfo>,
@@ -56,7 +88,7 @@ pub fn resolve_auto_compact_threshold_percent(
 ///
 /// Precedence: env > `user_per_model` > `user_global` > `gb_per_model`
 /// > `gb_global` > `DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT`.
-pub fn resolve_auto_compact_threshold_percent_from_tiers(
+pub(crate) fn resolve_auto_compact_threshold_percent_from_tiers(
     user_per_model: Option<u8>,
     user_global: Option<u8>,
     gb_per_model: Option<u8>,
@@ -111,7 +143,7 @@ const ENV_COMPACTION_WALL_CLOCK_BUDGET_SECS: &str = "CHUTES_BUILD_COMPACTION_WAL
 /// `0` **disables** it. Low values are warned, not clamped — any "safe" clamp
 /// (e.g. 30s) would itself cut legit compactions, trading one silent failure for
 /// another; ops own the value.
-pub fn resolve_compaction_wall_clock_budget_secs(gb_global: Option<u64>) -> u64 {
+pub(crate) fn resolve_compaction_wall_clock_budget_secs(gb_global: Option<u64>) -> u64 {
     let from_env = std::env::var(ENV_COMPACTION_WALL_CLOCK_BUDGET_SECS)
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok());
@@ -139,5 +171,50 @@ mod compaction_wall_clock_budget_tests {
         assert_eq!(resolve(Some(450)), 450); // server global wins
         assert_eq!(resolve(Some(0)), 0); // 0 explicitly disables (no clamp)
         assert_eq!(resolve(Some(5)), 5); // low values pass through (warned, not clamped)
+    }
+}
+
+#[cfg(test)]
+mod compaction_tool_choice_tests {
+    use super::{CompactionToolChoice, resolve_compaction_tool_choice_from as resolve};
+
+    #[test]
+    fn default_is_auto() {
+        assert_eq!(resolve(None, None, None), CompactionToolChoice::Auto);
+    }
+
+    #[test]
+    fn precedence_env_over_config_over_remote() {
+        assert_eq!(
+            resolve(Some("none"), Some("auto"), Some("auto")),
+            CompactionToolChoice::None
+        );
+        assert_eq!(
+            resolve(None, Some("none"), Some("auto")),
+            CompactionToolChoice::None
+        );
+        assert_eq!(
+            resolve(None, None, Some("none")),
+            CompactionToolChoice::None
+        );
+    }
+
+    #[test]
+    fn garbage_falls_through() {
+        assert_eq!(
+            resolve(Some("garbage"), None, Some("none")),
+            CompactionToolChoice::None
+        );
+        assert_eq!(
+            resolve(Some("garbage"), Some("also-bad"), None),
+            CompactionToolChoice::Auto
+        );
+    }
+
+    #[test]
+    fn from_str_case_insensitive() {
+        assert_eq!("AUTO".parse(), Ok(CompactionToolChoice::Auto));
+        assert_eq!(" None ".parse(), Ok(CompactionToolChoice::None));
+        assert!("required".parse::<CompactionToolChoice>().is_err());
     }
 }

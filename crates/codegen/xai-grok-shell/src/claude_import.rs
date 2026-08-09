@@ -536,7 +536,7 @@ static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(No
 /// on the marker (so users see one log line indicating the cutoff fired).
 /// Use the bare version for read-time display logic that already has its own
 /// path (e.g. UI listings in `extensions/skills.rs` and `inspect.rs`).
-pub fn is_claude_import_marked() -> bool {
+pub(crate) fn is_claude_import_marked() -> bool {
     if let Some(v) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
         return v;
     }
@@ -551,7 +551,7 @@ pub fn is_claude_import_marked() -> bool {
 /// Called from the slash command after `apply_import` writes the marker so
 /// that subsequent in-process gate checks reflect the new state without
 /// waiting for restart.
-pub fn refresh_marker_cache(value: bool) {
+pub(crate) fn refresh_marker_cache(value: bool) {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(value);
 }
 
@@ -559,28 +559,6 @@ pub fn refresh_marker_cache(value: bool) {
 #[cfg(test)]
 pub(crate) fn reset_marker_cache_for_test() {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = None;
-}
-
-/// Expand a leading bare `~` or `~/` to the home directory. Returns the path
-/// unchanged if home cannot be resolved or the input has no leading tilde.
-///
-/// `~user/` (other-user home) is **not** supported — this is a config field,
-/// not a shell input, so the surface is intentionally narrow.
-///
-/// Shared by `extensions/skills.rs` (skills paths from `[paths] extra_skill_dirs`)
-/// and `inspect.rs` (rules paths from `[paths] extra_rule_dirs`) so both call
-/// sites apply identical normalisation.
-pub fn expand_home(s: &str) -> std::path::PathBuf {
-    if let Some(stripped) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
-    } else if s == "~"
-        && let Some(home) = dirs::home_dir()
-    {
-        return home;
-    }
-    std::path::PathBuf::from(s)
 }
 
 /// Like [`is_claude_import_marked`], but logs a one-time `info!` line on the
@@ -592,7 +570,7 @@ pub fn expand_home(s: &str) -> std::path::PathBuf {
 /// Call sites are runtime fallback paths in `claude_compat.rs`,
 /// `util/config.rs`, `util/hooks.rs`, and `agent/config.rs` that previously
 /// read `.claude/`.
-pub fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool {
+pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool {
     static LOGGED: OnceLock<()> = OnceLock::new();
     let marked = is_claude_import_marked();
     if marked {
@@ -607,7 +585,7 @@ pub fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool {
 }
 
 /// Testable variant of [`is_claude_import_marked`] that reads from the given path.
-pub fn is_claude_import_marked_at(config_path: &Path) -> bool {
+pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
     let content = match std::fs::read_to_string(config_path) {
         Ok(s) => s,
         Err(_) => return false,
@@ -2067,43 +2045,6 @@ extra_rule_dirs = ["/c/rules"]
         assert_eq!(
             parsed["paths"]["extra_rule_dirs"][0].as_str().unwrap(),
             "/bar/rules"
-        );
-    }
-
-    #[test]
-    fn expand_home_passthrough_for_absolute_path() {
-        assert_eq!(
-            expand_home("/abs/path"),
-            std::path::PathBuf::from("/abs/path")
-        );
-    }
-
-    #[test]
-    fn expand_home_passthrough_for_relative_path() {
-        assert_eq!(
-            expand_home("rel/path"),
-            std::path::PathBuf::from("rel/path")
-        );
-    }
-
-    #[test]
-    fn expand_home_bare_tilde() {
-        let home = dirs::home_dir().expect("home_dir required for this test");
-        assert_eq!(expand_home("~"), home);
-    }
-
-    #[test]
-    fn expand_home_tilde_slash() {
-        let home = dirs::home_dir().expect("home_dir required for this test");
-        assert_eq!(expand_home("~/foo/bar"), home.join("foo/bar"));
-    }
-
-    #[test]
-    fn expand_home_does_not_handle_user_tilde() {
-        // Documented limitation: `~bob/path` is treated as a literal relative path.
-        assert_eq!(
-            expand_home("~bob/path"),
-            std::path::PathBuf::from("~bob/path")
         );
     }
 
