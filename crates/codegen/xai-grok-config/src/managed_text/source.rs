@@ -59,8 +59,8 @@ impl ParentPlan {
                         });
                     }
                     chain.push(PathIdentity {
+                        identity: DirIdentity::of(&current, &metadata),
                         path: current.clone(),
-                        identity: FileIdentity::from_metadata(&metadata),
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -115,7 +115,7 @@ impl ParentPlan {
                 .map_err(|_| ManagedConfigError::ParentChanged(expected.path.clone()))?;
             if metadata.file_type().is_symlink()
                 || !metadata.is_dir()
-                || FileIdentity::from_metadata(&metadata) != expected.identity
+                || DirIdentity::of(&expected.path, &metadata) != expected.identity
             {
                 return Err(ManagedConfigError::ParentChanged(expected.path.clone()));
             }
@@ -127,7 +127,7 @@ impl ParentPlan {
 #[derive(Debug)]
 pub(super) struct ParentAnchor {
     path: PathBuf,
-    identity: FileIdentity,
+    identity: DirIdentity,
     directory: fs::File,
 }
 
@@ -145,8 +145,8 @@ impl ParentAnchor {
             source,
         })?;
         Ok(Self {
+            identity: DirIdentity::of(path, &metadata),
             path: path.to_path_buf(),
-            identity: FileIdentity::from_metadata(&metadata),
             directory,
         })
     }
@@ -179,7 +179,7 @@ impl ParentAnchor {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PathIdentity {
     path: PathBuf,
-    identity: FileIdentity,
+    identity: DirIdentity,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,6 +192,64 @@ pub(super) struct FileIdentity {
     len: u64,
     #[cfg(not(unix))]
     modified: Option<std::time::SystemTime>,
+}
+
+/// Identity of a **directory**, stable across writes into it.
+///
+/// Distinct from [`FileIdentity`] on purpose: that one answers "is this the same
+/// file, unchanged?", so it must move when the contents move. This one answers "is
+/// this the same directory?", so it must **not**. On Unix `(dev, ino)` answers both,
+/// which is why one type served both for so long; off Unix the file answer
+/// (`len` + `modified`) is actively wrong for a directory, because creating a file
+/// inside one changes its mtime — the very thing applying a fix does.
+///
+/// Off Unix this is the directory's **creation** time, which has both properties the
+/// check needs: writing a file inside a directory leaves it untouched, and a
+/// directory replaced at the same path carries a new one. Windows' true identity —
+/// volume serial plus file index — has no stable accessor (`MetadataExt` gates them
+/// behind `windows_by_handle`), and reading it through `same-file` would mean holding
+/// a directory handle open across the user-confirmation window this check spans.
+///
+/// Not `modified`, which is what this used to be: creating the config file inside the
+/// parent changes the parent's mtime, so the check fired on every apply. And not the
+/// canonical path, which cannot tell a replaced directory from the original — the
+/// case `stale_source_and_parent_swap_are_rejected_before_publication` exercises.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct DirIdentity {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(not(unix))]
+    created: Option<std::time::SystemTime>,
+    /// Only consulted where `created` is unavailable — see `of`.
+    #[cfg(not(unix))]
+    canonical: PathBuf,
+}
+
+impl DirIdentity {
+    fn of(path: &Path, metadata: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        {
+            let _ = path;
+            use std::os::unix::fs::MetadataExt as _;
+            Self {
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            // The canonical path rides along for filesystems that do not record a
+            // creation time: on its own it cannot detect a same-path replacement, but
+            // it still catches a component that starts resolving elsewhere, and it
+            // keeps the comparison total rather than making every identity equal.
+            Self {
+                created: metadata.created().ok(),
+                canonical: dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+            }
+        }
+    }
 }
 
 impl FileIdentity {

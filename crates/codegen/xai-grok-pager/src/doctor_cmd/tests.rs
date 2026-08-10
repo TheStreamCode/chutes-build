@@ -527,7 +527,7 @@ fn human_mixed_fixture_is_exact() {
 fn fix_preview_contains_exact_change_and_caveats() {
     let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix(
+    let plan = crate::diagnostics::plan_fix_ignoring_platform(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,
@@ -556,7 +556,7 @@ fn fix_preview_contains_exact_change_and_caveats() {
 fn decline_is_success_and_does_not_write() {
     let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix(
+    let plan = crate::diagnostics::plan_fix_ignoring_platform(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,
@@ -588,7 +588,7 @@ fn decline_is_success_and_does_not_write() {
 fn non_tty_without_yes_fails_safely_before_write() {
     let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix(
+    let plan = crate::diagnostics::plan_fix_ignoring_platform(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,

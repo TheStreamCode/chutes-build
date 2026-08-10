@@ -19,6 +19,8 @@ mod view;
 pub use doctor_format::format_doctor;
 #[cfg(test)]
 pub(crate) use fix::test_fix_plan;
+#[cfg(test)]
+pub(crate) use fix::plan_fix_ignoring_platform;
 pub use fix::{
     AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixError, FixOutcome, FixPlan,
     FixRequest, FixStatus, PlannedChange, SSH_WRAP_FIX_COMMAND, SSH_WRAP_ID, SSH_WRAP_ONE_OFF,

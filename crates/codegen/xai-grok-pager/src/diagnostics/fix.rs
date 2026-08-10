@@ -698,9 +698,27 @@ fn plan_ssh_wrap(
     report: &DiagnosticReport,
     terminal: &TerminalContext,
 ) -> Result<FixPlan, FixError> {
+    // Policy, and it comes first: there is no supported shell-alias fix on Windows,
+    // so the planner refuses before inspecting anything. Covered by
+    // `windows_is_manual_only_before_shell_selection`.
     if cfg!(windows) {
         return Err(FixError::PlatformUnsupported);
     }
+    plan_ssh_wrap_after_platform_check(request, report, terminal)
+}
+
+/// `plan_ssh_wrap` minus the platform refusal.
+///
+/// Split out so a test fixture can build a real plan on any host. The mechanics
+/// below — resolving a shell, joining a config path, inspecting the managed block —
+/// are platform-independent; only the refusal above is not. Nineteen tests covering
+/// the doctor-fix modal used to fail on Windows solely because their fixture ran the
+/// whole planner and unwrapped it.
+fn plan_ssh_wrap_after_platform_check(
+    request: FixRequest,
+    report: &DiagnosticReport,
+    terminal: &TerminalContext,
+) -> Result<FixPlan, FixError> {
     if terminal.is_official_vscode_remote {
         return Err(FixError::NotApplicable);
     }
@@ -1592,9 +1610,36 @@ pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> Diag
     report
 }
 
+/// `plan_fix` without the platform refusal, for tests about the planning itself.
+///
+/// The ssh-wrap fix is unsupported on Windows, and `plan_fix` says so before looking
+/// at anything — correct, and covered by `windows_is_manual_only_before_shell_selection`.
+/// But the tests that check *what the planner produces* — exact paths, aliases,
+/// conflict scanning, stale-plan rejection — are about mechanics that work on any
+/// host, and gating them behind `#[cfg(unix)]` would drop that coverage on the
+/// platform this tree is developed on.
 #[cfg(test)]
+pub(crate) fn plan_fix_ignoring_platform(
+    request: FixRequest,
+    report: &DiagnosticReport,
+    terminal: &TerminalContext,
+) -> Result<FixPlan, FixError> {
+    let spec = fix_spec(request.id).ok_or_else(|| FixError::UnknownId(request.id.to_string()))?;
+    match spec.kind {
+        FixKind::SshWrap => plan_ssh_wrap_after_platform_check(request, report, terminal),
+        FixKind::TmuxOption(tmux) => plan_tmux_option(request, report, terminal, tmux),
+    }
+}
+
+#[cfg(test)]
+/// A real ssh-wrap plan, on any host.
+///
+/// Deliberately bypasses the Windows refusal rather than the planning: the tests
+/// that use this are about the doctor-fix *modal*, not about which platforms the fix
+/// supports, and a synthetic `FixPlan` literal would drift from what the planner
+/// actually produces. `plan_fix` itself still refuses on Windows.
 pub(crate) fn test_fix_plan(home: &Path) -> FixPlan {
-    plan_fix(
+    plan_ssh_wrap_after_platform_check(
         tests::request(home, "/bin/bash"),
         &tests::report(),
         &TerminalContext::default(),
