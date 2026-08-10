@@ -128,6 +128,17 @@ impl ParentPlan {
 pub(super) struct ParentAnchor {
     path: PathBuf,
     identity: DirIdentity,
+    /// Held open only to `sync_all` the directory entry once the rename lands, which
+    /// is what [`ParentAnchor::sync`] does — and which is already Unix-only, because
+    /// Windows offers no equivalent durability barrier for a directory.
+    ///
+    /// So off Unix nothing ever read this handle, and Windows could not produce one
+    /// in the first place: `File::open` on a directory needs
+    /// `FILE_FLAG_BACKUP_SEMANTICS`, which `std` does not set, so it returns
+    /// `PermissionDenied`. Capturing it unconditionally therefore failed **every**
+    /// apply on Windows — `doctor fix` could plan a fix and never write one — for a
+    /// value that platform then discarded.
+    #[cfg(unix)]
     directory: fs::File,
 }
 
@@ -140,6 +151,7 @@ impl ParentAnchor {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(ManagedConfigError::ParentChanged(path.to_path_buf()));
         }
+        #[cfg(unix)]
         let directory = fs::File::open(path).map_err(|source| ManagedConfigError::Read {
             path: path.to_path_buf(),
             source,
@@ -147,6 +159,7 @@ impl ParentAnchor {
         Ok(Self {
             identity: DirIdentity::of(path, &metadata),
             path: path.to_path_buf(),
+            #[cfg(unix)]
             directory,
         })
     }
