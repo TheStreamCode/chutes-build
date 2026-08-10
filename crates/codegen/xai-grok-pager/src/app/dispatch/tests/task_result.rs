@@ -366,6 +366,11 @@ fn foreign_resume_hint(
 #[test]
 fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     let mut launch = test_app();
+    // A real directory: `test_app`'s cwd is `/tmp`, which off Unix is
+    // drive-relative, and the Windows runner works on a drive that has no
+    // `\tmp` — so canonicalising it below fails. See the same note in
+    // `router.rs`.
+    launch.cwd = std::env::temp_dir();
     launch.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             cursor: true,
@@ -415,6 +420,7 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     );
 
     let mut stale = test_app();
+    stale.cwd = std::env::temp_dir();
     stale.foreign_session_compat = launch.foreign_session_compat;
     let Effect::CanonicalizeForeignResumeCwd {
         requested_cwd,
@@ -451,6 +457,11 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
 #[test]
 fn foreign_resume_result_rejects_startup_conflict_before_completion() {
     let mut app = test_app();
+    // A real directory: `test_app`'s cwd is `/tmp`, which off Unix is
+    // drive-relative, and the Windows runner works on a drive that has no
+    // `\tmp` — so canonicalising it below fails. See the same note in
+    // `router.rs`.
+    app.cwd = std::env::temp_dir();
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             cursor: true,
