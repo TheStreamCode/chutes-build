@@ -119,10 +119,11 @@ moka = { workspace = true, features = ["future"] }
 dhat = { workspace = true, optional = true }
 base64 = { workspace = true }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
-# `constant_time::verify_slices_are_equal` for the `agent serve` token. Already in
-# this crate's normal build graph via aws-config, so promoting it from
-# dev-dependencies adds nothing to the build.
-ring = { workspace = true }
+# Constant-time comparison for the `agent serve` token. `subtle` rather than
+# `ring::constant_time`, which ring deprecates as internal with "no promises
+# regarding side channels" — the promise being the entire point. Already in this
+# crate's build graph through rustls, so the direct edge adds no new code.
+subtle = "2.6"
 sha2 = { workspace = true }
 rand = { workspace = true }
 shlex = { workspace = true }

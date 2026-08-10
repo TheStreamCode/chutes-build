@@ -92,12 +92,19 @@ pub(crate) struct WsQueryParams {
 ///
 /// `==` on `&str` returns at the first differing byte, which over a socket with no
 /// rate limit is a practical oracle: an attacker recovers the token one byte at a
-/// time instead of guessing it whole. Length is compared first and separately —
-/// it is not secret, and `verify_slices_are_equal` requires equal lengths.
+/// time instead of guessing it whole.
+///
+/// `subtle` rather than `ring::constant_time::verify_slices_are_equal`, which ring
+/// now deprecates as an "internal function not intended for external use with no
+/// promises regarding side channels" — precisely the promise this call is here to
+/// obtain. `subtle` exists for this and defends against the compiler optimising the
+/// comparison back into an early return, which a hand-rolled fold cannot do.
+///
+/// Length is not secret, and `ct_eq` on slices settles it up front.
 fn secret_matches(presented: &str, expected: &str) -> bool {
-    presented.len() == expected.len()
-        && ring::constant_time::verify_slices_are_equal(presented.as_bytes(), expected.as_bytes())
-            .is_ok()
+    use subtle::ConstantTimeEq as _;
+
+    presented.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
 /// Validate the bearer token from request headers or query parameters.
