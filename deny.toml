@@ -32,6 +32,7 @@ ignore = [
     { id = "RUSTSEC-2026-0184", reason = "Potential UB in git2 with a Signature from a buffer-created BlameHunk. We call no git2 blame API — the four 'blame' matches are a test name, a comment, and two string literals naming the `git blame` subcommand in permission policy. No patched release exists." },
     { id = "RUSTSEC-2026-0097", reason = "rand is unsound when a custom logger itself calls rand::rng(), which re-enters the thread RNG. Our logging stack does not: xai-grok-telemetry and xai-grok-shared do not depend on rand, and no tracing layer references it. The two rand::rng() calls in this tree pick a random announcement index in the pager. No patched release exists." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39 is build-time-only through wayland-scanner and processes trusted bundled protocol XML, not user input." },
+    { id = "RUSTSEC-2026-0249", reason = "smartstring is unmaintained (repository archived 2026-05-03), not vulnerable — there is no affected API to avoid. It reaches us only as a non-optional dependency of rhai, the workflow scripting engine, and we are already on rhai's latest stable (1.25.1), so no bump closes it and nothing but dropping rhai would. Its own recommended alternatives (compact_str, smol_str) are rhai's migration to make." },
 ]
 
 [licenses]
