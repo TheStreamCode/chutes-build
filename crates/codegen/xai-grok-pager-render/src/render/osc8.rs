@@ -202,8 +202,20 @@ fn file_path_regex() -> &'static regex::Regex {
         // space-free so `…/bar here.` does not eat the word `here`.
         // Alternation prefers the spaced form first so it wins over the shorter
         // no-space prefix at the same start position.
+        // The second alternative is the Windows form, `C:\Users\me\x.md` — a drive
+        // letter, then segments joined by either separator. Without it no path
+        // mentioned in agent prose or in a command line was ever clickable on
+        // Windows, while the rest of this module already anticipated the shape
+        // (`file_link_presentation_for_resolved` tests for `Component::Prefix` and
+        // `~\`). Nothing needs gating by platform: a Windows path on Unix is not
+        // absolute there, so `from_file_path` declines it and no overlay appears.
+        //
+        // `\b` keeps the drive letter from being picked out of a longer word, so
+        // `note:\thing` does not linkify as `e:\thing`. Unlike the POSIX form this
+        // allows zero directory segments, because `C:\file.txt` is a real path
+        // whereas the POSIX `/file.txt` shape stays excluded as it was.
         let pat = format!(
-            r"~?/(?:{seg}/)+(?:{spaced}|{seg})",
+            r"~?/(?:{seg}/)+(?:{spaced}|{seg})|\b[a-zA-Z]:[\\/](?:{seg}[\\/])*(?:{spaced}|{seg})",
             seg = PATH_SEGMENT,
             spaced = PATH_SEGMENT_SPACED,
         );
