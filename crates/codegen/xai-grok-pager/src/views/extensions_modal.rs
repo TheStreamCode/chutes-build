@@ -1410,8 +1410,14 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
 
     let path = Path::new(&expanded);
 
-    // If path is an existing directory (ends with /), list its contents.
-    if path.is_dir() && expanded.ends_with('/') {
+    // If path is an existing directory (ends with a separator), list its contents.
+    // Either separator: a Windows path ends `…\`, so a `/`-only test meant typing a
+    // directory and pressing Tab listed nothing there.
+    if path.is_dir() && expanded.ends_with(['/', '\\']) {
+        // Hand back the separator already in use rather than imposing one. Both
+        // candidates are one byte and the string ends with one, so this slice is on
+        // a character boundary.
+        let separator = &expanded[expanded.len() - 1..];
         let mut entries: Vec<String> = std::fs::read_dir(path)
             .ok()?
             .filter_map(|e| e.ok())
@@ -1420,7 +1426,7 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
                 let name = e.file_name().to_string_lossy().to_string();
                 let full = path.join(&name);
                 if full.is_dir() {
-                    format!("{expanded}{name}/")
+                    format!("{expanded}{name}{separator}")
                 } else {
                     format!("{expanded}{name}")
                 }
@@ -1444,6 +1450,16 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
         return None;
     }
 
+    // The directory the user typed, given back verbatim with whichever separator
+    // they used. This looked for `/` only: a Windows path holds none, so the parent
+    // came back empty and Tab replaced the whole field with a bare filename —
+    // pressing it discarded the path instead of completing it.
+    let separator_at = expanded.rfind(['/', '\\']);
+    let parent_str = separator_at.map_or("", |index| &expanded[..=index]);
+    let directory_suffix = separator_at.map_or(std::path::MAIN_SEPARATOR_STR, |index| {
+        &expanded[index..=index]
+    });
+
     let mut matches: Vec<String> = std::fs::read_dir(parent)
         .ok()?
         .filter_map(|e| e.ok())
@@ -1454,16 +1470,8 @@ pub fn tab_complete_path(partial: &str) -> Option<String> {
         .map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             let full = parent.join(&name);
-            let parent_str = if expanded.contains('/') {
-                expanded
-                    .rsplit_once('/')
-                    .map(|(p, _)| format!("{p}/"))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
             if full.is_dir() {
-                format!("{parent_str}{name}/")
+                format!("{parent_str}{name}{directory_suffix}")
             } else {
                 format!("{parent_str}{name}")
             }
