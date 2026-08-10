@@ -36,6 +36,12 @@ cargo check -p chutes-build --locked
 cargo deny --locked check advisories licenses bans sources
 ```
 
+Run that `cargo deny` **online**. It checks the live advisory database, so an
+`--offline` run reuses whatever is already on disk and cannot see anything
+published since — which is how a commit passes locally and fails in CI an hour
+later, as `RUSTSEC-2026-0249` did on 2026-08-10. A new entry belongs in
+`deny.toml` with a reason that records what was checked.
+
 Review `CHANGELOG.md`, `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES`, and the npm
 package contents before continuing. Never place a Chutes API key in release
 configuration or CI.

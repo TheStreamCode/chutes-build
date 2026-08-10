@@ -57,6 +57,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warm cache moves it very little and the headroom is about a quarter.
 - **All five CI jobs pass.** Windows had been red since 1.0.0 landed and Linux had
   not finished in over twenty runs; this is the first complete green run.
+- `RUSTSEC-2026-0249` is recorded in `deny.toml`: `smartstring` is unmaintained —
+  archived, not vulnerable — and reaches this tree only as a non-optional
+  dependency of `rhai`, whose latest stable we already use, so no bump closes it.
+  It turned the dependency job red on a documentation-only commit, an hour after
+  the same check passed, because that job reads the live advisory database.
 - A flaky history-delivery test asked for a repaint and a result in one condition;
   it fails when the daemon is *fast* enough to answer before the eager snapshot,
   which is why widening its deadline had not helped.

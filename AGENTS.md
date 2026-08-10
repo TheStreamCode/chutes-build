@@ -182,6 +182,17 @@ git diff --check
 since 1.0.0 landed and Linux had not finished in over twenty runs — and it means a
 red job is now a regression to explain, not a background condition to work around.
 
+With one exception, and it is not a loophole: **`Secrets and dependency policy` can
+go red without a code change.** It runs `cargo deny` against the *live* advisory
+database, so a newly published RUSTSEC entry turns a commit red that passed an hour
+earlier — this happened on 2026-08-10 with `RUSTSEC-2026-0249`. Two consequences.
+Check whether the advisory names something your change touched before assuming it
+did. And run `cargo deny check advisories licenses bans sources` **online** when
+you want to know: `--offline` reuses whatever database is on disk and is
+structurally blind to anything published since. New entries go in `deny.toml` with
+a reason that says what was *checked* — the file's own comment insists on that, and
+the existing entries show the shape.
+
 **`xai-grok-pager --lib` passes on Windows CI. A failure there is a regression**,
 not the weather — this changed on 2026-08-10, when the sixty-six that CI reported
 were closed. Do not carry forward the old advice of comparing against an upstream
