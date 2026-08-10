@@ -6,6 +6,27 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-11
+
+### Fixed (the TUI wore upstream's identity)
+
+- **The splash showed Grok's wordmark.** `assets/logo/logo07.txt` and
+  `logo05.txt` were byte-identical to upstream's: the re-base overwrote the Chutes
+  wordmark and 1.0.0 shipped it, so every start drew the wrong brand. Restored. A
+  sweep of every asset in the tree says these two were the only ones taken.
+- **A Chutes user was offered a subscription to another company's product.**
+  Hitting a usage limit produced "Upgrade to SuperGrok" and "Upgrade to SuperGrok
+  Heavy"; a restricted command said it "requires SuperGrok". The buttons already
+  pointed at chutes.ai/pricing — the fork had rebranded where they *go* and left
+  what they *say*. This one predates the re-base; v0.4.3 carries the same strings.
+- The screen-mode settings described opening "plain grok", the welcome gate read
+  "SuperGrok subscription required", and the feedback prompt opened with "You've
+  been using Grok Code productively!".
+
+Rust identifiers, crate names, telemetry event types and model ids such as
+`grok-4.5` are deliberately untouched: `AGENTS.md` keeps them so upstream diffs
+stay readable, and a model name is data rather than branding.
+
 ### Security
 
 - **The `agent serve` token comparison no longer rests on a function that
