@@ -305,14 +305,18 @@ fn shorten_path(path: &str) -> &str {
     let memory_root = xai_grok_config::grok_home().join("memory");
     let memory_prefix = memory_root.display().to_string();
     if let Some(rest) = path.strip_prefix(&memory_prefix) {
-        let rest = rest.strip_prefix('/').unwrap_or(rest);
-        if let Some(after_slash) = rest.find('/') {
-            return &rest[after_slash + 1..];
+        // Both separators: the prefix comes from a `PathBuf`, so on Windows the rest
+        // begins with a `\` that a `/`-only strip left in place. The header then read
+        // `\MEMORY.md`, and a nested path kept its whole tail because the search for
+        // the first separator never matched.
+        let rest = rest.strip_prefix(['/', '\\']).unwrap_or(rest);
+        if let Some(after_separator) = rest.find(['/', '\\']) {
+            return &rest[after_separator + 1..];
         }
         return rest;
     }
     // Fallback: strip to filename
-    path.rsplit('/').next().unwrap_or(path)
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
 pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
@@ -450,14 +454,23 @@ session content
     fn shorten_memory_path() {
         // Paths under the configured chutes-build memory root keep one trailing segment group.
         let memory_root = xai_grok_config::grok_home().join("memory");
-        let session = memory_root.join("xai-50aa78f0/sessions/2026-05-01.md");
+        // Joined segment by segment so the fixture carries the platform's own
+        // separator: `shorten_path` returns a slice of its input, so a `/` written
+        // into the fixture would come back out and prove nothing about Windows.
+        let session = memory_root
+            .join("xai-50aa78f0")
+            .join("sessions")
+            .join("2026-05-01.md");
         let top = memory_root.join("MEMORY.md");
         assert_eq!(
             shorten_path(session.to_str().expect("utf8 path")),
-            "sessions/2026-05-01.md"
+            crate::test_util::rel_path("sessions/2026-05-01.md")
         );
         assert_eq!(shorten_path(top.to_str().expect("utf8 path")), "MEMORY.md");
         // Outside the memory root falls back to the filename.
-        assert_eq!(shorten_path("/some/other/path.md"), "path.md");
+        assert_eq!(
+            shorten_path(&crate::test_util::abs_path("/some/other/path.md")),
+            "path.md"
+        );
     }
 }
