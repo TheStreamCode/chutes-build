@@ -41,6 +41,50 @@ pub fn sandbox_dir() -> SandboxDir {
     SandboxDir { _dir: dir, path }
 }
 
+/// A POSIX-shaped fixture path, made absolute for the platform under test.
+///
+/// `/Users/me/project/src/main.rs` is **not** an absolute path on Windows:
+/// `Path::is_absolute` wants a prefix such as `C:`, and a rooted-but-prefixless path
+/// is drive-relative. So a fixture written that way exercises a shape the product
+/// never meets on Windows — the link layer declines to build a `file:` target from
+/// it, and the header relativiser finds no root to strip — and the tests that use
+/// one failed there over their fixture rather than over anything they assert.
+///
+/// Unix returns the string unchanged. Windows prefixes `C:` and switches the
+/// separators, so the example above becomes `C:\Users\me\project\src\main.rs`.
+pub fn abs_path(posix: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", posix.replace('/', "\\"))
+    } else {
+        posix.to_owned()
+    }
+}
+
+/// A POSIX-shaped **relative** path as this platform renders it, for assertions
+/// against text the product produced.
+///
+/// The pager rebuilds a relative path from its components, so it comes back joined
+/// with the native separator: `src/main.rs` under a Windows cwd renders as
+/// `src\main.rs`. That is the right thing to show a Windows user; it is only the
+/// expectations that were POSIX-only. See [`abs_path`].
+pub fn rel_path(posix: &str) -> String {
+    if cfg!(windows) {
+        posix.replace('/', "\\")
+    } else {
+        posix.to_owned()
+    }
+}
+
+/// The `file:` URL this platform produces for [`abs_path`] of the same input — on Windows
+/// the drive letter joins the path, giving `file:///C:/…`.
+pub fn file_url(posix: &str) -> String {
+    if cfg!(windows) {
+        format!("file:///C:{posix}")
+    } else {
+        format!("file://{posix}")
+    }
+}
+
 /// Minimal `AgentView` for unit tests outside the dispatch/handler modules
 /// (which keep their own richer factories).
 pub fn make_agent_view(session_id: Option<&str>, cwd: &str) -> crate::app::agent_view::AgentView {

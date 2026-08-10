@@ -873,7 +873,7 @@ mod tests {
     fn done_state_scans_file_paths_like_scrollback() {
         // Absolute path text (not a markdown hyperlink) should still become a
         // file:// overlay via scan_lines_for_url_overlays.
-        let path = "/Users/test/project/src/main.rs";
+        let path = crate::test_util::abs_path("/Users/test/project/src/main.rs");
         let state = BtwOverlayState::done("q".to_string(), format!("See {path} for details."));
         let (_model, overlay) = render_with_links(&state, 80, 8);
         let urls: Vec<_> = overlay

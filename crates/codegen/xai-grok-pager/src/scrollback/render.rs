@@ -2605,8 +2605,10 @@ mod tests {
         // across rows. The whole path must be clickable (one overlay region
         // per row, all pointing at the full file:// URL) — not just the
         // leading path fragment on the first row.
-        let path = "/Users/alice/.chutes-build/sessions/%2FUsers%2Falice%2Fcode%2Fxai/\
-                    019e0000-0000-7000-8000-000000000001/images/1.jpg";
+        let path = crate::test_util::abs_path(
+            "/Users/alice/.chutes-build/sessions/%2FUsers%2Falice%2Fcode%2Fxai/\
+                     019e0000-0000-7000-8000-000000000001/images/1.jpg",
+        );
         let entries = vec![make_markdown_entry(&format!(
             "Image generated and saved to {path}\n"
         ))];
@@ -2614,7 +2616,7 @@ mod tests {
         let viewport = Rect::new(0, 0, 40, 20);
         let result = render_with_scratch(&entries, viewport, 0, None);
 
-        let expected_url = url::Url::from_file_path(path).unwrap();
+        let expected_url = url::Url::from_file_path(&path).unwrap();
         let path_links: Vec<_> = result
             .link_overlay
             .links()
@@ -2703,7 +2705,10 @@ mod tests {
         // File paths in the command header line should be linkified even
         // when the block is collapsed.
         let mut entries = vec![ScrollbackEntry::new(RenderBlock::execute_with_output(
-            "cd /Users/foo/project && ls",
+            &format!(
+                "cd {} && ls",
+                crate::test_util::abs_path("/Users/foo/project")
+            ),
             "file1\nfile2",
             None::<String>,
         ))];
@@ -2724,7 +2729,7 @@ mod tests {
             .collect();
         assert!(
             urls.iter()
-                .any(|u| u.starts_with("file:///Users/foo/project")),
+                .any(|u| u.starts_with(&crate::test_util::file_url("/Users/foo/project"))),
             "file path in collapsed header should be linkified, got: {urls:?}"
         );
     }
@@ -2733,7 +2738,10 @@ mod tests {
     fn group_header_entry_does_not_leak_hidden_line_links() {
         let mut entries = vec![
             ScrollbackEntry::new(RenderBlock::execute_with_output(
-                "cd /Users/foo/project && ls",
+                &format!(
+                    "cd {} && ls",
+                    crate::test_util::abs_path("/Users/foo/project")
+                ),
                 "out",
                 None::<String>,
             )),
@@ -2834,12 +2842,18 @@ mod tests {
         // group: 3 entries, header count = group_len - 1 = 2.
         let mut entries = vec![
             ScrollbackEntry::new(RenderBlock::execute_with_output(
-                "cd /Users/foo/hidden && ls",
+                &format!(
+                    "cd {} && ls",
+                    crate::test_util::abs_path("/Users/foo/hidden")
+                ),
                 "out",
                 None::<String>,
             )),
             ScrollbackEntry::new(RenderBlock::execute_with_output(
-                "cat /Users/foo/visible/file.txt",
+                &format!(
+                    "cat {}",
+                    crate::test_util::abs_path("/Users/foo/visible/file.txt")
+                ),
                 "out",
                 None::<String>,
             )),
@@ -3528,9 +3542,9 @@ mod tests {
         use crate::scrollback::types::{BlockContext, selectable_cols};
         use unicode_width::UnicodeWidthStr;
 
-        let abs = "/Users/me/project/src/foo.rs";
-        let cwd = std::path::PathBuf::from("/Users/me/project");
-        let mut entry = ScrollbackEntry::new(RenderBlock::edit(abs, None));
+        let abs = crate::test_util::abs_path("/Users/me/project/src/foo.rs");
+        let cwd = std::path::PathBuf::from(crate::test_util::abs_path("/Users/me/project"));
+        let mut entry = ScrollbackEntry::new(RenderBlock::edit(&abs, None));
         entry.display_mode = DisplayMode::Collapsed;
 
         let mut appearance = AppearanceConfig::default();
@@ -3558,7 +3572,7 @@ mod tests {
         let target = header.link_target.as_ref().expect("link target on header");
         assert_eq!(
             target,
-            &crate::render::osc8::LinkTarget::File(Arc::from(std::path::Path::new(abs)))
+            &crate::render::osc8::LinkTarget::File(Arc::from(std::path::Path::new(&abs)))
         );
 
         let cols = selectable_cols(&header.content, &header.selectable)
@@ -3645,8 +3659,8 @@ mod tests {
 
     #[test]
     fn official_vscode_remote_delegates_scanned_absolute_path() {
-        let path = "/worktree/src/main.rs";
-        let entry = make_markdown_entry(path);
+        let path = crate::test_util::abs_path("/worktree/src/main.rs");
+        let entry = make_markdown_entry(&path);
         let viewport = Rect::new(0, 0, 80, 5);
         let (result, buf) =
             render_with_scratch_and_buffer(std::slice::from_ref(&entry), viewport, 0, None);
@@ -3657,7 +3671,7 @@ mod tests {
             .find(|link| matches!(&link.target, crate::render::osc8::LinkTarget::File(_)))
             .expect("scanned file target");
 
-        assert!((0..viewport.height).any(|row| buffer_row_text(&buf, row).contains(path)));
+        assert!((0..viewport.height).any(|row| buffer_row_text(&buf, row).contains(path.as_str())));
         assert_eq!(link.presentation, LinkPresentation::SelfResolvingPath);
         assert_eq!(
             file_link_policy(link, &official_vscode_remote_context()),
@@ -3670,8 +3684,8 @@ mod tests {
 
     #[test]
     fn official_vscode_remote_tool_headers_delegate_only_self_resolving_paint() {
-        let cwd = std::path::PathBuf::from("/worktree");
-        let target = "/worktree/src/nested/main.rs";
+        let cwd = std::path::PathBuf::from(crate::test_util::abs_path("/worktree"));
+        let target = &crate::test_util::abs_path("/worktree/src/nested/main.rs");
         let terminal = official_vscode_remote_context();
 
         for (name, block) in [
@@ -3719,8 +3733,13 @@ mod tests {
                     .filter(|row| !row.is_empty())
                     .collect::<Vec<_>>();
 
+                // The header paints a relative path joined with the platform
+                // separator, so the expectation follows it.
+                let expected_paint = crate::test_util::rel_path(expected_paint);
                 assert!(
-                    painted_rows.iter().any(|row| row.contains(expected_paint)),
+                    painted_rows
+                        .iter()
+                        .any(|row| row.contains(expected_paint.as_str())),
                     "{name} {mode:?} width={width}: {painted_rows:?}"
                 );
                 assert!(!path_links.is_empty(), "{name} {mode:?} width={width}");
@@ -3775,15 +3794,24 @@ mod tests {
 
     #[test]
     fn basename_headers_stay_grok_owned_for_duplicate_and_outside_targets() {
-        let cwd = std::path::PathBuf::from("/worktree");
+        let cwd = std::path::PathBuf::from(crate::test_util::abs_path("/worktree"));
         let terminal = official_vscode_remote_context();
         let cases = [
-            ("duplicate-a", "/worktree/src/a/main.rs"),
-            ("duplicate-b", "/worktree/src/b/main.rs"),
-            ("outside", "/opt/service/main.rs"),
+            (
+                "duplicate-a",
+                crate::test_util::abs_path("/worktree/src/a/main.rs"),
+            ),
+            (
+                "duplicate-b",
+                crate::test_util::abs_path("/worktree/src/b/main.rs"),
+            ),
+            (
+                "outside",
+                crate::test_util::abs_path("/opt/service/main.rs"),
+            ),
         ];
 
-        for (name, target) in cases {
+        for (name, target) in &cases {
             for (tool, block) in [
                 ("Read", RenderBlock::read(target, None)),
                 ("Edit", RenderBlock::edit(target, None)),
@@ -3824,8 +3852,8 @@ mod tests {
 
     #[test]
     fn long_read_header_link_is_clipped_to_offset_content_area() {
-        let path = "/outside/a/very/long/path/that/is/clipped/main.rs";
-        let mut entry = ScrollbackEntry::new(RenderBlock::read(path, None));
+        let path = crate::test_util::abs_path("/outside/a/very/long/path/that/is/clipped/main.rs");
+        let mut entry = ScrollbackEntry::new(RenderBlock::read(&path, None));
         entry.display_mode = DisplayMode::Expanded;
         let viewport = Rect::new(11, 0, 24, 5);
 
@@ -3848,7 +3876,7 @@ mod tests {
 
     #[test]
     fn explicit_tool_link_clips_before_u16_conversion() {
-        let path = format!("/outside/{}.rs", "x".repeat(70_000));
+        let path = crate::test_util::abs_path(&format!("/outside/{}.rs", "x".repeat(70_000)));
         let mut entry = ScrollbackEntry::new(RenderBlock::read(path, None));
         entry.display_mode = DisplayMode::Expanded;
         let viewport = Rect::new(9, 0, 40, 5);

@@ -1598,7 +1598,10 @@ mod tests {
             None,
         );
         let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Edit src/main.rs");
+        assert_eq!(
+            text,
+            format!("Edit {}", crate::test_util::rel_path("src/main.rs"))
+        );
     }
 
     #[test]
@@ -1636,7 +1639,7 @@ mod tests {
         assert_eq!(text, "Editing workflow cc-deep-research");
         assert!(
             block
-                .path_link_target(Some(Path::new("/repo")))
+                .path_link_target(Some(Path::new(&crate::test_util::abs_path("/repo"))))
                 .and_then(|target| crate::render::osc8::resolve_link_target(&target))
                 .and_then(|resolved| resolved.osc8_url)
                 .is_some_and(|u| u.contains("cc-deep-research.rhai")),
@@ -1763,9 +1766,10 @@ mod tests {
 
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
-        let abs = "/Users/me/project/src/foo.rs";
-        let cwd = Path::new("/Users/me/project");
-        let block = EditToolCallBlock::new(abs, vec![]);
+        let abs = crate::test_util::abs_path("/Users/me/project/src/foo.rs");
+        let cwd_owned = crate::test_util::abs_path("/Users/me/project");
+        let cwd = Path::new(&cwd_owned);
+        let block = EditToolCallBlock::new(&abs, vec![]);
         let theme = Theme::current();
         let header = block.header_line(
             &theme,
@@ -1777,7 +1781,10 @@ mod tests {
             None,
         );
         let text: String = header.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "Edit src/foo.rs");
+        assert_eq!(
+            text,
+            format!("Edit {}", crate::test_util::rel_path("src/foo.rs"))
+        );
 
         let mut ctx = test_ctx();
         ctx.mode = DisplayMode::Expanded;
@@ -1789,7 +1796,7 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(preamble_text, "Edit /Users/me/project/src/foo.rs");
+        assert_eq!(preamble_text, format!("Edit {abs}"));
     }
 
     #[test]
@@ -1808,13 +1815,14 @@ mod tests {
 
     #[test]
     fn header_link_target_is_absolute_file_for_all_surfaces() {
-        let abs = "/Users/me/project/src/foo.rs";
-        let cwd = Path::new("/Users/me/project");
-        let block = EditToolCallBlock::new(abs, vec![]);
+        let abs = crate::test_util::abs_path("/Users/me/project/src/foo.rs");
+        let cwd_owned = crate::test_util::abs_path("/Users/me/project");
+        let cwd = Path::new(&cwd_owned);
+        let block = EditToolCallBlock::new(&abs, vec![]);
         let target = block.path_link_target(Some(cwd)).expect("file target");
         assert_eq!(
             target,
-            crate::render::osc8::LinkTarget::File(Arc::from(Path::new(abs)))
+            crate::render::osc8::LinkTarget::File(Arc::from(Path::new(&abs)))
         );
         assert_eq!(
             crate::render::osc8::resolve_link_target(&target)
@@ -1822,7 +1830,7 @@ mod tests {
                 .osc8_url
                 .unwrap()
                 .as_ref(),
-            "file:///Users/me/project/src/foo.rs"
+            crate::test_util::file_url("/Users/me/project/src/foo.rs")
         );
 
         let mut ctx = test_ctx();
@@ -1839,7 +1847,7 @@ mod tests {
         let expanded = block.output(&ctx);
         assert_eq!(
             expanded.lines[0].content.spans[1].content.as_ref(),
-            "src/foo.rs"
+            crate::test_util::rel_path("src/foo.rs")
         );
         assert_eq!(expanded.lines[0].link_target.as_ref(), Some(&target));
     }

@@ -532,9 +532,9 @@ mod tests {
 
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
-        let abs = "/Users/me/project/src/main.rs";
-        let cwd = std::path::PathBuf::from("/Users/me/project");
-        let block = ReadToolCallBlock::new(abs).with_content("hello".into(), 1);
+        let abs = crate::test_util::abs_path("/Users/me/project/src/main.rs");
+        let cwd = std::path::PathBuf::from(crate::test_util::abs_path("/Users/me/project"));
+        let block = ReadToolCallBlock::new(&abs).with_content("hello".into(), 1);
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
         ctx.cwd = Some(cwd.clone());
@@ -545,7 +545,10 @@ mod tests {
             .iter()
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(header, "Read src/main.rs");
+        assert_eq!(
+            header,
+            format!("Read {}", crate::test_util::rel_path("src/main.rs"))
+        );
 
         let preamble = block.preamble(&ctx).unwrap();
         let preamble_text: String = preamble
@@ -554,7 +557,7 @@ mod tests {
             .flat_map(|l| l.spans.iter())
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(preamble_text, "Read /Users/me/project/src/main.rs");
+        assert_eq!(preamble_text, format!("Read {abs}"));
     }
 
     #[test]
@@ -609,20 +612,28 @@ mod tests {
     fn expanded_header_selection_matches_relative_path() {
         use crate::scrollback::types::derive_selection_text;
 
-        let block = ReadToolCallBlock::new("/Users/me/project/src/main.rs");
+        let block =
+            ReadToolCallBlock::new(crate::test_util::abs_path("/Users/me/project/src/main.rs"));
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;
-        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
+        ctx.cwd = Some(std::path::PathBuf::from(crate::test_util::abs_path(
+            "/Users/me/project",
+        )));
         let header = &block.output(&ctx).lines[0];
-        assert_eq!(derive_selection_text(header), "src/main.rs");
+        assert_eq!(
+            derive_selection_text(header),
+            crate::test_util::rel_path("src/main.rs")
+        );
     }
 
     #[test]
     fn header_link_target_is_absolute_file_for_collapsed_and_expanded() {
-        let abs = "/Users/me/project/src/main.rs";
-        let block = ReadToolCallBlock::new(abs);
+        let abs = crate::test_util::abs_path("/Users/me/project/src/main.rs");
+        let block = ReadToolCallBlock::new(&abs);
         let mut ctx = make_ctx();
-        ctx.cwd = Some(std::path::PathBuf::from("/Users/me/project"));
+        ctx.cwd = Some(std::path::PathBuf::from(crate::test_util::abs_path(
+            "/Users/me/project",
+        )));
 
         let collapsed = block.output(&ctx);
         let target = collapsed.lines[0]
@@ -631,9 +642,9 @@ mod tests {
             .expect("link target");
         assert_eq!(
             target,
-            &crate::render::osc8::LinkTarget::File(
-                std::sync::Arc::from(std::path::Path::new(abs),)
-            )
+            &crate::render::osc8::LinkTarget::File(std::sync::Arc::from(std::path::Path::new(
+                &abs
+            ),))
         );
         assert_eq!(
             crate::render::osc8::resolve_link_target(target)
@@ -641,7 +652,7 @@ mod tests {
                 .osc8_url
                 .unwrap()
                 .as_ref(),
-            "file:///Users/me/project/src/main.rs"
+            crate::test_util::file_url("/Users/me/project/src/main.rs")
         );
         assert_eq!(
             collapsed.lines[0].content.spans[1].content.as_ref(),
@@ -652,7 +663,7 @@ mod tests {
         let expanded = block.output(&ctx);
         assert_eq!(
             expanded.lines[0].content.spans[1].content.as_ref(),
-            "src/main.rs"
+            crate::test_util::rel_path("src/main.rs")
         );
         assert_eq!(expanded.lines[0].link_target.as_ref(), Some(target));
     }

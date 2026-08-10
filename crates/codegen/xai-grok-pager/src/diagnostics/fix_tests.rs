@@ -721,7 +721,8 @@ fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
             "alias ssh 'chutes-build wrap ssh'",
         ),
     ] {
-        let plan = plan_fix_ignoring_platform(request(temp.path(), shell), &report(), &terminal()).unwrap();
+        let plan = plan_fix_ignoring_platform(request(temp.path(), shell), &report(), &terminal())
+            .unwrap();
         assert_eq!(plan.id(), SSH_WRAP_ID);
         assert_eq!(plan.change().requested_path, temp.path().join(relative));
         assert_eq!(
@@ -873,7 +874,9 @@ fn conflict_scan_uses_the_exact_validated_source_snapshot() {
     let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
     std::fs::write(&path, "export KEEP=1\n").unwrap();
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     std::fs::write(&path, "alias ssh='ssh -A'\n").unwrap();
     assert!(matches!(
         apply_fix(plan),
@@ -946,7 +949,8 @@ fn comments_and_managed_alias_do_not_create_false_conflicts() {
         "# alias ssh='ssh -A'\n# >>> chutes-build doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='chutes-build wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< chutes-build doctor <<<\n",
     )
     .unwrap();
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &terminal()).unwrap();
+    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &terminal())
+        .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.status(), FixStatus::AlreadyConfigured);
     assert!(outcome.backup_path().is_none());
@@ -978,7 +982,9 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
     let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
     std::fs::write(&path, "export KEEP=1\n").unwrap();
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     std::fs::write(&path, "export KEEP=2\n").unwrap();
     assert!(matches!(
         apply_fix(plan),
@@ -988,7 +994,9 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "export KEEP=2\n");
 
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.status(), FixStatus::Applied);
     assert_eq!(outcome.id(), SSH_WRAP_ID);
@@ -1004,7 +1012,9 @@ fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
     // apply against bash must still report the managed alias as configured.
     let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.shell(), Some(ShellKind::Bash));
     assert_eq!(outcome.changed_path(), path);
@@ -1049,7 +1059,8 @@ fn configured_report_reaches_pass_state_only_for_exact_managed_alias() {
     let temp = crate::test_util::sandbox_dir();
     let mut healthy = report();
     healthy.findings.clear();
-    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &healthy, &terminal()).unwrap();
+    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &healthy, &terminal())
+        .unwrap();
     assert_eq!(
         plan.id(),
         SSH_WRAP_ID,
