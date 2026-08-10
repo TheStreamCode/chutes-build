@@ -6485,16 +6485,24 @@ pub(crate) mod tests {
             app.needs_animation(),
             "an open prompt history overlay must request animation ticks"
         );
-        // Wait against the clock, not an iteration count. The daemon runs on
-        // another thread, and a one-second budget — which 1000 x 1 ms was — is
-        // sized for an idle machine: this failed on a loaded CI runner while
-        // passing locally and on the previous run. Ten seconds still fails if the
-        // daemon never delivers, so the assertion keeps its meaning, and the loop
-        // exits the moment it does.
+        // Drive the ticks, then read the results — not both in one condition.
+        //
+        // `tick()` returns "the screen needs repainting", which is not a delivery
+        // signal. `activate` above already grabs an eager snapshot and moves
+        // `last_gen` up to it, so when the daemon is quick enough to have answered
+        // before that call, the results are present from the start and every later
+        // `poll` sees no new generation and reports no change. `tick()` then stays
+        // false while the count is already 2, and `tick() && count == 2` never
+        // holds however long it is given.
+        //
+        // Which is why the earlier widening of this deadline — 1 s to 10 s — did
+        // nothing: this fails when the machine is *fast*, not when it is loaded.
+        // The clock stays only as a backstop for a daemon that truly never answers.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut delivered = false;
         while std::time::Instant::now() < deadline {
-            if app.tick() && app.agents[&id].prompt.history_search.result_count() == 2 {
+            app.tick();
+            if app.agents[&id].prompt.history_search.result_count() == 2 {
                 delivered = true;
                 break;
             }
@@ -6502,7 +6510,7 @@ pub(crate) mod tests {
         }
         assert!(
             delivered,
-            "tick() must poll the history daemon and deliver results"
+            "the history overlay must end up with the daemon's results"
         );
         app.agents
             .get_mut(&id)
