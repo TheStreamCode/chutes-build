@@ -7676,6 +7676,11 @@ pub(crate) mod tests {
     #[test]
     fn welcome_ctrl_u_update_keeps_priority_over_foreign_resume() {
         let mut app = test_app();
+        // `test_app` sets the cwd to `/tmp`, which off Unix is drive-relative: the
+        // GitHub Windows runner works on `D:`, so it resolves to `D:\tmp`, which does
+        // not exist, and the canonicalisation below fails. This case needs a real
+        // directory, not that one in particular.
+        app.cwd = std::env::temp_dir();
         app.foreign_session_compat =
             xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
                 cursor: true,

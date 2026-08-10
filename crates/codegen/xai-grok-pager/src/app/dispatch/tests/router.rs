@@ -317,6 +317,11 @@ fn seed_foreign_resume_hint(
     app: &mut AppView,
     tool: xai_grok_workspace::foreign_sessions::ForeignSessionTool,
 ) {
+    // `test_app` sets the cwd to `/tmp`, which off Unix is drive-relative: the
+    // GitHub Windows runner works on `D:`, so it resolves to `D:\tmp`, which does
+    // not exist, and the canonicalisation below fails. This case needs a real
+    // directory, not that one in particular.
+    app.cwd = std::env::temp_dir();
     app.foreign_session_compat =
         xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
             claude: true,
