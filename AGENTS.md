@@ -178,6 +178,10 @@ git diff --check
 
 ### Reading the result on Windows
 
+**All five CI jobs pass, as of 2026-08-10.** That is new — Windows had been red
+since 1.0.0 landed and Linux had not finished in over twenty runs — and it means a
+red job is now a regression to explain, not a background condition to work around.
+
 **`xai-grok-pager --lib` passes on Windows CI. A failure there is a regression**,
 not the weather — this changed on 2026-08-10, when the sixty-six that CI reported
 were closed. Do not carry forward the old advice of comparing against an upstream

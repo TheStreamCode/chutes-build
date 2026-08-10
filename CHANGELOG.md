@@ -36,6 +36,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and bundled skills, Chutes-native tools, and clippy — had not run either. Behind
   them were a banned `tokio::process::Command::spawn` in a test the ban does not
   describe, and a doc comment separated from the function it documents.
+- **That job's 60-minute limit was sized for the broken state.** The first run to
+  reach the end spent 59.7 minutes on work that passed and was killed during the
+  cache *save* — which left the next run cold, slower, and killed in the same
+  place. Raised to 90, matching Windows; the following run finished in 65 with the
+  cache written, so the next starts warm.
+- **All five CI jobs pass.** Windows had been red since 1.0.0 landed and Linux had
+  not finished in over twenty runs; this is the first complete green run.
 - A flaky history-delivery test asked for a repaint and a result in one condition;
   it fails when the daemon is *fast* enough to answer before the eager snapshot,
   which is why widening its deadline had not helped.

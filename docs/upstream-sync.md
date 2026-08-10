@@ -700,6 +700,20 @@ unexecuted steps including clippy over the Chutes-owned packages. Every step
 cleared reveals the next, and the count of "remaining failures" is only ever a
 lower bound until a job runs green end to end.
 
+The last thing hiding down there was not a test at all: **a job that starts
+passing does more work than the one that used to fail, and can outgrow the time
+limit written for the broken version of itself.** The Linux job's 60 minutes had
+been ample while it died at the formatting check; the first run that reached the
+end spent 59.7 minutes on steps that all passed and was killed during the cache
+*save*. That failure mode feeds itself — no cache saved means the next run starts
+cold, takes longer, and dies in the same place — so the limit is now 90, and the
+run after it finished in 65 with the cache written.
+
+Final state, 2026-08-10: all five jobs green, which is the first complete run this
+repository has had. `xai-grok-pager --lib` 8274 passing on Windows against 83
+failures at the start, `xai-grok-shell --lib auth::` 374 against 24 in a step that
+had never run.
+
 **Reproduce the runner rather than trusting the local number.** Local runs on the
 development machine disagreed with CI in both directions, and each disagreement
 had a cause worth knowing: the runner's `%TEMP%` is an 8.3 short path
