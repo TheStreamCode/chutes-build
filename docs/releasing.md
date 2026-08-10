@@ -27,6 +27,13 @@ Use one version for the root npm launcher, every native optional dependency,
 the `chutes-build` Rust binary crate, and the lockstepped runtime crates checked
 by `npm run verify:release`. After updating those manifests, run:
 
+> [!IMPORTANT]
+> **Regenerate `Cargo.lock` before committing the bump.** The workflow builds with
+> `--locked`, and a lock still naming the old version fails every one of the six
+> native jobs with `cannot update the lock file`. `npm run verify:release` checks
+> the manifests and does not touch the lock; `cargo check -p chutes-build --locked`
+> is what tells you. The 1.0.1 release failed exactly here on its first attempt.
+
 ```powershell
 npm run verify:release
 npm test
@@ -86,6 +93,14 @@ places where the re-base had taken upstream's branding back over the fork's, thr
 of them flag *names* (`--grok-ws-origin`, `--grok-ws-url`, `--xai-api-base-url`).
 Nothing in the build or the test suites looks at that text. Grep the installed
 binary's help for `grok`, `xai` and `x.ai`, not just the version string.
+
+**And then start it.** That help sweep read every command's text and still missed
+the thing a user sees first: 1.0.0 shipped Grok's wordmark on the splash, because
+the re-base had replaced both logo assets with upstream's. `--help` never draws it.
+Launch the TUI, look at the welcome screen, and open the settings and the usage
+paths — the upsell there was offering a SuperGrok subscription. A test now pins the
+wordmark's hash so that particular loss cannot repeat silently, but the general
+lesson is that reading strings is not the same as running the program.
 
 The workflow publishes native packages first because the root launcher depends
 on them as optional dependencies. A failed or partial run must be investigated;

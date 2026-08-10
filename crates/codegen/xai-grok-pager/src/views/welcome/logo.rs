@@ -218,6 +218,38 @@ pub fn render_compact_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
 mod tests {
     use super::*;
 
+    /// The wordmark is pinned, because losing it is silent.
+    ///
+    /// The 1.0.0 re-base replaced both files with upstream's Grok wordmark and it
+    /// shipped that way: nothing compiles differently, no test looked at the bytes,
+    /// and the only symptom is the splash a user sees on every start. A merge that
+    /// takes upstream's side here now fails this instead of reaching a release.
+    ///
+    /// Changing the art is fine — update the hashes in the same commit, which makes
+    /// it a decision someone took rather than one that happened.
+    #[test]
+    fn wordmark_assets_are_ours() {
+        for (name, art, expected) in [
+            (
+                "logo07.txt",
+                LOGO,
+                "60bcfccf5dc86d5217c8e4655dfefee5d32af5d7a52e220081f4e57e180b8e39",
+            ),
+            (
+                "logo05.txt",
+                LOGO_SMALL,
+                "e86b32b3274a4255bd901992604af048100cebb235074ef413a4b51e25179320",
+            ),
+        ] {
+            let actual = blake3::hash(art.as_bytes()).to_hex().to_string();
+            assert_eq!(
+                actual, expected,
+                "{name} changed. If that was deliberate, update the hash here; if a \
+                 merge brought upstream's wordmark back, restore ours."
+            );
+        }
+    }
+
     #[test]
     fn logo_sizes_by_height() {
         assert!(pick_logo_for(SMALL_LOGO_MIN_HEIGHT - 1, false).is_none());

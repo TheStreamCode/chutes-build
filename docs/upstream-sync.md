@@ -57,6 +57,17 @@ whose value came across from upstream compiles fine and its tests assert against
 the constant. See the sweep section in the re-base record below for what that
 cost.
 
+The sweep reads source. It does not read **assets**, and 1.0.0 shipped upstream's
+Grok wordmark because both logo files came across untouched — invisible to the
+compiler, to the tests and to the sweep, and visible to every user at startup.
+After a merge, compare the asset tree too:
+
+```powershell
+git diff --stat upstream/main -- '**/assets/**'   # anything identical is suspect
+```
+
+A test now pins the wordmark's hash. Nothing pins the rest.
+
 Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 `models`, `du`, and a confirmation that nothing was written outside
 `$CHUTES_BUILD_HOME`.

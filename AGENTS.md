@@ -176,6 +176,17 @@ npm pack --dry-run
 git diff --check
 ```
 
+### What a green gate does not tell you
+
+Both of 1.0.0's branding faults passed every test and every lint. The flags in
+`--help` said `--grok-ws-*`; the splash drew upstream's wordmark. Nothing reads
+that text, and the logo is two asset files nobody diffs.
+
+So after a merge, and before a release: **start the program and look at it.** Read
+every subcommand's `--help` for `grok`, `xai` and `x.ai`, then open the TUI —
+welcome screen, settings, the usage and upsell paths. A wordmark test now pins the
+logo hashes, but that guard exists because the general case has no guard.
+
 ### Reading the result on Windows
 
 **All five CI jobs pass, as of 2026-08-10.** That is new — Windows had been red

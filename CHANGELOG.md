@@ -27,6 +27,10 @@ Rust identifiers, crate names, telemetry event types and model ids such as
 `grok-4.5` are deliberately untouched: `AGENTS.md` keeps them so upstream diffs
 stay readable, and a model name is data rather than branding.
 
+The wordmark's hash is now pinned by a test, so a merge that takes upstream's
+side there fails instead of shipping. The loss was silent by nature: nothing
+compiles differently, no test read the bytes, and the only symptom was on screen.
+
 ### Security
 
 - **The `agent serve` token comparison no longer rests on a function that
