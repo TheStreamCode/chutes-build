@@ -719,14 +719,48 @@ results are already there, no later poll reports a change, and the conjunction c
 never hold however long it waits. It fails when the machine is quick, which no
 amount of clock could fix.
 
-Still open: `xai-grok-shell --lib auth::` fails 24 on Windows. Its fixtures are
-POSIX shell one-liners while a provider command runs through `cmd /C` there, by a
-deliberate choice in `util::subprocess::shell_c` for exit-code propagation. Two
-lock tests in that count read the lock file while holding it, which Windows refuses
-with `ERROR_LOCK_VIOLATION`; the product itself degrades safely there, falling back
-to the mtime staleness branch it already has, so the PID liveness check simply does
-not run on Windows. Rewriting the suite in a second dialect is a project, not a
-fix, and it has never run on Windows anywhere — upstream included.
+### The auth suite, and the step below the step
+
+Clearing the pager let the Windows job reach its second step for the first time —
+`xai-grok-shell --lib auth::`, which failed 24. One cause: a provider command goes
+through the platform shell, and off Unix `util::subprocess::shell_c` picks `cmd /C`
+deliberately, because the contract is "exit 0 means success" and PowerShell's
+`-Command` does not propagate a child's exit code. The fixtures were POSIX
+one-liners — `printf`, `sleep 20; printf never`, `$(wc -l < …)`, `${VAR:-0}`,
+`if [ … ]; then … fi` — so they minted nothing there.
+
+Writing each fixture twice, once per dialect, would have encoded the problem
+instead of removing it: `cmd` has no `sleep`, no `printf`, no default-valued
+expansion, and quoting JSON through it is its own nightmare. The suite now drives
+`crates/codegen/xai-grok-shell/src/bin/auth-provider-fixture.rs`, invoked with
+`args`, which takes the direct-exec branch where no shell interprets anything.
+
+Three constraints that shaped it, worth knowing before touching it:
+
+- **The helper has to be built first.** `CARGO_BIN_EXE_*` is set for integration
+  tests and benches, not for a lib's unit tests, and `cargo test --lib` does not
+  build a crate's binaries. Both CI steps and the local gate build it; the test
+  panics with the exact command if it is missing.
+- **The command-only paths cannot be quoted.** `run_external_refresh` and
+  `run_external_auth_provider` take a command and no args, so they still go through
+  a shell — and `cmd /C` strips the first and last quote of the whole string, so a
+  quoted program with quoted arguments comes apart in its hands. The helper is
+  named bare there, with an assertion that nothing in the line contains a space.
+- **A fixture must not abort.** `[profile.dev]` sets `panic = "abort"`, so the
+  stderr-flood mode writing through `eprint!` — which panics on a failed write —
+  surfaced as exit `0xc0000409`, indistinguishable from the deadlock that case
+  exists to detect.
+
+The two lock tests were a different fault: they read the lock file through a second
+handle while holding it, which Windows refuses with `ERROR_LOCK_VIOLATION`, since
+`fs2` locks a byte range there. They read through the holding handle now, which is
+what `holder_state` does in the product. Note what that implies for production:
+under real contention the PID-liveness read fails on Windows and the code falls
+into the `holder info unreadable` branch it already has, so staleness is decided by
+mtime. It degrades safely — it waits the full threshold before breaking a lock —
+but the liveness probe does not run there.
+
+374 pass, 0 fail.
 
 ## Review record: 2026-08-07
 

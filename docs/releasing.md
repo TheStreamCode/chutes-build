@@ -74,6 +74,13 @@ CLI behavior must agree before a release candidate is packaged.
 8. Install the published version on at least Windows and one Unix platform, then
    verify `chutes-build --version` and a non-billable startup path.
 
+Step 8 is not a formality either. Doing it for 1.0.0 — `npm install chutes-build`
+into a throwaway prefix, then reading every subcommand's `--help` — found five
+places where the re-base had taken upstream's branding back over the fork's, three
+of them flag *names* (`--grok-ws-origin`, `--grok-ws-url`, `--xai-api-base-url`).
+Nothing in the build or the test suites looks at that text. Grep the installed
+binary's help for `grok`, `xai` and `x.ai`, not just the version string.
+
 The workflow publishes native packages first because the root launcher depends
 on them as optional dependencies. A failed or partial run must be investigated;
 do not reuse an already published version.

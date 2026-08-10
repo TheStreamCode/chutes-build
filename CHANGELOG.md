@@ -6,6 +6,40 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--help` had upstream's branding back in it.** The re-base took upstream's
+  wording over the fork's in five places a user reads, three of them flag *names*:
+  `--grok-ws-origin` and `--grok-ws-url`, which 0.4.3 spelled `--chutes-ws-*` and
+  kept hidden, so the re-base both renamed them and put internal plumbing into the
+  top-level help; `--xai-api-base-url`, described as "the public xAI API base URL"
+  when it overrides the Chutes inference base URL; the positional-prompt example,
+  which read ``grok "fix the bug"`` beside a `chutes-build` example on the same
+  line; and the `screen_mode` help, which said "To default plain `grok` to
+  minimal". Found by installing the published 1.0.0 the way a user gets it and
+  reading every help surface — the step the release procedure asks for and which
+  had not been done. `leader/mod.rs` passes those flags to the child process, so
+  the rename covers it too.
+
+### Repository and CI
+
+- **`xai-grok-shell --lib auth::` runs on Windows.** It failed 24 there, and the
+  CI step had never executed at all, because the pager step above it always failed
+  first. A provider command goes through `cmd /C` off Unix — deliberately, for
+  exit-code propagation — while the fixtures were POSIX one-liners. They now drive
+  `auth-provider-fixture`, a real helper invoked with `args`, so no shell
+  interprets them. Two lock tests read the lock file through a second handle while
+  holding it, which Windows refuses; they read through the holding handle now, as
+  the product does.
+- **The Linux job reaches its end.** It had not passed in the last twenty runs, so
+  four steps below the failure — auth and session integration, agent construction
+  and bundled skills, Chutes-native tools, and clippy — had not run either. Behind
+  them were a banned `tokio::process::Command::spawn` in a test the ban does not
+  describe, and a doc comment separated from the function it documents.
+- A flaky history-delivery test asked for a repaint and a result in one condition;
+  it fails when the daemon is *fast* enough to answer before the eager snapshot,
+  which is why widening its deadline had not helped.
+
 ## [1.0.0] - 2026-08-07
 
 Chutes Build is re-based onto `xai-org/grok-build` 1.0.0 (`afbc0fb`) and adopts
