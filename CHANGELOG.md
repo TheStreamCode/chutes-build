@@ -99,6 +99,47 @@ upstream instead:
   578. Two were real defects rather than test bugs: the trust hole above, and a
   home-directory guard no test on Windows could reach.
 
+### Fixed (Windows, and these were the product)
+
+The pager's Windows suite had sixty-six failures. Most were fixtures written for
+POSIX, but five were defects users would meet:
+
+- **`doctor fix` could not apply anything.** The managed-config writer opened the
+  parent directory as a file, to `sync_all` it after the rename. That sync is
+  Unix-only — Windows has no durability barrier for a directory — so off Unix the
+  handle was captured and never read, and Windows cannot produce one at all:
+  `File::open` on a directory needs `FILE_FLAG_BACKUP_SEMANTICS`, which `std` does
+  not set. Every fix planned, then failed to write, reporting "access denied"
+  against the directory rather than the file.
+- **No file path written in agent prose was clickable.** The scanner that turns
+  paths into `file://` overlays matched `~?/…` only, so `C:\Users\me\x.md` was
+  never recognised. Only tool headers worked, because those receive the path
+  directly instead of finding it in text.
+- **Tab completion in the extensions modal destroyed the path.** It rebuilt the
+  directory prefix by looking for a `/`; a Windows path has none, so completing
+  `C:\src\plugin-s` replaced the whole field with `plugin-source`. The directory
+  listing, gated on the text ending in `/`, never triggered either.
+- **The memory-search header showed `\MEMORY.md`.** The path shortener looked for
+  `/` alone, so the separator after the memory root survived — and a nested result
+  was not shortened at all, painting the whole `\xai-…\sessions\…` tail.
+- **A test fixture named `nul` proved nothing**, because on Windows that name is
+  the null device wherever it appears: the write went nowhere and the NUL-byte
+  refusal it existed to check was never reached.
+
+### Fixed (releases carried an unstripped binary)
+
+`release-dist` keeps symbols on purpose, for sidecars extracted "before stripping
+post-build" — and that post-build strip had never been written. The npm packages
+therefore shipped the profile's full DWARF: `linux-arm64-gnu` reached 938 MB
+unpacked and the registry refused it outright with `413 Payload Too Large`.
+Stripping now happens between the build and the smoke test, so the run check, the
+package, its checksum and the release asset all see the binary that ships. Linux
+falls from ~890 MB to ~130 MB; Windows needs none, since MSVC keeps debug info in
+a separate `.pdb`.
+
+The macOS packages for this version were published before that fix and are larger
+than the rest; they cannot be replaced, because an npm version is immutable.
+
 ### Authentication
 
 Upstream ships an OAuth application everyone signs in through, so its

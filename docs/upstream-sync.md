@@ -224,7 +224,13 @@ without that baseline the failure counts here are unreadable:
 | `xai-grok-pager --lib` | 82 failures | 82 — identical sets |
 | `xai-grok-shell --lib auth::` | 24 failures | 24 — identical sets |
 
-Zero regressions. The upstream failures are Windows platform gaps (path
+Zero regressions. The table stands as measured; the conclusion drawn from it does
+not. "Not ours to fix" held only while nobody looked: on 2026-08-10 the pager's
+sixty-six were worked through and five turned out to be defects a Windows user
+would meet, not platform gaps — see "Closing the Windows failures" below. Inherited
+failures are worth reading one at a time before they are filed under the platform.
+
+The upstream failures are Windows platform gaps (path
 separators, `#[cfg(unix)]` helpers, shell-alias planners) and are not ours to
 fix here; three of them that broke *compilation* rather than assertions were
 fixed and are worth sending back: `process_has_exited_without_reap` and
@@ -307,6 +313,15 @@ Two lessons worth keeping:
   the endpoint could point anywhere and the suite stayed green.
 
 ### Known upstream failures on Windows
+
+> [!IMPORTANT]
+> **Superseded for the pager, 2026-08-10.** `xai-grok-pager --lib` now passes on
+> Windows CI: sixty-six failures closed, five of them product defects rather than
+> test bugs — see "Closing the Windows failures" below. The comparison-against-
+> upstream advice no longer applies to that crate, because its baseline is zero
+> and any failure is a regression. The `auth::` line below also does not match
+> measurement: this tree fails 24 there on Windows, for the shell-dialect reason
+> recorded in the same section.
 
 Measured against a pristine `upstream/main` worktree on the same machine, so
 these are not re-base damage:
@@ -610,6 +625,16 @@ tool invocable.
 
 ### The Windows CI job crashes, and it is not a test failure
 
+> [!NOTE]
+> **Closed.** The crash was the doctor's voice probe: `collect_report` enumerated
+> the audio device through WASAPI, and doing that twice in one process takes the
+> binary down with `0xc0000005`. The report now skips the probe entirely when it is
+> not asked for, rather than suppressing its finding — the first attempt did the
+> latter, the probe still ran, and CI returned the identical crash. With the log no
+> longer truncated, the run finally produced a complete failure list, which is what
+> "Closing the Windows failures" below works from. The `RUST_TEST_THREADS=1`
+> localisation described here was never needed.
+
 `Rust quality (Windows)` is red on `main` since 1.0.0 landed. The pager test binary
 **exits with `0xc0000005`** — an access violation — after roughly 3868 of ~8200
 tests, so `cargo test` reports no failure list at all: the process dies mid-run.
@@ -654,6 +679,54 @@ of them on Unix.
 
 `main`'s branch protection still forbids the merge commits this model needs; see
 the section above. That is a decision, not a task.
+
+### Closing the Windows failures, 2026-08-10
+
+Sixty-six, from CI's own list — available complete for the first time once the
+crash above stopped truncating the log. Five were product defects, and they are in
+the 1.0.0 changelog: `doctor fix` unable to write anything, file paths in agent
+prose never clickable, Tab completion in the extensions modal destroying the path,
+the memory header painting `\MEMORY.md`, and a fixture named `nul` that on Windows
+is the null device. The rest were fixtures describing a platform they were not
+running on.
+
+Three things are worth carrying forward more than the individual fixes.
+
+**A red step hides everything below it.** The Windows job's second step — the
+authentication and tools tests — had *never executed*, because the pager step
+above it always failed first. The Linux job had not reached its end in twenty
+runs: first a formatting failure, then one flaky test, and behind them four
+unexecuted steps including clippy over the Chutes-owned packages. Every step
+cleared reveals the next, and the count of "remaining failures" is only ever a
+lower bound until a job runs green end to end.
+
+**Reproduce the runner rather than trusting the local number.** Local runs on the
+development machine disagreed with CI in both directions, and each disagreement
+had a cause worth knowing: the runner's `%TEMP%` is an 8.3 short path
+(`C:\Users\RUNNER~1\…`), which a guard that rejects `~` refuses; `/tmp` is
+drive-relative off Unix and resolves only because `C:\tmp` happens to exist here,
+while the runner works on `D:`; and a terminal is attached here and not there, so
+capability-driven rendering and key handling differ. Pointing `%TEMP%` at a
+short path turned a CI-only failure into one that could be iterated on locally in
+seconds.
+
+**A widened deadline is usually a misdiagnosis.** The history-delivery test was
+"fixed" once by taking its budget from one second to ten. It kept failing, because
+the condition was `tick() && result_count() == 2`: `tick()` reports that the screen
+needs repainting, not that the daemon answered, and `activate` takes an eager
+snapshot that moves the generation counter — so when the daemon is *fast*, the
+results are already there, no later poll reports a change, and the conjunction can
+never hold however long it waits. It fails when the machine is quick, which no
+amount of clock could fix.
+
+Still open: `xai-grok-shell --lib auth::` fails 24 on Windows. Its fixtures are
+POSIX shell one-liners while a provider command runs through `cmd /C` there, by a
+deliberate choice in `util::subprocess::shell_c` for exit-code propagation. Two
+lock tests in that count read the lock file while holding it, which Windows refuses
+with `ERROR_LOCK_VIOLATION`; the product itself degrades safely there, falling back
+to the mtime staleness branch it already has, so the PID liveness check simply does
+not run on Windows. Rewriting the suite in a second dialect is a project, not a
+fix, and it has never run on Windows anywhere — upstream included.
 
 ## Review record: 2026-08-07
 

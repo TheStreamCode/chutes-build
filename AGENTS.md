@@ -177,19 +177,37 @@ git diff --check
 
 ### Reading the result on Windows
 
-`test-pager-lib` and `test-shell-auth` fail on a healthy tree. Upstream 1.0.0
-fails them too, for platform reasons, so the absolute count means nothing —
-**compare against a pristine upstream worktree** and look for a *difference*:
+**`xai-grok-pager --lib` passes on Windows CI. A failure there is a regression**,
+not the weather — this changed on 2026-08-10, when the sixty-six that CI reported
+were closed. Do not carry forward the old advice of comparing against an upstream
+baseline for this crate; the baseline is now zero.
 
-```powershell
-git worktree add --detach ..\upstream-baseline upstream/main
-# needs $env:PROTOC set, or the vendored protoc fix copied in:
-# upstream does not build on Windows on its own
-```
+`xai-grok-shell --lib auth::` still fails 24 on Windows, and that is expected: its
+fixtures are POSIX shell one-liners (`printf`, `sleep 20; printf never`,
+`${VAR:-0}`, an injection case built on `tok-$HOME;42`) while a provider command
+runs through `cmd /C` there — see `util::subprocess::shell_c`, which chooses `cmd`
+deliberately, for exit-code propagation. The suite cannot describe Windows as
+written; rewriting its fixtures in a second dialect is open work, not a bug.
 
-The recorded baselines, and what this tree scores against them, are in
-`docs/upstream-sync.md`. At the time of writing: pager `--lib` 79 against
-upstream's 82, shell `auth::` 24 = 24, `xai-grok-agent` 0 against upstream's 5.
+**This machine is not the CI runner, and the difference is not noise.** The local
+Windows result is good for spotting a *regression* you just caused; it is not the
+list of what to fix. Three ways it lies, all met on 2026-08-10:
+
+- The runner's `%TEMP%` is `C:\Users\RUNNER~1\…` — an 8.3 short name, which some
+  guards reject. Reproduce it here by pointing `%TEMP%` and `%TMP%` at a path
+  containing a `~` (`GetShortPathNameW` will give you one).
+- `/tmp` is drive-relative off Unix. It resolves here because `C:\tmp` happens to
+  exist; the runner works on `D:`, where it does not.
+- A terminal is attached here and not there, so anything reading terminal
+  capabilities — extended keys, `Ctrl+i` versus Tab, the theme's colour level —
+  can differ in both directions. VS Code's injected environment moves it again.
+
+**Read the whole step list, not the failing step.** A red step skips every step
+after it, and a job that has been red for a while is hiding however much work
+comes below. On 2026-08-10 the Windows job's authentication step had *never* run,
+and the Linux job had not reached its end in twenty runs — so four more steps,
+clippy among them, had not run either. Each cleared step reveals the next; budget
+for that rather than assuming the first green run is the last.
 
 The gate runs `xai-grok-shell --lib auth::` rather than the whole crate because
 the full run overflows a 1 MB thread stack in the debug profile on Windows. That

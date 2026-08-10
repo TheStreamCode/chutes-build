@@ -114,6 +114,12 @@ carried the profile's full DWARF, and the numbers were not marginal:
 The registry refused the last one outright — `E413 Payload Too Large` — which is
 what stopped the 1.0.0 publish after two packages had already gone out.
 
+The 1.0.0 publish had already put `darwin-x64` and `darwin-arm64` on the registry
+before it hit that error, so those two carry their symbols and are visibly larger
+than the other four. They cannot be replaced: an npm version is immutable. It is a
+size wart in one release, not a fault — the launcher pins the whole set, so nothing
+resolves a mismatched pair.
+
 The `Strip the shipped binary` step now runs between the build and the smoke test,
 so the run check, the package, its checksum and the release asset all see the
 binary that ships. Each target builds on its own native runner, so it is the host's
