@@ -6,6 +6,19 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **The `agent serve` token comparison no longer rests on a function that
+  disclaims the property it was chosen for.** It used
+  `ring::constant_time::verify_slices_are_equal`, which ring now deprecates as an
+  "internal function not intended for external use with no promises regarding side
+  channels" — while the reason for calling it at all is that `==` on `&str` returns
+  at the first differing byte, and over a socket with no rate limit that leaks the
+  token one byte at a time. It now uses `subtle::ConstantTimeEq`, which is
+  maintained for this and also resists the compiler folding the comparison back
+  into an early return. No new code enters the build: `subtle` was already in the
+  graph through rustls, so the lock file moves by one line.
+
 ### Fixed
 
 - **`--help` had upstream's branding back in it.** The re-base took upstream's
