@@ -66,7 +66,14 @@ jobs:
   rust-quality:
     name: Rust quality (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # 90, matching the Windows job. This was 60, which fitted while the job died
+    # early: for twenty runs it stopped at the formatting check or the pager tests,
+    # so the four steps below — auth and session integration, agent construction,
+    # the Chutes tools, clippy — never ran. The first run that reached the end took
+    # 59.7 minutes of work and was killed during the cache *save*, which then left
+    # the next run cold, slower, and killed in the same place. The extra half hour
+    # is what breaks that loop; a warm cache should keep the real cost well under it.
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
