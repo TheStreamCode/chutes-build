@@ -164,6 +164,7 @@ cargo test -p chutes-build-core --locked
 cargo test -p chutes-build --locked
 cargo test -p xai-grok-pager --lib --locked
 cargo test -p xai-grok-pager --test settings_e2e --locked
+cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
 cargo test -p xai-grok-shell --lib auth:: --locked
 cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
 cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools `
@@ -182,12 +183,15 @@ not the weather — this changed on 2026-08-10, when the sixty-six that CI repor
 were closed. Do not carry forward the old advice of comparing against an upstream
 baseline for this crate; the baseline is now zero.
 
-`xai-grok-shell --lib auth::` still fails 24 on Windows, and that is expected: its
-fixtures are POSIX shell one-liners (`printf`, `sleep 20; printf never`,
-`${VAR:-0}`, an injection case built on `tok-$HOME;42`) while a provider command
-runs through `cmd /C` there — see `util::subprocess::shell_c`, which chooses `cmd`
-deliberately, for exit-code propagation. The suite cannot describe Windows as
-written; rewriting its fixtures in a second dialect is open work, not a bug.
+**`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
+fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,
+`${VAR:-0}`) while a provider command runs through `cmd /C` there — see
+`util::subprocess::shell_c`, which chooses `cmd` deliberately, for exit-code
+propagation — so 24 of them had never once run on that platform. They now drive
+`src/bin/auth-provider-fixture.rs`, a real helper reached through `args`, which no
+shell interprets. **It has to be built first**: `cargo test --lib` does not build a
+crate's binaries, and `CARGO_BIN_EXE_*` is set only for integration tests and
+benches. The gate above runs the build; the test says so if you forget.
 
 **This machine is not the CI runner, and the difference is not noise.** The local
 Windows result is good for spotting a *regression* you just caused; it is not the

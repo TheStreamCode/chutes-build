@@ -716,6 +716,24 @@ mod tests {
         dir.path().join("auth.json")
     }
 
+    /// Read the holder info the way the product reads it: through the handle that
+    /// holds the lock.
+    ///
+    /// Opening the path a second time works on Unix, where `flock` is advisory, and
+    /// is refused on Windows with `ERROR_LOCK_VIOLATION` — `fs2` locks a byte range
+    /// there, and a second handle may not read it. `holder_state` already takes a
+    /// `&mut File` for the same reason.
+    fn holder_info(lock: &mut crate::auth::storage::AuthFileLock) -> String {
+        let mut content = String::new();
+        lock._file
+            .seek(io::SeekFrom::Start(0))
+            .expect("seek the lock file");
+        lock._file
+            .read_to_string(&mut content)
+            .expect("read the lock file");
+        content
+    }
+
     // ── Pure-function unit tests (no runtime needed) ─────────────────
 
     #[test]
@@ -806,9 +824,10 @@ mod tests {
         let path = auth_json_path(&dir);
         let lock_path = path.with_file_name("auth.json.lock");
 
-        let lock = try_lock_auth_file_nonblocking(&path).expect("uncontended non-blocking acquire");
+        let mut lock =
+            try_lock_auth_file_nonblocking(&path).expect("uncontended non-blocking acquire");
 
-        let content = std::fs::read_to_string(&lock_path).unwrap();
+        let content = holder_info(&mut lock);
         let (pid, _ts) =
             parse_holder_info(&content).expect("non-blocking acquire must write parseable info");
         assert_eq!(pid, std::process::id());
@@ -1182,12 +1201,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = auth_json_path(&dir);
 
-        let lock = try_lock_auth_file_async(&path, StdDuration::from_secs(1)).await;
+        let mut lock = try_lock_auth_file_async(&path, StdDuration::from_secs(1)).await;
         assert!(lock.is_some(), "should acquire lock");
 
         // Verify lock file has holder info.
-        let lock_path = path.with_file_name("auth.json.lock");
-        let content = std::fs::read_to_string(&lock_path).unwrap();
+        let content = holder_info(lock.as_mut().expect("the lock was acquired"));
         let (pid, _ts) = parse_holder_info(&content).unwrap();
         assert_eq!(pid, std::process::id());
 

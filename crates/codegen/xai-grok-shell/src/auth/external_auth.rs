@@ -181,9 +181,14 @@ mod tests {
 
     #[tokio::test]
     async fn sets_grok_auth_expired_env_on_refresh() {
-        let auth = run_external_refresh("echo $CHUTES_BUILD_AUTH_EXPIRED")
-            .await
-            .unwrap();
+        // `$VAR` is POSIX expansion and `%VAR%` is cmd's; the fixture reads the
+        // environment itself, so the command means the same thing to both.
+        let command = crate::auth::auth_provider::test_fixture_command(&[
+            "env",
+            "CHUTES_BUILD_AUTH_EXPIRED",
+            "unset",
+        ]);
+        let auth = run_external_refresh(&command).await.unwrap();
         assert_eq!(auth.key, "1");
     }
 

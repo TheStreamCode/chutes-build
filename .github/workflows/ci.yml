@@ -97,7 +97,13 @@ jobs:
           cargo test -p xai-grok-pager --lib --locked
           cargo test -p xai-grok-pager --test settings_e2e --locked
       - name: Test authentication and session integration
-        run: "cargo test -p xai-grok-shell --lib auth:: --locked"
+        # The auth-provider fixtures run a real helper rather than a shell
+        # one-liner, because a provider command goes through `cmd /C` off Unix
+        # and the POSIX forms meant nothing there. `--lib` does not build a
+        # crate's binaries, so it is built explicitly first.
+        run: |
+          cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
+          cargo test -p xai-grok-shell --lib auth:: --locked
       - name: Test agent construction and bundled skills
         run: |
           cargo test -p xai-grok-agent --lib --locked
@@ -158,7 +164,12 @@ jobs:
           cargo test -p chutes-build --locked
           cargo test -p xai-grok-pager --lib --locked
       - name: Test authentication and tools on Windows
+        # The auth-provider fixtures run a real helper rather than a shell
+        # one-liner, because a provider command goes through `cmd /C` off Unix
+        # and the POSIX forms meant nothing there. `--lib` does not build a
+        # crate's binaries, so it is built explicitly first.
         run: |
+          cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
           cargo test -p xai-grok-shell --lib auth:: --locked
           cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
 

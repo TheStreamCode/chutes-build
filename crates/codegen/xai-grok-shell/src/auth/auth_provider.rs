@@ -621,22 +621,85 @@ pub(crate) fn test_backdate_provider_mint(name: &str, age: std::time::Duration) 
     }
 }
 
+/// Path to the `auth-provider-fixture` helper binary.
+///
+/// A provider command runs through the platform shell, and off Unix that is
+/// `cmd /C` — see [`crate::util::subprocess::shell_c`], which picks `cmd` on
+/// purpose because the provider contract is "exit 0 means success" and
+/// PowerShell's `-Command` does not propagate a child's exit code. The fixtures
+/// here were POSIX one-liners, so on Windows they produced nothing and this whole
+/// suite failed. Pointing `command` at a real program with `args` takes the
+/// direct-exec branch instead, which has no dialect at all.
+///
+/// `CARGO_BIN_EXE_*` is set for integration tests and benches, not for the lib's
+/// own unit tests, and `cargo test --lib` does not build the crate's binaries — so
+/// the path is derived from the running test binary and the helper has to be built
+/// first. The panic says how.
+#[cfg(test)]
+pub(crate) fn test_provider_fixture_bin() -> std::path::PathBuf {
+    let mut dir = std::env::current_exe().expect("the running test binary has a path");
+    dir.pop();
+    if dir.ends_with("deps") {
+        dir.pop();
+    }
+    let path = dir.join(format!(
+        "auth-provider-fixture{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    assert!(
+        path.exists(),
+        "the auth-provider fixture helper is missing at {}\n\
+         build it first:  cargo build -p xai-grok-shell --bin auth-provider-fixture",
+        path.display()
+    );
+    path
+}
+
+/// A provider that runs the fixture helper with `args`, so no shell sees them.
+#[cfg(test)]
+pub(crate) fn test_fixture_provider_config(args: &[&str]) -> AuthProviderConfig {
+    AuthProviderConfig {
+        command: test_provider_fixture_bin().display().to_string(),
+        args: Some(args.iter().map(|a| (*a).to_owned()).collect()),
+        token_ttl_secs: Some(3600),
+        timeout_secs: None,
+        cwd: None,
+    }
+}
+
+/// The fixture helper as a *command string*, for the paths that take one.
+///
+/// `run_external_refresh` and `run_external_auth_provider` accept a command and no
+/// args, so they always go through a shell. Naming the helper and its arguments
+/// bare keeps the string meaningful to both `sh -c` and `cmd /C`: quoting would
+/// not, because `cmd /C` strips the first and last quote of the whole string, so a
+/// quoted program followed by quoted arguments comes apart in its hands.
+///
+/// Bare works only while nothing needs quoting, which is true of a target directory
+/// and of the arguments used here. The assertion says so rather than letting a
+/// path with a space fail as a mysteriously empty token.
+#[cfg(test)]
+pub(crate) fn test_fixture_command(args: &[&str]) -> String {
+    let bin = test_provider_fixture_bin().display().to_string();
+    let command = std::iter::once(bin.as_str())
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        !command.contains("  ") && !bin.contains(' ') && args.iter().all(|a| !a.contains(' ')),
+        "the fixture command goes through a shell unquoted, so nothing in it may \
+         contain a space: {command}"
+    );
+    command
+}
+
 /// A counting provider that prints "tok-1", "tok-2", ... on successive runs.
 #[cfg(test)]
 pub(crate) fn test_counting_provider(name: &str, dir: &std::path::Path) -> AuthProviderRef {
     let counter = dir.join("count");
     AuthProviderRef::new(
         name.to_owned(),
-        AuthProviderConfig {
-            command: format!(
-                "echo run >> {c}; printf 'tok-%s' \"$(wc -l < {c} | tr -d ' ')\"",
-                c = counter.display()
-            ),
-            args: None,
-            token_ttl_secs: Some(3600),
-            timeout_secs: None,
-            cwd: None,
-        },
+        test_fixture_provider_config(&["count", &counter.display().to_string()]),
     )
 }
 

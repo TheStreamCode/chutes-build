@@ -272,3 +272,11 @@ tar = { workspace = true }
 [[bin]]
 name = "chat-history-downgrade"
 path = "src/bin/chat-history-downgrade.rs"
+
+# A stand-in credential helper for the auth-provider tests, reached through
+# `CARGO_BIN_EXE_auth-provider-fixture`. It exists because a provider command runs
+# through `cmd /C` off Unix, where the suite's POSIX one-liners mean nothing; see
+# the module docs for why a second dialect was the worse answer.
+[[bin]]
+name = "auth-provider-fixture"
+path = "src/bin/auth-provider-fixture.rs"

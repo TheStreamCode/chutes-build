@@ -1342,7 +1342,10 @@ mod tests {
     async fn mint_session_noninteractive_uses_external_provider() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(crate::auth::auth_provider::test_fixture_command(&[
+                "print",
+                "xai-ext-token",
+            ])),
             ..GrokComConfig::default()
         };
         let mgr = Arc::new(
@@ -1355,7 +1358,12 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_login_carries_no_expired_flag_even_over_a_stale_credential() {
-        let echo_env = "printf '%s' \"e=${CHUTES_BUILD_AUTH_EXPIRED:-unset}\"";
+        let echo_env = crate::auth::auth_provider::test_fixture_command(&[
+            "env",
+            "e=",
+            "CHUTES_BUILD_AUTH_EXPIRED",
+            "unset",
+        ]);
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1366,7 +1374,7 @@ mod tests {
             ..oidc_session("stale-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider(echo_env, &mgr, true, None)
+        let (auth, _) = run_external_auth_provider(&echo_env, &mgr, true, None)
             .await
             .expect("provider output must parse");
         assert_eq!(
@@ -1378,7 +1386,14 @@ mod tests {
     /// The script is the one published in `README.md`, which operators copy.
     #[tokio::test]
     async fn a_provider_written_to_the_published_contract_can_sign_in_after_an_expiry() {
-        let conforming = r#"if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
+        // Refuses the silent path, mints on the interactive one — the published
+        // contract, without a shell conditional neither `cmd` nor `sh` share.
+        let conforming = crate::auth::auth_provider::test_fixture_command(&[
+            "gate",
+            "CHUTES_BUILD_AUTH_EXPIRED",
+            "1",
+            "sso-token",
+        ]);
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1389,7 +1404,7 @@ mod tests {
             ..oidc_session("stale-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider(conforming, &mgr, true, None)
+        let (auth, _) = run_external_auth_provider(&conforming, &mgr, true, None)
             .await
             .expect("the sign-in run must reach the binary's interactive branch");
         assert_eq!(auth.key, "sso-token");
@@ -1503,7 +1518,10 @@ mod tests {
         // pick up the provider instead of starting an interactive device login.
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(crate::auth::auth_provider::test_fixture_command(&[
+                "print",
+                "xai-ext-token",
+            ])),
             // oauth2=Some, oidc=None → the device flow is available (opt-in).
             ..GrokComConfig::default()
         };
@@ -2189,8 +2207,10 @@ mod tests {
             AuthManager::new(dir.path(), GrokComConfig::default())
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = r#"sh -c 'i=0; while [ $i -lt 2000 ]; do printf "%s" "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; printf token'"#;
-        let (auth, _) = run_external_auth_provider(cmd, &mgr, false, None)
+        // 80 kB of stderr: comfortably past a pipe buffer, so a piped stderr
+        // nobody drains would deadlock here.
+        let cmd = crate::auth::auth_provider::test_fixture_command(&["stderr", "80000", "token"]);
+        let (auth, _) = run_external_auth_provider(&cmd, &mgr, false, None)
             .await
             .expect("CLI path must inherit stderr so large stderr does not deadlock");
         assert_eq!(auth.key, "token");
