@@ -86,7 +86,7 @@ Clients connect over WebSocket and authenticate with the secret token. If you om
 To reach the agent over the internet, connect the agent to a relay and point browsers at the same relay:
 
 ```bash
-chutes-build agent --always-approve headless --grok-ws-url wss://your-relay.example.com/ws
+chutes-build agent --always-approve headless --chutes-ws-url wss://your-relay.example.com/ws
 ```
 
 ---

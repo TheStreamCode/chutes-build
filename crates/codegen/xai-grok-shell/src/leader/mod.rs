@@ -1688,8 +1688,8 @@ fn spawn_leader_subprocess(env_urls: &LeaderEnvUrls) -> Result<u32, ConnectionEr
     cmd.arg("agent").arg("leader");
     cmd.arg("--no-exit-on-disconnect");
     cmd.arg("--relay-on-demand");
-    cmd.arg("--grok-ws-url").arg(&env_urls.grok_ws_url);
-    cmd.arg("--grok-ws-origin").arg(&env_urls.grok_ws_origin);
+    cmd.arg("--chutes-ws-url").arg(&env_urls.grok_ws_url);
+    cmd.arg("--chutes-ws-origin").arg(&env_urls.grok_ws_origin);
     if let Some(socket) = std::env::var_os(crate::leader::LEADER_SOCKET_ENV) {
         cmd.env(crate::leader::LEADER_SOCKET_ENV, socket);
     }

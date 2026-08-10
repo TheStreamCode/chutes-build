@@ -298,8 +298,8 @@ pub struct AgentArgs {
     /// Override the CLI chat proxy base URL.
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Override the public xAI API base URL.
-    #[arg(long = "xai-api-base-url")]
+    /// Override the Chutes inference API base URL.
+    #[arg(long = "chutes-api-base-url")]
     pub xai_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
@@ -344,9 +344,9 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "grok-ws-origin")]
+    #[arg(long = "chutes-ws-origin", hide = true)]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "grok-ws-url")]
+    #[arg(long = "chutes-ws-url", hide = true)]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
@@ -758,7 +758,7 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `grok` to
+    /// Session-scoped only — does not write config. To default plain `chutes-build` to
     /// minimal, set `[ui] screen_mode = "minimal"` in ~/.chutes-build/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
@@ -783,7 +783,7 @@ pub struct PagerArgs {
     /// Run standalone even when leader mode is configured.
     #[arg(long, conflicts_with = "leader", hide = true)]
     pub no_leader: bool,
-    /// Initial prompt for the interactive session, e.g. `grok "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
+    /// Initial prompt for the interactive session, e.g. `chutes-build "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
         conflicts_with_all = &["single",

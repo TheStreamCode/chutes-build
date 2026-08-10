@@ -810,7 +810,7 @@ Communication happens via JSON-RPC over stdin/stdout. This mode is used by:
 To expose the agent over the internet (instead of local network), run a WebSocket relay server and have the agent connect to it:
 
 ```bash
-chutes-build agent headless --grok-ws-url wss://your-relay.example.com/ws
+chutes-build agent headless --chutes-ws-url wss://your-relay.example.com/ws
 ```
 
 The agent connects OUT to your relay, and your web clients connect to the same relay. Useful for building web UIs where browsers can't spawn local processes.
