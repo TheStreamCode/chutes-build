@@ -706,8 +706,13 @@ limit written for the broken version of itself.** The Linux job's 60 minutes had
 been ample while it died at the formatting check; the first run that reached the
 end spent 59.7 minutes on steps that all passed and was killed during the cache
 *save*. That failure mode feeds itself — no cache saved means the next run starts
-cold, takes longer, and dies in the same place — so the limit is now 90, and the
-run after it finished in 65 with the cache written.
+cold, takes longer, and dies in the same place — so the limit is now 90.
+
+Measured twice after the raise: 65 minutes, then 67. Which corrects the guess
+made when raising it — that a warm cache would leave the real cost well under the
+limit. It does not: about 45 of those minutes are test execution and 11 are
+clippy, so compilation is not what fills the hour, and the headroom is roughly a
+quarter rather than a half.
 
 Final state, 2026-08-10: all five jobs green, which is the first complete run this
 repository has had. `xai-grok-pager --lib` 8274 passing on Windows against 83
