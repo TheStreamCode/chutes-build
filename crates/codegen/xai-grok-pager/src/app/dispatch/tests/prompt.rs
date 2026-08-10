@@ -75,7 +75,7 @@ fn doctor_question_app(temp: &std::path::Path) -> AppView {
 
 #[test]
 fn doctor_fix_modal_stashes_prompt_and_confirms_exactly_one_apply() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = doctor_question_app(temp.path());
     let id = AgentId(0);
     assert_eq!(app.agents[&id].prompt.text(), "");
@@ -100,7 +100,7 @@ fn doctor_fix_modal_stashes_prompt_and_confirms_exactly_one_apply() {
 
 #[test]
 fn doctor_fix_confirm_rejects_changed_session_or_cwd() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     for mutate in ["session", "cwd"] {
         let mut app = doctor_question_app(temp.path());
         let id = AgentId(0);
@@ -135,7 +135,7 @@ fn doctor_fix_confirm_rejects_changed_session_or_cwd() {
 
 #[test]
 fn doctor_fix_promoted_target_allows_confirm_and_apply() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = doctor_question_app(temp.path());
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().unbind_session_id();
@@ -179,7 +179,7 @@ fn doctor_fix_promoted_target_allows_confirm_and_apply() {
 
 #[test]
 fn doctor_fix_none_target_rejects_cwd_change() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = doctor_question_app(temp.path());
     let id = AgentId(0);
     let epoch = app.agents[&id].session_binding_epoch;
@@ -215,7 +215,7 @@ fn doctor_fix_none_target_rejects_cwd_change() {
 
 #[test]
 fn doctor_fix_background_confirm_keeps_original_target() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = doctor_question_app(temp.path());
     let initiator = AgentId(0);
     let original = target_for(&app, initiator);
@@ -245,7 +245,7 @@ fn doctor_fix_background_confirm_keeps_original_target() {
 
 #[test]
 fn doctor_fix_cancel_routes_to_initiator_then_fallbacks() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = doctor_question_app(temp.path());
     let initiator = AgentId(0);
     let outcome = app
@@ -280,7 +280,7 @@ fn doctor_fix_cancel_routes_to_initiator_then_fallbacks() {
 
 #[test]
 fn doctor_fix_all_cancel_keys_restore_prompt_without_effect() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     for key in [
         crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('c'),

@@ -1,6 +1,46 @@
 //! Shared test utilities for the pager crate.
 //!
 //! Compiled only in `#[cfg(test)]` builds. Import via `crate::test_util`.
+
+/// A temporary directory whose path has no 8.3 short components — use it wherever
+/// a test hands a sandbox root to code that treats it as a real `HOME` or cwd.
+///
+/// `tempfile::tempdir()` builds under `std::env::temp_dir()`, and on the GitHub
+/// Windows runner that is `C:\Users\RUNNER~1\AppData\Local\Temp`: `RUNNER~1` is the
+/// 8.3 short name for `runneradmin`. `SafeAbsoluteDirectory::parse` rejects any
+/// path containing a `~`, and is right to — the path it guards gets written into a
+/// shell rc file, where a literal `~` would be re-expanded against the home
+/// directory instead of naming the file meant. So thirty-two tests failed on CI and
+/// nowhere else, over a property of the runner's `%TEMP%` rather than anything they
+/// were testing. A real Windows home arrives from `dirs::home_dir()` in long form,
+/// which is what this reproduces.
+///
+/// Canonicalising resolves every short component. `dunce` is used rather than
+/// `std::fs::canonicalize` so the result keeps the plain `C:\…` form: the `\\?\`
+/// prefix would pass the guard but not string comparisons against paths the test
+/// built by hand.
+pub struct SandboxDir {
+    // Held only for its `Drop`: the directory lives as long as this value.
+    _dir: tempfile::TempDir,
+    path: std::path::PathBuf,
+}
+
+impl SandboxDir {
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+/// A temporary directory safe to use as a sandbox root. See [`SandboxDir`].
+pub fn sandbox_dir() -> SandboxDir {
+    let dir = tempfile::tempdir().unwrap();
+    // A path that will not canonicalise is still worth returning: the directory was
+    // just created, so this is some transient condition, and the raw path is what
+    // the test would have got before.
+    let path = dunce::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
+    SandboxDir { _dir: dir, path }
+}
+
 /// Minimal `AgentView` for unit tests outside the dispatch/handler modules
 /// (which keep their own richer factories).
 pub fn make_agent_view(session_id: Option<&str>, cwd: &str) -> crate::app::agent_view::AgentView {

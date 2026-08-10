@@ -19,7 +19,7 @@ fn doctor_target(app: &AppView, id: AgentId) -> crate::app::actions::DoctorFixTa
 
 #[test]
 fn doctor_planning_promotes_initial_session_binding() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().unbind_session_id();
@@ -53,7 +53,7 @@ fn doctor_planning_promotes_initial_session_binding() {
 
 #[test]
 fn doctor_planning_rejects_bind_replace_and_unbind_rebind() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     for replacement in ["bind-replace", "unbind-rebind"] {
         let mut app = test_app_with_agent();
         let id = AgentId(0);
@@ -86,7 +86,7 @@ fn doctor_planning_rejects_bind_replace_and_unbind_rebind() {
 
 #[test]
 fn doctor_planning_opens_refuses_remote_and_rejects_stale_identity() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     let target = doctor_target(&app, id);
@@ -208,7 +208,7 @@ fn doctor_apply_reload_success_does_not_claim_live_finding_disappeared() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     let target = doctor_target(&app, id);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     dispatch_task_result(
         TaskResult::DoctorFixApplied {
@@ -246,7 +246,7 @@ fn doctor_apply_success_only_renders_resolution_instructions() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     let target = doctor_target(&app, id);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     dispatch_task_result(
         TaskResult::DoctorFixApplied {
             target,
@@ -436,7 +436,7 @@ fn foreign_resume_results_require_launch_token_and_canonical_cwd() {
     );
     assert!(stale.foreign_resume_hint().is_none());
 
-    stale.cwd = tempfile::tempdir().unwrap().path().to_path_buf();
+    stale.cwd = crate::test_util::sandbox_dir().path().to_path_buf();
     dispatch(
         Action::TaskComplete(TaskResult::ForeignResumeCwdCanonicalized {
             requested_cwd,
