@@ -92,6 +92,29 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-release-
       - name: Build native binary
         run: cargo build -p chutes-build --profile release-dist --locked
+      # `release-dist` sets `strip = false` on purpose — its comment says CI extracts
+      # debug sidecars "before stripping post-build". That post-build strip had never
+      # been written, so the npm packages carried the full DWARF: `linux-arm64-gnu`
+      # came to 938 MB unpacked and the registry refused it outright with a 413,
+      # which is what stopped the 1.0.0 publish after two packages.
+      #
+      # Placed before the smoke test so every step below — the run check, the
+      # package, its checksum, the release asset — sees exactly the binary that
+      # ships. Every target builds on its own native runner, so this is the host's
+      # own `strip`; MSVC keeps debug info in a separate `.pdb`, so the `.exe` is
+      # already lean and there is nothing to remove.
+      - name: Strip the shipped binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=$(wc -c < "${{ matrix.binary }}")
+          case "${{ matrix.target }}" in
+            linux-*) strip --strip-debug --strip-unneeded "${{ matrix.binary }}" ;;
+            darwin-*) strip -x "${{ matrix.binary }}" ;;
+            win32-*) echo "win32: debug info lives in the .pdb, nothing to strip" ;;
+          esac
+          after=$(wc -c < "${{ matrix.binary }}")
+          echo "${{ matrix.target }}: $((before / 1024 / 1024)) MB -> $((after / 1024 / 1024)) MB"
       - name: Smoke-test native binary
         run: node npm/scripts/verify-native-binary.mjs "${{ matrix.binary }}"
       - name: Stage native npm package

@@ -98,6 +98,29 @@ empty, so a release cannot ship with blank notes.
 Assets are the bare executables as well as the npm archives. Someone downloading
 from a release wants something they can run, not a tarball to unpack.
 
+### The shipped binary is stripped, and has to be
+
+`release-dist` builds with `strip = false` and `debug = 1`, which is right for a
+profile whose comment promises that CI extracts debug sidecars "before stripping
+post-build". That post-build strip had never been written. So every npm package
+carried the profile's full DWARF, and the numbers were not marginal:
+
+| package | packed | unpacked |
+| --- | ---: | ---: |
+| `darwin-arm64` | 57.3 MB | 146.7 MB |
+| `darwin-x64` | 60.2 MB | 158.8 MB |
+| `linux-arm64-gnu` | 209.7 MB | **938.2 MB** |
+
+The registry refused the last one outright — `E413 Payload Too Large` — which is
+what stopped the 1.0.0 publish after two packages had already gone out.
+
+The `Strip the shipped binary` step now runs between the build and the smoke test,
+so the run check, the package, its checksum and the release asset all see the
+binary that ships. Each target builds on its own native runner, so it is the host's
+own `strip`; Windows needs none, because MSVC keeps debug info in a separate
+`.pdb`. The cost is line numbers in a local backtrace — worth it against a
+download that the registry will not accept at all.
+
 ## Repository presentation
 
 One thing stays manual because GitHub exposes no API for it: the **social preview**,
