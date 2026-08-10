@@ -1851,8 +1851,6 @@ fn save_fork_secondary_model_toast(value: &str) -> String {
     format!("\u{2713} Fork secondary model: {value}")
 }
 
-/// Outer dispatcher for `Action::SetForkSecondaryModel`.
-/// Mirror + persist + toast. Idempotent: same-id → no-op.
 // ---------------------------------------------------------------------------
 // `/advisor` — pins/unpins the model and enabled state of the built-in advisor
 // subagent. Unlike the settings above these write directly to
@@ -1887,6 +1885,8 @@ pub(in crate::app::dispatch) fn set_advisor_enabled(
     vec![Effect::SetAdvisorEnabled(enabled)]
 }
 
+/// Outer dispatcher for `Action::SetForkSecondaryModel`.
+/// Mirror + persist + toast. Idempotent: same-id → no-op.
 pub(in crate::app::dispatch) fn set_fork_secondary_model(
     app: &mut AppView,
     new_id: acp::ModelId,
