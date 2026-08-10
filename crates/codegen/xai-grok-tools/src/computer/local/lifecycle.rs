@@ -177,6 +177,13 @@ mod tests {
     /// until a `wait` has returned.
     #[cfg(unix)]
     #[tokio::test]
+    // The ban exists because an unenrolled child outlives its session. Nothing here
+    // does: this spawns `true`, hands the handle straight to the assertion, and
+    // waits on it before the test ends. Enrolling it in the process scope would
+    // also take away the very thing under test — `Collection::of` reads the raw
+    // `Child`, and the case is that no collection may be claimed until a `wait`
+    // has returned.
+    #[allow(clippy::disallowed_methods)]
     async fn a_collection_claim_requires_the_child_to_have_been_waited_on() {
         let mut child = tokio::process::Command::new("true")
             .spawn()
