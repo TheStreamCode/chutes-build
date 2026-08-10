@@ -112,10 +112,15 @@ fn applicable_fix_listing_uses_report_metadata_and_planner_availability() {
             None,
         )
     });
-    assert_eq!(
-        local_fixes,
+    // Windows has no shell-alias fix, so the planner refuses and nothing is
+    // offered "here". The remote cases below are unaffected: availability
+    // short-circuits to `RunLocally` before the planner is consulted.
+    let expected_local = if cfg!(windows) {
+        Vec::new()
+    } else {
         vec![(SSH_WRAP_ID, "ssh-wrap", AutomaticFixAvailability::Here)]
-    );
+    };
+    assert_eq!(local_fixes, expected_local);
 
     let mut remote = local.clone();
     remote.is_ssh = true;
@@ -752,18 +757,18 @@ fn remote_vscode_and_unsupported_shell_are_refused() {
     let mut remote = terminal();
     remote.is_ssh = true;
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &remote),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &remote),
         Err(FixError::RemoteSession)
     ));
 
     let mut vscode = terminal();
     vscode.is_official_vscode_remote = true;
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &vscode),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &vscode),
         Err(FixError::NotApplicable)
     ));
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/tcsh"), &report(), &terminal()),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/tcsh"), &report(), &terminal()),
         Err(FixError::UnsupportedShell)
     ));
 }
@@ -797,7 +802,7 @@ fn existing_alias_and_function_conflicts_are_preserved() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
         assert!(matches!(
-            plan_fix(request(temp.path(), shell), &report(), &terminal()),
+            plan_fix_ignoring_platform(request(temp.path(), shell), &report(), &terminal()),
             Err(FixError::ExistingCustomization { .. })
         ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), content);
@@ -896,7 +901,7 @@ fn non_utf8_source_fails_closed_before_conflict_policy() {
     let path = temp.path().join(".zshrc");
     std::fs::write(&path, [0xff]).unwrap();
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &terminal()),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &terminal()),
         Err(FixError::Managed(
             xai_grok_config::managed_text::ManagedConfigError::UnsafePath { .. }
         ))

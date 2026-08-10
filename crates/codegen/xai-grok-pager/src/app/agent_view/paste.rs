@@ -2500,7 +2500,9 @@ pub(super) mod paste_key_tests {
         let completion = agent.complete_clipboard_attachment_paste(
             ctx,
             crate::app::actions::ProbedAttachment::NoRaster,
-            Some("file:///definitely/missing/xai-primary-paste.png".to_owned()),
+            Some(crate::test_util::file_url(
+                "/definitely/missing/xai-primary-paste.png",
+            )),
         );
         assert_eq!(
             completion,
@@ -2508,7 +2510,10 @@ pub(super) mod paste_key_tests {
         );
         assert_eq!(
             agent.prompt.text(),
-            "/definitely/missing/xai-primary-paste.png "
+            format!(
+                "{} ",
+                crate::test_util::abs_path("/definitely/missing/xai-primary-paste.png")
+            )
         );
         assert!(agent.prompt.images.is_empty());
     }

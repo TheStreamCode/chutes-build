@@ -233,7 +233,10 @@ mod tests {
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("done");
-        let command = format!("touch {}", marker.display());
+        // Same reason the redirect cases quote: `sh -c` eats the backslashes of a
+        // bare Windows path, so `touch C:\…\done` would create `C:…done` in the
+        // crate root and the assertion below would find nothing.
+        let command = format!("touch {}", shell_redirect_target(&marker));
 
         execute_hook(
             &command,

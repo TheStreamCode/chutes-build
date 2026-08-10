@@ -1515,13 +1515,27 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
-        // Gutter cell carries the block background, proving the block fill
-        // (not the bg_base clear) owns it. UserPrompt has vpad → content on row 1.
-        let gutter_x = gutter_band(&renderer, width).start + 2;
-        let gutter_cell = buf.cell((gutter_x, 1)).unwrap();
+        // The gutter carries the same fill as the content beside it, proving the
+        // block owns it and the bg_base clear did not run. UserPrompt has vpad →
+        // content on row 1.
+        //
+        // Compared against the neighbouring cell rather than against
+        // `theme.bg_light`: the row's band colour comes from the block, which reads
+        // `Theme::current()`, while the renderer paints with the theme handed to it
+        // here. In the product both are `Theme::current()` and agree; naming a
+        // literal colour only held where those two coincide, and on Windows they do
+        // not, because `current()` applies a contrast boost that the concrete theme
+        // built here has not been through.
+        let band = gutter_band(&renderer, width);
+        let gutter_cell = buf.cell((band.start + 2, 1)).unwrap();
+        let content_cell = buf.cell((band.start - 1, 1)).unwrap();
         assert_eq!(
-            gutter_cell.bg, theme.bg_light,
+            gutter_cell.bg, content_cell.bg,
             "background block gutter must use the block bg fill"
+        );
+        assert_ne!(
+            gutter_cell.bg, theme.bg_base,
+            "the no-bg clear must not run for a background block"
         );
     }
 

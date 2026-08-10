@@ -67,8 +67,11 @@ fn collect_report_joins_registry_and_flags_untracked() {
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
     let home = base.join("grok-home");
-    let tracked = home.join("worktrees/xai/wt-tracked");
-    let untracked = home.join("worktrees/xai/wt-untracked");
+    // Joined a segment at a time: the report walks the tree and reports native
+    // separators, so a single `join` holding `/` would only ever match on Unix.
+    let worktrees = home.join("worktrees").join("xai");
+    let tracked = worktrees.join("wt-tracked");
+    let untracked = worktrees.join("wt-untracked");
     let external = base.join("external-repo");
     std::fs::create_dir_all(&tracked).unwrap();
     std::fs::create_dir_all(&untracked).unwrap();
