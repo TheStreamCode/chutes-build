@@ -1026,12 +1026,12 @@ fn free_usage_upsell_shows_two_options_with_exact_labels() {
     assert_eq!(q.question, "You hit your free usage limit.");
     let expected = [
         (
-            "Upgrade to SuperGrok",
+            "See Chutes plans",
             "For everyday coding and productivity tasks",
             Some(UPSELL_URL_UPGRADE),
         ),
         (
-            "Upgrade to SuperGrok Heavy",
+            "See higher Chutes limits",
             "Get the most out of Chutes Build. Highest usage limits.",
             Some(UPSELL_URL_UPGRADE),
         ),
@@ -1166,11 +1166,11 @@ fn restricted_command_submit_opens_two_option_upsell() {
         )
     ));
     let q = &qv.questions[0];
-    assert_eq!(q.question, "Unlock all features with SuperGrok.");
+    assert_eq!(q.question, "Unlock all features with a Chutes plan.");
     assert_eq!(q.options.len(), 2);
-    assert_eq!(q.options[0].label, "Upgrade to SuperGrok");
+    assert_eq!(q.options[0].label, "See Chutes plans");
     assert_eq!(q.options[0].id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(q.options[1].label, "Upgrade to SuperGrok Heavy");
+    assert_eq!(q.options[1].label, "See higher Chutes limits");
     assert_eq!(q.options[1].id.as_deref(), Some(UPSELL_URL_UPGRADE));
 }
 

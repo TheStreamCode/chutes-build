@@ -1536,8 +1536,8 @@ fn dashboard_slash_restricted_command_upsells_via_toast() {
         .as_deref()
         .expect("restricted command must set the upsell toast");
     assert!(
-        toast.contains("/imagine") && toast.contains("SuperGrok"),
-        "toast must carry the upsell: {toast}"
+        toast.contains("/imagine") && toast.contains("Chutes"),
+        "toast must name the command and the Chutes configuration: {toast}"
     );
 }
 /// A slash command that fails (`CommandResult::Error`) surfaces on

@@ -277,7 +277,7 @@ fn open_supergrok_upsell(
             "free-usage-upsell",
         ),
         UpsellReason::RestrictedCommand => (
-            "Unlock all features with SuperGrok.",
+            "Unlock all features with a Chutes plan.",
             SuperGrokUpsell::RestrictedCommand,
             "restricted-command-upsell",
         ),
@@ -290,13 +290,13 @@ fn open_supergrok_upsell(
 
     let options = vec![
         QuestionOption {
-            label: "Upgrade to SuperGrok".into(),
+            label: "See Chutes plans".into(),
             description: "For everyday coding and productivity tasks".into(),
             preview: None,
             id: Some(UPSELL_URL_UPGRADE.into()),
         },
         QuestionOption {
-            label: "Upgrade to SuperGrok Heavy".into(),
+            label: "See higher Chutes limits".into(),
             description: "Get the most out of Chutes Build. Highest usage limits.".into(),
             preview: None,
             // No Heavy-specific URL exists; the /supergrok page lists
