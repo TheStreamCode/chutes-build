@@ -233,6 +233,21 @@ not the weather — this changed on 2026-08-10, when the sixty-six that CI repor
 were closed. Do not carry forward the old advice of comparing against an upstream
 baseline for this crate; the baseline is now zero.
 
+**But run it from a VS Code terminal and you get seven failures that are not
+real.** `default_actions()` calls `terminal_context()`, which reads the *process*
+environment, so the keybindings under test change with whatever terminal the
+suite happens to run in. Inside VS Code the brand is detected from
+`VSCODE_GIT_ASKPASS_MAIN` and Quit binds to Ctrl+D rather than Ctrl+Q, so the
+four `ctrl_q` tests, `build_entries_surfaces_interject_ctrl_i_fallback` and
+`modifier_click_on_file_link_opens_via_our_handler` fail against an app that is
+behaving correctly. Unsetting those variables does not give you the CI answer
+either — it makes it worse (50 failures), because the brand then refines to
+`WindowsTerminal`. The `actions::` tests build their registry explicitly and
+stay green throughout, which is the signal that the keybinding logic is fine and
+the environment is what moved. Before treating a pager failure as yours, check
+the count: CI reports 8275 passed, and a local 8268 + 7 is this, not a
+regression.
+
 **`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
 fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,
 `${VAR:-0}`) while a provider command runs through `cmd /C` there — see
