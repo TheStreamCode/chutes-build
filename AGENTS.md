@@ -117,7 +117,22 @@ full procedure is in `docs/upstream-sync.md`; the short version:
   seams, or a policy-forbidden feature.
 - Re-run `python scripts/rebrand.py --apply`, then `--check`. It fails loudly on
   any forbidden token outside its allowlist, and reports the four ambiguous token
-  families it will never rewrite for you.
+  families it will never rewrite for you. **Read `git status` after every run.**
+  A file outside the area in hand means something was matched that should not
+  have been: the script rewrote the six sentences that name upstream on purpose
+  until those were pinned in `UPSTREAM_PROSE`, turning the README attribution
+  into "SpaceXAI's Chutes Build" and the fork link into a repository that does
+  not exist. It also leaves bare `grok` alone as ambiguous, so a binary name in
+  a comment stays wrong until you fix it by hand.
+- Finish an area on `cargo clippy -p <crate> --all-targets -- -D warnings`, not
+  on a green test run. An area is always bigger than the module you meant to
+  take, and `dead_code` is what proves it — `scripts/dead_modules.py` cannot,
+  because the module *is* reachable through `mod`. Every area ported so far
+  reached two to four crates.
+- Measure the baseline failure set before attributing a failure to your port.
+  This tree carries pre-existing Windows failures — 69 in `xai-grok-tools`, 53
+  in `xai-grok-workspace` — so a post-port count means nothing on its own. Stash,
+  run, keep the sorted names, run again, and `comm` the two lists.
 - Run `python scripts/seam_sweep.py --base <previous-release-ref>` in both modes.
   A clean merge and a green gate do **not** mean the seams survived: a constant
   whose value came across from upstream compiles fine, and its tests assert

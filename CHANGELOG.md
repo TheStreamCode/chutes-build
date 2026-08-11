@@ -6,42 +6,55 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+The manual port from upstream `b13fa526` starts here — one area per commit, each
+landing with its own tests green and measured against a pre-port baseline rather
+than an absolute count. Four areas of the ninety-one files that carry no risk of
+overwriting our work; the remaining sixty-six and the hundred and forty-seven
+overlapping files are still ahead.
+
+### Added
+
+- **A failed `SKILL.md` read now says where that skill is actually registered**,
+  instead of a bare "does not exist". Ambiguous names, disabled skills, stale
+  registrations and reads that are not `SKILL.md` deliberately suggest nothing,
+  so a wrong pointer is never preferred to no pointer.
+- **Every workspace RPC declares whether it reads or writes** (`ACTIVITY`), and
+  the proxy client can report the server binary's version.
+
+### Changed
+
+- The terminal runtime sizes its worker pool against per-user ceilings
+  (`pids.max` / `RLIMIT_NPROC`) using upstream's reworked logic, with 329 lines
+  of tests it did not have before — including the EAGAIN path.
+- Sandbox hook write-deny is compiled only where it enforces. Its identity
+  capture, symlink and rename-race errors and JSON snapshot check move from
+  `#[cfg(unix)]` to `#[cfg(any(target_os = "linux", all(unix, test)))]`: the
+  rules are applied through Linux namespaces, so on macOS that code compiled and
+  never ran. Linux behaviour is unchanged.
+
 ### Fixed
 
-- **Only streaming requests could survive a busy model.** The Chutes fallback
-  chain — selected model, then `CHUTES_FALLBACK_MODELS`, then `model-router` —
-  was wired into `chat_completion_stream` and never into `chat_completion`. The
-  two paths had diverged by omission rather than by any decision, so an
-  interactive turn recovered quietly from `429 Infrastructure is at maximum
-  capacity` while compaction, title generation and the advisor surfaced it raw.
-  Both paths now share one chain and one policy. Nothing on the non-streaming
-  path can be mid-stream, so the "never switch models once bytes have shipped"
-  rule is satisfied trivially there.
-- The chain's ordering is now testable without touching process-wide
-  environment variables, which no test could do safely while the rest of the
-  suite runs in parallel — the env reads moved to a wrapper around a pure core.
-- **`CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE=Team` could never complete a flow.**
-  `default_team_oauth2_scopes()` was still upstream's — `grok-cli:access`,
-  `api:access`, `team:read`, `conversations:*`, `workspaces:*`. The user-facing
-  list was corrected during the re-base cleanup and this one was missed.
-  `api.chutes.ai` advertises no team principal at all: its `scopes_supported` is
-  entirely user-level, so an authorization server was being asked for scopes it
-  has never heard of. The default is now the user list; a deployment that really
-  does define a team principal says so through `CHUTES_BUILD_OAUTH2_SCOPES`.
-  Established by reading the IdP's own discovery document rather than the prose
-  documentation, which does not cover team principals either way.
+- **`scripts/rebrand.py` rewrote the sentences that name upstream on purpose.**
+  Running `--apply` over the tree changed six files with nothing to do with the
+  port in hand, every one of them wrongly: the README attribution became
+  "SpaceXAI's Chutes Build", `AGENTS.md` came to say the re-base replaced our own
+  wordmark with our own, and the getting-started guide gained a fork link to
+  `github.com/xai-org/chutes-build`, which does not exist. `--check` reported the
+  correct sentences as violations, so it would have pushed the next person to
+  "fix" them. The rules cannot tell "Grok Build, the thing we forked" from "Grok
+  Build, a name to replace"; those six are now pinned by exact text, and the
+  script fails loudly if one is reworded rather than silently exempting a file.
 
 ### Documentation
 
-- `docs/upstream-sync.md` records the pending port measured rather than
-  estimated: 3 commits, 238 files, of which 147 overlap work of ours and 91 do
-  not. It also records that `git diff HEAD upstream/main` is the wrong
-  instrument — it reports 1424 files, because the fork is not a descendant of
-  upstream and the diff is mostly our own re-base read backwards.
-- `AGENTS.md` records that `xai-grok-pager --lib` reports seven failures when
-  run from a VS Code terminal, and that they are the terminal rather than the
-  code: `default_actions()` reads the process environment, so Quit binds to
-  Ctrl+D there and the `ctrl_q` tests fail against a correct app.
+- `docs/upstream-sync.md` records what the first areas taught, for the eighty-six
+  files still to come: an area is always bigger than the module it started as and
+  clippy's `dead_code` is what proves it, since `dead_modules.py` cannot see a
+  module that *is* reachable; measure the baseline failure set before attributing
+  anything; and upstream's fixtures assume POSIX absolute paths, which on Windows
+  are drive-relative, so eleven tests failed here that pass on upstream's CI.
+
+
 
 ## [1.0.3] - 2026-08-11
 
@@ -87,8 +100,57 @@ did, and one contradicted an earlier fix in this same release.
   — a security instruction, not a stylistic one — never to put API keys,
   credentials, private code or repository contents into a search query or
   outbound request. Both restored from 0.4.3 and the encrypted templates
-  regenerated. Present in the 1.0.3 binaries; this entry was written after the
-  build was dispatched, so the 1.0.3 tag does not carry it.
+  regenerated.
+- **Only streaming requests could survive a busy model.** The Chutes fallback
+  chain — selected model, then `CHUTES_FALLBACK_MODELS`, then `model-router` —
+  was wired into `chat_completion_stream` and never into `chat_completion`. The
+  two paths had diverged by omission rather than by any decision, so an
+  interactive turn recovered quietly from `429 Infrastructure is at maximum
+  capacity` while compaction, title generation and the advisor surfaced it raw.
+  Both paths now share one chain and one policy. Nothing on the non-streaming
+  path can be mid-stream, so the "never switch models once bytes have shipped"
+  rule is satisfied trivially there. The chain's ordering also became testable
+  without touching process-wide environment variables, which no test could do
+  safely while the rest of the suite runs in parallel — the env reads moved to a
+  wrapper around a pure core.
+- **`CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE=Team` could never complete a flow.**
+  `default_team_oauth2_scopes()` was still upstream's — `grok-cli:access`,
+  `api:access`, `team:read`, `conversations:*`, `workspaces:*`. The user-facing
+  list was corrected during the re-base cleanup and this one was missed.
+  `api.chutes.ai` advertises no team principal at all: its `scopes_supported` is
+  entirely user-level, so an authorization server was being asked for scopes it
+  has never heard of. The default is now the user list; a deployment that really
+  does define a team principal says so through `CHUTES_BUILD_OAUTH2_SCOPES`.
+  Established by reading the IdP's own discovery document rather than the prose
+  documentation, which does not cover team principals either way.
+
+### Release engineering
+
+- **The first 1.0.3 built every artifact and shipped none.** `darwin-arm64`
+  finished in 118m40s of a 120-minute budget: binary, strip, smoke test,
+  package, checksum and upload all succeeded, and the wall then killed the
+  cache-save step eighty seconds later. A cancelled job fails the run, so
+  `Publish GitHub release` and `Publish npm packages` were skipped. Not a
+  regression — the macOS jobs of the previous three releases ran 67, 74, 91, 84,
+  96 and 102 minutes, so the budget had been within ~15% of the slowest observed
+  build for several releases. Raised to 180.
+- **`main` had been red since 06:40 and nothing showed it.** A rebranded string
+  grew three characters past 100 columns, `Check formatting` is the first step of
+  the Linux job, and its failure skipped the six test steps and clippy behind it.
+  It stayed invisible because `cancel-in-progress: true` plus a run of quick
+  pushes cancelled every CI run in between.
+
+### Documentation
+
+- `docs/upstream-sync.md` records the pending port measured rather than
+  estimated: 3 commits, 238 files, of which 147 overlap work of ours and 91 do
+  not. It also records that `git diff HEAD upstream/main` is the wrong
+  instrument — it reports 1424 files, because the fork is not a descendant of
+  upstream and the diff is mostly our own re-base read backwards.
+- `AGENTS.md` records that `xai-grok-pager --lib` reports seven failures when
+  run from a VS Code terminal, and that they are the terminal rather than the
+  code: `default_actions()` reads the process environment, so Quit binds to
+  Ctrl+D there and the `ctrl_q` tests fail against a correct app.
 
 ### Notes on tool compatibility
 

@@ -106,6 +106,21 @@ The workflow publishes native packages first because the root launcher depends
 on them as optional dependencies. A failed or partial run must be investigated;
 do not reuse an already published version.
 
+**A cancelled build job ships nothing, even when it built everything.** The first
+1.0.3 run produced all six artifacts and published none. `darwin-arm64` finished
+in 118m40s of a 120-minute budget — binary, strip, smoke test, package, checksum
+and upload all green — and the wall then killed the cache-save step eighty
+seconds later. A cancelled job fails the run, so both publish jobs were skipped.
+The budget is 180 minutes now, sized against the 102-minute slowest build of the
+previous three releases rather than against the fastest.
+
+So when a release "fails", read the *steps*, not the job conclusion. If every
+step that produces an artifact succeeded, nothing is wrong with the code and the
+fix belongs in the workflow. Check `npm view chutes-build version` and
+`gh release view` before doing anything else: if neither moved, the version is
+still free and a re-dispatch is clean. That check is what made cancelling and
+re-running safe here rather than burning a version number.
+
 ### Why the release is not a manual step any more
 
 The releases for v0.4.1, v0.4.2 and v0.4.3 exist and carry real notes. What none of

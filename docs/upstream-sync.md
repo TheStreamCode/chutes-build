@@ -718,10 +718,24 @@ this and is re-runnable.
 Order the work by area, not by commit, and land each area with its own tests
 green: it is the only way to tell which area broke something.
 
-#### What the first two areas taught
+#### Ported so far
 
-`xai-tty-utils` (5 files) and the skill-path suggestion (6 files) are done. Four
-things generalise to the rest.
+Four areas, 28 files, on `port/upstream-b13fa526`. Each landed as its own commit
+with its own tests green, measured against a pre-port baseline.
+
+| Area | Files | What it brings |
+| --- | ---: | --- |
+| `xai-tty-utils` | 5 | Runtime worker sizing against `pids.max` / `RLIMIT_NPROC`, plus 329 lines of tests it had none of, including EAGAIN |
+| Skill-path suggestion | 6 | A failed `SKILL.md` read answers with where the skill is registered |
+| Workspace RPC | 17 | Every RPC declares read or write (`ACTIVITY`); proxy client reports the server binary version |
+| Sandbox write-deny | 3 | Compiled only where it enforces — Linux, plus the test arm |
+
+Sixty-six of the ninety-one safe files remain, and all hundred and forty-seven
+overlapping ones.
+
+#### What those areas taught
+
+Four things generalise to the rest.
 
 **An area is bigger than the module you meant to take.** The suggestion looked
 like one new module. Alone it fails clippy's `dead_code`, because its only
