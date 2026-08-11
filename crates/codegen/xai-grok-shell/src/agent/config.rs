@@ -536,11 +536,21 @@ impl EndpointsConfig {
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
-            cli_chat_proxy_base_url: std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("CHUTES_BUILD_XAI_API_BASE_URL")
+            // The documented names come first. `docs/configuration.md` promises
+            // `CHUTES_ROUTER_BASE_URL` and `CHUTES_INFERENCE_BASE_URL`, and
+            // `chutes-build-core::endpoints` already honours them — but the re-base
+            // left this layer reading only the `CHUTES_BUILD_*` spellings, so an
+            // override reached inference and not the catalogue fetch. The
+            // `CHUTES_BUILD_*` forms stay as fallbacks rather than disappearing.
+            cli_chat_proxy_base_url: std::env::var("CHUTES_ROUTER_BASE_URL")
+                .or_else(|_| std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL"))
+                .ok(),
+            xai_api_base_url: std::env::var("CHUTES_INFERENCE_BASE_URL")
+                .or_else(|_| std::env::var("CHUTES_BUILD_XAI_API_BASE_URL"))
                 .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
-            models_base_url: env_string("CHUTES_BUILD_MODELS_BASE_URL"),
+            models_base_url: env_string("CHUTES_MODELS_BASE_URL")
+                .or_else(|| env_string("CHUTES_BUILD_MODELS_BASE_URL")),
             models_list_url: env_string("CHUTES_BUILD_MODELS_LIST_URL"),
             feedback_base_url: env_string("CHUTES_BUILD_FEEDBACK_BASE_URL"),
             trace_upload_url: env_string("CHUTES_BUILD_TRACE_UPLOAD_URL"),
