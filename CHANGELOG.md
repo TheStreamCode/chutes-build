@@ -6,6 +6,21 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Only streaming requests could survive a busy model.** The Chutes fallback
+  chain — selected model, then `CHUTES_FALLBACK_MODELS`, then `model-router` —
+  was wired into `chat_completion_stream` and never into `chat_completion`. The
+  two paths had diverged by omission rather than by any decision, so an
+  interactive turn recovered quietly from `429 Infrastructure is at maximum
+  capacity` while compaction, title generation and the advisor surfaced it raw.
+  Both paths now share one chain and one policy. Nothing on the non-streaming
+  path can be mid-stream, so the "never switch models once bytes have shipped"
+  rule is satisfied trivially there.
+- The chain's ordering is now testable without touching process-wide
+  environment variables, which no test could do safely while the rest of the
+  suite runs in parallel — the env reads moved to a wrapper around a pure core.
+
 ## [1.0.3] - 2026-08-11
 
 Measured against the live Chutes endpoint with a real key, not reasoned about from
@@ -38,6 +53,20 @@ did, and one contradicted an earlier fix in this same release.
   `chutes-build-core` honours them, but the re-base left the agent's
   `EndpointsConfig` reading only the `CHUTES_BUILD_*` spellings. The documented
   names come first now, with the others kept as fallbacks.
+- **The system prompt introduced the agent as xAI's.** The re-base overwrote
+  `templates/prompt.md` with upstream's, so every model was told at every turn
+  that it was "released by xAI" instead of "a privacy-first coding agent
+  optimized for the Chutes ecosystem" — the branding fix in 1.0.1 covered what
+  the user could see, not what the model was told. The same overwrite deleted
+  the `<official_chutes_sources>` block, which is the larger loss: it is what
+  directed the model to treat `chutes.ai/docs` and `chutes.ai/news` as the
+  primary authority on Chutes products, APIs, models, pricing and quotas, to
+  say when a claim is unverified rather than blending fact with inference, and
+  — a security instruction, not a stylistic one — never to put API keys,
+  credentials, private code or repository contents into a search query or
+  outbound request. Both restored from 0.4.3 and the encrypted templates
+  regenerated. Present in the 1.0.3 binaries; this entry was written after the
+  build was dispatched, so the 1.0.3 tag does not carry it.
 
 ### Notes on tool compatibility
 

@@ -307,12 +307,29 @@ fn env_flag(name: &str) -> bool {
 }
 
 fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
+    chutes_fallback_chain(
+        is_chutes_backend(base_url),
+        env_flag("CHUTES_STRICT_MODEL"),
+        std::env::var("CHUTES_FALLBACK_MODELS").ok().as_deref(),
+        selected,
+    )
+}
+
+/// The chain itself, with the environment already read. Split out so the
+/// ordering can be tested without mutating process-wide env vars, which no
+/// test can do safely while the rest of the suite runs in parallel.
+fn chutes_fallback_chain(
+    is_chutes: bool,
+    strict_model: bool,
+    configured: Option<&str>,
+    selected: &str,
+) -> Vec<String> {
     let mut models = vec![selected.to_owned()];
-    if !is_chutes_backend(base_url) || env_flag("CHUTES_STRICT_MODEL") {
+    if !is_chutes || strict_model {
         return models;
     }
 
-    if let Ok(configured) = std::env::var("CHUTES_FALLBACK_MODELS") {
+    if let Some(configured) = configured {
         models.extend(
             configured
                 .split(',')
@@ -1037,11 +1054,62 @@ impl SamplingClient {
     // Chat Completions API
     // =========================================================================
 
+    /// Send a non-streaming chat completion, falling back across Chutes model
+    /// candidates on the same policy as the streaming path.
+    ///
+    /// The two paths diverged for no reason anyone chose: the streaming one
+    /// grew the chain and this one did not, so compaction, title generation and
+    /// the advisor surfaced a bare `429 Infrastructure is at maximum capacity`
+    /// while an interactive turn quietly recovered. Nothing here can be
+    /// mid-stream, so `stream_started` is always false.
     pub async fn chat_completion(
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
         let payload = self.apply_defaults(request)?;
+        let selected = payload.model.clone().unwrap_or_default();
+        let candidates = chutes_fallback_models(&self.base_url, &selected);
+        let policy = chutes_build_core::routing::FallbackPolicy::default();
+
+        let mut last_error = None;
+        for (index, candidate) in candidates.iter().enumerate() {
+            let has_fallback = index + 1 < candidates.len();
+            let mut attempt = payload.clone();
+            attempt.model = Some(candidate.clone());
+            match self.chat_completion_once(attempt).await {
+                Ok(response) => return Ok(response),
+                Err(error) => {
+                    let status = match &error {
+                        SamplingError::Api { status, .. } => Some(status.as_u16()),
+                        _ => None,
+                    };
+                    if has_fallback
+                        && policy.permits_model_fallback(status, &error.to_string(), false)
+                    {
+                        tracing::warn!(
+                            model_id = %candidate,
+                            fallback_model = %candidates[index + 1],
+                            %error,
+                            "Chutes model unavailable; trying the next candidate"
+                        );
+                        last_error = Some(error);
+                        continue;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Err(last_error.unwrap_or(SamplingError::InvalidConfiguration(
+            "no model candidates to try",
+        )))
+    }
+
+    /// One non-streaming attempt against one model. Takes an already
+    /// defaulted payload so the chain does not re-apply defaults per candidate.
+    async fn chat_completion_once(
+        &self,
+        payload: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse> {
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -2401,6 +2469,45 @@ mod tests {
 
         assert!(obj.get("max_tokens").is_none());
         assert!(obj.get("tools").is_none());
+    }
+
+    #[test]
+    fn fallback_chain_ends_at_the_router_and_never_repeats_a_model() {
+        let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a");
+        assert_eq!(chain, ["a", "b", "model-router"]);
+    }
+
+    #[test]
+    fn fallback_chain_is_a_single_candidate_off_chutes_or_when_pinned() {
+        // A custom or self-hosted endpoint has no sibling models to try, and
+        // `CHUTES_STRICT_MODEL` is the user saying so explicitly. Both must
+        // collapse to a pass-through, or a pinned model is silently replaced.
+        assert_eq!(chutes_fallback_chain(false, false, Some("b"), "a"), ["a"]);
+        assert_eq!(chutes_fallback_chain(true, true, Some("b"), "a"), ["a"]);
+    }
+
+    #[test]
+    fn fallback_chain_keeps_the_router_last_when_it_is_the_selection() {
+        // Selecting the router itself must not queue it twice.
+        assert_eq!(
+            chutes_fallback_chain(true, false, None, "model-router"),
+            ["model-router"]
+        );
+    }
+
+    #[test]
+    fn rate_limits_and_cold_models_fall_back_but_bad_requests_do_not() {
+        let policy = chutes_build_core::routing::FallbackPolicy::default();
+        // What the user actually hit on DeepSeek-V4-Flash and GLM-5.2.
+        assert!(policy.permits_model_fallback(
+            Some(429),
+            "Infrastructure is at maximum capacity",
+            false
+        ));
+        // A malformed prompt or tool schema is our bug, not the model's:
+        // re-sending it elsewhere would just fail again, more slowly.
+        assert!(!policy.permits_model_fallback(Some(400), "invalid tool schema", false));
+        assert!(!policy.permits_model_fallback(Some(401), "unauthorized", false));
     }
 
     #[test]
