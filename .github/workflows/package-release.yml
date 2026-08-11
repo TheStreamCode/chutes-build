@@ -40,7 +40,19 @@ jobs:
     name: ${{ matrix.target }}
     needs: validate
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    # 180, not 120. The 1.0.3 run built darwin-arm64 in 118m40s of a 120m
+    # budget: every real step succeeded — binary, strip, smoke test, package,
+    # upload — and then the wall killed the cache-save 80 seconds later. A
+    # cancelled job fails the run, so `Publish GitHub release` and `Publish npm
+    # packages` were skipped and a release that had produced all six artifacts
+    # shipped nothing.
+    #
+    # Not a regression — runner variance. The macOS jobs across the previous
+    # three successful releases ran 67, 74, 91, 84, 96 and 102 minutes, so the
+    # budget has been within ~15% of the slowest observed build for a while and
+    # this was owed. Sized against 102m + headroom instead, because a release
+    # must not be decided by eighty seconds of cache bookkeeping.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
