@@ -6,6 +6,49 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-11
+
+Measured against the live Chutes endpoint with a real key, not reasoned about from
+the source. Two of the findings below contradicted what the code looked like it
+did, and one contradicted an earlier fix in this same release.
+
+### Fixed
+
+- **Every model claimed a 256,000-token context.** The catalogue at
+  `llm.chutes.ai/v1/models` publishes `context_length` per model;
+  `parse_remote_model_value` looked for `contextWindow`, `context_window` and two
+  `_meta` spellings, none of which Chutes sends, so all thirteen fell through to
+  one default. It was wrong in both directions at once: `Qwen3-32B` holds 40,960,
+  so the product promised six times what exists and its requests were refused;
+  `DeepSeek-V4-Flash`, `Kimi-K3` and `GLM-5.2` hold 1,048,576, so three quarters
+  of the window went unused. Compaction and truncation were sizing themselves
+  against a figure no model agreed with. Eleven of thirteen now carry their
+  published value; the two that publish nothing keep a default.
+- **Each model now carries its own output limit**, from `max_output_length` —
+  but only where that is *smaller* than the window. Several models publish the
+  two as the same number, which means "output may use the whole context" rather
+  than "always ask for this much": sending it as `max_tokens` leaves no room for
+  the prompt, and `Qwen3-32B` answers `400 Requested token count exceeds`. Nine
+  models gain a real cap, two are skipped. This was caught by testing the fix
+  against the endpoint before shipping it — the first version of the change would
+  have broken a model that previously worked.
+- **An endpoint override reached inference but not the catalogue.**
+  `docs/configuration.md` documents `CHUTES_ROUTER_BASE_URL`,
+  `CHUTES_INFERENCE_BASE_URL` and `CHUTES_MODELS_BASE_URL`, and
+  `chutes-build-core` honours them, but the re-base left the agent's
+  `EndpointsConfig` reading only the `CHUTES_BUILD_*` spellings. The documented
+  names come first now, with the others kept as fallbacks.
+
+### Notes on tool compatibility
+
+The catalogue's `supported_features` is accurate: every model advertising `tools`
+emits a real `tool_calls` finish, and the two advertising nothing do not. A first
+probe suggested three Qwen models were broken — they were not. The probe gave them
+96 output tokens, which a reasoning model spends thinking before it can emit the
+call. That is the finding worth keeping: **a thinking model needs output budget
+before tool use works at all**, and without it the failure is silent and looks like
+missing support.
+
 ## [1.0.2] - 2026-08-11
 
 Three faults a user meets in the first minute. All reproduced against the live

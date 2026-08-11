@@ -103,12 +103,18 @@ produces are public. Treat every commit as immediately world-readable:
 
 ## Upstream changes
 
-Since the 1.0.0 re-base the model is a **merge**, not a cherry-pick. The full
-procedure and its rationale are in `docs/upstream-sync.md`; the short version:
+**Never merge `upstream/main`.** The 1.0.0 re-base did, and taking upstream's side
+wholesale is what silently replaced the Chutes wordmark with Grok's, put
+`--grok-ws-*` back into `--help`, swapped the OAuth scopes for ones the Chutes IdP
+rejects, and left every model claiming a context window it does not have. Each
+compiled, passed the gate, and shipped.
 
-- `git merge upstream/main`. Conflicts are expected only in the Chutes seams,
-  the branding, and the deliberate divergences that document lists. Anywhere else,
-  take upstream's side — that is the point.
+Port by hand instead, one area per commit, so any piece can be reverted alone. The
+full procedure is in `docs/upstream-sync.md`; the short version:
+
+- Read `git diff <base>..upstream/main` by area and decide per area. Take what is
+  clearly useful and isolable; leave anything that touches Chutes identity, the
+  seams, or a policy-forbidden feature.
 - Re-run `python scripts/rebrand.py --apply`, then `--check`. It fails loudly on
   any forbidden token outside its allowlist, and reports the four ambiguous token
   families it will never rewrite for you.
@@ -175,6 +181,24 @@ npm run verify:release
 npm pack --dry-run
 git diff --check
 ```
+
+### The model catalogue is the source of truth, and we were not reading it
+
+`llm.chutes.ai/v1/models` publishes `context_length`, `max_output_length`,
+`supported_features`, `supported_sampling_parameters` and `input_modalities` per
+model. Until 1.0.3 the parser looked for none of those names, so every model got
+one hardcoded context window and the compaction logic sized itself against a
+number no model agreed with.
+
+Two rules follow. **Read the catalogue before assuming a capability** — it is
+accurate, including about which models support tools. And **verify a limit
+against the endpoint before shipping it**: `max_output_length` equal to
+`context_length` does not mean "ask for this much", and sending it as
+`max_tokens` makes the model refuse the request.
+
+When probing a model's behaviour, give it room. A reasoning model spends its
+first tokens thinking, so a small `max_tokens` turns "supports tools" into
+"answered in prose" and the conclusion is wrong.
 
 ### What a green gate does not tell you
 

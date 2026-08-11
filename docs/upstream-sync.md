@@ -1,7 +1,22 @@
 # Upstream synchronization
 
-Chutes Build tracks `xai-org/grok-build`. As of 1.0.0 the relationship is a
-**merge**, not a cherry-pick.
+Chutes Build tracks `xai-org/grok-build`. As of 1.0.3 the relationship is a
+**manual port**: read upstream's diff, decide per area, and carry across what is
+worth carrying. Never `git merge upstream/main`.
+
+> [!IMPORTANT]
+> This reverses the model 1.0.0 adopted, and the reversal was paid for. Merging
+> means taking upstream's side wherever there is no conflict, and "no conflict"
+> is exactly where a fork's identity lives: the same file, quietly replaced. The
+> 1.0.0 merge shipped Grok's wordmark on the splash, upstream's flag names in
+> `--help`, OAuth scopes the Chutes IdP rejects so sign-in could not complete, and
+> a single hardcoded context window for all thirteen models. Every one of those
+> compiled and passed a green gate. Three releases went to fixing them.
+>
+> Upstream publishes no releases and no tags — its commits are squashed drops
+> named "Synced from monorepo", and its product changelog lives at
+> `x.ai/build/changelog`, off GitHub. So there is no version to "take": there is a
+> diff to read.
 
 ## Why this changed
 
@@ -23,10 +38,11 @@ That layer is thin — 102 files exist only here, and only 26 consume
 
 ```powershell
 git fetch upstream main
-git merge upstream/main
+git diff --stat <last-ported-ref>..upstream/main    # what moved, and where
 ```
 
-Conflicts are expected, and only in three places:
+Group the diff by area and take one area per commit, so each can be reverted on
+its own. Three areas need judgement rather than a decision rule:
 
 1. **The 26 seams** — the files that consume `chutes-build-core`: the routing
    and endpoint policy in `xai-grok-sampler/src/client.rs`, the agent config /
@@ -41,18 +57,19 @@ Conflicts are expected, and only in three places:
    per-file decisions and can be regenerated.
 3. **Deliberate divergences** — listed below.
 
-Everything else should take upstream's side. If a conflict is not in one of
-those three categories, the default answer is upstream's version: that is the
-whole point.
+Everywhere else, judge the hunk. "Not in one of those three categories" is not a
+licence to take upstream's version — that reasoning is what shipped the wrong
+wordmark, since a logo file is in no category and conflicts with nothing. Take a
+change because it is worth having, not because nothing objected.
 
 Then — and this step is not optional, it is where the 1.0.0 re-base leaked —
-run the seam sweep against the release you are coming from:
+run the seam sweep against the release you are porting from:
 
 ```powershell
 python scripts/seam_sweep.py --base <previous-release-ref>
 ```
 
-A clean merge and a green gate do **not** mean the seams survived: a constant
+A clean port and a green gate do **not** mean the seams survived: a constant
 whose value came across from upstream compiles fine and its tests assert against
 the constant. See the sweep section in the re-base record below for what that
 cost.
@@ -60,7 +77,7 @@ cost.
 The sweep reads source. It does not read **assets**, and 1.0.0 shipped upstream's
 Grok wordmark because both logo files came across untouched — invisible to the
 compiler, to the tests and to the sweep, and visible to every user at startup.
-After a merge, compare the asset tree too:
+After a port, compare the asset tree too:
 
 ```powershell
 git diff --stat upstream/main -- '**/assets/**'   # anything identical is suspect
@@ -72,7 +89,7 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 `models`, `du`, and a confirmation that nothing was written outside
 `$CHUTES_BUILD_HOME`.
 
-## Non-negotiables during a merge
+## Non-negotiables during a port
 
 - Never `git add -A` after running the test suite. It has committed live API
   keys to this branch once already: a test that shells out to `env` writes the
@@ -83,7 +100,7 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
   sharing, remote workspace exposure or phone-home updates. These are enforced
   by the compile-time constants in `crates/chutes-build-core/src/product.rs`
   consumed at their call sites — **not** by deleting the crates, which would
-  make every future merge conflict.
+  make every future diff unreadable.
 - Never send ambient Chutes credentials to an endpoint that has not passed
   `chutes-build-core::endpoint_policy`. Env-overridable base URLs
   (`CHUTES_ROUTER_BASE_URL` and friends) are the specific hazard.
@@ -95,6 +112,10 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
 - Rust identifiers are not renamed. `grok_home()`, `default_grok_home()` and the
   `xai-grok-*` crate names stay; only the strings they return become Chutes.
   Renaming them makes upstream diffs unreadable for no gain.
+- The model catalogue is read, not assumed. `llm.chutes.ai/v1/models` publishes
+  `context_length`, `max_output_length`, `supported_features` and
+  `input_modalities` per model; upstream's parser looks for none of those names.
+  If a port touches `parse_remote_model_value`, check those fallbacks survived.
 
 ## Deliberate divergences to preserve
 
@@ -123,6 +144,15 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
   the product never *offers* what it will then refuse.
 
 ## Landing this on `main`, and why it constrains branch protection
+
+> [!NOTE]
+> **Superseded by the manual-port model at the top of this file.** This section
+> reasons about merging `upstream/main` into a branch and squashing onto `main`,
+> which is no longer how syncs are done. It is kept because the constraint it
+> describes is real and would return the moment anyone reached for a merge again:
+> `main` forbids non-linear history, so a merge cannot land there, and a squash
+> keeps upstream's commits out of the history the next merge base is computed
+> from. A manual port has neither problem — it produces ordinary commits.
 
 `main` currently forbids non-linear history. That rule and the merge model above
 are incompatible, and the incompatibility is not cosmetic.
@@ -177,7 +207,7 @@ dance, at the cost of merge commits in `main`.
 ## Recording a sync
 
 Update `.github/upstream.json` (`lastReviewedCommit`, `lastReviewedVersion`,
-`reviewedAt`) **only after the merge is complete and the gates pass** — the
+`reviewedAt`) **only after the port is complete and the gates pass** — the
 field means "this is the upstream this tree is", and its previous drift from
 reality is what made the re-base necessary. Record user-visible changes in
 `CHANGELOG.md` and add a record below.
