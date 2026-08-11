@@ -30,6 +30,24 @@ pub(crate) enum ModelFetchAuth {
     CustomEndpoint,
 }
 
+/// Whether the stored credential is a *session*, as opposed to a saved API key.
+///
+/// `current_or_expired()` returns any credential on disk, and logging in with an
+/// API key stores one — `auth.json` then holds a `chutes::api_key` entry. Reading
+/// that as "has a session" sent [`ModelFetchAuth::resolve`] down the Session
+/// branch, which fetches the catalogue from the router proxy. That proxy
+/// advertises exactly one model, itself, so `/model` offered `model-router` and
+/// nothing else — including to users whose own config named a Chutes model as
+/// their default.
+///
+/// An API-key credential must reach the `ApiKey` branch, which fetches from the
+/// inference endpoint the requests are going to anyway.
+fn credential_is_session(auth_manager: &crate::auth::AuthManager) -> bool {
+    auth_manager
+        .current_or_expired()
+        .is_some_and(|auth| auth.auth_mode != crate::auth::AuthMode::ApiKey)
+}
+
 impl ModelFetchAuth {
     /// custom_endpoint > session > deployment > API key.
     pub(crate) fn resolve(endpoints: &config::EndpointsConfig, has_cached_session: bool) -> Self {
@@ -204,7 +222,7 @@ impl ModelsManagerBuilder {
     }
 
     pub(crate) fn build(self) -> ModelsManager {
-        let has_session = self.auth_manager.current_or_expired().is_some();
+        let has_session = credential_is_session(&self.auth_manager);
         let fetch_auth = ModelFetchAuth::resolve(&self.cfg.endpoints, has_session);
         let current_reasoning_effort = self.cfg.models.default_reasoning_effort;
         ModelsManager {
@@ -258,7 +276,7 @@ impl ModelsManager {
         prefetched_models: Option<IndexMap<String, ModelEntry>>,
         auth_manager: Arc<AuthManager>,
     ) -> Result<Self, String> {
-        let has_session = auth_manager.current_or_expired().is_some();
+        let has_session = credential_is_session(auth_manager.as_ref());
         let is_session_auth = auth_manager
             .current_or_expired()
             .is_some_and(|a| a.is_session_auth());
@@ -329,7 +347,7 @@ impl ModelsManager {
             )
         };
         let new_preferred = new_config.models.default.clone();
-        let has_session = self.inner.auth_manager.current_or_expired().is_some();
+        let has_session = credential_is_session(&self.inner.auth_manager);
         *self.inner.fetch_auth.write() =
             ModelFetchAuth::resolve(&new_config.endpoints, has_session);
         *self.inner.cfg.write() = new_config.clone();
@@ -597,7 +615,7 @@ impl ModelsManager {
         let config = self.inner.cfg.read().clone();
         crate::agent::init::update_telemetry_config(&config, &self.inner.auth_manager);
         self.inner.cache.invalidate();
-        let has_session = self.inner.auth_manager.current_or_expired().is_some();
+        let has_session = credential_is_session(&self.inner.auth_manager);
         let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);
         *self.inner.fetch_auth.write() = fetch_auth;
         if self.inner.auth_manager.current_or_expired().is_none()

@@ -10,20 +10,30 @@ fn default_oidc_scopes() -> Vec<String> {
         "api:access".into(),
     ]
 }
-/// Default scopes for the xAI OAuth2 provider. Includes `grok-cli:access`
-/// which authorizes the token for API proxy requests.
+/// Default scopes for "Sign in with Chutes".
+///
+/// Kept to the minimum the client uses: `account:read` backs the usage and quota
+/// indicator, `chutes:read` backs model and media discovery, `chutes:invoke`
+/// backs inference and media generation. Broader ones the IdP offers — `admin`,
+/// `*:write`, `*:delete`, `secrets:*` — are deliberately not requested.
+///
+/// `openid` is requested because Chutes' own "Sign in with Chutes" documentation
+/// lists it as required for every app, even though it does not appear in the
+/// IdP's advertised `scopes_supported`. `extract_user_info` in `oidc/protocol.rs`
+/// tolerates a login that returns no `id_token`, so asking costs nothing.
+///
+/// The 1.0.0 re-base replaced this list with upstream's — `grok-cli:access`,
+/// `api:access`, `conversations:*`, `workspaces:*` — none of which exist at
+/// `api.chutes.ai`. An authorization server rejects scopes it does not know, so
+/// "Sign in with Chutes" could not complete at all. Verified against the live
+/// `scopes_supported` at `https://api.chutes.ai/.well-known/openid-configuration`.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
         "profile".into(),
-        "email".into(),
-        "offline_access".into(),
-        "grok-cli:access".into(),
-        "api:access".into(),
-        "conversations:read".into(),
-        "conversations:write".into(),
-        "workspaces:read".into(),
-        "workspaces:write".into(),
+        "account:read".into(),
+        "chutes:read".into(),
+        "chutes:invoke".into(),
     ]
 }
 fn default_team_oauth2_scopes() -> Vec<String> {
@@ -445,19 +455,18 @@ mod tests {
     fn default_oauth2_scopes_are_frozen() {
         let scopes = default_oauth2_scopes();
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
+        // Every one of these exists in the IdP's advertised `scopes_supported`
+        // except `openid`, which Chutes' own documentation requires anyway. The
+        // list upstream ships — `grok-cli:access`, `conversations:*` — does not,
+        // and an authorization server rejects scopes it does not know.
         assert_eq!(
             scopes,
             [
                 "openid",
                 "profile",
-                "email",
-                "offline_access",
-                "grok-cli:access",
-                "api:access",
-                "conversations:read",
-                "conversations:write",
-                "workspaces:read",
-                "workspaces:write",
+                "account:read",
+                "chutes:read",
+                "chutes:invoke",
             ]
         );
     }
