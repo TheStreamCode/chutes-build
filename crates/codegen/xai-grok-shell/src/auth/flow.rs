@@ -2209,6 +2209,15 @@ mod tests {
         );
         // 80 kB of stderr: comfortably past a pipe buffer, so a piped stderr
         // nobody drains would deadlock here.
+        //
+        // Inherited stderr means those 80 kB land wherever the test harness's
+        // own stderr goes. That is the point of the test, and it also makes it
+        // only as reliable as whatever is reading that stream: a terminal or a
+        // CI log drains continuously and this passes, but a capture that stops
+        // reading (a truncating tool pipe, say) back-pressures the child and
+        // this fails. Before treating a failure here as a regression, check
+        // where the harness's stderr is going — the same stall would hit any
+        // program that inherits stderr, this product included.
         let cmd = crate::auth::auth_provider::test_fixture_command(&["stderr", "80000", "token"]);
         let (auth, _) = run_external_auth_provider(&cmd, &mgr, false, None)
             .await

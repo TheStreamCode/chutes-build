@@ -25,8 +25,19 @@ fn default_oidc_scopes() -> Vec<String> {
 /// The 1.0.0 re-base replaced this list with upstream's — `grok-cli:access`,
 /// `api:access`, `conversations:*`, `workspaces:*` — none of which exist at
 /// `api.chutes.ai`. An authorization server rejects scopes it does not know, so
-/// "Sign in with Chutes" could not complete at all. Verified against the live
-/// `scopes_supported` at `https://api.chutes.ai/.well-known/openid-configuration`.
+/// "Sign in with Chutes" could not complete at all.
+///
+/// `profile`, `account:read`, `chutes:read` and `chutes:invoke` are each present
+/// in the live `scopes_supported` at
+/// `https://api.chutes.ai/.well-known/openid-configuration`. `openid` is not,
+/// and is kept deliberately: Chutes' own "Sign in with Chutes" documentation
+/// lists it, that discovery document advertises `userinfo_endpoint`,
+/// `subject_types_supported` and `claims_supported`, so this is an OIDC
+/// provider, and OIDC requires `openid` on the request for an ID token to be
+/// issued at all. Providers commonly omit it from `scopes_supported` even
+/// though the spec says to list it. If a flow ever fails with `invalid_scope`,
+/// this is the one to suspect first — drop it and the flow degrades to plain
+/// OAuth2 without an ID token.
 fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
@@ -36,18 +47,18 @@ fn default_oauth2_scopes() -> Vec<String> {
         "chutes:invoke".into(),
     ]
 }
+/// Scopes for a `Team` principal, which `api.chutes.ai` does not have.
+///
+/// Its `scopes_supported` is entirely user-level: there is no `team:*`,
+/// no `conversations:*`, no `workspaces:*`. This branch survives only for a
+/// non-standard deployment that defines a team principal of its own, and such a
+/// deployment must say what it wants through `CHUTES_BUILD_OAUTH2_SCOPES`. So
+/// the default is the user list rather than a guess — asking for scopes an
+/// authorization server has never heard of fails the whole flow, which is how
+/// upstream's list (`grok-cli:access`, `api:access`, `team:read`, …) made
+/// `CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE=Team` unusable against Chutes.
 fn default_team_oauth2_scopes() -> Vec<String> {
-    vec![
-        "profile".into(),
-        "offline_access".into(),
-        "grok-cli:access".into(),
-        "api:access".into(),
-        "team:read".into(),
-        "conversations:read".into(),
-        "conversations:write".into(),
-        "workspaces:read".into(),
-        "workspaces:write".into(),
-    ]
+    default_oauth2_scopes()
 }
 /// Pin automatic auth to one method (`[auth] preferred_method` in config.toml).
 ///
@@ -405,7 +416,7 @@ mod tests {
     #[test]
     fn team_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: XAI_OAUTH2_ISSUER.into(),
             client_id: "client-123".into(),
             scopes: default_team_oauth2_scopes(),
             principal_type: Some("Team".into()),
@@ -413,7 +424,31 @@ mod tests {
             referrer: Some("chutes-build".into()),
             client_secret: None,
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://api.chutes.ai::client-123");
+    }
+
+    #[test]
+    fn team_scopes_ask_for_nothing_chutes_does_not_have() {
+        // `api.chutes.ai` has no team principal: its `scopes_supported` is
+        // entirely user-level. A Team default that names `team:*`,
+        // `conversations:*` or `workspaces:*` cannot be granted by the only
+        // issuer this product ships with, so the flow fails before it starts.
+        let scopes = default_team_oauth2_scopes();
+        assert_eq!(scopes, default_oauth2_scopes());
+        for absent in [
+            "team:read",
+            "conversations:read",
+            "conversations:write",
+            "workspaces:read",
+            "workspaces:write",
+            "grok-cli:access",
+            "api:access",
+        ] {
+            assert!(
+                !scopes.iter().any(|scope| scope == absent),
+                "team scopes still request `{absent}`, which api.chutes.ai does not advertise"
+            );
+        }
     }
     #[test]
     fn env_flag_enabled_treats_falsy_spellings_as_off() {
