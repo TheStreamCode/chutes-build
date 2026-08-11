@@ -718,6 +718,47 @@ this and is re-runnable.
 Order the work by area, not by commit, and land each area with its own tests
 green: it is the only way to tell which area broke something.
 
+#### What the first two areas taught
+
+`xai-tty-utils` (5 files) and the skill-path suggestion (6 files) are done. Four
+things generalise to the rest.
+
+**An area is bigger than the module you meant to take.** The suggestion looked
+like one new module. Alone it fails clippy's `dead_code`, because its only
+consumer is the `read_file` tool; `read_file` then needs
+`AsyncFileSystem::file_exists`, new in `computer/types.rs`, with its local and
+mock implementations. Six files for one feature. **`dead_modules.py` cannot see
+this** — the module *is* reachable through `mod`, so it reports nothing. The
+lint is the detector, which means an area is not finished until
+`cargo clippy -p <crate> --all-targets -- -D warnings` passes, not merely until
+it compiles and its own tests are green.
+
+**Measure the baseline failure set before attributing anything.** This tree has
+pre-existing Windows failures — 69 in `xai-grok-tools` alone — so a post-port
+count is meaningless on its own. Stash, run, save the sorted failure names, run
+again after, and `comm` the two lists. "73 failures" told us nothing; "these
+exact four are new" told us everything.
+
+**Upstream's fixtures assume POSIX, and their CI never says otherwise.** Eleven
+tests across the two areas failed here and pass upstream, all for the same
+reason: a leading slash on Windows is drive-*relative*, so
+`Path::new("/repo/x").is_absolute()` is false and any code guarding on
+`is_absolute()` skips the whole fixture set. The production guards were right
+every time. Give the fixtures a dialect — a small `abs()` helper that prefixes a
+drive on Windows — rather than touching the code they cover. Watch for the
+second form too: a path built with `join` carries host separators, so an
+expected string must be composed the way the implementation composes it, not
+written with forward slashes.
+
+**Do not run `scripts/rebrand.py --apply` over the whole tree and trust it.** It
+used to rewrite the six sentences that name upstream on purpose — the README
+attribution, SECURITY's upstream-scope paragraph, the comments explaining whose
+wordmark 1.0.0 shipped, and the fork link in the getting-started guide, which it
+pointed at a repository that does not exist. Those are pinned in `UPSTREAM_PROSE`
+now and the script fails loudly if one is reworded. Still read `git status` after
+every run: a file outside the area in hand is the signal that something was
+matched that should not have been.
+
 ### The Windows CI job crashes, and it is not a test failure
 
 > [!NOTE]
