@@ -18,6 +18,7 @@ use crate::types::resources::{
     Cwd, DisplayCwd, FileSystem, GitignoreFilter, PathNotFoundHints, RespectGitignore,
     SharedResources, TruncationCfg, display_cwd_or_cwd, resolve_model_path,
 };
+use crate::types::skill_discovery_tracker::SkillManager;
 use crate::types::template_renderer::TemplateRenderer;
 use crate::types::tool::{ToolKind, ToolNamespace};
 use std::sync::LazyLock;
@@ -390,14 +391,30 @@ pub(crate) async fn run_read_file(
             let display_path = display_dcwd.join(&input.path);
             return Ok(match e.io_error_kind() {
                 Some(std::io::ErrorKind::NotFound) => {
-                    let msg = crate::util::format_not_found_error(
+                    let skill_suggestion = {
+                        let res = resources.lock().await;
+                        res.get::<SkillManager>()
+                            .and_then(|manager| manager.suggest_skill_path(&path))
+                    };
+                    let verified_skill_suggestion = if let Some(suggestion) = skill_suggestion
+                        && fs.file_exists(&suggestion.path).await.unwrap_or(false)
+                    {
+                        Some(suggestion)
+                    } else {
+                        None
+                    };
+                    let mut msg = crate::util::format_not_found_error(
                         &display_path,
                         &path,
                         &cwd,
                         &display_dcwd,
-                        hints_enabled,
+                        hints_enabled && verified_skill_suggestion.is_none(),
                     )
                     .await;
+                    if let Some(suggestion) = verified_skill_suggestion {
+                        msg.push_str("\nThe skill you are looking for is registered at:\n");
+                        msg.push_str(&suggestion.display_path.to_string_lossy());
+                    }
                     ReadFileOutput::FileNotFound(msg)
                 }
                 Some(std::io::ErrorKind::IsADirectory) => ReadFileOutput::IsADirectory(format!(
@@ -723,8 +740,8 @@ mod tests {
     use crate::computer::local::LocalFs;
     use crate::implementations::read_file::MAX_PDF_BYTES;
     use crate::implementations::read_file::compress_image_for_conversation;
+    use crate::implementations::skills::types::SkillInfo;
     use crate::notification::types::ToolNotificationHandle;
-    #[allow(unused_imports)]
     use crate::types::resources::{NotificationHandle, Resources};
     use crate::types::tool_metadata::test_ctx;
     use std::sync::Arc;
@@ -817,6 +834,173 @@ mod tests {
             }
             other => panic!("Expected FileNotFound, got {:?}", other),
         }
+    }
+    fn seeded_manager(skills: Vec<SkillInfo>) -> SkillManager {
+        let mut manager = SkillManager::new();
+        manager.seed(None, None, skills, None, None, None);
+        manager
+    }
+    /// Absolute in the host's own dialect.
+    ///
+    /// On Windows a leading slash is drive-*relative*, so the tool resolved
+    /// upstream's `/wrong/root/…` fixtures against the current drive and
+    /// reported `C:/wrong/root/…` back. The suggestion itself was correct in
+    /// every case; only the echoed request differed, which is why these four
+    /// tests pass on upstream's CI and failed here. Same helper as
+    /// `skill_discovery_tracker::skill_path_suggestion_tests`.
+    fn abs(path: &str) -> String {
+        #[cfg(windows)]
+        {
+            format!("C:{path}")
+        }
+        #[cfg(not(windows))]
+        {
+            path.to_owned()
+        }
+    }
+    async fn not_found_msg(resources: Resources, path: &str) -> String {
+        let input = ReadFileInput {
+            path: path.to_owned(),
+            offset: None,
+            limit: None,
+            pages: None,
+            format: None,
+        };
+        let result =
+            xai_tool_runtime::Tool::run(&ReadFileTool, test_ctx(resources.into_shared()), input)
+                .await
+                .unwrap();
+        match result {
+            ReadFileOutput::FileNotFound(msg) => msg,
+            other => panic!("Expected FileNotFound, got {other:?}"),
+        }
+    }
+    #[tokio::test]
+    async fn missing_skill_read_suggests_registered_path() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".chutes-build/skills/code-review");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_path = skill_dir.join("SKILL.md");
+        std::fs::write(&skill_path, "# Code review\n").unwrap();
+        let mut resources = test_resources(tmp.path());
+        resources.insert(PathNotFoundHints(true));
+        resources.insert(seeded_manager(vec![SkillInfo {
+            name: "code-review".to_owned(),
+            path: skill_path.to_string_lossy().into_owned(),
+            disable_model_invocation: true,
+            ..SkillInfo::default()
+        }]));
+        let requested = abs("/wrong/root/skills/code-review/SKILL.md");
+        let msg = not_found_msg(resources, &requested).await;
+        assert_eq!(
+            msg,
+            format!(
+                "Error: {requested} does not exist.\n\
+                 The skill you are looking for is registered at:\n{}",
+                skill_path.display()
+            )
+        );
+    }
+    #[tokio::test]
+    async fn missing_skill_read_uses_display_path() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".chutes-build/skills/review");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_path = skill_dir.join("SKILL.md");
+        std::fs::write(&skill_path, "# Review\n").unwrap();
+        let mut resources = test_resources(tmp.path());
+        resources.insert(DisplayCwd(std::path::PathBuf::from(abs(
+            "/display/project",
+        ))));
+        let mut manager = SkillManager::new();
+        manager.seed(
+            Some(tmp.path().to_path_buf()),
+            None,
+            vec![SkillInfo {
+                name: "review".to_owned(),
+                path: skill_path.to_string_lossy().into_owned(),
+                ..SkillInfo::default()
+            }],
+            Some(abs("/display/project")),
+            None,
+            None,
+        );
+        resources.insert(manager);
+        let requested = abs("/wrong/root/review/SKILL.md");
+        let msg = not_found_msg(resources, &requested).await;
+        // The suggestion is built by joining onto the display root, so its
+        // separators are the host's and appear wherever a `join` did: the
+        // registration itself was built as `skill_dir.join("SKILL.md")`, so
+        // the rendering has a host separator before `SKILL.md` too. Compose
+        // the expectation the same way rather than hardcoding forward slashes,
+        // which is what made this read as a failure on Windows.
+        let expected = std::path::Path::new(&abs("/display/project"))
+            .join(".chutes-build/skills/review")
+            .join("SKILL.md");
+        assert_eq!(
+            msg,
+            format!(
+                "Error: {requested} does not exist.\n\
+                 The skill you are looking for is registered at:\n{}",
+                expected.display()
+            )
+        );
+    }
+    #[tokio::test]
+    async fn missing_skill_read_omits_ambiguous_suggestion() {
+        let tmp = TempDir::new().unwrap();
+        let first = tmp.path().join("first/review/SKILL.md");
+        let second = tmp.path().join("second/review/SKILL.md");
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&second, "# Second\n").unwrap();
+        let mut resources = test_resources(tmp.path());
+        resources.insert(PathNotFoundHints(true));
+        resources.insert(seeded_manager(vec![
+            SkillInfo {
+                name: "review".to_owned(),
+                path: first.to_string_lossy().into_owned(),
+                ..SkillInfo::default()
+            },
+            SkillInfo {
+                name: "review".to_owned(),
+                path: second.to_string_lossy().into_owned(),
+                ..SkillInfo::default()
+            },
+        ]));
+        let requested = abs("/wrong/root/review/SKILL.md");
+        let msg = not_found_msg(resources, &requested).await;
+        assert_eq!(
+            msg,
+            format!(
+                "Error: {requested} does not exist.\n\
+                 Note: your current working directory is {}",
+                tmp.path().display()
+            )
+        );
+    }
+    #[tokio::test]
+    async fn missing_skill_read_omits_stale_registered_path() {
+        let tmp = TempDir::new().unwrap();
+        let stale_path = tmp.path().join(".chutes-build/skills/review/SKILL.md");
+        let mut resources = test_resources(tmp.path());
+        resources.insert(PathNotFoundHints(true));
+        resources.insert(seeded_manager(vec![SkillInfo {
+            name: "review".to_owned(),
+            path: stale_path.to_string_lossy().into_owned(),
+            ..SkillInfo::default()
+        }]));
+        let requested = abs("/wrong/root/review/SKILL.md");
+        let msg = not_found_msg(resources, &requested).await;
+        assert_eq!(
+            msg,
+            format!(
+                "Error: {requested} does not exist.\n\
+                 Note: your current working directory is {}",
+                tmp.path().display()
+            )
+        );
     }
     #[tokio::test]
     async fn legacy_read_file_directory_returns_exact_historical_message() {
