@@ -20,6 +20,28 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The chain's ordering is now testable without touching process-wide
   environment variables, which no test could do safely while the rest of the
   suite runs in parallel — the env reads moved to a wrapper around a pure core.
+- **`CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE=Team` could never complete a flow.**
+  `default_team_oauth2_scopes()` was still upstream's — `grok-cli:access`,
+  `api:access`, `team:read`, `conversations:*`, `workspaces:*`. The user-facing
+  list was corrected during the re-base cleanup and this one was missed.
+  `api.chutes.ai` advertises no team principal at all: its `scopes_supported` is
+  entirely user-level, so an authorization server was being asked for scopes it
+  has never heard of. The default is now the user list; a deployment that really
+  does define a team principal says so through `CHUTES_BUILD_OAUTH2_SCOPES`.
+  Established by reading the IdP's own discovery document rather than the prose
+  documentation, which does not cover team principals either way.
+
+### Documentation
+
+- `docs/upstream-sync.md` records the pending port measured rather than
+  estimated: 3 commits, 238 files, of which 147 overlap work of ours and 91 do
+  not. It also records that `git diff HEAD upstream/main` is the wrong
+  instrument — it reports 1424 files, because the fork is not a descendant of
+  upstream and the diff is mostly our own re-base read backwards.
+- `AGENTS.md` records that `xai-grok-pager --lib` reports seven failures when
+  run from a VS Code terminal, and that they are the terminal rather than the
+  code: `default_actions()` reads the process environment, so Quit binds to
+  Ctrl+D there and the `ctrl_q` tests fail against a correct app.
 
 ## [1.0.3] - 2026-08-11
 
