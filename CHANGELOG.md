@@ -6,6 +6,48 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-11
+
+Three faults a user meets in the first minute. All reproduced against the live
+service with a real API key, not inferred from the source.
+
+### Fixed
+
+- **`/model` offered a single model.** `ModelFetchAuth::resolve` treated any stored
+  credential as a *session*, and logging in with an API key stores one — so
+  `auth.json` holding a `chutes::api_key` entry sent the catalogue fetch down the
+  session path, which asks the router proxy. That proxy advertises exactly one
+  model: itself. `llm.chutes.ai/v1/models` returns thirteen. The request URL was
+  already right for API keys; only the classification was wrong. `models` now
+  lists all fourteen, with the configured default marked — a default the product
+  previously could not resolve even when the user had named it.
+- **"Sign in with Chutes" could not complete.** The re-base replaced the fork's
+  OAuth scopes with upstream's — `grok-cli:access`, `api:access`,
+  `conversations:*`, `workspaces:*` — none of which exist at `api.chutes.ai`. Its
+  discovery document offers `account:read`, `chutes:read`, `chutes:invoke`; an
+  authorization server rejects scopes it does not know. Restored to the minimum the
+  client uses. OAuth still requires an application you register yourself at
+  [chutes.ai](https://chutes.ai/docs/sign-in-with-chutes/overview) — there is no
+  shared client id, by design — and the API key remains the primary method.
+- **The welcome screen disagreed with its own input bar.** The wordmark blended
+  from a fixed gray because the re-base replaced `theme.accent_assistant` with
+  upstream's `theme.gray`. It takes the accent again, so the centre of the screen
+  and the prompt border move together.
+- The feedback prompt's default still read "You've been using Grok Code
+  productively!". It lives in `prod/mc/cli-chat-proxy-types`, outside the crates
+  the 1.0.1 sweep looked at — found by searching the shipped binary rather than
+  the tree.
+
+### Changed
+
+- **Silver is the brand accent.** Not a rename of the green: in this palette one
+  constant carried both the brand and the *meaning* of success and of a diff's
+  insertion side. Those are now two families. `SILVER` takes the chrome — wordmark,
+  assistant, model and command labels, active prompt border, H1 rule — and green
+  stays exactly where it says something, because a silver diff against a red one is
+  unreadable. The silver is cool on purpose: these neutral grays are warm, so a
+  warm silver would sink into the furniture.
+
 ## [1.0.1] - 2026-08-11
 
 ### Fixed (the TUI wore upstream's identity)
