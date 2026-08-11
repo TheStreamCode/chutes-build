@@ -29,6 +29,21 @@ then Auto. Duplicates are removed. Only transient/model-unavailable failures
 before stream start can advance the chain. Authentication, permission,
 invalid-request, and mid-stream errors do not silently switch models.
 
+The chain covers **both** request paths, which it did not always: it was wired
+into `chat_completion_stream` and not into `chat_completion`, so an interactive
+turn recovered from `429 Infrastructure is at maximum capacity` while
+compaction, title generation and the advisor surfaced it raw. Both now share
+one chain and one `FallbackPolicy`. Nothing on the non-streaming path can be
+mid-stream, so the rule that matters — never switch models once bytes have
+reached the user — holds there by construction, and the streaming path keeps
+enforcing it explicitly.
+
+Waiting and retrying is a separate layer and stays there. The sampler actor
+honours the server's `Retry-After` on a 429 and retries the *same* model with a
+cancellable backoff, up to `rate_limit_retry_threshold`. The client chain does
+not sleep: a sleep inside `chat_completion_stream` would be uninterruptible,
+because `run_one_attempt` is not wrapped in a select on the cancellation token.
+
 Each fallback attempt is rebuilt from the unchanged logical request after its
 candidate model is selected. This is important for mixed-family chains: Qwen,
 Kimi, DeepSeek, GLM, MiniMax, and future generations cannot inherit one

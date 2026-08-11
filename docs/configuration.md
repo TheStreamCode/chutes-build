@@ -27,6 +27,7 @@ or secret manager, and never commit real credentials.
 | --- | --- |
 | `CHUTES_API_KEY` | Ambient Chutes API credential for allowlisted official HTTPS endpoints. |
 | `CHUTES_MODELS_API_KEY` | Dedicated credential for a custom model-catalog endpoint. |
+| `CHUTES_AUTH_SCHEME=raw` | Send the management API key without the `Bearer` prefix. Default is `Bearer`. |
 | `CHUTES_BUILD_OAUTH2_CLIENT_ID` | Registered Chutes OAuth application ID. |
 | `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` | Confidential OAuth secret, used for exchange and refresh but never persisted. |
 | `CHUTES_BUILD_DEFAULT_MODEL` | Default model ID; use `model-router` for Auto. |
@@ -34,6 +35,7 @@ or secret manager, and never commit real credentials.
 | `CHUTES_STRICT_MODEL=1` | Disable automatic fallback. |
 | `CHUTES_ROUTER_BASE_URL` | Compatible router endpoint override. |
 | `CHUTES_INFERENCE_BASE_URL` | Compatible inference endpoint override. |
+| `CHUTES_MODELS_BASE_URL` | Compatible model-catalogue endpoint override. |
 | `CHUTES_API_BASE_URL` | Compatible account/media API override. |
 
 Ambient Chutes credentials are never inherited by arbitrary custom inference

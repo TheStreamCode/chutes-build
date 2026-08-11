@@ -83,9 +83,10 @@ did, and one contradicted an earlier fix in this same release.
   against the endpoint before shipping it — the first version of the change would
   have broken a model that previously worked.
 - **An endpoint override reached inference but not the catalogue.**
-  `docs/configuration.md` documents `CHUTES_ROUTER_BASE_URL`,
-  `CHUTES_INFERENCE_BASE_URL` and `CHUTES_MODELS_BASE_URL`, and
-  `chutes-build-core` honours them, but the re-base left the agent's
+  `docs/configuration.md` documents `CHUTES_ROUTER_BASE_URL` and
+  `CHUTES_INFERENCE_BASE_URL` — `CHUTES_MODELS_BASE_URL` was supported and
+  undocumented, and is in the table now — and `chutes-build-core` honours them,
+  but the re-base left the agent's
   `EndpointsConfig` reading only the `CHUTES_BUILD_*` spellings. The documented
   names come first now, with the others kept as fallbacks.
 - **The system prompt introduced the agent as xAI's.** The re-base overwrote
