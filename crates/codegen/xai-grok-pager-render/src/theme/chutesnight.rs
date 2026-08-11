@@ -13,14 +13,15 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
-// Chutes Night palette — graphite surfaces with the Chutes green accent.
+// Chutes Night palette — graphite surfaces with a silver accent.
 //
 // The brand anchors are:
 //   • background = #121212
-//   • accent     = #63d297
+//   • accent     = #a8b4c0
 //
-// Blue, amber, and red are retained only for semantic distinction. They are
-// deliberately softened so the brand green remains the dominant signal.
+// Green is no longer the brand signal; it is kept for what it *means* —
+// success and diff insertions. Blue, amber and red are retained for the same
+// reason and stay softened, so the silver chrome remains the dominant voice.
 #[allow(dead_code)]
 mod palette {
     use super::*;
@@ -41,8 +42,23 @@ mod palette {
     pub const GRAY: Color = rgb(99, 108, 103); // #636c67 — medium gray
     pub const GRAY_BRIGHT: Color = rgb(154, 164, 158); // #9aa49e — tool text
 
-    // ── Brand + semantic accents ─────────────────────────────────────────
-    pub const ACCENT: Color = rgb(99, 210, 151); // #63d297 — Chutes green
+    // ── Brand: silver ────────────────────────────────────────────────────
+    //
+    // The chrome a person reads as "this product" — the wordmark, the active
+    // prompt border, the assistant, the model and command labels. Cool-toned on
+    // purpose: the neutral grays above are warm (green-tinted, #7e8983 and
+    // #9aa49e), so a cool silver separates from them instead of merging into the
+    // furniture, which a warm one would.
+    pub const SILVER: Color = rgb(168, 180, 192); // #a8b4c0 — brand accent
+    pub const SILVER_SOFT: Color = rgb(205, 214, 223); // #cdd6df — light silver
+    pub const SILVER_MUTED: Color = rgb(107, 120, 133); // #6b7885 — subdued silver
+
+    // ── Semantic accents ─────────────────────────────────────────────────
+    //
+    // Green stays where green *means* something: success, and the insertion side
+    // of a diff against its red counterpart. Those are not branding, and a
+    // silver diff would be unreadable.
+    pub const ACCENT: Color = rgb(99, 210, 151); // #63d297 — success / insertions
     pub const ACCENT_SOFT: Color = rgb(154, 229, 188); // #9ae5bc — light green
     pub const ACCENT_MUTED: Color = rgb(69, 149, 107); // #45956b — subdued green
     pub const BLUE: Color = rgb(124, 167, 217); // #7ca7d9 — informational
@@ -57,7 +73,7 @@ mod palette {
 use palette::*;
 
 impl Theme {
-    /// Chutes Night theme — graphite surfaces with the official Chutes accent.
+    /// Chutes Night theme — graphite surfaces with the silver Chutes accent.
     ///
     /// Colors are defined in RGB. Call [`Theme::quantized`] to downgrade
     /// them to the terminal's supported color level before rendering.
@@ -71,14 +87,14 @@ impl Theme {
             bg_terminal: BG_TERMINAL,
 
             accent_user: FG_SECONDARY,
-            accent_assistant: ACCENT,
-            accent_thinking: ACCENT_SOFT,
+            accent_assistant: SILVER,
+            accent_thinking: SILVER_SOFT,
             accent_tool: GRAY_BRIGHT,
             accent_system: BLUE,
             accent_error: RED,
             accent_success: ACCENT,
-            accent_running: ACCENT,
-            accent_skill: ACCENT_SOFT,
+            accent_running: SILVER,
+            accent_skill: SILVER_SOFT,
 
             text_primary: FG,
             text_secondary: FG_SECONDARY,
@@ -87,25 +103,25 @@ impl Theme {
             gray: COMMENT,
             gray_bright: GRAY_BRIGHT,
 
-            command: ACCENT_SOFT,
+            command: SILVER_SOFT,
             path: ORANGE,
             running: CYAN,
             warning: AMBER,
 
-            fuzzy_accent: ACCENT,
+            fuzzy_accent: SILVER,
 
             accent_plan: AMBER,
 
             accent_verify: CYAN,
 
-            accent_remember: ACCENT_MUTED,
+            accent_remember: SILVER_MUTED,
 
-            selection_border: rgb(58, 106, 79),
+            selection_border: rgb(88, 99, 110),
             prompt_border: rgb(48, 54, 50),
-            prompt_border_active: ACCENT_MUTED,
+            prompt_border_active: SILVER_MUTED,
             hover_border: rgb(42, 48, 44),
 
-            accent_model: ACCENT,
+            accent_model: SILVER,
 
             scrollbar_bg: BG_DARK,
             scrollbar_fg: BG_HIGHLIGHT,
@@ -117,17 +133,17 @@ impl Theme {
             diff_equal_fg: COMMENT,
             diff_gutter_fg: COMMENT,
 
-            bg_visual: rgb(39, 54, 46),
+            bg_visual: rgb(42, 47, 53),
 
             paste_bg: BG_DARK,
             paste_fg: FG_SECONDARY,
             paste_dim: FG_GUTTER,
 
-            md_heading_h1: ACCENT,
+            md_heading_h1: SILVER,
             md_heading_h1_mod: Modifier::BOLD,
             md_heading_h2: BLUE,
             md_heading_h2_mod: Modifier::BOLD,
-            md_heading_h3: ACCENT_SOFT,
+            md_heading_h3: SILVER_SOFT,
             md_heading_h3_mod: Modifier::BOLD,
             md_heading_h4: GRAY_BRIGHT,
             md_heading_h4_mod: Modifier::BOLD,
@@ -155,9 +171,11 @@ mod tests {
         let theme = Theme::chutesnight();
         assert_eq!(theme.bg_base, Color::Rgb(18, 18, 18));
         assert_eq!(theme.bg_terminal, Color::Rgb(15, 15, 15));
-        assert_eq!(theme.accent_assistant, Color::Rgb(99, 210, 151));
-        assert_eq!(theme.accent_model, Color::Rgb(99, 210, 151));
+        // Brand chrome is silver; green survives only where it carries meaning.
+        assert_eq!(theme.accent_assistant, Color::Rgb(168, 180, 192));
+        assert_eq!(theme.accent_model, Color::Rgb(168, 180, 192));
         assert_eq!(theme.accent_success, Color::Rgb(99, 210, 151));
+        assert_eq!(theme.diff_insert_fg, Color::Rgb(99, 210, 151));
         assert_eq!(theme.text_primary, Color::Rgb(244, 246, 245));
     }
 }

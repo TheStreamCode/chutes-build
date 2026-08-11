@@ -118,11 +118,16 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
         .max(1) as f32;
     let secs = anim_phase_secs();
 
-    // Blend each glyph from the resting gray toward the bright text color by its
-    // shine opacity, so a sheen sweeps across the braille art. Adjacent glyphs
-    // that land on the same blended color share one Span to hold down the
-    // per-frame allocation.
-    let base = theme.gray;
+    // Blend each glyph from the brand accent toward primary text by its shine
+    // opacity, so a sheen sweeps across the braille art. The base is the theme's
+    // accent rather than a fixed gray: the wordmark and the active prompt border
+    // then carry the same colour, which is what makes the screen read as one
+    // thing. The re-base had replaced this with `theme.gray`, and the centre of
+    // the welcome screen stopped matching its own input bar.
+    //
+    // Adjacent glyphs that land on the same blended color share one Span to hold
+    // down the per-frame allocation.
+    let base = theme.accent_assistant;
     let hilite = theme.text_primary;
     let logo_lines: Vec<Line> = lines
         .iter()
