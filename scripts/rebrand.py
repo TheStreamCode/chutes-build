@@ -107,6 +107,62 @@ TEXT_SUFFIXES = {
 # strings those functions *return* become Chutes. The same goes for the tool
 # dialect module `implementations/grok_build/`.
 
+# Sentences that name upstream's product on purpose, and must survive verbatim.
+#
+# The rules below cannot tell "Grok Build, the thing we forked" from "Grok
+# Build, a name to replace" — and since the 1.0.0 re-base the documentation is
+# full of the former: the attribution in README, the upstream-scope paragraph in
+# SECURITY, and the comments that explain the wordmark regression by naming
+# whose wordmark it was. Running `--apply` over the tree rewrote all six on
+# 2026-08-11: README came to read "SpaceXAI's Chutes Build", AGENTS.md said the
+# re-base replaced our wordmark with our own, and the getting-started guide
+# gained a link to `github.com/xai-org/chutes-build`, which does not exist.
+#
+# So they are pinned by exact text rather than by path. A path-level exemption
+# would also protect a *new* branding token that lands in one of these files
+# later; an exact string fails loudly if someone rewords the sentence, which is
+# the moment to re-decide rather than to keep exempting.
+UPSTREAM_PROSE: dict[str, tuple[str, ...]] = {
+    "AGENTS.md": ("replaced the Chutes wordmark with Grok's",),
+    "README.md": ("SpaceXAI's Grok Build",),
+    "SECURITY.md": ("reproduces on Grok Build",),
+    "docs/releasing.md": ("shipped Grok's wordmark",),
+    "crates/codegen/xai-grok-pager/docs/user-guide/01-getting-started.md": (
+        "fork of [Grok Build](https://github.com/xai-org/grok-build)",
+    ),
+    "crates/codegen/xai-grok-pager/src/views/welcome/logo.rs": (
+        "upstream's Grok wordmark",
+    ),
+}
+
+# A character no source file in this tree contains, used to park protected text
+# out of the rules' reach and put it back afterwards.
+_GUARD = "\x00"
+
+
+def protect_upstream_prose(text: str, rel: str) -> tuple[str, list[str]]:
+    """Replace this file's deliberate upstream references with placeholders."""
+    parked: list[str] = []
+    for phrase in UPSTREAM_PROSE.get(rel, ()):
+        if phrase not in text:
+            raise SystemExit(
+                f"rebrand: {rel} no longer contains the pinned upstream reference\n"
+                f"  {phrase!r}\n"
+                "It was reworded or removed. Re-read the sentence and either update "
+                "UPSTREAM_PROSE or drop the entry — do not delete this check to make "
+                "the script run."
+            )
+        text = text.replace(phrase, f"{_GUARD}{len(parked)}{_GUARD}")
+        parked.append(phrase)
+    return text, parked
+
+
+def restore_upstream_prose(text: str, parked: list[str]) -> str:
+    for index, phrase in enumerate(parked):
+        text = text.replace(f"{_GUARD}{index}{_GUARD}", phrase)
+    return text
+
+
 RULES: list[tuple[str, re.Pattern[str], str]] = [
     # Environment variables, and the Rust statics that mirror their names.
     # 419 of upstream's 505 `GROK_*` variables follow this rule exactly.
@@ -360,6 +416,7 @@ def apply_rules(
     text: str, rel: str, decisions: dict[str, dict[str, list[str]]]
 ) -> tuple[str, Counter]:
     hits: Counter = Counter()
+    text, parked = protect_upstream_prose(text, rel)
     for name, pattern, replacement in RULES:
         text, n = pattern.subn(replacement, text)
         if n:
@@ -376,10 +433,13 @@ def apply_rules(
     text, repaired = repair_identifiers(text, rel)
     if repaired:
         hits["identifier repair"] += repaired
+    text = restore_upstream_prose(text, parked)
     return text, hits
 
 
 def residual_is_allowed(rel: str, line: str) -> bool:
+    if any(phrase in line for phrase in UPSTREAM_PROSE.get(rel, ())):
+        return True
     return any(marker in rel or marker in line for marker, _ in ALLOWED_RESIDUAL)
 
 
