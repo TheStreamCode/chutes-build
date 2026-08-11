@@ -664,6 +664,60 @@ tool invocable.
   debug, so that crate's non-`auth::` tests are unmeasured here. `agent::config`
   and `remote::client` were checked per-module and pass.
 
+### The pending port: 3 commits, and which 91 files are safe
+
+Measured 2026-08-11 against `upstream/main` at `b13fa526`, from the recorded
+baseline `afbc0fb7`. Three commits, 238 files, +17887/−6138.
+
+Do not measure this with `git diff HEAD upstream/main`. That reports 1424 files
+and 40k deletions, nearly all of which are *our* re-base and rebranding read
+backwards — the fork is not a descendant of upstream, so the diff is symmetric
+and tells you nothing about what arrived. Diff from the baseline commit instead.
+
+What the three commits contain:
+
+| Commit | Size | Theme |
+| --- | --- | --- |
+| `8a14c91d` | 157 files, +11148/−4949 | session replay (`session/storage/replay.rs` + tests, 1627 lines, new), `app/session_load_barrier.rs` (new), `scrollback/state/layout.rs` (new), `.envrc`/direnv support in workspace |
+| `75e73f3d` | 10 files, +273/−789 | `agent/app.rs` loses 740 lines to a refactor; sandbox `hook_write_deny` and `child_net`; textarea |
+| `b13fa526` | 102 files, +6536/−470 | session rename as a user-facing feature (`slash/commands/rename.rs`, `session_admin.rs`, `agent/server.rs`) |
+
+**The split that makes this tractable.** Intersect what upstream changed with
+what we changed, both measured from the same baseline:
+
+- **147 files overlap.** These need reconciling by hand, one at a time.
+- **91 files are upstream-only** — we never touched them, so there is nothing of
+  ours to lose. 17 are new files; 74 already exist here unmodified.
+
+The overlap list is the argument against merging, in concrete form: it contains
+`xai-grok-agent/templates/prompt.md` and `prompt/prompt_encrypted.rs`. A merge
+would take upstream's system prompt again and silently re-introduce exactly the
+regression 1.0.3 fixed — the agent introducing itself as xAI's, and the
+`<official_chutes_sources>` block with its "never put credentials in a search
+query" instruction deleted a second time.
+
+**Of the 91, only 16 carry branding tokens** in upstream's new version (checked
+with `grep -E 'GROK_|grok-build|GrokBuild|Grok Build|grok\.com|x\.ai|~/\.grok'`
+against `upstream/main:<path>`, not against ours):
+
+```
+app/exit_timeout.rs                     agent/handlers/models.rs
+app/session_load_barrier.rs             agent/mvp_agent/tests/session_rename_tests.rs
+memory_trace_signal_topology_tests.rs   session/acp_session_impl/spawn_runtime_containment_tests.rs
+pty_e2e/scroll_anchor_holds_parked_…    session/goal_planner.rs
+pty-harness/tests/exit_timeout.rs       session/goal_strategist.rs
+session/goal_summarizer.rs              session/storage/relocation/mod.rs
+session/storage/replay.rs               session/storage/replay_tests.rs
+tests/test_mcp_doctor_isolation.rs      workspace/src/envrc.rs
+```
+
+The other 75 are token-clean and can be taken verbatim, subject only to API
+drift at compile time. Run `scripts/rebrand.py` over the 16 — it exists for
+this and is re-runnable.
+
+Order the work by area, not by commit, and land each area with its own tests
+green: it is the only way to tell which area broke something.
+
 ### The Windows CI job crashes, and it is not a test failure
 
 > [!NOTE]
