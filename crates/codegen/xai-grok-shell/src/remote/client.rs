@@ -866,8 +866,16 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
+    // `context_length` and `max_model_len` are what an OpenAI-shaped catalogue
+    // sends, and they are what `llm.chutes.ai/v1/models` sends. Without them every
+    // Chutes model fell through to `DEFAULT_CONTEXT_WINDOW`, so the product told
+    // itself 256k for all thirteen: six times too much for `Qwen3-32B` (40,960),
+    // four times too little for the three million-token models. Compaction and
+    // truncation were both working from a number no model agreed with.
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
+        .or_else(|| get_u64(obj, "context_length"))
+        .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .unwrap_or(DEFAULT_CONTEXT_WINDOW);
@@ -894,8 +902,20 @@ pub(crate) fn parse_remote_model_value(
         base_url,
         name,
         description: get_string(obj, "description"),
+        // `max_output_length` is the Chutes catalogue's name for the same bound —
+        // but only when it is *smaller* than the window. Several Chutes models
+        // publish the two as the same number, which means "output may use the whole
+        // context", not "always ask for this much". Sending it as `max_tokens` then
+        // leaves no room for the prompt: `Qwen3-32B` (40,960 = 40,960) answers
+        // `400 Requested token count exceeds`. Taking it only when it is a real
+        // sub-limit keeps the nine models where it is one and skips the two where
+        // it is not.
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
+            .or_else(|| {
+                get_u64(obj, "max_output_length")
+                    .filter(|out| *out < context_window.get())
+            })
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
