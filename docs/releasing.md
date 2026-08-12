@@ -40,8 +40,17 @@ npm test
 npm pack --dry-run
 $env:CARGO_BUILD_JOBS = "1"
 cargo check -p chutes-build --locked
+python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
 cargo deny --locked check advisories licenses bans sources
 ```
+
+`known_failures.py` belongs in a release check because CI's own run of it is
+per-platform and you are on one of them. It gates the 122 Windows and 66 Linux
+failures that pre-date the 1.0.0 re-base — a set CI previously stepped around
+with narrow filters, leaving a new failure among them indistinguishable from the
+rest. Do not `--record` your way past a red result to get a release out: the
+baseline is the claim that nothing new broke, and rewriting it to match reality
+turns the claim into a tautology.
 
 Run that `cargo deny` **online**. It checks the live advisory database, so an
 `--offline` run reuses whatever is already on disk and cannot see anything

@@ -200,11 +200,27 @@ cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
 cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools `
   --all-targets --locked --no-deps -- -D warnings
 cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
+python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
 npm test
 npm run verify:release
 npm pack --dry-run
 git diff --check
 ```
+
+That `known_failures` line is the one whose absence used to matter. Those two
+crates fail 122 tests on Windows and 66 on Linux, all pre-dating the 1.0.0
+re-base, and the commands above only ever ran narrow filters over them — so a
+*new* failure among them looked exactly like the rest. The script compares
+against `.github/known-failures/<platform>.txt`: a failure outside it fails, and
+a baselined test that starts passing fails too, because a list nobody prunes
+stops describing anything.
+
+If it reports something new, re-run before concluding. These suites do flake
+under load; one appeared and vanished within three runs the day the script was
+written. If it reproduces, it is yours. And when a genuinely flaky test earns a
+place on the list, prefer fixing the flake — a notification-hook test polled a
+five-second deadline for a forked shell and went red on a loaded runner, where
+the fix was to wait for the thread rather than the clock.
 
 ### The model catalogue is the source of truth, and we were not reading it
 
