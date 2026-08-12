@@ -126,6 +126,13 @@ jobs:
           cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools \
             --all-targets --locked --no-deps -- -D warnings
           cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
+      # No Linux baseline is committed yet: the 122 known failures were measured
+      # on Windows and nobody has measured this platform. Until one exists the
+      # script prints what it observed and exits 0, so this run is how the
+      # numbers get discovered — read the log and commit
+      # `.github/known-failures/linux.txt` if the list is stable.
+      - name: Known-failure baseline
+        run: python3 scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
 
   npm-package:
     name: npm package
@@ -183,6 +190,12 @@ jobs:
           cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
           cargo test -p xai-grok-shell --lib auth:: --locked
           cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
+      # The two crates with pre-existing Windows failures, gated against a
+      # committed baseline rather than skipped. The steps above run narrow
+      # filters, which left 122 tests neither passing nor watched — a new
+      # failure among them was indistinguishable from the other 122.
+      - name: Known-failure baseline
+        run: python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
 
   macos-check:
     name: Rust check (macOS)
