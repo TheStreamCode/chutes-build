@@ -659,7 +659,22 @@ tool invocable.
   including the loopback callback and the `chutes.ai` CORS origin.
 - The usage and quota display in the status bar, and `/usage`.
 - The pre-stream fallback chain (`CHUTES_FALLBACK_MODELS`), which needs a model to
-  be genuinely unavailable to trigger.
+  be genuinely unavailable to trigger. The short-`Retry-After` wait added in
+  1.0.4 needs the same: a real capacity 429 carrying the header.
+- **Why `xai-grok-tools --lib` never finishes on the Windows CI runner.** It ran
+  107 minutes, then 140, then hit a 40-minute timeout, against six minutes on
+  Linux and about five on a local Windows machine. Every Windows step in the
+  workflow runs `implementations::chutes::`, which skips
+  `computer::local::terminal`, so the whole suite had never run on a runner and
+  the hang had never been seen. Not reproducible from a machine where it passes,
+  so the way in is a throwaway Windows job running that suite with `--nocapture`
+  and `--test-threads=1` to see which test it stops on. Until then the Windows
+  job gates `xai-grok-workspace` only.
+- The `AuthFileStamp` memo cannot distinguish two same-length rewrites within one
+  ~15ms clock tick on Windows, where there is no inode. Judged unreachable in
+  practice (a rotation is minutes apart, and refresh does not use this memo) and
+  left with the reasoning in place; closing it means
+  `GetFileInformationByHandle`, since `file_index()` is still unstable in std.
 - `xai-grok-shell --lib` as a whole: it overflows a 1 MB thread stack on Windows in
   debug, so that crate's non-`auth::` tests are unmeasured here. `agent::config`
   and `remote::client` were checked per-module and pass.

@@ -87,12 +87,21 @@ and a kill switch that documents a privacy guarantee turned out to gate nothing.
 
 - **188 failing tests were neither passing nor watched.** CI ran narrow filters
   over `xai-grok-tools` and `xai-grok-workspace`, so a *new* failure among them
-  was indistinguishable from the rest. `scripts/known_failures.py` now gates both
-  crates against a committed per-platform baseline: 122 entries on Windows, 66 on
-  Linux — a number nobody had measured, and the platforms disagree sharply enough
+  was indistinguishable from the rest. `scripts/known_failures.py` gates them
+  against a committed per-platform baseline — 122 entries on Windows, 66 on
+  Linux, a number nobody had measured, and the platforms disagree sharply enough
   that assuming would have been wrong either way (`xai-grok-workspace` fails 53
   there and 1 here). A failure outside the baseline fails the build; a baselined
   test that starts passing fails it too, so the file cannot rot.
+- **Both crates are gated on Linux and locally; Windows CI gates
+  `xai-grok-workspace` only**, and that limit is a finding rather than a choice:
+  the full `xai-grok-tools --lib` suite does not complete on the Windows runner.
+  It ran 107 minutes, then 140, then hit a 40-minute timeout, while finishing in
+  six minutes on Linux and about five on a local Windows machine. Nothing had
+  noticed because every Windows step in CI runs a filter that skips
+  `computer::local::terminal`, so the whole suite had never run there. The hang
+  is unexplained and recorded in `AGENTS.md` for its own investigation; its 69
+  entries stay in the baseline, where local runs still check them.
 - **The pager suite reported seven failures that were the terminal.**
   `default_actions()` reads the process environment, so inside a VS Code terminal
   Quit binds to Ctrl+D, interject moves to Ctrl+L, and a terminal with native
