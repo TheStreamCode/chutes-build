@@ -29,6 +29,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -69,16 +70,39 @@ def load_baseline(name: str) -> set[tuple[str, str]] | None:
     return entries
 
 
+# Generous, and a backstop rather than a budget: the suites run in seconds once
+# built, and the Linux job completes the whole step in six minutes. Anything past
+# this is a hang, and failing loudly beats eating the job's remaining time.
+SUITE_TIMEOUT_SECS = 40 * 60
+
+
 def run_suite(crate: str) -> set[str]:
     """Run `cargo test -p <crate> --lib` and return the set of failing tests."""
-    result = subprocess.run(
-        ["cargo", "test", "-p", crate, "--lib", "--locked"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    output = (result.stdout or "") + (result.stderr or "")
+    # Output goes to a file, not a pipe. `capture_output=True` waits for EOF on
+    # the pipe, and these suites spawn shells: one leaked grandchild holding the
+    # inherited handle keeps it open after cargo exits, and the wait never ends.
+    # That is not hypothetical — it burned 107 minutes of a Windows CI job and
+    # then 150, against six minutes for the same step on Linux. A file handle a
+    # straggler keeps open costs nothing.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as sink:
+        try:
+            subprocess.run(
+                ["cargo", "test", "-p", crate, "--lib", "--locked"],
+                cwd=REPO_ROOT,
+                stdout=sink,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                timeout=SUITE_TIMEOUT_SECS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise SystemExit(
+                f"known_failures: `{crate}` did not finish in "
+                f"{SUITE_TIMEOUT_SECS // 60} minutes. That is a hang, not a slow "
+                "machine — the suite itself runs in seconds once built."
+            ) from None
+        sink.seek(0)
+        output = sink.read()
     if "test result:" not in output:
         # The suite did not run at all — a compile error, a missing crate, a
         # linker failure. Reporting "no failures" here would turn a broken build
