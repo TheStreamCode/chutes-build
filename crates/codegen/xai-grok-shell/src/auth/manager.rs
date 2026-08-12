@@ -2684,7 +2684,21 @@ struct StaticKeyCacheEntry {
 
 /// (inode, mtime, len). `write_auth_json`'s temp+rename allocates a new inode
 /// per rewrite, so even a same-length same-mtime rewrite misses the memo.
-/// Windows has no stable inode (0 there); its fine mtimes suffice.
+///
+/// **Not on Windows**, where the inode is 0 and only (mtime, len) distinguish a
+/// rewrite. The comment here used to claim Windows' "fine mtimes suffice"; they
+/// do not. NTFS stores 100ns resolution, but the system clock that fills the
+/// field advances about every 15ms, so two same-length rewrites inside one tick
+/// share a stamp and the memo serves the older key. Measured at roughly 2 in 10
+/// with a test that rewrites as fast as it can.
+///
+/// Left as is deliberately. The window needs two writes of *equal length* within
+/// ~15ms: a key rotation is minutes apart, and the refresh path does not go
+/// through this memo, so the product cannot reach it. Closing it properly means
+/// `GetFileInformationByHandle` through the `windows` crate — `file_index()` is
+/// still unstable in std — which is more machinery than the exposure justifies.
+/// If that changes, that is the fix; do not reach for a content hash, which
+/// would read the file on every call and defeat the memo.
 type AuthFileStamp = (u64, Option<std::time::SystemTime>, u64);
 
 fn auth_file_stamp(path: &Path) -> Option<AuthFileStamp> {

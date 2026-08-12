@@ -3999,9 +3999,23 @@ async fn shared_api_key_provider_disk_memo_follows_rewrites() {
 
     assert_eq!(provider.current_api_key_async().await, None);
 
-    for key in ["first-key", "fresh-key", "second-key-rotated"] {
+    // `first-key` and `fresh-key` are the same length on purpose: on Unix the
+    // inode in the stamp catches that rewrite. On Windows the inode is 0 and the
+    // mtime only advances every ~15ms, so writing both as fast as this loop can
+    // shares a stamp and the memo serves the first — 2 runs in 10 here. The
+    // platform cannot make that promise (see `AuthFileStamp`), so do not assert
+    // it there; the differing-length rotation still exercises the memo on both.
+    #[cfg(unix)]
+    let keys: &[&str] = &["first-key", "fresh-key", "second-key-rotated"];
+    #[cfg(not(unix))]
+    let keys: &[&str] = &["first-key", "second-key-rotated"];
+
+    for key in keys {
         crate::auth::store_api_key(dir.path(), key).unwrap();
-        assert_eq!(provider.current_api_key_async().await.as_deref(), Some(key));
+        assert_eq!(
+            provider.current_api_key_async().await.as_deref(),
+            Some(*key)
+        );
     }
 
     crate::auth::clear_api_key(dir.path()).unwrap();

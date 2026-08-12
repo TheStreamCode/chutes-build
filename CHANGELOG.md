@@ -18,6 +18,14 @@ and a kill switch that documents a privacy guarantee turned out to gate nothing.
 
 ### Security
 
+- **`webbrowser` updated for RUSTSEC-2026-0257**, argument injection through the
+  Unix `BROWSER` template: an attacker-controlled non-HTTP(S) URL retaining
+  spaces could become extra browser arguments, reproduced upstream by injecting
+  `--remote-debugging-port` and `--proxy-server`. Chutes Build opens a browser on
+  the OAuth login path, so this is a path we use. Fixed in 1.2.2; the lock now
+  resolves 1.2.4. The advisory was published while this release was being
+  prepared and turned a commit red that had passed an hour earlier — which is
+  what `cargo deny` reading the live database is for.
 - **The self-update kill switch gated nothing.**
   `product::AUTOMATIC_SELF_UPDATE` documents that a running Chutes Build never
   downloads its own update, and it appeared exactly once in the tree — inside a
