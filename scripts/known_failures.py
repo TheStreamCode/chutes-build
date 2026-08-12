@@ -34,11 +34,15 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_DIR = REPO_ROOT / ".github" / "known-failures"
 
-# `cargo test` prints a `failures:` block listing bare test paths, then repeats
-# it with the panic text. Only the first block is a clean list, and both are
-# indented four spaces, so anchor on the section rather than the indentation.
+# `cargo test` prints a `failures:` block with each failure's panic text, then a
+# second one that is a clean list of names. Both are indented four spaces, so
+# anchor on the section header and take whatever lines in it look like a test
+# path; the panic block contributes nothing that matches.
 FAILURES_HEADER = re.compile(r"^failures:$")
-TEST_PATH = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)+)$")
+# No `::` required: a `#[test]` at a lib's crate root has a bare name, and
+# demanding a module path would make exactly such a failure invisible to the
+# gate — the hole this script exists to close.
+TEST_PATH = re.compile(r"^    ([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z0-9_]+)*)$")
 
 
 def platform_name() -> str:
@@ -121,13 +125,28 @@ def main() -> int:
         for test in run_suite(crate):
             observed.add((crate, test))
 
+    # The baseline covers every crate; this run covers the ones named. Compare
+    # and record only within those, or a single-crate run reports the other
+    # crate's entries as newly passing and `--record` deletes them — which the
+    # docstring's own one-crate example would have done.
+    ran = set(args.crate)
+    existing = load_baseline(args.platform) or set()
+    untouched = {entry for entry in existing if entry[0] not in ran}
+
     if args.record:
         BASELINE_DIR.mkdir(parents=True, exist_ok=True)
-        baseline_path(args.platform).write_text(render(observed), encoding="utf-8")
-        print(f"known_failures: recorded {len(observed)} for {args.platform}")
+        baseline_path(args.platform).write_text(
+            render(observed | untouched), encoding="utf-8"
+        )
+        print(
+            f"known_failures: recorded {len(observed)} for {args.platform} "
+            f"({len(untouched)} kept for crates not run)"
+        )
         return 0
 
     baseline = load_baseline(args.platform)
+    if baseline is not None:
+        baseline = {entry for entry in baseline if entry[0] in ran}
     if baseline is None:
         print(f"known_failures: no baseline for {args.platform!r} yet.")
         print(f"  {len(observed)} failing test(s) observed. To adopt them, commit:")
@@ -146,8 +165,11 @@ def main() -> int:
 
     if new:
         print(f"\n{len(new)} test(s) fail that the baseline does not know about.")
-        print("This is a regression, not the weather. Fix it, or justify the")
-        print("entry in the commit message before adding it with --record.")
+        print("Re-run before concluding: some of these suites do flake under")
+        print("load, and one appeared and vanished within three runs while this")
+        print("script was being written. If it reproduces it is a regression —")
+        print("fix it, or justify the entry in the commit message before")
+        print("adding it with --record.")
     if fixed:
         print(f"\n{len(fixed)} baselined test(s) now pass. Re-record so the file")
         print("keeps describing reality — a stale baseline hides the next one.")

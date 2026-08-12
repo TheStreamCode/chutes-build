@@ -2389,17 +2389,29 @@ fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
     // neither deadened. So a single line of user config turned the release
     // binary into one that contacts a registry at startup and can spawn a
     // download child, against a documented guarantee that it would not.
-    if !chutes_build_core::product::AUTOMATIC_SELF_UPDATE {
-        return false;
-    }
-    if cfg!(debug_assertions) {
-        return false;
-    }
-    if no_auto_update_flag {
-        return false;
-    }
-    !std::env::var_os("CHUTES_BUILD_DISABLE_AUTOUPDATER")
-        .is_some_and(|v| env_flag_enabled(&v.to_string_lossy()))
+    update_check_allowed(
+        chutes_build_core::product::AUTOMATIC_SELF_UPDATE,
+        cfg!(debug_assertions),
+        no_auto_update_flag,
+        std::env::var_os("CHUTES_BUILD_DISABLE_AUTOUPDATER")
+            .is_some_and(|v| env_flag_enabled(&v.to_string_lossy())),
+    )
+}
+
+/// The decision itself, with every input passed in.
+///
+/// Split out because the interesting case cannot be reached otherwise: a test
+/// binary is a debug build, so `should_check_for_updates` returns false there
+/// whatever the product switch says, and a test asserting *it* would pass just
+/// as happily with the switch flipped on. Here the switch can be set to `true`
+/// and the guarantee actually checked.
+fn update_check_allowed(
+    product_allows: bool,
+    debug_build: bool,
+    no_auto_update_flag: bool,
+    disabled_by_env: bool,
+) -> bool {
+    product_allows && !debug_build && !no_auto_update_flag && !disabled_by_env
 }
 /// Gate for the stdio agent's background auto-update: only the direct stdio
 /// agent, from the managed install. Other modes update in `run_agent_command`.
@@ -2564,13 +2576,18 @@ mod tests {
     /// here rather than silently shipping a phone-home.
     #[test]
     fn the_update_check_is_gated_on_the_product_switch() {
-        assert!(
-            !chutes_build_core::product::AUTOMATIC_SELF_UPDATE,
-            "Chutes Build does not self-update; see PRIVACY.md and product.rs"
-        );
-        // Every argument combination, including the one that opts *in*.
+        // The switch alone stops it, with every other input saying "go".
+        assert!(!update_check_allowed(false, false, false, false));
+        // And it is the *only* thing stopping it in that configuration — so
+        // this fails the moment someone removes the gate rather than passing
+        // for an unrelated reason.
+        assert!(update_check_allowed(true, false, false, false));
+        // The pre-existing gates still hold when the product allows it.
+        assert!(!update_check_allowed(true, true, false, false));
+        assert!(!update_check_allowed(true, false, true, false));
+        assert!(!update_check_allowed(true, false, false, true));
+        // What ships.
         assert!(!should_check_for_updates(false));
-        assert!(!should_check_for_updates(true));
     }
 
     #[test]

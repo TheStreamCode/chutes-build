@@ -488,8 +488,9 @@ async fn run_one_attempt(
             // a `Retry-After` — left Esc dead until the request returned on its
             // own. Dropping the future here is what makes that wait safe.
             let established = tokio::select! {
-                result = client.conversation_stream(request) => result,
+                biased;
                 () = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+                result = client.conversation_stream(request) => result,
             };
             let (raw, metadata) = match established {
                 Ok(pair) => pair,
@@ -510,8 +511,9 @@ async fn run_one_attempt(
         }
         ApiBackend::Responses => {
             let established = tokio::select! {
-                result = client.conversation_stream_responses(request) => result,
+                biased;
                 () = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+                result = client.conversation_stream_responses(request) => result,
             };
             let (raw, metadata, doom_loop) = match established {
                 Ok(parts) => parts,
@@ -543,7 +545,12 @@ async fn run_one_attempt(
             .await
         }
         ApiBackend::Messages => {
-            let (raw, metadata) = match client.conversation_stream_messages(request).await {
+            let established = tokio::select! {
+                biased;
+                () = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+                result = client.conversation_stream_messages(request) => result,
+            };
+            let (raw, metadata) = match established {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };

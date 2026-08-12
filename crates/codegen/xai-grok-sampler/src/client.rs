@@ -367,12 +367,20 @@ fn chutes_capacity_wait(error: &SamplingError) -> Option<Duration> {
     let SamplingError::Api {
         status,
         retry_after_secs,
+        should_retry,
         ..
     } = error
     else {
         return None;
     };
     if !matches!(status.as_u16(), 429 | 503) {
+        return None;
+    }
+    // `x-should-retry: false` is the server saying not to, and the rest of the
+    // stack already obeys it — `retry.rs` classifies such errors Fatal. Waiting
+    // and re-sending anyway would burn the delay to produce a request that is
+    // discarded, and on a rate limiter it can deepen the penalty.
+    if matches!(should_retry, Some(false)) {
         return None;
     }
     let wait = Duration::from_secs((*retry_after_secs)?);
@@ -1195,7 +1203,8 @@ impl SamplingClient {
     /// The chain is: the selected model, then `CHUTES_FALLBACK_MODELS`, then the
     /// virtual `model-router`. `CHUTES_STRICT_MODEL=1` disables it, and a
     /// non-Chutes backend yields a single candidate, so this is a plain
-    /// pass-through there.
+    /// pass-through there — including the capacity wait below, which is why
+    /// that is gated on the backend and not merely on the candidate count.
     pub async fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
@@ -1215,14 +1224,22 @@ impl SamplingClient {
             attempt.model = Some(candidate.clone());
             let mut outcome = self.chat_completion_stream_once(attempt.clone()).await;
 
-            // One retry on the *selected* model before abandoning it. The user
-            // picked this model; a burst 429 with a short `Retry-After` is the
-            // server saying "wait", not "use something else". A long one, or no
-            // header at all, falls through to the next candidate immediately.
+            // One retry, on the model the *user picked* and nowhere else. A
+            // burst 429 with a short `Retry-After` is the server saying "wait",
+            // not "use something else", and that model is worth the wait. A
+            // long delay, no header, or a candidate we already fell back to is
+            // not: move on.
+            //
+            // Gated on the backend too, so a non-Chutes endpoint stays the
+            // pass-through this method documents rather than gaining a stall.
+            // Bounded to one wait per call by construction — it can only fire
+            // at `index == 0`.
             //
             // Safe to sleep here only because `run_one_attempt` selects this
             // future against the cancel token, so Esc drops it mid-wait.
-            if let Err(error) = &outcome
+            if index == 0
+                && is_chutes_backend(&self.base_url)
+                && let Err(error) = &outcome
                 && let Some(wait) = chutes_capacity_wait(error)
             {
                 tracing::debug!(
@@ -2578,6 +2595,28 @@ mod tests {
         // while and another candidate can serve now.
         assert_eq!(chutes_capacity_wait(&api_error(429, Some(6))), None);
         assert_eq!(chutes_capacity_wait(&api_error(429, Some(120))), None);
+    }
+
+    #[test]
+    fn a_server_that_says_do_not_retry_is_obeyed() {
+        // `x-should-retry: false` outranks `Retry-After`. `retry.rs` classifies
+        // such errors Fatal, so waiting would buy a request that is thrown
+        // away — and on a rate limiter it can extend the penalty.
+        let mut refused = api_error(429, Some(2));
+        if let SamplingError::Api { should_retry, .. } = &mut refused {
+            *should_retry = Some(false);
+        }
+        assert_eq!(chutes_capacity_wait(&refused), None);
+
+        // `Some(true)` and an absent header both still wait.
+        let mut affirmed = api_error(429, Some(2));
+        if let SamplingError::Api { should_retry, .. } = &mut affirmed {
+            *should_retry = Some(true);
+        }
+        assert_eq!(
+            chutes_capacity_wait(&affirmed),
+            Some(Duration::from_secs(2))
+        );
     }
 
     #[test]
