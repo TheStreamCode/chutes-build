@@ -6,11 +6,28 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-The manual port from upstream `b13fa526` starts here — one area per commit, each
-landing with its own tests green and measured against a pre-port baseline rather
-than an absolute count. Four areas of the ninety-one files that carry no risk of
-overwriting our work; the remaining sixty-six and the hundred and forty-seven
-overlapping files are still ahead.
+## [1.0.4] - 2026-08-12
+
+Two threads. The manual port from upstream `b13fa526` begins — one area per
+commit, each landing with its own tests green and measured against a pre-port
+baseline rather than an absolute count. And the verification system itself was
+overhauled, because three of the previous release's problems were failures to
+*notice*, not failures of code: 188 tests were failing where nobody looked, a
+pager suite reported failures that were the terminal rather than the product,
+and a kill switch that documents a privacy guarantee turned out to gate nothing.
+
+### Security
+
+- **The self-update kill switch gated nothing.**
+  `product::AUTOMATIC_SELF_UPDATE` documents that a running Chutes Build never
+  downloads its own update, and it appeared exactly once in the tree — inside a
+  comment. What held the line was narrower and accidental: the `internal`
+  installer's base URLs are deadened to `127.0.0.1:9`. But `get_installer()`
+  honours `CHUTES_BUILD_INSTALLER=npm` and `[cli] installer` in `config.toml`,
+  and neither the npm path (`npm view`) nor gh-release (the GitHub API) is
+  deadened, so one line of user configuration turned a release binary into one
+  that contacts a registry at startup and can spawn a download child. The gate
+  is read now, and a test asserts it is read rather than merely present.
 
 ### Added
 
@@ -34,6 +51,19 @@ overlapping files are still ahead.
 
 ### Fixed
 
+- **A busy model is waited for, not replaced.** A capacity 429 used to swap the
+  model you chose for `model-router` on the first attempt, instantly, discarding
+  the `Retry-After` the server had just sent — the header was parsed and then
+  dropped at that layer. A short delay (≤5s) on a 429 or 503 is now honoured on
+  the selected model before any switch; a long one still switches, because that
+  chute is busy for a while and another candidate can answer now. A server
+  sending `x-should-retry: false` is obeyed rather than retried against.
+- **Esc worked only once a stream existed.** Everything before the first chunk
+  ignored the cancellation token, so a slow connect left the key dead until the
+  request returned on its own. All three backends now race the request against
+  cancellation, with the cancel arm biased first — the request goes out on the
+  future's first poll, so an already-cancelled turn was previously winning only
+  about half the time.
 - **`scripts/rebrand.py` rewrote the sentences that name upstream on purpose.**
   Running `--apply` over the tree changed six files with nothing to do with the
   port in hand, every one of them wrongly: the README attribution became
@@ -45,6 +75,33 @@ overlapping files are still ahead.
   Build, a name to replace"; those six are now pinned by exact text, and the
   script fails loudly if one is reworded rather than silently exempting a file.
 
+### Verification
+
+- **188 failing tests were neither passing nor watched.** CI ran narrow filters
+  over `xai-grok-tools` and `xai-grok-workspace`, so a *new* failure among them
+  was indistinguishable from the rest. `scripts/known_failures.py` now gates both
+  crates against a committed per-platform baseline: 122 entries on Windows, 66 on
+  Linux — a number nobody had measured, and the platforms disagree sharply enough
+  that assuming would have been wrong either way (`xai-grok-workspace` fails 53
+  there and 1 here). A failure outside the baseline fails the build; a baselined
+  test that starts passing fails it too, so the file cannot rot.
+- **The pager suite reported seven failures that were the terminal.**
+  `default_actions()` reads the process environment, so inside a VS Code terminal
+  Quit binds to Ctrl+D, interject moves to Ctrl+L, and a terminal with native
+  link hover owns link clicks. Each test asserted one side of a rule that has
+  two. They use the pinned registries that already existed, and the link test now
+  asserts both sides — covering something nothing covered: with native link
+  hover, *not* intercepting is correct. 8275 pass in both configurations.
+- `scripts/port_assist.py` sorts an upstream delta into what needs a judgement
+  call and what does not — files absent here, files we never touched, and files
+  whose divergence *is* the rebrand, verifiable because
+  `rebrand(upstream@base)` reproduces our version character for character. 127 of
+  the 208 outstanding files need no human decision. It leaves genuine divergence
+  alone, refuses to resurrect files we deleted on purpose, and skips binaries.
+- A notification-hook test waited five seconds for a forked shell and went red on
+  a loaded runner. `run_hook` returns its join handle now, so the test waits for
+  the fact rather than the clock.
+
 ### Documentation
 
 - `docs/upstream-sync.md` records what the first areas taught, for the eighty-six
@@ -53,6 +110,11 @@ overlapping files are still ahead.
   module that *is* reachable; measure the baseline failure set before attributing
   anything; and upstream's fixtures assume POSIX absolute paths, which on Windows
   are drive-relative, so eleven tests failed here that pass on upstream's CI.
+- `AGENTS.md` gains the three rules the port produced — check `git status` after
+  every rebrand run, finish an area on clippy rather than on green tests, and
+  measure the baseline failure set before attributing anything — and
+  `docs/releasing.md` records that a cancelled job ships nothing even when it
+  built everything.
 
 
 
