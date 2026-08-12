@@ -7669,6 +7669,7 @@ pub(crate) mod tests {
     #[test]
     fn welcome_ctrl_q_requires_confirmation() {
         let mut app = test_app();
+        pin_non_vscode_registry(&mut app);
         let outcome = app.handle_input(&key_event(KeyCode::Char('q'), KeyModifiers::CONTROL));
         assert!(matches!(outcome, InputOutcome::Changed));
         let pending = app
@@ -8472,6 +8473,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_sets_pending_action() {
         let mut app = test_app_with_agent();
+        pin_non_vscode_registry(&mut app);
         let outcome = app.handle_input(&ctrl_q());
         assert!(matches!(outcome, InputOutcome::Changed));
         assert!(app.pending_action.is_some());
@@ -8480,6 +8482,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_double_press_quits() {
         let mut app = test_app_with_agent();
+        pin_non_vscode_registry(&mut app);
         let _ = app.handle_input(&ctrl_q());
         assert!(app.pending_action.is_some());
         let outcome = app.handle_input(&ctrl_q());
@@ -8490,6 +8493,7 @@ pub(crate) mod tests {
     fn different_key_clears_pending() {
         crate::appearance::cache::set_simple_mode(false);
         let mut app = test_app_with_agent();
+        pin_non_vscode_registry(&mut app);
         if let ActiveView::Agent(id) = app.active_view
             && let Some(agent) = app.agents.get_mut(&id)
         {
@@ -10716,6 +10720,7 @@ pub(crate) mod tests {
     #[test]
     fn ctrl_q_on_dashboard_arms_quit() {
         let mut app = test_app();
+        pin_non_vscode_registry(&mut app);
         app.active_view = ActiveView::AgentDashboard;
         app.dashboard = Some(crate::views::dashboard::DashboardState::new());
         let outcome = app.handle_input(&key_event(KeyCode::Char('q'), KeyModifiers::CONTROL));

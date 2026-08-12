@@ -1241,6 +1241,12 @@ mod link_click_tests {
     /// A modifier+click preserves a filesystem target through app activation
     /// (Ctrl on Linux/Windows; macOS polls CoreGraphics so the Down step isn't
     /// reproducible in a unit test).
+    ///
+    /// Whether we intercept at all depends on the host terminal: one with
+    /// native link hover owns the click and we must keep our hands off it. So
+    /// this asserts the rule rather than one side of it — hardcoding the
+    /// intercept made the test pass on CI and fail in a VS Code terminal,
+    /// against an app that was behaving correctly in both.
     #[test]
     #[cfg(not(target_os = "macos"))]
     fn modifier_click_on_file_link_opens_via_our_handler() {
@@ -1258,8 +1264,16 @@ mod link_click_tests {
         );
         let mut down = mouse_down(15, 5);
         down.modifiers = crossterm::event::KeyModifiers::CONTROL;
-        assert!(matches!(agent.handle_mouse(&down), InputOutcome::Changed));
-        match agent.handle_mouse(&mouse_up(15, 5)) {
+        agent.handle_mouse(&down);
+        let outcome = agent.handle_mouse(&mouse_up(15, 5));
+        if has_native_link_hover() {
+            assert!(
+                !matches!(outcome, InputOutcome::Action(Action::OpenLink(_))),
+                "terminal owns link clicks here; we must not also open it: {outcome:?}"
+            );
+            return;
+        }
+        match outcome {
             InputOutcome::Action(Action::OpenLink(target)) => {
                 assert_eq!(
                     target,

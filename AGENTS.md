@@ -257,20 +257,27 @@ not the weather — this changed on 2026-08-10, when the sixty-six that CI repor
 were closed. Do not carry forward the old advice of comparing against an upstream
 baseline for this crate; the baseline is now zero.
 
-**But run it from a VS Code terminal and you get seven failures that are not
-real.** `default_actions()` calls `terminal_context()`, which reads the *process*
-environment, so the keybindings under test change with whatever terminal the
-suite happens to run in. Inside VS Code the brand is detected from
-`VSCODE_GIT_ASKPASS_MAIN` and Quit binds to Ctrl+D rather than Ctrl+Q, so the
-four `ctrl_q` tests, `build_entries_surfaces_interject_ctrl_i_fallback` and
-`modifier_click_on_file_link_opens_via_our_handler` fail against an app that is
-behaving correctly. Unsetting those variables does not give you the CI answer
-either — it makes it worse (50 failures), because the brand then refines to
-`WindowsTerminal`. The `actions::` tests build their registry explicitly and
-stay green throughout, which is the signal that the keybinding logic is fine and
-the environment is what moved. Before treating a pager failure as yours, check
-the count: CI reports 8275 passed, and a local 8268 + 7 is this, not a
-regression.
+**It also passes from a VS Code terminal now, and that took work.** Seven tests
+used to fail there against an app behaving correctly, because `default_actions()`
+calls `terminal_context()`, which reads the *process* environment: inside VS Code
+the brand is detected from `VSCODE_GIT_ASKPASS_MAIN`, Quit binds to Ctrl+D
+because the editor owns Ctrl+Q, interject moves to Ctrl+L, and a terminal with
+native link hover owns link clicks so the app must not also open them. Each test
+asserted one side of a rule that has two.
+
+The fixes are the pattern to copy. Five `ctrl_q` tests now call
+`pin_non_vscode_registry`, which already existed and which nine of their
+neighbours already used; two cheatsheet tests take
+`ActionRegistry::non_vscode_for_test()` instead of `defaults()`; and the
+link-click test asserts the rule on both sides — with native link hover, not
+intercepting is the correct outcome and is now checked. Reach for a pinned
+registry before reaching for a global.
+
+Do not try to reproduce CI by unsetting the VS Code variables. Four of them
+survive `env -u` in a Git Bash shell, so what you get is a hybrid that matches
+no real terminal and fails 50 tests in unrelated areas. The two configurations
+that exist are a VS Code terminal and a clean runner, and the suite reports 8275
+passed, 0 failed in both.
 
 **`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
 fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,

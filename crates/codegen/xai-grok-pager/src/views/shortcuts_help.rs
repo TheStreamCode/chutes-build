@@ -3361,7 +3361,10 @@ mod tests {
 
     #[test]
     fn build_entries_surfaces_interject_ctrl_i_fallback() {
-        let registry = ActionRegistry::defaults();
+        // Pinned: `defaults()` reads the host terminal, and the VS Code
+        // family moves interject to Ctrl+L because the editor owns Ctrl+I.
+        // The unpinned form asserted the host, not the fallback.
+        let registry = ActionRegistry::non_vscode_for_test();
         let entries = build_entries(&all_contexts(), &registry, true);
         // Action label is compact "send now" wording (interject under the hood).
         assert_cheatsheet_row_has_key(&entries, "send now", "Ctrl+i");
@@ -3369,7 +3372,7 @@ mod tests {
 
     #[test]
     fn build_entries_surfaces_queue_ctrl_apostrophe_fallback() {
-        let registry = ActionRegistry::defaults();
+        let registry = ActionRegistry::non_vscode_for_test();
         let entries = build_entries(&all_contexts(), &registry, true);
         assert_cheatsheet_row_has_key(&entries, "queue", "Ctrl+'");
     }
