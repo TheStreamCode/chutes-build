@@ -215,6 +215,17 @@ against `.github/known-failures/<platform>.txt`: a failure outside it fails, and
 a baselined test that starts passing fails too, because a list nobody prunes
 stops describing anything.
 
+**The full `xai-grok-tools --lib` suite does not complete on the Windows CI
+runner.** It ran 107 minutes, then 140, then hit the script's own 40-minute
+timeout, while finishing in six minutes on Linux and about five on a local
+Windows machine. Every Windows step in CI runs a narrow filter
+(`implementations::chutes::`) that skips `computer::local::terminal`, so nothing
+had ever run the whole suite on a runner and nothing had noticed it cannot. The
+Windows job therefore gates `xai-grok-workspace` only; run both locally, where
+it works. The hang is unexplained and wants its own investigation — the shell
+spawning in those tests against a runner with no interactive console is the
+place to start.
+
 If it reports something new, re-run before concluding. These suites do flake
 under load; one appeared and vanished within three runs the day the script was
 written. If it reproduces, it is yours. And when a genuinely flaky test earns a
