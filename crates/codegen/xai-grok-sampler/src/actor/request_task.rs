@@ -482,7 +482,16 @@ async fn run_one_attempt(
 ) -> AttemptOutcome {
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
-            let (raw, metadata) = match client.conversation_stream(request).await {
+            // Cancellable. Everything before the first chunk used to ignore the
+            // cancel token entirely: `drive_l2` watches it, but only once a
+            // stream exists, so a slow connect — or the Chutes chain waiting out
+            // a `Retry-After` — left Esc dead until the request returned on its
+            // own. Dropping the future here is what makes that wait safe.
+            let established = tokio::select! {
+                result = client.conversation_stream(request) => result,
+                () = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+            };
+            let (raw, metadata) = match established {
                 Ok(pair) => pair,
                 Err(e) => return AttemptOutcome::InitFailed { error: e },
             };
@@ -500,11 +509,14 @@ async fn run_one_attempt(
             .await
         }
         ApiBackend::Responses => {
-            let (raw, metadata, doom_loop) =
-                match client.conversation_stream_responses(request).await {
-                    Ok(parts) => parts,
-                    Err(e) => return AttemptOutcome::InitFailed { error: e },
-                };
+            let established = tokio::select! {
+                result = client.conversation_stream_responses(request) => result,
+                () = cancel_token.cancelled() => return AttemptOutcome::Cancelled,
+            };
+            let (raw, metadata, doom_loop) = match established {
+                Ok(parts) => parts,
+                Err(e) => return AttemptOutcome::InitFailed { error: e },
+            };
             if doom_check.is_none()
                 && let Some(collector) = &doom_loop
             {

@@ -20,6 +20,7 @@ use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
 };
 use serde::Serialize;
+use std::time::Duration;
 
 use chutes_build_core::reasoning::{
     ReasoningProfile, RequestedReasoning, WireReasoningEffort, reasoning_profile,
@@ -345,6 +346,37 @@ fn chutes_fallback_chain(
     let mut seen = std::collections::HashSet::new();
     models.retain(|model| seen.insert(model.clone()));
     models
+}
+
+/// How long the Chutes chain will wait on a `Retry-After` before giving up on
+/// the selected model.
+///
+/// A capacity 429 on a chute is often a burst: the server says "two seconds"
+/// and means it, and waiting beats handing the user a different model than the
+/// one they chose. A long `Retry-After` means the opposite — the chute is busy
+/// for a while, and the next candidate is the better answer *now*. So this is
+/// the line between the two readings, not a timeout.
+const CHUTES_MAX_SAME_MODEL_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether `error` says "this model is busy, come back" rather than "this model
+/// cannot serve you", and if so how long the server asked us to wait.
+///
+/// `None` means do not wait: either it is not a capacity signal, or the server
+/// asked for longer than [`CHUTES_MAX_SAME_MODEL_WAIT`].
+fn chutes_capacity_wait(error: &SamplingError) -> Option<Duration> {
+    let SamplingError::Api {
+        status,
+        retry_after_secs,
+        ..
+    } = error
+    else {
+        return None;
+    };
+    if !matches!(status.as_u16(), 429 | 503) {
+        return None;
+    }
+    let wait = Duration::from_secs((*retry_after_secs)?);
+    (wait <= CHUTES_MAX_SAME_MODEL_WAIT).then_some(wait)
 }
 
 fn requested_reasoning(effort: Option<ReasoningEffort>) -> RequestedReasoning {
@@ -1181,7 +1213,28 @@ impl SamplingClient {
             let has_fallback = index + 1 < candidates.len();
             let mut attempt = payload.clone();
             attempt.model = Some(candidate.clone());
-            match self.chat_completion_stream_once(attempt).await {
+            let mut outcome = self.chat_completion_stream_once(attempt.clone()).await;
+
+            // One retry on the *selected* model before abandoning it. The user
+            // picked this model; a burst 429 with a short `Retry-After` is the
+            // server saying "wait", not "use something else". A long one, or no
+            // header at all, falls through to the next candidate immediately.
+            //
+            // Safe to sleep here only because `run_one_attempt` selects this
+            // future against the cancel token, so Esc drops it mid-wait.
+            if let Err(error) = &outcome
+                && let Some(wait) = chutes_capacity_wait(error)
+            {
+                tracing::debug!(
+                    model_id = %candidate,
+                    wait_ms = wait.as_millis() as u64,
+                    "Chutes model at capacity; honouring Retry-After before trying another"
+                );
+                tokio::time::sleep(wait).await;
+                outcome = self.chat_completion_stream_once(attempt).await;
+            }
+
+            match outcome {
                 Ok(result) => return Ok(result),
                 Err(error) => {
                     let status = match &error {
@@ -2493,6 +2546,60 @@ mod tests {
             chutes_fallback_chain(true, false, None, "model-router"),
             ["model-router"]
         );
+    }
+
+    fn api_error(status: u16, retry_after_secs: Option<u64>) -> SamplingError {
+        SamplingError::Api {
+            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            message: "Infrastructure is at maximum capacity".into(),
+            model_metadata: None,
+            retry_after_secs,
+            should_retry: None,
+        }
+    }
+
+    #[test]
+    fn a_short_retry_after_is_waited_out_on_the_selected_model() {
+        // What the user actually hit. The server named a delay it means; the
+        // model they chose is worth that much waiting.
+        assert_eq!(
+            chutes_capacity_wait(&api_error(429, Some(2))),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            chutes_capacity_wait(&api_error(503, Some(5))),
+            Some(Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    fn a_long_retry_after_switches_model_instead_of_waiting() {
+        // Past the line, waiting is the wrong answer: the chute is busy for a
+        // while and another candidate can serve now.
+        assert_eq!(chutes_capacity_wait(&api_error(429, Some(6))), None);
+        assert_eq!(chutes_capacity_wait(&api_error(429, Some(120))), None);
+    }
+
+    #[test]
+    fn only_capacity_errors_are_worth_waiting_for() {
+        // No header: nothing to honour, so do not invent a delay.
+        assert_eq!(chutes_capacity_wait(&api_error(429, None)), None);
+        // Not capacity: a cold or missing model does not get better in 2s, and
+        // an auth or request error never does.
+        assert_eq!(chutes_capacity_wait(&api_error(404, Some(2))), None);
+        assert_eq!(chutes_capacity_wait(&api_error(400, Some(2))), None);
+        assert_eq!(chutes_capacity_wait(&api_error(401, Some(2))), None);
+        assert_eq!(
+            chutes_capacity_wait(&SamplingError::InvalidConfiguration("no")),
+            None
+        );
+    }
+
+    #[test]
+    fn the_wait_cannot_outlast_a_user_s_patience() {
+        // The cap is a policy line, not a timeout, and it is what bounds how
+        // long Esc can appear unresponsive if the select is ever removed.
+        assert!(CHUTES_MAX_SAME_MODEL_WAIT <= Duration::from_secs(5));
     }
 
     #[test]
