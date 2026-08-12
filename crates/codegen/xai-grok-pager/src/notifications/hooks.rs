@@ -91,7 +91,17 @@ fn attach_to_global_scope(child: &std::process::Child) -> Option<Arc<xai_tty_uti
         .then_some(group)
 }
 
-pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
+/// Run `hook` for `event` on its own thread.
+///
+/// Returns the join handle so a caller that needs to know the hook *finished*
+/// can wait for the fact instead of for the clock. Dropping it detaches, which
+/// is what fire-and-forget callers want and what this did before.
+///
+/// The handle exists because the alternative is a deadline, and a deadline on a
+/// forked shell measures how loaded the machine is, not whether the hook works:
+/// `run_hook_passes_correct_env_via_thread` polled for five seconds and went
+/// red on a CI runner that had just compiled the workspace.
+pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) -> std::thread::JoinHandle<()> {
     let command = hook.command.clone();
     let event_str: &'static str = event.kind.as_str();
     let message = event.body.clone();
@@ -106,7 +116,7 @@ pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
             session_id.as_deref(),
             timeout,
         );
-    });
+    })
 }
 
 #[cfg(test)]
@@ -305,21 +315,17 @@ mod tests {
             timeout_secs: 5,
         };
         let event = test_event();
-        run_hook(&hook, &event);
+        // Wait for the hook to finish, not for five seconds to pass. The
+        // previous form polled against a deadline and failed on a CI runner
+        // that had just built the workspace — the shell was merely slow to be
+        // scheduled, which is not what this test is about. `execute_hook`
+        // enforces the hook's own timeout, so joining cannot hang.
+        run_hook(&hook, &event)
+            .join()
+            .expect("hook thread panicked");
 
-        // Poll for the output file instead of a fixed sleep — the spawned
-        // thread + fork/exec may take variable time on loaded systems.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let content = loop {
-            if let Ok(c) = std::fs::read_to_string(&out) {
-                break c;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "hook did not produce output file within 5s (sh or printf may not be available)"
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        };
+        let content = std::fs::read_to_string(&out)
+            .expect("hook finished without writing its output (is `sh` on PATH?)");
         assert!(content.contains("CHUTES_BUILD_EVENT=Turn complete"));
         assert!(content.contains("CHUTES_BUILD_MESSAGE=test body payload"));
         assert!(content.contains("CHUTES_BUILD_SESSION_ID=test-session-123"));
