@@ -207,31 +207,23 @@ npm pack --dry-run
 git diff --check
 ```
 
-That `known_failures` line is the one whose absence used to matter. Those two
-crates fail 122 tests on Windows and 66 on Linux, all pre-dating the 1.0.0
-re-base, and the commands above only ever ran narrow filters over them — so a
-*new* failure among them looked exactly like the rest. The script compares
-against `.github/known-failures/<platform>.txt`: a failure outside it fails, and
-a baselined test that starts passing fails too, because a list nobody prunes
-stops describing anything.
+`known_failures.py` is a **local diagnostic, not a CI gate.** It compares those
+two crates against `.github/known-failures/<platform>.txt` and is useful for one
+question: did *my* change break something in the ~188 tests the narrow filters
+skip? Run it before and after and compare.
 
-**The full `xai-grok-tools --lib` suite does not complete on the Windows CI
-runner.** It ran 107 minutes, then 140, then hit the script's own 40-minute
-timeout, while finishing in six minutes on Linux and about five on a local
-Windows machine. Every Windows step in CI runs a narrow filter
-(`implementations::chutes::`) that skips `computer::local::terminal`, so nothing
-had ever run the whole suite on a runner and nothing had noticed it cannot. The
-Windows job therefore gates `xai-grok-workspace` only; run both locally, where
-it works. The hang is unexplained and wants its own investigation — the shell
-spawning in those tests against a runner with no interactive console is the
-place to start.
+It is not in CI because the set it compares is not fixed. Of 53
+`xai-grok-workspace` failures recorded on a local Windows machine, 17 pass on the
+Windows runner and 2 others fail; a `daemonize` test failed on Linux in one run
+and not in the run 90 minutes earlier, same commit. A per-test gate needs a
+stable set, and making these suites deterministic is the real work — see
+`docs/upstream-sync.md`. Do not re-add the CI step before that is done; it was
+tried, and it produced red builds that said nothing about the commits.
 
-If it reports something new, re-run before concluding. These suites do flake
-under load; one appeared and vanished within three runs the day the script was
-written. If it reproduces, it is yours. And when a genuinely flaky test earns a
-place on the list, prefer fixing the flake — a notification-hook test polled a
-five-second deadline for a forked shell and went red on a loaded runner, where
-the fix was to wait for the thread rather than the clock.
+The full `xai-grok-tools --lib` suite also never completes on the Windows
+runner — 107 minutes, then 140, then a 40-minute timeout, against six on Linux —
+which is why every Windows step here runs a narrow filter. Both suites run fine
+locally.
 
 ### The model catalogue is the source of truth, and we were not reading it
 

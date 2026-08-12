@@ -661,6 +661,14 @@ tool invocable.
 - The pre-stream fallback chain (`CHUTES_FALLBACK_MODELS`), which needs a model to
   be genuinely unavailable to trigger. The short-`Retry-After` wait added in
   1.0.4 needs the same: a real capacity 429 carrying the header.
+- **Making `xai-grok-tools` and `xai-grok-workspace` deterministic.** Their
+  failing sets move: of 53 `xai-grok-workspace` failures recorded on a local
+  Windows machine, 17 pass on the Windows runner and 2 others fail, and a
+  `daemonize` test failed on Linux in one run and not in the run 90 minutes
+  earlier on the same commit. That is why `known_failures.py` is a local
+  diagnostic rather than a CI gate — a per-test baseline needs a fixed set. This
+  is the work that would make ~188 currently unwatched tests watchable, and it is
+  larger than the tooling that exposed it.
 - **Why `xai-grok-tools --lib` never finishes on the Windows CI runner.** It ran
   107 minutes, then 140, then hit a 40-minute timeout, against six minutes on
   Linux and about five on a local Windows machine. Every Windows step in the

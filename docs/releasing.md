@@ -44,13 +44,13 @@ python scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspa
 cargo deny --locked check advisories licenses bans sources
 ```
 
-`known_failures.py` belongs in a release check because CI's own run of it is
-per-platform and you are on one of them. It gates the 122 Windows and 66 Linux
-failures that pre-date the 1.0.0 re-base — a set CI previously stepped around
-with narrow filters, leaving a new failure among them indistinguishable from the
-rest. Do not `--record` your way past a red result to get a release out: the
-baseline is the claim that nothing new broke, and rewriting it to match reality
-turns the claim into a tautology.
+`known_failures.py` is here because CI does not run it: the set of failures it
+compares is not stable across machines or runs, so it cannot be a gate (see
+`AGENTS.md`). Locally it still answers the question that matters before a
+release — did anything in the ~188 tests the CI filters skip change under me? —
+and this is the only place that asks it. Read a red result rather than
+`--record`-ing past it; the baseline is the claim that nothing new broke, and
+rewriting it to match reality turns the claim into a tautology.
 
 Run that `cargo deny` **online**. It checks the live advisory database, so an
 `--offline` run reuses whatever is already on disk and cannot see anything

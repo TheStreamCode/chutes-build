@@ -126,13 +126,6 @@ jobs:
           cargo clippy -p chutes-build -p chutes-build-core -p xai-grok-tools \
             --all-targets --locked --no-deps -- -D warnings
           cargo clippy -p xai-grok-pager --lib --locked --no-deps -- -D warnings
-      # No Linux baseline is committed yet: the 122 known failures were measured
-      # on Windows and nobody has measured this platform. Until one exists the
-      # script prints what it observed and exits 0, so this run is how the
-      # numbers get discovered — read the log and commit
-      # `.github/known-failures/linux.txt` if the list is stable.
-      - name: Known-failure baseline
-        run: python3 scripts/known_failures.py --crate xai-grok-tools --crate xai-grok-workspace
 
   npm-package:
     name: npm package
@@ -158,17 +151,12 @@ jobs:
   windows-check:
     name: Rust quality (Windows)
     runs-on: windows-2025
-    # 150, because the known-failure gate below added real work to a budget
-    # sized without it. Measured on the run that hit the wall: checkout 12s,
-    # `Check Chutes Build` 10m, pager 23m, auth+tools 26m — 59 minutes — and
-    # the gate had used 31 more and was not finished when 90 struck. It has to
-    # compile `xai-grok-workspace`, which nothing else in this job builds; the
-    # suites themselves run in under a minute.
-    #
-    # Every step that existed before succeeded. This is the same shape as the
-    # 120-minute release budget that shipped nothing: a job that did all its
-    # work and got killed on the last step. Sizing it at 59 + ~40 cold + margin.
-    timeout-minutes: 150
+    # Back to 90 now that the known-failure gate is gone from this job. It was
+    # raised to 150 to accommodate that step, twice, before measurement showed
+    # the step was not slow but unbounded: `xai-grok-tools --lib` never
+    # completes on this runner. Raising a budget was the wrong response to a
+    # number (107 minutes against six on Linux) that was already saying so.
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -200,21 +188,6 @@ jobs:
           cargo build -p xai-grok-shell --bin auth-provider-fixture --locked
           cargo test -p xai-grok-shell --lib auth:: --locked
           cargo test -p xai-grok-tools --lib implementations::chutes:: --locked
-      # `xai-grok-workspace` only, and that is a finding rather than a
-      # preference: the full `xai-grok-tools --lib` suite does not complete on
-      # this runner. It ran 107 minutes, then 140, then hit the script's own
-      # 40-minute timeout — while finishing in six minutes on Linux and about
-      # five on a local Windows machine. Every other Windows step here runs a
-      # narrow filter (`implementations::chutes::`) that skips
-      # `computer::local::terminal`, so nothing had ever run the whole thing on
-      # a runner, and nothing had noticed it cannot.
-      #
-      # Its 69 Windows entries stay in the baseline for local runs, which the
-      # script tolerates because it compares only the crates it was asked to
-      # run. The hang wants its own investigation; leaving the step out of the
-      # job in the meantime beats a red build that says nothing new.
-      - name: Known-failure baseline
-        run: python scripts/known_failures.py --crate xai-grok-workspace
 
   macos-check:
     name: Rust check (macOS)
