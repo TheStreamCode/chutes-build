@@ -718,6 +718,33 @@ this and is re-runnable.
 Order the work by area, not by commit, and land each area with its own tests
 green: it is the only way to tell which area broke something.
 
+#### Let the machine sort the delta first
+
+`python scripts/port_assist.py --base afbc0fb7` splits the 238 files five ways
+and only the last needs a person:
+
+```
+done          30  (12%)  already ported — we hold upstream's version
+new           13  ( 5%)  not in our tree
+clean         62  (26%)  untouched by us since the baseline
+mechanical    52  (21%)  our divergence is exactly the rebrand
+manual        81  (34%)  genuine divergence — read it
+```
+
+`mechanical` is the bucket worth understanding: for those files
+`rebrand(upstream@base)` reproduces our current version character for
+character, which proves our only divergence was the rebrand and that
+re-applying it to upstream's *new* version reproduces the work exactly.
+
+`--apply` writes the three take-able buckets and leaves `manual` alone. It is
+where the work starts, not where it ends — every area ported so far reached two
+to four crates, so compile, run the suite and check `known_failures.py` before
+believing any of it.
+
+A useful sanity check on the tool: `--path crates/codegen/xai-grok-agent`
+reports 100% manual. That is the crate holding `templates/prompt.md`, and
+taking it automatically is exactly what told every model it was released by xAI.
+
 #### Ported so far
 
 Four areas, 28 files, on `port/upstream-b13fa526`. Each landed as its own commit

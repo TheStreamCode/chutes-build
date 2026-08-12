@@ -112,9 +112,18 @@ compiled, passed the gate, and shipped.
 Port by hand instead, one area per commit, so any piece can be reverted alone. The
 full procedure is in `docs/upstream-sync.md`; the short version:
 
-- Read `git diff <base>..upstream/main` by area and decide per area. Take what is
-  clearly useful and isolable; leave anything that touches Chutes identity, the
-  seams, or a policy-forbidden feature.
+- Start with `python scripts/port_assist.py --base <baseline>`. It sorts the
+  delta into what needs a judgement call and what does not: files absent here,
+  files we never touched, and files whose divergence *is* the rebrand — for
+  those, `rebrand(upstream@base)` reproduces our version character for
+  character, so re-applying it reproduces the work. Currently 127 of the 208
+  outstanding files. It also recognises what earlier sessions already ported, so
+  the same files are not handed back for review twice.
+- Read `git diff <base>..upstream/main` by area for the rest, and decide per
+  area. Take what is clearly useful and isolable; leave anything that touches
+  Chutes identity, the seams, or a policy-forbidden feature. `xai-grok-agent` is
+  100% manual and should stay that way — taking `templates/prompt.md`
+  automatically is what told every model it was released by xAI.
 - Re-run `python scripts/rebrand.py --apply`, then `--check`. It fails loudly on
   any forbidden token outside its allowlist, and reports the four ambiguous token
   families it will never rewrite for you. **Read `git status` after every run.**
