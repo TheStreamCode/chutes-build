@@ -158,7 +158,17 @@ jobs:
   windows-check:
     name: Rust quality (Windows)
     runs-on: windows-2025
-    timeout-minutes: 90
+    # 150, because the known-failure gate below added real work to a budget
+    # sized without it. Measured on the run that hit the wall: checkout 12s,
+    # `Check Chutes Build` 10m, pager 23m, auth+tools 26m — 59 minutes — and
+    # the gate had used 31 more and was not finished when 90 struck. It has to
+    # compile `xai-grok-workspace`, which nothing else in this job builds; the
+    # suites themselves run in under a minute.
+    #
+    # Every step that existed before succeeded. This is the same shape as the
+    # 120-minute release budget that shipped nothing: a job that did all its
+    # work and got killed on the last step. Sizing it at 59 + ~40 cold + margin.
+    timeout-minutes: 150
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
