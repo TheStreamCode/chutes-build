@@ -2377,6 +2377,21 @@ fn build_update_config() -> UpdateConfig {
 /// Central gate for auto-update checks; add new suppression rules here,
 /// not at call sites.
 fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
+    // The product invariant first. `product::AUTOMATIC_SELF_UPDATE` documents
+    // that a running Chutes Build never downloads its own update, and until now
+    // nothing read it — the constant appeared exactly once in the tree, inside a
+    // comment. What actually held the line was the `internal` installer's base
+    // URLs being deadened to `127.0.0.1:9`.
+    //
+    // That is not the same promise. `get_installer()` honours
+    // `CHUTES_BUILD_INSTALLER=npm` and `[cli] installer` in config.toml, and the
+    // npm path shells out to `npm view` while gh-release calls the GitHub API —
+    // neither deadened. So a single line of user config turned the release
+    // binary into one that contacts a registry at startup and can spawn a
+    // download child, against a documented guarantee that it would not.
+    if !chutes_build_core::product::AUTOMATIC_SELF_UPDATE {
+        return false;
+    }
     if cfg!(debug_assertions) {
         return false;
     }
@@ -2536,6 +2551,28 @@ async fn signal_leaders_to_relaunch(installed_version: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The update check must be off because the product says so, not because
+    /// the `internal` installer's URLs happen to point at a discard port.
+    ///
+    /// Those are different promises: `get_installer()` honours
+    /// `CHUTES_BUILD_INSTALLER=npm` and `[cli] installer` in config.toml, and
+    /// the npm and gh-release paths are live — `npm view` and the GitHub API.
+    /// Before this, one line of user config was enough to make a release binary
+    /// contact a registry at startup and spawn a download child. This asserts
+    /// the switch is *read*: flip `AUTOMATIC_SELF_UPDATE` to `true` and it fails
+    /// here rather than silently shipping a phone-home.
+    #[test]
+    fn the_update_check_is_gated_on_the_product_switch() {
+        assert!(
+            !chutes_build_core::product::AUTOMATIC_SELF_UPDATE,
+            "Chutes Build does not self-update; see PRIVACY.md and product.rs"
+        );
+        // Every argument combination, including the one that opts *in*.
+        assert!(!should_check_for_updates(false));
+        assert!(!should_check_for_updates(true));
+    }
+
     #[test]
     fn default_caps_the_core_count() {
         let nz = |n| NonZeroUsize::new(n).unwrap();

@@ -1702,6 +1702,7 @@ name = "chutes-build"
 version = "1.0.3"
 dependencies = [
  "anyhow",
+ "chutes-build-core",
  "clap",
  "cryptify",
  "dunce",
