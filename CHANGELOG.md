@@ -6,6 +6,23 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-18
+
+### Added
+
+- **Tool calls emitted as plain text are recovered.** An open-weight model served through vLLM or SGLang can emit a well-formed tool call in its own chat-template syntax while the server-side parser returns an empty `tool_calls` array, so the turn ends having done nothing and the user sees raw markup. The runtime now recognises the Hermes/Qwen `<tool_call>`, Kimi K2 and Llama inline-function shapes (plus a strict fenced-JSON form) and turns them back into real calls only when the name resolves to a registered tool and the arguments pass that tool's own parser. `CHUTES_DISABLE_TOOL_TEXT_RECOVERY=1` disables it.
+- **`/usage` reports cache effectiveness.** A `cache_read_ratio` (cached read tokens divided by input tokens, clamped to `[0, 1]`) and per-call `cache_hit_calls` / `cache_miss_calls` counters join the token totals; the TUI usage block now shows the cached percentage and the hit count.
+
+### Changed
+
+- **Models without tool calling no longer receive a `tools` array.** The live catalog's `supported_features` now gates tool specs: a model that does not advertise `tools` gets an empty tool list instead of a request its endpoint rejects. The `StructuredOutput` tool is gated the same way and falls back to validating the final answer text directly. The default stays `true` for models absent from the catalog.
+
+### Fixed
+
+- **Parallel tool calls from providers that omit the chunk index no longer fuse.** `ToolCallDelta.index` is now optional, and the stream correlates by tool-call `id` when the index is absent; previously a missing index defaulted to `0`, merging every parallel call into one accumulator and concatenating their arguments into invalid JSON.
+- **Non-streaming requests now apply the Chutes reasoning plan.** Compaction, title generation and the advisor sent the bare payload to the configured inference base, dropping the `chat_template_kwargs` thinking switches and never routing `model-router` to the router endpoint, the same asymmetry the streaming path already handled.
+- **Stream deserialization errors name the offending chute.** A failed chunk now carries a short excerpt of the SSE payload alongside the serde error, so "expected value at line 1 column 1" says which backend produced what.
+
 ## [1.0.4] - 2026-08-12
 
 Two threads. The manual port from upstream `b13fa526` begins — one area per

@@ -72,6 +72,15 @@ do not inherit guessed reasoning controls from a provider prefix.
 `Auto (Chutes Router)` has no model-specific effort selector because its target
 may change between requests.
 
+## Tool calling
+
+Open-weight models served through vLLM or SGLang can return a well-formed tool
+call as plain text in their chat-template syntax while the server-side parser
+reports an empty `tool_calls` array. Chutes Build recognises the Hermes/Qwen,
+Kimi K2 and Llama shapes and turns them back into real calls only when the tool
+name resolves to a registered tool and the arguments pass its parser.
+`CHUTES_DISABLE_TOOL_TEXT_RECOVERY=1` disables the recovery.
+
 ## Web, Context7, and browser
 
 | Variable | Purpose |
