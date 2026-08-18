@@ -36,6 +36,10 @@ pub struct UsageTotals {
     pub cache_creation_tokens: u64,
     pub reasoning_tokens: u64,
     pub model_calls: u64,
+    /// Calls whose prompt read from the server-side prefix cache.
+    pub cache_hit_calls: u64,
+    /// Calls with no cached prompt read (`cached_prompt_tokens == 0`).
+    pub cache_miss_calls: u64,
     pub api_duration_ms: u64,
     /// USD ticks (1e10 per USD). Absent when no call reported cost.
     pub cost_usd_ticks: Option<i64>,
@@ -49,6 +53,7 @@ impl UsageTotals {
         cost_usd_ticks: Option<i64>,
     ) -> Self {
         let cost_usd_ticks = xai_grok_sampling_types::reported_cost_ticks(cost_usd_ticks);
+        let cache_hit = usage.cached_prompt_tokens > 0;
         Self {
             input_tokens: u64::from(usage.prompt_tokens),
             output_tokens: u64::from(usage.completion_tokens),
@@ -56,6 +61,8 @@ impl UsageTotals {
             cache_creation_tokens: u64::from(usage.cache_creation_prompt_tokens),
             reasoning_tokens: u64::from(usage.reasoning_tokens),
             model_calls: 1,
+            cache_hit_calls: u64::from(cache_hit),
+            cache_miss_calls: u64::from(!cache_hit),
             api_duration_ms: api_duration_ms.unwrap_or(0),
             cost_usd_ticks,
             cost_missing_calls: u64::from(cost_usd_ticks.is_none()),
@@ -64,6 +71,17 @@ impl UsageTotals {
 
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens.saturating_add(self.output_tokens)
+    }
+
+    /// Cache read ratio `cached_read_tokens / input_tokens`, 0-safe and clamped
+    /// to `[0, 1]`. `cache_creation_tokens` is deliberately excluded: for
+    /// ChatCompletions it is hardcoded to 0 (only Anthropic Messages reports it).
+    pub fn cache_read_ratio(&self) -> f64 {
+        if self.input_tokens == 0 {
+            return 0.0;
+        }
+        let ratio = self.cached_read_tokens as f64 / self.input_tokens as f64;
+        ratio.clamp(0.0, 1.0)
     }
 
     pub fn cost_is_partial(&self) -> bool {
@@ -78,6 +96,8 @@ impl UsageTotals {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
+            cache_hit_calls,
+            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_missing_calls,
@@ -90,6 +110,8 @@ impl UsageTotals {
             .saturating_add(*cache_creation_tokens);
         self.reasoning_tokens = self.reasoning_tokens.saturating_add(*reasoning_tokens);
         self.model_calls = self.model_calls.saturating_add(*model_calls);
+        self.cache_hit_calls = self.cache_hit_calls.saturating_add(*cache_hit_calls);
+        self.cache_miss_calls = self.cache_miss_calls.saturating_add(*cache_miss_calls);
         self.api_duration_ms = self.api_duration_ms.saturating_add(*api_duration_ms);
         self.cost_missing_calls = self.cost_missing_calls.saturating_add(*cost_missing_calls);
         self.cost_usd_ticks = merge_cost_ticks(self.cost_usd_ticks, *cost_usd_ticks);
@@ -198,5 +220,36 @@ mod tests {
 
         ledger.record_subagent(&[], true);
         assert!(ledger.incomplete);
+    }
+
+    #[test]
+    fn cache_read_ratio_is_zero_safe_and_clamped() {
+        let mut t = UsageTotals::default();
+        // input == 0 must not divide by zero.
+        assert_eq!(t.cache_read_ratio(), 0.0);
+
+        t.input_tokens = 100;
+        t.cached_read_tokens = 40;
+        assert!((t.cache_read_ratio() - 0.4).abs() < f64::EPSILON);
+
+        // cached cannot exceed input in practice; clamp keeps the ratio <= 1.
+        t.cached_read_tokens = 250;
+        assert_eq!(t.cache_read_ratio(), 1.0);
+    }
+
+    #[test]
+    fn cache_hit_miss_counters_follow_cached_prompt_tokens() {
+        let mut ledger = UsageLedger::default();
+
+        let mut hit = tu(100, 10);
+        hit.cached_prompt_tokens = 40;
+        ledger.record_main_loop_call("m", &hit, None, None);
+
+        let miss = tu(100, 10); // cached_prompt_tokens == 0
+        ledger.record_main_loop_call("m", &miss, None, None);
+
+        assert_eq!(ledger.totals.cache_hit_calls, 1);
+        assert_eq!(ledger.totals.cache_miss_calls, 1);
+        assert_eq!(ledger.totals.model_calls, 2);
     }
 }

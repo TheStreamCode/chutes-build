@@ -288,9 +288,34 @@ struct StreamingChatRequest<'a> {
     chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
 }
 
+/// Non-streaming body wrapper: carries the Chutes chat-template controls next
+/// to the flattened request, mirroring [`StreamingChatRequest`] so compaction,
+/// title generation and the advisor apply the same reasoning plan instead of
+/// silently dropping it.
+#[derive(Serialize)]
+struct NonStreamingChatRequest<'a> {
+    #[serde(flatten)]
+    inner: &'a ChatCompletionRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
+}
+
 #[derive(Serialize)]
 struct StreamOptions {
     include_usage: bool,
+}
+
+/// Leading `max_chars` of an SSE payload, for error context.
+///
+/// A serde message alone ("expected value at line 1 column 1") says nothing
+/// about which chute produced what. The full payload is already in the local
+/// error log; this puts enough of it in the error the user actually sees.
+fn chunk_excerpt(data: &str, max_chars: usize) -> String {
+    let mut excerpt: String = data.chars().take(max_chars).collect();
+    if excerpt.len() < data.len() {
+        excerpt.push('…');
+    }
+    excerpt
 }
 
 fn is_chutes_backend(base_url: &str) -> bool {
@@ -1150,6 +1175,14 @@ impl SamplingClient {
         &self,
         payload: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
+        // Mirror the streaming path: apply the Chutes reasoning plan and route
+        // the virtual `model-router` to the router endpoint. This path used to
+        // send the bare payload to the configured inference base, so
+        // compaction, title generation and the advisor dropped the thinking
+        // switches and never reached the router under `model-router`.
+        let mut payload = payload;
+        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
+
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -1173,8 +1206,12 @@ impl SamplingClient {
         let SentRequest {
             builder,
             sent_bearer,
-        } = self.post(self.endpoint("chat/completions"));
-        let http_request = grok_headers.apply(builder).json(&payload);
+        } = self.post(self.chat_completions_endpoint(&model_id)?);
+        let request = NonStreamingChatRequest {
+            inner: &payload,
+            chat_template_kwargs: chat_template_kwargs.as_ref(),
+        };
+        let http_request = grok_headers.apply(builder).json(&request);
 
         let response = http_request.send().await.map_err(|e| {
             // Log at debug level; errors are surfaced to the caller.
@@ -1438,7 +1475,14 @@ impl SamplingClient {
                                         raw_data = %data,
                                         "Failed to deserialize ChatCompletionChunk from stream"
                                     );
-                                    SamplingError::Serialization(e)
+                                    // Stays a `Serialization` error, which is
+                                    // non-retryable by design — this only adds
+                                    // the context needed to tell which chute
+                                    // sent what.
+                                    SamplingError::serialization_message(format!(
+                                        "{e} (chunk: {})",
+                                        chunk_excerpt(data, 200)
+                                    ))
                                 }),
                             )
                         }
@@ -2539,6 +2583,64 @@ mod tests {
 
         assert!(obj.get("max_tokens").is_none());
         assert!(obj.get("tools").is_none());
+    }
+
+    #[test]
+    fn non_streaming_chat_request_flattens_inner_and_mirrors_kwargs() {
+        let req = ChatCompletionRequest {
+            model: Some("deepseek-ai/DeepSeek-R1".into()),
+            messages: vec![ChatRequestMessage::user("hello")],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            user: None,
+            tools: None,
+            tool_choice: None,
+            search_parameters: None,
+            response_format: None,
+            reasoning_effort: None,
+            x_grok_conv_id: None,
+            x_grok_req_id: None,
+            x_grok_session_id: None,
+            x_grok_turn_idx: None,
+            x_grok_agent_id: None,
+            x_grok_deployment_id: None,
+            x_grok_user_id: None,
+            trace: None,
+        };
+
+        let kwargs = ChutesChatTemplateKwargs {
+            enable_thinking: Some(true),
+            thinking: None,
+        };
+
+        let wrapper = NonStreamingChatRequest {
+            inner: &req,
+            chat_template_kwargs: Some(&kwargs),
+        };
+
+        let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
+        assert_eq!(
+            json.get("model").and_then(|v| v.as_str()),
+            Some("deepseek-ai/DeepSeek-R1")
+        );
+        let kwargs_obj = json.get("chat_template_kwargs").unwrap();
+        assert_eq!(
+            kwargs_obj.get("enable_thinking").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(kwargs_obj.get("thinking").is_none());
+        assert!(json.get("stream").is_none());
+
+        // Without kwargs, the field must be absent from json.
+        let bare = NonStreamingChatRequest {
+            inner: &req,
+            chat_template_kwargs: None,
+        };
+        let bare_json: serde_json::Value = serde_json::to_value(&bare).unwrap();
+        assert!(bare_json.get("chat_template_kwargs").is_none());
     }
 
     #[test]

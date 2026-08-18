@@ -978,6 +978,14 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| meta.and_then(|m| m.get("supportsBackendSearch")))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        supports_tools: obj
+            .get("supported_features")
+            .or_else(|| obj.get("supportedFeatures"))
+            .or_else(|| meta.and_then(|m| m.get("supported_features")))
+            .or_else(|| meta.and_then(|m| m.get("supportedFeatures")))
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().any(|f| f.as_str() == Some("tools")))
+            .unwrap_or(true),
         compactions_remaining: obj
             .get("compactionsRemaining")
             .or_else(|| obj.get("compactions_remaining"))

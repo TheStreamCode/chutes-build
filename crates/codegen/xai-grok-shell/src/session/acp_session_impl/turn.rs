@@ -1979,21 +1979,29 @@ impl SessionActor {
             jsonschema::validator_for(schema).map_err(|e| format!("invalid output schema: {e}"))
         });
         let schema_ok = matches!(structured_output_validator, Some(Ok(_)));
-        let native_backend = if json_schema.is_some() {
+        let (native_backend, turn_model) = if json_schema.is_some() {
             match self.chat_state_handle.get_sampling_config().await {
-                Some(c) => c.api_backend.supports_native_schema(),
+                Some(c) => (c.api_backend.supports_native_schema(), Some(c.model)),
                 None => {
                     tracing::warn!(
                         "structured output: no sampling config; using StructuredOutput tool"
                     );
-                    false
+                    (false, None)
                 }
             }
         } else {
-            false
+            (false, None)
         };
         let structured_output_native = schema_ok && native_backend;
-        let structured_output_tool = schema_ok && !native_backend;
+        // The StructuredOutput tool path needs tool calling. When the catalog
+        // declares the active model cannot call tools, fall back to validating
+        // the final answer text directly (see the final_answer_text path below)
+        // rather than sending a tool spec the endpoint would reject.
+        let structured_output_tool = schema_ok
+            && !native_backend
+            && turn_model
+                .as_deref()
+                .is_none_or(|m| self.models_manager.model_supports_tools(m));
         if structured_output_tool {
             self.push_system_reminder(
                 "A response schema is required. After any tool use, call the \
@@ -2124,6 +2132,24 @@ impl SessionActor {
                 } else {
                     self.turn_base_tool_specs(&tool_definitions)
                 };
+
+            // Gating per modello: se il modello attivo non supporta le tool call
+            // (come da catalogo live o config), ometti l'array dei tools per evitare
+            // errori 400 da endpoint che non implementano function calling.
+            let current_model = self
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .map(|c| c.model)
+                .unwrap_or_default();
+            if !self.models_manager.model_supports_tools(&current_model) {
+                tracing::debug!(
+                    model = %current_model,
+                    "omitting tools because model does not support tool calling"
+                );
+                effective_tools.clear();
+            }
+
             if structured_output_tool && let Some(schema) = json_schema.clone() {
                 effective_tools.push(ToolSpec {
                     name: STRUCTURED_OUTPUT_TOOL.to_string(),
@@ -2200,7 +2226,7 @@ impl SessionActor {
                 })),
             );
             let model_timer = std::time::Instant::now();
-            let (response, latency) = match self.run_turn_via_sampler(request.clone()).await {
+            let (mut response, latency) = match self.run_turn_via_sampler(request.clone()).await {
                 Ok(SamplerTurnOutcome::Response(r, latency)) => (r, latency),
                 Err(error) => {
                     self.tool_context.fail_task_output_usage_closed();
@@ -2339,6 +2365,11 @@ impl SessionActor {
                 }
             };
             auth_retry_schedule.reset_on_success();
+            // Before anything reads `tool_calls`, `stop_reason` or the assistant
+            // text: a chute with no server-side tool-call parser delivers the
+            // call as text, and everything downstream would treat the turn as a
+            // plain answer.
+            self.recover_text_tool_calls(&mut response).await;
             let model_elapsed_ms = model_timer.elapsed().as_millis() as u64;
             let usage = response.usage.as_ref();
             let prompt_tokens = usage.map(|u| u.prompt_tokens);

@@ -1692,6 +1692,7 @@ fn make_entry_config_with_id(
         supports_reasoning_effort: false,
         reasoning_efforts: Vec::new(),
         supports_backend_search: false,
+        supports_tools: true,
         compactions_remaining: None,
         compaction_at_tokens: None,
         show_model_fingerprint: false,

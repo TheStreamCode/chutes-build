@@ -530,6 +530,16 @@ impl ModelsManager {
             .unwrap_or(false)
     }
 
+    pub(crate) fn model_supports_tools(&self, model_id: &str) -> bool {
+        self.inner
+            .catalog
+            .read()
+            .models
+            .get(model_id)
+            .map(|e| e.info().supports_tools)
+            .unwrap_or(true)
+    }
+
     pub(crate) fn model_compactions_remaining(
         &self,
         model_id: &str,

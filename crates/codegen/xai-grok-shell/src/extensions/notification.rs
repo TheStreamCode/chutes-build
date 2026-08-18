@@ -153,8 +153,10 @@ impl PromptUsage {
             cache_creation_tokens, // subset of input_tokens on the wire
             reasoning_tokens: _,   // subset of output_tokens
             model_calls,
-            api_duration_ms: _, // timing, not tokens
-            cost_usd_ticks: _,  // cost without usage cannot occur
+            cache_hit_calls: _,  // derived from calls; 0 whenever model_calls == 0
+            cache_miss_calls: _, // derived from calls; 0 whenever model_calls == 0
+            api_duration_ms: _,  // timing, not tokens
+            cost_usd_ticks: _,   // cost without usage cannot occur
             cost_is_partial: _,
             cost_missing_calls: _,
         } = self.totals;
@@ -188,6 +190,12 @@ pub struct PromptUsageModel {
     pub reasoning_tokens: u64,
     #[serde(default)]
     pub model_calls: u64,
+    /// Calls whose prompt read from the server-side prefix cache.
+    #[serde(default)]
+    pub cache_hit_calls: u64,
+    /// Calls with no cached prompt read (`cached_prompt_tokens == 0`).
+    #[serde(default)]
+    pub cache_miss_calls: u64,
     #[serde(default)]
     pub api_duration_ms: u64,
     /// Server cost in USD ticks (`USD_TICKS_PER_USD` = 1e10 ticks per $1).
@@ -206,6 +214,19 @@ pub struct PromptUsageModel {
     /// `cost_is_partial` only — never on the public ACP wire.
     #[serde(default, skip_serializing)]
     pub cost_missing_calls: u64,
+}
+
+impl PromptUsageModel {
+    /// Cache read ratio (`cached_read_tokens / input_tokens`), 0-safe and
+    /// clamped to `[0, 1]`. `cache_creation_tokens` is excluded: for
+    /// ChatCompletions it is hardcoded to 0 (only Anthropic Messages reports it).
+    pub fn cache_read_ratio(&self) -> f64 {
+        if self.input_tokens == 0 {
+            return 0.0;
+        }
+        let ratio = self.cached_read_tokens as f64 / self.input_tokens as f64;
+        ratio.clamp(0.0, 1.0)
+    }
 }
 
 /// One model call's token usage: the four Messages API `message.usage` fields
@@ -236,6 +257,8 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
+            cache_hit_calls,
+            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_missing_calls,
@@ -248,6 +271,8 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
+            cache_hit_calls,
+            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_is_partial: t.cost_is_partial(),
@@ -309,8 +334,10 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
         cached_read_tokens,
         cache_creation_tokens,
         reasoning_tokens,
-        model_calls: _,     // totals-level; headless carries num_turns instead
-        api_duration_ms: _, // dropped: not part of the frozen headless shape
+        model_calls: _,      // totals-level; headless carries num_turns instead
+        cache_hit_calls: _,  // dropped: not part of the frozen headless shape
+        cache_miss_calls: _, // dropped: not part of the frozen headless shape
+        api_duration_ms: _,  // dropped: not part of the frozen headless shape
         cost_usd_ticks,
         cost_is_partial,
         cost_missing_calls: _, // internal partiality count; the flag suffices
@@ -350,7 +377,9 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
                 cache_creation_tokens,
                 reasoning_tokens: _, // dropped: reduced per-model schema
                 model_calls,
-                api_duration_ms: _, // dropped: reduced per-model schema
+                cache_hit_calls: _,  // dropped: reduced per-model schema
+                cache_miss_calls: _, // dropped: reduced per-model schema
+                api_duration_ms: _,  // dropped: reduced per-model schema
                 cost_usd_ticks,
                 cost_is_partial,
                 cost_missing_calls: _,

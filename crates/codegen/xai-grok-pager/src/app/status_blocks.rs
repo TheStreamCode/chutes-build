@@ -194,9 +194,16 @@ pub(crate) fn session_usage_block_text(
 
     let mut rows = Vec::new();
     rows.push(format!(
-        "  Input tokens:   {} ({} cached)",
+        "  Input tokens:   {} ({} cached, {:.1}%)",
         group_thousands(t.input_tokens),
         group_thousands(t.cached_read_tokens),
+        t.cache_read_ratio() * 100.0,
+    ));
+    rows.push(format!(
+        "  Cache:          {} hit / {} call{}",
+        group_thousands(t.cache_hit_calls),
+        group_thousands(t.model_calls),
+        if t.model_calls == 1 { "" } else { "s" },
     ));
     rows.push(format!(
         "  Output tokens:  {} ({} reasoning)",
@@ -292,6 +299,8 @@ mod tests {
             cache_creation_tokens: 0,
             reasoning_tokens: 0,
             model_calls: 1,
+            cache_hit_calls: 0,
+            cache_miss_calls: 0,
             api_duration_ms: 1_000,
             cost_usd_ticks: ticks,
             cost_is_partial: false,
@@ -321,6 +330,8 @@ mod tests {
         totals.cached_read_tokens = 1_000_000;
         totals.reasoning_tokens = 12_000;
         totals.model_calls = 42;
+        totals.cache_hit_calls = 39;
+        totals.cache_miss_calls = 3;
         totals.api_duration_ms = 192_000;
         let usage = PromptUsage {
             totals,
@@ -374,6 +385,21 @@ mod tests {
         let text = session_usage_block_text(&usage);
         assert!(text.contains("not reported for some calls"), "{text}");
         assert!(text.contains("usage is incomplete"), "{text}");
+    }
+
+    #[test]
+    fn session_usage_block_cache_ratio_zero_input_does_not_divide_by_zero() {
+        let mut totals = model_row(0, 10, None);
+        totals.cached_read_tokens = 0;
+        let usage = PromptUsage {
+            totals,
+            ..Default::default()
+        };
+        let text = session_usage_block_text(&usage);
+        assert!(
+            text.contains("Input tokens:   0 (0 cached, 0.0%)"),
+            "{text}"
+        );
     }
 
     #[test]

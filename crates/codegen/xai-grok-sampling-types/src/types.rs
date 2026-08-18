@@ -605,8 +605,14 @@ pub struct ChatChunkChoice {
 pub struct ToolCallDelta {
     /// The positional index of the tool call being streamed.
     /// Used to correlate delta chunks belonging to the same tool call.
-    #[serde(default)]
-    pub index: u32,
+    ///
+    /// Absent when the provider omits it. This must stay `Option`: defaulting a
+    /// missing `index` to `0` merged every parallel call of such a provider into
+    /// one accumulator slot and concatenated their argument strings into
+    /// invalid JSON. The consumer correlates by `id` instead — see
+    /// `xai-grok-sampler::stream::chat_completions`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
     /// Only present in the first chunk for this tool call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,

@@ -1398,6 +1398,86 @@ impl SessionActor {
             });
         }
     }
+    /// Promote a tool call the model emitted as assistant text into a real one.
+    ///
+    /// A chute serves its model through vLLM/SGLang, and the server-side
+    /// tool-call parser belongs to that deployment, not to the model. When it is
+    /// absent the model still emits a well-formed call — as text, in its chat
+    /// template's own syntax — and `tool_calls` arrives empty, so the turn ends
+    /// having done nothing while the user stares at raw markup.
+    ///
+    /// Runs only when the provider returned no tool calls at all, and accepts a
+    /// candidate only when its name resolves to a registered tool *and* its
+    /// arguments pass that tool's own parser. Prose that merely looks like a
+    /// call therefore stays prose. `CHUTES_DISABLE_TOOL_TEXT_RECOVERY=1` turns
+    /// it off.
+    ///
+    /// No corrective reminder is pushed: a user message between the assistant's
+    /// tool calls and their results would break the pairing providers validate.
+    /// The model sees the tool result and continues as it would have anyway.
+    ///
+    /// Returns the number of calls recovered.
+    pub(super) async fn recover_text_tool_calls(
+        &self,
+        response: &mut xai_grok_sampling_types::ConversationResponse,
+    ) -> usize {
+        use crate::session::helpers::tool_text_recovery;
+
+        if !response.tool_calls().is_empty() || !tool_text_recovery::recovery_enabled() {
+            return 0;
+        }
+        let text = response.assistant_text();
+        if text.is_empty() {
+            return 0;
+        }
+        let candidates = tool_text_recovery::find_tool_calls_in_text(&text);
+        if candidates.is_empty() {
+            return 0;
+        }
+
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        let mut calls = Vec::new();
+        let mut accepted = Vec::new();
+        for candidate in candidates {
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&candidate.arguments) else {
+                continue;
+            };
+            if bridge.try_parse(&candidate.name, parsed).await.is_err() {
+                continue;
+            }
+            calls.push(xai_grok_sampling_types::ToolCall {
+                id: std::sync::Arc::<str>::from(format!(
+                    "recovered_{}",
+                    uuid::Uuid::new_v4().simple()
+                )),
+                name: candidate.name.clone(),
+                arguments: std::sync::Arc::<str>::from(candidate.arguments.clone()),
+            });
+            accepted.push(candidate);
+        }
+        if calls.is_empty() {
+            return 0;
+        }
+
+        let recovered = calls.len();
+        // Strip the markup from the stored text: it was already streamed to the
+        // user and cannot be unsent, but leaving it in history would replay the
+        // malformed form to the model on every later turn.
+        let stripped = tool_text_recovery::strip_recovered_spans(&text, &accepted);
+        if let Some(assistant) = response.assistant_mut() {
+            assistant.content = std::sync::Arc::<str>::from(stripped);
+            assistant.tool_calls = calls;
+        }
+        response.stop_reason = Some(xai_grok_sampling_types::StopReason::ToolCalls);
+        tracing::warn!(
+            recovered,
+            tools = ?accepted.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            "model emitted tool calls as text — the chute's tool-call parser is \
+             likely unconfigured; recovered them from the assistant message"
+        );
+        recovered
+    }
+
     pub(super) async fn record_assistant_response(&self, assistant_item: ConversationItem) {
         self.signals_handle().record_assistant_message();
         if let ConversationItem::Assistant(ref a) = assistant_item {

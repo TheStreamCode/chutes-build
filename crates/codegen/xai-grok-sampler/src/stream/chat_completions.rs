@@ -18,6 +18,41 @@ use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
 use crate::metrics::InferenceLatencyStats;
 use crate::types::RequestId;
 
+/// Resolve which accumulator slot a tool-call delta belongs to.
+///
+/// An explicit `index` always wins. Without one, a non-empty `id` claims a slot
+/// of its own the first time it is seen and reuses it afterwards; a delta with
+/// neither continues the slot the previous delta used, which is what an
+/// argument fragment after the opening chunk looks like.
+///
+/// `name` is deliberately *not* part of this: the caller overwrites it rather
+/// than appending, because the common case is a provider repeating the full
+/// name in every chunk, and appending would corrupt it. A genuinely chunked
+/// name is left unhandled rather than guessed at.
+fn resolve_tool_index(
+    index: Option<u32>,
+    id: Option<&str>,
+    id_to_index: &mut BTreeMap<String, u32>,
+    next_index: &mut u32,
+    last_index: Option<u32>,
+) -> u32 {
+    let id = id.filter(|id| !id.is_empty());
+    let resolved = match (index, id) {
+        (Some(explicit), _) => explicit,
+        (None, Some(id)) => id_to_index.get(id).copied().unwrap_or(*next_index),
+        (None, None) => last_index.unwrap_or(0),
+    };
+    // Keep the counter clear of explicitly-numbered slots, so a provider that
+    // mixes both forms cannot have an id-assigned slot collide with one.
+    *next_index = (*next_index).max(resolved.saturating_add(1));
+    // Record the mapping even when the index was explicit: a later fragment may
+    // carry the id but not the index.
+    if let Some(id) = id {
+        id_to_index.entry(id.to_owned()).or_insert(resolved);
+    }
+    resolved
+}
+
 /// Transform a raw Chat Completions chunk stream into a stream of
 /// [`SamplingEvent`]s.
 ///
@@ -74,6 +109,13 @@ pub fn stream_chat_completions<'a>(
         // carries id+name and starts the arguments buffer, subsequent
         // chunks append to arguments only.
         let mut tool_call_acc: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
+        // Correlation state for providers that omit `index` on tool-call
+        // deltas. `id` then becomes the only thing distinguishing two parallel
+        // calls, so each unseen id claims its own slot; a delta carrying
+        // neither index nor id continues the slot it opened.
+        let mut tool_id_to_index: BTreeMap<String, u32> = BTreeMap::new();
+        let mut next_tool_index: u32 = 0;
+        let mut last_tool_index: Option<u32> = None;
 
         // Index counter spanning text + reasoning chunks (matches the
         // shell's chunk_index used for notification correlation).
@@ -197,8 +239,17 @@ pub fn stream_chat_completions<'a>(
                 for tc_delta in delta.tool_calls.into_iter() {
                     chunk_has_content = true;
 
+                    let tool_index = resolve_tool_index(
+                        tc_delta.index,
+                        tc_delta.id.as_deref(),
+                        &mut tool_id_to_index,
+                        &mut next_tool_index,
+                        last_tool_index,
+                    );
+                    last_tool_index = Some(tool_index);
+
                     let entry = tool_call_acc
-                        .entry(tc_delta.index)
+                        .entry(tool_index)
                         .or_insert_with(|| (String::new(), String::new(), String::new()));
 
                     let mut id_for_event: Option<String> = None;
@@ -222,7 +273,7 @@ pub fn stream_chat_completions<'a>(
 
                     yield SamplingEvent::ToolCallDelta {
                         request_id: request_id.clone(),
-                        tool_index: tc_delta.index,
+                        tool_index,
                         id: id_for_event,
                         name: name_for_event,
                         arguments_delta: args_for_event,
@@ -246,9 +297,18 @@ pub fn stream_chat_completions<'a>(
 
         // ── Build the final response ─────────────────────────────────
         let tool_calls: Vec<ToolCall> = tool_call_acc
-            .into_values()
-            .map(|(id, name, arguments)| ToolCall {
-                id: std::sync::Arc::<str>::from(id),
+            .into_iter()
+            .map(|(tool_index, (id, name, arguments))| ToolCall {
+                // A provider that streams no id still needs one: the id pairs
+                // the tool result back to this call, and it is replayed in
+                // history next to other turns' calls, so it has to be unique
+                // beyond this response — hence the request id, not the bare
+                // index.
+                id: if id.is_empty() {
+                    std::sync::Arc::<str>::from(format!("{request_id}_tool_{tool_index}"))
+                } else {
+                    std::sync::Arc::<str>::from(id)
+                },
                 name,
                 arguments: std::sync::Arc::<str>::from(arguments),
             })
@@ -501,7 +561,7 @@ mod tests {
             content: None,
             reasoning_content: None,
             tool_calls: vec![ChunkToolCallDelta {
-                index: 0,
+                index: Some(0),
                 id: Some("call_abc".into()),
                 kind: Some("function".into()),
                 function: Some(ToolCallFunctionDelta {
@@ -517,7 +577,7 @@ mod tests {
             content: None,
             reasoning_content: None,
             tool_calls: vec![ChunkToolCallDelta {
-                index: 0,
+                index: Some(0),
                 id: None,
                 kind: None,
                 function: Some(ToolCallFunctionDelta {
@@ -581,6 +641,175 @@ mod tests {
             }
             other => panic!("expected Completed, got {other:?}"),
         }
+    }
+
+    fn tool_delta_chunk(
+        index: Option<u32>,
+        id: Option<&str>,
+        name: Option<&str>,
+        arguments: Option<&str>,
+    ) -> ChatCompletionChunk {
+        make_chunk(vec![ChatChunkDelta {
+            role: None,
+            content: None,
+            reasoning_content: None,
+            tool_calls: vec![ChunkToolCallDelta {
+                index,
+                id: id.map(str::to_owned),
+                kind: None,
+                function: Some(ToolCallFunctionDelta {
+                    name: name.map(str::to_owned),
+                    arguments: arguments.map(str::to_owned),
+                }),
+            }],
+            tool_call_id: None,
+        }])
+    }
+
+    /// `(id, name, arguments)` of the assembled calls on the terminal event.
+    async fn completed_tool_calls(
+        chunks: Vec<Result<ChatCompletionChunk, SamplingError>>,
+    ) -> Vec<(String, String, String)> {
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+        match events.last().expect("stream must yield a terminal event") {
+            SamplingEvent::Completed { response, .. } => response
+                .tool_calls()
+                .iter()
+                .map(|c| (c.id.to_string(), c.name.clone(), c.arguments.to_string()))
+                .collect(),
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// A provider that omits `index` on parallel calls. Defaulting the missing
+    /// index to `0` merged both into one slot and concatenated their argument
+    /// strings into `{"a":1}{"b":2}`, which no tool can parse.
+    #[tokio::test]
+    async fn parallel_tool_calls_without_index_stay_separate() {
+        let calls = completed_tool_calls(vec![
+            Ok(tool_delta_chunk(
+                None,
+                Some("call_a"),
+                Some("first"),
+                Some("{\"a\":1}"),
+            )),
+            Ok(tool_delta_chunk(
+                None,
+                Some("call_b"),
+                Some("second"),
+                Some("{\"b\":2}"),
+            )),
+        ])
+        .await;
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0],
+            ("call_a".into(), "first".into(), "{\"a\":1}".into())
+        );
+        assert_eq!(
+            calls[1],
+            ("call_b".into(), "second".into(), "{\"b\":2}".into())
+        );
+    }
+
+    /// The shape of every argument fragment after the opening chunk when the
+    /// provider sends neither index nor id.
+    #[tokio::test]
+    async fn argument_fragments_without_index_or_id_continue_the_open_call() {
+        let calls = completed_tool_calls(vec![
+            Ok(tool_delta_chunk(
+                None,
+                Some("call_a"),
+                Some("do_thing"),
+                Some("{\"x\":"),
+            )),
+            Ok(tool_delta_chunk(None, None, None, Some("1}"))),
+        ])
+        .await;
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].2, "{\"x\":1}");
+    }
+
+    /// Interleaved parallel calls: the third fragment belongs to the first
+    /// call, and only its id says so.
+    #[tokio::test]
+    async fn a_later_fragment_is_matched_by_id_not_by_arrival_order() {
+        let calls = completed_tool_calls(vec![
+            Ok(tool_delta_chunk(
+                None,
+                Some("call_a"),
+                Some("first"),
+                Some("{\"a\":"),
+            )),
+            Ok(tool_delta_chunk(
+                None,
+                Some("call_b"),
+                Some("second"),
+                Some("{\"b\":2}"),
+            )),
+            Ok(tool_delta_chunk(None, Some("call_a"), None, Some("1}"))),
+        ])
+        .await;
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].2, "{\"a\":1}");
+        assert_eq!(calls[1].2, "{\"b\":2}");
+    }
+
+    /// An empty id cannot pair a tool result back to its call.
+    #[tokio::test]
+    async fn missing_tool_call_id_is_synthesized_from_the_request_id() {
+        let calls = completed_tool_calls(vec![Ok(tool_delta_chunk(
+            Some(0),
+            None,
+            Some("do_thing"),
+            Some("{}"),
+        ))])
+        .await;
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "test-req_tool_0");
+    }
+
+    #[test]
+    fn an_id_assigned_slot_never_collides_with_an_explicit_index() {
+        let mut id_to_index = BTreeMap::new();
+        let mut next_index = 0;
+
+        let a = resolve_tool_index(
+            Some(0),
+            Some("call_a"),
+            &mut id_to_index,
+            &mut next_index,
+            None,
+        );
+        // A second call arriving without an index must not land on slot 0.
+        let b = resolve_tool_index(
+            None,
+            Some("call_b"),
+            &mut id_to_index,
+            &mut next_index,
+            Some(a),
+        );
+        // The first call's id still resolves to the slot it was given.
+        let a_again = resolve_tool_index(
+            None,
+            Some("call_a"),
+            &mut id_to_index,
+            &mut next_index,
+            Some(b),
+        );
+
+        assert_eq!((a, b, a_again), (0, 1, 0));
     }
 
     #[tokio::test]
