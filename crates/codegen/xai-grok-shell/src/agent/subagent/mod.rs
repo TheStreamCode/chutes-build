@@ -131,6 +131,7 @@ pub(crate) struct SubagentSpawnContext {
     pub parent_depth: u32,
     pub subagents_max_depth: u32,
     pub workflow_max_concurrent_agents: usize,
+    pub media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits,
     /// Inference idle timeout (secs), resolved from the parent's model config at spawn-context creation time.
     pub inference_idle_timeout_secs: u64,
     /// Tier inputs for resolving `auto_compact_threshold_percent` at

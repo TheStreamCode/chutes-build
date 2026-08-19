@@ -1019,6 +1019,14 @@ pub struct RemoteSettings {
     pub subagents_limit_behavior: Option<String>,
     #[serde(default)]
     pub workflow_max_concurrent_agents: Option<u32>,
+    /// Max parallel `image_gen` / `image_edit` tool calls in one model step
+    /// (`grok_build_settings.max_parallel_image_gen_calls`).
+    #[serde(default)]
+    pub max_parallel_image_gen_calls: Option<u32>,
+    /// Max parallel video-gen tool calls in one model step
+    /// (`grok_build_settings.max_parallel_video_gen_calls`).
+    #[serde(default)]
+    pub max_parallel_video_gen_calls: Option<u32>,
     /// Global system-prompt identity label. Per-model override wins; see
     /// `resolve_system_prompt_label`.
     #[serde(default)]

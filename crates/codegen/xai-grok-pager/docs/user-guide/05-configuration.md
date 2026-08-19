@@ -76,6 +76,16 @@ load_envrc = true                      # load .envrc environment variables
 
 [tools]
 respect_gitignore = false              # default: false; set true to make every tool skip gitignored files
+
+# Optional caps on parallel media generation in a single model step.
+# Per tool name. First 2×-or-more burst: discard that step and retry once.
+# Any other over-cap (including a second 2× burst) keeps the first K.
+# Defaults: image 8, video 4.
+# Env vars CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS / CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS
+# override these values (see environment-variables doc).
+# [tools.media_gen]
+# max_parallel_image_gen_calls = 8
+# max_parallel_video_gen_calls = 4
 ```
 
 #### Input mode
@@ -763,6 +773,8 @@ The key ones. See the README for the complete list.
 |----------|-------------|
 | `CHUTES_BUILD_HOME` | Override config directory (default: `~/.chutes-build`) |
 | `CHUTES_BUILD_RESPECT_GITIGNORE` | Force gitignore filtering on (`1`) or off (`0`); overrides `[tools] respect_gitignore` |
+| `CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS` | Cap parallel image generation/edit calls in one model step (default 8) |
+| `CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS` | Cap parallel video-generation calls in one model step (default 4) |
 
 ### Telemetry
 

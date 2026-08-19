@@ -119,6 +119,20 @@ their most recent 200 entries each.
 | `CHUTES_COLD_START_RETRIES` | Configure bounded media cold-start retries. |
 | `CHUTES_ALLOW_UNKNOWN_PARAMS` | Allow model parameters absent from the discovered schema. |
 | `CHUTES_PROVENANCE` | Write generated-media provenance sidecars. |
+| `CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS` | Cap parallel image generation/edit calls in one model step (default 8). |
+| `CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS` | Cap parallel video-generation calls in one model step (default 4). |
+
+The parallel media-generation caps are per tool name, not shared. A burst at
+least twice the cap is discarded once and the step is retried with a reminder;
+any other over-cap keeps the first K calls and rejects the tail. Both caps can
+also be set in `config.toml`:
+
+```toml
+[tools.media_gen]
+max_parallel_image_gen_calls = 8
+max_parallel_video_gen_calls = 4
+```
+
 
 Non-JSON media responses stream to temporary files rather than accumulating in
 memory. Error and JSON bodies are capped at 32 MiB. Final workspace persistence

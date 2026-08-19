@@ -423,6 +423,7 @@ impl MvpAgent {
             parent_depth,
             subagents_max_depth: self.cfg.borrow().subagents_max_depth,
             workflow_max_concurrent_agents: self.cfg.borrow().workflow_max_concurrent_agents,
+            media_gen_batch_limits: self.cfg.borrow().media_gen_batch_limits,
             inference_idle_timeout_secs,
             auto_compact_threshold_tiers:
                 crate::agent::subagent::AutoCompactThresholdTiers::capture(&self.cfg.borrow()),

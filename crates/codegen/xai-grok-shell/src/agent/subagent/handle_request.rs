@@ -1102,6 +1102,7 @@ pub(crate) async fn run_shell_child(
         true,
         ctx.subagents_max_depth,
         ctx.workflow_max_concurrent_agents,
+        ctx.media_gen_batch_limits,
         ctx.ask_user_question_enabled,
         ctx.client_hooks.clone(),
         None,

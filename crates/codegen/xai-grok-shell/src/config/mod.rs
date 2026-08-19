@@ -861,6 +861,16 @@ impl ModelOverrideConfig {
         result
     }
 }
+/// Raw `[tools.media_gen]` counts; resolve via
+/// [`ToolsConfig::resolve_max_parallel_image_gen_calls`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct MediaGenToolsConfig {
+    #[serde(default)]
+    pub max_parallel_image_gen_calls: Option<i64>,
+    #[serde(default)]
+    pub max_parallel_video_gen_calls: Option<i64>,
+}
 /// Tool behavior configuration (`[tools]` in config.toml).
 ///
 /// Controls cross-cutting tool behavior such as `.gitignore` filtering.
@@ -868,6 +878,7 @@ impl ModelOverrideConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
+/// # [tools.media_gen] — see MediaGenToolsConfig
 /// # [tools.zdr_video_output_s3] — see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -887,8 +898,13 @@ pub struct ToolsConfig {
     /// is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
     pub zdr_video_output_s3:
         Option<xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
+    pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
+    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order:
     /// 1. Env vars `CHUTES_BUILD_RESPECT_GITIGNORE` and
     ///    `CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off,
@@ -933,6 +949,16 @@ impl ToolsConfig {
                         None
                     }
                 }),
+            media_gen: MediaGenToolsConfig {
+                max_parallel_image_gen_calls: tools
+                    .and_then(|t| t.get("media_gen"))
+                    .and_then(|m| m.get("max_parallel_image_gen_calls"))
+                    .and_then(|v| v.as_integer()),
+                max_parallel_video_gen_calls: tools
+                    .and_then(|t| t.get("media_gen"))
+                    .and_then(|m| m.get("max_parallel_video_gen_calls"))
+                    .and_then(|v| v.as_integer()),
+            },
         };
         match std::env::var("CHUTES_BUILD_RESPECT_GITIGNORE").as_deref() {
             Ok("0") | Ok("false") => {
@@ -953,6 +979,69 @@ impl ToolsConfig {
             _ => {}
         }
         result
+    }
+    pub(crate) fn resolve_max_parallel_image_gen_calls(
+        env: Option<&str>,
+        config: Option<i64>,
+        remote: Option<u32>,
+    ) -> usize {
+        resolve_clamped_count(
+            Self::ENV_MAX_PARALLEL_IMAGE_GEN_CALLS,
+            env,
+            config,
+            remote,
+            xai_grok_tools::media_gen_limits::DEFAULT_MAX_PARALLEL_IMAGE_GEN,
+        )
+    }
+    pub(crate) fn resolve_max_parallel_video_gen_calls(
+        env: Option<&str>,
+        config: Option<i64>,
+        remote: Option<u32>,
+    ) -> usize {
+        resolve_clamped_count(
+            Self::ENV_MAX_PARALLEL_VIDEO_GEN_CALLS,
+            env,
+            config,
+            remote,
+            xai_grok_tools::media_gen_limits::DEFAULT_MAX_PARALLEL_VIDEO_GEN,
+        )
+    }
+}
+/// Media-gen ladder: env > TOML > remote > default, with every numeric layer
+/// clamping `< 1` to `1`. Non-numeric env warns and falls through.
+fn resolve_clamped_count(
+    env_name: &str,
+    env: Option<&str>,
+    config: Option<i64>,
+    remote: Option<u32>,
+    default: usize,
+) -> usize {
+    if let Some(raw) = env {
+        match raw.trim().parse::<i64>() {
+            Ok(v) => return clamp_positive_count(v, "env", env_name),
+            Err(_) => {
+                tracing::warn!(
+                    name = env_name,
+                    %raw,
+                    "invalid env value (expected a whole number); ignoring"
+                );
+            }
+        }
+    }
+    if let Some(v) = config {
+        return clamp_positive_count(v, "config", env_name);
+    }
+    if let Some(v) = remote {
+        return clamp_positive_count(i64::from(v), "remote", env_name);
+    }
+    default
+}
+fn clamp_positive_count(value: i64, source: &str, name: &str) -> usize {
+    if value < 1 {
+        tracing::warn!(source, name, value, "positive count < 1; clamping to 1");
+        1
+    } else {
+        usize::try_from(value).unwrap_or(usize::MAX)
     }
 }
 /// Storage mode for session persistence.

@@ -1547,6 +1547,8 @@ pub struct Config {
         xai_grok_tools::implementations::grok_build::task::admission::LimitBehavior,
     #[serde(skip)]
     pub workflow_max_concurrent_agents: usize,
+    #[serde(skip)]
+    pub media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits,
     /// Per-subagent model ID overrides from `[subagents.models]` in config.toml.
     /// Keys are agent names, values are model IDs. Set alongside `subagents_enabled`
     /// from `SubagentsConfig::resolve()`.
@@ -1874,6 +1876,8 @@ impl Default for Config {
             subagents_limit_behavior: Default::default(),
             workflow_max_concurrent_agents:
                 crate::session::workflow::host_service::DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS,
+            media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits::default(
+            ),
             subagent_model_overrides: std::collections::HashMap::new(),
             subagent_toggle: std::collections::HashMap::new(),
             subagent_roles: std::collections::HashMap::new(),
@@ -2227,6 +2231,7 @@ impl Config {
     /// - subagents base layers (6 fields) via `SubagentsConfig::resolve`
     /// - respect_gitignore via `ToolsConfig::resolve`
     /// - disable_zdr_incompatible_tools via `ToolsConfig::resolve`
+    /// - media_gen_batch_limits via `ToolsConfig::resolve_max_parallel_*`
     /// - managed_mcps_enabled via `ManagedMcpsConfig::resolve`
     /// - web_search_model / session_summary_model / image_description_model /
     ///   prompt_suggest_model_pin via `ModelOverrideConfig::resolve`
@@ -2279,6 +2284,24 @@ impl Config {
         };
         self.disable_zdr_incompatible_tools = tools.disable_zdr_incompatible_tools;
         self.zdr_video_output_s3 = tools.zdr_video_output_s3;
+        self.media_gen_batch_limits = xai_grok_tools::media_gen_limits::MediaGenBatchLimits {
+            max_image: crate::config::ToolsConfig::resolve_max_parallel_image_gen_calls(
+                std::env::var(crate::config::ToolsConfig::ENV_MAX_PARALLEL_IMAGE_GEN_CALLS)
+                    .ok()
+                    .as_deref(),
+                tools.media_gen.max_parallel_image_gen_calls,
+                ctx.remote_settings
+                    .and_then(|r| r.max_parallel_image_gen_calls),
+            ),
+            max_video: crate::config::ToolsConfig::resolve_max_parallel_video_gen_calls(
+                std::env::var(crate::config::ToolsConfig::ENV_MAX_PARALLEL_VIDEO_GEN_CALLS)
+                    .ok()
+                    .as_deref(),
+                tools.media_gen.max_parallel_video_gen_calls,
+                ctx.remote_settings
+                    .and_then(|r| r.max_parallel_video_gen_calls),
+            ),
+        };
         let mcps = crate::config::ManagedMcpsConfig::resolve(
             ctx.raw_config,
             ctx.remote_settings,

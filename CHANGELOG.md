@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Parallel media-generation calls are capped per tool name.** image_gen/image_edit cap at 8 per model step and video-generation tools cap at 4; a burst at least twice the cap is discarded once and retried with a reminder, while any other over-cap keeps the first K and rejects the tail. Configurable via [tools.media_gen] in config.toml or CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS / CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS.
+
 ## [1.1.0] - 2026-08-18
 
 ### Added

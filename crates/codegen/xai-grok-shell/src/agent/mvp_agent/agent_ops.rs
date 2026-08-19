@@ -4490,6 +4490,7 @@ impl MvpAgent {
             .cfg
             .borrow()
             .workflow_max_concurrent_agents;
+        let media_gen_batch_limits = self.cfg.borrow().media_gen_batch_limits;
         let ask_user_question_enabled = crate::upload::turn::parse_ask_user_question_from_meta(
                 session_meta,
             )
@@ -4729,6 +4730,7 @@ impl MvpAgent {
                     subagents_enabled,
                     subagents_max_depth,
                     workflow_max_concurrent_agents,
+                    media_gen_batch_limits,
                     ask_user_question_enabled,
                     client_hooks,
                     prompt_display_cwd,

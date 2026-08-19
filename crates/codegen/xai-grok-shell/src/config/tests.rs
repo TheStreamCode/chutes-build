@@ -2184,6 +2184,30 @@ fn malformed_zdr_video_output_s3_preserves_zdr_flag() {
     });
 }
 #[test]
+fn media_gen_caps_resolve_env_over_toml_over_remote_over_default() {
+    use xai_grok_tools::media_gen_limits::{
+        DEFAULT_MAX_PARALLEL_IMAGE_GEN, DEFAULT_MAX_PARALLEL_VIDEO_GEN,
+    };
+    let config: toml::Value = toml::from_str(
+            "[tools.media_gen]\nmax_parallel_image_gen_calls = 2\nmax_parallel_video_gen_calls = 1\n",
+        )
+        .unwrap();
+    let tc = ToolsConfig::resolve(&config);
+    assert_eq!(tc.media_gen.max_parallel_image_gen_calls, Some(2));
+    assert_eq!(tc.media_gen.max_parallel_video_gen_calls, Some(1));
+    let image = ToolsConfig::resolve_max_parallel_image_gen_calls;
+    let video = ToolsConfig::resolve_max_parallel_video_gen_calls;
+    assert_eq!(image(Some("3"), Some(2), Some(4)), 3);
+    assert_eq!(image(None, Some(2), Some(4)), 2);
+    assert_eq!(image(None, None, Some(5)), 5);
+    assert_eq!(image(None, None, None), DEFAULT_MAX_PARALLEL_IMAGE_GEN);
+    assert_eq!(image(Some("not-a-number"), Some(2), None), 2);
+    assert_eq!(image(Some("0"), Some(2), None), 1);
+    assert_eq!(image(None, Some(0), Some(3)), 1);
+    assert_eq!(video(None, None, None), DEFAULT_MAX_PARALLEL_VIDEO_GEN);
+    assert_eq!(video(Some("9"), Some(1), Some(2)), 9);
+}
+#[test]
 fn roles_parse_from_toml() {
     let toml_str = r#"
             [roles.researcher]

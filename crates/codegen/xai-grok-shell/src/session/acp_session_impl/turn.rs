@@ -1975,6 +1975,7 @@ impl SessionActor {
         let mut turn_span_totals = TurnSpanTotals::default();
         let mut model_fingerprint: Option<String> = None;
         let mut structured_output_retries: u32 = 0;
+        let mut media_gen_resamples: u32 = 0;
         let structured_output_validator = json_schema.as_ref().map(|schema| {
             jsonschema::validator_for(schema).map_err(|e| format!("invalid output schema: {e}"))
         });
@@ -2469,6 +2470,44 @@ impl SessionActor {
                 );
             }
             let mut tool_calls = response.tool_calls().to_vec();
+            let over_cap = self.media_gen_over_cap(&tool_calls);
+            if xai_grok_tools::media_gen_limits::should_resample_egregious(
+                &over_cap,
+                media_gen_resamples,
+                MAX_MEDIA_GEN_OVER_CAP_RESAMPLES,
+            ) {
+                media_gen_resamples += 1;
+                let egregious: Vec<_> = over_cap.into_iter().filter(|o| o.is_egregious()).collect();
+                let reminder = xai_grok_tools::media_gen_limits::resample_reminder(&egregious);
+                tracing::warn!(
+                    session_id = %self.session_info.id,
+                    resample = media_gen_resamples,
+                    "media_gen 2x over-cap — discarding generation and resampling"
+                );
+                xai_grok_telemetry::unified_log::info(
+                    "shell.media_gen.batch_resampled",
+                    Some(self.session_info.id.0.as_ref()),
+                    Some(serde_json::json!({
+                        "over": egregious.iter().map(|o| serde_json::json!({
+                            "tool_name": o.name,
+                            "total": o.total,
+                            "max": o.max,
+                        })).collect::<Vec<_>>(),
+                        "attempt": media_gen_resamples,
+                        "max_retries": MAX_MEDIA_GEN_OVER_CAP_RESAMPLES,
+                    })),
+                );
+                self.send_xai_notification(XaiSessionUpdate::RetryState(
+                    crate::extensions::notification::RetryState::Retrying {
+                        attempt: media_gen_resamples,
+                        max_retries: MAX_MEDIA_GEN_OVER_CAP_RESAMPLES,
+                        reason: "Too many parallel media-gen calls; retrying".to_string(),
+                    },
+                ))
+                .await;
+                self.push_system_reminder(&reminder);
+                continue;
+            }
             metrics_drop_guard.record_model_response(tool_calls.len());
             if let Some(fp) = response
                 .assistant()
@@ -2757,6 +2796,7 @@ const NUDGE_AFTER_IDENTICAL_TOOL_CALLS: u32 = 8;
 const MAX_CONSECUTIVE_TRUE_NOOPS: u32 = 4;
 const _: () = assert!(NUDGE_AFTER_IDENTICAL_TOOL_CALLS < MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS);
 const _: () = assert!(MAX_CONSECUTIVE_TRUE_NOOPS < NUDGE_AFTER_IDENTICAL_TOOL_CALLS);
+const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
 const ACTION_STATIONARITY_NUDGE_TEMPLATE: &str = "You have called the same tool \
      (`${{ tool_name }}`) with the exact same arguments ${{ run_len }} times in a row — \
      you appear to be stuck in a polling loop. Stop repeating this call. If you are \
