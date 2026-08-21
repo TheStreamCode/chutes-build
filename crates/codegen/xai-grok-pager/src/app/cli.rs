@@ -299,7 +299,7 @@ pub struct AgentArgs {
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
     /// Override the Chutes inference API base URL.
-    #[arg(long = "chutes-api-base-url")]
+    #[arg(long = "chutes-api-base-url", value_name = "URL")]
     pub xai_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
@@ -344,9 +344,9 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "chutes-ws-origin", hide = true)]
+    #[arg(long = "chutes-ws-origin", value_name = "ORIGIN", hide = true)]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "chutes-ws-url", hide = true)]
+    #[arg(long = "chutes-ws-url", value_name = "URL", hide = true)]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.

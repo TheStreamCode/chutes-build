@@ -8,18 +8,21 @@ use clap_complete::{Shell, generate};
 
 use crate::app::PagerArgs;
 
+/// The public binary name every completion script must target.
+const BIN_NAME: &str = "chutes-build";
+
 /// Generate and print the completion script for the given shell.
 pub fn run(shell: Shell) {
-    // Ensure the script always uses the public "grok" name (matches historical
-    // behavior and what the installers + docs expect).
-    let mut cmd = PagerArgs::command().name("grok");
+    // Scripts must be generated under the public binary name, or they would
+    // complete calls to a binary that does not exist.
+    let mut cmd = PagerArgs::command().name(BIN_NAME);
     if shell != Shell::Zsh {
-        generate(shell, &mut cmd, "grok", &mut std::io::stdout());
+        generate(shell, &mut cmd, BIN_NAME, &mut std::io::stdout());
         return;
     }
     // zsh needs post-processing (see fix_zsh_root_prompt_positional).
     let mut buf = Vec::new();
-    generate(shell, &mut cmd, "grok", &mut buf);
+    generate(shell, &mut cmd, BIN_NAME, &mut buf);
     match String::from_utf8(buf) {
         Ok(script) => print!("{}", fix_zsh_root_prompt_positional(&script)),
         // clap_complete output is generated from Rust strings, so this arm is
@@ -64,8 +67,8 @@ fn fix_zsh_root_prompt_positional(script: &str) -> String {
             r#"words=($line[1] "${words[@]}")"#,
         ),
         (
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[2]:""#,
-            r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#,
+            format!(r##"curcontext="${{curcontext%:*:*}}:{BIN_NAME}-command-$line[2]:""##).as_str(),
+            format!(r##"curcontext="${{curcontext%:*:*}}:{BIN_NAME}-command-$line[1]:""##).as_str(),
         ),
         (r#"case $line[2] in"#, r#"case $line[1] in"#),
     ] {
@@ -80,9 +83,9 @@ mod tests {
 
     /// Generate the zsh completion script exactly like `run` does.
     fn zsh_script() -> String {
-        let mut cmd = PagerArgs::command().name("grok");
+        let mut cmd = PagerArgs::command().name(BIN_NAME);
         let mut buf = Vec::new();
-        generate(Shell::Zsh, &mut cmd, "grok", &mut buf);
+        generate(Shell::Zsh, &mut cmd, BIN_NAME, &mut buf);
         String::from_utf8(buf).expect("completion script is UTF-8")
     }
 
@@ -112,15 +115,22 @@ mod tests {
             "root dispatch must be shifted to $line[1]"
         );
         assert!(
-            fixed.contains(r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#),
+            fixed.contains(&format!(
+                r##"curcontext="${{curcontext%:*:*}}:{BIN_NAME}-command-$line[1]:""##
+            )),
             "root dispatch context must use $line[1]"
         );
         // Subcommand dispatch blocks (already on $line[1]) must survive.
         assert!(
-            fixed.contains("grok-worktree-command-$line[1]"),
+            fixed.contains(&format!("{BIN_NAME}-worktree-command-$line[1]")),
             "nested subcommand dispatch must be untouched"
         );
         // The subcommand list itself must still be offered at the root.
-        assert!(fixed.contains("_grok_commands"), "root command list intact");
+        assert!(
+            fixed.contains(&format!("_{BIN_NAME}_commands")),
+            "root command list intact"
+        );
+        // Every emitted script must target the public binary name only.
+        assert!(!fixed.contains("grok"), "no upstream binary name may leak");
     }
 }
