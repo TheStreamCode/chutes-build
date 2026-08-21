@@ -65,7 +65,7 @@ fn expired_auth_manager(
     (dir, am)
 }
 
-/// `x.ai/session_notification` payloads the client was sent.
+/// `chutes.build/session_notification` payloads the client was sent.
 type XaiUpdates = Arc<parking_lot::Mutex<Vec<serde_json::Value>>>;
 
 fn drain_gateway(
@@ -223,6 +223,7 @@ async fn run_prompt(
             None,
             None,
             true,
+            /* send_now */ false,
             None,
             None,
             None,

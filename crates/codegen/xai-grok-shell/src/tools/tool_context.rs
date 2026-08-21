@@ -218,6 +218,9 @@ pub struct ToolContext {
     /// contexts without one (subagents, defaults). Spawn sites enroll children
     /// into it; enrolled children are killed when the session closes.
     pub process_scope: Option<ProcessScope>,
+    /// Same Arc as `SessionRegistry`'s retained heal lock so the actor tick
+    /// and tray `list_running` cannot double-emit `SubagentFinished`.
+    pub(crate) live_orphan_heal_lock: Arc<tokio::sync::Mutex<()>>,
 }
 impl ToolContext {
     pub(crate) fn clamp_task_model_request(
@@ -242,7 +245,10 @@ impl ToolContext {
             budget.mark_incomplete_and_exhaust();
         }
     }
-    pub fn new(
+    /// Test-only: empty session env. Production goes through
+    /// [`Self::with_preloaded_env`].
+    #[cfg(test)]
+    pub(crate) fn new(
         cwd: AbsPathBuf,
         gateway: Option<GatewaySender>,
         session_id: Option<acp::SessionId>,
@@ -250,41 +256,15 @@ impl ToolContext {
         terminal: Arc<dyn AsyncTerminalRunner>,
         hunk_tracker_handle: HunkTrackerHandle,
     ) -> Self {
-        let session_env = xai_grok_workspace::envrc::load_envrc_or_empty_when_trusted(
-            cwd.as_path(),
-            crate::agent::folder_trust::project_scope_allowed(cwd.as_path()),
-        );
-        Self {
+        Self::with_preloaded_env(
+            cwd,
             gateway,
             session_id,
-            fs: AsyncFsWrapper::new(fs),
+            fs,
             terminal,
-            cwd,
-            file_state_handle: None,
-            session_env: Arc::new(session_env),
             hunk_tracker_handle,
-            hunk_tracking_enabled: true,
-            prompt_index: Arc::new(tokio::sync::Mutex::new(0)),
-            subagent_depth: 0,
-            subagent_event_tx: None,
-            lsp: None,
-            lsp_server_names: Vec::new(),
-            is_turn_active: None,
-            unattributed_background_usage: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            monitor_event_buffer: None,
-            task_completion_reservations: None,
-            task_wake_suppressed: None,
-            synthetic_trace_tx: None,
-            synthetic_trace_tx_shared: None,
-            task_output_tool_name:
-                xai_grok_tools::reminders::task_completion::DEFAULT_TASK_OUTPUT_TOOL.to_string(),
-            auto_wake_enabled: true,
-            goal_loop_active_gate: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            blocking_wait_depth: Arc::new(BlockingWaitState::new()),
-            task_output_token_budget: None,
-            sampler_retry_only_before_output: false,
-            process_scope: None,
-        }
+            HashMap::new(),
+        )
     }
     pub(crate) fn with_preloaded_env(
         cwd: AbsPathBuf,
@@ -325,6 +305,7 @@ impl ToolContext {
             task_output_token_budget: None,
             sampler_retry_only_before_output: false,
             process_scope: None,
+            live_orphan_heal_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
     pub(crate) fn with_file_state_handle(mut self, handle: FileStateHandle) -> Self {
@@ -415,6 +396,7 @@ mod tests {
                 task_output_token_budget: None,
                 sampler_retry_only_before_output: false,
                 process_scope: None,
+                live_orphan_heal_lock: Arc::new(tokio::sync::Mutex::new(())),
             }
         }
     }

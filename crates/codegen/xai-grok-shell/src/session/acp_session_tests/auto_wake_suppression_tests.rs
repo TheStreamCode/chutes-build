@@ -110,7 +110,7 @@ fn pending_notification_cap_keeps_newest_entries() {
     let mut state = State {
         running_task: None,
         pending_inputs: std::collections::VecDeque::new(),
-        combine_edit_holds: std::collections::HashSet::new(),
+        edit_holds: HashMap::new(),
         pending_notifications: Vec::new(),
         notifications_suppressed: true,
         rewindable: false,
@@ -366,12 +366,9 @@ async fn task_completion_wake_is_admitted_without_cancel_barrier() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let (gateway_tx, _) = tokio::sync::mpsc::unbounded_channel::<
-                xai_acp_lib::AcpClientMessage,
-            >();
-            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<
-                PersistenceMsg,
-            >();
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = std::sync::Arc::new(
                 create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await,
             );
@@ -406,8 +403,12 @@ async fn task_completion_wake_is_admitted_without_cancel_barrier() {
             let state = actor.state.lock().await;
             assert_eq!(state.pending_inputs.len(), 1);
             assert!(matches!(
-                state.pending_inputs.front().map(|item| &item.origin),
-                Some(crate::session::PromptOrigin::TaskCompleted { task_id }) if task_id == "bg-normal"
+                state
+                    .pending_inputs
+                    .front()
+                    .map(|item| item.input_origin.as_prompt_origin()),
+                Some(crate::session::PromptOrigin::TaskCompleted { task_id })
+                    if task_id == "bg-normal"
             ));
             drop(state);
             let resources = actor
@@ -439,25 +440,23 @@ async fn task_completion_wake_is_admitted_without_cancel_barrier() {
                         None,
                         None,
                         true,
+                        false,
                         None,
                         None,
                         None,
                     )
                     .await
             });
-            tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    async {
-                        loop {
-                            if already_reported(&actor, "bg-normal").await {
-                                break;
-                            }
-                            tokio::task::yield_now().await;
-                        }
-                    },
-                )
-                .await
-                .expect("synthetic turn marked completion reported");
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                loop {
+                    if already_reported(&actor, "bg-normal").await {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("synthetic turn marked completion reported");
             turn.abort();
             assert!(
                 already_reported(&actor, "bg-normal").await,
@@ -509,6 +508,7 @@ async fn disk_full_refusal_still_clears_task_completion_reservation() {
                     None,
                     None,
                     true,
+                    false,
                     None,
                     None,
                     None,
@@ -559,6 +559,7 @@ async fn genuine_user_start_consumes_deferred_completions_without_notification_t
                     kind: xai_grok_tools::computer::types::TaskKind::Monitor,
                     block_waited: false,
                     explicitly_killed: false,
+                    kill_result_delivered: false,
                     owner_session_id: None,
                     description: None,
                     is_backgrounded: false,
@@ -607,6 +608,7 @@ async fn genuine_user_start_consumes_deferred_completions_without_notification_t
                         None,
                         None,
                         false,
+                        false,
                         None,
                         None,
                         None,
@@ -629,7 +631,7 @@ async fn genuine_user_start_consumes_deferred_completions_without_notification_t
             assert!(state.notifications_suppressed);
             assert!(state.pending_notifications.is_empty());
             assert!(state.pending_inputs.iter().all(|input| !matches!(
-                input.origin,
+                input.input_origin.as_prompt_origin(),
                 crate::session::PromptOrigin::NotificationDrain
             )));
             drop(state);
@@ -637,7 +639,7 @@ async fn genuine_user_start_consumes_deferred_completions_without_notification_t
             SessionActor::maybe_drain_notifications(actor.clone(), completion_tx).await;
             let state = actor.state.lock().await;
             assert!(state.pending_inputs.iter().all(|input| !matches!(
-                input.origin,
+                input.input_origin.as_prompt_origin(),
                 crate::session::PromptOrigin::NotificationDrain
             )));
             drop(state);
@@ -697,6 +699,7 @@ async fn accepted_reservation_survives_user_start() {
                         None,
                         None,
                         None,
+                        false,
                         false,
                         None,
                         None,
@@ -1698,6 +1701,7 @@ fn completed_bash_task(id: &str) -> xai_grok_tools::computer::types::TaskSnapsho
         kind: Default::default(),
         block_waited: false,
         explicitly_killed: false,
+        kill_result_delivered: false,
         owner_session_id: None,
         description: None,
         is_backgrounded: false,

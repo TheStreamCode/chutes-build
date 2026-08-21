@@ -2,7 +2,7 @@
 //! - `POST /rest/skills` — first-party bundled skills (docx, pdf, ffmpeg, …)
 //! - `GET  /rest/user-skills` — enabled user-uploaded skills
 //!
-//! Transport only. Chat `x.ai/commands/list` / ACP `available_commands_update`
+//! Transport only. Chat `chutes.build/commands/list` / ACP `available_commands_update`
 //! map this catalog to slash commands.
 //!
 //! Desktop/shell chat uses this REST path (not gateway

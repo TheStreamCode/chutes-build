@@ -1,6 +1,6 @@
 //! Registry-churn regression gate: a real in-process `MvpAgent` on duplex
 //! ACP pipes churns sessions through create, prompt, and close, then
-//! asserts via `x.ai/debug/agent` that every registry count returns
+//! asserts via `chutes.build/debug/agent` that every registry count returns
 //! to its pre-churn baseline. Deterministic counts, no memory thresholds.
 //! Counts the echo workload never populates are pinned at their zero
 //! baseline only.
@@ -27,6 +27,7 @@ struct Counts {
     resident_resources: usize,
     retained_resources: usize,
     dispatch_locks: usize,
+    live_orphan_heal_locks: usize,
     session_turn_numbers: usize,
     permission_event_receivers: usize,
     model_unavailable_sessions: usize,

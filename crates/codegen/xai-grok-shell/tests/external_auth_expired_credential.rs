@@ -39,7 +39,7 @@ const FRESH_TOKEN: &str = "fresh-token-the-provider-cannot-mint";
 const STALE_TOKEN: &str = "stale-external-token";
 const PROVIDER_LABEL: &str = "Acme SSO";
 
-/// Records `x.ai/session/update` payloads so a phase can read the terminal
+/// Records `chutes.build/session/update` payloads so a phase can read the terminal
 /// `retryState`.
 #[derive(Clone, Default)]
 struct Capture {

@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use tempfile::TempDir;
-use xai_grok_shell::active_sessions::*;
+use xai_grok_active_sessions::*;
 
 fn session(id: &str, pid: u32) -> ActiveSession {
     ActiveSession {

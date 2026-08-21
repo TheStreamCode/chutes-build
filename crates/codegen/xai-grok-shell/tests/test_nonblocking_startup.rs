@@ -73,7 +73,7 @@ async fn leader_ready_while_proxy_hangs() {
         .await;
 }
 
-/// The background catalog refresh must re-fetch and push `x.ai/models/update`
+/// The background catalog refresh must re-fetch and push `chutes.build/models/update`
 /// once a previously-hanging endpoint recovers.
 #[tokio::test]
 #[ignore] // requires pre-built binary; run with --ignored
@@ -101,7 +101,7 @@ async fn catalog_self_heals_after_endpoint_recovers() {
                     clients[0].initialize().await;
 
                     // Recover the endpoint. The background catalog refresh
-                    // (5s-base backoff) re-fetches and pushes `x.ai/models/update`.
+                    // (5s-base backoff) re-fetches and pushes `chutes.build/models/update`.
                     server.set_hang(false);
 
                     let healed =
@@ -111,7 +111,7 @@ async fn catalog_self_heals_after_endpoint_recovers() {
                         .await;
                     assert!(
                         healed,
-                        "no x.ai/models/update after the endpoint recovered\nstderr:\n{}",
+                        "no chutes.build/models/update after the endpoint recovered\nstderr:\n{}",
                         clients[0].stderr_text(),
                     );
                 })

@@ -129,16 +129,33 @@ enum UserEchoMode {
     /// monitor gutter, task pane) that no pane should render live.
     PersistOnly,
 }
-fn user_echo_mode(prompt_id: &str) -> UserEchoMode {
-    if super::interjection::is_interject_fallback(prompt_id) {
-        return UserEchoMode::PersistOnly;
-    }
-    match super::super::PromptOrigin::from_prompt_id(prompt_id) {
-        super::super::PromptOrigin::NotificationDrain => UserEchoMode::PersistOnly,
-        _ => UserEchoMode::Broadcast,
+fn user_echo_mode(prompt_id: &str, input_origin: &InputOrigin) -> UserEchoMode {
+    if super::interjection::is_interject_fallback(prompt_id)
+        || matches!(
+            input_origin.as_prompt_origin(),
+            PromptOrigin::NotificationDrain
+        )
+    {
+        UserEchoMode::PersistOnly
+    } else {
+        UserEchoMode::Broadcast
     }
 }
 impl SessionActor {
+    /// Exactly once per turn: the cancel path and the turn's own post-loop both announce.
+    pub(super) async fn notify_turn_abort(
+        &self,
+        epoch: TurnEpoch,
+        reason: xai_agent_lifecycle::TurnAbortReason,
+    ) {
+        if !self.turn_abort.try_mark_announced(epoch) {
+            return;
+        }
+        let input = xai_agent_lifecycle::TurnAbortInput::new(reason);
+        for contributor in self.extension_registry.turn_lifecycle_contributors() {
+            contributor.on_turn_abort(&input).await;
+        }
+    }
     /// Run the image-normalization pipeline (re-encode caps, min-side and
     /// integrity checks) and surface its outcomes: compression / re-encode
     /// fallback / dropped notices are appended to `text_out` (TEXT only —
@@ -227,17 +244,7 @@ impl SessionActor {
                 crate::session::storage::SessionUpdate::Acp(Box::new(notification)),
             ));
     }
-    #[tracing::instrument(
-        name = "session.handle_prompt",
-        skip_all,
-        fields(
-            session_id = %self.session_info.id.0,
-            prompt_id = %prompt_id,
-            prompt_length = tracing::field::Empty,
-            command_name = tracing::field::Empty,
-            command_source = tracing::field::Empty,
-        )
-    )]
+    #[cfg(test)]
     pub(super) async fn handle_prompt(
         self: &Arc<Self>,
         prompt_id: &str,
@@ -248,10 +255,59 @@ impl SessionActor {
         prompt_client_identifier: Option<String>,
         prompt_screen_mode: Option<String>,
         verbatim: bool,
+        send_now: bool,
         json_schema: Option<serde_json::Value>,
         persist_ack: Option<oneshot::Sender<()>>,
         parsed_prompt_tx: Option<oneshot::Sender<ParsedPromptInfo>>,
     ) -> PromptTurnResult {
+        self.handle_turn_input(TurnInputRequest {
+            prompt_id: prompt_id.to_string(),
+            input_origin: InputOrigin::from_prompt_id(prompt_id),
+            prompt_blocks,
+            prompt_mode,
+            trace_gcs_config,
+            artifact_tracker,
+            client_identifier: prompt_client_identifier,
+            screen_mode: prompt_screen_mode,
+            verbatim,
+            send_now,
+            json_schema,
+            persist_ack,
+            parsed_prompt_tx,
+        })
+        .await
+    }
+    #[tracing::instrument(
+        name = "session.handle_prompt",
+        skip_all,
+        fields(
+            session_id = %self.session_info.id.0,
+            prompt_id = %request.prompt_id,
+            prompt_length = tracing::field::Empty,
+            command_name = tracing::field::Empty,
+            command_source = tracing::field::Empty,
+        )
+    )]
+    pub(super) async fn handle_turn_input(
+        self: &Arc<Self>,
+        request: TurnInputRequest,
+    ) -> PromptTurnResult {
+        let TurnInputRequest {
+            prompt_id,
+            input_origin,
+            prompt_blocks,
+            prompt_mode,
+            trace_gcs_config,
+            artifact_tracker,
+            client_identifier: prompt_client_identifier,
+            screen_mode: prompt_screen_mode,
+            verbatim,
+            send_now,
+            json_schema,
+            persist_ack,
+            parsed_prompt_tx,
+        } = request;
+        let prompt_id = prompt_id.as_str();
         let handle_prompt_start = std::time::Instant::now();
         let prompt_length: usize = prompt_blocks
             .iter()
@@ -270,29 +326,31 @@ impl SessionActor {
                 "block_count": prompt_blocks.len(),
             })),
         );
-        let origin = super::super::PromptOrigin::from_prompt_id(prompt_id);
-        if let Some(completion_id) = origin.completion_id() {
+        let policy = input_origin.policy();
+        if let Some(completion_id) = input_origin.completion_id() {
             self.mark_completions_reported(&[completion_id]).await;
             if let Some(reservations) = &self.tool_context.task_completion_reservations {
                 reservations.release(completion_id);
             }
         }
-        if !origin.is_synthetic() {
+        if policy.authority.is_human_intent() {
             self.invalidate_side_calls_for_new_prompt();
         }
         self.ensure_session_disk_writable().await?;
         self.signals_handle().increment_turn();
-        let prompt_mode = self.resolve_turn_prompt_mode(&origin, prompt_mode);
+        let prompt_mode =
+            self.resolve_turn_prompt_mode(input_origin.as_prompt_origin(), prompt_mode);
         *self.turn_start_prompt_mode.lock() = prompt_mode;
         *self.turn_prompt_mode.lock() = prompt_mode;
         let _turn_active_guard =
             TurnActiveGuard::activate(self.tool_context.is_turn_active.as_ref());
         let _session_turn_active_guard = TurnActiveGuard::activate(Some(&self.session_turn_active));
-        let turn_start_input = xai_agent_lifecycle::TurnStartInput::new(
-            super::super::PromptOrigin::from_prompt_id(prompt_id).is_synthetic(),
-        );
+        let turn_start_input =
+            xai_agent_lifecycle::TurnStartInput::new(input_origin.is_synthetic());
         for contributor in self.extension_registry.turn_lifecycle_contributors() {
-            contributor.on_turn_start(&turn_start_input).await;
+            contributor
+                .on_turn_start_with_policy(&turn_start_input, policy)
+                .await;
         }
         if let Ok(mut pending) = self.rewind_pending_prompt.lock()
             && let Some(prev_text) = pending.take()
@@ -336,14 +394,15 @@ impl SessionActor {
         } else {
             LoopFireMode::InSession
         };
-        let prompt_blocks = match slash_commands::resolve(
+        let resolved = slash_commands::resolve(
             prompt_blocks,
             &slash_skills,
             availability,
             skill_rewrite,
             &named_workflows,
             loop_fire_mode,
-        ) {
+        );
+        let prompt_blocks = match resolved {
             Ok(blocks) => blocks,
             Err(SlashCommandOutcome::Builtin(action)) => {
                 let text_block =
@@ -475,10 +534,7 @@ impl SessionActor {
         self.current_turn_number.set(turn_number);
         let yolo_mode = self.permissions.is_yolo_mode();
         let msg_count = self.chat_state_handle.get_conversation_len().await;
-        let redirect_kind = if matches!(
-            super::super::PromptOrigin::from_prompt_id(prompt_id),
-            super::super::PromptOrigin::User
-        ) {
+        let redirect_kind = if policy.authority.is_human_intent() {
             self.events.take_prior_redirect_kind()
         } else {
             None
@@ -519,14 +575,16 @@ impl SessionActor {
         });
         let current_prompt_index = self.chat_state_handle.get_prompt_index().await;
         xai_grok_telemetry::session_ctx::begin_prompt_id();
-        let origin = super::super::PromptOrigin::from_prompt_id(prompt_id);
         let mut chunk_meta = serde_json::Map::new();
         chunk_meta.insert("modelId".into(), serde_json::json!(model_id));
         chunk_meta.insert(
             "promptIndex".into(),
             serde_json::json!(current_prompt_index),
         );
-        if origin.hide_user_echo_from_scrollback() {
+        if input_origin
+            .as_prompt_origin()
+            .hide_user_echo_from_scrollback()
+        {
             chunk_meta.insert("hideFromScrollback".into(), serde_json::json!(true));
         }
         let user_chunk_meta = Some(chunk_meta);
@@ -545,7 +603,7 @@ impl SessionActor {
         self.file_state_tracker
             .begin_prompt(current_prompt_index)
             .await;
-        let echo_mode = user_echo_mode(prompt_id);
+        let echo_mode = user_echo_mode(prompt_id, &input_origin);
         for block in prompt_blocks.iter() {
             let update = acp::SessionUpdate::UserMessageChunk(
                 acp::ContentChunk::new(block.clone()).meta(user_chunk_meta.clone()),
@@ -599,6 +657,11 @@ impl SessionActor {
             );
         }
         let query = crate::session::placeholder_images::strip_paths_from_image_placeholders(query);
+        let query = if send_now && !verbatim {
+            xai_interjection_core::frame_user_turn(xai_interjection_core::INTERJECTION_NOTE, &query)
+        } else {
+            query
+        };
         let user_images = self
             .normalize_images_with_notices(&mut context, raw_images, is_cursor)
             .await;
@@ -692,7 +755,7 @@ impl SessionActor {
         self.maybe_inject_date_rollover_reminder().await;
         self.inject_plan_mode_reminders().await;
         self.inject_resumed_tasks_reminder();
-        if matches!(&origin, super::super::PromptOrigin::User) {
+        if policy.authority.is_human_intent() {
             if let Some(gate) = &self.tool_context.task_wake_suppressed {
                 gate.set(false);
             }
@@ -711,11 +774,15 @@ impl SessionActor {
             self.transcribe_user_images(user_message, &user_images)
                 .await?
         } else {
-            let session_dir =
-                crate::session::persistence::session_dir(&crate::session::info::Info {
+            let session_dir = crate::session::persistence::ensure_owner_only_session_dir(
+                &crate::session::info::Info {
                     id: self.session_info.id.clone(),
                     cwd: self.session_info.cwd.clone(),
-                });
+                },
+            )
+            .map_err(|e| {
+                acp::Error::internal_error().data(format!("failed to create session dir: {e}"))
+            })?;
             crate::session::image_describe::persist_and_prepend_image_files(
                 &session_dir,
                 &user_images,
@@ -736,16 +803,12 @@ impl SessionActor {
                 attached_image_refs,
             ))
             .await;
-        let prompt_text_for_hook = user_message.clone();
+        let prompt_text_for_hook = Some(user_message.clone());
         {
             if trace_gcs_config.is_some() {
                 self.chat_state_handle.begin_turn_capture();
             }
-            let origin = super::super::PromptOrigin::from_prompt_id(prompt_id);
-            if matches!(origin, super::super::PromptOrigin::User) {
-                self.maybe_inject_interrupt_reminder().await;
-            }
-            let mut user_chat = match &origin {
+            let mut user_chat = match input_origin.as_prompt_origin() {
                 super::super::PromptOrigin::TaskCompleted { .. } => {
                     ConversationItem::task_completed(user_message)
                 }
@@ -769,7 +832,9 @@ impl SessionActor {
                 }
                 super::super::PromptOrigin::PlanResume => ConversationItem::user(user_message),
                 super::super::PromptOrigin::User => {
-                    let mut item = ConversationItem::user(user_message);
+                    let mut item = ConversationItem::user(
+                        self.maybe_apply_interrupt_envelope(user_message, verbatim),
+                    );
                     if let Some(interrupt) = self
                         .events
                         .take_prior_interrupt_category()
@@ -830,7 +895,8 @@ impl SessionActor {
         self.dispatch_hook(
             xai_grok_hooks::event::HookEventName::UserPromptSubmit,
             xai_grok_hooks::event::HookPayload::UserPromptSubmit {
-                prompt: Some(prompt_text_for_hook),
+                prompt: prompt_text_for_hook,
+                subagent_type: self.subagent_type_label(),
             },
             Some(prompt_id),
             None,
@@ -969,18 +1035,15 @@ impl SessionActor {
                     None,
                 );
                 if let Some(explanation) = refusal {
-                    let details = (!explanation.is_empty()).then(|| explanation.clone());
-                    self.dispatch_hook(
-                        xai_grok_hooks::event::HookEventName::StopFailure,
-                        xai_grok_hooks::event::HookPayload::StopFailure {
+                    self.report_turn_end(
+                        prompt_id,
+                        TurnEnd::Failed {
                             error: xai_grok_hooks::event::StopFailureKind::InvalidRequest,
-                            error_details: details.clone(),
-                            last_assistant_message: details,
+                            error_details: None,
+                            last_assistant_message: (!explanation.is_empty())
+                                .then(|| explanation.clone()),
                         },
-                        Some(prompt_id),
-                        None,
-                    )
-                    .await;
+                    );
                 }
                 self.send_after_turn_event(xai_tool_protocol::turn_hook::AfterTurnPayload {
                     turn_number: current_prompt_index as u64,
@@ -1017,7 +1080,9 @@ impl SessionActor {
                     tool_call_count: turn_tool_count,
                     model_id: turn_model_id.clone(),
                     written_repo_paths: Vec::new(),
-                    cancellation_category: Some("action_stationarity".to_string()),
+                    cancellation_category: Some(
+                        crate::session::commands::ACTION_STATIONARITY_CATEGORY.to_string(),
+                    ),
                     cancellation_context: None,
                 })
                 .await;
@@ -1027,7 +1092,9 @@ impl SessionActor {
                         duration_ms: turn_duration_ms,
                         tool_call_count: turn_tool_count,
                         model_id: turn_model_id,
-                        cancellation_category: Some("action_stationarity".to_string()),
+                        cancellation_category: Some(
+                            crate::session::commands::ACTION_STATIONARITY_CATEGORY.to_string(),
+                        ),
                         error_category: None,
                     },
                 );
@@ -1058,7 +1125,8 @@ impl SessionActor {
                         duration_ms: turn_duration_ms,
                         tool_call_count: turn_tool_count,
                         model_id: turn_model_id,
-                        cancellation_category: category.map(|c| format!("{c:?}")),
+                        cancellation_category: category
+                            .map(|c| crate::session::commands::meta_category_str(c).to_string()),
                         error_category: None,
                     },
                 );
@@ -1093,7 +1161,9 @@ impl SessionActor {
                         duration_ms: turn_duration_ms,
                         tool_call_count: turn_tool_count,
                         model_id: turn_model_id,
-                        cancellation_category: Some("max_turns_reached".to_string()),
+                        cancellation_category: Some(
+                            crate::session::commands::MAX_TURNS_REACHED_CATEGORY.to_string(),
+                        ),
                         error_category: None,
                     },
                 );
@@ -1130,17 +1200,14 @@ impl SessionActor {
                         error_category: Some(error_category),
                     },
                 );
-                self.dispatch_hook(
-                    xai_grok_hooks::event::HookEventName::StopFailure,
-                    xai_grok_hooks::event::HookPayload::StopFailure {
+                self.report_turn_end(
+                    prompt_id,
+                    TurnEnd::Failed {
                         error: Self::stop_failure_error_type(err),
                         error_details: Self::turn_error_detail(err),
                         last_assistant_message: Some(Self::format_turn_error_message(err)),
                     },
-                    Some(prompt_id),
-                    None,
-                )
-                .await;
+                );
             }
         }
         xai_grok_telemetry::session_ctx::log_session_event(
@@ -1171,12 +1238,11 @@ impl SessionActor {
                 }
             }
             Ok(TurnOutcome::Cancelled { .. }) | Ok(TurnOutcome::MaxTurnsReached { .. }) => {
-                let input = xai_agent_lifecycle::TurnAbortInput::new(
+                self.notify_turn_abort(
+                    self.turn_report.epoch(),
                     xai_agent_lifecycle::TurnAbortReason::Interrupted,
-                );
-                for contributor in self.extension_registry.turn_lifecycle_contributors() {
-                    contributor.on_turn_abort(&input).await;
-                }
+                )
+                .await;
             }
             Err(err) => {
                 let message = err.to_string();
@@ -1658,6 +1724,9 @@ impl SessionActor {
             }
         }
     }
+    pub(super) fn is_first_turn_memory_score_visible(score: f64) -> bool {
+        format!("{score:.2}") != "0.00"
+    }
     /// Compute the first-turn memory reminder, if one should be injected.
     ///
     /// A block persisted by an earlier session segment (a prior `--resume`
@@ -1681,11 +1750,21 @@ impl SessionActor {
                 target: xai_grok_telemetry::memory_log::TARGET,
                 "MEMORY_INJECT: first-turn injection disabled by config"
             );
+            crate::session::memory_observation::log_memory_injection(
+                self.session_info.id.to_string(),
+                xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Skipped,
+                Default::default(),
+            );
             return None;
         }
         let (Some(storage), Some(params)) =
             (self.memory.storage(), self.memory.backend_params.as_ref())
         else {
+            crate::session::memory_observation::log_memory_injection(
+                self.session_info.id.to_string(),
+                xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Skipped,
+                Default::default(),
+            );
             return None;
         };
         let conversation = self.chat_state_handle.get_conversation().await;
@@ -1693,6 +1772,11 @@ impl SessionActor {
             tracing::info!(
                 target: xai_grok_telemetry::memory_log::TARGET,
                 "MEMORY_INJECT: existing memory-context block present in system message -- skipping re-injection to preserve prompt cache"
+            );
+            crate::session::memory_observation::log_memory_injection(
+                self.session_info.id.to_string(),
+                xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Skipped,
+                Default::default(),
             );
             return None;
         }
@@ -1715,34 +1799,62 @@ impl SessionActor {
             raw_query
         };
         let inject_start = std::time::Instant::now();
-        let inject_results = backend.search(&query, 6, configured_min_score).await.ok();
-        let result_count = inject_results.as_ref().map_or(0, |r| r.len());
-        let top_score = inject_results
-            .as_ref()
-            .and_then(|r| r.first())
-            .map_or(0.0, |r| r.score);
-        let total_snippet_chars: usize = inject_results
-            .as_ref()
-            .map_or(0, |r| r.iter().map(|s| s.snippet.len()).sum());
+        let search_result = backend.search(&query, 6, configured_min_score).await;
+        let (outcome, mut inject_results) = match search_result {
+            Ok(results) if results.is_empty() => (
+                xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Empty,
+                results,
+            ),
+            Ok(results) => (
+                xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Results,
+                results,
+            ),
+            Err(error) => {
+                tracing::warn!(
+                    target: xai_grok_telemetry::memory_log::TARGET,
+                    %error,
+                    "MEMORY_INJECT_SEARCH: search failed"
+                );
+                (
+                    xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Error,
+                    Vec::new(),
+                )
+            }
+        };
+        inject_results.retain(|result| Self::is_first_turn_memory_score_visible(result.score));
+        let outcome = if outcome
+            == xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Results
+            && inject_results.is_empty()
+        {
+            xai_grok_telemetry::memory_telemetry::MemoryInjectionOutcome::Empty
+        } else {
+            outcome
+        };
+        let result_count = inject_results.len();
+        let top_score = inject_results.first().map_or(0.0, |result| result.score);
+        let total_snippet_chars = inject_results
+            .iter()
+            .map(|result| result.snippet.len())
+            .sum();
         tracing::info!(
             target: xai_grok_telemetry::memory_log::TARGET,
             configured_min_score,
-            "MEMORY_INJECT_SEARCH: results={result_count}"
+            result_count,
+            "MEMORY_INJECT_SEARCH: completed"
         );
-        xai_grok_telemetry::session_ctx::log_event(
-            xai_grok_telemetry::memory_telemetry::MemoryInjection {
-                session_id: self.session_info.id.to_string(),
-                was_greeting_fallback: was_greeting,
+        crate::session::memory_observation::log_memory_injection(
+            self.session_info.id.to_string(),
+            outcome,
+            crate::session::memory_observation::MemoryInjectionMetrics {
+                is_greeting_fallback: was_greeting,
                 result_count,
                 total_snippet_chars,
                 top_score,
                 configured_min_score,
-                injection_duration_ms: inject_start.elapsed().as_millis() as u64,
+                duration_ms: inject_start.elapsed().as_millis() as u64,
             },
         );
-        inject_results.and_then(|results| {
-            crate::session::helpers::memory_context::format_memory_reminder(&results)
-        })
+        crate::session::helpers::memory_context::format_memory_reminder(&inject_results)
     }
     /// Inspect `tool_calls` for a `StructuredOutput` call and decide the turn's
     /// next step, pushing the call's `tool_result` (correction / retry error /
@@ -2084,7 +2196,7 @@ impl SessionActor {
                     .unwrap_or_else(|| ACTION_STATIONARITY_NUDGE_TEMPLATE.to_string());
                 self.push_system_reminder(&reminder);
             }
-            self.drain_pending_interjections().await;
+            self.drain_interjections_at_safe_point().await;
             self.flush_pending_skill_reminders().await;
             self.inject_pending_monitor_events().await;
             let memory_reminder = self.first_turn_memory_reminder().await;
@@ -2621,8 +2733,8 @@ impl SessionActor {
                         ));
                     }
                 }
-                if self.drain_pending_interjections().await {
-                    tracing::info!("Drained interjection(s) before turn completion — continuing");
+                if self.drain_interjections_at_safe_point().await {
+                    tracing::info!("Drained interjection(s) before turn completion; continuing");
                     continue;
                 }
                 let snapshot = self
@@ -2635,7 +2747,7 @@ impl SessionActor {
                     .await;
                 if self.drain_pending_interjections().await {
                     tracing::info!(
-                        "Drained late interjection(s) during turn-end bookkeeping — continuing"
+                        "Drained late interjection(s) during turn-end bookkeeping; continuing"
                     );
                     continue;
                 }
@@ -2791,12 +2903,14 @@ impl SessionActor {
         }
     }
 }
+/// Discard an egregious (2× cap) media-gen generation and re-sample this
+/// many times; later over-caps in the same turn use first-K.
+const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
 const MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS: u32 = 16;
 const NUDGE_AFTER_IDENTICAL_TOOL_CALLS: u32 = 8;
 const MAX_CONSECUTIVE_TRUE_NOOPS: u32 = 4;
 const _: () = assert!(NUDGE_AFTER_IDENTICAL_TOOL_CALLS < MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS);
 const _: () = assert!(MAX_CONSECUTIVE_TRUE_NOOPS < NUDGE_AFTER_IDENTICAL_TOOL_CALLS);
-const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
 const ACTION_STATIONARITY_NUDGE_TEMPLATE: &str = "You have called the same tool \
      (`${{ tool_name }}`) with the exact same arguments ${{ run_len }} times in a row — \
      you appear to be stuck in a polling loop. Stop repeating this call. If you are \
@@ -2922,14 +3036,20 @@ mod identical_tool_call_run_tests {
 }
 #[cfg(test)]
 mod user_echo_broadcast_tests {
-    use super::{UserEchoMode, user_echo_mode};
+    use super::{InputOrigin, PromptOrigin, UserEchoMode, user_echo_mode};
+    fn origin(prompt_id: &str) -> InputOrigin {
+        InputOrigin::new(PromptOrigin::from_prompt_id(prompt_id))
+    }
     /// Notification-drain: persisted (rewind/fork count user-chunk runs as
     /// turn boundaries) but never broadcast live; the pager hides it via the
     /// `hideFromScrollback` chunk meta.
     #[test]
     fn notification_drain_turn_is_persist_only() {
         assert_eq!(
-            user_echo_mode("notifications-019e0000-0000-7000-8000-0000000000aa"),
+            user_echo_mode(
+                "notifications-019e0000-0000-7000-8000-0000000000aa",
+                &origin("notifications-uuid"),
+            ),
             UserEchoMode::PersistOnly
         );
     }
@@ -2937,17 +3057,20 @@ mod user_echo_broadcast_tests {
     /// live so multi-client / dashboard viewers stay in sync.
     #[test]
     fn user_and_cron_turns_broadcast_live() {
-        assert_eq!(user_echo_mode("my-prompt"), UserEchoMode::Broadcast);
         assert_eq!(
-            user_echo_mode("scheduler-fired-abc"),
+            user_echo_mode("my-prompt", &origin("my-prompt")),
             UserEchoMode::Broadcast
         );
         assert_eq!(
-            user_echo_mode("task-completed-bg-1"),
+            user_echo_mode("scheduler-fired-abc", &origin("scheduler-fired-abc")),
             UserEchoMode::Broadcast
         );
         assert_eq!(
-            user_echo_mode("subagent-completed-xyz"),
+            user_echo_mode("task-completed-bg-1", &origin("task-completed-bg-1")),
+            UserEchoMode::Broadcast
+        );
+        assert_eq!(
+            user_echo_mode("subagent-completed-xyz", &origin("subagent-completed-xyz")),
             UserEchoMode::Broadcast
         );
     }
@@ -2957,7 +3080,10 @@ mod user_echo_broadcast_tests {
     #[test]
     fn interject_fallback_turn_is_persist_only() {
         assert_eq!(
-            user_echo_mode("interject-fallback-019e24b7"),
+            user_echo_mode(
+                "interject-fallback-019e24b7",
+                &origin("interject-fallback-019e24b7")
+            ),
             UserEchoMode::PersistOnly
         );
     }

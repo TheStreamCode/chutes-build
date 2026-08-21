@@ -164,7 +164,7 @@ async fn assert_mixed_batch_snapshot(write_first: bool) {
         .lock()
         .unwrap()
         .clone()
-        .expect("gateway must receive x.ai/exit_plan_mode with plan content");
+        .expect("gateway must receive chutes.build/exit_plan_mode with plan content");
     assert_eq!(snapshot, NEW_PLAN);
 
     responder.abort();

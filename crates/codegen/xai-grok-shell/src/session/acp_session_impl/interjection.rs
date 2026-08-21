@@ -12,7 +12,9 @@ use super::*;
 // Re-exported for `acp_session.rs` which does `pub(crate) use interjection::*;`
 // so retained code and co-located tests keep resolving by `acp_session::` path.
 #[allow(unused_imports)]
-pub(crate) use xai_interjection_core::{InterjectionBuffer, drain_formatted, format_interjection};
+pub(crate) use xai_interjection_core::{
+    INTERRUPT_NOTE, InterjectionBuffer, drain_formatted, format_interjection, frame_user_turn,
+};
 
 /// Shell instantiation of the shared entry type: images are ACP content.
 pub(crate) type PendingInterjection = xai_interjection_core::PendingInterjection<acp::ImageContent>;
@@ -76,13 +78,14 @@ impl SessionActor {
             screen_mode: None,
             verbatim: false,
             json_schema: None,
-            origin: super::super::PromptOrigin::User,
+            input_origin: InputOrigin::new(super::super::PromptOrigin::User),
             task_wake_fallback: None,
             tool_overrides_update: None,
             respond_to,
             persist_ack: None,
             parsed_prompt_tx: None,
             queue_meta: None,
+            queue_mutation_policy: QueueMutationPolicy::hidden(),
             // Send-now semantics (see doc): a later real send-now must not
             // leapfrog this fallback in `queue_input`'s FIFO scan.
             send_now: front,
@@ -150,12 +153,8 @@ impl SessionActor {
     }
 
     /// Broadcast a mid-turn interjection to every attached client.
-    /// Fan it out (sessionId-routed, fire-and-forget) so every pane viewing the
-    /// session renders the interjection block — not just the originator. The
-    /// originating pager rendered an optimistic block locally and dedups this
-    /// echo by `id`; other panes (which never minted the id) render it. `id` is
-    /// to chat state. Shared by `add_followup_message_as_user_turn` (which
-    /// `None` only for older clients, in which case every pane renders.
+    /// The originator uses `id` to claim its optimistic prompt block; other
+    /// clients render the notification normally.
     pub(super) fn broadcast_interjection(&self, text: &str, id: Option<&str>) {
         let mut payload = serde_json::json!({
             "sessionId": self.session_info.id.0.as_ref(),
@@ -277,15 +276,34 @@ impl SessionActor {
         .await
     }
 
-    /// Drain all pending interjections, wrap them, and inject each into the
-    /// ([`ConversationItem::interjection`], tagged
-    /// `SyntheticReason::Interjection`) — never appended to tool results, so
-    /// compaction, replay, and analytics see the user's steering text as its
-    /// own user turn.
-    ///
-    /// Returns `true` if any interjections were drained (caller may want to
-    /// Returns `true` if any interjections were drained (caller may want to
-    /// `continue` the turn loop so the model sees them on the next iteration).
+    /// When follow-up behavior is Steer, promote held queue rows into
+    /// interjections, then drain. Call after a tool batch, at loop top, and
+    /// before the turn returns to the user. Returns `true` if any
+    /// interjections were drained (caller may `continue` so the model sees them
+    /// next).
+    pub(super) async fn drain_interjections_at_safe_point(&self) -> bool {
+        // Queue (default) must not re-parse config on every tool/model/turn-end
+        // drain. `follow_up_steer_enabled` is mtime-keyed on config.toml so a
+        // live pager settings write is visible without restarting the shell
+        // agent (a separate process); unchanged mtime is a cheap stat.
+        if crate::util::config::follow_up_steer_enabled().await {
+            let has_held = {
+                let state = self.state.lock().await;
+                let running = state.running_prompt_id();
+                // Only editable human rows are promotable; protected pins and
+                // queue-hidden fallbacks must not arm steer promotion.
+                running.is_some()
+                    && state.pending_inputs.iter().any(|item| {
+                        item.is_queue_editable() && Some(item.prompt_id.as_str()) != running
+                    })
+            };
+            if has_held {
+                self.promote_queued_as_interjections().await;
+            }
+        }
+        self.drain_pending_interjections().await
+    }
+
     pub(super) async fn drain_pending_interjections(&self) -> bool {
         // Manual drain (not `drain_formatted`): skill parsing needs the raw
         // text — parsed post-wrap, the envelope's closing `</user_query>` tag

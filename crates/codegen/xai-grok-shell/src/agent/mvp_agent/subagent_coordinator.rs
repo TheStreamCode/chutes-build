@@ -359,7 +359,15 @@ impl MvpAgent {
         let ask_user_question_enabled = parent_handle
             .as_ref()
             .map(|h| h.ask_user_question_enabled)
-            .unwrap_or_else(|| self.cfg.borrow().resolve_ask_user_question().value);
+            .unwrap_or_else(|| {
+                self.cfg
+                    .borrow()
+                    .is_feature_enabled(crate::agent::config::Feature::AskUserQuestion)
+            });
+        let parent_non_interactive = parent_handle
+            .as_ref()
+            .map(|h| h.non_interactive)
+            .unwrap_or(false);
         let (gcs_upload_method, gcs_bucket_url) = match self.trace_upload_config_snapshot() {
             Some(method) => {
                 let bucket = match &method {
@@ -438,10 +446,14 @@ impl MvpAgent {
             image_gen_config: self.prepare_image_gen_config(),
             video_gen_config: self.prepare_video_gen_config(),
             app_builder_deployer_config: self.prepare_app_builder_deployer_config(),
-            write_file_enabled: self.cfg.borrow().resolve_write_file().value,
+            write_file_enabled: self
+                .cfg
+                .borrow()
+                .is_feature_enabled(crate::agent::config::Feature::WriteFile),
             goal_enabled: self.cfg.borrow().resolve_goal().value,
             background_workflows_enabled: self.cfg.borrow().resolve_workflows().value,
             ask_user_question_enabled,
+            parent_non_interactive,
             parent_cmd_tx: parent_cmd_tx.clone(),
             parent_session_info: parent_handle.as_ref().map(|h| crate::session::info::Info {
                 id: parent_sid.clone(),
@@ -458,7 +470,10 @@ impl MvpAgent {
             todo_gate: self.cfg.borrow().todo_gate,
             remote_settings: self.cfg.borrow().remote_settings.clone(),
             laziness_debug_log: self.cfg.borrow().laziness_debug_log.clone(),
-            backend_tools_enabled: self.cfg.borrow().resolve_backend_tools().value,
+            backend_tools_enabled: self
+                .cfg
+                .borrow()
+                .is_feature_enabled(crate::agent::config::Feature::BackendTools),
             respect_gitignore: self.cfg.borrow().respect_gitignore,
             path_not_found_hints: self.cfg.borrow().path_not_found_hints,
             plugin_registry: self.plugin_registry_handle.snapshot(),
@@ -514,7 +529,10 @@ impl MvpAgent {
                 .unwrap_or_else(|| {
                     xai_grok_tools::reminders::task_completion::DEFAULT_TASK_OUTPUT_TOOL.to_string()
                 }),
-            auto_wake_enabled: self.cfg.borrow().auto_wake_enabled,
+            auto_wake_enabled: self
+                .cfg
+                .borrow()
+                .is_feature_enabled(crate::agent::config::Feature::AutoWake),
             goal_loop_active: parent_handle
                 .as_ref()
                 .map(|h| h.tool_context.goal_loop_active_gate.clone())

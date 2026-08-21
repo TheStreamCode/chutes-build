@@ -223,7 +223,7 @@ pub(crate) async fn create_test_actor_with_terminal(
     let state = TokioMutex::new(State {
         running_task: None,
         pending_inputs: VecDeque::new(),
-        combine_edit_holds: std::collections::HashSet::new(),
+        edit_holds: HashMap::new(),
         pending_notifications: Vec::new(),
         notifications_suppressed: false,
         rewindable: false,
@@ -393,7 +393,6 @@ pub(crate) async fn create_test_actor_with_terminal(
         pending_classifier_completions: parking_lot::Mutex::new(std::collections::VecDeque::new()),
         goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle: Default::default(),
-        managed_mcp_expires_at: std::sync::Mutex::new(None),
         initial_client_mcp_servers: vec![],
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),
         mcp_announced_servers: Mutex::new(HashMap::new()),
@@ -403,6 +402,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         mcp_handshakes_done: Arc::new(tokio::sync::Notify::new()),
         user_input_generation: std::sync::atomic::AtomicU64::new(0),
         laziness_debug_log: None,
+        last_live_orphan_reconcile: std::cell::Cell::new(None),
         deferred_prefix: TaskSlot::new(),
         extension_registry: xai_agent_lifecycle::LocalExtensionRegistry::default(),
         last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
@@ -410,6 +410,9 @@ pub(crate) async fn create_test_actor_with_terminal(
         last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
         last_api_request_at: std::sync::atomic::AtomicI64::new(0),
         hook_registry: std::cell::RefCell::new(None),
+        turn_report: Default::default(),
+        turn_abort: Default::default(),
+        turn_end_tx: Default::default(),
         client_hooks: Default::default(),
         hook_resolved_workspace_root: String::new(),
         vcs_kind: xai_grok_workspace::session::git::VcsKind::Git,
@@ -424,10 +427,15 @@ pub(crate) async fn create_test_actor_with_terminal(
         recap_epoch: std::cell::Cell::new(0),
         turn_summary_task: std::cell::RefCell::new(None),
         turn_summary_generation: std::cell::Cell::new(0),
+        title_refresh_task: std::cell::RefCell::new(None),
+        title_refresh_generation: std::cell::Cell::new(0),
+        next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
+        title_refresh_enabled: false,
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         turn_stream_drained: parking_lot::Mutex::new(None),
+        pending_image_strip: parking_lot::Mutex::new(None),
         sampler_handle: xai_grok_sampler::SamplerHandle::noop(),
         rebuild_spec: crate::session::agent_rebuild::test_rebuild_spec_default(),
         image_description_model: crate::test_support::TEST_MODEL.to_owned(),
@@ -492,7 +500,7 @@ pub(crate) fn user_item_with_rx(
         screen_mode: None,
         verbatim: false,
         json_schema: None,
-        origin: crate::session::PromptOrigin::User,
+        input_origin: InputOrigin::new(crate::session::PromptOrigin::User),
         task_wake_fallback: None,
         tool_overrides_update: None,
         respond_to,
@@ -507,6 +515,7 @@ pub(crate) fn user_item_with_rx(
             text,
             combined_texts: None,
         }),
+        queue_mutation_policy: QueueMutationPolicy::editable(),
         send_now: false,
     };
     (item, rx)
@@ -524,6 +533,7 @@ pub(crate) fn input_with_origin_rx(
 ) -> (InputItem, oneshot::Receiver<PromptTurnResult>) {
     let (respond_to, rx) = oneshot::channel();
     let verbatim = origin.is_synthetic();
+    let input_origin = InputOrigin::new(origin);
     let item = InputItem {
         prompt_id: prompt_id.to_string(),
         prompt_blocks: vec![],
@@ -534,13 +544,14 @@ pub(crate) fn input_with_origin_rx(
         screen_mode: None,
         verbatim,
         json_schema: None,
-        origin,
+        input_origin,
         task_wake_fallback: None,
         tool_overrides_update: None,
         respond_to,
         persist_ack: None,
         parsed_prompt_tx: None,
         queue_meta: None,
+        queue_mutation_policy: QueueMutationPolicy::hidden(),
         send_now: false,
     };
     (item, rx)
@@ -552,7 +563,7 @@ pub(crate) fn queue_input_request(
     prompt_id: &str,
     respond_to: oneshot::Sender<PromptTurnResult>,
 ) -> QueueInputRequest {
-    QueueInputRequest::new(
+    QueueInputRequest::from_legacy_prompt_id(
         prompt_blocks,
         prompt_id.to_string(),
         PromptMode::Agent,
@@ -659,5 +670,14 @@ pub(crate) async fn actor_with_persistence_drain() -> std::sync::Arc<SessionActo
             }
         }
     });
-    std::sync::Arc::new(create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await)
+    let (actor, _) = create_test_actor_with_terminal(
+        0,
+        256_000,
+        85,
+        gateway_tx,
+        persistence_tx,
+        Arc::new(DummyTerminal),
+    )
+    .await;
+    std::sync::Arc::new(actor)
 }

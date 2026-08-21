@@ -51,6 +51,7 @@ pub struct Config {
     pub ask_user_question: crate::tools::config::AskUserQuestionToolConfig,
     /// `[privacy]` — local banner ack (not auth-metadata).
     pub privacy: PrivacyConfig,
+    pub consent: super::consent::ConsentConfig,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -121,8 +122,15 @@ pub(crate) fn load_mcp_servers_with_oauth(
     cwd: &std::path::Path,
     compat: &CompatConfig,
 ) -> (Vec<acp::McpServer>, McpOAuthConfigMap) {
-    let global_config =
-        crate::config::load_from_disk().unwrap_or_else(|_| TomlValue::Table(toml::map::Map::new()));
+    // Read the same effective config that `load_mcp_servers` /
+    // `reload_mcp_servers_merged` start servers from, so the server list and its
+    // parallel OAuth map derive from one snapshot. This aligns the OAuth map
+    // with the effective-config server list, so a managed- or
+    // requirements-defined server cannot start without its OAuth client
+    // settings. (The overlay is stripped of `mcp_servers`, so it never
+    // contributes a server here.)
+    let global_config = crate::config::load_effective_config()
+        .unwrap_or_else(|_| TomlValue::Table(toml::map::Map::new()));
 
     let mut servers_map: IndexMap<String, McpServerConfig> = IndexMap::new();
     for (name, config) in parse_mcp_servers_from_toml(&global_config) {
@@ -1727,12 +1735,13 @@ pub fn disabled_mcp_server_names(cwd: &std::path::Path) -> std::collections::Has
 
 /// Names `chutes-build mcp enable`/`disable` may target: user/project TOML (including
 /// setup-required/invalid entries that session merge drops), the user
-/// `disabled_mcp_servers` list, compat JSON (`.mcp.json`, Claude, Cursor),
-/// **plugin** MCP servers (same discovery as doctor/`/mcps`), and legacy
-/// managed `grok_com_*` (special-cased in the CLI).
+/// `disabled_mcp_servers` list, compat JSON (`.mcp.json`, Claude, Cursor), and
+/// **plugin** MCP servers (same discovery as doctor/`/mcps`).
 ///
 /// Does **not** include gateway connectors (`managed_gateway:…`); those use
 /// `disabled_mcp_tools.__managed_gateway_connectors` via the `/mcps` Space.
+/// `grok_com_*` is known only when a TOML / disabled / compat / plugin
+/// definition exists — not by prefix.
 pub fn cli_known_mcp_server_names(cwd: &std::path::Path) -> std::collections::HashSet<String> {
     let mut names = disabled_mcp_server_names(cwd);
     // Full TOML key set (list parity) — merge drops setup-required/invalid.

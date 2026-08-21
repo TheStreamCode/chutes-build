@@ -288,8 +288,8 @@ impl JsonlStorageAdapter {
         target_info: &Info,
         options: CopySessionOptions,
     ) -> io::Result<CopySessionResult> {
-        let target_dir = self.session_dir(target_info);
-        std::fs::create_dir_all(&target_dir)?;
+        // Canonical creator: the fork target chain is born owner-only.
+        let target_dir = self.create_session_dir_owner_only(target_info)?;
 
         let source_summary = self.read_summary_sync(source_info)?;
         let chat_format_version = source_summary.chat_format_version;
@@ -414,16 +414,38 @@ impl JsonlStorageAdapter {
             &self.announcement_state_file(target_info),
         )?;
 
+        // Title-refresh watermark: only a managed parent (one with a watermark)
+        // passes managed state to the child, so a fork of a pre-feature session
+        // stays unmanaged (frozen) rather than being adopted. A full fork
+        // inherits the parent's checkpoint (keeping the inherited title frozen);
+        // a partial fork starts fresh at `0` so it can retitle its shorter
+        // conversation.
+        if let Some(parent_idx) =
+            crate::session::helpers::session_summary::load_title_refresh_watermark(
+                &self.session_dir(source_info),
+            )
+        {
+            let child_idx = if options.target_prompt_index.is_none() {
+                parent_idx
+            } else {
+                0
+            };
+            crate::session::helpers::session_summary::save_title_refresh_watermark(
+                &self.session_dir(target_info),
+                child_idx,
+            );
+        }
+
         // Copied verbatim: the archive is immutable, so no cwd rewrite.
         let compaction_segments_copied = if options.copy_compaction_segments {
             let src_dir = self
                 .session_dir(source_info)
-                .join(xai_chat_state::compaction_transcript::COMPACTION_DIR);
+                .join(xai_compaction_transcript::COMPACTION_DIR);
             let mut copied = 0usize;
             if src_dir.is_dir() {
                 let dst_dir = self
                     .session_dir(target_info)
-                    .join(xai_chat_state::compaction_transcript::COMPACTION_DIR);
+                    .join(xai_compaction_transcript::COMPACTION_DIR);
                 std::fs::create_dir_all(&dst_dir)?;
                 for entry in std::fs::read_dir(&src_dir)? {
                     let entry = entry?;
@@ -537,6 +559,13 @@ fn fork_summary(
             None
         } else {
             source.last_turn_summary_prompt_id
+        },
+        // A recap describes the parent's whole session; a partial fork may not
+        // contain that work, so clear it there and keep it for full forks.
+        last_recap: if options.target_prompt_index.is_some() {
+            None
+        } else {
+            source.last_recap
         },
     }
 }
