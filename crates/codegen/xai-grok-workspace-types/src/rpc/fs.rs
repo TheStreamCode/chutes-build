@@ -15,8 +15,8 @@ use super::{RpcActivityClass, WorkspaceRpc};
 /// A single file entry to write.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PutFileEntry {
-    /// Path relative to the workspace root, or an absolute path within it.
-    /// Paths that escape the root are rejected.
+    /// Path relative to the client-fs base (the bound session's cwd when it
+    /// extends the workspace root, else the root); escapes are rejected.
     pub path: String,
     /// UTF-8 file content (one chunk).
     pub content: String,
@@ -59,7 +59,7 @@ impl WorkspaceRpc for PutFilesReq {
 /// Per-file result from a put_files operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PutFileResult {
-    /// The resolved path (relative to workspace root).
+    /// The request path, echoed back.
     pub path: String,
     /// Whether this file was successfully written.
     pub ok: bool,
@@ -89,7 +89,7 @@ pub struct PutFilesRes {
 /// chunking should align offsets to codepoint boundaries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetFileEntry {
-    /// Path relative to the workspace root, or an absolute path within it.
+    /// Path relative to the client-fs base (see [`PutFileEntry::path`]).
     pub path: String,
     /// If set, the server compares this hash against the full-file content
     /// hash. If they match, the content field in the response is `None`
@@ -149,7 +149,7 @@ pub struct GetFilesRes {
 // Filesystem extension ops (`workspace.fs_*`)
 // =========================================================================
 
-// Response types — serde shapes match the shell's `session::file_system`
+// Response types ÔÇö serde shapes match the shell's `session::file_system`
 // types byte-for-byte so the ACP wire contract is unchanged.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,7 +259,7 @@ pub struct FsReadFileReq {
     #[serde(default)]
     pub offset: Option<u64>,
     /// Bytes to read (absent means "to EOF"). Only consulted for ranged
-    /// reads, and always capped at `max_bytes` and the server's hard limit —
+    /// reads, and always capped at `max_bytes` and the server's hard limit ÔÇö
     /// so an unset `length` still returns at most `max_bytes`. Detect "more
     /// data" by comparing the returned bytes (from `offset`) against `size`.
     #[serde(default)]
@@ -320,7 +320,7 @@ impl WorkspaceRpc for FsDeleteFileReq {
 // with a post-sort `offset`, and reads are binary-safe (base64 chunks).
 // camelCase wire format with fixed-width integers only, so both the
 // workspace server (`xai-grok-workspace`) and the grok.com backend
-// compile against the same structs — a field rename breaks both sides.
+// compile against the same structs ÔÇö a field rename breaks both sides.
 //
 // The method names use a `client_fs` segment (not `fs`) because the
 // `workspace.fs_*` ops above already serve the shell's `chutes.ai/fs/*`
@@ -381,9 +381,9 @@ fn default_max_bytes() -> u64 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsListReq {
-    /// Path relative to the workspace root (`""` or `"."` = root), or an
-    /// absolute path within the root. Paths that escape the root are
-    /// rejected by the server.
+    /// Path relative to the client-fs base (`""` or `"."` = the base: the
+    /// bound session's cwd when it extends the workspace root, else the
+    /// root); escapes are rejected.
     pub path: String,
     /// Walk depth below `path` (1 = immediate children).
     #[serde(default = "default_client_depth")]
@@ -418,14 +418,14 @@ impl WorkspaceRpc for ClientFsListReq {
     type Response = ClientFsListRes;
 }
 
-/// One listed node. Shell-aligned except `path` (workspace-root-relative)
+/// One listed node. Shell-aligned except `path` (client-fs-base-relative)
 /// and `mtimeMs` (epoch millis).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsListNode {
     /// File name (final path component).
     pub name: String,
-    /// Path relative to the workspace root (divergent: shell is absolute).
+    /// Path relative to the client-fs base (divergent: shell is absolute).
     pub path: String,
     /// Node kind.
     #[serde(rename = "type")]
@@ -453,11 +453,11 @@ pub struct ClientFsListRes {
     pub truncated: bool,
 }
 
-/// Stat request — existence, metadata, and a content hash for one path.
+/// Stat request ÔÇö existence, metadata, and a content hash for one path.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsStatReq {
-    /// Path relative to the workspace root, or an absolute path within it.
+    /// Path relative to the client-fs base (see [`ClientFsListReq::path`]).
     pub path: String,
 }
 
@@ -467,8 +467,8 @@ impl WorkspaceRpc for ClientFsStatReq {
     type Response = ClientFsStatRes;
 }
 
-/// Response for [`ClientFsStatReq`]. A missing path — including one whose
-/// intermediate component is a file rather than a directory — is
+/// Response for [`ClientFsStatReq`]. A missing path ÔÇö including one whose
+/// intermediate component is a file rather than a directory ÔÇö is
 /// `exists: false` with all other fields absent (not an RPC error).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -484,24 +484,24 @@ pub struct ClientFsStatRes {
     /// Modification time as epoch milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtime_ms: Option<i64>,
-    /// SHA-256 hex digest of the full content (files only) — keys the
+    /// SHA-256 hex digest of the full content (files only) ÔÇö keys the
     /// backend's content-addressed write-through cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
 }
 
 /// Binary-safe chunked read request. Unlike `workspace.get_files`, byte
-/// ranges need no UTF-8 alignment — chunks transfer as base64.
+/// ranges need no UTF-8 alignment ÔÇö chunks transfer as base64.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsReadFileReq {
-    /// Path relative to the workspace root, or an absolute path within it.
+    /// Path relative to the client-fs base (see [`ClientFsListReq::path`]).
     pub path: String,
     /// Byte offset to start reading from (default 0).
     #[serde(default)]
     pub offset: Option<u64>,
     /// Bytes to read (absent means "to EOF"), always capped at `max_bytes`
-    /// and the server's hard limit — so an unset `length` still returns at
+    /// and the server's hard limit ÔÇö so an unset `length` still returns at
     /// most `max_bytes`. Detect "more data" by comparing the returned bytes
     /// (from `offset`) against `size`.
     #[serde(default)]
@@ -524,8 +524,8 @@ impl WorkspaceRpc for ClientFsReadFileReq {
 }
 
 /// Response for [`ClientFsReadFileReq`]. Exactly one of `content` /
-/// `contentBase64` is populated, matching `type`: `text` ⇒ `content`
-/// (unless base64 was requested), `binary` ⇒ `contentBase64`.
+/// `contentBase64` is populated, matching `type`: `text` ÔçÆ `content`
+/// (unless base64 was requested), `binary` ÔçÆ `contentBase64`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsReadFileRes {
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     fn fs_read_file_req_defaults_are_legacy_full_read() {
-        // Absent offset/length/encoding ⇒ whole-file read with the
+        // Absent offset/length/encoding ÔçÆ whole-file read with the
         // unchanged wire contract; max_bytes defaults to 1 MiB and is
         // only consulted on ranged reads.
         let req: FsReadFileReq =

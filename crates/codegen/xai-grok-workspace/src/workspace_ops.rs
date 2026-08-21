@@ -1,13 +1,13 @@
-//! [`WorkspaceOps`] — dual-mode workspace operations handle.
+//! [`WorkspaceOps`] ÔÇö dual-mode workspace operations handle.
 //!
 //! Two modes:
 //!
-//! - **`Local`** — extensions dispatch through [`WorkspaceHandle`]; tool
+//! - **`Local`** ÔÇö extensions dispatch through [`WorkspaceHandle`]; tool
 //!   calls dispatch through the workspace session's [`FinalizedToolset`].
 //!   The toolset is installed via [`WorkspaceOps::bind_local_session`]
 //!   after the agent is built.
 //!
-//! - **`Proxy`** — everything routes through hub WebSocket to a remote
+//! - **`Proxy`** ÔÇö everything routes through hub WebSocket to a remote
 //!   workspace server.
 //!
 //! ## Type safety
@@ -15,7 +15,7 @@
 //! Each RPC method has a corresponding request struct that implements
 //! [`WorkspaceRpc`]. The struct carries a `METHOD` constant and derives
 //! `Serialize + Deserialize`. Both the proxy client (`WorkspaceOps`) and
-//! the server (`WorkspaceRpcHandler::dispatch`) use the same struct —
+//! the server (`WorkspaceRpcHandler::dispatch`) use the same struct ÔÇö
 //! add/rename a field and the compiler catches both sides.
 use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::file_system::ContentSearchRequest;
@@ -45,10 +45,10 @@ pub use xai_grok_workspace_types::rpc::git::{
     BinaryFileInfoData, CheckoutCommitResponse, CommitWithPatchData, DetectVcsKindReq,
     DiffStatsSummary, GitBranchesReq, GitCheckoutCommitReq, GitCheckoutReq, GitCollectChangesReq,
     GitCollectChangesResponse, GitCommitReq, GitCurrentCommitReq, GitDiffReq, GitDiscardReq,
-    GitFilesReq, GitInfoReq, GitResolveRootReq, GitStageContentReq, GitStageReq, GitStashReq,
-    GitStatusExtReq, GitStatusExtResponse, GitStatusFormat, GitStatusReq, GitSyncBaseReq,
-    GitUnstageReq, IdentityData, PublicBaseData, RepoInfo, UNTRACKED_CONTENT_THRESHOLD,
-    UncommittedChangesData, UntrackedFileData,
+    GitEnsureBindingReq, GitFilesReq, GitInfoReq, GitMergeToMainReq, GitPushReq, GitResolveRootReq,
+    GitStageContentReq, GitStageReq, GitStashReq, GitStatusExtReq, GitStatusExtResponse,
+    GitStatusFormat, GitStatusReq, GitSyncBaseReq, GitUnstageReq, IdentityData, PublicBaseData,
+    RepoInfo, UNTRACKED_CONTENT_THRESHOLD, UncommittedChangesData, UntrackedFileData,
 };
 pub use xai_grok_workspace_types::rpc::hooks::{
     HookEventNameWire, HookRegistryReq, HookRegistryWire, HookSpecWire,
@@ -262,7 +262,7 @@ fn session_tracker(
 }
 /// Ancestor hop budget when locating `.chutes-build/repos.json`.
 ///
-/// Grove rewrite is one hop (`/workspace/app` → `/workspace`). Desktop
+/// Grove rewrite is one hop (`/workspace/app` ÔåÆ `/workspace`). Desktop
 /// workspaces can sit deeper than that; this is a backstop only. Primary
 /// bounds are the sandbox root (`/workspace`) and the user-global Chutes Build home.
 const REPOS_MANIFEST_MAX_ANCESTOR_HOPS: usize = 16;
@@ -346,13 +346,31 @@ impl WorkspaceOp for ReposListReq {
 /// caller provides one (the per-session repo, which the desktop sends per
 /// window), else the workspace root. Without this, every session's git
 /// queries/mutations would target the workspace launch directory's repo.
-fn git_op_cwd(
+pub(crate) async fn git_op_cwd(
     ws: &WorkspaceHandle,
     git_root: &Option<std::path::PathBuf>,
 ) -> WorkspaceResult<std::path::PathBuf> {
     match git_root {
         Some(root) => Ok(root.clone()),
         None => ws.root_cwd(),
+    }
+}
+/// Every provisioned mount (or the workspace root when none). Prompt, graph,
+/// fs-notify, and turn-commit walk this list so multi-repo is not primary-only.
+pub(crate) async fn materialized_git_roots(
+    ws: &WorkspaceHandle,
+) -> WorkspaceResult<Vec<std::path::PathBuf>> {
+    let root = ws.root_cwd()?;
+    let manifest = load_repos_manifest(&root).await?;
+    Ok(manifest.materialized_mounts(&root))
+}
+async fn load_repos_manifest(root: &std::path::Path) -> WorkspaceResult<RepoManifest> {
+    let path = root.join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH);
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => RepoManifest::from_json_bytes(&bytes)
+            .map_err(|e| WorkspaceError::HubError(e.to_string())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RepoManifest::new(Vec::new())),
+        Err(e) => Err(WorkspaceError::HubError(e.to_string())),
     }
 }
 #[async_trait]
@@ -362,7 +380,7 @@ impl WorkspaceOp for GitStatusExtReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         match self.format {
             GitStatusFormat::Structured => {
                 let data = crate::session::git::status(
@@ -392,7 +410,7 @@ impl WorkspaceOp for GitFilesReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::read_files(&cwd, &self.paths, &self.version)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -405,7 +423,7 @@ impl WorkspaceOp for GitDiffReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::diffs(
             &cwd,
             self.paths.as_deref(),
@@ -426,7 +444,7 @@ impl WorkspaceOp for GitStageReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::stage(&cwd, self.paths.clone())
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -439,7 +457,7 @@ impl WorkspaceOp for GitStageContentReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::stage_content(&cwd, &self.path, &self.content)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -452,7 +470,7 @@ impl WorkspaceOp for GitUnstageReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::unstage(&cwd, self.paths.clone())
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -465,7 +483,7 @@ impl WorkspaceOp for GitDiscardReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::discard(&cwd, self.paths.clone(), self.scope, self.include_untracked)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -478,7 +496,7 @@ impl WorkspaceOp for GitCommitReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::commit(&cwd, self)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -491,7 +509,7 @@ impl WorkspaceOp for GitSyncBaseReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::sync_base(
             &cwd,
             self.base_ref.as_deref(),
@@ -509,8 +527,53 @@ impl WorkspaceOp for GitCheckoutReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::checkout_branch(&cwd, &self.branch, self.create)
+            .await
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for GitEnsureBindingReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
+        crate::session::git::ensure_binding(&cwd, &self.session_branch, &self.base_ref)
+            .await
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for GitMergeToMainReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
+        let target = self.required_target_branch().ok_or_else(|| {
+            WorkspaceError::HubError(
+                "target_branch is required; omit/empty is rejected (no silent main default)"
+                    .to_string(),
+            )
+        })?;
+        crate::session::git::merge_to_main(&cwd, &self.session_branch, target, self.push)
+            .await
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for GitPushReq {
+    async fn execute(
+        &self,
+        ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
+        crate::session::git::push_branch(&cwd, self.branch.as_deref())
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
     }
@@ -522,7 +585,7 @@ impl WorkspaceOp for GitStashReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::stash(&cwd, self.include_untracked)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -535,7 +598,7 @@ impl WorkspaceOp for GitInfoReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::git_info(&cwd)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -548,7 +611,7 @@ impl WorkspaceOp for GitBranchesReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let cwd = git_op_cwd(ws, &self.git_root)?;
+        let cwd = git_op_cwd(ws, &self.git_root).await?;
         crate::session::git::list_branches(&cwd)
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -1000,9 +1063,9 @@ impl WorkspaceOp for PutFilesReq {
     async fn execute(
         &self,
         ws: &WorkspaceHandle,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        ws.put_files(self.files.clone()).await
+        ws.put_files(session_id, self.files.clone()).await
     }
 }
 #[async_trait]
@@ -1010,9 +1073,9 @@ impl WorkspaceOp for GetFilesReq {
     async fn execute(
         &self,
         ws: &WorkspaceHandle,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        ws.get_files(self.files.clone()).await
+        ws.get_files(session_id, self.files.clone()).await
     }
 }
 #[async_trait]
@@ -1020,9 +1083,9 @@ impl WorkspaceOp for ClientFsListReq {
     async fn execute(
         &self,
         ws: &WorkspaceHandle,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        crate::file_system::client_fs::list(ws, self).await
+        crate::file_system::client_fs::list(ws, session_id, self).await
     }
 }
 #[async_trait]
@@ -1030,9 +1093,9 @@ impl WorkspaceOp for ClientFsStatReq {
     async fn execute(
         &self,
         ws: &WorkspaceHandle,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        crate::file_system::client_fs::stat(ws, self).await
+        crate::file_system::client_fs::stat(ws, session_id, self).await
     }
 }
 #[async_trait]
@@ -1040,9 +1103,9 @@ impl WorkspaceOp for ClientFsReadFileReq {
     async fn execute(
         &self,
         ws: &WorkspaceHandle,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        crate::file_system::client_fs::read_file(ws, self).await
+        crate::file_system::client_fs::read_file(ws, session_id, self).await
     }
 }
 /// Resolve the index root for a code-nav op. Prefers the explicit per-session
@@ -1070,6 +1133,22 @@ fn resolve_index_for_workspace(
     let (handle, _was_new) = ws.get_or_create_codebase_index(index_root.clone());
     Ok((handle, index_root))
 }
+fn resolve_index_for_file(
+    ws: &WorkspaceHandle,
+    root: Option<&std::path::Path>,
+    file: &str,
+) -> WorkspaceResult<(
+    std::sync::Arc<xai_codebase_graph::IndexManagerHandle>,
+    std::path::PathBuf,
+)> {
+    if root.is_none() {
+        let file_path = std::path::Path::new(file);
+        if let Some(handle) = ws.get_covering_codebase_index(file_path) {
+            return Ok((handle, file_path.to_path_buf()));
+        }
+    }
+    resolve_index_for_workspace(ws, root)
+}
 #[async_trait]
 impl WorkspaceOp for CodeGotoDefinitionReq {
     async fn execute(
@@ -1077,7 +1156,7 @@ impl WorkspaceOp for CodeGotoDefinitionReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let (handle, _root) = resolve_index_for_workspace(ws, self.root.as_deref())?;
+        let (handle, _root) = resolve_index_for_file(ws, self.root.as_deref(), &self.file)?;
         let result = handle
             .goto_definition(std::path::PathBuf::from(&self.file), self.line, self.col)
             .await
@@ -1092,7 +1171,7 @@ impl WorkspaceOp for CodeGotoReferencesReq {
         ws: &WorkspaceHandle,
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
-        let (handle, _root) = resolve_index_for_workspace(ws, self.root.as_deref())?;
+        let (handle, _root) = resolve_index_for_file(ws, self.root.as_deref(), &self.file)?;
         let result = handle
             .goto_references(
                 std::path::PathBuf::from(&self.file),
@@ -1303,27 +1382,27 @@ impl WorkspaceOp for WorktreeDbStatsReq {
 }
 /// Dual-mode workspace operations handle.
 ///
-/// - **`Local`** — wraps a [`WorkspaceHandle`]. Extensions dispatch
+/// - **`Local`** ÔÇö wraps a [`WorkspaceHandle`]. Extensions dispatch
 ///   through the handle; tool calls dispatch through the workspace
 ///   session's [`FinalizedToolset`](xai_grok_tools::registry::types::FinalizedToolset).
 ///   Call [`bind_local_session`](Self::bind_local_session) after building
 ///   the agent to install the toolset on the workspace session.
 ///
-/// - **`Proxy`** — wraps a [`WorkspaceClient`] connected to a remote hub.
+/// - **`Proxy`** ÔÇö wraps a [`WorkspaceClient`] connected to a remote hub.
 ///   Everything routes through hub WebSocket to a remote workspace server.
 #[derive(Clone)]
 pub enum WorkspaceOps {
-    /// Local in-process mode — extensions through the handle, tool calls
+    /// Local in-process mode ÔÇö extensions through the handle, tool calls
     /// through the workspace session's toolset.
     Local { handle: WorkspaceHandle },
-    /// Proxy mode — routes through hub RPC.
+    /// Proxy mode ÔÇö routes through hub RPC.
     Proxy { client: WorkspaceClient },
 }
 impl WorkspaceOps {
     /// Construct a local-mode ops handle.
     ///
     /// Extensions dispatch through the handle immediately. Tool calls
-    /// require a workspace session — call [`bind_local_session`](Self::bind_local_session)
+    /// require a workspace session ÔÇö call [`bind_local_session`](Self::bind_local_session)
     /// after building the agent to install the toolset.
     pub fn local(handle: WorkspaceHandle) -> Self {
         Self::Local { handle }
@@ -1371,7 +1450,7 @@ impl WorkspaceOps {
     ///
     /// The installed toolset keeps the shell's own terminal backend; the
     /// session-owned backend minted at create stays idle and is what
-    /// `drop_session`/evict cancel — deliberately never adopted from the
+    /// `drop_session`/evict cancel ÔÇö deliberately never adopted from the
     /// external toolset, or teardown would SIGKILL a backend the shell shares.
     ///
     /// No-op in proxy mode (the workspace server owns sessions).
@@ -1593,7 +1672,7 @@ impl WorkspaceOps {
                         "session_not_found",
                         format!(
                             "workspace session not found: {session_id} \
-                             — call bind_local_session() first"
+                             ÔÇö call bind_local_session() first"
                         ),
                     )
                 })?;
@@ -1638,7 +1717,7 @@ impl WorkspaceOps {
     /// Test variant backed by a temp dir.
     ///
     /// Supports extension dispatch (`dispatch()`). Tool calls via
-    /// `call_tool()` require a workspace session — call
+    /// `call_tool()` require a workspace session ÔÇö call
     /// `bind_local_session()` with a test toolset first.
     pub fn for_test() -> Self {
         Self::Local {
@@ -1686,8 +1765,8 @@ mod tests {
     /// The reported bug: every window's git queries ran against the workspace
     /// launch directory. `git_op_cwd` must return the per-session repo the
     /// client sends, and only fall back to the workspace root when none is given.
-    #[test]
-    fn git_op_cwd_uses_explicit_git_root_per_window() {
+    #[tokio::test]
+    async fn git_op_cwd_uses_explicit_git_root_per_window() {
         let ops = WorkspaceOps::for_test();
         let WorkspaceOps::Local { handle } = &ops else {
             unreachable!("for_test builds a local handle");
@@ -1696,21 +1775,21 @@ mod tests {
         let window_a = std::path::PathBuf::from("/repos/xai-main");
         let window_b = std::path::PathBuf::from("/repos/xai-main-2");
         assert_eq!(
-            git_op_cwd(handle, &Some(window_a.clone())).unwrap(),
+            git_op_cwd(handle, &Some(window_a.clone())).await.unwrap(),
             window_a
         );
         assert_eq!(
-            git_op_cwd(handle, &Some(window_b.clone())).unwrap(),
+            git_op_cwd(handle, &Some(window_b.clone())).await.unwrap(),
             window_b
         );
-        assert_eq!(git_op_cwd(handle, &None).unwrap(), workspace_root);
+        assert_eq!(git_op_cwd(handle, &None).await.unwrap(), workspace_root);
     }
     #[tokio::test]
     async fn repos_list_reads_real_manifest_empty_one_and_many() {
         let tmp = tempfile::tempdir().unwrap();
         let ops = WorkspaceOps::for_test_in(tmp.path());
         let empty = ops.repos_list().await.expect("empty list");
-        assert!(empty.repos.is_empty(), "missing manifest → empty list");
+        assert!(empty.repos.is_empty(), "missing manifest ÔåÆ empty list");
         assert_eq!(
             empty.version,
             xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_VERSION
@@ -1871,8 +1950,8 @@ mod tests {
         );
     }
     /// Regression: a long-lived (leader) workspace must reclaim the per-session
-    /// `FinalizedToolset` — and the MCP tools / `McpState` / `events.jsonl`
-    /// `EventWriter` it transitively pins — when a session ends.
+    /// `FinalizedToolset` ÔÇö and the MCP tools / `McpState` / `events.jsonl`
+    /// `EventWriter` it transitively pins ÔÇö when a session ends.
     /// `bind_local_session` installs the toolset on a leader-level workspace
     /// session; without `end_local_session` that session (and everything it
     /// holds) leaks for the life of the process.
@@ -2031,7 +2110,7 @@ mod tests {
         );
     }
     /// `HookRegistry` round-trips through the wire mirror in both directions
-    /// (heavy → wire serializes identically; wire → heavy is the inverse).
+    /// (heavy ÔåÆ wire serializes identically; wire ÔåÆ heavy is the inverse).
     #[test]
     fn hook_registry_wire_round_trip_both_directions() {
         let spec = xai_grok_hooks::config::HookSpec {
@@ -2052,12 +2131,12 @@ mod tests {
         };
         let mut registry = xai_grok_hooks::discovery::HookRegistry::default();
         registry.append_specs(vec![spec]);
-        let wire = hook_registry_to_wire(&registry).expect("heavy → wire");
+        let wire = hook_registry_to_wire(&registry).expect("heavy ÔåÆ wire");
         assert_eq!(
             serde_json::to_value(&registry).unwrap(),
             serde_json::to_value(&wire).unwrap()
         );
-        let back = wire_to_hook_registry(&wire).expect("wire → heavy");
+        let back = wire_to_hook_registry(&wire).expect("wire ÔåÆ heavy");
         assert_eq!(
             serde_json::to_value(&back).unwrap(),
             serde_json::to_value(&registry).unwrap()
@@ -2078,6 +2157,7 @@ mod tests {
                 E::SessionEnd => HookEventNameWire::SessionEnd,
                 E::Stop => HookEventNameWire::Stop,
                 E::StopFailure => HookEventNameWire::StopFailure,
+                E::StopCancelled => HookEventNameWire::StopCancelled,
                 E::PreToolUse => HookEventNameWire::PreToolUse,
                 E::PostToolUse => HookEventNameWire::PostToolUse,
                 E::PostToolUseFailure => HookEventNameWire::PostToolUseFailure,
@@ -2096,6 +2176,7 @@ mod tests {
             E::SessionEnd,
             E::Stop,
             E::StopFailure,
+            E::StopCancelled,
             E::PreToolUse,
             E::PostToolUse,
             E::PostToolUseFailure,
@@ -2466,7 +2547,7 @@ mod tests {
         assert_eq!(recovered.results[0].content.as_deref(), Some("contents"));
     }
     /// Code-nav must resolve its index at the per-session root the client
-    /// sends, not the shared workspace root — otherwise a second window would
+    /// sends, not the shared workspace root ÔÇö otherwise a second window would
     /// query the first window's index.
     #[tokio::test]
     async fn index_root_for_uses_explicit_per_window_root() {
