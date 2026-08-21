@@ -8,12 +8,12 @@
 //!
 //! The primary resource injected into every session's `Resources`:
 //!
-//! - `SubagentBackendResource` — wraps an `Arc<dyn SubagentBackend>` that
+//! - `SubagentBackendResource` ÔÇö wraps an `Arc<dyn SubagentBackend>` that
 //!   abstracts spawn/query/cancel (see [`super::backend`])
-//! - `SubagentDepthCounter` — current nesting depth
-//! - `MaxSubagentDepth` — configured max nesting depth
-//! - `SessionIdResource` — carries the current session ID for parent scoping
-//! - `TaskModelValidator` — validates explicit model slugs before background spawn
+//! - `SubagentDepthCounter` ÔÇö current nesting depth
+//! - `MaxSubagentDepth` ÔÇö configured max nesting depth
+//! - `SessionIdResource` ÔÇö carries the current session ID for parent scoping
+//! - `TaskModelValidator` ÔÇö validates explicit model slugs before background spawn
 //!
 //! All coordinator messages are funnelled through a single
 //! `SubagentEventSender` / `SubagentEvent` enum channel.
@@ -84,12 +84,12 @@ pub struct SubagentRequest {
     ///
     /// Controls immediate handle delivery and completion surfacing. A
     /// background child still auto-surfaces its completion to the model
-    /// (buffered reminder / auto-wake) when `surface_completion` is set —
+    /// (buffered reminder / auto-wake) when `surface_completion` is set ÔÇö
     /// background does not mean fire-and-forget. Prompt cancellation still
     /// cancels every child owned by that prompt.
     pub run_in_background: bool,
     /// When false, the subagent's completion is NOT buffered for the
-    /// between-turn "idle completion" reminder — used by harness-internal
+    /// between-turn "idle completion" reminder ÔÇö used by harness-internal
     /// subagents like the goal planner/classifier that the model must never see.
     pub surface_completion: bool,
     pub await_to_completion: bool,
@@ -173,11 +173,11 @@ pub struct SubagentRuntimeOverrides {
     pub isolation: Option<SubagentIsolationMode>,
     /// `/goal`-only harness override: the `agent_type` (e.g. `"cursor"`,
     /// `"grok-build-plan"`) whose `AgentDefinition` decides the child's harness
-    /// flavor — system prompt + toolset — applied
+    /// flavor ÔÇö system prompt + toolset ÔÇö applied
     /// REGARDLESS of the parent agent (so a session can pin a
     /// compat-harness verifier and vice versa).
     /// Orthogonal to `subagent_type`, which still selects the toolset-role
-    /// (implementer vs explorer). `None` for every non-goal spawn ⇒ the parent
+    /// (implementer vs explorer). `None` for every non-goal spawn ÔçÆ the parent
     /// agent decides the flavor (unchanged behavior).
     pub harness_agent_type: Option<String>,
     pub completion_output_cap: Option<usize>,
@@ -395,7 +395,7 @@ pub struct SubagentResult {
     /// Error message if the subagent failed.
     pub error: Option<String>,
     /// True if the subagent was cancelled (by user or model).
-    /// Distinct from failure — cancellation is intentional.
+    /// Distinct from failure ÔÇö cancellation is intentional.
     pub cancelled: bool,
     pub subagent_id: String,
     /// The child session ID (same as subagent_id for MVP).
@@ -505,7 +505,7 @@ pub struct SubagentInspection {
 }
 
 impl SubagentSnapshot {
-    /// Whether the child is still in flight (initializing or running) — the
+    /// Whether the child is still in flight (initializing or running) ÔÇö the
     /// shared liveness rule every driver's blocking query loops on.
     pub fn is_running(&self) -> bool {
         matches!(
@@ -533,7 +533,7 @@ pub enum SubagentSnapshotStatus {
         tokens_used: u64,
         /// Total context window capacity (tokens).
         context_window_tokens: u64,
-        /// Context window usage as a percentage (0–100).
+        /// Context window usage as a percentage (0ÔÇô100).
         context_usage_pct: u8,
         /// Distinct tool names called so far (e.g. `["bash", "read_file"]`).
         tools_used: Vec<String>,
@@ -570,7 +570,7 @@ pub enum SubagentCancelTarget {
     SubagentId(String),
     /// Turn-scoped cancel (soft cancel / max-turns).
     ParentPromptId(String),
-    /// User Stop / Esc with cancel_subagents — prior-turn background too.
+    /// User Stop / Esc with cancel_subagents ÔÇö prior-turn background too.
     ParentSession,
     WorkflowRunId(String),
 }
@@ -809,7 +809,7 @@ pub enum SubagentDescribeOutcome {
     },
     /// The type resolves but is disabled via `[subagents.toggle]`.
     Disabled,
-    /// Coordinator unreachable / responder dropped / timed out — treat as
+    /// Coordinator unreachable / responder dropped / timed out ÔÇö treat as
     /// fail-open (the type may be valid; the description just could not be
     /// obtained).
     Unavailable,
@@ -822,7 +822,7 @@ pub enum SubagentDescribeOutcome {
 /// parent's described tool names match what the child would
 /// actually get. The capability booleans key on the exact `ToolKind`
 /// variants used by the per-role gates (`Search` for grep, `Execute` for
-/// terminal/bash — there is no `Grep`/`Bash` variant).
+/// terminal/bash ÔÇö there is no `Grep`/`Bash` variant).
 #[derive(Debug, Clone, Default)]
 pub struct SubagentTypeSummary {
     /// Client-facing tool name per [`ToolKind`](crate::types::tool::ToolKind),
@@ -849,7 +849,7 @@ pub struct SubagentDescribeRequest {
     /// [`SubagentRuntimeOverrides::harness_agent_type`]: the coordinator
     /// resolves the toolset for `(subagent_type, harness_agent_type)` so the
     /// per-role capability gate + prompt tool names reflect the harness the
-    /// spawn will actually run on. `None` ⇒ the parent agent decides the flavor
+    /// spawn will actually run on. `None` ÔçÆ the parent agent decides the flavor
     /// (unchanged behavior).
     pub harness_agent_type: Option<String>,
     pub parent_session_id: String,
@@ -865,9 +865,12 @@ pub enum SubagentEvent {
     ListActive(SubagentListActiveRequest),
     ListRunning(SubagentListRunningRequest),
     Completions(SubagentCompletionsRequest),
-    /// Discard a closed session's buffered completions and cancel its children.
+    /// Cancel children of `parent_session_id` and drop its buffered completions.
+    /// `respond_to`, if set, resolves when no children remain (caller should
+    /// time-bound the wait).
     TeardownSession {
         parent_session_id: String,
+        respond_to: Option<oneshot::Sender<()>>,
     },
     /// Re-open Task spawns for a parent session after a prior ParentSession stop.
     /// Emitted at the start of each user turn so Stop's late-spawn gate does not
@@ -931,7 +934,7 @@ pub struct SubagentDepthCounter(pub u32);
 
 register_resource!("grok_build", "SubagentDepthCounter", SubagentDepthCounter);
 
-/// Host-injected max nesting depth; absent → [`super::MAX_SUBAGENT_DEPTH`].
+/// Host-injected max nesting depth; absent ÔåÆ [`super::MAX_SUBAGENT_DEPTH`].
 #[derive(Debug, Clone, Copy)]
 pub struct MaxSubagentDepth(pub u32);
 

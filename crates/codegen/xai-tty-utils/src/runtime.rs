@@ -12,7 +12,7 @@
 //! first mid-turn `spawn_blocking` does not take the empty-pool panic arm.
 //!
 //! This is the single home for the policy. Every production multi-thread
-//! runtime (the `chutes-build` binary, `workspace_server`) derives its worker count
+//! runtime (the `grok` binary, `workspace_server`) derives its worker count
 //! from here.
 
 use std::io;
@@ -21,7 +21,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-/// Maximum runtime worker threads for any chutes-build process.
+/// Maximum runtime worker threads for any grok process.
+#[allow(
+    clippy::unwrap_used,
+    reason = "const unwrap is evaluated at compile time and cannot panic at runtime"
+)]
 pub const MAX_WORKER_THREADS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
 /// Maximum Tokio blocking threads per runtime. Tokio's default is 512.
@@ -55,7 +59,7 @@ pub fn apply_blocking_pool(builder: &mut tokio::runtime::Builder) -> &mut tokio:
 /// Apply the blocking-pool policy, build, and pre-warm the full pool.
 ///
 /// Process-lifetime runtimes only. Per-session runtimes should
-/// [`apply_blocking_pool`] — a 16-wide pre-warm races `pthread_create`
+/// [`apply_blocking_pool`] ÔÇö a 16-wide pre-warm races `pthread_create`
 /// across a subagent wave.
 ///
 /// # Errors

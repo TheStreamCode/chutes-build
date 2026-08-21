@@ -60,7 +60,7 @@ pub trait AsyncFileSystem: Send + Sync {
     /// its contents. `Ok(false)` means a definitive not-found; other probe
     /// failures surface as `Err`.
     ///
-    /// The default errs with `ErrorKind::Unsupported` — callers must treat
+    /// The default errs with `ErrorKind::Unsupported` ÔÇö callers must treat
     /// `Err` as "unknown" and fail closed. Backends opt in by overriding
     /// with a cheap stat/lookup; a full-content read is never an acceptable
     /// probe (the target may be arbitrarily large or remote).
@@ -91,7 +91,7 @@ pub struct TerminalRunRequest {
     /// Notification handle for streaming output chunks during execution.
     /// The backend sends `BashOutputChunk` notifications every ~100ms.
     /// Callers that don't need streaming pass `ToolNotificationHandle::noop()`
-    /// — messages are silently dropped. No `Option` wrapper needed.
+    /// ÔÇö messages are silently dropped. No `Option` wrapper needed.
     pub notification_handle: ToolNotificationHandle,
 
     /// Tool call ID for correlating notifications with the tool invocation.
@@ -114,9 +114,9 @@ pub struct TerminalRunRequest {
     /// command may block the turn before being moved to the background (process
     /// keeps running). Independent of [`Self::timeout`].
     ///
-    /// - `None` → use the terminal backend default (typically 15s).
-    /// - `Some(Duration::MAX)` → no short budget; auto-bg only when `timeout` elapses.
-    /// - `Some(d)` → auto-bg after `d` if still running.
+    /// - `None` ÔåÆ use the terminal backend default (typically 15s).
+    /// - `Some(Duration::MAX)` ÔåÆ no short budget; auto-bg only when `timeout` elapses.
+    /// - `Some(d)` ÔåÆ auto-bg after `d` if still running.
     pub foreground_block_budget: Option<Duration>,
 
     /// Task kind for distinguishing monitor tasks from regular bash tasks.
@@ -124,7 +124,7 @@ pub struct TerminalRunRequest {
 
     /// Session that owns this process. Used to scope kill operations so
     /// `kill_all_background_tasks_by_owner` only targets the requesting
-    /// session's processes — not the parent's or sibling's.
+    /// session's processes ÔÇö not the parent's or sibling's.
     pub owner_session_id: Option<String>,
     /// Model-supplied label for task UI / snapshots.
     pub description: Option<String>,
@@ -147,7 +147,7 @@ pub enum TaskKind {
     /// Regular bash command.
     #[default]
     Bash,
-    /// Monitor tool — streams stdout events with rate limiting.
+    /// Monitor tool ÔÇö streams stdout events with rate limiting.
     Monitor,
 }
 
@@ -174,7 +174,7 @@ pub struct TerminalRunResult {
     pub pid: Option<u32>,
 }
 
-/// Returned by `TerminalBackend::run_background` — gives the caller the task_id
+/// Returned by `TerminalBackend::run_background` ÔÇö gives the caller the task_id
 /// to use for subsequent queries via `get_task`, `kill_task`, `wait_for_completion`.
 pub struct BackgroundHandle {
     pub task_id: String,
@@ -224,14 +224,15 @@ pub struct TaskSnapshot {
     /// because the blocking caller already received the result directly.
     #[serde(default)]
     pub block_waited: bool,
-    /// Whether this task was explicitly killed via the `kill_command_or_subagent` tool.
-    /// When set, auto-wake synthetic prompts are suppressed because the model
-    /// already received the kill result via `KillTaskResult`.
-    /// Also set during `kill_all_background_tasks` teardown (e.g. subagent
-    /// cleanup), where auto-wake suppression is irrelevant since the session
-    /// is shutting down.
+    /// Whether this task was explicitly killed (kill tool, UI Stop, or
+    /// teardown) rather than exiting on its own. Display/tombstone flag;
+    /// auto-wake uses [`Self::is_auto_wake_suppressed`].
     #[serde(default)]
     pub explicitly_killed: bool,
+    /// Model already got a kill/wait tool result, or the kill was teardown.
+    /// False for UI/Stop with no live waiter. Missing on the wire is false.
+    #[serde(default)]
+    pub kill_result_delivered: bool,
 
     /// Session that owns this task. Used for scoped kill operations so
     /// subagent teardown only kills the subagent's own tasks, not
@@ -256,7 +257,7 @@ impl TaskSnapshot {
             .unwrap_or(0.0)
     }
 
-    /// True iff the task has NOT yet completed — covers bash AND
+    /// True iff the task has NOT yet completed ÔÇö covers bash AND
     /// monitor task kinds (the `kind` field doesn't change this
     /// predicate; the runtime turn-end TodoGate counts both as
     /// backing work).
@@ -270,9 +271,14 @@ impl TaskSnapshot {
         crate::util::truncate::PartialOutput::part_of(&self.output, self.output_total_bytes)
     }
 
-    /// Incomplete and backgrounded — tray/`tasks_snapshot` predicate (not FG in-flight).
+    /// Incomplete and backgrounded ÔÇö tray/`tasks_snapshot` predicate (not FG in-flight).
     pub fn is_outstanding_background(&self) -> bool {
         !self.completed && self.is_backgrounded
+    }
+
+    /// True when a TaskCompleted auto-wake would be redundant.
+    pub fn is_auto_wake_suppressed(&self) -> bool {
+        self.block_waited || (self.explicitly_killed && self.kill_result_delivered)
     }
 }
 
@@ -287,6 +293,25 @@ pub enum KillOutcome {
     Killed,
     AlreadyExited,
     NotFound,
+}
+
+/// Who initiated a background-task kill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillSource {
+    /// Model `kill_task` / `kill_command_or_subagent` tool.
+    ModelTool,
+    /// Single-task client UI kill (task-pane `[├ù]`).
+    ClientUi,
+    /// Bulk teardown: owner sweep, dashboard stop-all, session delete, headless reap.
+    Teardown,
+}
+
+impl KillSource {
+    /// Model-tool and teardown kills count as delivered; a client/UI kill
+    /// counts only when a waiter actually received the result.
+    pub fn marks_result_delivered(self, waiter_delivered: bool) -> bool {
+        matches!(self, Self::ModelTool | Self::Teardown) || waiter_delivered
+    }
 }
 
 // ============================================================================
@@ -314,7 +339,19 @@ pub trait TerminalBackend: Send + Sync {
     async fn get_task(&self, task_id: &str) -> Option<TaskSnapshot>;
 
     /// Kill a background task.
+    ///
+    /// Equivalent to [`Self::kill_task_with_source`] with
+    /// [`KillSource::ModelTool`].
     async fn kill_task(&self, task_id: &str) -> KillOutcome;
+
+    /// Kill a background task, recording who initiated the kill.
+    ///
+    /// The default ignores `source` and delegates to [`Self::kill_task`],
+    /// which existing backends treat as a model-tool kill.
+    async fn kill_task_with_source(&self, task_id: &str, source: KillSource) -> KillOutcome {
+        let _ = source;
+        self.kill_task(task_id).await
+    }
 
     /// Kill all running foreground processes.
     async fn kill_foreground_commands(&self) {}
@@ -330,7 +367,7 @@ pub trait TerminalBackend: Send + Sync {
 
     /// Kill all running background tasks owned by a specific session.
     /// Used during subagent teardown on a shared terminal backend so
-    /// only the subagent's own tasks are killed — not the parent's.
+    /// only the subagent's own tasks are killed ÔÇö not the parent's.
     async fn kill_all_background_tasks_by_owner(&self, _owner_session_id: &str) {}
 
     async fn warm_shell(&self, _cwd: &std::path::Path) {}
@@ -470,6 +507,103 @@ mod tests {
             .await
             .expect_err("default probe must err");
         assert_eq!(err.io_error_kind(), Some(std::io::ErrorKind::Unsupported));
+    }
+
+    #[test]
+    fn kill_source_marks_result_delivered() {
+        assert!(KillSource::ModelTool.marks_result_delivered(false));
+        assert!(KillSource::ModelTool.marks_result_delivered(true));
+        assert!(KillSource::Teardown.marks_result_delivered(false));
+        assert!(KillSource::Teardown.marks_result_delivered(true));
+        assert!(!KillSource::ClientUi.marks_result_delivered(false));
+        assert!(KillSource::ClientUi.marks_result_delivered(true));
+    }
+
+    #[test]
+    fn snapshot_suppresses_auto_wake_only_when_result_was_delivered() {
+        let mut snap = TaskSnapshot {
+            task_id: "t".into(),
+            command: "sleep 1".into(),
+            display_command: None,
+            cwd: "/tmp".into(),
+            start_time: std::time::SystemTime::UNIX_EPOCH,
+            end_time: None,
+            output: String::new(),
+            output_file: PathBuf::new(),
+            truncated: false,
+            output_total_bytes: 0,
+            exit_code: None,
+            signal: None,
+            completed: false,
+            kind: TaskKind::Bash,
+            block_waited: false,
+            explicitly_killed: false,
+            kill_result_delivered: false,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: false,
+        };
+        assert!(!snap.is_auto_wake_suppressed());
+
+        snap.block_waited = true;
+        assert!(snap.is_auto_wake_suppressed());
+        snap.block_waited = false;
+
+        snap.explicitly_killed = true;
+        assert!(
+            !snap.is_auto_wake_suppressed(),
+            "UI/Stop kill with no delivered result must wake"
+        );
+        snap.kill_result_delivered = true;
+        assert!(
+            snap.is_auto_wake_suppressed(),
+            "model-tool/teardown/delivered kill must suppress"
+        );
+        snap.explicitly_killed = false;
+        assert!(
+            !snap.is_auto_wake_suppressed(),
+            "delivered bit alone is not a kill"
+        );
+    }
+
+    #[test]
+    fn kill_result_delivered_deserializes_default_false() {
+        let mut snap = TaskSnapshot {
+            task_id: "t".into(),
+            command: "echo".into(),
+            display_command: None,
+            cwd: "/tmp".into(),
+            start_time: std::time::SystemTime::UNIX_EPOCH,
+            end_time: None,
+            output: String::new(),
+            output_file: PathBuf::from("/tmp/t.log"),
+            truncated: false,
+            output_total_bytes: 0,
+            exit_code: None,
+            signal: None,
+            completed: true,
+            kind: TaskKind::Bash,
+            block_waited: false,
+            explicitly_killed: true,
+            kill_result_delivered: true,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: false,
+        };
+        let mut value = serde_json::to_value(&snap).expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("kill_result_delivered");
+        let decoded: TaskSnapshot = serde_json::from_value(value).expect("legacy snapshot");
+        assert!(!decoded.kill_result_delivered);
+        assert!(decoded.explicitly_killed);
+        assert!(
+            !decoded.is_auto_wake_suppressed(),
+            "legacy explicitly_killed without the new field is not a delivered kill"
+        );
+        snap.kill_result_delivered = false;
+        assert_eq!(decoded, snap);
     }
 
     #[test]

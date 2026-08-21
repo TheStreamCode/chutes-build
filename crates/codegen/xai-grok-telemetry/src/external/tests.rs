@@ -273,6 +273,8 @@ fn screen_mode_allowlist_is_pinned() {
 #[test]
 fn tool_name_sanitization() {
     assert_eq!(schema::sanitize_tool_name("read_file"), "read_file");
+    assert_eq!(schema::sanitize_tool_name("memory_search"), "memory_search");
+    assert_eq!(schema::sanitize_tool_name("memory_get"), "memory_get");
     assert_eq!(
         schema::sanitize_tool_name("nebula__post_message"),
         "mcp_tool"
@@ -317,6 +319,7 @@ fn sentinel_session_harness() -> events::SessionHarness {
         hook_names: vec!["h1".into()],
         agents_md_dir_names: vec!["proj".into()],
         memory_enabled: true,
+        memory_retrieval_mode: events::MemoryRetrievalMode::Hybrid,
         is_git_repo: true,
         auto_update: None,
     }
@@ -543,7 +546,7 @@ fn tool_result_gates_off_collapses_and_reduces() {
         &stream,
         &events::ToolCallCompleted {
             tool_name: "nebula__post_message".into(),
-            outcome: xai_file_utils::events::types::ToolOutcome::Success,
+            outcome: xai_grok_session_events::types::ToolOutcome::Success,
             duration_ms: 42,
             file_path: Some("/Users/alice/secret-project/main.rs".into()),
             parameters: Some(serde_json::json!({"text": "CANARY_TOOL_ARGS"})),
@@ -581,7 +584,7 @@ fn tool_result_details_gate_exposes_verbatim_scrubbed() {
         &stream,
         &events::ToolCallCompleted {
             tool_name: "nebula__post_message".into(),
-            outcome: xai_file_utils::events::types::ToolOutcome::Success,
+            outcome: xai_grok_session_events::types::ToolOutcome::Success,
             duration_ms: 42,
             file_path: Some(path.clone()),
             parameters: Some(serde_json::json!({"key": "sk-CANARYabcdefghij1234567890"})),

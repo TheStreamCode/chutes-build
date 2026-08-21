@@ -37,3 +37,5 @@ pub mod versions;
 pub use attribution::{
     Auth401AttributionCallback, BEARER_SUFFIX_LEN, SharedAttributionCallback, ToolConsumer,
 };
+pub use implementations::grok_build::is_task_tool_id;
+pub use implementations::{SEARCH_TOOL_NAME, USE_TOOL_NAME};

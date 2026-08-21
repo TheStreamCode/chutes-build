@@ -4,11 +4,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// ───────────────────────────────────────────────────────────────────────────
-// `task` (spawn) tool — Input
-// ───────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// `task` (spawn) tool ÔÇö Input
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
-/// Input for the `task` tool — launches a subagent to handle a task
+/// Input for the `task` tool ÔÇö launches a subagent to handle a task
 /// autonomously.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TaskToolInput {
@@ -81,7 +81,7 @@ pub struct TaskToolInput {
     /// Explicit working directory for the subagent. When set, the child
     /// session operates in this directory instead of the parent's cwd.
     /// Mutually exclusive with `isolation: "worktree"` (both set the
-    /// effective cwd — setting both is ambiguous).
+    /// effective cwd ÔÇö setting both is ambiguous).
     /// Path validation (exists, is a directory) happens at subagent launch
     /// time, not here.
     #[schemars(
@@ -201,9 +201,9 @@ impl SubagentIsolationMode {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// `task` (spawn) tool — Output
-// ───────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// `task` (spawn) tool ÔÇö Output
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Structured completion output from a subagent (`task` tool).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,7 +219,7 @@ pub struct SubagentCompletedOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
     /// The `subagent_id` to pass as `resume_from` to continue this subagent.
-    /// Always equals `subagent_id` — provided as a convenience so programmatic
+    /// Always equals `subagent_id` ÔÇö provided as a convenience so programmatic
     /// consumers can extract the resume handle without parsing text.
     pub resume_from_hint: String,
     /// If the subagent used a persona, the persona name to pass when resuming.
@@ -269,13 +269,13 @@ const PRIOR_EXEC_LOOKBACK: usize = 2;
 
 /// Whether background-spawn text should tell the parent to keep its own work.
 ///
-/// `user_asks` are recent parent user texts (oldest → newest), not including
+/// `user_asks` are recent parent user texts (oldest ÔåÆ newest), not including
 /// this spawn's tool call. `child_description` / `child_prompt` are the spawn
 /// being acknowledged.
 ///
 /// Returns true only when the latest ask (or either of the two before it)
 /// shows unfinished parent exec work besides the delegated child job.
-/// No user asks → false.
+/// No user asks ÔåÆ false.
 pub fn should_continue_parent_work(
     user_asks: &[String],
     child_description: &str,
@@ -296,7 +296,7 @@ pub fn should_continue_parent_work(
     if blob_has_exec(last) && !blob_is_delegate(last) {
         return true;
     }
-    // "while waiting, spawn …" — parent still has the waiting work.
+    // "while waiting, spawn ÔÇª" ÔÇö parent still has the waiting work.
     let last_l = last.to_ascii_lowercase();
     if last_l.contains("while waiting") || last_l.contains("whilst waiting") {
         return true;
@@ -371,6 +371,42 @@ fn blob_is_delegate(text: &str) -> bool {
     NEEDLES.iter().any(|n| t.contains(n))
 }
 
+/// Model-facing names used by the background-subagent notices. The retrieval
+/// tool and both of its parameters are host-renameable (tool randomization),
+/// so callers resolve them (e.g. from their `TemplateRenderer`) instead of
+/// baking the canonical names into the notice text.
+#[derive(Clone, Copy, Debug)]
+pub struct BackgroundNoticeNaming<'a> {
+    /// Task-result retrieval tool (canonical: `get_task_output`).
+    pub task_output_tool: &'a str,
+    /// Its ids parameter (canonical: `task_ids`).
+    pub task_ids_param: &'a str,
+    /// Its wait parameter (canonical: `timeout_ms`).
+    pub timeout_ms_param: &'a str,
+}
+
+impl BackgroundNoticeNaming<'static> {
+    /// Canonical grok-build names, for hosts without renaming.
+    pub const CANONICAL: Self = Self {
+        task_output_tool: "get_task_output",
+        task_ids_param: "task_ids",
+        timeout_ms_param: "timeout_ms",
+    };
+}
+
+/// Shared retrieval line for background notices: names this id and the
+/// host-facing get-output tool/params. Polling policy lives in the system prompt.
+fn background_result_line(subagent_id: &str, naming: &BackgroundNoticeNaming) -> String {
+    let BackgroundNoticeNaming {
+        task_output_tool,
+        task_ids_param,
+        timeout_ms_param,
+    } = *naming;
+    format!(
+        "When you need its result, use {task_output_tool} with {task_ids_param}=[\"{subagent_id}\"] and a positive {timeout_ms_param}."
+    )
+}
+
 /// Render the model-facing notice for a subagent that was spawned in the
 /// background and is still running.
 ///
@@ -379,15 +415,50 @@ pub fn format_subagent_started_background(
     subagent_id: &str,
     subagent_type: &str,
     description: &str,
-    task_output_tool_name: &str,
+    naming: &BackgroundNoticeNaming,
     continue_parent_work: bool,
 ) -> String {
+    let result_line = background_result_line(subagent_id, naming);
     let mut text = format!(
         "Subagent started in background.\n\
          subagent_id: {subagent_id}\n\
          type: {subagent_type}\n\
          description: {description}\n\n\
-         Use {task_output_tool_name} with task_ids=[\"{subagent_id}\"] and timeout_ms to wait for results."
+         {result_line}"
+    );
+    if continue_parent_work {
+        text.push_str("\n\n");
+        text.push_str(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK);
+    }
+    text
+}
+
+/// Render the notice for a blocking spawn whose foreground wait budget
+/// expired and was auto-backgrounded by the coordinator.
+///
+/// `notified_on_completion` gates the notification promise: only clients that
+/// deliver system reminders actually wake the model when the child finishes.
+pub fn format_subagent_auto_backgrounded(
+    subagent_id: &str,
+    subagent_type: &str,
+    description: &str,
+    naming: &BackgroundNoticeNaming,
+    notified_on_completion: bool,
+    continue_parent_work: bool,
+) -> String {
+    let notify_clause = if notified_on_completion {
+        " ÔÇö you will be notified when it completes"
+    } else {
+        ""
+    };
+    let result_line = background_result_line(subagent_id, naming);
+    let mut text = format!(
+        "Subagent took longer than the foreground budget and was moved to the \
+         background to keep the conversation responsive. It is still running{notify_clause}.\n\
+         subagent_id: {subagent_id}\n\
+         type: {subagent_type}\n\
+         description: {description}\n\n\
+         {result_line}"
     );
     if continue_parent_work {
         text.push_str("\n\n");
@@ -448,7 +519,7 @@ pub const MAX_MULTI_WAIT_IDS: usize = 20;
 pub struct TaskOutputToolInput {
     /// Task IDs to query. Pass one or more; a single task is a one-element list.
     ///
-    /// Lenient on the wire (invisible to the advertised schema — schemars
+    /// Lenient on the wire (invisible to the advertised schema ÔÇö schemars
     /// ignores serde aliases and custom deserializers): also accepts the
     /// singular `task_id` key and a bare string/number instead of an array.
     /// Models frequently mirror `kill_task`'s singular `task_id` here (in
@@ -468,7 +539,7 @@ pub struct TaskOutputToolInput {
     /// When set and positive, wait up to this many milliseconds; omit or `0` polls.
     ///
     /// `{max_wait_ms}` is resolved at finalize from the session's wait ceiling,
-    /// which also pins it as the schema `maximum` — the tool description cannot
+    /// which also pins it as the schema `maximum` ÔÇö the tool description cannot
     /// carry the bound alone, since randomization may replace it wholesale.
     #[schemars(
         description = "Max wait time in milliseconds, up to {max_wait_ms}. A positive value waits for completion; omit or pass 0 for a non-blocking status poll."
@@ -478,7 +549,7 @@ pub struct TaskOutputToolInput {
 }
 
 /// Trimmed, de-duplicated task IDs preserving first-seen order. Single source
-/// of truth for how `task_ids` args resolve — used by tool execution and by
+/// of truth for how `task_ids` args resolve ÔÇö used by tool execution and by
 /// the tool-usage-card mapping so displayed IDs match what actually runs.
 pub fn resolve_task_ids(ids: &[String]) -> Vec<String> {
     let mut out = Vec::new();
@@ -519,7 +590,7 @@ pub const MAX_WAIT_BLOCK_MS_DEFAULT: u64 = 600_000;
 /// The blocking-wait ceiling in effect, honoring `CHUTES_BUILD_MAX_WAIT_BLOCK_MS`.
 ///
 /// A host whose transport deadline is shorter than the default sets the env var
-/// so the server enforces — and the tool descriptions advertise — the same
+/// so the server enforces ÔÇö and the tool descriptions advertise ÔÇö the same
 /// number the caller will actually wait for. Without that, a model believing the
 /// default asks for a wait its own client will abandon first.
 pub fn max_wait_block_ms() -> u64 {
@@ -624,7 +695,7 @@ impl TaskOutputResult {
     /// Compute a progress signature from the semantically meaningful output
     /// fields of a `get_task_output` result.
     ///
-    /// Two results with the same signature are considered stagnant — the task
+    /// Two results with the same signature are considered stagnant ÔÇö the task
     /// state has not changed between polls.  Used by the doom-loop detector to
     /// distinguish legitimate waiting (progress) from a true polling stall.
     ///
@@ -648,9 +719,9 @@ impl TaskOutputResult {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// `wait_tasks` tool — Input
-// ───────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// `wait_tasks` tool ÔÇö Input
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// How a multi-wait (`wait_tasks`) request should resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -660,7 +731,7 @@ pub enum WaitMode {
     WaitAll,
 }
 
-/// Input for the `wait_tasks` tool — blocks until multiple background tasks /
+/// Input for the `wait_tasks` tool ÔÇö blocks until multiple background tasks /
 /// sub-agents reach a terminal state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WaitTasksToolInput {
@@ -679,11 +750,11 @@ pub struct WaitTasksToolInput {
     pub timeout_ms: Option<u64>,
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// `kill_task` (cancel) tool — Input / Output
-// ───────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// `kill_task` (cancel) tool ÔÇö Input / Output
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
-/// Input for the `kill_task` tool — terminates a running background task,
+/// Input for the `kill_task` tool ÔÇö terminates a running background task,
 /// monitor, or subagent by id.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct KillTaskToolInput {
@@ -866,7 +937,8 @@ fn substitute_tool_placeholders(
 /// code exploration, and multi-step research tasks.
 pub const GENERAL_PURPOSE_PROMPT: &str = "\
 Complete the assigned task directly. Do what was asked; nothing more, nothing less. \
-Respond with a detailed writeup when done.
+Report results in the format and length the task specifies; otherwise give a clear, \
+complete writeup.
 
 Strengths:
 - Searching across large codebases for code, configurations, and patterns
@@ -1076,9 +1148,10 @@ pub fn build_task_description(subagents: &[SubagentDescriptor], naming: &TaskToo
          - When the agent is done, it returns a single message with its agent ID. Use that ID to resume the agent later for follow-up work.\n\
          - {run_in_background_param}: Returns immediately with a subagent_id. Use {background_retrieval_tool} to retrieve results. This is set to true by default.\n\
          - Subagents receive a compacted version of project instructions (AGENTS.md). If the task requires detailed conventions (e.g., build rules, testing patterns), include the relevant rules directly in the prompt.\n\
-         - When using the {task_tool} tool, you must specify a {subagent_type_param} parameter to select which agent type to use.\n\n\
+         - When using the {task_tool} tool, you must specify a {subagent_type_param} parameter to select which agent type to use.\n\
+         - When launching independent subagents, you MUST incorporate the results into the task based on requirements BEFORE concluding.\n\n\
          Resuming a previous agent (resume_from):\n\
-         - Use {resume_from_param} to continue a previously completed subagent's conversation. Pass the subagent_id returned by a prior {task_tool} call. A resumed agent keeps its full transcript and tool state, so you only need to describe what changed since the last run — don't re-explain the original task.\n\
+         - Use {resume_from_param} to continue a previously completed subagent's conversation. Pass the subagent_id returned by a prior {task_tool} call. A resumed agent keeps its full transcript and tool state, so you only need to describe what changed since the last run ÔÇö don't re-explain the original task.\n\
          - The resumed agent must use the same subagent_type as the source.\n\n\
          Isolation mode:\n\
          - Use {isolation_param} to control the child's execution environment. With \"worktree\", the child runs in an isolated git worktree whose edits don't affect the parent workspace; the worktree is preserved after completion and its path is returned in the output."
@@ -1100,7 +1173,7 @@ fn lifecycle_target_suffix(monitor_present: bool, subagent_present: bool) -> &'s
 
 /// Optional "(a monitor's {id_name} is returned by {monitor})" clause.
 ///
-/// `id_name` is the model-facing singular id name — kill_task's `task_id`
+/// `id_name` is the model-facing singular id name ÔÇö kill_task's `task_id`
 /// input (tracks renames). get_task_output's `task_ids` array is plural and
 /// must not be used here; both tools share this wording so randomization
 /// cannot disagree across kill vs get-output docs.
@@ -1186,7 +1259,7 @@ pub struct TaskOutputToolNaming<'a> {
     pub task_ids_param: &'a str,
     /// Model-facing name of the `timeout_ms` input (tracks param renames).
     pub timeout_ms_param: &'a str,
-    /// Singular monitor-id name for the monitor aside — kill_task's `task_id`
+    /// Singular monitor-id name for the monitor aside ÔÇö kill_task's `task_id`
     /// (tracks renames). Not get_task_output's plural `task_ids`.
     pub task_id_param: &'a str,
 }
@@ -1235,7 +1308,7 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
 /// Naming/feature inputs for [`build_wait_tasks_description`].
 #[derive(Clone, Copy, Debug)]
 pub struct WaitTasksToolNaming<'a> {
-    /// The preferred retrieval tool name shown in the "Prefer …" line.
+    /// The preferred retrieval tool name shown in the "Prefer ÔÇª" line.
     pub background_retrieval_tool: &'a str,
     /// The bash `is_background` param name, when a bash/`execute` tool is present.
     pub bash_background_param: Option<&'a str>,
@@ -1377,7 +1450,7 @@ mod tests {
             serde_json::from_str(r#"{"task_ids": ["a", "b"]}"#).unwrap();
         assert_eq!(input.resolved_task_ids(), vec!["a", "b"]);
 
-        // Singular key with a bare string — the shape models organically send
+        // Singular key with a bare string ÔÇö the shape models organically send
         // (mirroring kill_task's singular task_id).
         let input: TaskOutputToolInput =
             serde_json::from_str(r#"{"task_id": "abc-123", "timeout_ms": 0}"#).unwrap();
@@ -1460,6 +1533,14 @@ mod tests {
             "run_in_background: Returns immediately with a subagent_id. Use get_task_output to retrieve results. This is set to true by default."
         ));
         assert!(desc.contains("you must specify a subagent_type parameter"));
+        assert!(desc.contains(
+            "When launching independent subagents, you MUST incorporate the results into the task based on requirements BEFORE concluding."
+        ));
+        assert!(
+            !desc.contains("only actual task calls do")
+                && !desc.contains("If the user explicitly asked for subagents"),
+            "delegation timing belongs in the shared system prompt, not the task contract: {desc}"
+        );
         assert!(desc.contains("Use resume_from to continue"));
     }
 
@@ -1630,7 +1711,7 @@ mod tests {
         let subagents = vec![SubagentDescriptor {
             name: "explore".into(),
             description: "Explore.".into(),
-            tools: Some("Read-only — has access to: ${{ tools.by_kind.read }}.".into()),
+            tools: Some("Read-only ÔÇö has access to: ${{ tools.by_kind.read }}.".into()),
         }];
         let desc = build_task_description(
             &subagents,
@@ -1651,7 +1732,7 @@ mod tests {
         assert!(desc.contains("Use ${{ params.task.isolation }} to control"));
     }
 
-    // ── Lifecycle tool descriptions ──────────────────────────────────────
+    // ÔöÇÔöÇ Lifecycle tool descriptions ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     //
     // These lock the exact model-facing text. The "cli_default" cases must
     // match what the grok-shell MiniJinja templates render for the default
@@ -1848,11 +1929,15 @@ mod tests {
 
     #[test]
     fn background_spawn_notice_keeps_poll_hint_and_open_parent_work() {
+        let naming = BackgroundNoticeNaming {
+            task_output_tool: "get_command_or_subagent_output",
+            ..BackgroundNoticeNaming::CANONICAL
+        };
         let with_cta = format_subagent_started_background(
             "sa-1",
             "general-purpose",
             "author board-setup skill",
-            "get_command_or_subagent_output",
+            &naming,
             true,
         );
         assert!(
@@ -1862,6 +1947,12 @@ mod tests {
         assert!(
             with_cta.contains("get_command_or_subagent_output") && with_cta.contains("timeout_ms"),
             "poll instruction must remain: {with_cta}"
+        );
+        assert!(
+            !with_cta.contains("to wait for results")
+                && !with_cta.contains("finish remaining independent work first")
+                && !with_cta.contains("Continue other work"),
+            "spawn notice must stay factual and not restate polling policy: {with_cta}"
         );
         assert!(
             !with_cta.contains("<system-reminder>") && !with_cta.contains("<system_reminder>"),
@@ -1876,13 +1967,55 @@ mod tests {
             "sa-1",
             "general-purpose",
             "review pr",
-            "get_command_or_subagent_output",
+            &naming,
             false,
         );
         assert!(
             poll_only.contains("timeout_ms")
                 && !poll_only.contains(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK),
             "no leftover parent work must not get the CTA: {poll_only}"
+        );
+    }
+
+    #[test]
+    fn background_notices_track_renamed_tool_and_params() {
+        // Randomized host names: the notice must never emit canonical
+        // `task_ids` / `timeout_ms` keys the retrieval tool's schema lacks.
+        let naming = BackgroundNoticeNaming {
+            task_output_tool: "FetchJobResult",
+            task_ids_param: "job_ids",
+            timeout_ms_param: "max_wait",
+        };
+        let spawn = format_subagent_started_background("sa-9", "explore", "scan", &naming, false);
+        assert!(
+            spawn.contains("use FetchJobResult with job_ids=[\"sa-9\"]")
+                && spawn.contains("a positive max_wait"),
+            "renamed tool/params must appear: {spawn}"
+        );
+        assert!(
+            !spawn.contains("task_ids") && !spawn.contains("timeout_ms"),
+            "canonical param names must not remain after rename: {spawn}"
+        );
+
+        let auto =
+            format_subagent_auto_backgrounded("sa-9", "explore", "scan", &naming, true, true);
+        assert!(
+            auto.contains("moved to the background")
+                && auto.contains("you will be notified when it completes")
+                && auto.contains("use FetchJobResult with job_ids=[\"sa-9\"]")
+                && auto.contains("a positive max_wait"),
+            "auto-bg notice must share the renamed retrieval line: {auto}"
+        );
+        assert!(
+            auto.contains(BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK),
+            "auto-bg notice must carry the CTA when parent work remains: {auto}"
+        );
+
+        let quiet =
+            format_subagent_auto_backgrounded("sa-9", "explore", "scan", &naming, false, false);
+        assert!(
+            !quiet.contains("you will be notified"),
+            "no notification promise without system reminders: {quiet}"
         );
     }
 
@@ -1931,7 +2064,7 @@ mod tests {
             "3 agent review",
             "review the diff",
         ));
-        // Exec two asks ago still counts (check bugs → nudge → review spawn).
+        // Exec two asks ago still counts (check bugs ÔåÆ nudge ÔåÆ review spawn).
         assert!(should_continue_parent_work(
             &[
                 "kan je is de recente signal bug's checken?".into(),

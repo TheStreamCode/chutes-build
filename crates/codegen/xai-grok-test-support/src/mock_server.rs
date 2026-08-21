@@ -447,6 +447,11 @@ impl MockInferenceServer {
         format!("http://{}/v1", self.addr)
     }
 
+    /// Origin without the `/v1` inference prefix (`http://127.0.0.1:PORT`).
+    pub fn origin(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
     pub fn request_count(&self) -> u32 {
         self.log.count.load(Ordering::SeqCst)
     }

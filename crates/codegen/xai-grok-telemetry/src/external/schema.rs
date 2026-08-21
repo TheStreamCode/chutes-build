@@ -625,6 +625,8 @@ pub(crate) const BUILTIN_TOOL_NAMES: &[&str] = &[
     "scheduler_list",
     "search_tool",
     "use_tool",
+    "memory_search",
+    "memory_get",
     "update_goal",
 ];
 
@@ -687,8 +689,8 @@ pub(crate) fn permission_mode_label(m: crate::enums::PermissionMode) -> &'static
     }
 }
 
-fn tool_outcome_label(o: &xai_file_utils::events::types::ToolOutcome) -> &'static str {
-    use xai_file_utils::events::types::ToolOutcome;
+fn tool_outcome_label(o: &xai_grok_session_events::types::ToolOutcome) -> &'static str {
+    use xai_grok_session_events::types::ToolOutcome;
     match o {
         ToolOutcome::Success => "success",
         ToolOutcome::Error => "error",
@@ -898,7 +900,7 @@ pub fn map_api_error(ev: &events::ApiError) -> Option<ExternalRecord> {
 
 /// `ToolCallCompleted` → `grok_code.tool_result` + `tool.usage`.
 pub fn map_tool_result(ev: &events::ToolCallCompleted) -> Option<ExternalRecord> {
-    use xai_file_utils::events::types::ToolOutcome;
+    use xai_grok_session_events::types::ToolOutcome;
     let sanitized = sanitize_tool_name(&ev.tool_name);
     let outcome = tool_outcome_label(&ev.outcome);
     let mut rec = ExternalRecord::event(ExternalEventName::ToolResult)
