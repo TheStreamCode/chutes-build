@@ -4,11 +4,15 @@
 # Regenerate with `--record` and read the diff before committing it.
 xai-grok-tools	computer::local::terminal::tests::chunk_notifications_keep_flowing_after_truncation
 xai-grok-tools	computer::local::terminal::tests::chunk_notifications_sent_during_execution
+xai-grok-tools	computer::local::terminal::tests::output_file_capped_by_size_guard
+xai-grok-tools	computer::local::terminal::tests::output_file_truncated_after_exit
 xai-grok-tools	computer::local::terminal::tests::reaped_background_child_leaves_scope_empty
 xai-grok-tools	computer::local::terminal::tests::test_non_persistent_shell_no_state
 xai-grok-tools	computer::local::terminal::tests::test_non_persistent_shell_unaffected_by_deleted_cd_target
+xai-grok-tools	computer::local::terminal::tests::test_output_size_guard_kills_runaway
 xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_cd_persists
 xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_deleted_cwd_falls_back_to_request_cwd
+xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_does_not_inherit_dump_errexit
 xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_env_var_persists
 xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_function_persists
 xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_spawn_error_names_missing_cwd
@@ -16,6 +20,7 @@ xai-grok-tools	computer::local::terminal::tests::test_persistent_shell_variable_
 xai-grok-tools	computer::local::terminal::tests::test_stderr_captured
 xai-grok-tools	gitignore::tests::regression_no_panic_on_absolute_path_without_git_root
 xai-grok-tools	implementations::grok_build::bash::tests::bash_streaming_progress
+xai-grok-tools	implementations::grok_build::bash::tests::bash_streaming_progress_includes_final_drain
 xai-grok-tools	implementations::grok_build::bash::tests::bash_streaming_progress_suppressed_when_gate_off
 xai-grok-tools	implementations::grok_build::bash::tests::bash_streaming_progress_survives_truncation
 xai-grok-tools	implementations::grok_build::enter_plan_mode::tests::falls_back_to_cwd_when_no_plan_file_path_resource
@@ -71,16 +76,9 @@ xai-grok-tools	types::resources::tests::resolve_model_path_display_trailing_slas
 xai-grok-tools	types::resources::tests::resolve_model_path_quoted_literal_backslash_n_with_display
 xai-grok-tools	types::resources::tests::resolve_model_path_root_itself
 xai-grok-tools	types::resources::tests::resolve_model_path_trailing_newline_with_display
-xai-grok-workspace	daemonize::tests::contended_acquire_does_not_modify_pidfile
-xai-grok-workspace	daemonize::tests::pidfile_acquire_truncates_stale_longer_content
-xai-grok-workspace	daemonize::tests::pidfile_records_current_pid
-xai-grok-workspace	daemonize::tests::take_over_declines_unreadable_pidfile
-xai-grok-workspace	daemonize::tests::take_over_uncontended_acquires_normally
 xai-grok-workspace	discovery::tests::discover_agents_md_receives_normalized_rule_content
-xai-grok-workspace	envrc::tests::test_conditional
 xai-grok-workspace	envrc::tests::test_path_add
 xai-grok-workspace	envrc::tests::test_simple_export
-xai-grok-workspace	envrc::tests::test_variable_expansion
 xai-grok-workspace	folder_trust::tests::decide_inputs_flags_home_key_unrecordable
 xai-grok-workspace	permission::exec_risk::tests::attached_and_chained_c_paths
 xai-grok-workspace	permission::resolution::tests::accept_edits_unaffected_by_policy_pin
@@ -117,10 +115,7 @@ xai-grok-workspace	session::git::restore_code_tests::soft_restore_restores_stash
 xai-grok-workspace	session::git::tests::test_effective_cwd_roundtrip_with_compute_offset
 xai-grok-workspace	session::git::tests::test_effective_worktree_cwd_nested_offset
 xai-grok-workspace	session::git::tests::test_effective_worktree_cwd_single_level_offset
-xai-grok-workspace	trust::tests::workspace_key_collapses_standalone_grok_worktree_onto_source_repo
-xai-grok-workspace	trust::tests::workspace_key_collapses_worktree_onto_source_repo_git_root
+xai-grok-workspace	session::git_gate::tests::invalidate_during_inflight_does_not_return_stale_walk
 xai-grok-workspace	trust::tests::workspace_key_ignores_home_git_repo_for_subdir
 xai-grok-workspace	workspace_ops::tests::repos_list_does_not_load_user_global_manifest
 xai-grok-workspace	workspace_ops::tests::repos_manifest_search_dirs_skips_user_global_grok_home
-xai-grok-workspace	worktree::tests::lookup_worktree_label_resolves_from_nested_cwd
-xai-grok-workspace	worktree::tests::touch_worktree_for_cwd_sets_last_accessed_for_nested_cwd
