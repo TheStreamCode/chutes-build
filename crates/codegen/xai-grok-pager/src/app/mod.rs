@@ -569,8 +569,9 @@ async fn bounded_connect(
             timeout_secs: None,
         }),
         () = tokio::time::sleep(timeout) => {
-            let stuck = timer.stuck_in();
-            let phases = timer.summary();
+            let timings = timer.phase_snapshot();
+            let stuck = timings.stuck_in();
+            let phases = timings.summary();
             // `connect_target`: tracing reserves bare `target=` for the log target.
             tracing::error!(
                 connect_target = %target,

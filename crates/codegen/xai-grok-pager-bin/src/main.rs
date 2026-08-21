@@ -1201,8 +1201,7 @@ async fn run_agent_command(
         cli_subagents: None,
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: false,
-        cli_no_memory: false,
+        memory_enabled_override: None,
         disable_web_search,
         todo_gate: false,
         laziness_debug_log: None,
@@ -1913,7 +1912,7 @@ fn main() {
             );
         }
     }
-    let crashed = xai_grok_shell::active_sessions::collect_crashed().unwrap_or_default();
+    let crashed = xai_grok_active_sessions::collect_crashed().unwrap_or_default();
     if !crashed.is_empty() {
         tracing::info!(
             count = crashed.len(),

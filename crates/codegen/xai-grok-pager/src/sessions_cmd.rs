@@ -72,7 +72,12 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
         SessionsCommand::Search { query, limit } => {
             use std::collections::HashSet;
             use xai_grok_shell::session::merge::REMOTE_TIMEOUT;
-            use xai_grok_shell::session::storage::search::{SessionSearchRequest, execute_search};
+            use xai_grok_shell::session::storage::search::{
+                IndexDecision, SessionSearchRequest, execute_search,
+            };
+
+            // The only subcommand that reads the index, so the only one to start one.
+            let search = xai_grok_shell::session::storage::search::start_if_enabled(agent_config);
 
             let req = SessionSearchRequest {
                 query,
@@ -84,23 +89,26 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
             let root = grok_home();
 
             let remote_limit = (limit * 3).max(100) as i64;
-            let (local_resp, remote_results) = tokio::join!(execute_search(&root, &req), async {
-                tokio::time::timeout(
-                    REMOTE_TIMEOUT,
-                    client.search(Some(&req.query), remote_limit),
-                )
-                .await
-                .unwrap_or_else(|_| {
-                    eprintln!(
-                        "warning: remote session search timed out, showing local results only"
-                    );
-                    Ok(Vec::new())
-                })
-                .unwrap_or_else(|e| {
-                    eprintln!("warning: remote session search failed: {e}");
-                    Vec::new()
-                })
-            });
+            let (local_resp, remote_results) = tokio::join!(
+                execute_search(IndexDecision::settled(&search), &root, &req),
+                async {
+                    tokio::time::timeout(
+                        REMOTE_TIMEOUT,
+                        client.search(Some(&req.query), remote_limit),
+                    )
+                    .await
+                    .unwrap_or_else(|_| {
+                        eprintln!(
+                            "warning: remote session search timed out, showing local results only"
+                        );
+                        Ok(Vec::new())
+                    })
+                    .unwrap_or_else(|e| {
+                        eprintln!("warning: remote session search failed: {e}");
+                        Vec::new()
+                    })
+                }
+            );
 
             let resp = local_resp?;
             let local_ids: HashSet<&str> =
@@ -184,6 +192,7 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 None,
                 needs_remote,
                 auth_manager.clone(),
+                None,
             )
             .await?;
 

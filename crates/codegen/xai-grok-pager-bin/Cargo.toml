@@ -23,6 +23,7 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-shell = { workspace = true }
+xai-grok-active-sessions = { workspace = true }
 # The compile-time product kill switches. This binary owns the decision to check
 # for updates at all, so it is where `AUTOMATIC_SELF_UPDATE` has to be read.
 chutes-build-core = { path = "../../chutes-build-core" }

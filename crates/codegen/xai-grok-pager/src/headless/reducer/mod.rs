@@ -173,9 +173,9 @@ fn json_array_or_empty<T: serde::Serialize>(value: &T) -> Value {
     }
 }
 
-/// Canonical model-facing tool name from the `x.ai/tool` `_meta` envelope, else
+/// Canonical model-facing tool name from the `chutes.build/tool` `_meta` envelope, else
 /// the display title, else kind, else `"tool"`. The shell stamps the wire name
-/// (`bash`, `x_search`, `read_file`) under `x.ai/tool.name`; without this the
+/// (`bash`, `x_search`, `read_file`) under `chutes.build/tool.name`; without this the
 /// name falls through to the human title (`Execute ...`, `X search:`).
 fn tool_name_from(meta: Option<&proto::Meta>, title: &str, kind: Option<&str>) -> String {
     if let Some(meta) = meta
@@ -208,10 +208,10 @@ fn is_backend_web_search(meta: Option<&proto::Meta>, raw_input: &Value) -> bool 
     backend && is_web_search
 }
 
-/// Canonical tool kind from the `x.ai/tool` `_meta` envelope, else the ACP
+/// Canonical tool kind from the `chutes.build/tool` `_meta` envelope, else the ACP
 /// `ToolCall.kind`. Client tools register as `ToolKind::Other` on the early
 /// notification, so the real kind (`read`, `edit`, `execute`) rides
-/// `x.ai/tool.kind`; without this every client tool reports `other`.
+/// `chutes.build/tool.kind`; without this every client tool reports `other`.
 fn tool_kind_from(meta: Option<&proto::Meta>, kind: proto::ToolKind) -> Option<String> {
     if let Some(meta) = meta
         && let Some(k) = meta

@@ -413,7 +413,7 @@ pub(super) fn handle_scheduled_task_deleted(
         return false;
     };
     let task_id = match session_notif.update {
-        XaiSessionUpdate::ScheduledTaskDeleted { task_id } => task_id,
+        XaiSessionUpdate::ScheduledTaskDeleted { task_id, .. } => task_id,
         _ => return false,
     };
     let matched = match find_session_match(app, &session_notif.session_id) {

@@ -914,8 +914,7 @@ pub struct AppView {
     /// last-write-wins behavior.
     pub session_picker_list_seq: u64,
     /// Resolved compat-session cells used before checking resume-skill paths.
-    pub(crate) foreign_session_compat:
-        xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources,
+    pub(crate) foreign_session_compat: xai_grok_foreign_sessions::EnabledForeignSessionSources,
     /// Monotonic picker scan sequence, bumped on every open and close.
     pub(crate) foreign_session_scan_seq: u64,
     /// Coalesces obsolete foreign scans across welcome and modal pickers.
@@ -7690,11 +7689,10 @@ pub(crate) mod tests {
         // not exist, and the canonicalisation below fails. This case needs a real
         // directory, not that one in particular.
         app.cwd = std::env::temp_dir();
-        app.foreign_session_compat =
-            xai_grok_workspace::foreign_sessions::EnabledForeignSessionSources {
-                cursor: true,
-                ..Default::default()
-            };
+        app.foreign_session_compat = xai_grok_foreign_sessions::EnabledForeignSessionSources {
+            cursor: true,
+            ..Default::default()
+        };
         let crate::app::actions::Effect::CanonicalizeForeignResumeCwd {
             requested_cwd,
             launch_token,
@@ -7711,8 +7709,8 @@ pub(crate) mod tests {
         app.apply_foreign_resume_detection(
             launch_token,
             &canonical_cwd,
-            Some(xai_grok_workspace::foreign_sessions::RecentForeignSession {
-                tool: xai_grok_workspace::foreign_sessions::ForeignSessionTool::Cursor,
+            Some(xai_grok_foreign_sessions::RecentForeignSession {
+                tool: xai_grok_foreign_sessions::ForeignSessionTool::Cursor,
                 native_id: "cursor-session".into(),
                 age: std::time::Duration::from_secs(30),
             }),

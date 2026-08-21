@@ -156,6 +156,18 @@ pub struct ConnectFlags {
     pub default_auto_mode: bool,
 }
 
+impl ConnectFlags {
+    pub(crate) fn memory_enabled_override(&self) -> Option<bool> {
+        if self.experimental_memory {
+            Some(true)
+        } else if self.no_memory {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
 /// Connect to an agent: spawn, initialize, authenticate.
 pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<AcpConnection> {
     startup::enter(StartupPhase::LoadConfig);
@@ -171,8 +183,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
         cli_subagents: Some(flags.subagents),
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: flags.experimental_memory,
-        cli_no_memory: flags.no_memory,
+        memory_enabled_override: flags.memory_enabled_override(),
         disable_web_search: flags.disable_web_search,
         todo_gate: flags.todo_gate,
         laziness_debug_log: flags.laziness_debug_log.as_deref(),

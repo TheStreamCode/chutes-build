@@ -1,4 +1,4 @@
-//! Decode `x.ai/leader/version_mismatch` into toast/log text.
+//! Decode `chutes.build/leader/version_mismatch` into toast/log text.
 //!
 //! Versions are scrubbed before the usability check so control-only values are
 //! rejected instead of toasted. The full banner then goes through

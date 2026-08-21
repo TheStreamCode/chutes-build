@@ -50,7 +50,7 @@ pub(crate) fn execute(
     match effect {
         Effect::RegisterActiveSession { session_id, cwd } => {
             crate::app::signal_handler::set_current_session_id(Some(session_id.clone()));
-            if let Err(e) = xai_grok_shell::active_sessions::register(xai_grok_shell::active_sessions::ActiveSession {
+            if let Err(e) = xai_grok_active_sessions::register(xai_grok_active_sessions::ActiveSession {
                 session_id,
                 pid: std::process::id(),
                 cwd,
@@ -645,7 +645,7 @@ pub(crate) fn execute(
                     }
                     let summaries = tokio::task::spawn_blocking(move || {
                             let _permit = permit;
-                            xai_grok_workspace::foreign_sessions::scan_foreign_sessions(
+                            xai_grok_foreign_sessions::scan_foreign_sessions(
                                 &cwd,
                                 enabled,
                             )
@@ -698,7 +698,7 @@ pub(crate) fn execute(
                             compat,
                             &grok_home,
                             |enabled| async move {
-                                tokio::task::spawn_blocking(move || xai_grok_workspace::foreign_sessions::most_recent_foreign_session(
+                                tokio::task::spawn_blocking(move || xai_grok_foreign_sessions::most_recent_foreign_session(
                                         &cwd_for_scan,
                                         enabled,
                                         crate::app::foreign_sessions::RESUME_HINT_WINDOW,
@@ -1608,6 +1608,7 @@ pub(crate) fn execute(
                     let params = xai_grok_shell::extensions::task::KillTaskRequest {
                         session_id: sid.clone(),
                         task_id: task_id.clone(),
+                        source: Default::default(),
                     };
                     let req = acp::ExtRequest::new(
                         "chutes.build/task/kill",

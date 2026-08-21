@@ -1,4 +1,4 @@
-//! Decoding of the shell's `x.ai/*` extension notifications into the headless
+//! Decoding of the shell's `chutes.build/*` extension notifications into the headless
 //! [`ExtEvent`] the orchestrator dispatches. Owns the wire envelope shapes and
 //! the method to event mapping, kept out of `headless.rs`.
 
@@ -58,7 +58,9 @@ pub(crate) fn handle_ext_notification(
             match crate::acp::version_mismatch_banner(params) {
                 Some(banner) => tracing::warn!(%banner, "chutes.build/leader/version_mismatch"),
                 None => {
-                    tracing::warn!("ignoring x.ai/leader/version_mismatch without usable versions")
+                    tracing::warn!(
+                        "ignoring chutes.build/leader/version_mismatch without usable versions"
+                    )
                 }
             }
             ExtEvent::None
@@ -98,7 +100,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: x.ai/task_backgrounded with mismatched sessionUpdate \
+                    "headless: chutes.build/task_backgrounded with mismatched sessionUpdate \
                      tag; background task will not be tracked for reaping"
                 );
                 ExtEvent::None
@@ -109,7 +111,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable x.ai/task_backgrounded notification; \
+                "headless: undecodable chutes.build/task_backgrounded notification; \
                  background task will not be tracked for reaping"
             );
             ExtEvent::None
@@ -146,7 +148,7 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: x.ai/task_completed with mismatched sessionUpdate \
+                    "headless: chutes.build/task_completed with mismatched sessionUpdate \
                      tag; background task completion will not be recorded"
                 );
                 ExtEvent::None
@@ -157,7 +159,7 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable x.ai/task_completed notification; \
+                "headless: undecodable chutes.build/task_completed notification; \
                  background task completion will not be recorded"
             );
             ExtEvent::None
@@ -303,7 +305,7 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
                     tag,
                     payload = params,
                     "headless: background-task lifecycle tag on a session notification \
-                     (expected the dedicated x.ai/task_backgrounded|task_completed method); \
+                     (expected the dedicated chutes.build/task_backgrounded|task_completed method); \
                      background tracking will not be updated"
                 );
             }

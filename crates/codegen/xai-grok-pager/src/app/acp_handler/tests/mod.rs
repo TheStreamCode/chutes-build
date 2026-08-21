@@ -677,6 +677,7 @@ pub(super) fn make_deleted_ext_notif(
         session_id: acp::SessionId::new(session_id),
         update: XaiSessionUpdate::ScheduledTaskDeleted {
             task_id: task_id.into(),
+            reason: Default::default(),
         },
         meta: None,
     };
@@ -1843,6 +1844,7 @@ pub(super) fn task_completed_notif(
                 kind: Default::default(),
                 block_waited: false,
                 explicitly_killed: false,
+                kill_result_delivered: false,
                 owner_session_id: None,
                 description: None,
                 is_backgrounded: false,
