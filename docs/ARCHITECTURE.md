@@ -221,6 +221,16 @@ builds on, not specific to any provider):
 - `xai-grok-workspace` — permission model, sandboxing, worktrees.
 - `xai-grok-auth` — OAuth/credential machinery in general; the Chutes issuer
   configuration is a caller-supplied parameter, not a fork of this crate.
+- Supporting crates upstream factored out after 1.0.0, all retained and
+  rebranded: `xai-grok-active-sessions` / `xai-grok-foreign-sessions`
+  (session registries), `xai-grok-session-events` / `xai-grok-session-search`
+  (per-session event log and local FTS search), `xai-grok-home` (home-dir
+  resolution), `xai-grok-workspace-daemon` / `xai-grok-diag-server`
+  (workspace-server process lifecycle and in-guest loopback diagnostics),
+  `xai-grok-bundle` (subagent bundle cache), `xai-compaction-transcript`
+  (compacted-segment markdown), and `xai-fuzzy-file-search` (walk + nucleo
+  matcher). `xai-file-utils`'s old `events` module and the shell's
+  `active_sessions`/`storage/search_*` modules moved into them.
 
 ### Where the Chutes layer is wired in
 

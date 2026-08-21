@@ -4,11 +4,20 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-08-21
 
 ### Added
 
 - **Parallel media-generation calls are capped per tool name.** image_gen/image_edit cap at 8 per model step and video-generation tools cap at 4; a burst at least twice the cap is discarded once and retried with a reminder, while any other over-cap keeps the first K and rejects the tail. Configurable via [tools.media_gen] in config.toml or CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS / CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS.
+
+### Changed
+
+- **The runtime is synced to upstream `1.0.5` (`d71f6e0c`).** Eleven upstream crates are added and rebranded: `xai-grok-active-sessions`, `xai-grok-foreign-sessions`, `xai-grok-session-events`, `xai-grok-session-search`, `xai-grok-home`, `xai-grok-workspace-daemon`, `xai-grok-diag-server`, `xai-grok-bundle`, `xai-compaction-transcript`, and `xai-fuzzy-file-search`. `xai-file-utils::events` and the shell's `active_sessions` / `storage/search_*` modules moved into them.
+
+### Fixed
+
+- **`models` no longer fails with "unknown ACP extension method".** The model-list client and handler had drifted onto different wire namespaces after the re-base; the client now sends what the handler registers (`chutes.build/models/list`).
+- **Worktree detection on Windows.** `WorktreeDb::get` treated only forward-slash input as a path, so a backslash path never reached the DB lookup; it now accepts both separators. `get_worktree_info` also normalises the git2 commondir back to native separators before display.
 
 ## [1.1.0] - 2026-08-18
 

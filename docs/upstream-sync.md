@@ -1170,3 +1170,66 @@ persistence, streaming JSON events, additional CA-bundle handling, background
 subagent cancellation, ACP task lifecycle changes, terminal resize behavior,
 and session cold-start work. No upstream identity, billing, telemetry, or
 enterprise-only behavior was imported.
+
+## Review record: 2026-08-21 — full sync to `d71f6e0c`
+
+Upstream advanced from the `afbc0fb7` (1.0.0) baseline to `d71f6e0c`
+(`Synced from monorepo`, version `1.0.5` in the pager-bin manifest), in ten
+commits. The full delta — 968 files — was ported by hand, one area per commit,
+on `port/upstream-d71f6e0c`.
+
+What upstream carried, in broad strokes: the session events log split out of
+`xai-file-utils`, the active-sessions and foreign-sessions registries split out
+of the shell and workspace, SQLite FTS search over local sessions, an
+in-guest loopback diagnostics server, the workspace-server daemon split, the
+subagent bundle cache, the compaction-transcript renderer, and the
+fuzzy-file-search walker — eleven new crates registered in the root manifest.
+
+### Ported
+
+- **Runtime infrastructure** — fast-worktree, fsnotify, file-utils, tty-utils,
+  chat-state, agent-lifecycle, config, config-types, sampler, sampling-types,
+  hooks, hooks-plugins-types, shared, shell-base, test-support, telemetry,
+  memory, mcp, tools, and the tool/computer-hub protocol crates.
+- **`xai-grok-agent`** — the prompt structure and `AgentDefinition` moved to the
+  upstream shape, with a new runtime-only `builtin_name` keying the
+  browser-verification gate. `templates/prompt.md`, `prompt_encrypted.rs` and
+  `skills.rs` stayed byte-identical to the fork: the Chutes system prompt,
+  subagent prompt and persona text were not taken from upstream.
+- **`xai-grok-shell`** — the session lifecycle, ACP, and config. The media-gen
+  parallel-call caps the fork added converge with an independent upstream
+  `media_gen_limits`; our version matches theirs exactly after rebrand.
+- **`xai-grok-workspace`** and **`xai-grok-pager`** — workspace/RPC, TUI and
+  launcher, with their Chutes seams preserved.
+
+### Windows-only defects found while verifying (upstream CI runs Linux/macOS)
+
+Four ported paths failed only on Windows, none caught by the build or the
+narrow test filters — `models` on the built binary and the leader/worktree
+suites did:
+
+- `WorktreeDb::get` decided "is this a path" with `contains('/')`, so a
+  backslash path on Windows fell into the id/label branch and the DB lookup
+  never ran.
+- `get_worktree_info` compared a git2 forward-slash `commondir` against a
+  native backslash path; the display now re-assembles native components.
+- The model-list client sent `x.ai/models/list` while the handler registered
+  `chutes.build/models/list`, so `models` failed at runtime (`unknown ACP
+  extension method`). The ambiguous `x.ai/` token is not rewritten by
+  `rebrand.py`, so 173 test fixtures were realigned to `chutes.build/` by hand.
+- A trailing-dot fixture name (`notes.txt.`) cannot exist on Windows and was
+  being normalised into a valid capability, so it is now `#[cfg(not(windows))]`.
+
+### What stayed manual
+
+`xai-grok-agent` remains 100 % manual by policy: the three identity files above
+were never auto-taken, and their divergence was confirmed byte-identical to
+the fork's before the agent commit.
+
+### Verification
+
+`cargo check --workspace --all-targets`, `cargo fmt --check`, clippy
+`-D warnings` on the gate crates, `dead_modules.py` (all reachable),
+`seam_sweep.py` against both the baseline and `v1.1.0`, and the release binary
+(`--version`, `--help` branding sweep, `models`, `du`) all green. Gitleaks scans
+the worktree and the full history clean.
