@@ -4,6 +4,14 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-08-22
+
+### Fixed
+
+- **`completions <shell>` now targets the public binary.** Every generated script (bash, zsh, fish, powershell) was built under the upstream binary name, completing calls to a program that does not exist; all four generators derive from one public-name constant and a test pins the absence of the upstream name in the emitted scripts.
+- **`du` works on Windows.** Worktree-home resolution read `$HOME` directly, which is typically unset there, so `chutes-build du` aborted with "neither $CHUTES_BUILD_HOME nor $HOME is set"; the resolver now falls back to `std::env::home_dir()` (`%USERPROFILE%` on Windows), leaving Unix behaviour unchanged.
+- **No upstream placeholders leak into help or completions.** Clap value names derived from internal field ids surfaced as `<XAI_API_BASE_URL>` and `GROK_WS_*` in `--help` and shell completion scripts; those arguments carry explicit value names now, and one MCP doc comment no longer names the upstream binary.
+
 ## [1.2.0] - 2026-08-21
 
 ### Added
