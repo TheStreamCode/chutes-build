@@ -220,7 +220,69 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
         }
     }
 
+    merge_adjacent_plain_messages(out)
+}
+
+/// Collapse runs of adjacent `System`/`User` messages into one message each.
+///
+/// Some serving templates are strict about role alternation and reject a
+/// request whose history contains two same-role messages in a row (observed
+/// on Mistral-Nemo: "conversation roles must alternate"). The agent assembles
+/// system instructions, project reminders, and injected user reminders as
+/// separate items that tolerant backends accept; merging the plain-text runs
+/// keeps those backends working without touching anything else.
+///
+/// Assistant and Tool messages are never merged: an assistant message can
+/// carry `tool_calls` and a tool message is paired to one call id, so joining
+/// either would break the tool protocol. A message with `tool_calls` or
+/// `tool_call_id` set is left alone even when its role would otherwise match.
+fn merge_adjacent_plain_messages(messages: Vec<ChatRequestMessage>) -> Vec<ChatRequestMessage> {
+    let mut out: Vec<ChatRequestMessage> = Vec::with_capacity(messages.len());
+    for msg in messages {
+        let mergeable_role = matches!(msg.role, Role::System | Role::User);
+        let carries_tool_state = !msg.tool_calls.is_empty() || msg.tool_call_id.is_some();
+        if mergeable_role
+            && !carries_tool_state
+            && let Some(last) = out.last_mut()
+            && last.role == msg.role
+            && last.tool_calls.is_empty()
+            && last.tool_call_id.is_none()
+        {
+            append_message_content(&mut last.content, msg.content);
+            continue;
+        }
+        out.push(msg);
+    }
     out
+}
+
+/// Append `extra` onto `content`, keeping `Text` when both sides are text.
+fn append_message_content(content: &mut MessageContent, extra: MessageContent) {
+    match (&mut *content, extra) {
+        (MessageContent::Text(a), MessageContent::Text(b)) => {
+            if a.is_empty() {
+                *a = b;
+            } else if !b.is_empty() {
+                a.push_str("\n\n");
+                a.push_str(&b);
+            }
+        }
+        (MessageContent::Blocks(blocks), MessageContent::Blocks(mut more)) => {
+            blocks.append(&mut more);
+        }
+        (MessageContent::Text(text), MessageContent::Blocks(mut more)) => {
+            let mut all = vec![ChatContentBlock::Text {
+                text: std::mem::take(text),
+            }];
+            all.append(&mut more);
+            *content = MessageContent::Blocks(all);
+        }
+        (MessageContent::Blocks(blocks), MessageContent::Text(text)) => {
+            if !text.is_empty() {
+                blocks.push(ChatContentBlock::Text { text });
+            }
+        }
+    }
 }
 
 impl From<ChatResponseMessage> for ConversationItem {

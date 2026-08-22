@@ -55,6 +55,80 @@ fn test_conversation_request_to_chat_completion() {
 }
 
 #[test]
+fn adjacent_system_messages_merge_into_one() {
+    // Strict serving templates reject consecutive same-role messages
+    // (observed on Mistral-Nemo), so plain runs must collapse.
+    let msgs = conversation_to_chat_messages(vec![
+        ConversationItem::system("Base instructions."),
+        ConversationItem::system("Project instructions."),
+        ConversationItem::user("Hi"),
+    ]);
+    assert_eq!(msgs.len(), 2);
+    assert!(matches!(msgs[0].role, Role::System));
+    assert_eq!(
+        msgs[0].content,
+        MessageContent::Text("Base instructions.\n\nProject instructions.".to_string())
+    );
+}
+
+#[test]
+fn adjacent_user_messages_merge_preserving_order() {
+    let msgs = conversation_to_chat_messages(vec![
+        ConversationItem::user("First reminder."),
+        ConversationItem::user("Second reminder."),
+        ConversationItem::user("Actual prompt."),
+    ]);
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(
+        msgs[0].content,
+        MessageContent::Text("First reminder.\n\nSecond reminder.\n\nActual prompt.".to_string())
+    );
+}
+
+#[test]
+fn assistant_messages_are_never_merged() {
+    let msgs = conversation_to_chat_messages(vec![
+        ConversationItem::user("Q1"),
+        ConversationItem::assistant_with_model("A1", "m"),
+        ConversationItem::assistant_with_model("A2", "m"),
+        ConversationItem::user("Q2"),
+    ]);
+    assert_eq!(msgs.len(), 4);
+    assert_eq!(msgs[1].content, MessageContent::Text("A1".to_string()));
+    assert_eq!(msgs[2].content, MessageContent::Text("A2".to_string()));
+}
+
+#[test]
+fn a_tool_result_between_users_breaks_the_run() {
+    let msgs = conversation_to_chat_messages(vec![
+        ConversationItem::user("Before"),
+        ConversationItem::tool_result("call_1", "data"),
+        ConversationItem::user("After"),
+    ]);
+    assert_eq!(msgs.len(), 3);
+    let texts: Vec<_> = msgs.iter().map(|m| m.text_content()).collect();
+    assert_eq!(texts, ["Before", "data", "After"]);
+}
+
+#[test]
+fn merging_mixed_blocks_keeps_images_and_text() {
+    let mut with_image = ConversationItem::user("Check this");
+    with_image.add_image("https://example.com/image.png");
+    let msgs = conversation_to_chat_messages(vec![
+        ConversationItem::system("Sys."),
+        ConversationItem::system("Sys2."),
+        with_image,
+        ConversationItem::user("And this"),
+    ]);
+    assert_eq!(msgs.len(), 2);
+    let blocks = match &msgs[1].content {
+        MessageContent::Blocks(blocks) => blocks,
+        other => panic!("expected merged blocks, got {other:?}"),
+    };
+    assert_eq!(blocks.len(), 3, "image block then both texts");
+}
+
+#[test]
 fn test_user_with_image() {
     let mut user = ConversationItem::user("Check this image");
     user.add_image("https://example.com/image.png");
