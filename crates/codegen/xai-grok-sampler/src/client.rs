@@ -341,8 +341,7 @@ fn chunk_excerpt(data: &str, max_chars: usize) -> String {
 }
 
 fn is_chutes_backend(base_url: &str) -> bool {
-    let lower = base_url.to_ascii_lowercase();
-    lower.contains("chutes.ai") || lower.contains("model-router-ten.vercel.app")
+    base_url.to_ascii_lowercase().contains("chutes.ai")
 }
 
 fn env_flag(name: &str) -> bool {
@@ -355,11 +354,13 @@ fn env_flag(name: &str) -> bool {
 }
 
 fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
+    let auto = chutes_build_core::routing::auto_model_from_env();
     chutes_fallback_chain(
         is_chutes_backend(base_url),
         env_flag("CHUTES_STRICT_MODEL"),
         std::env::var("CHUTES_FALLBACK_MODELS").ok().as_deref(),
         selected,
+        &auto,
     )
 }
 
@@ -371,6 +372,7 @@ fn chutes_fallback_chain(
     strict_model: bool,
     configured: Option<&str>,
     selected: &str,
+    auto_fallback: &str,
 ) -> Vec<String> {
     let mut models = vec![selected.to_owned()];
     if !is_chutes || strict_model {
@@ -386,10 +388,11 @@ fn chutes_fallback_chain(
                 .map(str::to_owned),
         );
     }
-    // The virtual model is dispatched to Chutes' native router endpoint by
-    // `chat_completions_endpoint`, so it is also the final safe fallback when
-    // a pinned model is explicitly cold or unavailable before streaming.
-    models.push("model-router".to_owned());
+    // The native routing alias resolves server-side against the account's
+    // saved pool (or an inline `CHUTES_ROUTING_POOL`), so it is the final
+    // safe fallback when a pinned model is explicitly cold or unavailable
+    // before streaming.
+    models.push(auto_fallback.to_owned());
     let mut seen = std::collections::HashSet::new();
     models.retain(|model| seen.insert(model.clone()));
     models
@@ -1077,26 +1080,23 @@ impl SamplingClient {
 
     /// Chat-completions URL for `model`.
     ///
-    /// The virtual `model-router` model is dispatched to Chutes' own router
-    /// endpoint rather than the configured inference base, so the router picks
-    /// the backing model. `CHUTES_ROUTER_BASE_URL` is env-overridable, so the
-    /// resolved target is validated before a session credential is sent to it.
-    fn chat_completions_endpoint(&self, model: &str) -> Result<String> {
-        if is_chutes_backend(&self.base_url) && model.eq_ignore_ascii_case("model-router") {
-            let endpoints = chutes_build_core::endpoints::ChutesEndpoints::default();
-            chutes_build_core::endpoint_policy::validate_endpoint_url(&endpoints.router).map_err(
-                |_| {
-                    SamplingError::InvalidConfiguration(
-                        "CHUTES_ROUTER_BASE_URL is not a trusted endpoint",
-                    )
-                },
-            )?;
-            return Ok(format!("{}/chat/completions", endpoints.router));
-        }
+    /// Routing is server-side: the auto string (`default`, a strategy alias,
+    /// or an inline pool) goes to the normal inference host like any model
+    /// id, so there is no separate router endpoint to reach.
+    fn chat_completions_endpoint(&self, _model: &str) -> Result<String> {
         Ok(self.endpoint("chat/completions"))
     }
 
     fn apply_defaults(&self, mut request: ChatCompletionRequest) -> Result<ChatCompletionRequest> {
+        // Legacy configs still name the retired virtual router id; map it to
+        // the native server-side routing string so old setups keep routing.
+        if is_chutes_backend(&self.base_url)
+            && let Some(model) = &request.model
+            && model.eq_ignore_ascii_case(chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
+        {
+            request.model = Some(chutes_build_core::routing::auto_model_from_env());
+        }
+
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
         }
@@ -1224,11 +1224,11 @@ impl SamplingClient {
         &self,
         payload: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
-        // Mirror the streaming path: apply the Chutes reasoning plan and route
-        // the virtual `model-router` to the router endpoint. This path used to
-        // send the bare payload to the configured inference base, so
-        // compaction, title generation and the advisor dropped the thinking
-        // switches and never reached the router under `model-router`.
+        // Mirror the streaming path: apply the Chutes reasoning plan and map
+        // the legacy `model-router` id to the native routing string. This
+        // path used to send the bare payload to the configured inference
+        // base, so compaction, title generation and the advisor dropped the
+        // thinking switches and never routed under `model-router`.
         let mut payload = payload;
         let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
 
@@ -1286,8 +1286,9 @@ impl SamplingClient {
     /// Stream a chat completion, falling back across Chutes model candidates
     /// while nothing has been streamed yet.
     ///
-    /// The chain is: the selected model, then `CHUTES_FALLBACK_MODELS`, then the
-    /// virtual `model-router`. `CHUTES_STRICT_MODEL=1` disables it, and a
+    /// The chain is: the selected model, then `CHUTES_FALLBACK_MODELS`, then
+    /// the native auto-routing alias (`default` / `CHUTES_ROUTING_POOL`).
+    /// `CHUTES_STRICT_MODEL=1` disables it, and a
     /// non-Chutes backend yields a single candidate, so this is a plain
     /// pass-through there — including the capacity wait below, which is why
     /// that is gated on the backend and not merely on the candidate count.
@@ -2859,9 +2860,9 @@ mod tests {
     }
 
     #[test]
-    fn fallback_chain_ends_at_the_router_and_never_repeats_a_model() {
-        let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a");
-        assert_eq!(chain, ["a", "b", "model-router"]);
+    fn fallback_chain_ends_at_the_auto_alias_and_never_repeats_a_model() {
+        let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a", "default");
+        assert_eq!(chain, ["a", "b", "default"]);
     }
 
     #[test]
@@ -2869,16 +2870,22 @@ mod tests {
         // A custom or self-hosted endpoint has no sibling models to try, and
         // `CHUTES_STRICT_MODEL` is the user saying so explicitly. Both must
         // collapse to a pass-through, or a pinned model is silently replaced.
-        assert_eq!(chutes_fallback_chain(false, false, Some("b"), "a"), ["a"]);
-        assert_eq!(chutes_fallback_chain(true, true, Some("b"), "a"), ["a"]);
+        assert_eq!(
+            chutes_fallback_chain(false, false, Some("b"), "a", "default"),
+            ["a"]
+        );
+        assert_eq!(
+            chutes_fallback_chain(true, true, Some("b"), "a", "default"),
+            ["a"]
+        );
     }
 
     #[test]
-    fn fallback_chain_keeps_the_router_last_when_it_is_the_selection() {
-        // Selecting the router itself must not queue it twice.
+    fn fallback_chain_keeps_the_auto_alias_last_when_it_is_the_selection() {
+        // Selecting the auto alias itself must not queue it twice.
         assert_eq!(
-            chutes_fallback_chain(true, false, None, "model-router"),
-            ["model-router"]
+            chutes_fallback_chain(true, false, None, "default", "default"),
+            ["default"]
         );
     }
 

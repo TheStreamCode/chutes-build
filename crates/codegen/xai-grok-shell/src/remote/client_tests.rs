@@ -899,7 +899,8 @@ fn list_url_explicit_overrides_derivation() {
     );
 }
 /// INVARIANT: the `/models` fetch URL + auth scheme match the auth mode —
-/// Session/Deployment → cli-chat-proxy (Session auth), never the inference host;
+/// Session/Deployment → the configured proxy base (Session auth; the default
+/// proxy is now the Chutes inference host), never a second registry;
 /// ApiKey → `xai_api_base_url` (ApiKey, public default when unset); a custom
 /// models endpoint → that URL verbatim.
 #[test]
@@ -922,10 +923,10 @@ fn models_fetch_endpoint_matches_auth_mode() {
         .unwrap(),
     );
     let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
-    assert_eq!(session.url, "https://cli-chat-proxy.grok.com/v1/models");
+    assert_eq!(session.url, "https://llm.chutes.ai/v1/models");
     assert_eq!(session.auth, EndpointAuth::Session);
     let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
-    assert_eq!(deployment.url, "https://cli-chat-proxy.grok.com/v1/models");
+    assert_eq!(deployment.url, "https://llm.chutes.ai/v1/models");
     assert_eq!(deployment.auth, EndpointAuth::Session);
     let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
     assert_eq!(api.url, "https://inference.acme-corp.example/xai/v1/models");
@@ -933,7 +934,7 @@ fn models_fetch_endpoint_matches_auth_mode() {
     let default = EndpointsConfig::from_config_value(&toml::Value::Table(Default::default()));
     assert_eq!(
         ListModelsEndpoint::from_endpoints(&default, ModelFetchAuth::ApiKey).url,
-        "https://api.x.ai/v1/models"
+        "https://llm.chutes.ai/v1/models"
     );
     let custom = EndpointsConfig::from_config_value(
         &toml::from_str(
@@ -944,7 +945,8 @@ fn models_fetch_endpoint_matches_auth_mode() {
     );
     let ep = ListModelsEndpoint::from_endpoints(&custom, ModelFetchAuth::Session);
     assert_eq!(ep.url, "https://models.acme.com/v1/models");
-    assert_eq!(ep.auth, EndpointAuth::ApiKey);
+    // A custom catalog host never receives the ambient Chutes credential.
+    assert_eq!(ep.auth, EndpointAuth::CustomApiKey);
 }
 /// REGRESSION: `chutes-build setup` must send the deployment key to
 /// the proxy, never the inference endpoint.

@@ -4,7 +4,11 @@ use std::borrow::Cow;
 
 pub const INFERENCE_BASE_URL: &str = "https://llm.chutes.ai/v1";
 pub const ACCOUNT_BASE_URL: &str = "https://api.chutes.ai";
-pub const ROUTER_BASE_URL: &str = "https://model-router-ten.vercel.app/v1";
+/// Retired: routing is native to the inference host (`default` aliases and
+/// inline pools in the `model` field). The field remains for a self-hosted
+/// router override via `CHUTES_ROUTER_BASE_URL`; the compiled default now
+/// matches the inference host so trust validation keeps passing.
+pub const ROUTER_BASE_URL: &str = INFERENCE_BASE_URL;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChutesEndpoints {

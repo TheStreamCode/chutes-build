@@ -131,6 +131,88 @@ impl StickyTurnRoute {
     }
 }
 
+/// Native Chutes server-side routing (chutes.ai/app → Model Routing).
+///
+/// The `model` field accepts a saved-pool alias (`default`), an alias with a
+/// strategy suffix (`default:latency`, `default:throughput`), or an inline
+/// comma-separated pool (`modelA,modelB[:strategy]`). The server resolves the
+/// pool per request; the client only composes the string. Saved aliases
+/// require a dashboard-configured pool, while inline pools work on any
+/// account.
+pub const DEFAULT_ALIAS: &str = "default";
+
+/// The legacy virtual auto-router id. Configs written before the native
+/// grammar still name it; the sampler maps it to the current auto string.
+pub const LEGACY_AUTO_MODEL_ID: &str = "model-router";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingStrategy {
+    Sequential,
+    Latency,
+    Throughput,
+}
+
+impl RoutingStrategy {
+    fn suffix(self) -> &'static str {
+        match self {
+            Self::Sequential => "",
+            Self::Latency => ":latency",
+            Self::Throughput => ":throughput",
+        }
+    }
+
+    fn from_env_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sequential" | "none" | "" => Some(Self::Sequential),
+            "latency" => Some(Self::Latency),
+            "throughput" => Some(Self::Throughput),
+            _ => None,
+        }
+    }
+}
+
+/// Compose the native routing string for a pool and optional strategy.
+///
+/// An empty pool yields the dashboard alias (`default`), so callers without
+/// configuration still target server-side failover once a pool is saved.
+pub fn compose_routing_model(pool: &[&str], strategy: Option<RoutingStrategy>) -> String {
+    let strategy = strategy.unwrap_or(RoutingStrategy::Sequential);
+    if pool.is_empty() {
+        return format!("{DEFAULT_ALIAS}{}", strategy.suffix());
+    }
+    let members: Vec<&str> = pool
+        .iter()
+        .map(|m| m.trim())
+        .filter(|m| !m.is_empty())
+        .collect();
+    format!("{}{}", members.join(","), strategy.suffix())
+}
+
+/// The auto-routing model string this process should send, resolved from the
+/// environment: `CHUTES_ROUTING_POOL` (comma-separated catalogue ids) and
+/// `CHUTES_ROUTING_STRATEGY` (`sequential`, `latency`, or `throughput`;
+/// unknown values are ignored). Unset environment means the plain `default`
+/// alias.
+pub fn auto_model_from_env() -> String {
+    let pool: Vec<String> = std::env::var("CHUTES_ROUTING_POOL")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|member| !member.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let strategy = std::env::var("CHUTES_ROUTING_STRATEGY")
+        .ok()
+        .and_then(|raw| RoutingStrategy::from_env_value(&raw));
+    compose_routing_model(
+        &pool.iter().map(String::as_str).collect::<Vec<_>>(),
+        strategy,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +246,62 @@ mod tests {
         let mut route = StickyTurnRoute::default();
         assert_eq!(route.select("first"), "first");
         assert_eq!(route.select("second"), "first");
+    }
+
+    #[test]
+    fn empty_pool_composes_the_dashboard_alias() {
+        use RoutingStrategy::*;
+        assert_eq!(compose_routing_model(&[], None), "default");
+        assert_eq!(compose_routing_model(&[], Some(Sequential)), "default");
+        assert_eq!(compose_routing_model(&[], Some(Latency)), "default:latency");
+        assert_eq!(
+            compose_routing_model(&[], Some(Throughput)),
+            "default:throughput"
+        );
+    }
+
+    #[test]
+    fn inline_pools_compose_in_order_with_optional_strategy() {
+        use RoutingStrategy::*;
+        let pool = ["zai-org/GLM-5.1-TEE", "Qwen/Qwen3-32B-TEE"];
+        assert_eq!(
+            compose_routing_model(&pool, None),
+            "zai-org/GLM-5.1-TEE,Qwen/Qwen3-32B-TEE"
+        );
+        assert_eq!(
+            compose_routing_model(&pool, Some(Throughput)),
+            "zai-org/GLM-5.1-TEE,Qwen/Qwen3-32B-TEE:throughput"
+        );
+    }
+
+    #[test]
+    fn env_resolution_reads_pool_and_strategy() {
+        // SAFETY: test-scoped env mutation, serialized by the suite runner
+        // (single-threaded harness for this crate's unit tests).
+        unsafe {
+            std::env::set_var(
+                "CHUTES_ROUTING_POOL",
+                " zai-org/GLM-5.1-TEE , deepseek-ai/DeepSeek-V3.2-TEE ",
+            );
+            std::env::set_var("CHUTES_ROUTING_STRATEGY", "Latency");
+        }
+        assert_eq!(
+            auto_model_from_env(),
+            "zai-org/GLM-5.1-TEE,deepseek-ai/DeepSeek-V3.2-TEE:latency"
+        );
+        unsafe {
+            std::env::remove_var("CHUTES_ROUTING_POOL");
+            std::env::set_var("CHUTES_ROUTING_STRATEGY", "throughput");
+        }
+        assert_eq!(auto_model_from_env(), "default:throughput");
+        unsafe {
+            std::env::set_var("CHUTES_ROUTING_STRATEGY", "nonsense");
+        }
+        // Unknown strategy falls back to the sequential alias.
+        assert_eq!(auto_model_from_env(), "default");
+        unsafe {
+            std::env::remove_var("CHUTES_ROUTING_STRATEGY");
+        }
+        assert_eq!(auto_model_from_env(), "default");
     }
 }

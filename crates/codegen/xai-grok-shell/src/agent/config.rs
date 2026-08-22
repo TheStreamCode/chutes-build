@@ -46,8 +46,9 @@ pub const DEFAULT_AGENT_TYPE: &str = "chutes-build-plan";
 pub(crate) fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-/// Default base URL for the cli chat proxy.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://model-router-ten.vercel.app/v1";
+/// Default base URL for the cli chat proxy. The retired standalone router
+/// deployment is gone; routing is native to the inference host now.
+pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://llm.chutes.ai/v1";
 /// Default base URL for the public xAI API.
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://llm.chutes.ai/v1";
 const NO_INLINE_CITATIONS_RESPONSE_INCLUDE: &str = "no_inline_citations";

@@ -101,7 +101,6 @@ pub static DEFAULT_ALLOWED_DOMAINS: &[&str] = &[
     "docs.chutes.ai",
     "api.chutes.ai",
     "llm.chutes.ai",
-    "model-router-ten.vercel.app",
     // Programming languages
     "docs.python.org",
     "en.cppreference.com",

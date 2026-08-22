@@ -15,7 +15,7 @@
 //! `ChutesAccountClient`) validates its endpoints once at construction time,
 //! before any request is built.
 
-const TRUSTED_HOSTS: &[&str] = &["chutes.ai", "model-router-ten.vercel.app"];
+const TRUSTED_HOSTS: &[&str] = &["chutes.ai"];
 
 /// Env var that opts a fork or local dev setup out of the trusted-host
 /// policy. Only affects *validation* of the configured base URL; it never
@@ -268,14 +268,6 @@ mod tests {
 
     #[test]
     #[serial]
-    fn accepts_exact_router_host() {
-        with_insecure_opt_in(None, || {
-            assert!(validate_endpoint_url("https://model-router-ten.vercel.app/v1").is_ok());
-        });
-    }
-
-    #[test]
-    #[serial]
     fn rejects_lookalike_domains() {
         with_insecure_opt_in(None, || {
             assert_eq!(
@@ -286,12 +278,9 @@ mod tests {
                 validate_endpoint_url("https://evilchutes.ai"),
                 Err(EndpointTrustError::UntrustedHost)
             );
+            // The retired router deployment host is no longer trusted either.
             assert_eq!(
-                validate_endpoint_url("https://notmodel-router-ten.vercel.app"),
-                Err(EndpointTrustError::UntrustedHost)
-            );
-            assert_eq!(
-                validate_endpoint_url("https://model-router-ten.vercel.app.evil.example"),
+                validate_endpoint_url("https://model-router-ten.vercel.app/v1"),
                 Err(EndpointTrustError::UntrustedHost)
             );
         });
@@ -300,7 +289,7 @@ mod tests {
     #[test]
     fn ambient_credentials_are_scoped_to_official_https_urls() {
         assert!(is_official_credential_url("https://llm.chutes.ai/v1"));
-        assert!(is_official_credential_url(
+        assert!(!is_official_credential_url(
             "https://model-router-ten.vercel.app/v1"
         ));
         assert!(!is_official_credential_url("https://chutes.ai.evil.test"));

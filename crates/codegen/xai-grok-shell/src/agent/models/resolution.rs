@@ -327,8 +327,9 @@ pub(crate) fn validate_selectable(
 }
 
 fn is_chutes_inference_url(url: &str) -> bool {
-    let url = url.to_ascii_lowercase();
-    url.contains("chutes.ai") || url.contains("model-router-ten.vercel.app")
+    // The retired standalone router deployment host is deliberately absent:
+    // routing is native to the inference host now.
+    url.to_ascii_lowercase().contains("chutes.ai")
 }
 
 fn normalize_chutes_model_capabilities(entry: &mut ModelEntry) {
@@ -424,8 +425,11 @@ fn normalize_chutes_model_capabilities(entry: &mut ModelEntry) {
 }
 
 fn add_chutes_auto_router(catalog: &mut IndexMap<String, ModelEntry>, cfg: &config::Config) {
-    const AUTO_MODEL_ID: &str = "model-router";
-    if catalog.contains_key(AUTO_MODEL_ID)
+    // The auto entry sends a native routing string (`default`, a strategy
+    // alias, or an inline `CHUTES_ROUTING_POOL`) to the normal inference
+    // host; Chutes resolves the pool server-side per request.
+    let auto_id = chutes_build_core::routing::auto_model_from_env();
+    if catalog.contains_key(&auto_id)
         || !catalog.values().any(|entry| {
             is_chutes_inference_url(&entry.info.base_url)
                 || entry
@@ -437,13 +441,16 @@ fn add_chutes_auto_router(catalog: &mut IndexMap<String, ModelEntry>, cfg: &conf
         return;
     }
 
-    let router_url = cfg.endpoints.proxy_url();
-    let mut info = config::ModelInfo::fallback(AUTO_MODEL_ID);
-    info.id = Some(AUTO_MODEL_ID.to_owned());
+    let inference_url = cfg.endpoints.resolve_inference_base_url();
+    let mut info = config::ModelInfo::fallback(&auto_id);
+    info.id = Some(auto_id.clone());
     info.name = Some("Auto (Chutes Router)".to_owned());
-    info.description =
-        Some("Native task-aware model selection with cold/unavailable fallback.".to_owned());
-    info.base_url = router_url.clone();
+    info.description = Some(
+        "Server-side routing: the account's saved pool (chutes.ai/app → Model Routing) \
+         or CHUTES_ROUTING_POOL, with optional :latency / :throughput strategy."
+            .to_owned(),
+    );
+    info.base_url = inference_url.clone();
     info.context_window = std::num::NonZeroU64::new(131_072).expect("non-zero context window");
     info.max_completion_tokens = Some(32_768);
     info.supports_reasoning_effort = false;
@@ -452,13 +459,13 @@ fn add_chutes_auto_router(catalog: &mut IndexMap<String, ModelEntry>, cfg: &conf
         info,
         api_key: None,
         env_key: None,
-        // The router is reached with the ambient session credential; a named
+        // Routing is reached with the ambient session credential; a named
         // helper would point it at a different account.
         auth_provider: None,
-        api_base_url: Some(router_url),
+        api_base_url: Some(inference_url),
     };
     let mut with_auto = IndexMap::with_capacity(catalog.len() + 1);
-    with_auto.insert(AUTO_MODEL_ID.to_owned(), auto);
+    with_auto.insert(auto_id, auto);
     with_auto.extend(std::mem::take(catalog));
     *catalog = with_auto;
 }

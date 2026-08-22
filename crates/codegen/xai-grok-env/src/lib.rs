@@ -20,7 +20,9 @@ pub struct GrokBuildEndpoints {
     pub ws_origin: &'static str,
 }
 const PRODUCTION_ENDPOINTS: GrokBuildEndpoints = GrokBuildEndpoints {
-    cli_chat_proxy_base_url: "https://model-router-ten.vercel.app/v1",
+    // The standalone router deployment is retired; routing is native to the
+    // inference host (saved `default` pools and inline pool strings).
+    cli_chat_proxy_base_url: "https://llm.chutes.ai/v1",
     asset_server_url: "https://api.chutes.ai",
     // Chutes Build has no vendor relay or cloud-sandbox control plane. These
     // loopback-only sentinels fail closed if an inherited relay path is invoked.

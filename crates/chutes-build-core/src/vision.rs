@@ -1,8 +1,7 @@
 //! Chutes vision-model client for on-demand image/PDF-page text transcription.
 //!
 //! Always targets an official, curated Chutes-hosted model over the standard
-//! inference endpoint (or the dedicated router endpoint for the virtual
-//! `model-router` id) — billed against the account's subscription quota,
+//! inference endpoint — billed against the account's subscription quota,
 //! never the separate marketplace/wallet balance used by third-party chutes.
 
 use base64::Engine as _;
@@ -40,9 +39,8 @@ impl ChutesVisionClient {
 
     /// Ask `model` to transcribe visible text out of `image_bytes` verbatim.
     ///
-    /// `model.eq_ignore_ascii_case("model-router")` is dispatched to the
-    /// dedicated router endpoint — the virtual auto-routing model isn't
-    /// served on the standard inference host.
+    /// The legacy `model-router` id is mapped to the native server-side
+    /// routing string before the request, like the sampler does.
     pub async fn transcribe(
         &self,
         model: &str,
@@ -50,12 +48,12 @@ impl ChutesVisionClient {
         image_bytes: &[u8],
         prompt: &str,
     ) -> Result<TranscribeResponse, VisionError> {
-        let base = if model.eq_ignore_ascii_case("model-router") {
-            &self.endpoints.router
+        let model = if model.eq_ignore_ascii_case(crate::routing::LEGACY_AUTO_MODEL_ID) {
+            crate::routing::auto_model_from_env()
         } else {
-            &self.endpoints.inference
+            model.to_owned()
         };
-        let url = format!("{base}/chat/completions");
+        let url = format!("{}/chat/completions", self.endpoints.inference);
         let data_url = format!(
             "data:{mime_type};base64,{}",
             base64::engine::general_purpose::STANDARD.encode(image_bytes)
