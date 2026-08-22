@@ -56,8 +56,7 @@ explicit hosted feature:
 
 | Destination | Purpose | Data sent |
 | --- | --- | --- |
-| `model-router-ten.vercel.app` | default Chutes-compatible model routing | prompts, selected context/tool schemas, model inputs, Chutes API credential |
-| `llm.chutes.ai` | Chutes inference, model catalog, semantic memory, voice transcription, OCR, and vision | model requests and the selected inputs: prompts/context, memory chunks, audio, images, PDF pages, or sampled video frames; Chutes API credential |
+| `llm.chutes.ai` | Chutes inference (including native model routing via the `model` field), model catalog, semantic memory, voice transcription, OCR, and vision | model requests and the selected inputs: prompts/context, memory chunks, audio, images, PDF pages, or sampled video frames; Chutes API credential |
 | `api.chutes.ai` | Chutes account and media APIs | account requests, media parameters and user-selected media assets; Chutes API credential |
 | `api.chutes.ai/idp` | OAuth sign-in and refresh | authorization code or refresh token, PKCE verifier, registered client ID, and a client secret only when configured |
 | `chutes.ai/docs`, `chutes.ai/news` | mandatory primary-source verification for Chutes topics | requested official page URLs; no Chutes API credential |

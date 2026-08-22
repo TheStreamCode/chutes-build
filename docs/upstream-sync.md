@@ -463,6 +463,18 @@ receive an ambient Chutes credential, and `resolve_inference_base_url` routes
 see the traffic that does go there. It was the fork's own choice; it deserves a
 conscious confirmation rather than inheritance.
 
+**Decided 2026-08-23.** The Vercel deployment answered `DEPLOYMENT_NOT_FOUND`:
+it is gone, and Chutes replaced it with routing native to the inference host —
+the `model` field now takes the saved-pool alias `default` (with optional
+`:latency` / `:throughput`) or inline comma-separated pools, per chutes.ai's
+llms.txt and Model Routing dashboard. The host was removed from every trust
+list and default (`TRUSTED_HOSTS`, web_fetch allowlist, proxy defaults,
+backend detection), the Auto entry composes the native string instead
+(`CHUTES_ROUTING_POOL` / `CHUTES_ROUTING_STRATEGY`, else `default`), and the
+legacy `model-router` id maps to it for old configs. `CHUTES_ROUTER_BASE_URL`
+survives only as a self-hosted override knob with the inference host as its
+compiled default.
+
 ### Phase 4 triage: what came forward, and what did not
 
 The 89 non-branding files we had touched, decided one at a time against the new

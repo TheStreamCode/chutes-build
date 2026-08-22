@@ -22,11 +22,14 @@ privacy-sensitive cloud behavior.
 ## Routing behavior
 
 `Auto (Chutes Router)` is inserted as the first catalog entry and is selected by
-default when the user has no stored model preference. Its stable local ID is
-`model-router`; only that virtual ID is dispatched to the router endpoint. A
-concrete selection is attempted first, followed by `CHUTES_FALLBACK_MODELS`,
-then Auto. Duplicates are removed. Only transient/model-unavailable failures
-before stream start can advance the chain. Authentication, permission,
+default when the user has no stored model preference. It sends a native
+Chutes routing string — `default` (the pool saved at chutes.ai/app), a
+strategy alias, or an inline `CHUTES_ROUTING_POOL` — to the normal inference
+host; Chutes resolves the pool server-side per request. The legacy local ID
+`model-router` is still accepted and mapped to that string. A concrete
+selection is attempted first, followed by `CHUTES_FALLBACK_MODELS`, then Auto.
+Duplicates are removed. Only transient/model-unavailable failures before
+stream start can advance the chain. Authentication, permission,
 invalid-request, and mid-stream errors do not silently switch models.
 
 The chain covers **both** request paths, which it did not always: it was wired
@@ -175,10 +178,11 @@ guarantee.
 **Chutes-owned** (product identity, provider integration, privacy posture):
 
 - `chutes-build-core` — the domain layer for everything Chutes-specific that
-  isn't a user-facing tool: model-router dispatch and virtual-model handling,
-  live capability catalog + cache, reasoning-compatibility registry, media
-  catalog/invocation client, Context7 client, credential-endpoint trust policy
-  and SSRF-safe DNS resolution, memory secret-filtering, and wellness nudges.
+  isn't a user-facing tool: native routing-string composition and legacy-id
+  mapping, live capability catalog + cache, reasoning-compatibility registry,
+  media catalog/invocation client, Context7 client, credential-endpoint trust
+  policy and SSRF-safe DNS resolution, memory secret-filtering, and wellness
+  nudges.
 - `xai-grok-tools::implementations::chutes` — the agent-callable tools backed
   by the above (media generation/discovery, Context7 lookup, OCR
   transcription, account usage, isolated browser control). Despite living
@@ -207,9 +211,10 @@ builds on, not specific to any provider):
 - `xai-grok-shell`, `xai-grok-shell-base` — session lifecycle, config
   resolution/persistence, credential provider, ACP session handling.
 - `xai-grok-sampler`, `xai-grok-sampling-types` — the HTTP/streaming client
-  and wire types for chat completions (Chutes-specific dispatch, e.g. the
-  model-router host substitution, is a small, explicitly-commented carve-out
-  inside otherwise-generic client code, not a separate Chutes crate).
+  and wire types for chat completions (Chutes-specific handling, e.g. legacy
+  auto-id mapping and role-run merging, is a small, explicitly-commented
+  carve-out inside otherwise-generic client code, not a separate Chutes
+  crate).
 - `xai-tool-runtime`, `xai-tool-protocol`, `xai-tool-types` — the tool trait,
   wire protocol, and shared type definitions any tool (Chutes-owned or not)
   is built on.

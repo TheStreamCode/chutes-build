@@ -34,7 +34,8 @@ Apache-2.0; the project is not affiliated with or endorsed by SpaceXAI.
 What the fork changes:
 
 - **Chutes, not xAI.** Inference goes to `llm.chutes.ai`, the model catalog is
-  Chutes', `model-router` ("Chutes Auto") is the default route, and media
+  Chutes', the default route is Chutes' native model routing (the saved
+  `default` pool, or an inline pool via `CHUTES_ROUTING_POOL`), and media
   generation, OCR, usage and quota all go through Chutes APIs.
 - **Nothing phones home.** Telemetry, remote error reporting, upload, session
   sharing, remote workspace exposure and self-update are off at compile time and

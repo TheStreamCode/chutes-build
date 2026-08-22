@@ -30,13 +30,31 @@ or secret manager, and never commit real credentials.
 | `CHUTES_AUTH_SCHEME=raw` | Send the management API key without the `Bearer` prefix. Default is `Bearer`. |
 | `CHUTES_BUILD_OAUTH2_CLIENT_ID` | Registered Chutes OAuth application ID. |
 | `CHUTES_BUILD_OAUTH2_CLIENT_SECRET` | Confidential OAuth secret, used for exchange and refresh but never persisted. |
-| `CHUTES_BUILD_DEFAULT_MODEL` | Default model ID; use `model-router` for Auto. |
+| `CHUTES_BUILD_DEFAULT_MODEL` | Default model ID; a concrete catalogue id, or a native routing string (see below). |
 | `CHUTES_FALLBACK_MODELS` | Ordered comma-separated model fallback chain. |
 | `CHUTES_STRICT_MODEL=1` | Disable automatic fallback. |
-| `CHUTES_ROUTER_BASE_URL` | Compatible router endpoint override. |
+| `CHUTES_ROUTING_POOL` | Inline routing pool: comma-separated catalogue ids sent as one `model` value. |
+| `CHUTES_ROUTING_STRATEGY` | Routing strategy for the pool or saved alias: `sequential` (default), `latency`, or `throughput`. |
+| `CHUTES_ROUTER_BASE_URL` | Self-hosted compatible router endpoint override. Unused by default — routing is native to the inference host. |
 | `CHUTES_INFERENCE_BASE_URL` | Compatible inference endpoint override. |
 | `CHUTES_MODELS_BASE_URL` | Compatible model-catalogue endpoint override. |
 | `CHUTES_API_BASE_URL` | Compatible account/media API override. |
+
+### Native model routing
+
+Chutes resolves routing server-side from the `model` field, so any of these
+strings work wherever a model id is accepted (`-m`, config default, `/model`):
+
+- `default` — the pool saved at chutes.ai/app → Model Routing (failover in
+  saved order);
+- `default:latency` / `default:throughput` — same pool, picked by lowest TTFT
+  or highest TPS;
+- `modelA,modelB,modelC` — inline failover pool, no dashboard setup;
+- `modelA,modelB:latency` / `...:throughput` — inline pool with a strategy.
+
+The built-in **Auto (Chutes Router)** entry sends `default`; set
+`CHUTES_ROUTING_POOL` to target an inline pool instead. A saved alias fails
+with "model not found" until a pool exists on the dashboard.
 
 Ambient Chutes credentials are never inherited by arbitrary custom inference
 or catalog endpoints. Custom models must declare their own `api_key` or
