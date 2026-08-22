@@ -137,6 +137,15 @@ pub async fn fetch_npm_version_for_test(
     fetch_npm_version(channel, npm_registry).await
 }
 
+/// The program name for spawning npm.
+///
+/// npm ships as `npm.cmd` on Windows, and `std::process::Command` only
+/// appends `.exe` to an extensionless name, so the bare `"npm"` never
+/// resolves there and every spawn fails with "program not found".
+pub(crate) fn npm_program() -> &'static str {
+    if cfg!(windows) { "npm.cmd" } else { "npm" }
+}
+
 async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> {
     let pkg_spec = if tag == "latest" {
         NPM_PACKAGE.to_string()
@@ -149,7 +158,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
         registry_flag = format!("--registry={}", registry);
         args.push(&registry_flag);
     }
-    let mut cmd = Command::new("npm");
+    let mut cmd = Command::new(npm_program());
     cmd.args(&args).stdin(std::process::Stdio::null());
     xai_grok_tools::util::detach_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
