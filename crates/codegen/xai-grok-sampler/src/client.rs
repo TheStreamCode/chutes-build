@@ -393,9 +393,34 @@ fn chutes_fallback_chain(
     // safe fallback when a pinned model is explicitly cold or unavailable
     // before streaming.
     models.push(auto_fallback.to_owned());
+    // Accounts without a saved pool get a 404 for the bare alias; keep one
+    // compiled-in inline pool behind it so Auto serves out of the box. An
+    // explicit `CHUTES_ROUTING_POOL` makes its own net unnecessary.
+    if let Some(net) = chutes_build_core::routing::auto_safety_net_model(auto_fallback) {
+        models.push(net);
+    }
     let mut seen = std::collections::HashSet::new();
     models.retain(|model| seen.insert(model.clone()));
     models
+}
+
+/// Append setup guidance when the whole chain failed because the routing
+/// string did not resolve server-side — the signature failure of an account
+/// with no saved dashboard pool behind the alias. Everything else passes
+/// through untouched, including mid-loop rejections that must stay raw.
+fn with_routing_setup_hint(mut error: SamplingError) -> SamplingError {
+    let needs_hint =
+        matches!(&error, SamplingError::Api { message, .. } if message.contains("model not found"));
+    if !needs_hint {
+        return error;
+    }
+    if let SamplingError::Api { message, .. } = &mut error {
+        message.push_str(
+            "\n\nHint: save a failover pool at chutes.ai/app (Model Routing), \
+             or set CHUTES_ROUTING_POOL to route without one.",
+        );
+    }
+    error
 }
 
 /// How long the Chutes chain will wait on a `Retry-After` before giving up on
@@ -1213,9 +1238,11 @@ impl SamplingClient {
                 }
             }
         }
-        Err(last_error.unwrap_or(SamplingError::InvalidConfiguration(
-            "no model candidates to try",
-        )))
+        Err(last_error
+            .map(with_routing_setup_hint)
+            .unwrap_or(SamplingError::InvalidConfiguration(
+                "no model candidates to try",
+            )))
     }
 
     /// One non-streaming attempt against one model. Takes an already
@@ -1361,9 +1388,11 @@ impl SamplingClient {
                 }
             }
         }
-        Err(last_error.unwrap_or(SamplingError::InvalidConfiguration(
-            "no model candidates to try",
-        )))
+        Err(last_error
+            .map(with_routing_setup_hint)
+            .unwrap_or(SamplingError::InvalidConfiguration(
+                "no model candidates to try",
+            )))
     }
 
     /// One attempt against one model. Returns only once the SSE response has
@@ -2862,7 +2891,15 @@ mod tests {
     #[test]
     fn fallback_chain_ends_at_the_auto_alias_and_never_repeats_a_model() {
         let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a", "default");
-        assert_eq!(chain, ["a", "b", "default"]);
+        assert_eq!(
+            chain,
+            [
+                "a",
+                "b",
+                "default",
+                "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE"
+            ]
+        );
     }
 
     #[test]
@@ -2882,10 +2919,40 @@ mod tests {
 
     #[test]
     fn fallback_chain_keeps_the_auto_alias_last_when_it_is_the_selection() {
-        // Selecting the auto alias itself must not queue it twice.
+        // Selecting the auto alias itself must not queue it twice; the
+        // safety net still follows it so a missing dashboard pool can
+        // step down to an inline pool instead of failing outright.
         assert_eq!(
             chutes_fallback_chain(true, false, None, "default", "default"),
-            ["default"]
+            ["default", "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE"]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_needs_no_safety_net_for_an_inline_pool_selection() {
+        let pool = "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE:latency";
+        assert_eq!(chutes_fallback_chain(true, false, None, pool, pool), [pool]);
+    }
+
+    #[test]
+    fn routing_setup_hint_lands_only_on_unresolved_model_errors() {
+        let missing = SamplingError::Api {
+            status: reqwest::StatusCode::NOT_FOUND,
+            message: "model not found: default".into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: None,
+        };
+        assert!(
+            with_routing_setup_hint(missing)
+                .to_string()
+                .contains("chutes.ai/app")
+        );
+        let capacity = api_error(429, Some(1));
+        assert_eq!(
+            with_routing_setup_hint(api_error(429, Some(1))).to_string(),
+            capacity.to_string()
         );
     }
 
