@@ -115,7 +115,6 @@ xai-grok-workspace	session::git::restore_code_tests::soft_restore_restores_stash
 xai-grok-workspace	session::git::tests::test_effective_cwd_roundtrip_with_compute_offset
 xai-grok-workspace	session::git::tests::test_effective_worktree_cwd_nested_offset
 xai-grok-workspace	session::git::tests::test_effective_worktree_cwd_single_level_offset
-xai-grok-workspace	session::git_gate::tests::invalidate_during_inflight_does_not_return_stale_walk
 xai-grok-workspace	trust::tests::workspace_key_ignores_home_git_repo_for_subdir
 xai-grok-workspace	workspace_ops::tests::repos_list_does_not_load_user_global_manifest
 xai-grok-workspace	workspace_ops::tests::repos_manifest_search_dirs_skips_user_global_grok_home
