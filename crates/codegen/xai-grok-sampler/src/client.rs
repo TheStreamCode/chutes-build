@@ -390,18 +390,39 @@ fn chutes_fallback_chain(
     }
     // The native routing alias resolves server-side against the account's
     // saved pool (or an inline `CHUTES_ROUTING_POOL`), so it is the final
-    // safe fallback when a pinned model is explicitly cold or unavailable
-    // before streaming.
+    // named fallback when a pinned model is explicitly cold or unavailable
+    // before streaming. A live catalogue pool is appended later, once the
+    // async catalog fetch has run.
     models.push(auto_fallback.to_owned());
-    // Accounts without a saved pool get a 404 for the bare alias; keep one
-    // compiled-in inline pool behind it so Auto serves out of the box. An
-    // explicit `CHUTES_ROUTING_POOL` makes its own net unnecessary.
-    if let Some(net) = chutes_build_core::routing::auto_safety_net_model(auto_fallback) {
-        models.push(net);
-    }
     let mut seen = std::collections::HashSet::new();
     models.retain(|model| seen.insert(model.clone()));
     models
+}
+
+async fn chutes_fallback_models_with_live_catalog(base_url: &str, selected: &str) -> Vec<String> {
+    let mut candidates = chutes_fallback_models(base_url, selected);
+    if !is_chutes_backend(base_url) {
+        return candidates;
+    }
+    let Some(alias) = candidates
+        .iter()
+        .find(|candidate| chutes_build_core::routing::is_dashboard_alias(candidate))
+        .cloned()
+    else {
+        return candidates;
+    };
+    match chutes_build_core::catalog::live_chat_model_ids().await {
+        Ok(ids) => {
+            chutes_build_core::routing::append_live_auto_pool(&mut candidates, &ids, &alias);
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "could not refresh the live catalog for Auto fallback"
+            );
+        }
+    }
+    candidates
 }
 
 /// Append setup guidance when the whole chain failed because the routing
@@ -1207,7 +1228,7 @@ impl SamplingClient {
     ) -> Result<ChatCompletionResponse> {
         let payload = self.apply_defaults(request)?;
         let selected = payload.model.clone().unwrap_or_default();
-        let candidates = chutes_fallback_models(&self.base_url, &selected);
+        let candidates = chutes_fallback_models_with_live_catalog(&self.base_url, &selected).await;
         let policy = chutes_build_core::routing::FallbackPolicy::default();
 
         let mut last_error = None;
@@ -1328,7 +1349,7 @@ impl SamplingClient {
     )> {
         let payload = self.apply_defaults(request)?;
         let selected = payload.model.clone().unwrap_or_default();
-        let candidates = chutes_fallback_models(&self.base_url, &selected);
+        let candidates = chutes_fallback_models_with_live_catalog(&self.base_url, &selected).await;
         let policy = chutes_build_core::routing::FallbackPolicy::default();
 
         let mut last_error = None;
@@ -2891,15 +2912,7 @@ mod tests {
     #[test]
     fn fallback_chain_ends_at_the_auto_alias_and_never_repeats_a_model() {
         let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a", "default");
-        assert_eq!(
-            chain,
-            [
-                "a",
-                "b",
-                "default",
-                "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE"
-            ]
-        );
+        assert_eq!(chain, ["a", "b", "default"]);
     }
 
     #[test]
@@ -2919,12 +2932,11 @@ mod tests {
 
     #[test]
     fn fallback_chain_keeps_the_auto_alias_last_when_it_is_the_selection() {
-        // Selecting the auto alias itself must not queue it twice; the
-        // safety net still follows it so a missing dashboard pool can
-        // step down to an inline pool instead of failing outright.
+        // Selecting the auto alias itself must not queue it twice. The live
+        // catalogue pool is appended later by the async catalog fetch.
         assert_eq!(
             chutes_fallback_chain(true, false, None, "default", "default"),
-            ["default", "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE"]
+            ["default"]
         );
     }
 

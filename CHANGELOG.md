@@ -8,7 +8,7 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Auto (Chutes Router) works without a dashboard-configured pool.** The native `default` alias resolves only against a routing pool saved at chutes.ai/app; accounts without one got a raw `404 model not found: default`, and the alias was the last link of its own chain. The fallback chain now keeps a compiled-in inline failover pool behind the alias (mirroring any `:latency` / `:throughput` suffix), and when every candidate fails to resolve, the error explains how to configure routing.
+- **Auto (Chutes Router) works without a dashboard-configured pool.** The native `default` alias resolves only against a routing pool saved at chutes.ai/app; accounts without one got a raw `404 model not found: default`. Auto now appends a live inline pool built from the current catalogue (chat-capable models, `:latency` so the warmest/fastest answers) and failovers to the next member when one is cold. Set `CHUTES_ROUTING_STRATEGY=throughput` to prefer tokens-per-second instead.
 
 ## [1.2.2] - 2026-08-23
 

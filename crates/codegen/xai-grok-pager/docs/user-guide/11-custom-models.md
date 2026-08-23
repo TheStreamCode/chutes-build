@@ -7,8 +7,10 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 ## Default Models
 
 By default, Chutes Build uses models served by Chutes, and new sessions start on
-`model-router` — shown as "Chutes Auto" — which classifies the task and picks a
-model for it, falling back to another if the first is unavailable. No
+`model-router` — shown as "Chutes Auto". That local id maps to Chutes' native
+routing alias `default` (the pool saved at chutes.ai/app). If the account has
+no saved pool, Auto steps down to a live inline pool built from the current
+catalogue (`:latency` by default). No
 configuration is required: authenticate with `chutes-build login` or an API key,
 then start a session.
 

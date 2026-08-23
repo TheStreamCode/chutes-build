@@ -42,11 +42,14 @@ does not assume that this snapshot describes models added later.
 
 ## Auto routing
 
-`Auto (Chutes Router)` is a virtual entry at the top of the model picker. It
-sends `model-router` requests to the Chutes native router endpoint, which owns
-task classification, model selection, and cold/unavailable fallback. Selecting
-a concrete model still pins that model. Auto intentionally exposes no reasoning
-selector because the routed target can vary between requests.
+`Auto (Chutes Router)` is a virtual entry at the top of the model picker. The
+legacy local id `model-router` still selects it; the request sent to Chutes is
+the native routing alias `default` (or an inline `CHUTES_ROUTING_POOL`). Chutes
+owns task classification, model selection, and cold/unavailable fallback. If
+the account has no saved routing pool, the client steps down to a live inline
+pool built from the current catalogue (`:latency` by default). Selecting a concrete model still pins that model. Auto
+intentionally exposes no reasoning selector because the routed target can vary
+between requests.
 
 ## User controls
 

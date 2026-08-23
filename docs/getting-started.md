@@ -87,7 +87,12 @@ Useful first commands:
 | `/plan` | Enter plan mode before implementation. |
 
 `Auto (Chutes Router)` is selected by default when no model preference exists.
-Use `chutes-build models --json` when scripts need the resolved catalog.
+It sends Chutes' native routing alias `default` (the pool saved at
+chutes.ai/app → Model Routing). If that alias cannot resolve, the fallback
+chain steps down to a live inline pool from the current catalogue (fastest
+warm model first) so Auto works without a dashboard setup. Pin a concrete catalogue id with `/model` or
+`CHUTES_BUILD_DEFAULT_MODEL`. Use `chutes-build models --json` when scripts
+need the resolved catalog.
 
 When revising a proposed plan, type revision notes and press Enter to request
 changes. An empty Enter does not approve the plan; press `a` explicitly when

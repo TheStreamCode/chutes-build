@@ -145,14 +145,6 @@ pub const DEFAULT_ALIAS: &str = "default";
 /// grammar still name it; the sampler maps it to the current auto string.
 pub const LEGACY_AUTO_MODEL_ID: &str = "model-router";
 
-/// A compiled-in inline pool that follows the dashboard alias in a fallback
-/// chain. The alias resolves only against an account-saved routing pool
-/// (chutes.ai/app → Model Routing); accounts without one get a 404 for it,
-/// and this net keeps Auto serving out of the box. Both ids were verified
-/// serving on the live inference host; if the catalogue retires them the
-/// request fails exactly as it did before the net existed.
-pub const AUTO_SAFETY_NET_POOL: &[&str] = &["Qwen/Qwen3.5-397B-A17B-TEE", "zai-org/GLM-5.2-TEE"];
-
 /// Whether the string is the saved-pool alias, optionally with a strategy
 /// suffix (`default`, `default:latency`, `default:throughput`). Such a
 /// string resolves only against an account-level pool; an inline pool never
@@ -164,15 +156,57 @@ pub fn is_dashboard_alias(model: &str) -> bool {
     rest.is_empty() || matches!(rest, ":latency" | ":throughput")
 }
 
-/// The inline-pool safety net for a dashboard-alias auto string, mirroring
-/// its strategy suffix. `None` for anything that is not the bare alias —
-/// an explicit `CHUTES_ROUTING_POOL` needs no net of its own.
-pub fn auto_safety_net_model(auto_alias: &str) -> Option<String> {
-    if !is_dashboard_alias(auto_alias) {
+/// Strategy for a live-composed Auto pool: honour an alias suffix or
+/// `CHUTES_ROUTING_STRATEGY`, otherwise prefer lowest time-to-first-token
+/// (`:latency`) so Auto answers quickly from whatever is warm.
+pub fn auto_live_strategy(alias: &str) -> RoutingStrategy {
+    if let Some((_, suffix)) = alias.split_once(':') {
+        return match suffix {
+            "throughput" => RoutingStrategy::Throughput,
+            "latency" => RoutingStrategy::Latency,
+            _ => RoutingStrategy::Latency,
+        };
+    }
+    std::env::var("CHUTES_ROUTING_STRATEGY")
+        .ok()
+        .and_then(|value| RoutingStrategy::from_env_value(&value))
+        .unwrap_or(RoutingStrategy::Latency)
+}
+
+/// Compose an inline pool from live catalogue ids. Drops the dashboard alias,
+/// the legacy virtual id, empty members, and anything containing a comma
+/// (which would break the grammar). `None` when nothing usable remains.
+pub fn compose_live_auto_pool(ids: &[&str], strategy: RoutingStrategy) -> Option<String> {
+    let members: Vec<&str> = ids
+        .iter()
+        .copied()
+        .map(str::trim)
+        .filter(|id| {
+            !id.is_empty()
+                && !id.contains(',')
+                && *id != LEGACY_AUTO_MODEL_ID
+                && !is_dashboard_alias(id)
+        })
+        .collect();
+    if members.is_empty() {
         return None;
     }
-    let suffix = &auto_alias[DEFAULT_ALIAS.len()..];
-    Some(format!("{}{}", AUTO_SAFETY_NET_POOL.join(","), suffix))
+    Some(compose_routing_model(&members, Some(strategy)))
+}
+
+/// Append a live-composed Auto pool after the dashboard alias in a fallback
+/// chain. No-op when the chain has no alias or the live list is empty.
+pub fn append_live_auto_pool(candidates: &mut Vec<String>, live_ids: &[String], alias: &str) {
+    if !is_dashboard_alias(alias) {
+        return;
+    }
+    let refs: Vec<&str> = live_ids.iter().map(String::as_str).collect();
+    let Some(pool) = compose_live_auto_pool(&refs, auto_live_strategy(alias)) else {
+        return;
+    };
+    if !candidates.iter().any(|candidate| candidate == &pool) {
+        candidates.push(pool);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,21 +324,34 @@ mod tests {
     }
 
     #[test]
-    fn safety_net_mirrors_the_alias_suffix_and_skips_inline_pools() {
+    fn live_auto_pool_drops_aliases_and_applies_strategy() {
         assert_eq!(
-            auto_safety_net_model("default").as_deref(),
-            Some("Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE")
+            compose_live_auto_pool(&["a/One", "default", "b/Two"], RoutingStrategy::Latency)
+                .as_deref(),
+            Some("a/One,b/Two:latency")
         );
         assert_eq!(
-            auto_safety_net_model("default:latency").as_deref(),
-            Some("Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE:latency")
+            compose_live_auto_pool(&["model-router", "c/Three"], RoutingStrategy::Throughput)
+                .as_deref(),
+            Some("c/Three:throughput")
         );
-        assert_eq!(
-            auto_safety_net_model("default:throughput").as_deref(),
-            Some("Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE:throughput")
-        );
-        assert!(auto_safety_net_model("a,b").is_none());
-        assert!(auto_safety_net_model("model-router").is_none());
+        assert!(compose_live_auto_pool(&["default", ""], RoutingStrategy::Latency).is_none());
+    }
+
+    #[test]
+    fn live_auto_pool_appends_only_behind_the_dashboard_alias() {
+        let live = ["a/One".to_owned(), "b/Two".to_owned()];
+        let mut chain = vec!["picked".to_owned(), "default".to_owned()];
+        append_live_auto_pool(&mut chain, &live, "default");
+        assert_eq!(chain, ["picked", "default", "a/One,b/Two:latency"]);
+
+        let mut already = vec!["a/One,b/Two:latency".to_owned()];
+        append_live_auto_pool(&mut already, &live, "default");
+        assert_eq!(already, ["a/One,b/Two:latency"]);
+
+        let mut pinned = vec!["a/One".to_owned()];
+        append_live_auto_pool(&mut pinned, &live, "a/One");
+        assert_eq!(pinned, ["a/One"]);
     }
 
     #[test]

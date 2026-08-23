@@ -1,11 +1,14 @@
 # Chutes Models and Ecosystem
 
 Chutes Build discovers models and capabilities from the live Chutes catalog.
-`Auto (Chutes Router)` is inserted as the first model choice; its stable ID is
-`model-router`. Auto delegates task classification and model selection to the
-Chutes router. A concrete model is tried first, followed by
-`CHUTES_FALLBACK_MODELS`, then Auto. Set `CHUTES_STRICT_MODEL=1` to disable
-fallback entirely.
+`Auto (Chutes Router)` is inserted as the first model choice; its stable local
+ID is `model-router`. Auto sends Chutes' native routing string — the saved-pool
+alias `default`, a strategy suffix, or an inline `CHUTES_ROUTING_POOL` — to the
+normal inference host. If the account has no dashboard pool, the fallback chain
+steps down to a live inline pool built from the current catalogue
+(`:latency` by default, so the fastest warm model answers). A concrete model is tried first,
+followed by `CHUTES_FALLBACK_MODELS`, then Auto. Set `CHUTES_STRICT_MODEL=1` to
+disable fallback entirely.
 
 Fallback is limited to transient/model-unavailable failures before streaming
 begins. Authentication and invalid-request errors do not silently change models.

@@ -28,9 +28,10 @@ strategy alias, or an inline `CHUTES_ROUTING_POOL` — to the normal inference
 host; Chutes resolves the pool server-side per request. The legacy local ID
 `model-router` is still accepted and mapped to that string. A concrete
 selection is attempted first, followed by `CHUTES_FALLBACK_MODELS`, then Auto.
-When the Auto string is the bare dashboard alias, a compiled-in inline pool
-follows it, so accounts without a saved routing pool still serve; if the whole
-chain fails to resolve, the surfaced error explains how to configure routing.
+When the Auto string is the bare dashboard alias, a live inline pool built
+from the current catalogue follows it (`:latency` by default), so accounts
+without a saved routing pool still serve; if the whole chain fails to resolve,
+the surfaced error explains how to configure routing.
 Duplicates are removed. Only transient/model-unavailable failures before
 stream start can advance the chain. Authentication, permission,
 invalid-request, and mid-stream errors do not silently switch models.

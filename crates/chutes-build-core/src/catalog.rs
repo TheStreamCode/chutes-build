@@ -38,6 +38,8 @@ struct CatalogModel {
     root: Option<String>,
     #[serde(default)]
     input_modalities: Vec<String>,
+    #[serde(default)]
+    output_modalities: Vec<String>,
 }
 
 /// Cached catalog body, read on the fast path without ever holding a lock
@@ -99,16 +101,8 @@ pub async fn model_supports_input(
         return Ok(result);
     }
 
-    match fetch_catalog(&endpoint).await {
-        Ok(body) => {
-            let result = supports_input(&body, model, modality);
-            *CACHE.write().await = Some(CatalogCacheEntry {
-                endpoint,
-                fetched_at: std::time::Instant::now(),
-                body,
-            });
-            Ok(result)
-        }
+    match refresh_catalog(&endpoint).await {
+        Ok(body) => Ok(supports_input(&body, model, modality)),
         Err(error) => {
             // Stale-cache fallback: prefer a previous (even expired) entry
             // for this endpoint over a hard failure, if one exists.
@@ -131,6 +125,83 @@ async fn cached_lookup(endpoint: &str, model: &str, modality: &str) -> Option<Op
     } else {
         None
     }
+}
+
+/// Chat-capable catalogue ids for Auto's live inline pool. Cached for the
+/// same TTL as modality lookups. Order follows the live catalogue.
+pub async fn live_chat_model_ids() -> Result<Vec<String>, CatalogError> {
+    let endpoint = ChutesEndpoints::default().inference;
+    crate::endpoint_policy::validate_endpoint_url(&endpoint)?;
+    if let Some(ids) = cached_chat_ids(&endpoint).await {
+        return Ok(ids);
+    }
+    let _gate = REFRESH_GATE.lock().await;
+    if let Some(ids) = cached_chat_ids(&endpoint).await {
+        return Ok(ids);
+    }
+    match refresh_catalog(&endpoint).await {
+        Ok(body) => Ok(chat_model_ids(&body)),
+        Err(error) => {
+            let cache = CACHE.read().await;
+            if let Some(entry) = cache.as_ref()
+                && entry.endpoint == endpoint
+            {
+                return Ok(chat_model_ids(&entry.body));
+            }
+            Err(error)
+        }
+    }
+}
+
+async fn cached_chat_ids(endpoint: &str) -> Option<Vec<String>> {
+    let cache = CACHE.read().await;
+    let entry = cache.as_ref()?;
+    if entry.endpoint == endpoint && entry.fetched_at.elapsed() < CATALOG_CACHE_TTL {
+        Some(chat_model_ids(&entry.body))
+    } else {
+        None
+    }
+}
+
+async fn refresh_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
+    let body = fetch_catalog(endpoint).await?;
+    *CACHE.write().await = Some(CatalogCacheEntry {
+        endpoint: endpoint.to_owned(),
+        fetched_at: std::time::Instant::now(),
+        body: body.clone(),
+    });
+    Ok(body)
+}
+
+fn chat_model_ids(body: &CatalogResponse) -> Vec<String> {
+    body.data
+        .iter()
+        .filter_map(|raw_entry| {
+            let entry: CatalogModel = serde_json::from_value(raw_entry.clone()).ok()?;
+            let id = entry.id.filter(|value| !value.trim().is_empty())?;
+            if id == crate::routing::DEFAULT_ALIAS || id == crate::routing::LEGACY_AUTO_MODEL_ID {
+                return None;
+            }
+            if id.contains(',') {
+                return None;
+            }
+            let input = if entry.input_modalities.is_empty() {
+                vec!["text".to_owned()]
+            } else {
+                entry.input_modalities
+            };
+            let output = if entry.output_modalities.is_empty() {
+                vec!["text".to_owned()]
+            } else {
+                entry.output_modalities
+            };
+            if input.iter().any(|m| m == "text") && output.iter().any(|m| m == "text") {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 async fn fetch_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
@@ -348,5 +419,19 @@ mod tests {
             std::env::remove_var("CHUTES_INFERENCE_BASE_URL");
         }
         assert!(matches!(result, Err(CatalogError::EndpointTrust(_))));
+    }
+
+    #[test]
+    fn chat_ids_keep_text_models_and_drop_aliases() {
+        let body = CatalogResponse {
+            data: vec![
+                serde_json::json!({"id": "a/Chat", "input_modalities": ["text"], "output_modalities": ["text"]}),
+                serde_json::json!({"id": "default"}),
+                serde_json::json!({"id": "b/Image", "input_modalities": ["text"], "output_modalities": ["image"]}),
+                serde_json::json!({"id": "model-router"}),
+                serde_json::json!({"id": "c/Bare"}),
+            ],
+        };
+        assert_eq!(chat_model_ids(&body), ["a/Chat", "c/Bare"]);
     }
 }

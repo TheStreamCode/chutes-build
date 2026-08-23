@@ -55,9 +55,10 @@ strings work wherever a model id is accepted (`-m`, config default, `/model`):
 The built-in **Auto (Chutes Router)** entry sends `default`; set
 `CHUTES_ROUTING_POOL` to target an inline pool instead. Auto works out of the
 box even without a saved pool: when the alias cannot resolve, the fallback
-chain steps down to a compiled-in inline failover pool
-(`Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE`). A pool saved on the
-dashboard, once configured, takes priority over that net.
+chain steps down to a live inline pool built from the current catalogue
+(chat-capable models, picked by lowest time-to-first-token). A pool saved on
+the dashboard, once configured, takes priority. Set
+`CHUTES_ROUTING_STRATEGY=throughput` to prefer tokens-per-second instead.
 
 Ambient Chutes credentials are never inherited by arbitrary custom inference
 or catalog endpoints. Custom models must declare their own `api_key` or
