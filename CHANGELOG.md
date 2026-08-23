@@ -4,6 +4,12 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-08-23
+
+### Fixed
+
+- **Auto (Chutes Router) works without a dashboard-configured pool.** The native `default` alias resolves only against a routing pool saved at chutes.ai/app; accounts without one got a raw `404 model not found: default`, and the alias was the last link of its own chain. The fallback chain now keeps a compiled-in inline failover pool behind the alias (mirroring any `:latency` / `:throughput` suffix), and when every candidate fails to resolve, the error explains how to configure routing.
+
 ## [1.2.2] - 2026-08-23
 
 ### Changed
