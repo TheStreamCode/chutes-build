@@ -4,6 +4,18 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-08-23
+
+### Changed
+
+- **Model routing targets Chutes' native grammar.** The standalone router deployment the virtual `model-router` id pointed at no longer exists; routing is native to the inference host now — the saved-pool alias `default` (with optional `:latency` / `:throughput`), or inline comma-separated pools composed from CHUTES_ROUTING_POOL and CHUTES_ROUTING_STRATEGY. Legacy configs naming `model-router` keep working, and the dead host is removed from every trust list and default.
+
+### Fixed
+
+- **`update --check` works on Windows.** The updater spawned bare `npm`, which does not resolve to `npm.cmd` there, so the version check always reported "program not found".
+- **Models with strict role alternation no longer reject the conversation.** Adjacent same-role system/user messages are merged before sending; Mistral-Nemo-Instruct returned "conversation roles must alternate" before.
+- **`sessions search` queries the local index only.** The CLI shipped every query to a remote registry that answers 404 on Chutes — a wasted credentialed round trip and a warning per search.
+
 ## [1.2.1] - 2026-08-22
 
 ### Fixed
