@@ -4,6 +4,11 @@ Chutes Build is privacy-first: it collects no product analytics, emits no
 telemetry, performs no remote error reporting, and does not upload traces or
 sessions. There is no hidden opt-in or installation identifier.
 
+The external OTEL telemetry stream is **deadened at compile time**: `init` is
+a no-op, `is_active()` is always `false`, and no OTLP exporter is ever
+constructed. No data can leave the process via this path regardless of any
+environment variable or remote setting.
+
 ## Local data
 
 The CLI may store configuration, an encrypted or OS-protected credential entry

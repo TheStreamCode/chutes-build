@@ -1,11 +1,18 @@
 //! Opt-in, content-redacted **external OTEL** telemetry stream.
 //!
+//! **DEADENED in Chutes Build**: `init` is a no-op, `is_active()` is always
+//! false, and no exporter is ever constructed. The code is retained so the
+//! types compile and the internal event fan-out call sites don't need
+//! cfg-gating, but nothing can ever leave the process via this path.
+//!
 //! Enterprise customers point the Chutes Build CLI at *their own* OpenTelemetry
 //! collector (standard `OTEL_*` env vars + the `CHUTES_BUILD_EXTERNAL_OTEL` master
 //! switch) and receive a curated, ZDR-safe schema: ~6 counters and ~17
 //! log-record events fanned out from the same typed call sites that emit the
 //! product events ([`crate::session_ctx::log_event`]).
 //!
+#![allow(dead_code)]
+
 //! Structural invariants (enforced by construction and tests):
 //! - The providers here are **never** registered with `opentelemetry::global`
 //!   (the internal tracer provider owns the global slot); everything is
@@ -36,8 +43,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use opentelemetry::logs::LoggerProvider as _;
-use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
@@ -141,105 +146,21 @@ impl ExternalTelemetry {
     }
 }
 
-/// Initialize the external stream. Called once from binary startup after
-/// config resolution, **before auth** (no credentials needed). `None` records
-/// the dormant state — the default path allocates nothing.
-pub fn init(cfg: Option<ExternalOtelConfig>) {
-    let value = cfg.and_then(build_handle);
-    if EXTERNAL.set(value).is_err() {
-        tracing::debug!("external otel: init called more than once; keeping first registration");
-    }
+/// Initialize the external stream. **Deadened in Chutes Build**: this is a
+/// no-op — the external stream can never activate, so no OTLP exporter is
+/// ever constructed and no data ever leaves the process via this path.
+pub fn init(_cfg: Option<ExternalOtelConfig>) {
+    // Compile-time deadening: Chutes Build does not phone home.
 }
 
-fn build_handle(cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
-    // No-double-send invariant, enforced in code (not release discipline):
-    // if the internal firehose resolved its endpoint/headers from
-    // `OTEL_EXPORTER_OTLP_*` (the deprecated fallback), refuse to activate.
-    if cfg.internal_pipeline_consumed_otel_vars {
-        tracing::warn!(
-            "external otel: refusing to activate — the internal trace pipeline consumed \
-             OTEL_EXPORTER_OTLP_* (deprecated fallback). Migrate internal repointing to \
-             CHUTES_BUILD_INTERNAL_OTLP_* to use the external stream."
-        );
-        return None;
-    }
-
-    let gates: redact::SharedGates = Arc::new(parking_lot::RwLock::new(cfg.gates));
-    let health = Arc::new(redact::ExportHealth::default());
-    let built = match providers::build(&cfg, gates.clone(), health.clone()) {
-        Ok(built) => built,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "external otel: exporter construction failed; stream disabled"
-            );
-            return None;
-        }
-    };
-    if built.logger_provider.is_none() && built.meter_provider.is_none() {
-        return None;
-    }
-
-    let logger = built
-        .logger_provider
-        .as_ref()
-        .map(|p| p.logger(schema::SCOPE_NAME));
-    let instruments = built
-        .meter_provider
-        .as_ref()
-        .map(|p| emit::Instruments::new(&p.meter(schema::SCOPE_NAME)));
-
-    let configured_meta = ConfiguredMeta {
-        metrics_exporter: exporter_label(cfg.metrics_exporter),
-        logs_exporter: exporter_label(cfg.logs_exporter),
-        logs_endpoint_origin: crate::redact_common::url_origin(&cfg.logs_endpoint).into_owned(),
-        metrics_endpoint_origin: crate::redact_common::url_origin(&cfg.metrics_endpoint)
-            .into_owned(),
-        protocol: if cfg.logs_transport == cfg.metrics_transport {
-            cfg.logs_transport.as_protocol_str().to_string()
-        } else {
-            format!(
-                "logs={},metrics={}",
-                cfg.logs_transport.as_protocol_str(),
-                cfg.metrics_transport.as_protocol_str()
-            )
-        },
-        prompts_gate: cfg.gates.log_user_prompts,
-        details_gate: cfg.gates.log_tool_details,
-        source: cfg.enabled_source,
-    };
-
-    let mtls_identity_configured = cfg.logs_client_certificate.is_some()
-        || cfg.logs_client_key.is_some()
-        || cfg.metrics_client_certificate.is_some()
-        || cfg.metrics_client_key.is_some();
-
-    tracing::debug!(
-        metrics_exporter = configured_meta.metrics_exporter,
-        logs_exporter = configured_meta.logs_exporter,
-        "external otel: stream active"
-    );
-
-    Some(Arc::new(ExternalTelemetry {
-        logger_provider: built.logger_provider,
-        meter_provider: built.meter_provider,
-        logger,
-        instruments,
-        active: AtomicBool::new(true),
-        gates,
-        identity: parking_lot::RwLock::new(IdentityAttrs::default()),
-        sequence: AtomicU64::new(0),
-        shutdown_once: std::sync::Once::new(),
-        include_session_id_on_metrics: cfg.include_session_id_on_metrics,
-        include_version_on_metrics: cfg.include_version_on_metrics,
-        app_version: cfg.client.client_version.clone(),
-        health,
-        mtls_identity_configured,
-        configured_meta,
-        meta_event_once: std::sync::Once::new(),
-    }))
+fn build_handle(_cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
+    // Deadened: never build an exporter.
+    None
 }
 
+/// Cheap check used by the fan-out hook and the split-sink call sites:
+/// **always false in Chutes Build** — the external stream is compile-time
+/// deadened and can never activate.
 fn handle() -> Option<Arc<ExternalTelemetry>> {
     EXTERNAL.get().and_then(|opt| opt.clone())
 }
@@ -331,30 +252,15 @@ fn settings_gate_window_expired() -> bool {
 }
 
 /// Cheap check used by the fan-out hook and the split-sink call sites:
-/// registry present AND the runtime emission gate set AND the settings gate
-/// open. A stale `true` read only costs a wasted mapping, never an export
-/// ([`emit`] re-checks).
+/// **always false in Chutes Build** — compile-time deadened.
 pub fn is_active() -> bool {
-    is_settings_gate_open()
-        && matches!(EXTERNAL.get(), Some(Some(ext)) if ext.active.load(Ordering::Relaxed))
+    false
 }
 
-/// Map and emit one typed telemetry event. No-op unless the stream is active
-/// and the event has an `external = …` mapping. Synchronous and cheap (the
-/// batch processor queues; nothing blocks on I/O).
-pub fn emit<T: crate::events::TelemetryEvent>(data: &T) {
-    // Fail-closed: suppress until the leader confirms the remote policy; open by
-    // default for everyone else.
-    if !is_settings_gate_open() {
-        return;
-    }
-    let Some(ext) = active_handle() else {
-        return;
-    };
-    let Some(record) = data.external_record() else {
-        return;
-    };
-    emit::emit_record(&ext, record);
+/// Map and emit one typed telemetry event. **No-op in Chutes Build** —
+/// the external stream is compile-time deadened and can never export.
+pub fn emit<T: crate::events::TelemetryEvent>(_data: &T) {
+    // Deadened: no external emission.
 }
 
 /// Update identity attrs when auth completes (called alongside the
@@ -389,11 +295,9 @@ pub(crate) fn set_identity_on(ext: &ExternalTelemetry, attrs: IdentityAttrs) {
 /// force-disable, flushes then drops subsequent emissions) and may force content gates
 /// off; it can never enable a stream that env/config left off, and never
 /// loosens gates mid-run.
-pub fn apply_remote_policy(policy: ExternalOtelRemotePolicy) {
-    let Some(ext) = handle() else {
-        return;
-    };
-    apply_remote_policy_on(&ext, policy);
+/// **No-op in Chutes Build** — the external stream is compile-time deadened.
+pub fn apply_remote_policy(_policy: ExternalOtelRemotePolicy) {
+    // Deadened.
 }
 
 pub(crate) fn apply_remote_policy_on(ext: &ExternalTelemetry, policy: ExternalOtelRemotePolicy) {
@@ -442,40 +346,12 @@ pub(crate) fn flush_on(ext: &ExternalTelemetry) {
 /// Flush + shutdown both providers with a 2-second watchdog. Idempotent —
 /// reachable from every `shutdown_otel()` exit path (16 `OtelGuard` sites,
 /// the direct call, and the signal handler); subsequent calls are no-ops.
+/// **No-op in Chutes Build** — the external stream is compile-time deadened.
 pub fn shutdown() {
-    let Some(ext) = handle() else {
-        return;
-    };
-    ext.shutdown_once.call_once(|| {
-        ext.active.store(false, Ordering::Relaxed);
-        let logger_provider = ext.logger_provider.clone();
-        let meter_provider = ext.meter_provider.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
-        // Detached thread + timed wait: a hung provider must not hang exit
-        // (`std::thread::scope` is unusable here — it joins unconditionally).
-        std::thread::spawn(move || {
-            if let Some(p) = logger_provider
-                && let Err(e) = p.shutdown()
-            {
-                tracing::debug!(error = %e, "external otel: logger shutdown failed");
-            }
-            if let Some(p) = meter_provider
-                && let Err(e) = p.shutdown()
-            {
-                tracing::debug!(error = %e, "external otel: meter shutdown failed");
-            }
-            let _ = tx.send(());
-        });
-        if rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
-            tracing::debug!("external otel: shutdown watchdog expired; abandoning flush thread");
-        }
-        // After provider shutdown (which flushes pending batches). Short-lived
-        // CLI exits often only export on this path, so health counters and the
-        // mTLS total-failure warn must run after it — not before.
-        emit_export_health(&ext);
-    });
+    // Deadened: no exporter to flush.
 }
 
+/// Flush both providers (logout path: called *before* credentials are
 /// Best-effort product-events export-health meta-event (never exported
 /// externally — avoid feedback loops). Emitting needs a Tokio runtime
 /// (`emit_event` spawns); skip silently when exiting without one.
@@ -537,6 +413,8 @@ pub(crate) mod test_support {
     //! can assert exactly what would reach the wire (post-validator).
 
     use super::*;
+    use opentelemetry::logs::LoggerProvider as _;
+    use opentelemetry::metrics::MeterProvider as _;
     use opentelemetry_sdk::logs::InMemoryLogExporter;
     use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader};
 
