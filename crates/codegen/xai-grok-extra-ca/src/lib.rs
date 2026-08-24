@@ -75,6 +75,16 @@ pub fn build_reqwest_client(
     configure(with_extra_root_certificates(reqwest::Client::builder())).build()
 }
 
+/// Blocking twin of [`build_reqwest_client`].
+pub fn build_blocking_reqwest_client(
+    configure: impl FnOnce(reqwest::blocking::ClientBuilder) -> reqwest::blocking::ClientBuilder,
+) -> Result<reqwest::blocking::Client, reqwest::Error> {
+    configure(with_extra_root_certificates_blocking(
+        reqwest::blocking::Client::builder(),
+    ))
+    .build()
+}
+
 fn load_extra_root_ders() -> Vec<Vec<u8>> {
     let path = match std::env::var_os(ENV_CHUTES_BUILD_EXTRA_CA_BUNDLE) {
         Some(p) if !p.is_empty() => std::path::PathBuf::from(p),

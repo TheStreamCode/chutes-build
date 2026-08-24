@@ -14,7 +14,7 @@
 //!    (`xai_grok_mcp::rmcp::*`).
 //!
 //! 2. **Owns MCP-specific integration code**:
-//!    - [`credentials`] -- on-disk `$CHUTES_BUILD_HOME/mcp_credentials.json` store and
+//!    - [`credentials`] -- on-disk `$GROK_HOME/mcp_credentials.json` store and
 //!      the rmcp `CredentialStore` adapter.
 //!    - [`oauth`] -- browser-based OAuth flow with cross-process + in-process
 //!      dedup.
@@ -30,9 +30,11 @@ pub use rmcp;
 
 pub mod acp_transport;
 pub mod credentials;
+pub mod elicitation;
 pub mod liveness;
 pub mod mcp_http_client;
 pub mod oauth;
 pub mod oauth_config;
+pub mod owned_clients;
 pub mod servers;
 pub mod wire;

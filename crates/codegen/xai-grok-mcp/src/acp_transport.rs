@@ -3,7 +3,7 @@
 //! In-process SDK MCP servers (the official `grok-agent-sdk`'s `@tool` /
 //! `create_sdk_mcp_server`) run in the SDK-host process, not behind a socket. The
 //! agent reaches them by sending each MCP JSON-RPC message to the client as a
-//! reverse `chutes.ai/mcp/sdk_call` request and feeding the response back. This module
+//! reverse `x.ai/mcp/sdk_call` request and feeding the response back. This module
 //! adapts that request/response channel into an rmcp transport so an in-process
 //! server reuses the same `RunningService` / tool-dispatch path as HTTP/stdio
 //! servers for tool calls.
@@ -11,7 +11,8 @@
 //! Half-duplex (v1 limitation): the bridge carries ONLY client→server requests and
 //! their responses. Server→client traffic is NOT bridged — neither notifications
 //! (`notifications/*`) nor server-initiated requests such as
-//! `sampling/createMessage`, `roots/list`, or elicitation are delivered. Tools that
+//! `sampling/createMessage` or `roots/list` are delivered (elicitation is not
+//! advertised on this transport, so compliant servers never send it). Tools that
 //! depend on those features will not work over this transport yet. The duplex
 //! plumbing below exists to decouple slow tool calls (one task per request), not to
 //! deliver a second message direction.
@@ -28,7 +29,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
 /// Sends one MCP JSON-RPC message to an in-process server over the ACP reverse
-/// channel (`chutes.ai/mcp/sdk_call`) and returns its JSON-RPC response. The `Err` string is
+/// channel (`x.ai/mcp/sdk_call`) and returns its JSON-RPC response. The `Err` string is
 /// surfaced as a JSON-RPC error to the waiting rmcp request (fail-closed: a missing
 /// tool server is a real error, unlike a hook gate).
 ///
@@ -65,7 +66,7 @@ const INTERNAL_ERROR_CODE: i64 = -32603;
 /// Build an rmcp transport that bridges to an in-process MCP server via `invoker`.
 ///
 /// Spawns a pump that forwards each client→server message as a reverse
-/// `chutes.ai/mcp/sdk_call` and writes the server→client response back. The pump exits when
+/// `x.ai/mcp/sdk_call` and writes the server→client response back. The pump exits when
 /// rmcp drops its half of the duplex (service shutdown), so it never leaks.
 ///
 /// `invoke_timeout` is the resolved per-server tool timeout; it bounds every reverse
@@ -159,7 +160,7 @@ async fn read_requests(
             }
         };
         // An id-less message is a notification (no response). The SDK peer rejects reverse
-        // `chutes.ai/mcp/sdk_call`s without a JSON-RPC id, so id-less messages (e.g. rmcp's
+        // `x.ai/mcp/sdk_call`s without a JSON-RPC id, so id-less messages (e.g. rmcp's
         // `notifications/initialized` on every handshake) are logged and discarded locally
         // rather than spawning a doomed round-trip. Safe only because the SDK `Server` is
         // lenient about never receiving `initialized` (a documented v1 limit).
