@@ -1285,6 +1285,7 @@ async fn run_agent_command(
             default_model,
             client_version: Some(PAGER_CLIENT_VERSION.to_string()),
             code_nav_enabled: false,
+            status_line: false,
             terminal: false,
             fs_read: false,
             fs_write: false,
@@ -1948,10 +1949,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     }
     if args.chat() {
         unsafe {
-            std::env::set_var(
-                xai_grok_shell::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV,
-                "1",
-            );
+            std::env::set_var(xai_grok_shell::agent::chat_modes::GROK_CHAT_MODE_ENV, "1");
         }
     }
     if let Some(ref socket) = args.leader_socket {
