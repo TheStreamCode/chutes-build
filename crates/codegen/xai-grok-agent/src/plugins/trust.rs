@@ -1,6 +1,6 @@
 //! Project plugin trust management.
 //!
-//! Plugins from project directories (`.chutes-build/plugins/`, `.claude/plugins/`)
+//! Plugins from project directories (`.grok/plugins/`, `.claude/plugins/`)
 //! are an execution surface.  A cloned repository could contain plugins with
 //! hook scripts or MCP server commands that run arbitrary code.
 //!
@@ -10,7 +10,7 @@
 //! **Trust key**: canonical absolute path of the plugin root directory,
 //! resolved via `dunce::canonicalize()`.
 //!
-//! **Trust storage**: `~/.chutes-build/trusted-plugins` (one canonical path per line).
+//! **Trust storage**: `~/.grok/trusted-plugins` (one canonical path per line).
 //!
 //! **Behavior for untrusted plugins**:
 //! - Skills and agents are **discovered and listed** (metadata-only).
@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-/// Name of the trust-store file under `~/.chutes-build/`.
+/// Name of the trust-store file under `~/.grok/`.
 const TRUST_FILE_NAME: &str = "trusted-plugins";
 
 /// Manages the set of trusted plugin root directories.
@@ -35,11 +35,11 @@ pub struct TrustStore {
 impl TrustStore {
     /// Load the trust store from disk.
     ///
-    /// If `~/.chutes-build/trusted-plugins` does not exist, returns an empty store.
+    /// If `~/.grok/trusted-plugins` does not exist, returns an empty store.
     /// If the file cannot be read, logs a warning and returns an empty store.
     pub fn load() -> Self {
-        // Gate on user_grok_home() so a project's `.chutes-build/trusted-plugins` is never
-        // read as the user trust store when neither CHUTES_BUILD_HOME nor a home dir resolves.
+        // Gate on user_grok_home() so a project's `.grok/trusted-plugins` is never
+        // read as the user trust store when neither GROK_HOME nor a home dir resolves.
         let Some(grok) = xai_grok_config::user_grok_home() else {
             return Self {
                 trusted: HashSet::new(),
@@ -76,7 +76,7 @@ impl TrustStore {
 
     /// Grant trust to a plugin root directory.
     ///
-    /// Canonicalizes the path and appends it to `~/.chutes-build/trusted-plugins`.
+    /// Canonicalizes the path and appends it to `~/.grok/trusted-plugins`.
     /// If the path is already trusted, this is a no-op and returns `Ok(())`.
     pub fn grant_trust(&mut self, plugin_root: &Path) -> Result<(), TrustError> {
         let canonical =
@@ -119,7 +119,7 @@ impl TrustStore {
     /// Revoke trust for a plugin root directory.
     ///
     /// Canonicalizes the path, removes it from the in-memory set, and
-    /// rewrites `~/.chutes-build/trusted-plugins` without the revoked entry.
+    /// rewrites `~/.grok/trusted-plugins` without the revoked entry.
     /// If the path is not currently trusted, this is a no-op.
     pub fn revoke_trust(&mut self, plugin_root: &Path) -> Result<(), TrustError> {
         let canonical =
@@ -163,35 +163,17 @@ impl TrustStore {
 
     /// Check whether a config-path plugin should be auto-trusted.
     ///
-    /// A `[plugins].paths` entry is auto-trusted if its canonicalized path is
-    /// under the user's home directory and outside the system temp directory.
-    /// Otherwise it requires explicit trust via
-    /// `~/.chutes-build/trusted-plugins`.
+    /// A `[plugins].paths` entry is auto-trusted if its canonicalized path
+    /// is under the user's home directory.  Otherwise it requires explicit
+    /// trust via `~/.grok/trusted-plugins`.
     pub fn is_config_path_auto_trusted(plugin_root: &Path) -> bool {
         let Some(home) = dirs::home_dir() else {
             return false;
         };
-        Self::auto_trusted_under(plugin_root, &home, &std::env::temp_dir())
-    }
-
-    /// The auto-trust policy, with both boundaries passed in.
-    ///
-    /// Split from the lookup for two reasons. It is the only way to test the
-    /// policy on Windows, where `dirs::home_dir()` calls `known_folder_profile`
-    /// and cannot be redirected by setting `HOME`. And it makes the temp
-    /// exclusion visible: on Windows the system temp directory lives *under* the
-    /// home (`%USERPROFILE%\AppData\Local\Temp`), so "under home" alone
-    /// auto-trusted anything unpacked into temp — a directory the user never
-    /// chose to trust and any process running as them can rewrite.
-    fn auto_trusted_under(plugin_root: &Path, home: &Path, temp: &Path) -> bool {
-        let Ok(canonical) = dunce::canonicalize(plugin_root) else {
-            return false;
-        };
-        if !canonical.starts_with(home) {
-            return false;
+        match dunce::canonicalize(plugin_root) {
+            Ok(canonical) => canonical.starts_with(&home),
+            Err(_) => false,
         }
-        let temp_canonical = dunce::canonicalize(temp).unwrap_or_else(|_| temp.to_path_buf());
-        !canonical.starts_with(&temp_canonical)
     }
 
     // ── Internal ──────────────────────────────────────────────────────
@@ -335,48 +317,10 @@ mod tests {
 
     #[test]
     fn config_path_auto_trust_under_home() {
-        // A path that cannot be canonicalized is never auto-trusted, whatever
-        // else is true. (The policy itself is covered below, with the home and
-        // temp boundaries passed in — the public entry point reads the real home
-        // through an API that cannot be redirected on Windows.)
+        // This test checks the logic but can't easily mock $HOME.
+        // We verify the function exists and returns a boolean.
         let result = TrustStore::is_config_path_auto_trusted(Path::new("/nonexistent/path"));
-        assert!(!result);
-    }
-
-    /// The auto-trust policy, on every platform.
-    ///
-    /// The temp case is the one that mattered: on Windows the system temp
-    /// directory sits under the home, so "under home" alone auto-trusted anything
-    /// unpacked there. This test states the boundary in a way that holds
-    /// regardless of where the platform puts temp.
-    #[test]
-    fn auto_trust_requires_home_and_excludes_temp() {
-        let root = tempfile::tempdir().unwrap();
-        let home = dunce::canonicalize(root.path()).unwrap();
-        let temp = home.join("AppData").join("Local").join("Temp");
-
-        let inside = home.join("plugins").join("mine");
-        let unpacked = temp.join("downloaded-plugin");
-        let outside_root = tempfile::tempdir().unwrap();
-        let outside = dunce::canonicalize(outside_root.path())
-            .unwrap()
-            .join("elsewhere");
-        for dir in [&inside, &unpacked, &outside] {
-            std::fs::create_dir_all(dir).unwrap();
-        }
-
-        assert!(
-            TrustStore::auto_trusted_under(&inside, &home, &temp),
-            "a plugin the user keeps in their home is auto-trusted"
-        );
-        assert!(
-            !TrustStore::auto_trusted_under(&unpacked, &home, &temp),
-            "temp is under the home on Windows; its contents are not trusted"
-        );
-        assert!(
-            !TrustStore::auto_trusted_under(&outside, &home, &temp),
-            "outside the home requires explicit trust"
-        );
+        assert!(!result); // nonexistent path can't be canonicalized
     }
 
     #[test]

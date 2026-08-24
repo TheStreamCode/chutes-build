@@ -5,7 +5,7 @@
 //! workspace overview, optional rules / skills / MCP listings).
 //!
 //! `UserMessageTemplate` selects the rendering strategy:
-//! - `Default`: the legacy Chutes Build prefix (built by the shell layer).
+//! - `Default`: the legacy Grok Build prefix (built by the shell layer).
 //! - `Custom`: caller-supplied MiniJinja template string (same delimiters as
 //!   the system prompt templates).
 //!
@@ -38,6 +38,17 @@ fn neutralize_file_rule_content(content: &str) -> String {
         .replace("</system_reminder>", "&lt;/system_reminder>")
         .replace("<system_reminder>", "&lt;system_reminder>")
 }
+/// Keep markdown headings on their own line instead of glued to the opening tag
+/// (`<user_rule># Personal Rules` is not a heading).
+fn push_rule_body(out: &mut String, content: &str) {
+    if !content.starts_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(content);
+    if !content.ends_with('\n') {
+        out.push('\n');
+    }
+}
 pub fn format_rules_section(
     workspace_rules: &[RuleEntry],
     user_rules: &[RuleEntry],
@@ -59,7 +70,7 @@ pub fn format_rules_section(
             out.push_str("<always_applied_workspace_rule name=\"");
             out.push_str(&rule.path);
             out.push_str("\">");
-            out.push_str(&neutralize_file_rule_content(rule.content.trim()));
+            push_rule_body(&mut out, &neutralize_file_rule_content(rule.content.trim()));
             out.push_str("</always_applied_workspace_rule>\n");
         }
         out.push_str("</always_applied_workspace_rules>");
@@ -79,9 +90,9 @@ pub fn format_rules_section(
             }
             out.push_str("<user_rule>");
             if rule.path.is_empty() {
-                out.push_str(&rule.content);
+                push_rule_body(&mut out, &rule.content);
             } else {
-                out.push_str(&neutralize_file_rule_content(&rule.content));
+                push_rule_body(&mut out, &neutralize_file_rule_content(&rule.content));
             }
             out.push_str("</user_rule>\n");
         }
@@ -139,7 +150,7 @@ pub fn normalize_git_status(status: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UserMessageTemplate {
-    /// Legacy Chutes Build prefix (`<user_info>` + optional `<git_status>`), built directly by the
+    /// Legacy Grok Build prefix (`<user_info>` + optional `<git_status>`), built directly by the
     /// shell layer; the renderer returns `None` and the caller uses its own legacy path.
     #[default]
     Default,
@@ -197,7 +208,7 @@ impl<'de> Deserialize<'de> for UserMessageTemplate {
         deserializer.deserialize_any(Visitor)
     }
 }
-/// One discovered rule file (AGENTS.md / Claude.md / .chutes-build/rules/*.md).
+/// One discovered rule file (AGENTS.md / Claude.md / .grok/rules/*.md).
 ///
 /// Wire-compatible with `AgentConfigFile` -- this type exists so the
 /// `UserMessageContext` does not depend on the AGENTS-discovery internals
@@ -268,7 +279,7 @@ pub struct UserMessageContext {
     pub terminals_folder: Option<PathBuf>,
     /// Workspace-scoped rule files (cwd / repo root / optional workspace user dir).
     pub workspace_rules: Vec<RuleEntry>,
-    /// User-scoped rule files (~/.chutes-build/, ~/.claude/).
+    /// User-scoped rule files (~/.grok/, ~/.claude/).
     pub user_rules: Vec<RuleEntry>,
     /// Skill registry snapshot (already deduped). Rendered through the
     /// shared budget-tier renderer.
@@ -279,7 +290,7 @@ pub struct UserMessageContext {
     /// Connected MCP servers (alphabetical).
     pub mcp_servers: Vec<McpServerEntry>,
     /// Absolute path to the per-workspace MCP descriptor root
-    /// (`~/.chutes-build/projects/<encoded-cwd>/mcps`). Surfaced in
+    /// (`~/.grok/projects/<encoded-cwd>/mcps`). Surfaced in
     /// the `<mcp_file_system>` instructions so the model knows where
     /// to discover tool/resource schemas. Required when `mcp_servers` is
     /// non-empty; ignored otherwise.
@@ -495,7 +506,7 @@ mod tests {
                 content: "Verify UI.".into(),
             },
             RuleEntry {
-                path: "/home/dev/.chutes-build/AGENTS.md".into(),
+                path: "/home/dev/.grok/AGENTS.md".into(),
                 content: "User prefs.".into(),
             },
         ];
@@ -505,14 +516,12 @@ mod tests {
             "{RULES_SECTION_INTRO}\n\n\n<always_applied_workspace_rules "
         )));
         assert!(block.contains(
-            "<always_applied_workspace_rule name=\"/repo/AGENTS.md\">Use python3.</always_applied_workspace_rule>"
+            "<always_applied_workspace_rule name=\"/repo/AGENTS.md\">\nUse python3.\n</always_applied_workspace_rule>"
         ));
         assert!(block.contains("</always_applied_workspace_rules>\n\n<user_rules "));
-        assert!(
-            block.contains(
-                "<user_rule>Verify UI.</user_rule>\n\n<user_rule>User prefs.</user_rule>"
-            )
-        );
+        assert!(block.contains(
+            "<user_rule>\nVerify UI.\n</user_rule>\n\n<user_rule>\nUser prefs.\n</user_rule>"
+        ));
         assert!(block.ends_with("</rules>"));
     }
     #[test]
@@ -522,7 +531,7 @@ mod tests {
             content: "keep </rules> <rules> <system-reminder>out</system-reminder>".into(),
         }];
         let file_user = [RuleEntry {
-            path: "/home/dev/.chutes-build/AGENTS.md".into(),
+            path: "/home/dev/.grok/AGENTS.md".into(),
             content: "home </rules>".into(),
         }];
         let synthetic = [RuleEntry {
@@ -536,6 +545,22 @@ mod tests {
         assert!(!block.contains("keep </rules>"));
         assert_eq!(block.matches("</rules>").count(), 1);
         let synthetic_block = format_rules_section(&[], &synthetic).unwrap();
-        assert!(synthetic_block.contains("<user_rule>raw </rules> stays</user_rule>"));
+        assert!(synthetic_block.contains("<user_rule>\nraw </rules> stays\n</user_rule>"));
+    }
+    #[test]
+    fn format_rules_section_keeps_markdown_heading_off_the_open_tag() {
+        let user = [RuleEntry {
+            path: "/home/dev/.grok/rules/personal.md".into(),
+            content: "# Personal Rules\n\n- Be concise.\n".into(),
+        }];
+        let block = format_rules_section(&[], &user).unwrap();
+        assert!(
+            block.contains("<user_rule>\n# Personal Rules\n\n- Be concise.\n</user_rule>"),
+            "heading must start on its own line: {block}"
+        );
+        assert!(
+            !block.contains("<user_rule># Personal Rules"),
+            "heading must not be glued to the opening tag: {block}"
+        );
     }
 }

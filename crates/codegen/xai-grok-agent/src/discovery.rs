@@ -1,7 +1,7 @@
 //! Agent definition file discovery.
 //!
-//! Searches `.chutes-build/agents/` and `.claude/agents/` from cwd to repo root,
-//! then `~/.chutes-build/agents/`, then `~/.claude/agents/`. Name-based dedup keeps
+//! Searches `.grok/agents/` and `.claude/agents/` from cwd to repo root,
+//! then `~/.grok/agents/`, then `~/.claude/agents/`. Name-based dedup keeps
 //! highest priority.
 
 use std::collections::HashMap;
@@ -14,10 +14,10 @@ use crate::config::{AgentDefinition, AgentScope, BuiltinAgentName};
 use crate::error::AgentBuildError;
 use crate::prompt::context::TemplateOverride;
 
-/// Project-level agent directories to scan (`.chutes-build/agents/` + `.claude/agents/` compat).
-const PROJECT_AGENT_SUBDIRS: &[&str] = &[".chutes-build/agents", ".claude/agents"];
+/// Project-level agent directories to scan (`.grok/agents/` + `.claude/agents/` compat).
+const PROJECT_AGENT_SUBDIRS: &[&str] = &[".grok/agents", ".claude/agents"];
 
-/// Existing project-level agent dirs (`.chutes-build/agents` / `.claude/agents`), walked
+/// Existing project-level agent dirs (`.grok/agents` / `.claude/agents`), walked
 /// from `cwd` up to the git worktree root (inclusive). Returns
 /// `(existing dirs, git_root)`. Mirrors [`crate::plugins::project_plugin_dirs`].
 pub fn project_agent_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>) {
@@ -28,7 +28,7 @@ pub fn project_agent_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>)
     (project_agent_dirs_in(&chain.dirs), chain.git_root)
 }
 
-/// Existing project agent dirs (`.chutes-build/agents` / `.claude/agents`) under each
+/// Existing project agent dirs (`.grok/agents` / `.claude/agents`) under each
 /// dir of a precomputed cwd→git-root chain ([`crate::repo::RepoDirChain`]).
 ///
 /// Single source of the `PROJECT_AGENT_SUBDIRS` walk: the folder-trust detector
@@ -123,7 +123,7 @@ fn merge_subagents(
     // the runtime spawn precedence in by_name_in_cwd():
     //   project > built-in > user > bundled
     //
-    // A user-level ~/.chutes-build/agents/explore.md does NOT shadow built-in explore
+    // A user-level ~/.grok/agents/explore.md does NOT shadow built-in explore
     // at spawn time, so it must not shadow it in the visible list either.
     // Otherwise: visible != callable (the guarantee would be broken).
     for def in discovered {
@@ -183,25 +183,25 @@ fn merge_subagents(
 /// Discover all agent definitions from the filesystem.
 ///
 /// Search order (highest priority first):
-/// 1. `.chutes-build/agents/` walking from `cwd` up to repo root
-/// 2. `~/.chutes-build/agents/` (user-level)
+/// 1. `.grok/agents/` walking from `cwd` up to repo root
+/// 2. `~/.grok/agents/` (user-level)
 /// 3. `~/.claude/agents/` (compat user-level)
-/// 4. `~/.chutes-build/bundled/agents/` (bundled, lowest priority)
+/// 4. `~/.grok/bundled/agents/` (bundled, lowest priority)
 ///
 /// Deduplicates by name — higher-priority definitions win.
 /// User-level agent directories in priority order: user grok agents, `.claude`
 /// compat agents, then bundled. `.grok` dirs resolve from `grok_home`
-/// (CHUTES_BUILD_HOME-aware) plus the legacy literal `~/.chutes-build` when CHUTES_BUILD_HOME points
+/// (GROK_HOME-aware) plus the legacy literal `~/.grok` when GROK_HOME points
 /// elsewhere; `.claude` resolves from `home`.
 pub(crate) fn user_agent_dirs(
     home: Option<&Path>,
     grok_home: Option<&Path>,
 ) -> Vec<(std::path::PathBuf, AgentScope)> {
-    // Legacy literal ~/.chutes-build, included only when it differs from grok_home
-    // (i.e. CHUTES_BUILD_HOME points elsewhere) so agents left in the old location are
+    // Legacy literal ~/.grok, included only when it differs from grok_home
+    // (i.e. GROK_HOME points elsewhere) so agents left in the old location are
     // still discovered and stay consistent with scope_from_path classification.
     let legacy_grok = home
-        .map(|h| h.join(".chutes-build"))
+        .map(|h| h.join(".grok"))
         .filter(|legacy| grok_home != Some(legacy.as_path()));
 
     let mut dirs = Vec::new();
@@ -284,7 +284,7 @@ fn by_name_with_home(
 
 /// Find an agent definition by name, with project-level discovery.
 ///
-/// Project-level `.chutes-build/agents/` has highest priority, then falls back
+/// Project-level `.grok/agents/` has highest priority, then falls back
 /// to built-ins, user-level, and finally bundled definitions.
 pub fn by_name_in_cwd(name: &str, cwd: &Path) -> Option<AgentDefinition> {
     let grok = xai_grok_config::user_grok_home();
@@ -357,6 +357,51 @@ fn source_from_agent_def(def: &AgentDefinition) -> ConfigSource {
 
 // ── Plugin-aware variants ─────────────────────────────────────────────
 
+/// One plugin-provided agent, addressable by its qualified `plugin:agent` name.
+#[derive(Debug)]
+pub struct PluginAgent {
+    /// Qualified `plugin-name:agent-name` used to spawn (and toggle) the agent.
+    pub qualified_name: String,
+    /// Owning plugin's scope mapped to the agent scope model (project or user).
+    pub scope: AgentScope,
+    /// Parsed definition (`plugin_name` is set; `name` stays unqualified).
+    pub definition: AgentDefinition,
+}
+
+/// Enumerate all agents provided by enabled plugins.
+///
+/// Loads every `*.md` in each enabled plugin's agent dirs. Untrusted plugins
+/// are parsed frontmatter-only (see [`load_plugin_agent_definition`]).
+pub fn plugin_agents(registry: &crate::plugins::PluginRegistry) -> Vec<PluginAgent> {
+    let mut agents = Vec::new();
+    for plugin in registry.enabled_plugins() {
+        for agent_dir in &plugin.agent_dirs {
+            let Ok(entries) = std::fs::read_dir(agent_dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let Some(def) = load_plugin_agent_definition(plugin, &path) else {
+                    continue;
+                };
+                let scope = match plugin.scope {
+                    crate::plugins::PluginScope::Project => AgentScope::Project,
+                    _ => AgentScope::User,
+                };
+                agents.push(PluginAgent {
+                    qualified_name: format!("{}:{}", plugin.name, def.name),
+                    scope,
+                    definition: def,
+                });
+            }
+        }
+    }
+    agents
+}
+
 /// Build the complete list of enabled subagents, including plugin agents.
 pub fn all_subagents_with_plugins(
     cwd: &Path,
@@ -385,51 +430,28 @@ fn all_subagents_with_plugins_and_home(
 
     // Append plugin agents under qualified names
     if let Some(registry) = plugins {
-        for plugin in registry.enabled_plugins() {
-            for agent_dir in &plugin.agent_dirs {
-                if !agent_dir.is_dir() {
-                    continue;
-                }
-                let agent_entries = match std::fs::read_dir(agent_dir) {
-                    Ok(entries) => entries,
-                    Err(_) => continue,
-                };
-                for entry in agent_entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                        continue;
-                    }
-                    let Some(def) = load_plugin_agent_definition(plugin, &path) else {
-                        continue;
-                    };
-
-                    let qualified_name = format!("{}:{}", plugin.name, def.name);
-
-                    // Skip if a native entry already has this qualified name
-                    if entries.iter().any(|e| e.name == qualified_name) {
-                        continue;
-                    }
-
-                    // Map plugin scope to agent scope
-                    let agent_scope = match plugin.scope {
-                        crate::plugins::PluginScope::Project => AgentScope::Project,
-                        crate::plugins::PluginScope::User => AgentScope::User,
-                        _ => AgentScope::User,
-                    };
-
-                    let config_source = ConfigSource::Plugin {
-                        plugin_name: plugin.name.clone(),
-                        path: path.clone(),
-                    };
-                    entries.push(SubagentEntry {
-                        name: qualified_name,
-                        description: def.description,
-                        source: SubagentSource::UserDefined { scope: agent_scope },
-                        shadows_builtin: None,
-                        config_source,
-                    });
-                }
+        for agent in plugin_agents(registry) {
+            // Skip if a native entry already has this qualified name
+            if entries.iter().any(|e| e.name == agent.qualified_name) {
+                continue;
             }
+
+            // Toggles key on the qualified name (same name the list shows).
+            if !toggle.get(&agent.qualified_name).copied().unwrap_or(true) {
+                continue;
+            }
+
+            let config_source = ConfigSource::Plugin {
+                plugin_name: agent.definition.plugin_name.clone().unwrap_or_default(),
+                path: agent.definition.source_path.clone().unwrap_or_default(),
+            };
+            entries.push(SubagentEntry {
+                name: agent.qualified_name,
+                description: agent.definition.description,
+                source: SubagentSource::UserDefined { scope: agent.scope },
+                shadows_builtin: None,
+                config_source,
+            });
         }
     }
 
@@ -547,7 +569,7 @@ fn load_plugin_agent_definition(
     }
 }
 
-/// Expand `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` (and the Chutes Build
+/// Expand `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` (and the Grok
 /// aliases) in a plugin agent's body so the model receives absolute paths,
 /// matching the expected load-time resolution for these variables.
 fn substitute_plugin_vars(def: &mut AgentDefinition, plugin: &crate::plugins::LoadedPlugin) {
@@ -571,7 +593,7 @@ fn substitute_plugin_vars(def: &mut AgentDefinition, plugin: &crate::plugins::Lo
     }
 }
 
-/// Load project agent definitions from every `.chutes-build/agents` / `.claude/agents`
+/// Load project agent definitions from every `.grok/agents` / `.claude/agents`
 /// dir along the cwd→git-root walk, via the shared [`project_agent_dirs`] SSOT.
 fn load_project_definitions(
     cwd: &Path,
@@ -747,17 +769,7 @@ mod tests {
                 name: plugin_name.to_string(),
                 version: Some("1.0.0".to_string()),
                 description: Some(format!("Plugin {plugin_name}")),
-                author: None,
-                homepage: None,
-                repository: None,
-                license: None,
-                keywords: vec![],
-                skills: None,
-                commands: None,
-                agents: None,
-                hooks: None,
-                mcp_servers: None,
-                lsp_servers: None,
+                ..Default::default()
             },
             id: PluginId::new(scope, &root, plugin_name),
             root: root.clone(),
@@ -785,23 +797,23 @@ mod tests {
             .map(|(p, _)| p)
             .collect();
         assert!(paths.contains(&grok.join("agents")));
-        assert!(paths.contains(&home.join(".chutes-build").join("agents")));
+        assert!(paths.contains(&home.join(".grok").join("agents")));
         assert!(paths.contains(&home.join(".claude").join("agents")));
         assert!(paths.contains(&grok.join("bundled").join("agents")));
-        assert!(paths.contains(&home.join(".chutes-build").join("bundled").join("agents")));
+        assert!(paths.contains(&home.join(".grok").join("bundled").join("agents")));
     }
 
     #[test]
     fn user_agent_dirs_dedups_legacy_when_grok_home_is_dot_grok() {
         let home = Path::new("/home/u");
-        let grok = home.join(".chutes-build");
+        let grok = home.join(".grok");
         let count = user_agent_dirs(Some(home), Some(&grok))
             .into_iter()
             .filter(|(p, _)| *p == grok.join("agents"))
             .count();
         assert_eq!(
             count, 1,
-            "no duplicate ~/.chutes-build/agents when grok_home == ~/.chutes-build"
+            "no duplicate ~/.grok/agents when grok_home == ~/.grok"
         );
     }
 
@@ -822,9 +834,9 @@ mod tests {
 
     #[test]
     fn test_by_name_builtin_grok_build() {
-        let def = by_name("chutes-build");
+        let def = by_name("grok-build");
         assert!(def.is_some());
-        assert_eq!(def.unwrap().name, "chutes-build");
+        assert_eq!(def.unwrap().name, "grok-build");
     }
 
     #[test]
@@ -843,7 +855,7 @@ mod tests {
     #[test]
     fn test_discover_finds_md_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
         write_agent_file(&agents_dir, "test-agent.md", "test-agent", "A test");
@@ -859,7 +871,7 @@ mod tests {
     #[test]
     fn test_discover_ignores_non_md_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
         write_agent_file(&agents_dir, "valid.md", "valid", "Valid agent");
@@ -874,7 +886,7 @@ mod tests {
     #[test]
     fn test_discover_invalid_md_logged_not_error() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
         write_agent_file(&agents_dir, "good.md", "good", "Good agent");
@@ -895,8 +907,8 @@ mod tests {
         let inner_dir = tmp.path().join("subdir");
         fs::create_dir_all(&inner_dir).unwrap();
 
-        let agents_dir_1 = tmp.path().join(".chutes-build").join("agents");
-        let agents_dir_2 = inner_dir.join(".chutes-build").join("agents");
+        let agents_dir_1 = tmp.path().join(".grok").join("agents");
+        let agents_dir_2 = inner_dir.join(".grok").join("agents");
         fs::create_dir_all(&agents_dir_1).unwrap();
         fs::create_dir_all(&agents_dir_2).unwrap();
 
@@ -914,7 +926,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
 
@@ -925,7 +937,7 @@ mod tests {
             "Bundled agent",
         );
 
-        let defs = discover_with_home(&cwd, Some(&home), Some(&home.join(".chutes-build")));
+        let defs = discover_with_home(&cwd, Some(&home), Some(&home.join(".grok")));
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "bundled-agent");
         assert_eq!(defs[0].scope, AgentScope::Bundled);
@@ -936,7 +948,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
 
@@ -947,13 +959,9 @@ mod tests {
             "Bundled only",
         );
 
-        let def = by_name_in_cwd_with_home(
-            "bundled-only",
-            &cwd,
-            Some(&home),
-            Some(&home.join(".chutes-build")),
-        )
-        .unwrap();
+        let def =
+            by_name_in_cwd_with_home("bundled-only", &cwd, Some(&home), Some(&home.join(".grok")))
+                .unwrap();
         assert_eq!(def.scope, AgentScope::Bundled);
         assert_eq!(def.description, "Bundled only");
     }
@@ -963,8 +971,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let user_dir = home.join(".chutes-build").join("agents");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let user_dir = home.join(".grok").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&user_dir).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
@@ -972,13 +980,9 @@ mod tests {
         write_agent_file(&user_dir, "reviewer.md", "reviewer", "User reviewer");
         write_agent_file(&bundled_dir, "reviewer.md", "reviewer", "Bundled reviewer");
 
-        let def = by_name_in_cwd_with_home(
-            "reviewer",
-            &cwd,
-            Some(&home),
-            Some(&home.join(".chutes-build")),
-        )
-        .unwrap();
+        let def =
+            by_name_in_cwd_with_home("reviewer", &cwd, Some(&home), Some(&home.join(".grok")))
+                .unwrap();
         assert_eq!(def.scope, AgentScope::User);
         assert_eq!(def.description, "User reviewer");
     }
@@ -988,19 +992,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
 
         write_agent_file(&bundled_dir, "explore.md", "explore", "Bundled explore");
 
-        let def = by_name_in_cwd_with_home(
-            "explore",
-            &cwd,
-            Some(&home),
-            Some(&home.join(".chutes-build")),
-        )
-        .unwrap();
+        let def = by_name_in_cwd_with_home("explore", &cwd, Some(&home), Some(&home.join(".grok")))
+            .unwrap();
         assert_eq!(def.scope, AgentScope::BuiltIn);
         assert_ne!(def.description, "Bundled explore");
     }
@@ -1010,21 +1009,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let project_dir = cwd.join(".chutes-build").join("agents");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let project_dir = cwd.join(".grok").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&project_dir).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
 
         write_agent_file(&project_dir, "reviewer.md", "reviewer", "Project reviewer");
         write_agent_file(&bundled_dir, "reviewer.md", "reviewer", "Bundled reviewer");
 
-        let def = by_name_in_cwd_with_home(
-            "reviewer",
-            &cwd,
-            Some(&home),
-            Some(&home.join(".chutes-build")),
-        )
-        .unwrap();
+        let def =
+            by_name_in_cwd_with_home("reviewer", &cwd, Some(&home), Some(&home.join(".grok")))
+                .unwrap();
         assert_eq!(def.scope, AgentScope::Project);
         assert_eq!(def.description, "Project reviewer");
     }
@@ -1032,35 +1027,33 @@ mod tests {
     #[test]
     fn test_by_name_in_cwd_project_shadows_builtin() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
-        // Create a project-level "chutes-build" that shadows the built-in
-        // Discovery matches the file stem to the agent name, so the shadowing
-        // file has to be named for the agent it shadows.
+        // Create a project-level "grok-build" that shadows the built-in
         write_agent_file(
             &agents_dir,
-            "chutes-build.md",
-            "chutes-build",
-            "Custom chutes-build",
+            "grok-build.md",
+            "grok-build",
+            "Custom grok-build",
         );
 
-        let def = by_name_in_cwd("chutes-build", tmp.path());
+        let def = by_name_in_cwd("grok-build", tmp.path());
         assert!(def.is_some());
         let def = def.unwrap();
-        assert_eq!(def.name, "chutes-build");
-        assert_eq!(def.description, "Custom chutes-build");
+        assert_eq!(def.name, "grok-build");
+        assert_eq!(def.description, "Custom grok-build");
     }
 
     #[test]
     fn test_by_name_in_cwd_falls_back_to_builtin() {
         let tmp = tempfile::tempdir().unwrap();
-        // No .chutes-build/agents/ directory — should fall back to built-in
+        // No .grok/agents/ directory — should fall back to built-in
 
-        let def = by_name_in_cwd("chutes-build", tmp.path());
+        let def = by_name_in_cwd("grok-build", tmp.path());
         assert!(def.is_some());
         let def = def.unwrap();
-        assert_eq!(def.name, "chutes-build");
+        assert_eq!(def.name, "grok-build");
         // Should be the built-in, not a custom one
         assert_eq!(def.scope, AgentScope::BuiltIn);
     }
@@ -1081,11 +1074,11 @@ mod tests {
     #[test]
     fn test_orchestrator_from_str_resolves() {
         use std::str::FromStr;
-        let variant = BuiltinAgentName::from_str("chutes-build-orchestrator")
-            .expect("from_str must resolve chutes-build-orchestrator");
+        let variant = BuiltinAgentName::from_str("grok-build-orchestrator")
+            .expect("from_str must resolve grok-build-orchestrator");
         assert_eq!(variant, BuiltinAgentName::GrokBuildOrchestrator);
         let def = variant.definition();
-        assert_eq!(def.name, "chutes-build-orchestrator");
+        assert_eq!(def.name, "grok-build-orchestrator");
         assert!(
             def.prompt_body.is_some(),
             "orchestrator must have prompt_body"
@@ -1100,21 +1093,20 @@ mod tests {
     #[test]
     fn test_orchestrator_by_name_in_cwd() {
         let tmp = tempfile::tempdir().unwrap();
-        let def = by_name_in_cwd("chutes-build-orchestrator", tmp.path())
-            .expect("by_name_in_cwd must find chutes-build-orchestrator");
-        assert_eq!(def.name, "chutes-build-orchestrator");
+        let def = by_name_in_cwd("grok-build-orchestrator", tmp.path())
+            .expect("by_name_in_cwd must find grok-build-orchestrator");
+        assert_eq!(def.name, "grok-build-orchestrator");
         assert!(def.prompt_body.is_some());
     }
 
     #[test]
-    fn test_merge_returns_4_builtins_when_no_user_agents() {
+    fn test_merge_returns_3_builtins_when_no_user_agents() {
         let entries = merge_subagents(vec![], &HashMap::new());
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.len(), 3);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"general-purpose"));
         assert!(names.contains(&"explore"));
         assert!(names.contains(&"plan"));
-        assert!(names.contains(&"advisor"));
         // All should be Builtin source
         for entry in &entries {
             assert!(
@@ -1130,11 +1122,10 @@ mod tests {
     fn test_merge_filters_toggled_off_builtins() {
         let toggle = HashMap::from([("plan".to_string(), false)]);
         let entries = merge_subagents(vec![], &toggle);
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.len(), 2);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"general-purpose"));
         assert!(names.contains(&"explore"));
-        assert!(names.contains(&"advisor"));
         assert!(!names.contains(&"plan"));
     }
 
@@ -1146,7 +1137,7 @@ mod tests {
             AgentScope::Project,
         )];
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries.len(), 5); // 4 built-ins + 1 user
+        assert_eq!(entries.len(), 4); // 3 built-ins + 1 user
         let cr = entries.iter().find(|e| e.name == "code-reviewer").unwrap();
         assert_eq!(cr.description, "Reviews code");
         assert_eq!(
@@ -1167,7 +1158,7 @@ mod tests {
         )];
         let toggle = HashMap::from([("code-reviewer".to_string(), false)]);
         let entries = merge_subagents(discovered, &toggle);
-        assert_eq!(entries.len(), 4); // only built-ins
+        assert_eq!(entries.len(), 3); // only built-ins
         assert!(entries.iter().all(|e| e.name != "code-reviewer"));
     }
 
@@ -1179,7 +1170,7 @@ mod tests {
             AgentScope::Project,
         )];
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries.len(), 4); // still 4 — replaced, not appended
+        assert_eq!(entries.len(), 3); // still 3 — replaced, not appended
         let explore = entries.iter().find(|e| e.name == "explore").unwrap();
         assert_eq!(explore.description, "Custom explore agent");
         assert_eq!(
@@ -1208,7 +1199,7 @@ mod tests {
 
     #[test]
     fn test_merge_user_level_builtin_name_is_skipped() {
-        // A user-level (~/.chutes-build/agents/) agent named "explore" should NOT shadow
+        // A user-level (~/.grok/agents/) agent named "explore" should NOT shadow
         // the built-in — only project-level can do that.
         let discovered = vec![synthetic_agent(
             "explore",
@@ -1216,7 +1207,7 @@ mod tests {
             AgentScope::User,
         )];
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries.len(), 4); // still 4 built-ins
+        assert_eq!(entries.len(), 3); // still 3 built-ins
         let explore = entries.iter().find(|e| e.name == "explore").unwrap();
         // Should still be the built-in, not the user-level agent
         assert!(
@@ -1251,15 +1242,14 @@ mod tests {
             AgentScope::User,
         )];
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries.len(), 5); // 4 built-ins + 1 user
+        assert_eq!(entries.len(), 4); // 3 built-ins + 1 user
         // Verify ordering: built-ins first, then user
         assert!(matches!(&entries[0].source, SubagentSource::Builtin(_)));
         assert!(matches!(&entries[1].source, SubagentSource::Builtin(_)));
         assert!(matches!(&entries[2].source, SubagentSource::Builtin(_)));
-        assert!(matches!(&entries[3].source, SubagentSource::Builtin(_)));
-        assert_eq!(entries[4].name, "migration-helper");
+        assert_eq!(entries[3].name, "migration-helper");
         assert_eq!(
-            entries[4].source,
+            entries[3].source,
             SubagentSource::UserDefined {
                 scope: AgentScope::User
             }
@@ -1274,9 +1264,9 @@ mod tests {
             AgentScope::Bundled,
         )];
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries[4].name, "bundled-helper");
+        assert_eq!(entries[3].name, "bundled-helper");
         assert_eq!(
-            entries[4].source,
+            entries[3].source,
             SubagentSource::UserDefined {
                 scope: AgentScope::Bundled
             }
@@ -1289,7 +1279,6 @@ mod tests {
             ("general-purpose".to_string(), false),
             ("explore".to_string(), false),
             ("plan".to_string(), false),
-            ("advisor".to_string(), false),
         ]);
         let entries = merge_subagents(vec![], &toggle);
         assert!(entries.is_empty(), "all toggled off should return empty");
@@ -1302,7 +1291,7 @@ mod tests {
         // and the built-in explore remains.
         let discovered = vec![]; // no valid user agents discovered
         let entries = merge_subagents(discovered, &HashMap::new());
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.len(), 3);
         let explore = entries.iter().find(|e| e.name == "explore").unwrap();
         assert!(matches!(
             &explore.source,
@@ -1347,7 +1336,7 @@ mod tests {
     #[test]
     fn test_all_subagents_with_project_agent_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
         write_agent_file(
@@ -1358,17 +1347,11 @@ mod tests {
         );
 
         let entries = all_subagents_with_home(tmp.path(), &HashMap::new(), None, None);
-        assert_eq!(entries.len(), 5);
+        assert_eq!(entries.len(), 4);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(
             names,
-            vec![
-                "general-purpose",
-                "explore",
-                "plan",
-                "advisor",
-                "test-agent"
-            ]
+            vec!["general-purpose", "explore", "plan", "test-agent"]
         );
     }
 
@@ -1377,8 +1360,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let user_dir = home.join(".chutes-build").join("agents");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let user_dir = home.join(".grok").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&user_dir).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
@@ -1397,7 +1380,7 @@ mod tests {
             &HashMap::new(),
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         );
 
         let native = entries.iter().find(|e| e.name == "reviewer").unwrap();
@@ -1407,6 +1390,44 @@ mod tests {
             SubagentSource::UserDefined {
                 scope: AgentScope::User
             }
+        );
+        assert!(entries.iter().any(|e| e.name == "plugin-one:reviewer"));
+    }
+
+    #[test]
+    fn test_plugin_agents_filtered_by_qualified_toggle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("workspace");
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&cwd).unwrap();
+        fs::create_dir_all(&home).unwrap();
+
+        let plugin_root = tempfile::tempdir().unwrap();
+        let plugin_agents = plugin_root.path().join("agents");
+        fs::create_dir_all(&plugin_agents).unwrap();
+        write_agent_file(&plugin_agents, "reviewer.md", "reviewer", "Plugin reviewer");
+
+        let registry = make_plugin_registry("plugin-one", PluginScope::User, vec![plugin_agents]);
+
+        let toggle = HashMap::from([("plugin-one:reviewer".to_string(), false)]);
+        let entries = all_subagents_with_plugins_and_home(
+            &cwd,
+            &toggle,
+            Some(&registry),
+            Some(&home),
+            Some(&home.join(".grok")),
+        );
+        assert!(
+            !entries.iter().any(|e| e.name == "plugin-one:reviewer"),
+            "toggled-off plugin agent must not be callable"
+        );
+
+        let entries = all_subagents_with_plugins_and_home(
+            &cwd,
+            &HashMap::new(),
+            Some(&registry),
+            Some(&home),
+            Some(&home.join(".grok")),
         );
         assert!(entries.iter().any(|e| e.name == "plugin-one:reviewer"));
     }
@@ -1434,7 +1455,7 @@ mod tests {
             &HashMap::new(),
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         );
         assert!(entries.iter().any(|e| e.name == "plugin-one:painter"));
 
@@ -1443,7 +1464,7 @@ mod tests {
             &cwd,
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         )
         .expect("agent must resolve despite the unrecognized color");
         assert_eq!(def.color, None, "unrecognized color must be dropped");
@@ -1454,7 +1475,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().join("workspace");
         let home = tmp.path().join("home");
-        let bundled_dir = home.join(".chutes-build").join("bundled").join("agents");
+        let bundled_dir = home.join(".grok").join("bundled").join("agents");
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(&bundled_dir).unwrap();
         write_agent_file(&bundled_dir, "reviewer.md", "reviewer", "Bundled reviewer");
@@ -1470,7 +1491,7 @@ mod tests {
             &cwd,
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         )
         .unwrap();
 
@@ -1505,7 +1526,7 @@ mod tests {
             &cwd,
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         )
         .unwrap();
         let bare_body = bare.prompt_body.as_deref().unwrap();
@@ -1524,7 +1545,7 @@ mod tests {
             &cwd,
             Some(&registry),
             Some(&home),
-            Some(&home.join(".chutes-build")),
+            Some(&home.join(".grok")),
         )
         .unwrap();
         let qualified_body = qualified.prompt_body.as_deref().unwrap();
@@ -1564,7 +1585,7 @@ mod tests {
     #[test]
     fn test_all_subagents_toggle_filters_project_agent() {
         let tmp = tempfile::tempdir().unwrap();
-        let agents_dir = tmp.path().join(".chutes-build").join("agents");
+        let agents_dir = tmp.path().join(".grok").join("agents");
         fs::create_dir_all(&agents_dir).unwrap();
 
         write_agent_file(
@@ -1577,6 +1598,6 @@ mod tests {
         let toggle = HashMap::from([("test-agent".to_string(), false)]);
         let entries = all_subagents_with_home(tmp.path(), &toggle, None, None);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["general-purpose", "explore", "plan", "advisor"]);
+        assert_eq!(names, vec!["general-purpose", "explore", "plan"]);
     }
 }

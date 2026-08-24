@@ -39,7 +39,7 @@ pub(crate) enum SessionLiveState {
 /// `_meta` key carrying [`SessionHandle::scheduler_background_loops`] on the
 /// `session/new` and `session/load` responses. Defined here so the shell that
 /// publishes it and the clients that read it share one spelling.
-pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.build/schedulerBackgroundLoops";
+pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "x.ai/schedulerBackgroundLoops";
 /// Handle for interacting with a session actor.
 /// Note: Permission event receivers are returned separately from `spawn_session_actor`
 /// and should be stored/managed by the caller.
@@ -77,6 +77,10 @@ pub struct SessionHandle {
     /// notifications to the client via the gateway. See
     /// [`SessionActor::gateway_enabled`] for details.
     pub gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// See [`SessionActor::status_line_enabled`]. Assigned by
+    /// [`Self::set_status_line_wanted`] at every attach, and when a client
+    /// disconnects from a session that stays resident.
+    pub status_line_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// MCP server configs for this session (merged local + client-provided).
     /// Stored on the handle so forked sessions can inherit the parent's
     /// MCP servers without requiring a round-trip through the session actor.
@@ -134,26 +138,26 @@ pub struct SessionHandle {
     /// client behaviors like yolo broadcasts.
     pub origin_client: Option<crate::http::OriginClientInfo>,
     /// Whether the client that created this session advertised
-    /// `chutes.ai/codeNavigation.enabled`.  Stored per-session so that in leader
+    /// `x.ai/codeNavigation.enabled`.  Stored per-session so that in leader
     /// mode a later `initialize()` from a different client cannot retroactively
     /// change code-nav eligibility for already-running sessions.
     pub code_nav_enabled: bool,
     /// Whether the `ask_user_question` tool is exposed for this session
     /// (`_meta.askUserQuestion` / `--no-ask-user` and the remote settings / config /
-    /// env gate). Stored per-session so subagents inherit it at spawn.
+    /// env gate). Subagents deliberately do not inherit it.
     pub ask_user_question_enabled: bool,
     /// Whether this session was spawned non-interactive
     /// (`startupHints.nonInteractive`, e.g. headless `-p` / SDK). Stored
     /// per-session so subagents inherit it at spawn.
     pub non_interactive: bool,
     /// Plan mode tracker — shared with the session actor via Arc.
-    /// Exposed so the `chutes.ai/toggle_plan_mode` handler can toggle plan mode
+    /// Exposed so the `x.ai/toggle_plan_mode` handler can toggle plan mode
     /// without going through the session command channel.
     pub plan_mode: std::sync::Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
     /// Debug flag: when set to `true`, the next turn unconditionally triggers
     /// auto-compaction regardless of context window usage. Consumed (reset to
     /// `false`) atomically on use via `compare_exchange`.
-    /// Set via `chutes.ai/debug/arm_auto_compact`.
+    /// Set via `x.ai/debug/arm_auto_compact`.
     pub force_compact: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub permission_handle: xai_grok_workspace::permission::PermissionHandle,
     /// The parent SessionActor's live `Auth401AttributionCallback`
@@ -423,6 +427,24 @@ impl SessionHandle {
         }
         rx.await
             .unwrap_or_else(|_| crate::session::slash_commands::ListCommandsResponse::default())
+    }
+    /// Record whether the client now on this session draws a status row.
+    ///
+    /// Assigned rather than raised and lowered from separate events: a resident
+    /// session outlives its clients, and the disconnect sweep hands the
+    /// decision to an attach that is already in flight. An attach that only
+    /// raised the flag would leave the previous client's row armed, and the
+    /// session would keep building payloads nobody draws.
+    pub(crate) fn set_status_line_wanted(&self, wanted: bool) {
+        self.status_line_enabled
+            .store(wanted, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// Ask for a fresh status-line snapshot. Used when a client attaches: the
+    /// notification is transient, so there is nothing to replay. The emitter
+    /// re-reads the capability when the wake lands, so
+    /// [`Self::set_status_line_wanted`] has to be stored before this is sent.
+    pub(crate) fn request_status_snapshot(&self) {
+        let _ = self.cmd_tx.send(SessionCommand::EmitStatusSnapshot);
     }
     /// Replace the live session's client-registered hooks (see `SessionCommand::SetClientHooks`).
     pub(crate) fn set_client_hooks(&self, hooks: crate::extensions::hooks::ClientHooks) {

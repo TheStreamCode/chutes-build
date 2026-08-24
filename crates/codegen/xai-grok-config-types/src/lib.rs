@@ -525,7 +525,7 @@ pub struct RemoteSettings {
     pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]
     pub writeback_enabled: Option<bool>,
-    /// OAuth2 provider issuer URL (e.g., "https://api.chutes.ai"). When present
+    /// OAuth2 provider issuer URL (e.g., "https://auth.x.ai"). When present
     /// together with `oauth2_client_id`, the client uses OAuth2 authorization code
     /// flow. Controlled via remote settings for gradual rollout.
     #[serde(default)]
@@ -544,7 +544,7 @@ pub struct RemoteSettings {
     /// MCP/LSP servers (commands sourced from working-tree config files) require
     /// a per-folder trust decision before they are spawned. `Some(true)`
     /// enables, `Some(false)` is a kill-switch, `None` falls back to the client
-    /// default (on). Sits below env `CHUTES_BUILD_FOLDER_TRUST`, user
+    /// default (on). Sits below env `GROK_FOLDER_TRUST`, user
     /// `[folder_trust] enabled`, and managed config in the resolver chain. See
     /// `agent::folder_trust::feature_enabled`.
     #[serde(default)]
@@ -560,6 +560,8 @@ pub struct RemoteSettings {
     /// Fallback when no per-model `inference_idle_timeout_secs` is set in config.toml.
     #[serde(default)]
     pub inference_idle_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub subagent_rate_limit_max_attempts: Option<u32>,
     /// Global default MCP startup-handshake timeout (seconds); lowest-precedence
     /// fallback (per-server config, env, and requirements/managed override it).
     #[serde(default)]
@@ -731,13 +733,16 @@ pub struct RemoteSettings {
     /// by `telemetry_enabled`.
     #[serde(default)]
     pub feedback_enabled: Option<bool>,
+    /// Gradual rollout of the `/feedback` trace-consent card.
+    #[serde(default)]
+    pub feedback_trace_card_enabled: Option<bool>,
     /// Two-pass (prefire) compaction. When approaching the auto-compact
     /// threshold the shell speculatively summarizes the history prefix in the
     /// background (pass 1 → NOTE₁); at compaction it summarizes NOTE₁ + the
     /// recent tail (pass 2 → final summary), keeping summarizer latency off the
     /// critical path. `Some(true)` enables (remote rollout), `Some(false)` forces
     /// off, `None` falls back to `[features] two_pass_compaction` /
-    /// `CHUTES_BUILD_TWO_PASS_COMPACTION` / default (off).
+    /// `GROK_TWO_PASS_COMPACTION` / default (off).
     #[serde(default)]
     pub two_pass_compaction_enabled: Option<bool>,
     /// Dynamic tip list from remote settings. When present with non-empty entries,
@@ -779,7 +784,7 @@ pub struct RemoteSettings {
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete
     /// ghost text), from the `grok_build_settings` remote settings flag. Sits below
-    /// env (`CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL`) and `[models] prompt_suggestion`
+    /// env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `[models] prompt_suggestion`
     /// in config.toml, above the client hint and the built-in
     /// `grok-build-0.1` default. The effective model is catalog-guarded: when
     /// it is not in the shell's model catalog the suggestion request is
@@ -851,6 +856,10 @@ pub struct RemoteSettings {
     /// `[cli] worktree_type` is set in config.toml.
     #[serde(default)]
     pub worktree_type: Option<String>,
+    /// Grove-projected worktree strategy (`true` = grove-fuse/grove-nfs, `false` = copy).
+    /// `Some(false)` is the remote kill switch. `nfs_worktree` is a deserialize alias.
+    #[serde(default, alias = "nfs_worktree")]
+    pub grove_worktree: Option<bool>,
     /// Server-recommended default for `restore_code` in worktree resume.
     /// Applied only when the client omits `restoreCode`.
     #[serde(default)]
@@ -905,7 +914,7 @@ pub struct RemoteSettings {
     pub sharing_enabled: Option<bool>,
     /// Voice mode (STT dictation). Client default is **on** when absent.
     /// `Some(false)` is a remote kill switch; `Some(true)` forces on.
-    /// Overridable locally via `CHUTES_BUILD_VOICE_MODE`. Free-tier SuperGrok upsell
+    /// Overridable locally via `GROK_VOICE_MODE`. Free-tier SuperGrok upsell
     /// is a separate client tier gate.
     #[serde(default)]
     pub voice_mode_enabled: Option<bool>,
@@ -926,7 +935,7 @@ pub struct RemoteSettings {
     pub privacy_banner_reshow_days: Option<u64>,
     /// remote settings tier of the `remember_tool_approvals` gate (whether per-tool
     /// "Always allow …" prompt options are shown). Lowest precedence; typically
-    /// targeted per-org. Default `false`.
+    /// targeted per-org. Default `true`; `Some(false)` is a kill-switch.
     #[serde(default)]
     pub remember_tool_approvals: Option<bool>,
     /// remote settings tier of the crash-handler install gate. Lowest precedence in
@@ -989,7 +998,7 @@ pub struct RemoteSettings {
     /// When `None` or `Some(false)`, sessions are shown in a flat list.
     #[serde(default)]
     pub session_picker_grouped: Option<bool>,
-    /// Whether the user is allowed to use Chutes Build. Set by remote settings
+    /// Whether the user is allowed to use Grok Build. Set by remote settings
     /// `grok_build_access_gate` targeting rules. `None` = no server response
     /// yet (client uses own fallback check). `Some(false)` = blocked.
     #[serde(default)]
@@ -1047,19 +1056,19 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub system_prompt_label: Option<String>,
     /// Global per-compaction wall-clock budget (seconds) from remote settings;
-    /// `0` disables. Env (`CHUTES_BUILD_COMPACTION_WALL_CLOCK_SECS`) overrides it.
+    /// `0` disables. Env (`GROK_COMPACTION_WALL_CLOCK_SECS`) overrides it.
     /// Resolved via `resolve_compaction_wall_clock_budget_secs`.
     #[serde(default)]
     pub compaction_wall_clock_budget_secs: Option<u64>,
     /// Compaction mode (`summary` | `transcript` | `segments`) from remote settings.
-    /// Env (`CHUTES_BUILD_COMPACTION_MODE`) and user config override it.
+    /// Env (`GROK_COMPACTION_MODE`) and user config override it.
     #[serde(default)]
     pub compaction_mode: Option<String>,
     /// Segments verbatim detail (`none` | `minimal` | `balanced` | `verbose`)
-    /// from remote settings. Env (`CHUTES_BUILD_COMPACTION_DETAIL`) and config override it.
+    /// from remote settings. Env (`GROK_COMPACTION_DETAIL`) and config override it.
     #[serde(default)]
     pub compaction_detail: Option<String>,
-    /// remote settings verbatim-input flag; env (`CHUTES_BUILD_COMPACTION_VERBATIM_INPUT`) and config override it. `None` = default (true).
+    /// remote settings verbatim-input flag; env (`GROK_COMPACTION_VERBATIM_INPUT`) and config override it. `None` = default (true).
     #[serde(default)]
     pub compaction_verbatim_input: Option<bool>,
     #[serde(default)]
@@ -1076,6 +1085,8 @@ pub struct RemoteSettings {
     /// `Some(true)` enables it; `None`/`Some(false)` (the default) keep it off.
     #[serde(default)]
     pub workspace_command_enabled: Option<bool>,
+    #[serde(default)]
+    pub workspace_dashboard_enabled: Option<bool>,
     /// Soft default for `keep_text_selection` (`"flash"` / `"hold"` / `"word_select"`), from
     /// `grok_build_settings.keep_text_selection_default`. Applied only when the user has set no
     /// local text-selection preference; an explicit local `keep_text_selection` always wins. An
@@ -1129,7 +1140,7 @@ pub struct ContextualHintsRemote {
     /// Word-select tip after double-click fold/nav (settings discoverability).
     #[serde(default)]
     pub word_select: Option<bool>,
-    /// SSH wrap session-load tip (recommend `chutes-build wrap ssh` for remote sessions).
+    /// SSH wrap session-load tip (recommend `grok wrap ssh` for remote sessions).
     #[serde(default)]
     pub ssh_wrap: Option<bool>,
 }
@@ -1931,6 +1942,17 @@ mod tests {
         let json = r#"{}"#;
         let s: RemoteSettings = serde_json::from_str(json).unwrap();
         assert_eq!(s.workspace_command_enabled, None);
+    }
+    #[test]
+    fn remote_settings_workspace_dashboard_enabled_parses_all_states() {
+        let on: RemoteSettings =
+            serde_json::from_str(r#"{"workspace_dashboard_enabled": true}"#).unwrap();
+        assert_eq!(on.workspace_dashboard_enabled, Some(true));
+        let off: RemoteSettings =
+            serde_json::from_str(r#"{"workspace_dashboard_enabled": false}"#).unwrap();
+        assert_eq!(off.workspace_dashboard_enabled, Some(false));
+        let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.workspace_dashboard_enabled, None);
     }
     #[test]
     fn remote_settings_keep_text_selection_default_round_trips() {

@@ -1,10 +1,10 @@
 //! AGENTS.md / Claude.md / rules directory discovery and loading.
 //!
-//! Searches from cwd to repo root, plus `~/.chutes-build/`. Also discovers
-//! `*.md` files in rules directories: vendor-prefixed `.chutes-build/rules/`,
+//! Searches from cwd to repo root, plus `~/.grok/`. Also discovers
+//! `*.md` files in rules directories: vendor-prefixed `.grok/rules/`,
 //! `.claude/rules/`, and `.cursor/rules/` in project directories, and a
 //! plain `rules/` directly under the vendor-qualified home-scope roots
-//! (`~/.chutes-build/rules/`, `~/.claude/rules/`, `~/.cursor/rules/`).
+//! (`~/.grok/rules/`, `~/.claude/rules/`, `~/.cursor/rules/`).
 
 use std::path::{Path, PathBuf};
 
@@ -38,7 +38,7 @@ fn find_agent_files(dir: &Path, filenames: &[&str]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Find `*.md` files in `.chutes-build/rules/`, `.claude/rules/`, and `.cursor/rules/`,
+/// Find `*.md` files in `.grok/rules/`, `.claude/rules/`, and `.cursor/rules/`,
 /// sorted alphabetically. `rules_subdirs` is the (compat-gated) list, precomputed
 /// once by the caller so the walk doesn't re-allocate it per directory.
 fn find_rules_files(dir: &Path, rules_subdirs: &[&str]) -> Vec<PathBuf> {
@@ -141,7 +141,7 @@ fn add_discovered_candidate(
     });
 }
 
-/// Read Agents.md from ~/.chutes-build/, git repo root, and session cwd.
+/// Read Agents.md from ~/.grok/, git repo root, and session cwd.
 /// Returns a list of AgentConfigFile with their file names, full paths, and contents.
 ///
 /// `compat` gates which vendor (`.claude`/`.cursor`) surfaces are scanned for
@@ -318,7 +318,7 @@ pub fn format_agents_md_section(configs: &[AgentConfigFile]) -> Option<String> {
 pub const LEGACY_AGENTS_MD_REMINDER_PREFIX: &str =
     "\n\n<system-reminder>\nAs you answer the user's questions, you can use the following context";
 
-/// Open/close `system-reminder` (Chutes Build) or `system_reminder` (Cursor/IDE), case-insensitive.
+/// Open/close `system-reminder` (Grok) or `system_reminder` (Cursor/IDE), case-insensitive.
 /// Shared with unit tests so CI fails if the pattern is ever invalid or too narrow.
 const SYSTEM_REMINDER_TAG_PATTERN: &str = r"(?i)<(\s*/?\s*system[-_]reminder)";
 
@@ -616,7 +616,7 @@ mod tests {
         fs::create_dir_all(grok_home.join("rules")).unwrap();
         fs::create_dir_all(home.join(".claude/rules")).unwrap();
         fs::create_dir_all(home.join(".cursor/rules")).unwrap();
-        fs::create_dir_all(repo.join(".chutes-build/rules")).unwrap();
+        fs::create_dir_all(repo.join(".grok/rules")).unwrap();
         fs::create_dir_all(repo.join(".claude/rules")).unwrap();
         fs::create_dir_all(repo.join(".cursor/rules")).unwrap();
         init_git_repo(&repo);
@@ -627,14 +627,14 @@ mod tests {
             (home.join(".claude/rules/a.md"), "claude-a"),
             (home.join(".cursor/rules/a.md"), "cursor-a"),
             (repo.join("AGENTS.md"), "repo-named"),
-            (repo.join(".chutes-build/rules/a.md"), "repo-grok"),
+            (repo.join(".grok/rules/a.md"), "repo-grok"),
             (repo.join(".claude/rules/a.md"), "repo-claude"),
             (repo.join(".cursor/rules/a.md"), "repo-cursor"),
         ] {
             fs::write(path, content).unwrap();
         }
         for path in [
-            grok_home.join(".chutes-build/rules/doubled.md"),
+            grok_home.join(".grok/rules/doubled.md"),
             home.join(".claude/.claude/rules/doubled.md"),
             home.join(".cursor/.cursor/rules/doubled.md"),
         ] {
@@ -744,16 +744,12 @@ mod tests {
         let repo = tmp.path().join("repo");
         let nested = repo.join("nested");
         fs::create_dir_all(nested.join("rules")).unwrap();
-        fs::create_dir_all(nested.join(".chutes-build/rules")).unwrap();
+        fs::create_dir_all(nested.join(".grok/rules")).unwrap();
         init_git_repo(&repo);
         fs::write(nested.join("rules/home.md"), "nested-home-rule").unwrap();
         fs::write(repo.join("AGENTS.md"), "repo-named").unwrap();
         fs::write(nested.join("AGENTS.md"), "nested-named").unwrap();
-        fs::write(
-            nested.join(".chutes-build/rules/project.md"),
-            "nested-project-rule",
-        )
-        .unwrap();
+        fs::write(nested.join(".grok/rules/project.md"), "nested-project-rule").unwrap();
 
         let configs = read_agents_config_with_roots(
             nested.to_str().unwrap(),
@@ -782,22 +778,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("repo");
         fs::create_dir_all(repo.join("rules")).unwrap();
-        fs::create_dir_all(repo.join(".chutes-build/rules")).unwrap();
+        fs::create_dir_all(repo.join(".grok/rules")).unwrap();
         fs::create_dir_all(repo.join(".claude/rules")).unwrap();
         init_git_repo(&repo);
         fs::write(repo.join("rules/home.md"), "home-rule").unwrap();
-        fs::write(
-            repo.join(".chutes-build/rules/project.md"),
-            "project-grok-rule",
-        )
-        .unwrap();
+        fs::write(repo.join(".grok/rules/project.md"), "project-grok-rule").unwrap();
         fs::write(repo.join(".claude/rules/project.md"), "project-claude-rule").unwrap();
-        fs::create_dir_all(repo.join(".chutes-build/.chutes-build/rules")).unwrap();
-        fs::write(
-            repo.join(".chutes-build/.chutes-build/rules/doubled.md"),
-            "doubled",
-        )
-        .unwrap();
+        fs::create_dir_all(repo.join(".grok/.grok/rules")).unwrap();
+        fs::write(repo.join(".grok/.grok/rules/doubled.md"), "doubled").unwrap();
 
         let configs = read_agents_config_with_roots(
             repo.to_str().unwrap(),
@@ -893,7 +881,7 @@ mod tests {
         fs::create_dir_all(grok_home.join("rules")).unwrap();
         fs::create_dir_all(home.join(".claude/rules")).unwrap();
         fs::create_dir_all(home.join(".cursor/rules")).unwrap();
-        fs::create_dir_all(repo.join(".chutes-build/rules")).unwrap();
+        fs::create_dir_all(repo.join(".grok/rules")).unwrap();
         fs::create_dir_all(repo.join(".claude/rules")).unwrap();
         fs::create_dir_all(repo.join(".cursor/rules")).unwrap();
         init_git_repo(&repo);
@@ -903,10 +891,7 @@ mod tests {
             (grok_home.join("rules/global.md"), "custom-home-body"),
             (home.join(".claude/rules/global.md"), "claude-body"),
             (home.join(".cursor/rules/global.md"), "cursor-body"),
-            (
-                repo.join(".chutes-build/rules/project.md"),
-                "grok-project-body",
-            ),
+            (repo.join(".grok/rules/project.md"), "grok-project-body"),
             (repo.join(".claude/rules/project.md"), "claude-project-body"),
             (repo.join(".cursor/rules/project.md"), "cursor-project-body"),
         ] {

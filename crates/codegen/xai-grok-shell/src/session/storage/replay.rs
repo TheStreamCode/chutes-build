@@ -41,7 +41,7 @@ pub enum ReplayLookupFallback {
 }
 
 /// Optional location hints so child `updates.jsonl` lookup can skip a full
-/// `~/.chutes-build/sessions` RelocationView scan.
+/// `~/.grok/sessions` RelocationView scan.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReplayPathHint<'a> {
     /// Parent session working directory; tried as
@@ -175,7 +175,7 @@ pub fn load_updates_for_replay(
 }
 
 /// Like [`load_updates_for_replay`], but resolves the session under a specific
-/// Chutes Build home. Typed, materialize-all replay reader: collects every update into
+/// grok home. Typed, materialize-all replay reader: collects every update into
 /// owned `Vec`s. Production forwards replay through [`stream_replay_updates_at`]
 /// to bound peak memory, so this has no production caller and is compiled only
 /// for tests: the `testkit_synth_roundtrip` and `session_load_perf` parity

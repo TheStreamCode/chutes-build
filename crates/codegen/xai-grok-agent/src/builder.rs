@@ -15,8 +15,8 @@ use xai_grok_tools::computer::types::{AsyncFileSystem, TerminalBackend};
 use xai_grok_tools::notification::ToolNotificationHandle;
 use xai_grok_tools::registry::types::SessionContext;
 use xai_grok_tools::types::tool::ToolKind;
-/// The Chutes Build [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
-/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Chutes Build
+/// The Grok [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
+/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Grok
 /// tool registry in `xai-grok-tools` (also used by the hook matcher).
 fn claude_tool_kind(name: &str) -> Option<ToolKind> {
     xai_grok_tools::types::kind_for(name)
@@ -44,7 +44,7 @@ pub struct AgentBuilder {
     /// Model-facing working directory for the system prompt `<user_info>` block.
     ///
     /// In forked sessions, the real `working_directory` is an overlay/worktree
-    /// path (e.g., `~/.chutes-build/worktrees/project/fork-...-overlay`) that must stay
+    /// path (e.g., `~/.grok/worktrees/project/fork-...-overlay`) that must stay
     /// hidden from the model. When set, `PromptContext.working_directory` uses
     /// this value instead of `self.working_directory`, so the system prompt
     /// shows the original project path. Tool execution (`ToolContext.cwd`,
@@ -135,217 +135,15 @@ pub struct AgentBuilder {
     /// `list_skills_with_plugins()`.
     preloaded_skills: Option<Vec<xai_grok_tools::implementations::skills::types::SkillInfo>>,
 }
-/// Ensure the Chutes-native ecosystem tools are available to default agents.
-///
-/// A toolset assembled from a config file rather than one of the presets would
-/// otherwise miss them entirely — the presets are not the only path in.
-fn ensure_chutes_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
-    use xai_grok_tools::implementations::chutes;
-    use xai_grok_tools::registry::types::ToolConfig;
-
-    let supports_lazy_discovery = tool_config
-        .tools
-        .iter()
-        .any(|tool| matches!(tool.kind, Some(ToolKind::SearchTool | ToolKind::UseTool)));
-    if !supports_lazy_discovery {
-        return;
-    }
-
-    let defaults: [ToolConfig; 8] = [
-        (&chutes::Context7SearchTool).into(),
-        (&chutes::Context7DocsTool).into(),
-        (&chutes::GetChutesUsageTool).into(),
-        (&chutes::ListMediaModelsTool).into(),
-        (&chutes::DescribeMediaModelTool).into(),
-        (&chutes::GenerateMediaTool).into(),
-        (&chutes::BrowserTool).into(),
-        (&chutes::OcrPageTool).into(),
-    ];
-    for tool in defaults {
-        if !tool_config
-            .tools
-            .iter()
-            .any(|existing| existing.id == tool.id)
-        {
-            tool_config.tools.push(tool);
-        }
-    }
-}
-
-/// Remove Chutes ecosystem tools from the per-turn schema list when the agent
-/// can discover and invoke them through `search_tool` / `use_tool` instead.
-///
-/// Both must be present: `search_tool` alone can find a tool it cannot call, and
-/// `use_tool` alone cannot be told what exists.
-fn take_lazy_chutes_tools(
-    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
-) -> Vec<String> {
-    take_lazy(
-        tool_config,
-        &[
-            "ChutesBuild:context7_search",
-            "ChutesBuild:context7_docs",
-            "ChutesBuild:get_chutes_usage",
-            "ChutesBuild:list_media_models",
-            "ChutesBuild:describe_media_model",
-            "ChutesBuild:generate_media",
-            "ChutesBuild:browser",
-            "ChutesBuild:ocr_page",
-        ],
-    )
-}
-
-/// Keep low-frequency runtime controls available without paying their schema
-/// cost on every coding turn.
-fn take_lazy_support_tools(
-    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
-) -> Vec<String> {
-    take_lazy(
-        tool_config,
-        &[
-            "ChutesBuild:scheduler_create",
-            "ChutesBuild:scheduler_delete",
-            "ChutesBuild:scheduler_list",
-            "ChutesBuild:monitor",
-            "ChutesBuild:update_goal",
-        ],
-    )
-}
-
-/// Shared body of the two `take_lazy_*` helpers: pull `ids` out of the schema
-/// list and return the ones that were there, or change nothing when the agent
-/// has no way to discover them again.
-fn take_lazy(
-    tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
-    ids: &[&str],
-) -> Vec<String> {
-    let has = |kind: ToolKind| {
-        tool_config
-            .tools
-            .iter()
-            .any(|tool| tool.kind.as_ref() == Some(&kind))
-    };
-    if !(has(ToolKind::SearchTool) && has(ToolKind::UseTool)) {
-        return Vec::new();
-    }
-    let mut lazy = Vec::new();
-    tool_config.tools.retain(|tool| {
-        if ids.contains(&tool.id.as_str()) {
-            lazy.push(tool.id.clone());
-            false
-        } else {
-            true
-        }
-    });
-    lazy
-}
-
-async fn register_lazy_chutes_tools(
-    tool_bridge: &ToolBridge,
-    tool_ids: &[String],
-) -> Result<(), AgentBuildError> {
-    use xai_grok_tools::implementations::chutes;
-
-    macro_rules! register {
-        ($name:literal, $tool:expr) => {
-            tool_bridge
-                .register_mcp_tools($name.into(), $tool, None)
-                .await
-                .map_err(|error| AgentBuildError::ToolError(error.to_string()))?;
-        };
-    }
-
-    for tool_id in tool_ids {
-        match tool_id.as_str() {
-            "ChutesBuild:context7_search" => {
-                register!("chutes__context7_search", chutes::Context7SearchTool);
-            }
-            "ChutesBuild:context7_docs" => {
-                register!("chutes__context7_docs", chutes::Context7DocsTool);
-            }
-            "ChutesBuild:get_chutes_usage" => {
-                register!("chutes__get_chutes_usage", chutes::GetChutesUsageTool);
-            }
-            "ChutesBuild:list_media_models" => {
-                register!("chutes__list_media_models", chutes::ListMediaModelsTool);
-            }
-            "ChutesBuild:describe_media_model" => {
-                register!(
-                    "chutes__describe_media_model",
-                    chutes::DescribeMediaModelTool
-                );
-            }
-            "ChutesBuild:generate_media" => {
-                register!("chutes__generate_media", chutes::GenerateMediaTool);
-            }
-            "ChutesBuild:browser" => {
-                register!("chutes__browser", chutes::BrowserTool);
-            }
-            "ChutesBuild:ocr_page" => {
-                register!("chutes__ocr_page", chutes::OcrPageTool);
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-async fn register_lazy_support_tools(
-    tool_bridge: &ToolBridge,
-    tool_ids: &[String],
-) -> Result<(), AgentBuildError> {
-    use xai_grok_tools::implementations::grok_build;
-
-    macro_rules! register {
-        ($name:literal, $tool:expr) => {
-            tool_bridge
-                .register_mcp_tools($name.into(), $tool, None)
-                .await
-                .map_err(|error| AgentBuildError::ToolError(error.to_string()))?;
-        };
-    }
-
-    for tool_id in tool_ids {
-        match tool_id.as_str() {
-            "ChutesBuild:scheduler_create" => {
-                register!(
-                    "chutes_build__scheduler_create",
-                    grok_build::SchedulerCreateTool
-                );
-            }
-            "ChutesBuild:scheduler_delete" => {
-                register!(
-                    "chutes_build__scheduler_delete",
-                    grok_build::SchedulerDeleteTool
-                );
-            }
-            "ChutesBuild:scheduler_list" => {
-                register!(
-                    "chutes_build__scheduler_list",
-                    grok_build::SchedulerListTool
-                );
-            }
-            "ChutesBuild:monitor" => {
-                register!("chutes_build__monitor", grok_build::MonitorTool);
-            }
-            "ChutesBuild:update_goal" => {
-                register!("chutes_build__update_goal", grok_build::UpdateGoalTool);
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
 /// Ensure plan mode tools (`enter_plan_mode`, `exit_plan_mode`,
 /// `ask_user_question`) are present in the tool config.
 fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig) {
     use xai_grok_tools::implementations::grok_build;
     let existing: std::collections::HashSet<&str> =
         tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
-    let missing_enter = !existing.contains("ChutesBuild:enter_plan_mode");
-    let missing_exit = !existing.contains("ChutesBuild:exit_plan_mode");
-    let missing_ask = !existing.contains("ChutesBuild:ask_user_question");
+    let missing_enter = !existing.contains("GrokBuild:enter_plan_mode");
+    let missing_exit = !existing.contains("GrokBuild:exit_plan_mode");
+    let missing_ask = !existing.contains("GrokBuild:ask_user_question");
     drop(existing);
     if missing_enter {
         tool_config
@@ -382,6 +180,7 @@ fn merge_tool_params(
 fn apply_workflow_tool_gates(
     tool_config: &mut xai_grok_tools::registry::types::ToolServerConfig,
     background_workflows_enabled: bool,
+    is_subagent: bool,
 ) {
     use xai_grok_tools::types::tool::ToolKind;
     if background_workflows_enabled {
@@ -389,6 +188,11 @@ fn apply_workflow_tool_gates(
             .tools
             .retain(|tool| tool.kind != Some(ToolKind::GoalUpdate));
     } else {
+        tool_config
+            .tools
+            .retain(|tool| tool.kind != Some(ToolKind::Workflow));
+    }
+    if is_subagent {
         tool_config
             .tools
             .retain(|tool| tool.kind != Some(ToolKind::Workflow));
@@ -564,7 +368,9 @@ impl AgentBuilder {
     /// Mark this session as non-interactive (headless / SDK / stdio /
     /// generic-ACP). Suppresses prompt sections that only make sense when
     /// a human is typing into the TUI prompt input (e.g. the `! <command>`
-    /// shell-prefix tip and the `<user_guide>` TUI pointer).
+    /// shell-prefix tip and the `<user_guide>` TUI pointer), and stamps
+    /// `non_interactive` into the ask_user_question params so an unanswered
+    /// questionnaire returns no-operator text instead of "user declined".
     pub fn with_is_non_interactive(mut self, value: bool) -> Self {
         self.is_non_interactive = value;
         self
@@ -655,7 +461,7 @@ impl AgentBuilder {
     /// When `Enabled`, the `web_fetch` tool is registered and a `WebFetchClient`
     /// is injected into `Resources`. When `Disabled` (default), the tool is not
     /// registered. Feature-flagged via remote settings `web_fetch_enabled` and
-    /// `CHUTES_BUILD_WEB_FETCH` env var.
+    /// `GROK_WEB_FETCH` env var.
     pub fn with_web_fetch_config(
         mut self,
         config: xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig,
@@ -756,19 +562,20 @@ impl AgentBuilder {
         self.background_workflows_enabled = enabled;
         self
     }
-    /// Set public model slugs advertised in the ChutesBuild Task description.
+    /// Set public model slugs advertised in the GrokBuild Task description.
     pub fn with_task_model_slugs(mut self, slugs: Vec<String>) -> Self {
         self.task_model_slugs = slugs;
         self
     }
-    /// Enable or disable the `ask_user_question` tool.
+    /// Enable or disable the `ask_user_question` tool for a primary agent.
     ///
-    /// When disabled, `ChutesBuild:ask_user_question` is stripped from the
-    /// agent's tool config after `ensure_plan_mode_tools` injection, so
-    /// the model cannot ask the user structured questions regardless of
-    /// which built-in profile is in use. Driven by the shell's resolved gate
-    /// (`resolve_ask_user_question`, default ON — remote settings/config/env act as
-    /// a kill-switch) and/or the pager's `--no-ask-user` (`_meta.askUserQuestion`).
+    /// Subagents never receive this tool. Otherwise, when disabled,
+    /// `GrokBuild:ask_user_question` is stripped from the agent's tool config
+    /// after `ensure_plan_mode_tools` injection, so the model cannot ask the
+    /// user structured questions regardless of which built-in profile is in
+    /// use. Driven by the shell's resolved gate (the `ask_user_question`
+    /// feature, default ON: remote settings/config/env act as a kill-switch)
+    /// and/or the pager's `--no-ask-user` (`_meta.askUserQuestion`).
     pub fn with_ask_user_question_enabled(mut self, enabled: bool) -> Self {
         self.ask_user_question_enabled = enabled;
         self
@@ -794,8 +601,8 @@ impl AgentBuilder {
         self
     }
     /// Set the skills config (custom paths, ignore globs) from config.toml.
-    /// Without this, only auto-discovered skills (cwd/.chutes-build/skills, ~/.chutes-build/skills)
-    /// are included — custom paths added via `chutes.ai/skills/add` would be ignored.
+    /// Without this, only auto-discovered skills (cwd/.grok/skills, ~/.grok/skills)
+    /// are included — custom paths added via `x.ai/skills/add` would be ignored.
     pub fn with_skills_config(mut self, config: crate::prompt::skills::SkillsConfig) -> Self {
         self.skills_config = config;
         self
@@ -938,12 +745,24 @@ impl AgentBuilder {
                     .tools
                     .push((&xai_grok_tools::implementations::grok_build::LspTool).into());
             }
-            // Upstream advertises its Imagine tools here. They call an xAI
-            // endpoint Chutes has no equivalent for — their own tier message
-            // says "This legacy image tool is unavailable. Use the native
-            // generate_media tool" — so `ensure_chutes_tools` below supplies the
-            // Chutes media tools instead. The implementations stay in the tree,
-            // unadvertised, so an upstream merge still applies cleanly.
+            if self.image_gen_config.image_gen_enabled() {
+                tool_config
+                    .tools
+                    .push((&xai_grok_tools::implementations::grok_build::ImageGenTool).into());
+            }
+            if self.image_gen_config.image_edit_enabled() {
+                tool_config
+                    .tools
+                    .push((&xai_grok_tools::implementations::grok_build::ImageEditTool).into());
+            }
+            if self.video_gen_config.is_enabled() {
+                tool_config
+                    .tools
+                    .push((&xai_grok_tools::implementations::grok_build::ImageToVideoTool).into());
+                tool_config.tools.push(
+                    (&xai_grok_tools::implementations::grok_build::ReferenceToVideoTool).into(),
+                );
+            }
             let has_write_tool = tool_config
                 .tools
                 .iter()
@@ -953,11 +772,10 @@ impl AgentBuilder {
                     .tools
                     .push((&xai_grok_tools::implementations::opencode::OpenCodeWriteTool).into());
             }
-            ensure_chutes_tools(&mut tool_config);
             ensure_plan_mode_tools(&mut tool_config);
         }
         if self.memory_backend.is_none() {
-            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::ChutesBuild.to_string();
+            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::GrokBuild.to_string();
             let mem_search_id = format!(
                 "{grok_build_ns}:{}",
                 xai_grok_tools::implementations::memory::MEMORY_SEARCH_TOOL_NAME
@@ -970,17 +788,25 @@ impl AgentBuilder {
                 .tools
                 .retain(|tc| tc.id != mem_search_id && tc.id != mem_get_id);
         }
-        if !self.ask_user_question_enabled {
+        if self.prompt_audience == crate::prompt::context::PromptAudience::Subagent {
+            tool_config
+                .tools
+                .retain(|tool| tool.kind != Some(xai_grok_tools::types::tool::ToolKind::AskUser));
+        } else if !self.ask_user_question_enabled {
             let ask_user_id = format!(
                 "{}:ask_user_question",
-                xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
+                xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
             );
-            tool_config.tools.retain(|tc| tc.id != ask_user_id);
+            tool_config.tools.retain(|tool| tool.id != ask_user_id);
         }
-        apply_workflow_tool_gates(&mut tool_config, self.background_workflows_enabled);
+        apply_workflow_tool_gates(
+            &mut tool_config,
+            self.background_workflows_enabled,
+            self.prompt_audience == crate::prompt::context::PromptAudience::Subagent,
+        );
         let task_tool_id = format!(
             "{}:{}",
-            xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
+            xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
             "task"
         );
         let mut task_stripped = false;
@@ -1028,8 +854,8 @@ impl AgentBuilder {
                                 .unwrap_or(true))
                 })
             };
-            if !has_satisfier(ToolNamespace::ChutesBuild, "run_terminal_cmd", true)
-                && !has_satisfier(ToolNamespace::ChutesBuildConcise, "run_terminal_cmd", true)
+            if !has_satisfier(ToolNamespace::GrokBuild, "run_terminal_cmd", true)
+                && !has_satisfier(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::OpenCode, "bash", false)
             {
                 let lifecycle = ["get_task_output", "wait_tasks", "kill_task"];
@@ -1044,13 +870,13 @@ impl AgentBuilder {
             && let Ok(params_value) = serde_json::to_value(params)
             && let Some(obj) = params_value.as_object()
         {
-            merge_tool_params(&mut tool_config, &["ChutesBuild:web_fetch"], obj);
+            merge_tool_params(&mut tool_config, &["GrokBuild:web_fetch"], obj);
         }
         if let Some(ref bash_params) = self.bash_params_json {
             merge_tool_params(
                 &mut tool_config,
                 &[
-                    "ChutesBuild:run_terminal_cmd",
+                    "GrokBuild:run_terminal_cmd",
                     "GrokBuildConcise:run_terminal_cmd",
                 ],
                 bash_params,
@@ -1059,9 +885,14 @@ impl AgentBuilder {
         if let Some(ref ask_params) = self.ask_user_question_params_json {
             merge_tool_params(
                 &mut tool_config,
-                &["ChutesBuild:ask_user_question"],
+                &["GrokBuild:ask_user_question"],
                 ask_params,
             );
+        }
+        if self.is_non_interactive {
+            let mut ni = serde_json::Map::new();
+            ni.insert("non_interactive".into(), serde_json::Value::Bool(true));
+            merge_tool_params(&mut tool_config, &["GrokBuild:ask_user_question"], &ni);
         }
         if !definition.disallowed_tools.is_empty() {
             let before: std::collections::HashSet<String> =
@@ -1214,10 +1045,6 @@ impl AgentBuilder {
         }
         let use_backend_search = self.backend_search;
         let web_search_enabled = self.web_search_config.is_enabled();
-        // Taken off the schema list before the bridge sees it, and registered
-        // on the bridge immediately after, so `use_tool` can still reach them.
-        let lazy_chutes_tools = take_lazy_chutes_tools(&mut tool_config);
-        let lazy_support_tools = take_lazy_support_tools(&mut tool_config);
         let tool_bridge = ToolBridge::finalize_builder(
             tool_bridge_builder,
             tool_config,
@@ -1251,8 +1078,6 @@ impl AgentBuilder {
         )
         .await
         .map_err(|e| AgentBuildError::ToolError(e.to_string()))?;
-        register_lazy_chutes_tools(&tool_bridge, &lazy_chutes_tools).await?;
-        register_lazy_support_tools(&tool_bridge, &lazy_support_tools).await?;
         if let Some(bytes) = self.mcp_max_output_bytes {
             tool_bridge.toolset().resources.lock().await.insert(
                 xai_grok_tools::types::resources::TruncationCfg(
@@ -1776,7 +1601,7 @@ mod tests {
         use xai_grok_tools::notification::ToolNotificationHandle;
         let tmp = tempfile::tempdir().unwrap();
         let write_skill = |dir: &str, content: &str| {
-            let d = tmp.path().join(".chutes-build/skills").join(dir);
+            let d = tmp.path().join(".grok/skills").join(dir);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join("SKILL.md"), content).unwrap();
         };
@@ -1955,6 +1780,32 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn subagent_audience_never_receives_ask_user_question() {
+        use xai_grok_tools::computer::local::LocalTerminalBackend;
+        use xai_grok_tools::notification::ToolNotificationHandle;
+        let agent = AgentBuilder::new(
+            std::env::temp_dir(),
+            Arc::new(LocalTerminalBackend::new()),
+            ToolNotificationHandle::noop(),
+        )
+        .from_definition(crate::config::AgentDefinition::grok_build_ask_user())
+        .with_ask_user_question_enabled(true)
+        .with_prompt_audience(crate::prompt::context::PromptAudience::Subagent)
+        .build()
+        .await
+        .expect("subagent should build");
+        let names: Vec<String> = agent
+            .tool_definitions()
+            .await
+            .into_iter()
+            .map(|definition| definition.function.name)
+            .collect();
+        assert!(
+            !names.iter().any(|name| name == "ask_user_question"),
+            "subagents must not receive ask_user_question even when their profile and parent gate enable it: {names:?}"
+        );
+    }
+    #[tokio::test]
     async fn curated_empty_toolset_fails_agent_build() {
         use xai_grok_tools::computer::local::LocalTerminalBackend;
         use xai_grok_tools::notification::ToolNotificationHandle;
@@ -1995,7 +1846,7 @@ mod tests {
                 .tool_config
                 .tools
                 .iter()
-                .any(|tc| tc.id == "ChutesBuild:ask_user_question"),
+                .any(|tc| tc.id == "GrokBuild:ask_user_question"),
             "test premise: the profile must not pre-declare ask_user_question"
         );
         let mut params = serde_json::Map::new();
@@ -2018,6 +1869,33 @@ mod tests {
             .expect("finalize must insert Params for the injected ask_user_question");
         assert_eq!(applied.0.timeout_enabled, Some(false));
         assert_eq!(applied.0.timeout_secs, Some(5));
+        assert_eq!(applied.0.non_interactive, None);
+    }
+    /// A non-interactive build stamps `non_interactive: true` into the AUQ
+    /// params (session state, not user config) so cancel/timeout return the
+    /// no-operator text.
+    #[tokio::test]
+    async fn non_interactive_build_stamps_ask_user_question_params() {
+        use xai_grok_tools::computer::local::LocalTerminalBackend;
+        use xai_grok_tools::implementations::grok_build::ask_user_question::AskUserQuestionParams;
+        use xai_grok_tools::notification::ToolNotificationHandle;
+        use xai_grok_tools::types::resources::Params;
+        let agent = AgentBuilder::new(
+            std::env::temp_dir(),
+            Arc::new(LocalTerminalBackend::new()),
+            ToolNotificationHandle::noop(),
+        )
+        .from_definition(crate::config::AgentDefinition::default_grok_build())
+        .with_is_non_interactive(true)
+        .build()
+        .await
+        .expect("agent should build");
+        let applied = agent
+            .tool_bridge()
+            .read_resource::<Params<AskUserQuestionParams>>()
+            .await
+            .expect("finalize must insert Params for the injected ask_user_question");
+        assert_eq!(applied.0.non_interactive, Some(true));
     }
     async fn build_with_tools(tools: Vec<String>, disallowed: Vec<String>) -> crate::agent::Agent {
         use xai_grok_tools::computer::local::LocalTerminalBackend;
@@ -2120,7 +1998,7 @@ mod tests {
         let mut def = crate::config::AgentDefinition::general_purpose();
         assert!(def.session_tools_allowed("read_file"));
         def.session_tools_allowlist = Some(vec!["read_file".into()]);
-        assert!(def.session_tools_allowed("ChutesBuild:read_file"));
+        assert!(def.session_tools_allowed("GrokBuild:read_file"));
         assert!(!def.session_tools_allowed("grep"));
         def.session_tools_denylist = Some(vec!["read_file".into()]);
         assert!(!def.session_tools_allowed("read_file"));
@@ -2237,7 +2115,7 @@ mod tests {
             Some(vec!["worker".into()])
         );
     }
-    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Chutes Build
+    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Grok
     /// equivalents by `ToolKind` — a real restricted toolset, not zero tools.
     #[tokio::test]
     async fn claude_tool_names_map_to_grok_equivalents() {
@@ -2447,7 +2325,7 @@ mod tests {
         .from_definition(definition)
         .with_web_search_config(WebSearchConfig::Enabled {
             api_key: "test-key".into(),
-            base_url: "https://api.chutes.ai/v1".into(),
+            base_url: "https://api.x.ai/v1".into(),
             model: "test-web-search-model".into(),
             extra_headers: Default::default(),
             alpha_test_key: None,
@@ -2576,7 +2454,7 @@ mod tests {
         let web_search_config = if web_search_enabled {
             WebSearchConfig::Enabled {
                 api_key: "test-key".into(),
-                base_url: "https://api.chutes.ai/v1".into(),
+                base_url: "https://api.x.ai/v1".into(),
                 model: "test-web-search-model".into(),
                 extra_headers: Default::default(),
                 alpha_test_key: None,

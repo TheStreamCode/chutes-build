@@ -16,7 +16,7 @@ pub(crate) use self::journal::{RelocationJournal, RelocationLease, RelocationPha
 pub(crate) use self::view::RelocationView;
 use crate::session::persistence::{PendingCwdSwitchReminder, Summary};
 
-/// True when `~/.chutes-build/relocations/<session_id>.json` exists.
+/// True when `~/.grok/relocations/<session_id>.json` exists.
 ///
 /// Replay's parent-cwd/sibling fast path must not trust a found `updates.jsonl`
 /// while a journal is present: source and target dirs can both exist, and the

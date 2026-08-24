@@ -19,7 +19,7 @@ pub use xai_grok_session_search::{
 };
 
 /// Private on purpose: [`start_if_enabled`] is the only way to a manager, so the
-/// feature cannot be bypassed. One live manager per Chutes Build home, at most.
+/// feature cannot be bypassed. One live manager per grok home, at most.
 fn start_search_index() -> SearchIndexManager {
     SearchIndexManager::start(
         |root| -> Box<dyn SessionSource> {

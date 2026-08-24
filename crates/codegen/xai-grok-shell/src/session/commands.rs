@@ -257,6 +257,10 @@ pub enum SessionCommand {
     ReplaceSystemPrompt {
         system_prompt: String,
     },
+    /// Push a fresh status-line snapshot. Sent when a client attaches to a
+    /// resident session, which the transient `SessionStatus` notification would
+    /// otherwise never reach.
+    EmitStatusSnapshot,
     /// Resume hook: after a session is restored with
     /// `awaiting_plan_approval == true`, re-issue the `exit_plan_mode`
     /// reverse-request so the client re-shows approval chrome over a real live
@@ -323,6 +327,8 @@ pub enum SessionCommand {
     SetSessionModel {
         sampling_config: xai_grok_sampler::SamplerConfig,
         use_concise: bool,
+        /// Models declare differing `model_family`s → compact (lossy) at switch end.
+        is_family_switch: bool,
         /// When `false`, skip the system prompt rewrite (concise/default swap).
         /// Set to `false` for forked sessions so mid-session model switches
         /// cannot contaminate the inherited prompt configuration.
@@ -403,7 +409,7 @@ pub enum SessionCommand {
     ReloadPlugins {
         registry: Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>,
     },
-    /// Re-discover the session's own project hooks (`.chutes-build/hooks`,
+    /// Re-discover the session's own project hooks (`.grok/hooks`,
     /// `.cursor/hooks.json`, …) mid-session, re-evaluating folder trust. Used by
     /// the interactive folder-trust grant so a granted folder's repo-local hooks
     /// start without a session restart (plugin-contributed hooks are handled by
@@ -433,7 +439,7 @@ pub enum SessionCommand {
         request: RewindRequest,
         respond_to: oneshot::Sender<anyhow::Result<RewindResponse>>,
     },
-    /// Out-of-band history repair (`chutes.ai/session/repair`): fix tool-pairing
+    /// Out-of-band history repair (`x.ai/session/repair`): fix tool-pairing
     /// violations (orphaned/displaced `ToolResult`s, duplicates, unanswered
     /// calls) that would otherwise 400 on every request. `dry_run` only
     /// reports. Refused while a turn is in flight.
@@ -506,7 +512,7 @@ pub enum SessionCommand {
         respond_to: oneshot::Sender<std::io::Result<()>>,
     },
     /// Update MCP servers for an existing session (used during reconnect or
-    /// mid-session via the `chutes.ai/session/update_mcp_servers` extension method).
+    /// mid-session via the `x.ai/session/update_mcp_servers` extension method).
     /// This replaces the current MCP server configuration and triggers re-initialization.
     ///
     /// The caller is notified via `respond_to` once MCP re-initialization
@@ -643,7 +649,7 @@ pub enum SessionCommand {
         action: xai_hooks_plugins_types::PluginsAction,
         respond_to: oneshot::Sender<xai_hooks_plugins_types::ActionOutcome>,
     },
-    /// This session's plugin registry, as served by `chutes.ai/plugins/list`.
+    /// This session's plugin registry, as served by `x.ai/plugins/list`.
     PluginsList {
         respond_to:
             oneshot::Sender<Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>>,
@@ -706,7 +712,7 @@ pub enum SessionCommand {
     },
     /// Replace the text of a queued (not-yet-running) prompt in place
     /// (server-side LWW). Last write wins via the actor's
-    /// serialized mailbox; the rebroadcast of `chutes.ai/queue/changed` is the
+    /// serialized mailbox; the rebroadcast of `x.ai/queue/changed` is the
     /// truth signal for every attached client. The original `owner`
     /// attribution is preserved; `editor` is recorded as the most recent
     /// editor (for future "alice edited this" UX). A missing id, or an id
@@ -735,7 +741,7 @@ pub enum SessionCommand {
     /// like [`RemoveQueuedPrompt`]. A benign no-op (the prompt stays queued and
     /// runs normally) when no turn is running, the id names the running turn, is
     /// stale/already-drained, or `owner` doesn't match. The rebroadcast of
-    /// `chutes.ai/queue/changed` is the truth signal for every attached client.
+    /// `x.ai/queue/changed` is the truth signal for every attached client.
     InterjectQueuedPrompt {
         id: String,
         expected_version: u64,
@@ -845,7 +851,7 @@ pub enum SessionCommand {
     Interject {
         text: String,
         /// Client-minted id echoed back on the broadcast
-        /// `chutes.ai/session/interjection` so the originating pager can dedup its
+        /// `x.ai/session/interjection` so the originating pager can dedup its
         /// optimistic local block. `None` from older clients.
         id: Option<String>,
         /// Pasted images riding along with the interjection. Empty from

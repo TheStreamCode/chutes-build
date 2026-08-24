@@ -1245,3 +1245,37 @@ the fork's before the agent commit.
 `seam_sweep.py` against both the baseline and `v1.1.0`, and the release binary
 (`--version`, `--help` branding sweep, `models`, `du`) all green. Gitleaks scans
 the worktree and the full history clean.
+
+## Sync 1.0.6..1.0.8 in corso (branch sync/upstream-1.0.8-wip, 2026-08-24)
+
+Aree portate e verdi per-crate: proxy-types+ptyctl, chat-state+tracing+
+proto-build(pbjson_exclude solo; scartato il regressivo /dev/stdout),
+pager-render(kitty), **tools** (elicitation MCP, shared_http cache,
+task capability_mode harness-internal via xai-tool-types, registry
+generate_schema_cached/RwLock, taxonomy InitOrUpdateApp), telemetry
+(OTLP esterno con master switch nostro) + version(IS_DEV_BUILD/full_version)
++tty-utils(metriche processo) + extra-ca(build_reqwest_client/
+build_blocking_reqwest_client interim) + mcp(elicitation/owned_clients)
++ session-events(McpOAuthProbeResolved), **fast-worktree** (backend NFS
+completo + stub), **workspace stack** (workspace-types DeleteScheduledTask
+e worktree detach/salvage/clean; hub-sdk/core; diag-server revive_connected;
+status-line NUOVO crate in members; daemon preview_supervisor; workspace:
+permission/shell_access split, handle acknowledged-notify + guarded insert,
+workspace_ops repos .chutes-build, commands EmitStatusSnapshot/is_family_switch,
+config ModelInfo.subagent_rate_limit_max_attempts, bins allineati).
+
+### Da fare per chiudere (in ordine)
+1. **xai-grok-agent**: builder.rs rifattorizzato upstream (tool registration
+   spostata su ToolBridgeBuilder); riportare le registrazioni Chutes
+   (~14 register! + match arms, salvate in %TEMP%/opencode/our_builder.rs)
+   nella nuova forma. Poi config/discovery già presi; subagent_prompts.rs e
+   templates/*.md restano NOSTRI (identità).
+2. shell residui: spawn.rs inferenza (Agent vs tuple) si sblocca col punto 1;
+   compaction.rs:1673 u32::from(persist_compaction_segment) -> helper ora
+   restituisce () in helpers/session_compact.rs: adattare contatore.
+3. **Telemetria (mandato utente)**: deadenare compile-time ogni export
+   (external::init no-op, is_active=false costante, exporter mai costruiti);
+   restano solo eventi locali jsonl. Aggiornare PRIVACY.md.
+4. pager (delta intero), poi root Cargo.toml/clippy.toml(+fix call-site),
+   seam_sweep --base v1.2.4, dead_modules, known_failures compare,
+   smoke binario, upstream.json -> 07b2f714, CHANGELOG, release.

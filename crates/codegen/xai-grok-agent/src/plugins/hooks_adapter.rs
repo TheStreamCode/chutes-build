@@ -99,17 +99,11 @@ fn process_hooks_content(
         warnings.push(msg);
     }
 
-    // Native `CHUTES_BUILD_PLUGIN_*` vars plus their vendor-compat aliases.
+    // Native `GROK_PLUGIN_*` vars plus their vendor-compat aliases.
     let plugin_env: HashMap<String, String> = HashMap::from([
-        (
-            "CHUTES_BUILD_PLUGIN_ROOT".to_string(),
-            plugin_root.to_string(),
-        ),
+        ("GROK_PLUGIN_ROOT".to_string(), plugin_root.to_string()),
         ("CLAUDE_PLUGIN_ROOT".to_string(), plugin_root.to_string()),
-        (
-            "CHUTES_BUILD_PLUGIN_DATA".to_string(),
-            plugin_data.to_string(),
-        ),
+        ("GROK_PLUGIN_DATA".to_string(), plugin_data.to_string()),
         ("CLAUDE_PLUGIN_DATA".to_string(), plugin_data.to_string()),
     ]);
 
@@ -131,7 +125,7 @@ fn process_hooks_content(
         if let Some(cmd) = &spec.command {
             let cmd_str = cmd.to_string_lossy();
             let substituted = substitute_env_vars(&cmd_str, plugin_root, plugin_data);
-            let expanded = xai_grok_config::expand_env_vars_in_string(&substituted);
+            let expanded = xai_grok_hooks::config::expand_env_skipping_runner_vars(&substituted);
             if expanded != cmd_str {
                 spec.command = Some(PathBuf::from(expanded));
             }
@@ -285,7 +279,7 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert!(specs[0].name.starts_with("plugin/my-plugin/"));
         assert_eq!(
-            specs[0].extra_env.get("CHUTES_BUILD_PLUGIN_ROOT").unwrap(),
+            specs[0].extra_env.get("GROK_PLUGIN_ROOT").unwrap(),
             "/path/to/plugin"
         );
         assert_eq!(
@@ -293,7 +287,7 @@ mod tests {
             "/path/to/plugin"
         );
         assert_eq!(
-            specs[0].extra_env.get("CHUTES_BUILD_PLUGIN_DATA").unwrap(),
+            specs[0].extra_env.get("GROK_PLUGIN_DATA").unwrap(),
             "/path/to/data"
         );
 
@@ -325,7 +319,7 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert!(specs[0].name.starts_with("plugin/inline-plugin/"));
         assert_eq!(
-            specs[0].extra_env.get("CHUTES_BUILD_PLUGIN_ROOT").unwrap(),
+            specs[0].extra_env.get("GROK_PLUGIN_ROOT").unwrap(),
             "/path/to/plugin"
         );
         assert!(warnings.is_empty());
@@ -361,7 +355,7 @@ mod tests {
                 "PreToolUse": [
                     {"hooks": [
                         {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre.sh"},
-                        {"type": "command", "command": "${CHUTES_BUILD_PLUGIN_ROOT}/hooks/alias.sh"},
+                        {"type": "command", "command": "${GROK_PLUGIN_ROOT}/hooks/alias.sh"},
                         {"type": "command", "command": "${CLAUDE_PLUGIN_DATA}/cache/post.sh"}
                     ]}
                 ]
@@ -406,7 +400,7 @@ mod tests {
             "command_raw must preserve the source string verbatim, got {raws:?}"
         );
         assert!(
-            raws.contains(&"${CHUTES_BUILD_PLUGIN_ROOT}/hooks/alias.sh"),
+            raws.contains(&"${GROK_PLUGIN_ROOT}/hooks/alias.sh"),
             "command_raw must preserve the source string verbatim, got {raws:?}"
         );
         assert!(
@@ -473,9 +467,9 @@ mod tests {
                             "env": {
                                 "FOO": "bar",
                                 "CLAUDE_PLUGIN_ROOT": "/user/wins?",
-                                "CHUTES_BUILD_PLUGIN_ROOT": "/user/wins?",
+                                "GROK_PLUGIN_ROOT": "/user/wins?",
                                 "CLAUDE_PLUGIN_DATA": "/user/wins?",
-                                "CHUTES_BUILD_PLUGIN_DATA": "/user/wins?"
+                                "GROK_PLUGIN_DATA": "/user/wins?"
                             }
                         }
                     ]}
@@ -503,9 +497,9 @@ mod tests {
         // All four plugin-owned keys: plugin wins over the user's attempt.
         for (key, expected) in [
             ("CLAUDE_PLUGIN_ROOT", "/actual/plugin/root"),
-            ("CHUTES_BUILD_PLUGIN_ROOT", "/actual/plugin/root"),
+            ("GROK_PLUGIN_ROOT", "/actual/plugin/root"),
             ("CLAUDE_PLUGIN_DATA", "/actual/plugin/data"),
-            ("CHUTES_BUILD_PLUGIN_DATA", "/actual/plugin/data"),
+            ("GROK_PLUGIN_DATA", "/actual/plugin/data"),
         ] {
             assert_eq!(
                 specs[0].extra_env.get(key).map(String::as_str),

@@ -36,15 +36,16 @@ pub(crate) type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 pub enum PendingKind {
     /// `request_permission` for a tool action.
     Permission,
-    /// `chutes.ai/ask_user_question`.
+    /// `x.ai/ask_user_question`.
     Question,
-    /// `chutes.ai/exit_plan_mode` plan approval.
+    /// `x.ai/exit_plan_mode` plan approval.
     PlanApproval,
+    McpElicitation,
 }
 
 /// Whether a blocking plan-approval reverse-request is parked in `pending`.
 ///
-/// The resume re-park issues `chutes.ai/exit_plan_mode` from a detached task
+/// The resume re-park issues `x.ai/exit_plan_mode` from a detached task
 /// with no running turn, making it the one parked interaction that also carries a
 /// persisted gate (`awaiting_plan_approval`). `session_has_live_work` consults
 /// this to keep such a session resident until the decision is answered or a real
@@ -70,7 +71,7 @@ fn broadcast(gateway: &GatewaySender, session_id: &acp::SessionId, update: XaiSe
     };
     if let Ok(params) = serde_json::value::to_raw_value(&notification) {
         gateway.forward_fire_and_forget(acp::ExtNotification::new(
-            "chutes.build/session_notification",
+            "x.ai/session_notification",
             params.into(),
         ));
     }

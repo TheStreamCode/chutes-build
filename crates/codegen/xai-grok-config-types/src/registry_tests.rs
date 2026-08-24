@@ -45,32 +45,27 @@ fn registered_settings() {
     assert_eq!(
         rows,
         BTreeMap::from([
-            ("session_search", ("CHUTES_BUILD_SESSION_SEARCH", true)),
-            ("lsp_tools", ("CHUTES_BUILD_LSP_TOOLS", false)),
-            ("web_fetch", ("CHUTES_BUILD_WEB_FETCH", false)),
-            ("session_recap", ("CHUTES_BUILD_SESSION_RECAP", true)),
-            (
-                "ask_user_question",
-                ("CHUTES_BUILD_ASK_USER_QUESTION", true)
-            ),
-            ("voice_mode", ("CHUTES_BUILD_VOICE_MODE", true)),
-            ("write_file", ("CHUTES_BUILD_WRITE_FILE", true)),
-            ("feedback", ("CHUTES_BUILD_FEEDBACK_ENABLED", true)),
-            ("turn_summary", ("CHUTES_BUILD_TURN_SUMMARY", true)),
-            ("cancel_rewind", ("CHUTES_BUILD_CANCEL_REWIND", true)),
+            ("session_search", ("GROK_SESSION_SEARCH", true)),
+            ("lsp_tools", ("GROK_LSP_TOOLS", false)),
+            ("web_fetch", ("GROK_WEB_FETCH", false)),
+            ("session_recap", ("GROK_SESSION_RECAP", true)),
+            ("ask_user_question", ("GROK_ASK_USER_QUESTION", true)),
+            ("voice_mode", ("GROK_VOICE_MODE", true)),
+            ("write_file", ("GROK_WRITE_FILE", true)),
+            ("feedback", ("GROK_FEEDBACK_ENABLED", true)),
+            ("feedback_trace_card", ("GROK_FEEDBACK_TRACE_CARD", false)),
+            ("turn_summary", ("GROK_TURN_SUMMARY", true)),
+            ("cancel_rewind", ("GROK_CANCEL_REWIND", true)),
             (
                 "compaction_verbatim_input",
-                ("CHUTES_BUILD_COMPACTION_VERBATIM_INPUT", true),
+                ("GROK_COMPACTION_VERBATIM_INPUT", true),
             ),
-            (
-                "two_pass_compaction",
-                ("CHUTES_BUILD_TWO_PASS_COMPACTION", false)
-            ),
-            ("backend_tools", ("CHUTES_BUILD_BACKEND_SEARCH", true)),
-            ("auto_wake", ("CHUTES_BUILD_AUTO_WAKE", true)),
+            ("two_pass_compaction", ("GROK_TWO_PASS_COMPACTION", false)),
+            ("backend_tools", ("GROK_BACKEND_SEARCH", true)),
+            ("auto_wake", ("GROK_AUTO_WAKE", true)),
             (
                 "subagent_worktree_snapshot",
-                ("CHUTES_BUILD_SUBAGENT_WORKTREE_SNAPSHOT", false),
+                ("GROK_SUBAGENT_WORKTREE_SNAPSHOT", false),
             ),
         ]),
     );
@@ -92,6 +87,7 @@ fn every_registered_feature_reads_its_own_remote_setting() {
             Feature::VoiceMode => settings.voice_mode_enabled = Some(value),
             Feature::WriteFile => settings.write_file_enabled = Some(value),
             Feature::Feedback => settings.feedback_enabled = Some(value),
+            Feature::FeedbackTraceCard => settings.feedback_trace_card_enabled = Some(value),
             Feature::TurnSummary => settings.turn_summary = Some(value),
             Feature::CancelRewind => settings.cancel_rewind_enabled = Some(value),
             Feature::CompactionVerbatimInput => settings.compaction_verbatim_input = Some(value),
@@ -187,7 +183,7 @@ fn off_reason_names_the_setting_that_turned_it_off() {
                 env: Some(false),
                 ..Default::default()
             },
-            "the CHUTES_BUILD_SESSION_SEARCH environment variable",
+            "the GROK_SESSION_SEARCH environment variable",
         ),
         (
             FeatureSources {
