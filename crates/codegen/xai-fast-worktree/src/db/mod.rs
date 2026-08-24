@@ -7,7 +7,6 @@ mod queries;
 mod schema;
 
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -228,13 +227,13 @@ impl WorktreeDb {
             .with_context(|| format!("failed to set journal mode {}", mode.as_str()))
     }
 
-    /// Open the default DB at `~/.chutes-build/worktrees.db`.
+    /// Open the default DB at `~/.grok/worktrees.db`.
     ///
-    /// Discovers Chutes Build home via `$CHUTES_BUILD_HOME`, falling back to the canonicalized
-    /// user home (matching `xai_grok_config::grok_home`).
-    /// Path is resolved fresh each call (~1µs env var read) to support
-    /// test overrides. Each call opens its own connection — callers in hot
-    /// paths should cache the `WorktreeDb` instance.
+    /// Discovers grok home via `xai_grok_home::resolve_grok_home` (`$GROK_HOME`,
+    /// else the canonicalized `<home>/.grok`).
+    /// Path is resolved fresh each call (env read plus a canonicalize) to
+    /// support test overrides. Each call opens its own connection — callers in
+    /// hot paths should cache the `WorktreeDb` instance.
     pub fn open_default() -> Result<Self> {
         Self::open(&resolve_grok_home()?)
     }
@@ -375,7 +374,7 @@ impl WorktreeDb {
     /// before lookup). Otherwise it's looked up first as a DB ID, then as a
     /// worktree label (stored in `metadata.label`).
     pub fn get(&self, id_or_path: &str) -> Result<Option<WorktreeRecord>> {
-        if id_or_path.contains('/') || id_or_path.contains('\\') {
+        if id_or_path.contains('/') {
             let canon = PathBuf::from(id_or_path);
             let canon = dunce::canonicalize(&canon).unwrap_or(canon);
             queries::get_by_path(&self.conn, &canon)
@@ -443,16 +442,11 @@ impl WorktreeDb {
 /// The basename alone collides across repos, and `INSERT OR REPLACE` would then evict
 /// the other repo's record; hashing the full path keeps distinct worktrees distinct.
 pub fn id_from_path(path: &Path) -> String {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
-    let base = name.strip_prefix("worktree-").unwrap_or(&name);
-    format!("{base}-{}", crate::copy::shard::short_path_hash(path))
+    crate::worktree::plan::worktree_id_from_path(path)
 }
 
 /// Extract the repo name (last component) from a source repo path.
-pub fn repo_name_from_path(source: &Path) -> String {
+pub(crate) fn repo_name_from_path(source: &Path) -> String {
     source
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -460,47 +454,38 @@ pub fn repo_name_from_path(source: &Path) -> String {
 }
 
 pub fn now_epoch_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+    crate::time::epoch_secs()
 }
 
+/// Resolve the grok home: `$GROK_HOME`, else `<home>/.grok`.
 pub fn resolve_grok_home() -> Result<PathBuf> {
-    if let Ok(v) = std::env::var("CHUTES_BUILD_HOME") {
-        return Ok(PathBuf::from(v));
-    }
-    // `std::env::home_dir` reads $HOME on Unix and %USERPROFILE% on Windows,
-    // where a bare $HOME is usually unset.
-    let home =
-        std::env::home_dir().context("neither $CHUTES_BUILD_HOME nor a user home resolves")?;
-    // Canonicalize the home dir so worktree paths share the same physical .chutes-build
-    // tree as trust/hooks even when it is symlinked. The dunce canonicalization
-    // must stay in sync with xai_grok_config::default_grok_home().
-    Ok(dunce::canonicalize(&home)
-        .unwrap_or(home)
-        .join(".chutes-build"))
+    xai_grok_home::resolve_grok_home()
+        .context("neither $GROK_HOME nor a home directory could be resolved")
 }
 
-/// Serializes tests that mutate the process-global `CHUTES_BUILD_HOME` env var so they
+/// Serializes tests that mutate the process-global `GROK_HOME` env var so they
 /// don't clobber each other under `cargo test`, where tests share one process
 /// (nextest isolates per-process, but the suite must also pass under `cargo test`).
 #[cfg(test)]
-static CHUTES_BUILD_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static GROK_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only isolation for code that resolves the DB via `open_default()`.
 ///
-/// Holds [`CHUTES_BUILD_HOME_ENV_LOCK`] (serializing concurrent setters), points
-/// `CHUTES_BUILD_HOME` at a fresh private tmp dir, and restores the prior value on drop.
+/// Holds [`GROK_HOME_ENV_LOCK`] (serializing concurrent setters), points
+/// `GROK_HOME` at a fresh private tmp dir, and restores the prior value on drop.
 /// Use instead of hand-rolling the lock + restore guard + tmp dir per test.
 ///
-/// `Drop` restores `CHUTES_BUILD_HOME` before `_lock` releases, so the env is correct
+/// `Drop` restores `GROK_HOME` before `_lock` releases, so the env is correct
 /// before another waiting setter proceeds.
 #[cfg(test)]
 pub(crate) struct GrokHomeFixture {
     _lock: std::sync::MutexGuard<'static, ()>,
     prev: Option<std::ffi::OsString>,
-    /// The isolated Chutes Build home; pass to `WorktreeDb::open` to read the same DB
+    prev_xdg_data_home: Option<std::ffi::OsString>,
+    prev_grove_data_dir: Option<std::ffi::OsString>,
+    prev_home: Option<std::ffi::OsString>,
+    touched_grove_env: bool,
+    /// The isolated grok home; pass to `WorktreeDb::open` to read the same DB
     /// `open_default()` writes to.
     pub home: PathBuf,
     _tmp: tempfile::TempDir,
@@ -509,36 +494,76 @@ pub(crate) struct GrokHomeFixture {
 #[cfg(test)]
 impl GrokHomeFixture {
     pub(crate) fn new() -> Self {
-        let lock = CHUTES_BUILD_HOME_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let lock = GROK_HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().join("grok-home");
         std::fs::create_dir_all(&home).unwrap();
         // Warm up the DB (journal-mode conversion + schema) before exposing it
-        // via CHUTES_BUILD_HOME, sparing the test hot loop set_journal_mode's retry
+        // via GROK_HOME, sparing the test hot loop set_journal_mode's retry
         // sleeps. This open has exclusive access (nothing reaches the path
-        // until CHUTES_BUILD_HOME points here); set_journal_mode's retry is the actual
+        // until GROK_HOME points here); set_journal_mode's retry is the actual
         // race fix.
         let _ = WorktreeDb::open(&home);
-        let prev = std::env::var_os("CHUTES_BUILD_HOME");
-        unsafe { std::env::set_var("CHUTES_BUILD_HOME", &home) };
+        let prev = std::env::var_os("GROK_HOME");
+        // SAFETY: the fixture holds the GROK_HOME env lock for its whole
+        // lifetime, so no other test thread reads or writes the environment.
+        unsafe { std::env::set_var("GROK_HOME", &home) };
         Self {
             _lock: lock,
             prev,
+            prev_xdg_data_home: None,
+            prev_grove_data_dir: None,
+            prev_home: None,
+            touched_grove_env: false,
             home,
             _tmp: tmp,
         }
+    }
+
+    /// Point grove lookup at `$XDG_DATA_HOME/grove` with `GROVE_DATA_DIR` unset
+    /// and `HOME` confined to this fixture so pin-GC cannot touch the host.
+    pub(crate) fn isolate_xdg_grove_data(&mut self) -> PathBuf {
+        if !self.touched_grove_env {
+            self.prev_xdg_data_home = std::env::var_os("XDG_DATA_HOME");
+            self.prev_grove_data_dir = std::env::var_os("GROVE_DATA_DIR");
+            self.prev_home = std::env::var_os("HOME");
+            self.touched_grove_env = true;
+        }
+        let xdg = self._tmp.path().join("xdg-data");
+        let grove = xdg.join("grove");
+        std::fs::create_dir_all(&grove).unwrap();
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", &xdg);
+            std::env::remove_var("GROVE_DATA_DIR");
+            std::env::set_var("HOME", self._tmp.path());
+        }
+        grove
     }
 }
 
 #[cfg(test)]
 impl Drop for GrokHomeFixture {
     fn drop(&mut self) {
+        // SAFETY: the fixture still holds the GROK_HOME env lock here, so no
+        // other test thread reads or writes the environment during restore.
         unsafe {
             match self.prev.take() {
-                Some(p) => std::env::set_var("CHUTES_BUILD_HOME", p),
-                None => std::env::remove_var("CHUTES_BUILD_HOME"),
+                Some(p) => std::env::set_var("GROK_HOME", p),
+                None => std::env::remove_var("GROK_HOME"),
+            }
+            if self.touched_grove_env {
+                match self.prev_xdg_data_home.take() {
+                    Some(p) => std::env::set_var("XDG_DATA_HOME", p),
+                    None => std::env::remove_var("XDG_DATA_HOME"),
+                }
+                match self.prev_grove_data_dir.take() {
+                    Some(p) => std::env::set_var("GROVE_DATA_DIR", p),
+                    None => std::env::remove_var("GROVE_DATA_DIR"),
+                }
+                match self.prev_home.take() {
+                    Some(p) => std::env::set_var("HOME", p),
+                    None => std::env::remove_var("HOME"),
+                }
             }
         }
     }

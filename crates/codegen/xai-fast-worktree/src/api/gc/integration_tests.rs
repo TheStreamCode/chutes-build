@@ -719,6 +719,10 @@ fn gc_report_serde_round_trip() {
         not_judged: 0,
         unnamed: 2,
         names_collected: 7,
+        pin_gc_examined: 0,
+        pin_gc_pruned: 0,
+        pin_gc_deferred: 0,
+        pin_gc_kept: 0,
     };
     let json = serde_json::to_string(&report).unwrap();
     let deser: gc::GcReport = serde_json::from_str(&json).unwrap();
