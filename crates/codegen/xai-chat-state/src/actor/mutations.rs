@@ -132,7 +132,7 @@ impl ChatStateActor {
         });
     }
 
-    /// Out-of-band history repair (`chutes.ai/session/repair`): run
+    /// Out-of-band history repair (`x.ai/session/repair`): run
     /// [`crate::compaction_utils::repair_history`] and persist changes via
     /// [`Self::replace_conversation`]. Unlike
     /// [`Self::ensure_conversation_integrity`], this also removes orphaned
@@ -229,6 +229,21 @@ impl ChatStateActor {
                 "ChatState: push_message updated estimated_tokens_since_model"
             );
         }
+        self.persist_and_push_message(item);
+    }
+
+    /// Persist model output already included in the provider's usage total.
+    pub(super) fn push_model_output(&mut self, item: ConversationItem) {
+        self.persist_and_push_message(item);
+    }
+
+    /// Persist model output whose provider response omitted usage.
+    pub(super) fn push_unreported_model_output(&mut self, item: ConversationItem) {
+        self.state.estimated_tokens_since_model += super::state::estimate_item_tokens(&item);
+        self.persist_and_push_message(item);
+    }
+
+    fn persist_and_push_message(&mut self, item: ConversationItem) {
         self.persistence.persist_message(&item);
         self.state.conversation.push(item);
     }

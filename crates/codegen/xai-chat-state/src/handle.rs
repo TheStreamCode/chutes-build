@@ -96,6 +96,18 @@ impl ChatStateHandle {
         let _ = self.cmd_tx.send(ChatStateCommand::PushToolResult { item });
     }
 
+    /// Persist model output already included in the provider's usage total.
+    pub fn push_model_output(&self, item: ConversationItem) {
+        let _ = self.cmd_tx.send(ChatStateCommand::PushModelOutput { item });
+    }
+
+    /// Persist model output whose provider response omitted usage.
+    pub fn push_unreported_model_output(&self, item: ConversationItem) {
+        let _ = self
+            .cmd_tx
+            .send(ChatStateCommand::PushUnreportedModelOutput { item });
+    }
+
     /// Record accumulated token usage.
     pub fn record_token_usage(&self, total_tokens: u64) {
         let _ = self
@@ -224,7 +236,7 @@ impl ChatStateHandle {
         .unwrap_or(crate::StripOutcome::ActorUnavailable)
     }
 
-    /// Out-of-band history repair (`chutes.ai/session/repair`); see
+    /// Out-of-band history repair (`x.ai/session/repair`); see
     /// [`ChatStateCommand::RepairHistory`]. Returns `None` if the actor is
     /// dead, `Some(Err(_))` if a turn was in flight at processing time.
     pub async fn repair_history(
@@ -441,11 +453,17 @@ impl ChatStateHandle {
     /// `total_tokens` plus bytes/4 estimate of tool results pushed since the
     /// last model response. Used by `check_preflight_overflow`.
     pub async fn get_estimated_total_tokens(&self) -> u64 {
+        self.try_get_estimated_total_tokens().await.unwrap_or(0)
+    }
+
+    /// The same count, distinguishing "nothing yet" from "the actor did not
+    /// answer": a caller that reports occupancy cannot treat an unreadable
+    /// actor as an empty context.
+    pub async fn try_get_estimated_total_tokens(&self) -> Option<u64> {
         self.query("GetEstimatedTotalTokens", |reply| {
             ChatStateCommand::GetEstimatedTotalTokens { reply }
         })
         .await
-        .unwrap_or(0)
     }
 
     /// Bytes/4 estimate of all non-system conversation items.

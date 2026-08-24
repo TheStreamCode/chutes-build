@@ -668,6 +668,21 @@ async fn assistant_response_push_does_not_bump_estimated_delta() {
 }
 
 #[tokio::test]
+async fn provider_counted_model_output_persists_without_bumping_estimate() {
+    let h = TestHarness::new();
+    h.handle.record_token_usage(100_000);
+    h.handle.push_model_output(ConversationItem::Reasoning(
+        xai_grok_sampling_types::synthesized_reasoning_item("r".repeat(4_000)),
+    ));
+
+    assert!(matches!(
+        h.handle.get_conversation().await.as_slice(),
+        [ConversationItem::Reasoning(_)]
+    ));
+    assert_eq!(h.handle.get_estimated_total_tokens().await, 100_000);
+}
+
+#[tokio::test]
 async fn estimated_tokens_resets_on_truncate() {
     let mut h = TestHarness::new();
     h.handle.record_token_usage(100_000);
@@ -4057,7 +4072,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
 
     // Initial config: 500k context, Responses backend (matches grok-4.5)
     let config = SamplingConfig {
-        base_url: "https://api.chutes.ai/v1".to_string(),
+        base_url: "https://api.x.ai/v1".to_string(),
         model: "grok-4.5".to_string(),
         max_completion_tokens: None,
         temperature: Some(0.7),
@@ -4881,7 +4896,7 @@ async fn prefix_stable_after_session_resume() {
 }
 
 // ============================================================================
-// Out-of-band history repair (chutes.ai/session/repair)
+// Out-of-band history repair (x.ai/session/repair)
 // ============================================================================
 
 /// Bricked-session shape: an orphaned tool result survives load (the eager
