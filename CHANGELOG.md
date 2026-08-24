@@ -4,6 +4,16 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-08-24
+
+### Fixed
+
+- **The welcome wordmark no longer disappears on some consoles.** Terminal detection used to suppress the Chutes Build logo entirely on hosts flagged as a legacy Windows console — a plain PowerShell launch could trip it, leaving the first screen without any identity. Height is now the only input: the box-drawing wordmark from 1.2.0 renders on every console at every height that already showed a logo, and the pinned art hashes are untouched.
+
+### Changed
+
+- **Brighter welcome shimmer.** The light sweep across the logo is clearly visible on a bright terminal too: peak strength doubled (0.33 → 0.60), a wider band and a longer sweep per cycle, deeper background breathing.
+
 ## [1.2.3] - 2026-08-23
 
 ### Fixed
