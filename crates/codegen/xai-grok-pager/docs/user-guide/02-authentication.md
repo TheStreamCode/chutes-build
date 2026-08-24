@@ -357,7 +357,7 @@ knobs are separate from it either way:
 |---------|---------------|
 | `[features] telemetry` | `config.toml` or `CHUTES_BUILD_TELEMETRY_ENABLED` |
 | `[telemetry] trace_upload` | `config.toml` or `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` |
-| External OpenTelemetry | `CHUTES_BUILD_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
+| External OpenTelemetry | **Deadened** — no OTLP exporter is ever constructed; the stream can never activate. |
 
 On team accounts, only a team admin can change coding-data sharing.
 Team admins can also enable or disable Zero Data Retention (ZDR) for their team.

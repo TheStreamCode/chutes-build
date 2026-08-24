@@ -137,9 +137,10 @@ Nesting is bounded to prevent unreviewable recursive swarms.
 ## Privacy boundary
 
 Outbound provider calls are allowlisted. Telemetry and remote error pipelines
-are hard-disabled, traces export locally, the upstream relay defaults to a
-closed loopback endpoint, and public commands that depended on upstream cloud
-services are not registered. See [PRIVACY.md](../PRIVACY.md).
+are compile-time deadened (the external OTEL stream can never activate — no
+exporter is constructed), traces export locally, the upstream relay defaults
+to a closed loopback endpoint, and public commands that depended on upstream
+cloud services are not registered. See [PRIVACY.md](../PRIVACY.md).
 
 All Chutes endpoint overrides pass a central URL and DNS policy before use.
 Without an explicit development opt-in, endpoints must be allowlisted HTTPS
