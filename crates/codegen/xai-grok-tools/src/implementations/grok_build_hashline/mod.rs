@@ -1,4 +1,4 @@
-//! `GrokBuildHashline` namespace — hashline-anchored read/edit/search tools.
+//! `ChutesBuildHashline` namespace — hashline-anchored read/edit/search tools.
 //!
 //! This module provides the anchor engine used by the hashline toolset:
 //! - [`AnchorScheme`] trait and implementations (Candidates A, B, C)

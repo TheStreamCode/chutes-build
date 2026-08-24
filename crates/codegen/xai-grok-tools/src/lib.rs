@@ -1,4 +1,4 @@
-//! Chutes Build tools library.
+//! Grok tools library.
 
 pub use xai_grok_version::VERSION;
 
@@ -22,6 +22,7 @@ pub mod bridge;
 pub mod computer;
 pub mod gitignore;
 pub mod implementations;
+pub mod mcp_elicitation;
 pub mod media_gen_limits;
 pub mod normalization;
 pub mod notification;

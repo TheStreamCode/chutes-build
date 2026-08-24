@@ -105,7 +105,7 @@ impl crate::types::tool_metadata::ToolMetadata for HashlineReadTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuildHashline
+        ToolNamespace::ChutesBuildHashline
     }
 
     fn description_template(&self) -> &str {
@@ -367,7 +367,7 @@ mod tests {
         assert!(xai_tool_runtime::Tool::capabilities(&tool).is_read_only);
         assert!(matches!(
             ToolMetadata::tool_namespace(&tool),
-            ToolNamespace::GrokBuildHashline
+            ToolNamespace::ChutesBuildHashline
         ));
     }
 

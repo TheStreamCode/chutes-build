@@ -216,7 +216,7 @@ impl crate::types::tool_metadata::ToolMetadata for HashlineEditTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuildHashline
+        ToolNamespace::ChutesBuildHashline
     }
 
     fn description_template(&self) -> &str {

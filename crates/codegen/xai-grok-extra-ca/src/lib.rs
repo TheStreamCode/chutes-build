@@ -63,6 +63,18 @@ pub fn with_extra_root_certificates_blocking(
     builder
 }
 
+/// Configure and build an async client under the crate's root policy.
+///
+/// Interim compat surface for the 1.0.8 tool callers: applies
+/// [`with_extra_root_certificates`], then hands the builder to `configure`
+/// and builds. The fuller upstream rework (rustls backend pin, shared root
+/// store, process crypto provider) is intentionally not ported yet.
+pub fn build_reqwest_client(
+    configure: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
+) -> Result<reqwest::Client, reqwest::Error> {
+    configure(with_extra_root_certificates(reqwest::Client::builder())).build()
+}
+
 fn load_extra_root_ders() -> Vec<Vec<u8>> {
     let path = match std::env::var_os(ENV_CHUTES_BUILD_EXTRA_CA_BUNDLE) {
         Some(p) if !p.is_empty() => std::path::PathBuf::from(p),

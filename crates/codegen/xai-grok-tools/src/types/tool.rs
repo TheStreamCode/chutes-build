@@ -33,10 +33,10 @@ use crate::types::resources::SharedResources;
 pub enum ToolNamespace {
     #[serde(alias = "ChutesBuild")]
     ChutesBuild,
-    #[serde(alias = "GrokBuildConcise")]
-    GrokBuildConcise,
-    #[serde(alias = "GrokBuildHashline")]
-    GrokBuildHashline,
+    #[serde(alias = "ChutesBuildConcise")]
+    ChutesBuildConcise,
+    #[serde(alias = "ChutesBuildHashline")]
+    ChutesBuildHashline,
     #[serde(alias = "Codex")]
     Codex,
     #[serde(rename = "opencode", alias = "OpenCode", alias = "open_code")]
@@ -96,6 +96,7 @@ pub enum ToolKind {
     ImageToVideo,
     ReferenceToVideo,
     DeployApp,
+    InitOrUpdateApp,
     SearchTool,
     UseTool,
     Monitor,

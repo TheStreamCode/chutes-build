@@ -26,7 +26,7 @@ impl crate::types::tool_metadata::ToolMetadata for ReadFileConciseTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuildConcise
+        ToolNamespace::ChutesBuildConcise
     }
 
     fn description_template(&self) -> &str {
@@ -77,7 +77,7 @@ impl xai_tool_runtime::Tool for ReadFileConciseTool {
         use crate::types::tool_metadata::shared_resources;
         let resources = shared_resources(&ctx)?;
 
-        // GrokBuildConcise is not version-managed — always pass None.
+        // ChutesBuildConcise is not version-managed — always pass None.
         let cwd_override = ctx
             .extensions
             .get::<xai_tool_runtime::Cwd>()

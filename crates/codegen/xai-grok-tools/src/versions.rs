@@ -80,7 +80,7 @@ pub struct PresetEntry {
 /// Only tools listed here can have `behavior_version` overrides.
 /// Uses fully-qualified IDs (`Namespace:tool_id`) to prevent collisions
 /// between namespaces (e.g. `ChutesBuild:run_terminal_cmd` vs.
-/// `GrokBuildConcise:run_terminal_cmd`).
+/// `ChutesBuildConcise:run_terminal_cmd`).
 pub const MANAGED_TOOLS: &[&str] = &[
     "ChutesBuild:run_terminal_cmd",
     "ChutesBuild:read_file",
@@ -587,9 +587,9 @@ mod tests {
 
     #[test]
     fn concise_namespace_not_managed() {
-        // GrokBuildConcise tools should NOT be version-managed.
-        assert!(!is_version_managed("GrokBuildConcise:run_terminal_cmd"));
-        let v = resolve_version("current", "GrokBuildConcise:run_terminal_cmd", None).unwrap();
+        // ChutesBuildConcise tools should NOT be version-managed.
+        assert!(!is_version_managed("ChutesBuildConcise:run_terminal_cmd"));
+        let v = resolve_version("current", "ChutesBuildConcise:run_terminal_cmd", None).unwrap();
         assert_eq!(v, None);
     }
 

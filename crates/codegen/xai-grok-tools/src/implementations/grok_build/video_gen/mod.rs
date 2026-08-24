@@ -12,12 +12,12 @@
 //! - When `Disabled`, the tools are not registered so the model never sees them.
 //!
 //! The generated video is written to `<session_folder>/videos/<n>.mp4`
-//! where `<n>` is a session-scoped counter (1, 2, 3, ... ÔÇö 1 token each).
+//! where `<n>` is a session-scoped counter (1, 2, 3, ... — 1 token each).
 //! The tools return the absolute path so the model can copy or move the
 //! video into the project working directory when it needs a persistent asset.
 //!
 //! Video generation is asynchronous:
-//! 1. POST to `/v1/videos/generations` ÔåÆ receive a `request_id`
+//! 1. POST to `/v1/videos/generations` → receive a `request_id`
 //! 2. Poll GET `/v1/videos/{request_id}` until status is `"done"`
 //! 3. Download video bytes from the API URL, or an optional presigned GET URL
 
@@ -157,6 +157,10 @@ pub struct VideoGenClient {
     tier_restricted: bool,
     /// See [`VideoGenConfig::Enabled`]'s `zdr_restricted`.
     zdr_restricted: bool,
+    /// Per-request session-id header; kept off `default_headers` so the
+    /// transport stays session-independent and cacheable.
+    session_header: Option<HeaderValue>,
+    defaults_have_session_header: bool,
 }
 
 impl VideoGenClient {
@@ -207,21 +211,32 @@ impl VideoGenClient {
             Ok::<(), xai_tool_runtime::ToolError>(())
         })?;
 
-        let http = xai_grok_extra_ca::with_extra_root_certificates(
-            reqwest::Client::builder().default_headers(headers),
-        )
-        .build()
+        // Process-cached; the session id is attached per request, not here.
+        let defaults_have_session_header =
+            headers.contains_key(super::image_gen::SESSION_ID_HEADER);
+        let key = crate::util::shared_http::cache_key("video_gen", &headers);
+        let http = crate::util::shared_http::cached_client(key, || {
+            xai_grok_extra_ca::build_reqwest_client(|builder| {
+                builder.default_headers(headers.clone())
+            })
+        })
         .map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
                 "Failed to build HTTP client: {e}"
             ))
         })?;
 
-        let download_http = xai_grok_extra_ca::with_extra_root_certificates(
-            reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS)),
-        )
-        .build()
+        // Distinct client (download timeout, no default headers); an empty
+        // header map routes it through the same `CacheKey` constructor.
+        let download_key = crate::util::shared_http::cache_key(
+            "video_gen_download",
+            &reqwest::header::HeaderMap::new(),
+        );
+        let download_http = crate::util::shared_http::cached_client(download_key, || {
+            xai_grok_extra_ca::build_reqwest_client(|builder| {
+                builder.timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS))
+            })
+        })
         .map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
                 "Failed to build download client: {e}"
@@ -241,7 +256,39 @@ impl VideoGenClient {
             attribution_callback: None,
             tier_restricted: *tier_restricted,
             zdr_restricted: *zdr_restricted,
+            session_header: None,
+            defaults_have_session_header,
         })
+    }
+
+    /// Attach the session-id header per start/poll request; a
+    /// caller-provided `extra_headers` value is never overridden.
+    /// Every Imagine video API request goes through here so no call site
+    /// can miss the bearer or per-request session header (the presigned
+    /// download client stays separate: its URLs carry their own auth).
+    fn request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        sent_bearer: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        let mut req = self.http.request(method, url);
+        if let Some(key) = sent_bearer {
+            req = req.header(AUTHORIZATION, format!("Bearer {key}"));
+        }
+        if let Some(ref session) = self.session_header {
+            req = req.header(super::image_gen::SESSION_ID_HEADER, session.clone());
+        }
+        req
+    }
+
+    pub fn with_session_id(mut self, session_id: &str) -> Self {
+        if !self.defaults_have_session_header
+            && let Ok(value) = HeaderValue::from_str(session_id)
+        {
+            self.session_header = Some(value);
+        }
+        self
     }
 
     /// Whether the current user's tier (free / X Basic) is zero-limited on
@@ -313,14 +360,10 @@ impl VideoGenClient {
         };
 
         let sent_bearer = self.current_bearer().await;
-        let mut req = self
-            .http
-            .post(&start_url)
+        let req = self
+            .request(reqwest::Method::POST, &start_url, sent_bearer.as_deref())
             .timeout(std::time::Duration::from_secs(VIDEO_START_TIMEOUT_SECS))
             .json(&payload);
-        if let Some(ref key) = sent_bearer {
-            req = req.header(AUTHORIZATION, format!("Bearer {key}"));
-        }
 
         let response = req.send().await.map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
@@ -337,11 +380,7 @@ impl VideoGenClient {
             // 500 chars so the unknown-voice 400 keeps its full voice roster.
             let truncated: String = body.chars().take(500).collect();
             tracing::warn!(http_status = %status, "Video generation API error: {truncated}");
-            return Err(xai_tool_runtime::ToolError::new(
-                xai_tool_runtime::ToolErrorKind::Custom,
-                format!("Video generation failed with HTTP {status}: {truncated}"),
-            )
-            .with_details(serde_json::json!({"code": "http_failure", "status": status.as_u16()})));
+            return Err(video_http_error(status, &body));
         }
 
         let body = response.text().await.map_err(|e| {
@@ -354,7 +393,7 @@ impl VideoGenClient {
             let preview: String = body.chars().take(500).collect();
             tracing::warn!("Video generation API returned unparseable body: {preview}");
             xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Failed to parse video generation start response: {e} ÔÇö body preview: {preview}"
+                "Failed to parse video generation start response: {e} — body preview: {preview}"
             ))
         })?;
 
@@ -388,10 +427,9 @@ impl VideoGenClient {
             }
 
             let poll_sent_bearer = self.current_bearer().await;
-            let mut poll_req = self.http.get(&poll_url).timeout(poll_timeout);
-            if let Some(ref key) = poll_sent_bearer {
-                poll_req = poll_req.header(AUTHORIZATION, format!("Bearer {key}"));
-            }
+            let poll_req = self
+                .request(reqwest::Method::GET, &poll_url, poll_sent_bearer.as_deref())
+                .timeout(poll_timeout);
 
             let poll_response = poll_req.send().await.map_err(|e| {
                 xai_tool_runtime::ToolError::invalid_arguments(format!(
@@ -408,6 +446,9 @@ impl VideoGenClient {
             }
             if !poll_status.is_success() && poll_status.as_u16() != 202 {
                 let body = poll_response.text().await.unwrap_or_default();
+                if is_zdr_upload_url_error(&body) {
+                    return Err(zdr_restricted_error());
+                }
                 let truncated: String = body.chars().take(200).collect();
                 return Err(xai_tool_runtime::ToolError::new(
                     xai_tool_runtime::ToolErrorKind::Custom,
@@ -429,7 +470,7 @@ impl VideoGenClient {
                     let preview: String = poll_body.chars().take(500).collect();
                     tracing::warn!("Video poll API returned unparseable body: {preview}");
                     xai_tool_runtime::ToolError::invalid_arguments(format!(
-                        "Failed to parse video poll response: {e} ÔÇö body preview: {preview}"
+                        "Failed to parse video poll response: {e} — body preview: {preview}"
                     ))
                 })?;
 
@@ -522,7 +563,7 @@ impl VideoGenClient {
             return Ok(VideoOutcome::Bytes(bytes));
         }
 
-        // No pre-minted GET URL ÔÇö retry presign (may succeed now that the
+        // No pre-minted GET URL — retry presign (may succeed now that the
         // object exists) and attempt a local download before falling back to
         // a remote reference URL for the model.
         match self.presign_and_download(config, &urls, request_id).await {
@@ -717,16 +758,6 @@ impl VideoGenConfig {
     pub fn is_enabled(&self) -> bool {
         matches!(self, Self::Enabled { .. })
     }
-
-    /// Stamp [`super::image_gen::SESSION_ID_HEADER`] onto `extra_headers`.
-    /// A caller-provided value is never overwritten. No-op when `Disabled`.
-    pub fn stamp_session_id_header(&mut self, session_id: &str) {
-        if let Self::Enabled { extra_headers, .. } = self {
-            extra_headers
-                .entry(super::image_gen::SESSION_ID_HEADER.to_string())
-                .or_insert_with(|| session_id.to_string());
-        }
-    }
 }
 
 /// Prose returned to the model (as a normal, successful tool result) when a
@@ -740,14 +771,29 @@ pub(crate) const TIER_RESTRICTED_UPSELL: &str = "This legacy video tool is unava
 /// paraphrasing a privacy-adjacent message risks distortion.
 pub(crate) const ZDR_RESTRICTED_MESSAGE: &str = "Video generation tools are unavailable under zero data retention (ZDR). To re-enable, either supply a user-hosted storage bucket (see https://docs.x.ai/build/settings/zdr-video-storage) or turn off /privacy mode to disable ZDR for all Chutes Build requests (including code). Restart Chutes Build after changing the config for it to take effect. Relay this message to the user verbatim; do not retry this tool.";
 
-/// The [`ZDR_RESTRICTED_MESSAGE`] as a structured tool error, with a stable
-/// details code for log/trace filtering.
 fn zdr_restricted_error() -> xai_tool_runtime::ToolError {
     xai_tool_runtime::ToolError::new(
         xai_tool_runtime::ToolErrorKind::Custom,
         ZDR_RESTRICTED_MESSAGE,
     )
     .with_details(serde_json::json!({"code": "zdr_output_storage_required"}))
+}
+
+fn is_zdr_upload_url_error(body: &str) -> bool {
+    body.to_ascii_lowercase()
+        .contains("must provide output.upload_url")
+}
+
+fn video_http_error(status: reqwest::StatusCode, body: &str) -> xai_tool_runtime::ToolError {
+    if is_zdr_upload_url_error(body) {
+        return zdr_restricted_error();
+    }
+    let truncated: String = body.chars().take(500).collect();
+    xai_tool_runtime::ToolError::new(
+        xai_tool_runtime::ToolErrorKind::Custom,
+        format!("Video generation failed with HTTP {status}: {truncated}"),
+    )
+    .with_details(serde_json::json!({"code": "http_failure", "status": status.as_u16()}))
 }
 
 fn default_resolution_name() -> String {
@@ -1275,6 +1321,43 @@ impl xai_tool_runtime::Tool for ReferenceToVideoTool {
 
 #[cfg(test)]
 mod tests {
+    // Mirrors image_gen's post_json pinning: every start/poll request must
+    // route through request(), which attaches both bearer and session id.
+    #[tokio::test]
+    async fn request_attaches_session_and_bearer_headers() {
+        let cfg = VideoGenConfig::Enabled {
+            api_key: "k".into(),
+            base_url: "https://api.chutes.ai/v1".into(),
+            extra_headers: indexmap::IndexMap::new(),
+            zdr_video_output_s3: None,
+            tier_restricted: false,
+            zdr_restricted: false,
+        };
+        let client = VideoGenClient::new(&cfg, None)
+            .unwrap()
+            .with_session_id("sess-7");
+        let req = client
+            .request(
+                reqwest::Method::POST,
+                "https://api.chutes.ai/v1/videos",
+                Some("tok"),
+            )
+            .build()
+            .unwrap();
+        assert_eq!(
+            req.headers()
+                .get(super::super::image_gen::SESSION_ID_HEADER)
+                .and_then(|v| v.to_str().ok()),
+            Some("sess-7")
+        );
+        assert_eq!(
+            req.headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok()),
+            Some("Bearer tok")
+        );
+    }
+
     use super::*;
     use crate::types::tool_metadata::test_ctx_with_call_id;
 
@@ -1411,7 +1494,7 @@ mod tests {
 
     #[test]
     fn zdr_presign_expires_secs_clamps_below_minimum() {
-        // Below minimum ÔåÆ clamped up.
+        // Below minimum → clamped up.
         assert_eq!(
             zdr_presign_expires_secs(60),
             MIN_ZDR_VIDEO_PRESIGN_EXPIRES_SECS
@@ -1420,7 +1503,7 @@ mod tests {
             zdr_presign_expires_secs(0),
             MIN_ZDR_VIDEO_PRESIGN_EXPIRES_SECS
         );
-        // At or above minimum ÔåÆ passthrough.
+        // At or above minimum → passthrough.
         assert_eq!(
             zdr_presign_expires_secs(MIN_ZDR_VIDEO_PRESIGN_EXPIRES_SECS),
             MIN_ZDR_VIDEO_PRESIGN_EXPIRES_SECS
@@ -1480,12 +1563,12 @@ mod tests {
 
     #[test]
     fn zdr_video_object_key_normalizes_prefix() {
-        // No prefix ÔåÆ bare UUID.mp4.
+        // No prefix → bare UUID.mp4.
         let key = zdr_video_object_key("");
         assert!(key.ends_with(".mp4"), "key must end with .mp4: {key}");
         assert!(!key.starts_with('/'), "bare key must not start with /");
 
-        // Prefix with trailing slash ÔåÆ preserved.
+        // Prefix with trailing slash → preserved.
         let key = zdr_video_object_key("team/videos/");
         assert!(
             key.starts_with("team/videos/"),
@@ -1493,14 +1576,14 @@ mod tests {
         );
         assert!(key.ends_with(".mp4"));
 
-        // Prefix without trailing slash ÔåÆ slash appended.
+        // Prefix without trailing slash → slash appended.
         let key = zdr_video_object_key("team/videos");
         assert!(
             key.starts_with("team/videos/"),
             "trailing / must be added: {key}"
         );
 
-        // Whitespace-only prefix ÔåÆ treated as empty.
+        // Whitespace-only prefix → treated as empty.
         let key = zdr_video_object_key("   ");
         assert!(
             !key.contains(' '),
@@ -1512,6 +1595,21 @@ mod tests {
         let a = zdr_video_object_key("v/");
         let b = zdr_video_object_key("v/");
         assert_ne!(a, b, "object keys must be unique across calls");
+    }
+
+    #[test]
+    fn video_http_error_rewrites_zdr_storage_400() {
+        let zdr = video_http_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"code":"invalid-argument","error":"Zero Data Retention teams must provide output.upload_url for video generation."}"#,
+        );
+        assert_eq!(zdr.to_string(), ZDR_RESTRICTED_MESSAGE);
+
+        let invalid_url = video_http_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"code":"invalid-argument","error":"The output.upload_url field is invalid."}"#,
+        );
+        assert_ne!(invalid_url.to_string(), ZDR_RESTRICTED_MESSAGE);
     }
 
     #[test]
