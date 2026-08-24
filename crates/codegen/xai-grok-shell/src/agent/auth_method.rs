@@ -23,11 +23,11 @@ pub(crate) fn new_shared_auth_method_id(initial: Option<acp::AuthMethodId>) -> S
 /// Env var that, when set, advertises `xai.api_key` as a viable auth method.
 ///
 /// Kept as a constant so test code and the production check stay in sync.
-pub const XAI_API_KEY_ENV_VAR: &str = "XAI_API_KEY";
+pub const XAI_API_KEY_ENV_VAR: &str = "CHUTES_API_KEY";
 
 /// Legacy env var name. Checked as a fallback when `XAI_API_KEY` is not set,
 /// so existing deployments that use the old name keep working.
-pub const LEGACY_XAI_API_KEY_ENV_VAR: &str = "GROK_CODE_XAI_API_KEY";
+pub const LEGACY_XAI_API_KEY_ENV_VAR: &str = "CHUTES_BUILD_API_KEY";
 
 /// Read the API key from the environment.
 ///

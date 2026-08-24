@@ -4331,7 +4331,22 @@ impl MvpAgent {
         let sampling_config = self
             .resolve_sampling_config_for_model(&session_model_id, origin_client.clone());
         if self.auth_method_id.load().is_none() {
-            return Err(acp::Error::auth_required().data("no auth method id provided"));
+            // Fallback: when the API-key probe failed during initialize() (e.g.
+            // network timeout), the auth method was never published. If the env
+            // key is present, default to it rather than blocking the session —
+            // the actual inference call will fail with a clear 401 if the key
+            // is genuinely invalid.
+            if crate::agent::auth_method::has_chutes_api_key_env() {
+                let id = acp::AuthMethodId::new(
+                    crate::agent::auth_method::CHUTES_BUILD_COM_METHOD_ID,
+                );
+                self.set_auth_method(id);
+                tracing::info!(
+                    "auth_method_id was unset; defaulted to API key method via CHUTES_API_KEY"
+                );
+            } else {
+                return Err(acp::Error::auth_required().data("no auth method id provided"));
+            }
         }
         let auth_method_id = std::sync::Arc::clone(&self.auth_method_id);
         tracing::info!(
