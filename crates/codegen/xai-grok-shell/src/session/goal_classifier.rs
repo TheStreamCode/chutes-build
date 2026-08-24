@@ -37,12 +37,12 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 /// early-exit ([`crate::session::goal_tracker::GOAL_CLASSIFIER_STALL_THRESHOLD`])
 /// is the primary, cheaper stop for stuck loops, so this cap is a
 /// runaway-cost backstop. There is no upper ceiling — override via
-/// `CHUTES_BUILD_GOAL_CLASSIFIER_MAX` or remote `goal_classifier_max_runs` to
+/// `GROK_GOAL_CLASSIFIER_MAX` or remote `goal_classifier_max_runs` to
 /// raise it arbitrarily (only the `GOAL_CLASSIFIER_MAX_RUNS_MIN` floor
 /// is enforced).
 pub(crate) const GOAL_CLASSIFIER_MAX_RUNS_DEFAULT: u32 = 10;
 
-/// Floor for `CHUTES_BUILD_GOAL_CLASSIFIER_MAX` / remote `goal_classifier_max_runs`.
+/// Floor for `GROK_GOAL_CLASSIFIER_MAX` / remote `goal_classifier_max_runs`.
 /// Floor 1 keeps the gate live (0 would disable rejection entirely).
 /// There is deliberately no upper ceiling so the cap can be raised
 /// arbitrarily via remote/env.
@@ -101,7 +101,7 @@ const GOAL_CLASSIFIER_SUBAGENT_DESCRIPTION: &str = "goal achievement skeptic";
 const GOAL_VERIFIER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_verifier_prompt.md");
 
 /// Default number of adversarial skeptics spawned per verification
-/// attempt. Override via `CHUTES_BUILD_GOAL_VERIFIER_N` (clamped 1..=5) or the
+/// attempt. Override via `GROK_GOAL_VERIFIER_N` (clamped 1..=5) or the
 /// remote `goal_verifier_count` setting. Default 3 yields a genuine
 /// majority vote (`⌈3/2⌉ = 2` not-refuted to pass): a lone outlier in
 /// either direction — one rubber-stamp or one false-refute — cannot
@@ -109,7 +109,7 @@ const GOAL_VERIFIER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_verifie
 /// lenient skeptic passes what a single strict one refutes.
 pub(crate) const GOAL_VERIFIER_SKEPTIC_COUNT: u32 = 3;
 
-/// Lower/upper bounds for `CHUTES_BUILD_GOAL_VERIFIER_N` / remote
+/// Lower/upper bounds for `GROK_GOAL_VERIFIER_N` / remote
 /// `goal_verifier_count`. Five is the practical ceiling — any more is
 /// pointless cost and saturates the subagent coordinator.
 pub(crate) const GOAL_VERIFIER_SKEPTIC_MIN: u32 = 1;

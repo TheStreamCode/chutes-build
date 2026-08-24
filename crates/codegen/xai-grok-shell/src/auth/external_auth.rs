@@ -50,7 +50,7 @@ pub(crate) async fn run_external_refresh(command: &str) -> Option<GrokAuth> {
     tracing::info!(cmd = %command, timeout_secs = EXTERNAL_AUTH_REFRESH_TIMEOUT.as_secs(), "auth: running external auth provider (headless refresh)");
 
     let mut cmd = shell_c(command);
-    cmd.env("CHUTES_BUILD_AUTH_EXPIRED", "1");
+    cmd.env("GROK_AUTH_EXPIRED", "1");
     // Route through the group-killing runner so a provider that spawns helpers
     // is torn down as a unit on timeout.
     let output = match run_detached_with_timeout(
@@ -128,19 +128,15 @@ mod tests {
             stderr: vec![],
         };
 
-        // First-party issuer claim → first-party session (relay-eligible).
-        // The fixture has to name the issuer the predicate recognises, so it is
-        // built from the constant: a plausible-looking hostname here passes the
-        // parse and then quietly fails `is_xai_auth`.
-        let issuer = crate::auth::config::XAI_OAUTH2_ISSUER;
-        let auth = parse_output(&ok(&format!(
-            r#"{{"access_token":"t","expires_in":900,"issuer":"{issuer}"}}"#
-        )))
+        // x.ai issuer claim → first-party session (relay-eligible).
+        let auth = parse_output(&ok(
+            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.x.ai"}"#,
+        ))
         .unwrap();
-        assert_eq!(auth.oidc_issuer.as_deref(), Some(issuer));
+        assert_eq!(auth.oidc_issuer.as_deref(), Some("https://auth.x.ai"));
         assert!(auth.is_xai_auth());
 
-        // Non-first-party issuer is stored but stays third-party.
+        // Non-x.ai issuer is stored but stays third-party.
         let auth = parse_output(&ok(
             r#"{"access_token":"t","issuer":"https://idp.acme.example"}"#,
         ))
@@ -181,14 +177,9 @@ mod tests {
 
     #[tokio::test]
     async fn sets_grok_auth_expired_env_on_refresh() {
-        // `$VAR` is POSIX expansion and `%VAR%` is cmd's; the fixture reads the
-        // environment itself, so the command means the same thing to both.
-        let command = crate::auth::auth_provider::test_fixture_command(&[
-            "env",
-            "CHUTES_BUILD_AUTH_EXPIRED",
-            "unset",
-        ]);
-        let auth = run_external_refresh(&command).await.unwrap();
+        let auth = run_external_refresh("echo $GROK_AUTH_EXPIRED")
+            .await
+            .unwrap();
         assert_eq!(auth.key, "1");
     }
 

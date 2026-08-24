@@ -1409,7 +1409,7 @@ impl MvpAgent {
             );
             return Err(acp::Error::auth_required().data(msg));
         };
-        let meta = if method_id.0.as_ref() == auth_method::CHUTES_BUILD_COM_METHOD_ID {
+        let meta = if method_id.0.as_ref() == auth_method::GROK_COM_METHOD_ID {
             serde_json::json!({ "use_oauth": true }).as_object().cloned()
         } else {
             arguments.meta

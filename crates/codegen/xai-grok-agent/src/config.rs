@@ -732,7 +732,7 @@ pub enum BuiltinAgentName {
     #[strum(serialize = "chutes-build")]
     ChutesBuild,
     #[strum(serialize = "chutes-build-concise")]
-    GrokBuildConcise,
+    ChutesBuildConcise,
     #[strum(serialize = "chutes-build-plan")]
     GrokBuildPlan,
     #[strum(serialize = "chutes-build-plan-no-subagents")]
@@ -765,7 +765,7 @@ impl BuiltinAgentName {
     pub fn definition(self) -> AgentDefinition {
         match self {
             Self::ChutesBuild => AgentDefinition::default_grok_build(),
-            Self::GrokBuildConcise => AgentDefinition::grok_build_concise(),
+            Self::ChutesBuildConcise => AgentDefinition::grok_build_concise(),
             Self::GrokBuildPlan => AgentDefinition::grok_build_plan(),
             Self::GrokBuildPlanNoSubagents => AgentDefinition::grok_build_plan_no_subagents(),
             Self::GrokBuildAskUser => AgentDefinition::grok_build_ask_user(),
@@ -1607,7 +1607,7 @@ impl AgentDefinition {
             tool_config: grok_build_concise_toolset(),
             agents_md: false,
             ..Self::base(
-                BuiltinAgentName::GrokBuildConcise,
+                BuiltinAgentName::ChutesBuildConcise,
                 "Chutes Build agent with concise output format.",
             )
         }
@@ -1993,7 +1993,7 @@ mod tests {
         match name {
             BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
             BuiltinAgentName::ChutesBuild
-            | BuiltinAgentName::GrokBuildConcise
+            | BuiltinAgentName::ChutesBuildConcise
             | BuiltinAgentName::GrokBuildPlan
             | BuiltinAgentName::GrokBuildPlanNoSubagents
             | BuiltinAgentName::GrokBuildAskUser
@@ -2678,7 +2678,7 @@ description: Test default tool config
         use std::str::FromStr;
         for (s, expected) in [
             ("chutes-build", BuiltinAgentName::ChutesBuild),
-            ("chutes-build-concise", BuiltinAgentName::GrokBuildConcise),
+            ("chutes-build-concise", BuiltinAgentName::ChutesBuildConcise),
             ("chutes-build-ask-user", BuiltinAgentName::GrokBuildAskUser),
             ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),

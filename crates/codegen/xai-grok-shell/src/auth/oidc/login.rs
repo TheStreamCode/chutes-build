@@ -71,7 +71,7 @@ fn parse_pasted_input(input: &str) -> Result<Callback, OidcError> {
 /// Render a styled callback page shown in the browser after the OAuth redirect.
 pub(crate) fn callback_page(title: &str, message: &str, is_success: bool) -> String {
     let icon = if is_success {
-        // Chutes Build logo
+        // Grok logo
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 33 33"><path fill="currentColor" d="m13.237 21.04 11.082-8.19c.543-.4 1.32-.244 1.578.38 1.363 3.288.754 7.241-1.957 9.955-2.71 2.714-6.482 3.31-9.93 1.954l-3.765 1.745c5.401 3.697 11.96 2.782 16.059-1.324 3.251-3.255 4.258-7.692 3.317-11.693l.008.009c-1.365-5.878.336-8.227 3.82-13.031q.123-.17.247-.345l-4.585 4.59v-.014L13.234 21.044M10.95 23.031c-3.877-3.707-3.208-9.446.1-12.755 2.446-2.449 6.454-3.448 9.952-1.979L24.76 6.56c-.677-.49-1.545-1.017-2.54-1.387A12.465 12.465 0 0 0 8.675 7.901c-3.519 3.523-4.625 8.94-2.725 13.561 1.42 3.454-.907 5.898-3.251 8.364-.83.874-1.664 1.749-2.335 2.674l10.583-9.466"/></svg>"#
     } else {
         // X circle
@@ -159,7 +159,7 @@ fn callback_response(result: &CallbackResult) -> (StatusCode, Html<String>) {
     let (title, message) = match result {
         Ok(_) => (
             "Signed in",
-            "You can close this window and return to Chutes Build.",
+            "You can close this window and return to Grok Build.",
         ),
         Err(_) => ("Access denied", "Close this window and try again."),
     };
@@ -376,7 +376,11 @@ pub async fn run_login_flow_with_config(
 ) -> anyhow::Result<(GrokAuth, bool)> {
     tracing::info!(issuer = %oidc.issuer, client_id = %oidc.client_id, "OIDC: starting login flow");
 
-    crate::auth::ensure_crypto_provider();
+    // Ensure jsonwebtoken CryptoProvider is installed (required for JWT validation).
+    jsonwebtoken::crypto::CryptoProvider::install_default(
+        &jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER,
+    )
+    .ok();
 
     let discovery = discover(&oidc.issuer).await?;
     let pkce = generate_pkce();
@@ -423,7 +427,7 @@ pub async fn run_login_flow_with_config(
         // No client UI — print to stderr.
         eprintln!();
         let provider_label = if oidc.issuer == super::super::config::XAI_OAUTH2_ISSUER {
-            "Chutes Build".to_owned()
+            "Grok".to_owned()
         } else {
             oidc.issuer.clone()
         };
@@ -472,7 +476,6 @@ pub async fn run_login_flow_with_config(
         &redirect_uri,
         &oidc.client_id,
         &pkce.code_verifier,
-        oidc.client_secret.as_deref(),
     )
     .await?;
     tracing::info!(
@@ -576,7 +579,6 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "email".into()],
             audience: None,
-            client_secret: None,
         };
         let discovery = discover(&oidc_cfg.issuer).await.unwrap();
         let pkce = generate_pkce();
@@ -592,7 +594,7 @@ mod tests {
             &redirect_uri,
             &pkce,
             &state,
-            TEST_NONCE,
+            &test_nonce(),
         );
 
         // Simulate browser callback via race_callback_and_stdin
@@ -619,7 +621,6 @@ mod tests {
             &redirect_uri,
             &oidc_cfg.client_id,
             &pkce.code_verifier,
-            oidc_cfg.client_secret.as_deref(),
         )
         .await
         .unwrap();
@@ -630,7 +631,7 @@ mod tests {
             &discovery,
             &oidc_cfg.issuer,
             &oidc_cfg.client_id,
-            TEST_NONCE,
+            &test_nonce(),
             None,
             None,
             None,

@@ -5,13 +5,13 @@ use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-const CHUTES_BUILD_CODE_BACKEND_URL: &str = "https://code.chutes.ai";
+const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const CHUTES_BUILD_CODE_WEB_URL: &str = "http://127.0.0.1:9";
+const GROK_CODE_WEB_URL: &str = "https://grok.com";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
-    let web_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
-        .unwrap_or_else(|_| CHUTES_BUILD_CODE_WEB_URL.to_string());
+    let web_url =
+        std::env::var("GROK_CODE_WEB_URL").unwrap_or_else(|_| GROK_CODE_WEB_URL.to_string());
     format!("{}/build/share/{}", web_url, permission_id)
 }
 fn add_cli_chat_proxy_headers_blocking(
@@ -290,12 +290,9 @@ impl Default for BackendClient {
 }
 impl BackendClient {
     fn build_default_client() -> reqwest::Client {
-        xai_grok_extra_ca::with_extra_root_certificates(
-                reqwest::Client::builder()
-                    .connect_timeout(Duration::from_secs(10))
-                    .timeout(DEFAULT_TIMEOUT),
-            )
-            .build()
+        xai_grok_extra_ca::build_reqwest_client(|builder| {
+                builder.connect_timeout(Duration::from_secs(10)).timeout(DEFAULT_TIMEOUT)
+            })
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
                 crate::http::shared_client()
@@ -306,8 +303,8 @@ impl BackendClient {
         Self {
             client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
             reqwest_client,
-            base_url: std::env::var("CHUTES_BUILD_CODE_BACKEND_URL")
-                .unwrap_or_else(|_| CHUTES_BUILD_CODE_BACKEND_URL.to_string()),
+            base_url: std::env::var("GROK_CODE_BACKEND_URL")
+                .unwrap_or_else(|_| GROK_CODE_BACKEND_URL.to_string()),
             auth_manager: None,
         }
     }
@@ -388,7 +385,7 @@ impl BackendClient {
         Ok(share_url(&share_response.permission_id))
     }
     /// Build auth + identity headers.
-    /// Must include X-XAI-Token-Auth so nginx auth subrequest routes to authenticate_xai_grok_cli_token.
+    /// Must include X-XAI-Token-Auth so nginx auth subrequest routes to OAuth.
     /// See: crates/codegen/xai-grok-shell/src/agent/app.rs:run_headless
     async fn auth_header_map(&self) -> Result<reqwest::header::HeaderMap, BackendError> {
         use reqwest::header::{HeaderMap, HeaderValue};
@@ -706,13 +703,7 @@ struct ModelsResponse {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointAuth {
-    /// The official Chutes catalog: the ambient `CHUTES_API_KEY`, or the signed-in
-    /// session key, may be used.
     ApiKey,
-    /// A custom catalog endpoint. Requires its own `CHUTES_MODELS_API_KEY`: the
-    /// ambient Chutes credential is restricted to official hosts, and a startup
-    /// fetch must not be the thing that leaks it to an arbitrary URL.
-    CustomApiKey,
     Session,
 }
 struct ListModelsEndpoint {
@@ -738,7 +729,7 @@ impl ListModelsEndpoint {
         if endpoints.has_custom_endpoint() {
             Self {
                 url: endpoints.resolve_models_list_url(),
-                auth: EndpointAuth::CustomApiKey,
+                auth: EndpointAuth::ApiKey,
             }
         } else if fetch_auth == crate::agent::models::ModelFetchAuth::ApiKey {
             Self {
@@ -778,22 +769,7 @@ pub(crate) fn fetch_models_blocking(
                 })
                 .map_err(|_| {
                     BackendError::Auth(
-                        "No API key for the official models endpoint. Set CHUTES_API_KEY.".into(),
-                    )
-                })?;
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-        EndpointAuth::CustomApiKey => {
-            let api_key = std::env::var("CHUTES_MODELS_API_KEY")
-                .ok()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    BackendError::Auth(
-                        "No credential for the custom models endpoint. Set \
-                         CHUTES_MODELS_API_KEY; CHUTES_API_KEY is restricted to \
-                         official Chutes hosts."
-                            .into(),
+                        "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
                     )
                 })?;
             request = request.header("Authorization", format!("Bearer {}", api_key));
@@ -870,16 +846,8 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
-    // `context_length` and `max_model_len` are what an OpenAI-shaped catalogue
-    // sends, and they are what `llm.chutes.ai/v1/models` sends. Without them every
-    // Chutes model fell through to `DEFAULT_CONTEXT_WINDOW`, so the product told
-    // itself 256k for all thirteen: six times too much for `Qwen3-32B` (40,960),
-    // four times too little for the three million-token models. Compaction and
-    // truncation were both working from a number no model agreed with.
     let context_window = get_u64(obj, "contextWindow")
         .or_else(|| get_u64(obj, "context_window"))
-        .or_else(|| get_u64(obj, "context_length"))
-        .or_else(|| get_u64(obj, "max_model_len"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
         .unwrap_or(DEFAULT_CONTEXT_WINDOW);
@@ -907,21 +875,8 @@ pub(crate) fn parse_remote_model_value(
         base_url,
         name,
         description: get_string(obj, "description"),
-        subagent_rate_limit_max_attempts: None,
-        // `max_output_length` is the Chutes catalogue's name for the same bound —
-        // but only when it is *smaller* than the window. Several Chutes models
-        // publish the two as the same number, which means "output may use the whole
-        // context", not "always ask for this much". Sending it as `max_tokens` then
-        // leaves no room for the prompt: `Qwen3-32B` (40,960 = 40,960) answers
-        // `400 Requested token count exceeds`. Taking it only when it is a real
-        // sub-limit keeps the nine models where it is one and skips the two where
-        // it is not.
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
-            .or_else(|| {
-                get_u64(obj, "max_output_length")
-                    .filter(|out| *out < context_window.get())
-            })
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
@@ -948,6 +903,9 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| get_u64(obj, "inference_idle_timeout_secs")),
         max_retries: get_u64(obj, "maxRetries")
             .or_else(|| get_u64(obj, "max_retries"))
+            .and_then(|v| u32::try_from(v).ok()),
+        subagent_rate_limit_max_attempts: get_u64(obj, "subagentRateLimitMaxAttempts")
+            .or_else(|| get_u64(obj, "subagent_rate_limit_max_attempts"))
             .and_then(|v| u32::try_from(v).ok()),
         hidden: obj
             .get("hidden")
@@ -984,14 +942,6 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| meta.and_then(|m| m.get("supportsBackendSearch")))
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
-        supports_tools: obj
-            .get("supported_features")
-            .or_else(|| obj.get("supportedFeatures"))
-            .or_else(|| meta.and_then(|m| m.get("supported_features")))
-            .or_else(|| meta.and_then(|m| m.get("supportedFeatures")))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(|f| f.as_str() == Some("tools")))
-            .unwrap_or(true),
         compactions_remaining: obj
             .get("compactionsRemaining")
             .or_else(|| obj.get("compactions_remaining"))

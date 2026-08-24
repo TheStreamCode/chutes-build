@@ -77,7 +77,7 @@ mod inbound_summary_persist_scrub_tests {
     use super::*;
     use crate::extensions::notification::TITLE_IS_MANUAL_META_KEY;
     use crate::session::persistence::MAX_TITLE_SCALARS;
-    /// Drive inbound `_chutes.build/session/update` through `handle_xai_session_notification`
+    /// Drive inbound `_x.ai/session/update` through `handle_xai_session_notification`
     /// so removing the `scrub_inbound_session_summary` call site fails.
     #[tokio::test]
     async fn persist_path_scrubs_title_and_drops_manual_meta() {

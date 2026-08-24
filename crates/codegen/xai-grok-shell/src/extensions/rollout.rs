@@ -1,4 +1,4 @@
-//! `chutes.ai/rollout/survey` extension handler.
+//! `x.ai/rollout/survey` extension handler.
 //!
 //! Logs a rollout-survey submission via telemetry (Mixpanel + BigQuery).
 

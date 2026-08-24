@@ -295,7 +295,7 @@ pub struct StopBackgroundTask {
 #[serde(rename_all = "camelCase")]
 pub struct StopSessionCron {
     pub id: String,
-    /// Human-readable interval (e.g. `every 5 minutes`): chutes-build schedules are intervals, not cron.
+    /// Human-readable interval (e.g. `every 5 minutes`): grok schedules are intervals, not cron.
     pub schedule: String,
     pub recurring: bool,
     pub prompt: String,
@@ -309,7 +309,7 @@ pub enum BackgroundTaskType {
     Subagent,
 }
 
-/// `StopFailure` error type. Chutes Build emits a subset: capacity errors fold into
+/// `StopFailure` error type. Grok emits a subset: capacity errors fold into
 /// `RateLimit`, and there is no `billing_error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]

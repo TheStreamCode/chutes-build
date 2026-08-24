@@ -1,4 +1,15 @@
 use super::*;
+/// Wire the session's elicitation inbox into a freshly built client so its
+/// `elicitation/create` requests reach the coordinator. Takes the
+/// already-locked `McpState` so each caller keeps its own lock scope.
+fn attach_elicitation_tx(
+    state: &crate::session::mcp_servers::McpState,
+    client: &crate::session::mcp_servers::McpClient,
+) {
+    if let Some(tx) = state.elicitation_tx() {
+        client.set_elicitation_tx(Some(tx));
+    }
+}
 impl SessionActor {
     /// Wait for MCP tools to be initialized.
     /// If initialization is in progress by another task, this will poll until complete.
@@ -91,6 +102,7 @@ impl SessionActor {
             .strip_prefix(&prefix)
             .unwrap_or(&qualified_name)
             .to_string();
+        mcp_state.record_tool_icons(qualified_name.clone(), reg.icons.clone());
         if let Some(meta) = reg.meta.as_ref() {
             mcp_state
                 .mcp_tool_meta
@@ -105,10 +117,10 @@ impl SessionActor {
                     .or_default()
                     .push(crate::extensions::mcp::McpToolEntry {
                         name: unqualified.clone(),
-                        icons: Vec::new(),
                         display_name: None,
                         description: Some(reg.description.clone()),
                         meta: Some(meta.clone()),
+                        icons: reg.icons.clone(),
                         enabled: !mcp_state.is_tool_disabled(server_name, &unqualified),
                     });
             }
@@ -153,7 +165,7 @@ impl SessionActor {
             );
         }
     }
-    /// Emit per-server `chutes.ai/mcp/tools_changed` notifications.
+    /// Emit per-server `x.ai/mcp/tools_changed` notifications.
     ///
     /// Each emission carries the owning
     /// `sessionId` so the pager can route via `find_session_match`
@@ -185,7 +197,7 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client (chutes.ai/mcp/auth_trigger).
+    /// Handle explicit auth trigger from the client (x.ai/mcp/auth_trigger).
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server
     /// and registers its tools.
@@ -281,6 +293,7 @@ impl SessionActor {
         if let Some(tx) = event_tx {
             new_client.set_event_tx(Some(tx));
         }
+        attach_elicitation_tx(&*self.mcp_state.lock().await, &new_client);
         let arc = std::sync::Arc::new(new_client);
         {
             let mut mcp_state = self.mcp_state.lock().await;
@@ -532,7 +545,7 @@ impl SessionActor {
     /// (`util::config::disabled_mcp_server_names`). Used by the
     /// auto-restart task to gate on the live configuration each
     /// backoff iteration — the user may have toggled the server off
-    /// or removed it from `~/.chutes-build/config.toml` while we were
+    /// or removed it from `~/.grok/config.toml` while we were
     /// sleeping.
     ///
     /// HTTP / HttpAuth entries always return `false` here, which is
@@ -543,8 +556,8 @@ impl SessionActor {
     ///
     /// Performs one synchronous read of the per-cwd disabled-MCP
     /// list (`crate::util::config::disabled_mcp_server_names`,
-    /// which parses `~/.chutes-build/config.toml` + the project
-    /// `.chutes-build/config.toml`) on every call. The auto-restart task
+    /// which parses `~/.grok/config.toml` + the project
+    /// `.grok/config.toml`) on every call. The auto-restart task
     /// calls this at most:
     ///   - once at schedule time (`maybe_schedule_restart`), and
     ///   - once per backoff iteration (≤3 per restart window).
@@ -761,6 +774,7 @@ impl SessionActor {
         )
         .await
         .map_err(|e| e.to_string())?;
+        attach_elicitation_tx(&*self.mcp_state.lock().await, &new_client);
         new_client
             .ensure_initialized()
             .await
@@ -1182,6 +1196,7 @@ impl SessionActor {
                     if let Some(tx) = task_event_tx {
                         client.set_event_tx(Some(tx));
                     }
+                    attach_elicitation_tx(&*mcp_state.lock().await, client);
                     let init_budget = std::time::Duration::from_secs(
                         timeout_sec.saturating_mul(2).saturating_add(5),
                     );
@@ -1292,6 +1307,8 @@ impl SessionActor {
                                     .strip_prefix(&prefix)
                                     .unwrap_or(&qualified_name)
                                     .to_string();
+                                mcp_state
+                                    .record_tool_icons(qualified_name.clone(), reg.icons.clone());
                                 if let Some(meta) = reg.meta.as_ref() {
                                     mcp_state
                                         .mcp_tool_meta
@@ -1306,10 +1323,10 @@ impl SessionActor {
                                             .or_default()
                                             .push(crate::extensions::mcp::McpToolEntry {
                                                 name: unqualified.clone(),
-                                                icons: Vec::new(),
                                                 display_name: None,
                                                 description: Some(reg.description.clone()),
                                                 meta: Some(meta.clone()),
+                                                icons: reg.icons.clone(),
                                                 enabled: !mcp_state
                                                     .is_tool_disabled(&server_name, &unqualified),
                                             });
@@ -1365,6 +1382,10 @@ impl SessionActor {
                                 "sse" => xai_grok_telemetry::events::McpTransport::Sse,
                                 _ => xai_grok_telemetry::events::McpTransport::Http,
                             };
+                            debug_assert!(
+                                xai_grok_telemetry::activity::MCP_SERVERS_CONNECTED.get() >= 1,
+                                "McpServerConnected must stamp a self-inclusive count"
+                            );
                             xai_grok_telemetry::session_ctx::log_event(
                                 xai_grok_telemetry::events::McpServerConnected {
                                     server_name: server_name.clone(),
@@ -1534,6 +1555,7 @@ impl SessionActor {
                         .strip_prefix(&prefix)
                         .unwrap_or(&qualified_name)
                         .to_string();
+                    mcp_state.record_tool_icons(qualified_name.clone(), reg.icons.clone());
                     if let Some(meta) = reg.meta.as_ref() {
                         mcp_state
                             .mcp_tool_meta

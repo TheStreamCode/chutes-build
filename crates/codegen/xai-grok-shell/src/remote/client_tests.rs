@@ -899,8 +899,7 @@ fn list_url_explicit_overrides_derivation() {
     );
 }
 /// INVARIANT: the `/models` fetch URL + auth scheme match the auth mode —
-/// Session/Deployment → the configured proxy base (Session auth; the default
-/// proxy is now the Chutes inference host), never a second registry;
+/// Session/Deployment → cli-chat-proxy (Session auth), never the inference host;
 /// ApiKey → `xai_api_base_url` (ApiKey, public default when unset); a custom
 /// models endpoint → that URL verbatim.
 #[test]
@@ -909,9 +908,9 @@ fn models_fetch_endpoint_matches_auth_mode() {
     use crate::agent::config::EndpointsConfig;
     use crate::agent::models::ModelFetchAuth;
     for k in [
-        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
-        "CHUTES_BUILD_XAI_API_BASE_URL",
-        "CHUTES_BUILD_MODELS_LIST_URL",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_XAI_API_BASE_URL",
+        "GROK_MODELS_LIST_URL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
@@ -923,10 +922,10 @@ fn models_fetch_endpoint_matches_auth_mode() {
         .unwrap(),
     );
     let session = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Session);
-    assert_eq!(session.url, "https://llm.chutes.ai/v1/models");
+    assert_eq!(session.url, "https://cli-chat-proxy.grok.com/v1/models");
     assert_eq!(session.auth, EndpointAuth::Session);
     let deployment = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::Deployment);
-    assert_eq!(deployment.url, "https://llm.chutes.ai/v1/models");
+    assert_eq!(deployment.url, "https://cli-chat-proxy.grok.com/v1/models");
     assert_eq!(deployment.auth, EndpointAuth::Session);
     let api = ListModelsEndpoint::from_endpoints(&cfg, ModelFetchAuth::ApiKey);
     assert_eq!(api.url, "https://inference.acme-corp.example/xai/v1/models");
@@ -934,7 +933,7 @@ fn models_fetch_endpoint_matches_auth_mode() {
     let default = EndpointsConfig::from_config_value(&toml::Value::Table(Default::default()));
     assert_eq!(
         ListModelsEndpoint::from_endpoints(&default, ModelFetchAuth::ApiKey).url,
-        "https://llm.chutes.ai/v1/models"
+        "https://api.x.ai/v1/models"
     );
     let custom = EndpointsConfig::from_config_value(
         &toml::from_str(
@@ -945,23 +944,22 @@ fn models_fetch_endpoint_matches_auth_mode() {
     );
     let ep = ListModelsEndpoint::from_endpoints(&custom, ModelFetchAuth::Session);
     assert_eq!(ep.url, "https://models.acme.com/v1/models");
-    // A custom catalog host never receives the ambient Chutes credential.
-    assert_eq!(ep.auth, EndpointAuth::CustomApiKey);
+    assert_eq!(ep.auth, EndpointAuth::ApiKey);
 }
-/// REGRESSION: `chutes-build setup` must send the deployment key to
+/// REGRESSION: `grok setup` must send the deployment key to
 /// the proxy, never the inference endpoint.
 #[test]
 #[serial_test::serial]
 fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
     use crate::agent::config::EndpointsConfig;
     for k in [
-        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
-        "CHUTES_BUILD_MANAGED_CONFIG_URL",
-        "CHUTES_BUILD_XAI_API_BASE_URL",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_MANAGED_CONFIG_URL",
+        "GROK_XAI_API_BASE_URL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
-    unsafe { std::env::set_var("CHUTES_BUILD_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
+    unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
     let managed: toml::Value = toml::from_str(
         r#"[endpoints]
             deployment_key = "xai-token-ENTERPRISE"
@@ -984,7 +982,7 @@ fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
         EndpointsConfig::from_config_value(&pinned).resolve_managed_config_url(),
         "https://proxy.acme-corp.example/v1/deployment/config"
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_DEPLOYMENT_KEY") };
+    unsafe { std::env::remove_var("GROK_DEPLOYMENT_KEY") };
 }
 #[derive(Clone)]
 struct DualBundleServerState {
@@ -1141,6 +1139,7 @@ async fn fetch_bundle_propagates_legacy_error_after_fallback() {
 /// Regression: reqwest .header() appends — duplicate
 /// or overlapping headers cause Cloudflare to reject the request.
 #[tokio::test(flavor = "current_thread")]
+#[allow(clippy::disallowed_methods)]
 async fn auth_headers_do_not_collide_with_json() {
     let client =
         BackendClient::with_base_url("http://localhost").with_auth_manager(test_auth_manager());

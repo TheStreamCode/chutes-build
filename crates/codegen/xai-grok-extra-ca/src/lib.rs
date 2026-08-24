@@ -63,6 +63,24 @@ pub fn with_extra_root_certificates_blocking(
     builder
 }
 
+/// Interim: build a shared rustls ClientConfig with default provider + roots.
+/// The upstream rework caches this via BundleSnapshot; ours is the minimal
+/// viable config so proxy/relay callers can establish TLS connections.
+pub fn rustls_client_config() -> std::sync::Arc<rustls::ClientConfig> {
+    let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("aws-lc-rs supports the default protocol versions")
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    std::sync::Arc::new(config)
+}
+
+/// Interim: the env var name our fork reads the bundle path from.
+pub fn configured_bundle_env() -> Option<&'static str> {
+    Some(ENV_CHUTES_BUILD_EXTRA_CA_BUNDLE)
+}
+
 /// Interim no-op placeholder for the upstream TLS-policy entry point.
 /// With the current feature set, rustls falls back to its default process
 /// provider, so there is nothing to install yet.

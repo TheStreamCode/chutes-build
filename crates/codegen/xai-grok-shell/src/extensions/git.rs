@@ -204,7 +204,7 @@ pub(crate) struct GitCurrentCommitRequest {
     #[serde(default)]
     pub git_root: Option<String>,
 }
-/// Request for chutes.ai/git/checkout_commit extension method.
+/// Request for x.ai/git/checkout_commit extension method.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GitCheckoutCommitRequest {

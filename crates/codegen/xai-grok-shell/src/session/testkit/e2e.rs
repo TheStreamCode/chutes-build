@@ -99,7 +99,7 @@ pub async fn load_session_via_agent<C: acp::Client + 'static>(
     if let Some(method) = init
         .auth_methods
         .iter()
-        .find(|m| &*m.id().0 == "chutes.api_key")
+        .find(|m| &*m.id().0 == "xai.api_key")
     {
         let _ = client_conn
             .authenticate(

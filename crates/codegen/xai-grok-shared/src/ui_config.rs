@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use xai_grok_config_types::DisplayRefreshSettings;
 
+use xai_grok_status_line::StatusLineConfig;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -80,8 +82,8 @@ pub struct UiConfig {
     pub render_mermaid: Option<String>,
     /// Hunk-tracker mode the pager advertises to the agent (`agent_only` |
     /// `all_dirty` | `off`). Written by the pager's settings modal; read at
-    /// connect time (CLI `--hunk-tracker-mode` / `CHUTES_BUILD_HUNK_TRACKER` override
-    /// it). `off` disables hunk tracking entirely.
+    /// connect time (CLI `--hunk-tracker-mode` / `GROK_HUNK_TRACKER` override
+    /// it). Unset defaults to `off`, which disables hunk tracking entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hunk_tracker_mode: Option<String>,
     /// Voice capture chord behavior: `toggle` or `hold` (hold-to-talk; needs a
@@ -89,7 +91,7 @@ pub struct UiConfig {
     /// settings modal; unset defaults to `hold`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_capture_mode: Option<String>,
-    /// Speech-to-text language preference for voice dictation. A Chutes Build STT
+    /// Speech-to-text language preference for voice dictation. A Grok STT
     /// catalog code (`en`, `es`, `ja`, … — see xAI STT supported languages) or
     /// `auto` (system locale, resolved at connect). Written by the settings
     /// modal; unset leaves `[voice].language` / default `en`. When set, overrides
@@ -114,10 +116,9 @@ pub struct UiConfig {
     /// when the user picks "Always stop" / "Always continue".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_subagents_on_turn_cancel: Option<String>,
-    /// User knob for the `remember_tool_approvals` gate: when `true`, permission
-    /// prompts show the granular per-tool "Always allow …" options. Written by
-    /// the settings modal; requirements/env/managed/remote settings also feed the
-    /// effective gate.
+    /// User knob for the `remember_tool_approvals` gate: per-tool "Always
+    /// allow …" prompt options (resolver default: on). Written by the settings
+    /// modal; requirements/env/managed/remote settings also feed the gate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remember_tool_approvals: Option<bool>,
     /// In-app drag selection highlight: `flash` | `hold` (legacy bool accepted).
@@ -146,7 +147,7 @@ pub struct UiConfig {
     pub collapsed_edit_blocks: Option<bool>,
     /// Next-prompt suggestions (tab autocomplete ghost text) after each turn.
     /// `None` = on (client default). Written by the pager's settings modal;
-    /// the `CHUTES_BUILD_PROMPT_SUGGESTIONS` env var overrides at runtime.
+    /// the `GROK_PROMPT_SUGGESTIONS` env var overrides at runtime.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_suggestions: Option<bool>,
     /// Startup cursor style: `None` (default) inherits the terminal's own
@@ -181,6 +182,13 @@ pub struct UiConfig {
     /// `None` inherits remote/default; skipped when untouched.
     #[serde(default, skip_serializing_if = "DisplayRefreshSettings::is_default")]
     pub display_refresh: DisplayRefreshSettings,
+    /// `[ui.status_line]`. Not drawn in minimal mode; disabled by default.
+    #[serde(default, skip_serializing_if = "status_line_should_not_be_saved")]
+    pub status_line: StatusLineConfig,
+}
+
+fn status_line_should_not_be_saved(status_line: &StatusLineConfig) -> bool {
+    status_line.is_default() || status_line.problem().is_some()
 }
 
 /// User-config opt-outs for the per-tip contextual hints, serialized as
@@ -208,7 +216,7 @@ pub struct ContextualHints {
     /// is still fold/nav (`flash` / `hold`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub word_select: Option<bool>,
-    /// SSH wrap session-load tip (recommend `chutes-build wrap ssh` when the session
+    /// SSH wrap session-load tip (recommend `grok wrap ssh` when the session
     /// runs over SSH without an OSC 52 sink).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_wrap: Option<bool>,
@@ -295,6 +303,7 @@ impl Default for UiConfig {
             combine_queued_prompts: None,
             follow_up_behavior: None,
             display_refresh: DisplayRefreshSettings::default(),
+            status_line: StatusLineConfig::default(),
         }
     }
 }
@@ -364,6 +373,59 @@ impl UiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The leniency lives in `StatusLineConfig`'s own `Deserialize`; this pins
+    /// that the real `[ui]` table gets it, and that `skip_serializing_if` keeps
+    /// a section we misread out of a save that merges per key.
+    #[test]
+    fn one_typo_in_the_status_line_cannot_fail_the_rest_of_the_ui_table() {
+        let ui: UiConfig = serde_json::from_str(
+            r#"{"theme": "kanagawa", "status_line": {"type": "builtin", "items": "cwd"}}"#,
+        )
+        .expect("[ui] must survive whatever the status line says");
+
+        assert_eq!(ui.theme.as_deref(), Some("kanagawa"));
+        assert!(ui.status_line.problem().is_some());
+
+        let saved = serde_json::to_value(&ui).expect("[ui] serializes");
+        assert_eq!(saved["theme"], "kanagawa");
+        assert!(
+            saved.get("status_line").is_none(),
+            "a section we misread must not be written back over"
+        );
+    }
+
+    /// A settings write merges per key, so a section the parse could not read in
+    /// full must stay out of it.
+    #[test]
+    fn only_a_status_line_we_read_in_full_is_written_back() {
+        for json in [
+            r#"{"status_line": {"type": "enabled"}}"#,
+            // A type this build removed reads like any other unknown one.
+            r#"{"status_line": {"type": "static", "text": "hi"}}"#,
+            r#"{"status_line": {"type": "builtin", "items": "cwd"}}"#,
+            r#"{"status_line": "builtin"}"#,
+            r#"{"status_line": {"padding": 2}}"#,
+            "{}",
+        ] {
+            let ui: UiConfig = serde_json::from_str(json).expect("[ui] survives it");
+            let saved = serde_json::to_value(&ui).expect("[ui] serializes");
+            assert!(saved.get("status_line").is_none(), "{json}");
+        }
+
+        // An unknown key is preserved by the merge, so the section still
+        // persists. `off` is a spelling of `disabled`, so it is a choice that
+        // was read rather than a value that was not, and it saves as the
+        // canonical name.
+        for json in [
+            r#"{"status_line": {"type": "command", "command": "x"}}"#,
+            r#"{"status_line": {"type": "off"}}"#,
+        ] {
+            let ui: UiConfig = serde_json::from_str(json).expect("[ui] survives it");
+            let saved = serde_json::to_value(&ui).expect("[ui] serializes");
+            assert!(saved.get("status_line").is_some(), "{json}");
+        }
+    }
 
     #[test]
     fn page_flip_on_send_defaults_on() {

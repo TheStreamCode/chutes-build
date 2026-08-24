@@ -7,13 +7,13 @@ use xai_grok_workspace::file_system::{
 };
 /// Parsed prompt with context and query kept separate.
 ///
-/// Some templates put `<user_query>` last (context first); Chutes Build puts it first.
+/// Some templates put `<user_query>` last (context first); Grok puts it first.
 /// Keeping them separate lets the caller truncate context without
 /// searching for the query boundary in a flat string.
 #[derive(Debug, Clone)]
 pub struct ParsedPrompt {
     /// Context blocks: `<attached_files>` payloads and resource-link sections.
-    /// Chutes Build mode may include editor open/focus metadata; the compat mode does not.
+    /// Grok mode may include editor open/focus metadata; the compat mode does not.
     /// Empty string when there is no context.
     pub context: String,
     /// The user's query, already wrapped in `<user_query>` tags
@@ -40,7 +40,7 @@ impl ParsedPrompt {
     /// Assemble context, query, and skill information into the final message string.
     ///
     /// Layout:
-    /// - **Chutes Build mode:** `<user_query>` + `<skill_information>` + context
+    /// - **Grok mode:** `<user_query>` + `<skill_information>` + context
     /// - **Query-last mode:** context + `<user_query>` + `<skill_information>`
     ///
     /// The `<skill_information>` block always follows `<user_query>` immediately
@@ -70,7 +70,7 @@ impl ParsedPrompt {
 /// - `<attached_files>` (bare), resource links, then `<user_query>` last
 /// - File references use `<code_selection>` tags
 ///
-/// When `is_cursor` is false, produces original Chutes Build-format output:
+/// When `is_cursor` is false, produces original Grok-format output:
 /// - `<user_query>` first, then `<system-reminder>` wrapped `<attached_files>` and resource links
 /// - File references use `<file_contents>` tags
 pub async fn parse_prompt(
@@ -213,9 +213,20 @@ fn collect_file_references(message: &str) -> Vec<String> {
         let Some(at_symbol_offset) = message[i..].find('@') else {
             break;
         };
-        let start = i + at_symbol_offset + 1;
-        if start >= message.len() || !message.is_char_boundary(start) {
+        let at = i + at_symbol_offset;
+        if !message.is_char_boundary(at) {
+            i = at.saturating_add(1);
+            continue;
+        }
+        let start = at + '@'.len_utf8();
+        if start > message.len() || !message.is_char_boundary(start) {
             break;
+        }
+        if let Some(ch) = message[..at].chars().next_back()
+            && (ch.is_alphanumeric() || ch == '_')
+        {
+            i = start;
+            continue;
         }
         let rest = &message[start..];
         let token = rest.split_whitespace().next().unwrap_or("");
@@ -223,6 +234,9 @@ fn collect_file_references(message: &str) -> Vec<String> {
             paths.push(token.to_string());
         }
         i = start + token.len().max(1);
+        while i < message.len() && !message.is_char_boundary(i) {
+            i += 1;
+        }
     }
     paths
 }
@@ -280,7 +294,7 @@ fn render_regular_links(links: &[&acp::ResourceLink]) -> String {
     }
     s.trim_end_matches('\n').to_string()
 }
-/// Chutes Build-format resource links: `<focused_files>` / `<open_files>` with
+/// Grok-format resource links: `<focused_files>` / `<open_files>` with
 /// metadata inside a `<system-reminder>` wrapper.
 fn render_resource_links_grok(resource_links: &[acp::ResourceLink]) -> String {
     let mut regular_links = Vec::new();
@@ -411,6 +425,16 @@ mod tests {
         let tokens = collect_file_references("@a.rs @b.rs");
         assert_eq!(tokens, vec!["a.rs", "b.rs"]);
     }
+    #[test]
+    fn test_collect_skips_email_addresses() {
+        let tokens = collect_file_references("email foo@bar.com and also @src/main.rs");
+        assert_eq!(tokens, vec!["src/main.rs"]);
+    }
+    #[test]
+    fn test_collect_email_and_at_ref_with_multibyte() {
+        let tokens = collect_file_references("連絡先 foo@bar.com と @src/main.rs を見て");
+        assert_eq!(tokens, vec!["src/main.rs"]);
+    }
     fn make_link(meta: Option<serde_json::Value>) -> acp::ResourceLink {
         let mut link = acp::ResourceLink::new("test.rs", "file:///project/test.rs");
         if let Some(m) = meta.and_then(|v| v.as_object().cloned()) {
@@ -496,7 +520,7 @@ mod tests {
         assert!(result.contains("embedded content"));
         assert!(
             result.starts_with("<user_query>"),
-            "Chutes Build should start with <user_query>, got: {result}"
+            "Grok should start with <user_query>, got: {result}"
         );
     }
     #[test]
@@ -509,7 +533,7 @@ mod tests {
         let rr_pos = result.find("Referenced resources:").unwrap();
         assert!(
             uq_pos < rr_pos,
-            "Chutes Build: <user_query> ({uq_pos}) should come before resource links ({rr_pos})\ngot: {result}"
+            "Grok: <user_query> ({uq_pos}) should come before resource links ({rr_pos})\ngot: {result}"
         );
         assert!(result.contains("<system-reminder>"));
     }

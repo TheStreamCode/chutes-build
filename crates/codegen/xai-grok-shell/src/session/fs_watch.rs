@@ -70,7 +70,7 @@ pub(crate) fn forward_to_hunk_tracker(
     }
 }
 
-/// Dedup key for `chutes.ai/git_head_changed`, shared by the watcher's `GitHead`
+/// Dedup key for `x.ai/git_head_changed`, shared by the watcher's `GitHead`
 /// consumer and the post-edit `maybe_notify_git_branch` path so both compute
 /// the same identity (branch | is_worktree | main_repo | commit). The commit
 /// SHA is included so a same-branch commit (agent runs `git commit`) still
@@ -264,7 +264,7 @@ pub(crate) struct CapabilityInputs {
     pub client_notify: bool,
     pub hunk_tracking: bool,
     pub code_nav: bool,
-    /// `chutes.ai/gitHeadChanged`; opt-in (absent => off).
+    /// `x.ai/gitHeadChanged`; opt-in (absent => off).
     pub git_head_changed: Option<bool>,
 }
 
@@ -280,6 +280,9 @@ pub(crate) struct FsWatchDeps {
     pub client_fs_config: Option<ClientFsConfig>,
     pub persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
     pub last_reported_branch: Arc<parking_lot::Mutex<Option<String>>>,
+    /// A signal, not an entry point: `run_status_emitter` is the only consumer
+    /// and decides whether the row is worth building.
+    pub status_wake: Arc<tokio::sync::Notify>,
 }
 
 impl FsWatchDeps {
@@ -300,6 +303,7 @@ impl FsWatchDeps {
             client_fs_config,
             persistence_tx: session.notifications.persistence_tx.clone(),
             last_reported_branch: session.last_reported_branch.clone(),
+            status_wake: session.status_wake.handle(),
         }
     }
 }
@@ -319,7 +323,7 @@ impl ClientNotify {
 
         match self.mode {
             ClientFsMode::Events => {
-                // Present-tense strings are the `chutes.ai/fs_notify` wire protocol;
+                // Present-tense strings are the `x.ai/fs_notify` wire protocol;
                 // do not sync to internal variant names.
                 let kind_str = match kind {
                     FsEventKind::Created => "Create",
@@ -496,6 +500,7 @@ struct GitHead {
     /// Dedup slot shared with `SessionActor::maybe_notify_git_branch` (see
     /// `git_head_dedup_key`).
     last: Arc<parking_lot::Mutex<Option<String>>>,
+    status_wake: Arc<tokio::sync::Notify>,
 }
 
 impl GitHead {
@@ -535,6 +540,10 @@ impl GitHead {
                         raw.into(),
                     ));
             }
+            // The snapshot carries `workspace.branch`, so a checkout between
+            // turns has to repush it or the row names the old branch until the
+            // next turn ends.
+            self.status_wake.notify_one();
         }
 
         let _ = self
@@ -594,6 +603,7 @@ impl FsWatchPlan {
             cwd: deps.cwd.clone(),
             persistence_tx: deps.persistence_tx,
             last: deps.last_reported_branch,
+            status_wake: deps.status_wake,
         });
 
         Self {
@@ -1191,6 +1201,7 @@ mod tests {
             client_fs_config: None,
             persistence_tx: tx,
             last_reported_branch: Arc::new(parking_lot::Mutex::new(None)),
+            status_wake: Arc::default(),
         };
         let plan = FsWatchPlan::build(
             FsWatchCapabilities {

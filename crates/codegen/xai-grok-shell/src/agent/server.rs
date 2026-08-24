@@ -1,7 +1,7 @@
 //! WebSocket server for remote agent connections.
 //!
 //! This module provides a WebSocket server that allows remote TUI clients to
-//! connect to a chutes-build agent running on a different machine.
+//! connect to a grok agent running on a different machine.
 //!
 //! The agent persists across WebSocket reconnections: a single MvpAgent instance
 //! is created on first connection and reused for all subsequent connections. This
@@ -106,25 +106,6 @@ pub(crate) struct WsQueryParams {
     pub server_key: Option<String>,
 }
 
-/// Compare a presented token against the expected one in constant time.
-///
-/// `==` on `&str` returns at the first differing byte, which over a socket with no
-/// rate limit is a practical oracle: an attacker recovers the token one byte at a
-/// time instead of guessing it whole.
-///
-/// `subtle` rather than `ring::constant_time::verify_slices_are_equal`, which ring
-/// now deprecates as an "internal function not intended for external use with no
-/// promises regarding side channels" — precisely the promise this call is here to
-/// obtain. `subtle` exists for this and defends against the compiler optimising the
-/// comparison back into an early return, which a hand-rolled fold cannot do.
-///
-/// Length is not secret, and `ct_eq` on slices settles it up front.
-fn secret_matches(presented: &str, expected: &str) -> bool {
-    use subtle::ConstantTimeEq as _;
-
-    presented.as_bytes().ct_eq(expected.as_bytes()).into()
-}
-
 /// Validate the bearer token from request headers or query parameters.
 fn validate_auth(headers: &HeaderMap, query: &WsQueryParams, expected_secret: &str) -> bool {
     // Try Authorization header
@@ -133,12 +114,12 @@ fn validate_auth(headers: &HeaderMap, query: &WsQueryParams, expected_secret: &s
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
     {
-        return secret_matches(token, expected_secret);
+        return token == expected_secret;
     }
 
     // Fall back to query parameter for browser connections
     if let Some(ref key) = query.server_key {
-        return secret_matches(key, expected_secret);
+        return key == expected_secret;
     }
 
     false
@@ -693,66 +674,5 @@ pub async fn run_agent_server(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bearer(token: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            format!("Bearer {token}").parse().expect("valid header"),
-        );
-        headers
-    }
-
-    #[test]
-    fn secret_matches_only_the_exact_token() {
-        assert!(secret_matches("abc123", "abc123"));
-        assert!(!secret_matches("abc124", "abc123"));
-        // A correct prefix must not pass. This is the case `==` also rejected,
-        // but only after leaking where the mismatch was through timing.
-        assert!(!secret_matches("abc", "abc123"));
-        assert!(!secret_matches("abc1234", "abc123"));
-        assert!(!secret_matches("", "abc123"));
-    }
-
-    #[test]
-    fn auth_accepts_the_bearer_header() {
-        let query = WsQueryParams::default();
-        assert!(validate_auth(&bearer("tok"), &query, "tok"));
-        assert!(!validate_auth(&bearer("nope"), &query, "tok"));
-    }
-
-    /// The query parameter is the browser fallback; it must be checked the same
-    /// way, not more loosely.
-    #[test]
-    fn auth_accepts_the_query_parameter() {
-        let expected = "tok";
-        let good = WsQueryParams {
-            server_key: Some("tok".into()),
-        };
-        let bad = WsQueryParams {
-            server_key: Some("to".into()),
-        };
-        assert!(validate_auth(&HeaderMap::new(), &good, expected));
-        assert!(!validate_auth(&HeaderMap::new(), &bad, expected));
-    }
-
-    /// No credential at all is a rejection, not a default-allow.
-    #[test]
-    fn auth_rejects_a_request_with_no_credential() {
-        assert!(!validate_auth(
-            &HeaderMap::new(),
-            &WsQueryParams::default(),
-            "tok"
-        ));
-    }
-
-    /// A present-but-empty key must not match an empty expectation by accident:
-    /// an empty `--secret` would otherwise authorise everyone.
-    #[test]
-    fn auth_with_an_empty_header_token_is_rejected() {
-        let query = WsQueryParams::default();
-        assert!(!validate_auth(&bearer(""), &query, "tok"));
-    }
-}
+#[path = "server_tests.rs"]
+mod server_tests;

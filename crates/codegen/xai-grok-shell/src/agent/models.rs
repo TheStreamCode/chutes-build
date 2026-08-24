@@ -15,7 +15,6 @@ use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_confi
 use crate::auth::{AuthManager, GrokAuth, GrokComConfig};
 use crate::remote::{FetchModelsResult, fetch_models_blocking};
 use crate::sampling::SamplerConfig as SamplingConfig;
-use chutes_build_core::reasoning::{ReasoningProfile, reasoning_profile};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 
@@ -28,24 +27,6 @@ pub(crate) enum ModelFetchAuth {
     ApiKey,
     Deployment,
     CustomEndpoint,
-}
-
-/// Whether the stored credential is a *session*, as opposed to a saved API key.
-///
-/// `current_or_expired()` returns any credential on disk, and logging in with an
-/// API key stores one — `auth.json` then holds a `chutes::api_key` entry. Reading
-/// that as "has a session" sent [`ModelFetchAuth::resolve`] down the Session
-/// branch, which fetches the catalogue from the router proxy. That proxy
-/// advertises exactly one model, itself, so `/model` offered `model-router` and
-/// nothing else — including to users whose own config named a Chutes model as
-/// their default.
-///
-/// An API-key credential must reach the `ApiKey` branch, which fetches from the
-/// inference endpoint the requests are going to anyway.
-fn credential_is_session(auth_manager: &crate::auth::AuthManager) -> bool {
-    auth_manager
-        .current_or_expired()
-        .is_some_and(|auth| auth.auth_mode != crate::auth::AuthMode::ApiKey)
 }
 
 impl ModelFetchAuth {
@@ -282,7 +263,7 @@ impl ModelsManagerBuilder {
     }
 
     pub(crate) fn build(self) -> ModelsManager {
-        let has_session = credential_is_session(&self.auth_manager);
+        let has_session = self.auth_manager.current_or_expired().is_some();
         let fetch_auth = ModelFetchAuth::resolve(&self.cfg.endpoints, has_session);
         let current_reasoning_effort = self.cfg.models.default_reasoning_effort;
         ModelsManager {
@@ -338,7 +319,7 @@ impl ModelsManager {
         prefetched_models: Option<IndexMap<String, ModelEntry>>,
         auth_manager: Arc<AuthManager>,
     ) -> Result<Self, String> {
-        let has_session = credential_is_session(auth_manager.as_ref());
+        let has_session = auth_manager.current_or_expired().is_some();
         let is_session_auth = auth_manager
             .current_or_expired()
             .is_some_and(|a| a.is_session_auth());
@@ -419,7 +400,7 @@ impl ModelsManager {
             )
         };
         let new_preferred = new_config.models.default.clone();
-        let has_session = credential_is_session(&self.inner.auth_manager);
+        let has_session = self.inner.auth_manager.current_or_expired().is_some();
         *self.inner.fetch_auth.write() =
             ModelFetchAuth::resolve(&new_config.endpoints, has_session);
         *self.inner.cfg.write() = new_config.clone();
@@ -473,7 +454,7 @@ impl ModelsManager {
         self.inner.catalog.read().models.clone()
     }
 
-    /// Config-declared display name for a catalog id, if any.
+    /// One name without cloning the catalog, for callers on a hot path.
     pub fn display_name(&self, id: &str) -> Option<String> {
         self.inner
             .catalog
@@ -607,16 +588,6 @@ impl ModelsManager {
             .unwrap_or(false)
     }
 
-    pub(crate) fn model_supports_tools(&self, model_id: &str) -> bool {
-        self.inner
-            .catalog
-            .read()
-            .models
-            .get(model_id)
-            .map(|e| e.info().supports_tools)
-            .unwrap_or(true)
-    }
-
     pub(crate) fn model_compactions_remaining(
         &self,
         model_id: &str,
@@ -746,7 +717,7 @@ impl ModelsManager {
             cat.generation += 1;
             cat.etag = None;
         }
-        let has_session = credential_is_session(&self.inner.auth_manager);
+        let has_session = self.inner.auth_manager.current_or_expired().is_some();
         let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);
         *self.inner.fetch_auth.write() = fetch_auth;
         // No session but the endpoint needs one: a fetch would 401, so skip it
@@ -824,7 +795,7 @@ impl ModelsManager {
         }
     }
 
-    /// Hot-reload the catalog from `~/.chutes-build/models_cache.json` after an external write (config-watcher detected).
+    /// Hot-reload the catalog from `~/.grok/models_cache.json` after an external write (config-watcher detected).
     pub(crate) fn reload_from_disk_cache(&self) {
         self.reload_from_cache_manager(&self.inner.cache);
     }

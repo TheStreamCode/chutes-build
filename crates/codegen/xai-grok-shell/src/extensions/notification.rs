@@ -37,7 +37,7 @@ pub struct WorkflowAgentInfo {
 
 /// `_meta` key on rename fan-out (`SessionSummaryGenerated` + ACP
 /// `SessionInfoUpdate`). Old clients ignore unknown meta.
-pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.ai/titleIsManual";
+pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.build/titleIsManual";
 
 /// `_meta` object carried on a manual-rename fan-out.
 pub fn title_is_manual_meta() -> serde_json::Value {
@@ -168,10 +168,8 @@ impl PromptUsage {
             cache_creation_tokens, // subset of input_tokens on the wire
             reasoning_tokens: _,   // subset of output_tokens
             model_calls,
-            cache_hit_calls: _,  // derived from calls; 0 whenever model_calls == 0
-            cache_miss_calls: _, // derived from calls; 0 whenever model_calls == 0
-            api_duration_ms: _,  // timing, not tokens
-            cost_usd_ticks: _,   // cost without usage cannot occur
+            api_duration_ms: _, // timing, not tokens
+            cost_usd_ticks: _,  // cost without usage cannot occur
             cost_is_partial: _,
             cost_missing_calls: _,
         } = self.totals;
@@ -205,12 +203,6 @@ pub struct PromptUsageModel {
     pub reasoning_tokens: u64,
     #[serde(default)]
     pub model_calls: u64,
-    /// Calls whose prompt read from the server-side prefix cache.
-    #[serde(default)]
-    pub cache_hit_calls: u64,
-    /// Calls with no cached prompt read (`cached_prompt_tokens == 0`).
-    #[serde(default)]
-    pub cache_miss_calls: u64,
     #[serde(default)]
     pub api_duration_ms: u64,
     /// Server cost in USD ticks (`USD_TICKS_PER_USD` = 1e10 ticks per $1).
@@ -229,19 +221,6 @@ pub struct PromptUsageModel {
     /// `cost_is_partial` only — never on the public ACP wire.
     #[serde(default, skip_serializing)]
     pub cost_missing_calls: u64,
-}
-
-impl PromptUsageModel {
-    /// Cache read ratio (`cached_read_tokens / input_tokens`), 0-safe and
-    /// clamped to `[0, 1]`. `cache_creation_tokens` is excluded: for
-    /// ChatCompletions it is hardcoded to 0 (only Anthropic Messages reports it).
-    pub fn cache_read_ratio(&self) -> f64 {
-        if self.input_tokens == 0 {
-            return 0.0;
-        }
-        let ratio = self.cached_read_tokens as f64 / self.input_tokens as f64;
-        ratio.clamp(0.0, 1.0)
-    }
 }
 
 /// One model call's token usage: the four Messages API `message.usage` fields
@@ -278,6 +257,7 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cost_usd_ticks,
             cost_missing_calls,
         } = *t;
+        let _ = (cache_hit_calls, cache_miss_calls);
         Self {
             input_tokens,
             output_tokens,
@@ -286,8 +266,6 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
-            cache_hit_calls,
-            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_is_partial: t.cost_is_partial(),
@@ -349,10 +327,8 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
         cached_read_tokens,
         cache_creation_tokens,
         reasoning_tokens,
-        model_calls: _,      // totals-level; headless carries num_turns instead
-        cache_hit_calls: _,  // dropped: not part of the frozen headless shape
-        cache_miss_calls: _, // dropped: not part of the frozen headless shape
-        api_duration_ms: _,  // dropped: not part of the frozen headless shape
+        model_calls: _,     // totals-level; headless carries num_turns instead
+        api_duration_ms: _, // dropped: not part of the frozen headless shape
         cost_usd_ticks,
         cost_is_partial,
         cost_missing_calls: _, // internal partiality count; the flag suffices
@@ -392,9 +368,7 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
                 cache_creation_tokens,
                 reasoning_tokens: _, // dropped: reduced per-model schema
                 model_calls,
-                cache_hit_calls: _,  // dropped: reduced per-model schema
-                cache_miss_calls: _, // dropped: reduced per-model schema
-                api_duration_ms: _,  // dropped: reduced per-model schema
+                api_duration_ms: _, // dropped: reduced per-model schema
                 cost_usd_ticks,
                 cost_is_partial,
                 cost_missing_calls: _,
@@ -623,7 +597,7 @@ pub enum SessionUpdate {
     },
     /// A short "where was I" recap of the session so far.
     ///
-    /// Emitted by the `chutes.ai/recap` ext method: on demand via the `/recap`
+    /// Emitted by the `x.ai/recap` ext method: on demand via the `/recap`
     /// slash command (`auto = false`), or automatically when the user
     /// returns to the terminal after being away (`auto = true`). The pager
     /// renders it as an informational scrollback line; it is never added to
@@ -1074,8 +1048,8 @@ pub enum SessionUpdate {
     /// pending ⏳ for this `tool_call_id`.
     InteractionResolved { tool_call_id: String },
     /// The durable, replayable signal that a turn reached its terminal
-    /// outcome. Rides the persisted `_chutes.build/session/update` rail (unlike the
-    /// fire-and-forget `chutes.ai/session/prompt_complete` notification), so a
+    /// outcome. Rides the persisted `_x.ai/session/update` rail (unlike the
+    /// fire-and-forget `x.ai/session/prompt_complete` notification), so a
     /// viewer that re-attaches mid-turn can finalize the turn from replay
     /// instead of staying stuck on "Waiting…".
     TurnCompleted {
@@ -1230,7 +1204,7 @@ pub enum RetryState {
 /// again. Drives the actionable re-auth banner.
 ///
 /// `legacy_auth` is intentionally excluded: those failures carry their own
-/// detailed migration guidance (`chutes-build update` / `chutes-build logout` / `chutes-build login`)
+/// detailed migration guidance (`grok update` / `grok logout` / `grok login`)
 /// in the message, so we surface that verbatim instead of the generic prompt.
 ///
 /// `auth_transient` is excluded for the opposite reason: the shell emits it
@@ -1474,9 +1448,8 @@ pub struct RecapRequestFile {
     pub x_grok_req_id: String,
     /// Sampling conversation id (`recap-{uuid}`).
     pub x_grok_conv_id: String,
-    /// Whether reasoning/thinking blocks were stripped from the prefix
-    /// (Anthropic Messages backend only; other backends keep reasoning
-    /// verbatim for prompt-cache warmth).
+    /// Whether the side-call requested reasoning/thinking removal before
+    /// budgeting. The over-budget path removes reasoning independently.
     pub strip_reasoning: bool,
     /// Reminder tag used in the recap instruction (`system-reminder` or
     /// the alternate `system_reminder` form).
@@ -1826,7 +1799,7 @@ mod tests {
     fn memory_flush_completed_with_path_roundtrips() {
         let update = SessionUpdate::MemoryFlushCompleted {
             result: "written".into(),
-            path: Some("/home/user/.chutes-build/memory/ws/sessions/log.md".into()),
+            path: Some("/home/user/.grok/memory/ws/sessions/log.md".into()),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1851,7 +1824,7 @@ mod tests {
     fn memory_dream_completed_roundtrips() {
         let update = SessionUpdate::MemoryDreamCompleted {
             result: "written (500 chars)".into(),
-            path: Some("/home/user/.chutes-build/memory/ws/MEMORY.md".into()),
+            path: Some("/home/user/.grok/memory/ws/MEMORY.md".into()),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1861,8 +1834,7 @@ mod tests {
     #[test]
     fn memory_session_saved_roundtrips() {
         let update = SessionUpdate::MemorySessionSaved {
-            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md"
-                .into(),
+            path: "/home/user/.grok/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md".into(),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -1887,13 +1859,13 @@ mod tests {
         let update = SessionUpdate::MemoryFiles {
             files: vec![
                 MemoryFileInfo {
-                    path: "/home/user/.chutes-build/memory/MEMORY.md".into(),
+                    path: "/home/user/.grok/memory/MEMORY.md".into(),
                     source: "global".into(),
                     size_bytes: 1024,
                     modified_epoch_secs: Some(1_700_000_000),
                 },
                 MemoryFileInfo {
-                    path: "/project/.chutes-build/memory/MEMORY.md".into(),
+                    path: "/project/.grok/memory/MEMORY.md".into(),
                     source: "workspace".into(),
                     size_bytes: 512,
                     modified_epoch_secs: None,

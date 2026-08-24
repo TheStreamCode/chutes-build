@@ -1,4 +1,4 @@
-//! `chutes.ai/share_session` extension handler.
+//! `x.ai/share_session` extension handler.
 //!
 //! Loads a local session, exports it, uploads the message payload to cloud storage via
 //! a signed URL (so large sessions bypass the proxy/backend body-size limits),
@@ -29,9 +29,6 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
-    if !chutes_build_core::product::REMOTE_SESSION_SHARING {
-        return Err(acp::Error::method_not_found());
-    }
     let request: ShareSessionRequest = parse_params(args)?;
 
     // Get auth - required for sharing.
@@ -179,7 +176,7 @@ fn require_xai_auth_for_share(
     super::auth_gate::require_xai_auth(
         auth_manager,
         "Authentication required to share session",
-        "Share session is disabled. Run `chutes-build login` to authenticate.",
+        "Share session is disabled. Run `grok login` to authenticate.",
     )
 }
 
@@ -204,12 +201,12 @@ mod tests {
         let expires_at = Utc::now() + ttl;
 
         // We must explicitly set oidc_issuer to a first-party xAI issuer.
-        // Only OIDC tokens against https://auth.chutes.ai (or the local-dev equivalent)
+        // Only OIDC tokens against https://auth.x.ai (or the local-dev equivalent)
         // return true from is_xai_auth(). This is required for the share tests to
         // exercise the happy path through require_xai_auth_for_share.
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
-            oidc_issuer: Some("https://auth.chutes.ai".to_string()),
+            oidc_issuer: Some("https://auth.x.ai".to_string()),
             key: "test-key".into(),
             expires_at: Some(expires_at),
             create_time: Utc::now() - Duration::hours(1),
@@ -287,7 +284,7 @@ mod tests {
 
         assert_eq!(
             data,
-            "Share session is disabled. Run `chutes-build login` to authenticate."
+            "Share session is disabled. Run `grok login` to authenticate."
         );
     }
 }

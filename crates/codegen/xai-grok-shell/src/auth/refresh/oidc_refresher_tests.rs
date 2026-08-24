@@ -764,8 +764,12 @@ async fn lock_timeout_falls_through_to_refresh() {
 
     // Use a very short timeout so the test doesn't wait 30s.
     let _lock = mgr
-        .try_lock_auth_file_async(std::time::Duration::from_millis(100))
-        .await;
+        .try_lock_auth_file_async(
+            std::time::Duration::from_millis(100),
+            crate::auth::manager::lock::Heartbeat::Skip,
+        )
+        .await
+        .into_guard();
     assert!(_lock.is_none(), "lock should timeout");
 
     // The refresh should still succeed (refresher doesn't need the lock).
@@ -1380,7 +1384,7 @@ fn transient_blip_budget_is_scoped_to_the_credential() {
 
 /// Network-unreachable failures (DNS/connect/timeout — the post-wake offline
 /// window) must never consume the escalation budget: no amount of them may
-/// produce a `PermanentFailure` ("Run `chutes-build login`") verdict, because they
+/// produce a `PermanentFailure` ("Run `grok login`") verdict, because they
 /// prove nothing about the credential. Counted failures accrued before or
 /// after are unaffected (the budget is neither consumed nor reset).
 #[test]

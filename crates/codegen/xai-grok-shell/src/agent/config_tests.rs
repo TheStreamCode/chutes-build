@@ -939,7 +939,7 @@ async fn resolve_credentials_serves_cached_provider_token() {
 #[tokio::test]
 async fn set_env_key_shadows_warm_provider_at_resolve_time() {
     use xai_grok_test_support::EnvGuard;
-    let var = "CHUTES_BUILD_TEST_ENVKEY_SHADOW";
+    let var = "GROK_TEST_ENVKEY_SHADOW";
     let _guard = EnvGuard::set(var, "env-token");
     let mut model = test_model_entry("m", "https://litellm.example/v1", None, Some(var), None);
     let provider = crate::auth::AuthProviderRef::new(
@@ -1035,7 +1035,6 @@ fn test_model_entry(
 ) -> ModelEntry {
     ModelEntry {
         info: ModelInfo {
-            supports_tools: true,
             user_selectable: true,
             id: None,
             model_family: None,
@@ -1058,6 +1057,7 @@ fn test_model_entry(
             agent_type: default_agent_type(),
             inference_idle_timeout_secs: None,
             max_retries: None,
+            subagent_rate_limit_max_attempts: None,
             hidden: false,
             supported_in_api: true,
             reasoning_effort: None,
@@ -1239,21 +1239,18 @@ fn env_keys_deser_string_or_array() {
 }
 #[test]
 fn env_keys_resolve_first_set_wins() {
-    let keys = EnvKeys::new([
-        "CHUTES_BUILD_TEST_ENV_KEY_PRIMARY",
-        "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK",
-    ]);
+    let keys = EnvKeys::new(["GROK_TEST_ENV_KEY_PRIMARY", "GROK_TEST_ENV_KEY_FALLBACK"]);
     assert_eq!(keys.resolve_value_with(|_| None), None, "none set");
     assert_eq!(
         keys.resolve_value_with(
-            |n| (n == "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK").then(|| "from-fallback".into())
+            |n| (n == "GROK_TEST_ENV_KEY_FALLBACK").then(|| "from-fallback".into())
         ),
         Some("from-fallback".into())
     );
     assert_eq!(
         keys.resolve_value_with(|n| match n {
-            "CHUTES_BUILD_TEST_ENV_KEY_PRIMARY" => Some("from-primary".into()),
-            "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK" => Some("from-fallback".into()),
+            "GROK_TEST_ENV_KEY_PRIMARY" => Some("from-primary".into()),
+            "GROK_TEST_ENV_KEY_FALLBACK" => Some("from-fallback".into()),
             _ => None,
         }),
         Some("from-primary".into()),
@@ -1261,8 +1258,8 @@ fn env_keys_resolve_first_set_wins() {
     );
     assert_eq!(
         keys.resolve_value_with(|n| match n {
-            "CHUTES_BUILD_TEST_ENV_KEY_PRIMARY" => Some(String::new()),
-            "CHUTES_BUILD_TEST_ENV_KEY_FALLBACK" => Some("from-fallback".into()),
+            "GROK_TEST_ENV_KEY_PRIMARY" => Some(String::new()),
+            "GROK_TEST_ENV_KEY_FALLBACK" => Some("from-fallback".into()),
             _ => None,
         }),
         Some("from-fallback".into())
@@ -1277,24 +1274,21 @@ fn env_keys_single_and_array_are_semantically_equal() {
 }
 #[test]
 fn env_keys_resolve_skips_whitespace_only_value() {
-    let keys = EnvKeys::new([
-        "CHUTES_BUILD_TEST_WS_PRIMARY",
-        "CHUTES_BUILD_TEST_WS_FALLBACK",
-    ]);
+    let keys = EnvKeys::new(["GROK_TEST_WS_PRIMARY", "GROK_TEST_WS_FALLBACK"]);
     assert_eq!(
         keys.resolve_value_with(|n| match n {
-            "CHUTES_BUILD_TEST_WS_PRIMARY" => Some("   ".into()),
-            "CHUTES_BUILD_TEST_WS_FALLBACK" => Some("real".into()),
+            "GROK_TEST_WS_PRIMARY" => Some("   ".into()),
+            "GROK_TEST_WS_FALLBACK" => Some("real".into()),
             _ => None,
         }),
         Some("real".into())
     );
     assert_eq!(
-        EnvKeys::single("CHUTES_BUILD_TEST_WS_ONLY").resolve_value_with(|_| Some("   ".into())),
+        EnvKeys::single("GROK_TEST_WS_ONLY").resolve_value_with(|_| Some("   ".into())),
         None
     );
     assert_eq!(
-        EnvKeys::single("CHUTES_BUILD_TEST_WS_PAD").resolve_value_with(|_| Some("  tok  ".into())),
+        EnvKeys::single("GROK_TEST_WS_PAD").resolve_value_with(|_| Some("  tok  ".into())),
         Some("  tok  ".into())
     );
 }
@@ -1302,7 +1296,7 @@ fn env_keys_resolve_skips_whitespace_only_value() {
 #[serial]
 fn first_own_credential_empty_api_key_falls_through_to_env_key() {
     use xai_grok_test_support::EnvGuard;
-    let var = "CHUTES_BUILD_TEST_FIRST_OWN_CRED_ENV";
+    let var = "GROK_TEST_FIRST_OWN_CRED_ENV";
     let _guard = EnvGuard::set(var, "env-token");
     let env_key = EnvKeys::single(var);
     assert_eq!(
@@ -1318,8 +1312,8 @@ fn first_own_credential_empty_api_key_falls_through_to_env_key() {
 #[serial]
 fn resolve_credentials_multi_env_key_uses_lc_alias() {
     use xai_chat_state::AuthType;
-    let primary = "CHUTES_BUILD_TEST_MULTI_ENV_PRIMARY";
-    let alias = "CHUTES_BUILD_TEST_MULTI_ENV_LC_ALIAS";
+    let primary = "GROK_TEST_MULTI_ENV_PRIMARY";
+    let alias = "GROK_TEST_MULTI_ENV_LC_ALIAS";
     unsafe {
         std::env::remove_var(primary);
         std::env::set_var(alias, "token-via-lc-alias");
@@ -1354,8 +1348,8 @@ fn resolve_credentials_multi_env_key_uses_lc_alias() {
 fn resolve_credentials_empty_env_key_falls_through_to_session() {
     use xai_chat_state::AuthType;
     use xai_grok_test_support::EnvGuard;
-    let primary = "CHUTES_BUILD_TEST_EMPTY_ENV_PRIMARY";
-    let alias = "CHUTES_BUILD_TEST_EMPTY_ENV_LC_ALIAS";
+    let primary = "GROK_TEST_EMPTY_ENV_PRIMARY";
+    let alias = "GROK_TEST_EMPTY_ENV_LC_ALIAS";
     let _primary = EnvGuard::set(primary, "");
     let _alias = EnvGuard::set(alias, "");
     let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
@@ -1368,16 +1362,16 @@ fn resolve_credentials_empty_env_key_falls_through_to_session() {
 #[test]
 #[serial]
 fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
-    use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
+    use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
     use xai_chat_state::AuthType;
     use xai_grok_test_support::EnvGuard;
     let sentinel = "xai-global-sentinel-key";
-    let primary = "CHUTES_BUILD_TEST_EMPTY_ENV_GLOBAL_PRIMARY";
-    let alias = "CHUTES_BUILD_TEST_EMPTY_ENV_GLOBAL_ALIAS";
+    let primary = "GROK_TEST_EMPTY_ENV_GLOBAL_PRIMARY";
+    let alias = "GROK_TEST_EMPTY_ENV_GLOBAL_ALIAS";
     let _primary = EnvGuard::set(primary, "");
     let _alias = EnvGuard::set(alias, "");
-    let _global = EnvGuard::set(CHUTES_API_KEY_ENV_VAR, sentinel);
-    let _legacy = EnvGuard::unset(LEGACY_CHUTES_API_KEY_ENV_VAR);
+    let _global = EnvGuard::set(XAI_API_KEY_ENV_VAR, sentinel);
+    let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
     let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
     model.env_key = Some(EnvKeys::new([primary, alias]));
     assert!(!model.has_own_credentials());
@@ -2116,7 +2110,6 @@ fn model_use_concise_defaults_to_false() {
 #[test]
 fn model_info_from_config_propagates_use_concise() {
     let entry = ModelEntryConfig {
-        supports_tools: true,
         id: None,
         model_family: None,
         model: "test".to_string(),
@@ -2139,6 +2132,7 @@ fn model_info_from_config_propagates_use_concise() {
         agent_type: default_agent_type(),
         inference_idle_timeout_secs: None,
         max_retries: None,
+        subagent_rate_limit_max_attempts: None,
         hidden: false,
         supported_in_api: true,
         reasoning_effort: None,
@@ -2277,7 +2271,6 @@ fn model_agent_type_defaults_to_grok_build() {
 #[test]
 fn model_info_from_config_propagates_agent_type() {
     let entry = ModelEntryConfig {
-        supports_tools: true,
         id: None,
         model_family: None,
         model: "test".to_string(),
@@ -2300,6 +2293,7 @@ fn model_info_from_config_propagates_agent_type() {
         agent_type: "codex".to_string(),
         inference_idle_timeout_secs: None,
         max_retries: None,
+        subagent_rate_limit_max_attempts: None,
         hidden: false,
         supported_in_api: true,
         reasoning_effort: None,
@@ -2730,7 +2724,6 @@ fn inference_idle_timeout_secs_absent_defaults_to_none() {
 #[test]
 fn inference_idle_timeout_propagates_to_model_info() {
     let entry = ModelEntryConfig {
-        supports_tools: true,
         id: None,
         model_family: None,
         model: "test".to_string(),
@@ -2753,6 +2746,7 @@ fn inference_idle_timeout_propagates_to_model_info() {
         agent_type: default_agent_type(),
         inference_idle_timeout_secs: Some(120),
         max_retries: None,
+        subagent_rate_limit_max_attempts: None,
         hidden: false,
         supported_in_api: true,
         reasoning_effort: None,
@@ -2878,7 +2872,7 @@ fn disable_api_key_auth_parses_from_auth_alias() {
 #[test]
 fn force_login_team_uuid_parses_string_and_array() {
     use crate::auth::ForceLoginTeam;
-    let _g = crate::env::EnvVarGuard::remove("CHUTES_BUILD_FORCE_LOGIN_TEAM_ID");
+    let _g = crate::env::EnvVarGuard::remove("GROK_FORCE_LOGIN_TEAM_ID");
     assert!(
         crate::auth::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
@@ -2930,7 +2924,7 @@ fn force_login_team_uuid_parses_string_and_array() {
 #[test]
 fn force_login_team_id_env_overrides_user_config() {
     use crate::auth::ForceLoginTeam;
-    let _guard = crate::env::EnvVarGuard::set("CHUTES_BUILD_FORCE_LOGIN_TEAM_ID", "env-team");
+    let _guard = crate::env::EnvVarGuard::set("GROK_FORCE_LOGIN_TEAM_ID", "env-team");
     assert!(
         crate::auth::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
@@ -2958,7 +2952,7 @@ fn force_login_team_id_env_overrides_user_config() {
 #[test]
 fn force_login_team_id_env_unset_keeps_config_value() {
     use crate::auth::ForceLoginTeam;
-    let _guard = crate::env::EnvVarGuard::remove("CHUTES_BUILD_FORCE_LOGIN_TEAM_ID");
+    let _guard = crate::env::EnvVarGuard::remove("GROK_FORCE_LOGIN_TEAM_ID");
     assert!(
         crate::auth::force_login_team_from_requirements().is_none(),
         "clear the force_login_team_uuid pin in requirements.toml to run this test",
@@ -3067,10 +3061,10 @@ fn e2e_config_toml_model_overrides_default() {
     let model = models.get(dm).expect("model should exist");
     let sampling = resolve_sampling(model, Some("session-tok"));
     assert_eq!(sampling.base_url, "https://inference.example.com/v1");
-    unsafe { std::env::set_var("CHUTES_API_KEY", "xai-key") };
+    unsafe { std::env::set_var("XAI_API_KEY", "xai-key") };
     let sampling = resolve_sampling(model, None);
     assert_eq!(sampling.base_url, "https://inference.example.com/v1");
-    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+    unsafe { std::env::remove_var("XAI_API_KEY") };
     let sampling = resolve_sampling(model, None);
     assert_eq!(sampling.base_url, "https://inference.example.com/v1");
 }
@@ -3126,7 +3120,7 @@ fn config_models_default_is_not_overwritten_by_default_models_json() {
     let remote_settings_default = Some("remote-settings-model");
     let resolved = resolve_string_flag(
         None,
-        "CHUTES_BUILD_DEFAULT_MODEL_TEST_NONEXISTENT",
+        "GROK_DEFAULT_MODEL_TEST_NONEXISTENT",
         config_default,
         remote_settings_default,
     );
@@ -3178,14 +3172,14 @@ fn e2e_default_model_with_external_api_key_routes_to_api_xai() {
     let model = models
         .get(crate::models::default_model())
         .expect("default model should exist");
-    unsafe { std::env::set_var("CHUTES_API_KEY", "xai-external-key") };
+    unsafe { std::env::set_var("XAI_API_KEY", "xai-external-key") };
     let sampling = resolve_sampling(model, None);
     assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
     assert_eq!(
         sampling.base_url, "https://api.x.ai/v1",
         "external API key should route to api.x.ai via api_base_url"
     );
-    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+    unsafe { std::env::remove_var("XAI_API_KEY") };
 }
 #[test]
 fn e2e_user_config_overrides_prefetched_model() {
@@ -3230,7 +3224,7 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         None,
         None,
     );
-    unsafe { std::env::set_var("CHUTES_API_KEY", "env-key") };
+    unsafe { std::env::set_var("XAI_API_KEY", "env-key") };
     let sampling = resolve_sampling(&model_with_key, Some("session-key"));
     assert_eq!(
         sampling.api_key.as_deref(),
@@ -3268,7 +3262,7 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         sampling.base_url, "https://api.x.ai/v1",
         "env key should route to api_base_url"
     );
-    unsafe { std::env::remove_var("CHUTES_API_KEY") };
+    unsafe { std::env::remove_var("XAI_API_KEY") };
     let sampling = resolve_sampling(&model_no_key, None);
     assert!(
         sampling.api_key.is_none(),
@@ -3447,19 +3441,19 @@ fn e2e_enterprise_endpoints_only_no_model_override() {
 /// the ambient environment. Gated behind `#[serial]`.
 fn unset_endpoint_env_vars() {
     for k in [
-        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
-        "CHUTES_BUILD_XAI_API_BASE_URL",
-        "CHUTES_BUILD_FEEDBACK_BASE_URL",
-        "CHUTES_BUILD_TRACE_UPLOAD_URL",
-        "CHUTES_BUILD_MANAGED_CONFIG_URL",
-        "CHUTES_BUILD_MODELS_BASE_URL",
-        "CHUTES_BUILD_MODELS_LIST_URL",
+        "GROK_CLI_CHAT_PROXY_BASE_URL",
+        "GROK_XAI_API_BASE_URL",
+        "GROK_FEEDBACK_BASE_URL",
+        "GROK_TRACE_UPLOAD_URL",
+        "GROK_MANAGED_CONFIG_URL",
+        "GROK_MODELS_BASE_URL",
+        "GROK_MODELS_LIST_URL",
         "OTEL_EXPORTER_OTLP_ENDPOINT",
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
         "OTEL_EXPORTER_OTLP_HEADERS",
-        "CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT",
-        "CHUTES_BUILD_INTERNAL_OTLP_HEADERS",
-        "CHUTES_BUILD_EXTERNAL_OTEL",
+        "GROK_INTERNAL_OTLP_TRACES_ENDPOINT",
+        "GROK_INTERNAL_OTLP_HEADERS",
+        "GROK_EXTERNAL_OTEL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
@@ -3773,8 +3767,8 @@ fn non_boolean_feature_value_fails_the_load() {
 #[test]
 #[serial]
 fn resolve_title_refresh_defaults_to_turn_summary_but_decouples() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_TITLE_REFRESH") };
-    unsafe { std::env::remove_var("CHUTES_BUILD_TURN_SUMMARY") };
+    unsafe { std::env::remove_var("GROK_TITLE_REFRESH") };
+    unsafe { std::env::remove_var("GROK_TURN_SUMMARY") };
     let r = Config::default().resolve_title_refresh();
     assert!(r.value, "title_refresh defaults to turn_summary (on)");
     let ts_off = Config {
@@ -3801,19 +3795,19 @@ fn resolve_title_refresh_defaults_to_turn_summary_but_decouples() {
         "title_refresh config overrides the turn_summary default"
     );
     assert_eq!(r.source, ConfigSource::Config);
-    unsafe { std::env::set_var("CHUTES_BUILD_TITLE_REFRESH", "0") };
+    unsafe { std::env::set_var("GROK_TITLE_REFRESH", "0") };
     let r = decoupled.resolve_title_refresh();
-    assert!(!r.value, "CHUTES_BUILD_TITLE_REFRESH env wins");
+    assert!(!r.value, "GROK_TITLE_REFRESH env wins");
     assert_eq!(r.source, ConfigSource::Env);
-    unsafe { std::env::remove_var("CHUTES_BUILD_TITLE_REFRESH") };
+    unsafe { std::env::remove_var("GROK_TITLE_REFRESH") };
 }
 /// A `turn_summary` pin lands in the title's default slot, so it moves the title
-/// with it. Only the default slot, so `CHUTES_BUILD_TITLE_REFRESH` still outranks it and a
+/// with it. Only the default slot, so `GROK_TITLE_REFRESH` still outranks it and a
 /// user can turn the title back on. Pinning `title_refresh` is what closes that.
 #[test]
 #[serial]
 fn a_turn_summary_pin_moves_the_title_default_and_the_environment_lifts_it() {
-    let _env = EnvGuard::set("CHUTES_BUILD_TURN_SUMMARY", "1");
+    let _env = EnvGuard::set("GROK_TURN_SUMMARY", "1");
     let mut cfg = Config::default();
     cfg.requirements.pin_feature(
         Feature::TurnSummary,
@@ -3821,13 +3815,13 @@ fn a_turn_summary_pin_moves_the_title_default_and_the_environment_lifts_it() {
         crate::config::RequirementSource::Unknown,
     );
     {
-        let _title = EnvGuard::unset("CHUTES_BUILD_TITLE_REFRESH");
+        let _title = EnvGuard::unset("GROK_TITLE_REFRESH");
         assert!(
             !cfg.resolve_title_refresh().value,
-            "the pin outranks CHUTES_BUILD_TURN_SUMMARY, and the title default follows the pin"
+            "the pin outranks GROK_TURN_SUMMARY, and the title default follows the pin"
         );
     }
-    let _title = EnvGuard::set("CHUTES_BUILD_TITLE_REFRESH", "1");
+    let _title = EnvGuard::set("GROK_TITLE_REFRESH", "1");
     let r = cfg.resolve_title_refresh();
     assert!(r.value, "the environment outranks a derived default");
     assert_eq!(r.source, ConfigSource::Env);
@@ -3837,13 +3831,13 @@ fn a_turn_summary_pin_moves_the_title_default_and_the_environment_lifts_it() {
 #[test]
 #[serial]
 fn a_title_refresh_pin_outranks_the_environment() {
-    let _env = EnvGuard::set("CHUTES_BUILD_TITLE_REFRESH", "1");
+    let _env = EnvGuard::set("GROK_TITLE_REFRESH", "1");
     let mut cfg = Config::default();
     cfg.requirements
         .title_refresh
         .pin(false, crate::config::RequirementSource::Unknown);
     let r = cfg.resolve_title_refresh();
-    assert!(!r.value, "the pin lost to CHUTES_BUILD_TITLE_REFRESH");
+    assert!(!r.value, "the pin lost to GROK_TITLE_REFRESH");
     assert_eq!(r.source, ConfigSource::Requirement);
 }
 /// Gate precedence: env > `[doom_loop_recovery]` > remote settings >
@@ -3854,7 +3848,7 @@ fn a_title_refresh_pin_outranks_the_environment() {
 #[serial]
 fn resolve_doom_loop_recovery_precedence() {
     use crate::util::config::DoomLoopRecoverySettings;
-    unsafe { std::env::remove_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY") };
+    unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
     let default_cfg = Config::default();
     let p = default_cfg
         .resolve_doom_loop_recovery()
@@ -3887,12 +3881,12 @@ fn resolve_doom_loop_recovery_precedence() {
         remote_off.resolve_doom_loop_recovery().is_none(),
         "remote settings kill switch"
     );
-    unsafe { std::env::set_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY", "0") };
+    unsafe { std::env::set_var("GROK_DOOM_LOOP_RECOVERY", "0") };
     assert!(
         default_cfg.resolve_doom_loop_recovery().is_none(),
         "env kill switch"
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY") };
+    unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
     let remote_on = Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             doom_loop_recovery: Some(DoomLoopRecoverySettings {
@@ -3948,19 +3942,19 @@ fn resolve_doom_loop_recovery_precedence() {
         .expect("config on beats remote kill-switch");
     assert_eq!(p.max_threshold, 4);
     assert_eq!(p.max_retries, 3);
-    unsafe { std::env::set_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY", "0") };
+    unsafe { std::env::set_var("GROK_DOOM_LOOP_RECOVERY", "0") };
     assert!(
         config_over_remote.resolve_doom_loop_recovery().is_none(),
         "env wins over config + remote"
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY") };
+    unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
 }
 /// The `[doom_loop_recovery]` TOML section deserializes through the
 /// standard config path (no bespoke parser).
 #[test]
 #[serial]
 fn doom_loop_recovery_section_parses_from_toml() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY") };
+    unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
     let raw: toml::Value = toml::from_str(
         r#"
             [doom_loop_recovery]
@@ -4018,7 +4012,7 @@ fn worktree_auto_gc_section_parses_from_toml() {
 #[serial]
 fn resolve_doom_loop_recovery_clamps_tunables() {
     use crate::util::config::DoomLoopRecoverySettings;
-    unsafe { std::env::remove_var("CHUTES_BUILD_DOOM_LOOP_RECOVERY") };
+    unsafe { std::env::remove_var("GROK_DOOM_LOOP_RECOVERY") };
     let cfg = Config {
         doom_loop_recovery: DoomLoopRecoverySettings {
             enabled: Some(true),
@@ -4067,8 +4061,8 @@ fn resolve_doom_loop_recovery_clamps_tunables() {
 #[test]
 #[serial]
 fn resolve_trace_upload_disabled_when_telemetry_off_despite_remote_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Disabled);
     cfg.remote_settings = Some(crate::util::config::RemoteSettings {
@@ -4082,8 +4076,8 @@ fn resolve_trace_upload_disabled_when_telemetry_off_despite_remote_flag() {
 #[test]
 #[serial]
 fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Disabled);
     cfg.telemetry.trace_upload = Some(true);
@@ -4102,8 +4096,8 @@ fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
 #[test]
 #[serial]
 fn trace_upload_decision_debug_reports_winning_source() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Disabled);
     cfg.remote_settings = Some(crate::util::config::RemoteSettings {
@@ -4125,8 +4119,8 @@ fn trace_upload_decision_debug_reports_winning_source() {
 #[test]
 #[serial]
 fn resolve_trace_upload_honors_config_when_telemetry_on() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Enabled);
     cfg.telemetry.trace_upload = Some(false);
@@ -4140,7 +4134,7 @@ fn resolve_trace_upload_honors_config_when_telemetry_on() {
 #[test]
 #[serial]
 fn resolve_goal_defaults_to_true_when_unset() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL") };
+    unsafe { std::env::remove_var("GROK_GOAL") };
     let cfg = Config::default();
     let r = cfg.resolve_goal();
     assert!(r.value, "goal should be on by default");
@@ -4149,18 +4143,18 @@ fn resolve_goal_defaults_to_true_when_unset() {
 #[test]
 #[serial]
 fn resolve_goal_env_overrides_config_without_remote_kill_switch() {
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL", "1") };
+    unsafe { std::env::set_var("GROK_GOAL", "1") };
     let mut cfg = Config::default();
     cfg.goal.enabled = Some(false);
     let r = cfg.resolve_goal();
     assert_eq!(r.source, ConfigSource::Env);
     assert!(r.value);
-    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL") };
+    unsafe { std::env::remove_var("GROK_GOAL") };
 }
 #[test]
 #[serial]
 fn resolve_goal_remote_false_kills_local_opt_in() {
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL", "1") };
+    unsafe { std::env::set_var("GROK_GOAL", "1") };
     let mut cfg = Config::default();
     cfg.goal.enabled = Some(true);
     cfg.remote_settings = Some(crate::util::config::RemoteSettings {
@@ -4170,12 +4164,12 @@ fn resolve_goal_remote_false_kills_local_opt_in() {
     let r = cfg.resolve_goal();
     assert_eq!(r.source, ConfigSource::Remote);
     assert!(!r.value);
-    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL") };
+    unsafe { std::env::remove_var("GROK_GOAL") };
 }
 #[test]
 #[serial]
 fn resolve_goal_remote_settings_used_when_no_local() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL") };
+    unsafe { std::env::remove_var("GROK_GOAL") };
     let cfg = Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             goal_enabled: Some(true),
@@ -4192,7 +4186,7 @@ fn resolve_goal_remote_settings_used_when_no_local() {
 #[test]
 #[serial]
 fn resolve_goal_remote_settings_kill_switch_overrides_default_on() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL") };
+    unsafe { std::env::remove_var("GROK_GOAL") };
     let cfg = Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             goal_enabled: Some(false),
@@ -4207,7 +4201,7 @@ fn resolve_goal_remote_settings_kill_switch_overrides_default_on() {
 #[test]
 #[serial]
 fn background_workflows_default_on_without_affecting_goal() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_WORKFLOWS") };
+    unsafe { std::env::remove_var("GROK_WORKFLOWS") };
     let cfg = Config::default();
     let r = cfg.resolve_workflows();
     assert!(r.value);
@@ -4217,7 +4211,7 @@ fn background_workflows_default_on_without_affecting_goal() {
 #[test]
 #[serial]
 fn resolve_workflows_remote_settings_enables() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_WORKFLOWS") };
+    unsafe { std::env::remove_var("GROK_WORKFLOWS") };
     let cfg = Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             workflows_enabled: Some(true),
@@ -4232,7 +4226,7 @@ fn resolve_workflows_remote_settings_enables() {
 #[test]
 #[serial]
 fn resolve_workflows_remote_false_kills_local_opt_in() {
-    unsafe { std::env::set_var("CHUTES_BUILD_WORKFLOWS", "1") };
+    unsafe { std::env::set_var("GROK_WORKFLOWS", "1") };
     let mut cfg = Config::default();
     cfg.workflows.enabled = Some(true);
     cfg.remote_settings = Some(crate::util::config::RemoteSettings {
@@ -4242,12 +4236,12 @@ fn resolve_workflows_remote_false_kills_local_opt_in() {
     let r = cfg.resolve_workflows();
     assert_eq!(r.source, ConfigSource::Remote);
     assert!(!r.value);
-    unsafe { std::env::remove_var("CHUTES_BUILD_WORKFLOWS") };
+    unsafe { std::env::remove_var("GROK_WORKFLOWS") };
 }
 #[test]
 #[serial]
 fn resolve_workflows_env_wins() {
-    unsafe { std::env::set_var("CHUTES_BUILD_WORKFLOWS", "0") };
+    unsafe { std::env::set_var("GROK_WORKFLOWS", "0") };
     let cfg = Config::default();
     let r = cfg.resolve_workflows();
     assert_eq!(r.source, ConfigSource::Env);
@@ -4255,12 +4249,12 @@ fn resolve_workflows_env_wins() {
         !r.value,
         "env must be able to kill the default-on workflows"
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_WORKFLOWS") };
+    unsafe { std::env::remove_var("GROK_WORKFLOWS") };
 }
 #[test]
 #[serial]
 fn resolve_image_gen_model_override_remote_settings_or_config() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE") };
+    unsafe { std::env::remove_var("GROK_IMAGE_GEN_MODEL_OVERRIDE") };
     let with = |config: Option<&str>, gb: Option<&str>| Config {
         features: Features {
             image_gen_model_override: config.map(String::from),
@@ -4286,7 +4280,7 @@ fn resolve_image_gen_model_override_remote_settings_or_config() {
 #[test]
 #[serial]
 fn resolve_image_edit_model_override_remote_settings_or_config() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_EDIT_MODEL_OVERRIDE") };
+    unsafe { std::env::remove_var("GROK_IMAGE_EDIT_MODEL_OVERRIDE") };
     let with = |config: Option<&str>, gb: Option<&str>| Config {
         features: Features {
             image_edit_model_override: config.map(String::from),
@@ -4320,7 +4314,7 @@ fn resolve_image_edit_model_override_remote_settings_or_config() {
 #[test]
 #[serial]
 fn imagine_tools_disabled_gates_image_edit() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_EDIT") };
+    unsafe { std::env::remove_var("GROK_IMAGE_EDIT") };
     let with_list = |tools: Vec<&str>| Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             imagine_tools_disabled: Some(tools.into_iter().map(String::from).collect()),
@@ -4328,18 +4322,18 @@ fn imagine_tools_disabled_gates_image_edit() {
         }),
         ..Default::default()
     };
-    unsafe { std::env::set_var("CHUTES_BUILD_IMAGE_EDIT", "1") };
+    unsafe { std::env::set_var("GROK_IMAGE_EDIT", "1") };
     let off = with_list(vec!["image_edit"]).resolve_image_edit();
     assert!(!off.value);
     assert_eq!(off.source, ConfigSource::Remote);
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_EDIT") };
+    unsafe { std::env::remove_var("GROK_IMAGE_EDIT") };
     assert!(with_list(vec!["image_to_video"]).resolve_image_edit().value);
     assert!(Config::default().resolve_image_edit().value);
 }
 #[test]
 #[serial]
 fn resolve_image_gen_gates() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_GEN") };
+    unsafe { std::env::remove_var("GROK_IMAGE_GEN") };
     assert!(Config::default().resolve_image_gen().value);
     assert!(
         !Config {
@@ -4363,7 +4357,7 @@ fn resolve_image_gen_gates() {
         .resolve_image_gen()
         .value
     );
-    unsafe { std::env::set_var("CHUTES_BUILD_IMAGE_GEN", "1") };
+    unsafe { std::env::set_var("GROK_IMAGE_GEN", "1") };
     let denied = Config {
         remote_settings: Some(crate::util::config::RemoteSettings {
             imagine_tools_disabled: Some(vec!["image_gen".into()]),
@@ -4374,12 +4368,12 @@ fn resolve_image_gen_gates() {
     .resolve_image_gen();
     assert!(!denied.value);
     assert_eq!(denied.source, ConfigSource::Remote);
-    unsafe { std::env::remove_var("CHUTES_BUILD_IMAGE_GEN") };
+    unsafe { std::env::remove_var("GROK_IMAGE_GEN") };
 }
 #[test]
 #[serial]
 fn resolve_video_gen_gates() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_VIDEO_GEN") };
+    unsafe { std::env::remove_var("GROK_VIDEO_GEN") };
     assert!(Config::default().resolve_video_gen().value);
     assert!(
         !Config {
@@ -4419,14 +4413,14 @@ fn resolve_video_gen_gates() {
 /// start from a known baseline regardless of run order.
 fn clear_goal_envs() {
     unsafe {
-        std::env::remove_var("CHUTES_BUILD_GOAL");
-        std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER");
-        std::env::remove_var("CHUTES_BUILD_GOAL_PLANNER");
-        std::env::remove_var("CHUTES_BUILD_GOAL_SUMMARY");
-        std::env::remove_var("CHUTES_BUILD_GOAL_VERIFIER_N");
-        std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX");
-        std::env::remove_var("CHUTES_BUILD_GOAL_STRATEGIST_EVERY");
-        std::env::remove_var("CHUTES_BUILD_GOAL_REVERIFY_AFTER");
+        std::env::remove_var("GROK_GOAL");
+        std::env::remove_var("GROK_GOAL_CLASSIFIER");
+        std::env::remove_var("GROK_GOAL_PLANNER");
+        std::env::remove_var("GROK_GOAL_SUMMARY");
+        std::env::remove_var("GROK_GOAL_VERIFIER_N");
+        std::env::remove_var("GROK_GOAL_CLASSIFIER_MAX");
+        std::env::remove_var("GROK_GOAL_STRATEGIST_EVERY");
+        std::env::remove_var("GROK_GOAL_REVERIFY_AFTER");
     }
 }
 fn cfg_with_goal(goal: bool) -> Config {
@@ -4514,12 +4508,12 @@ fn resolve_goal_classifier_remote_forces_either_way() {
 #[serial]
 fn resolve_goal_classifier_env_overrides_default_and_remote() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER", "0") };
     let r = cfg_with_goal_and_remote(true, remote_classifier(true))
         .resolve_goal_classifier_enabled(true);
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER", "1") };
+    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER", "1") };
     let r = cfg_with_goal_and_remote(false, remote_classifier(false))
         .resolve_goal_classifier_enabled(false);
     assert!(r.value);
@@ -4558,11 +4552,11 @@ fn resolve_goal_planner_remote_forces_either_way() {
 #[serial]
 fn resolve_goal_planner_env_overrides_default_and_remote() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_PLANNER", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_PLANNER", "0") };
     let r = cfg_with_goal_and_remote(true, remote_planner(true)).resolve_goal_planner_enabled(true);
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_PLANNER", "1") };
+    unsafe { std::env::set_var("GROK_GOAL_PLANNER", "1") };
     let r =
         cfg_with_goal_and_remote(false, remote_planner(false)).resolve_goal_planner_enabled(false);
     assert!(r.value);
@@ -4601,7 +4595,7 @@ fn resolve_goal_summary_remote_forces_either_way() {
 #[serial]
 fn resolve_goal_summary_env_overrides_default_and_remote() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_SUMMARY", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_SUMMARY", "0") };
     let r = cfg_with_goal_and_remote(true, remote_summary(true)).resolve_goal_summary_enabled(true);
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
@@ -4624,7 +4618,7 @@ fn resolve_goal_classifier_config_honored_when_env_unset() {
 #[serial]
 fn resolve_goal_classifier_env_beats_config() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER", "0") };
     let r = cfg_with_goal_config(GoalConfig {
         classifier_enabled: Some(true),
         ..Default::default()
@@ -4681,7 +4675,7 @@ fn resolve_goal_planner_config_honored_when_env_unset() {
 #[serial]
 fn resolve_goal_planner_env_beats_config() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_PLANNER", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_PLANNER", "0") };
     let r = cfg_with_goal_config(GoalConfig {
         planner_enabled: Some(true),
         ..Default::default()
@@ -4738,7 +4732,7 @@ fn resolve_goal_summary_config_honored_when_env_unset() {
 #[serial]
 fn resolve_goal_summary_env_beats_config() {
     clear_goal_envs();
-    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_SUMMARY", "0") };
+    unsafe { std::env::set_var("GROK_GOAL_SUMMARY", "0") };
     let r = cfg_with_goal_config(GoalConfig {
         summary_enabled: Some(true),
         ..Default::default()
@@ -4807,7 +4801,7 @@ reverify_after = 6
     assert_eq!(empty.goal.classifier_enabled, None);
     assert_eq!(empty.goal.verifier_count, None);
 }
-const GOAL_USE_CURRENT_ENV: &str = "CHUTES_BUILD_GOAL_USE_CURRENT_MODEL_ONLY";
+const GOAL_USE_CURRENT_ENV: &str = "GROK_GOAL_USE_CURRENT_MODEL_ONLY";
 fn clear_goal_model_env() {
     unsafe { std::env::remove_var(GOAL_USE_CURRENT_ENV) };
 }
@@ -5202,11 +5196,19 @@ fn known_non_serde_config_paths_are_not_reported_unused() {
             not_a_real_feature = true
             [slash_command_tags]
             workflows = "new"
+            [marketplace]
+            plugin_cta_marketplace = "Acme Marketplace"
         "#,
     );
     assert!(
         !unused.iter().any(|k| k == "features.remote_fetch"),
         "features.remote_fetch must not be treated as a typo: {unused:?}"
+    );
+    assert!(
+        !unused
+            .iter()
+            .any(|k| k == "marketplace.plugin_cta_marketplace"),
+        "the pager-read CTA marketplace override must not warn: {unused:?}"
     );
     assert!(
         !unused.iter().any(|k| k == "features.session_search"),
@@ -5567,7 +5569,7 @@ fn internal_otlp_endpoint_grok_internal_wins_regardless_of_switch() {
         assert_eq!(
             cfg.resolve_otlp_traces_endpoint(),
             "https://internal.example/traces",
-            "switch={switch}: CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT must win verbatim (trailing / trimmed)"
+            "switch={switch}: GROK_INTERNAL_OTLP_TRACES_ENDPOINT must win verbatim (trailing / trimmed)"
         );
     }
 }
@@ -5758,7 +5760,7 @@ fn external_otel_default_off_and_double_opt_in() {
         resolve_external_otel_config_with(
             None,
             None,
-            ext_env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "1")]),
+            ext_env(&[("GROK_EXTERNAL_OTEL", "1")]),
             ext_client(),
             false,
         )
@@ -5769,7 +5771,7 @@ fn external_otel_default_off_and_double_opt_in() {
             None,
             None,
             ext_env(&[
-                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+                ("GROK_EXTERNAL_OTEL", "1"),
                 ("OTEL_METRICS_EXPORTER", "otlp"),
             ]),
             ext_client(),
@@ -5819,7 +5821,7 @@ fn external_otel_file_table_layered_under_env() {
         resolve_external_otel_config_with(
             Some(&effective),
             None,
-            ext_env(&[("CHUTES_BUILD_EXTERNAL_OTEL", "0")]),
+            ext_env(&[("GROK_EXTERNAL_OTEL", "0")]),
             ext_client(),
             false,
         )
@@ -5893,10 +5895,7 @@ fn external_otel_requirements_pin_wins_over_env() {
         resolve_external_otel_config_with(
             None,
             Some(&req),
-            ext_env(&[
-                ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
-                ("OTEL_LOGS_EXPORTER", "otlp"),
-            ]),
+            ext_env(&[("GROK_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp"),]),
             ext_client(),
             false,
         )
@@ -5914,7 +5913,7 @@ fn external_otel_requirements_pin_wins_over_env() {
         None,
         Some(&req),
         ext_env(&[
-            ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
+            ("GROK_EXTERNAL_OTEL", "1"),
             ("OTEL_LOGS_EXPORTER", "otlp"),
             ("OTEL_LOG_USER_PROMPTS", "1"),
             ("OTEL_LOG_TOOL_DETAILS", "1"),
@@ -5927,7 +5926,7 @@ fn external_otel_requirements_pin_wins_over_env() {
     assert!(!cfg.gates.log_tool_details, "requirement pin must win");
 }
 /// Regression: an org enable via `[telemetry].otel_enabled`
-/// (managed config / requirements — no `CHUTES_BUILD_EXTERNAL_OTEL` env var) must
+/// (managed config / requirements — no `GROK_EXTERNAL_OTEL` env var) must
 /// flip the master switch the *internal* pipeline keys off, so legacy
 /// `OTEL_EXPORTER_OTLP_*` repointing shuts off in lockstep with the
 /// external stream activating. A desync would point the internally-authed
@@ -5979,10 +5978,7 @@ fn external_otel_carries_internal_consumed_flag() {
     let cfg = resolve_external_otel_config_with(
         None,
         None,
-        ext_env(&[
-            ("CHUTES_BUILD_EXTERNAL_OTEL", "1"),
-            ("OTEL_LOGS_EXPORTER", "otlp"),
-        ]),
+        ext_env(&[("GROK_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp")]),
         ext_client(),
         true,
     )
@@ -5994,22 +5990,22 @@ fn empty_config() -> toml::Value {
 }
 fn clear_runtime_env_vars() {
     unsafe {
-        std::env::remove_var("CHUTES_BUILD_SUBAGENTS");
-        std::env::remove_var("CHUTES_BUILD_RESPECT_GITIGNORE");
-        std::env::remove_var("CHUTES_BUILD_WEB_SEARCH_MODEL");
-        std::env::remove_var("CHUTES_BUILD_SESSION_SUMMARY_MODEL");
-        std::env::remove_var("CHUTES_BUILD_CURSOR_SKILLS_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_CURSOR_RULES_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_CURSOR_AGENTS_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_CLAUDE_SKILLS_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_CLAUDE_RULES_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_CLAUDE_AGENTS_ENABLED");
+        std::env::remove_var("GROK_SUBAGENTS");
+        std::env::remove_var("GROK_RESPECT_GITIGNORE");
+        std::env::remove_var("GROK_WEB_SEARCH_MODEL");
+        std::env::remove_var("GROK_SESSION_SUMMARY_MODEL");
+        std::env::remove_var("GROK_CURSOR_SKILLS_ENABLED");
+        std::env::remove_var("GROK_CURSOR_RULES_ENABLED");
+        std::env::remove_var("GROK_CURSOR_AGENTS_ENABLED");
+        std::env::remove_var("GROK_CLAUDE_SKILLS_ENABLED");
+        std::env::remove_var("GROK_CLAUDE_RULES_ENABLED");
+        std::env::remove_var("GROK_CLAUDE_AGENTS_ENABLED");
     }
 }
 fn clear_managed_mcp_env_vars() {
     unsafe {
-        std::env::remove_var("CHUTES_BUILD_MANAGED_MCPS_ENABLED");
-        std::env::remove_var("CHUTES_BUILD_MANAGED_MCP_GATEWAY_TOOLS_ENABLED");
+        std::env::remove_var("GROK_MANAGED_MCPS_ENABLED");
+        std::env::remove_var("GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED");
     }
 }
 fn isolate_compat_env() -> Vec<EnvGuard> {
@@ -6170,7 +6166,7 @@ fn resolve_raw_compat_sessions_load_failure_fails_closed() {
 #[serial]
 fn resolve_raw_compat_sessions_load_failure_allows_env_override() {
     let _env = isolate_compat_env();
-    let _codex = EnvGuard::set("CHUTES_BUILD_CODEX_SESSIONS_ENABLED", "true");
+    let _codex = EnvGuard::set("GROK_CODEX_SESSIONS_ENABLED", "true");
     let resolved = resolve_compat_sessions_from_raw(Err(()), None);
     assert!(!resolved.cursor.sessions);
     assert!(!resolved.claude.sessions);
@@ -6222,9 +6218,9 @@ fn remote_keys_are_one_hot_and_false_overrides_default() {
 fn resolve_compat_env_sessions_disable_independently() {
     let _env = isolate_compat_env();
     for (vendor, env_var) in [
-        (CompatVendor::Cursor, "CHUTES_BUILD_CURSOR_SESSIONS_ENABLED"),
-        (CompatVendor::Claude, "CHUTES_BUILD_CLAUDE_SESSIONS_ENABLED"),
-        (CompatVendor::Codex, "CHUTES_BUILD_CODEX_SESSIONS_ENABLED"),
+        (CompatVendor::Cursor, "GROK_CURSOR_SESSIONS_ENABLED"),
+        (CompatVendor::Claude, "GROK_CLAUDE_SESSIONS_ENABLED"),
+        (CompatVendor::Codex, "GROK_CODEX_SESSIONS_ENABLED"),
     ] {
         let _disabled = EnvGuard::set(env_var, "false");
         assert_session_one_disabled(
@@ -6247,8 +6243,8 @@ fn resolve_compat_precedence_and_reserved_codex_hook() {
     assert!(!resolved.codex.hooks);
     assert!(resolved.cursor.hooks);
     assert!(resolved.claude.hooks);
-    let _session = EnvGuard::set("CHUTES_BUILD_CURSOR_SESSIONS_ENABLED", "true");
-    let _hook = EnvGuard::set("CHUTES_BUILD_CODEX_HOOKS_ENABLED", "true");
+    let _session = EnvGuard::set("GROK_CURSOR_SESSIONS_ENABLED", "true");
+    let _hook = EnvGuard::set("GROK_CODEX_HOOKS_ENABLED", "true");
     let resolved = resolve_compat_config(&config, Some(&remote));
     assert!(resolved.cursor.sessions);
     assert!(resolved.codex.hooks);
@@ -6257,7 +6253,7 @@ fn resolve_compat_precedence_and_reserved_codex_hook() {
 #[serial]
 fn resolve_runtime_fields_compat_asymmetric_sources() {
     let _env = isolate_compat_env();
-    let _cursor = EnvGuard::set("CHUTES_BUILD_CURSOR_SESSIONS_ENABLED", "false");
+    let _cursor = EnvGuard::set("GROK_CURSOR_SESSIONS_ENABLED", "false");
     let raw: toml::Value =
         toml::from_str("[compat.cursor]\nsessions = true\n[compat.claude]\nsessions = false")
             .unwrap();
@@ -6417,7 +6413,7 @@ fn resolve_runtime_fields_cli_subagents_override() {
 #[serial]
 fn resolve_runtime_fields_gitignore_from_env() {
     clear_runtime_env_vars();
-    unsafe { std::env::set_var("CHUTES_BUILD_RESPECT_GITIGNORE", "0") };
+    unsafe { std::env::set_var("GROK_RESPECT_GITIGNORE", "0") };
     let raw = empty_config();
     let mut cfg = Config::new_from_toml_cfg(&raw).unwrap();
     cfg.resolve_runtime_fields(&RuntimeResolutionContext {
@@ -6548,12 +6544,12 @@ telemetry = "garbage"
 #[test]
 #[serial]
 fn is_telemetry_explicitly_disabled_sync_env_signals() {
-    unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "0") };
+    unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "0") };
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
     assert!(is_telemetry_explicitly_disabled_sync());
-    unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "1") };
+    unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "1") };
     assert!(!is_telemetry_explicitly_disabled_sync());
-    unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
+    unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
     unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
     assert!(is_telemetry_explicitly_disabled_sync());
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
@@ -6713,7 +6709,6 @@ fn slug_propagation_noop_when_no_donor() {
 fn prefetch_model_entry(slug: &str, context_window: u64, api_backend: ApiBackend) -> ModelEntry {
     ModelEntry {
         info: ModelInfo {
-            supports_tools: true,
             user_selectable: true,
             id: None,
             model_family: None,
@@ -6734,6 +6729,7 @@ fn prefetch_model_entry(slug: &str, context_window: u64, api_backend: ApiBackend
             agent_type: default_agent_type(),
             inference_idle_timeout_secs: None,
             max_retries: None,
+            subagent_rate_limit_max_attempts: None,
             hidden: false,
             supported_in_api: true,
             reasoning_effort: None,
@@ -6871,6 +6867,7 @@ fn global_model_defaults_apply_to_model_without_override() {
     cfg.models.max_completion_tokens = Some(4096);
     cfg.models.max_retries = Some(9);
     cfg.models.inference_idle_timeout_secs = Some(600);
+    cfg.models.subagent_rate_limit_max_attempts = Some(12);
     cfg.models.stream_tool_calls = Some(true);
     let entry = prefetch_model_entry("remote-only-model", 200_000, ApiBackend::default());
     let mut prefetched = IndexMap::new();
@@ -6885,6 +6882,7 @@ fn global_model_defaults_apply_to_model_without_override() {
     assert_eq!(info.max_completion_tokens, Some(4096));
     assert_eq!(info.max_retries, Some(9));
     assert_eq!(info.inference_idle_timeout_secs, Some(600));
+    assert_eq!(info.subagent_rate_limit_max_attempts, Some(12));
     assert_eq!(info.stream_tool_calls, Some(true));
 }
 #[test]
@@ -7214,7 +7212,7 @@ fn plain_config_overlay_preserves_bundled_visibility() {
 #[test]
 #[serial]
 fn mcp_liveness_watchers_default_is_true() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     let r = resolve_mcp_liveness_watchers(None, None, None, None, None);
     assert!(r.value, "default-on by spec");
     assert_eq!(r.source, ConfigSource::Default);
@@ -7222,35 +7220,35 @@ fn mcp_liveness_watchers_default_is_true() {
 #[test]
 #[serial]
 fn mcp_liveness_watchers_requirement_wins_over_everything() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS", "true") };
+    unsafe { std::env::set_var("GROK_MCP_LIVENESS_WATCHERS", "true") };
     let r =
         resolve_mcp_liveness_watchers(Some(false), Some(true), Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     assert!(!r.value, "requirement overrides every other layer");
     assert_eq!(r.source, ConfigSource::Requirement);
 }
 #[test]
 #[serial]
 fn mcp_liveness_watchers_cli_wins_over_env_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS", "true") };
+    unsafe { std::env::set_var("GROK_MCP_LIVENESS_WATCHERS", "true") };
     let r = resolve_mcp_liveness_watchers(None, Some(false), Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Cli);
 }
 #[test]
 #[serial]
 fn mcp_liveness_watchers_env_wins_over_config_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS", "false") };
+    unsafe { std::env::set_var("GROK_MCP_LIVENESS_WATCHERS", "false") };
     let r = resolve_mcp_liveness_watchers(None, None, Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
 }
 #[test]
 #[serial]
 fn mcp_liveness_watchers_config_wins_over_managed_and_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     let r = resolve_mcp_liveness_watchers(None, None, Some(false), Some(true), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Config);
@@ -7258,7 +7256,7 @@ fn mcp_liveness_watchers_config_wins_over_managed_and_feature_flag() {
 #[test]
 #[serial]
 fn mcp_liveness_watchers_managed_wins_over_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     let r = resolve_mcp_liveness_watchers(None, None, None, Some(false), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::ManagedConfig);
@@ -7266,7 +7264,7 @@ fn mcp_liveness_watchers_managed_wins_over_feature_flag() {
 #[test]
 #[serial]
 fn mcp_liveness_watchers_feature_flag_used_when_no_higher_layer() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_LIVENESS_WATCHERS") };
+    unsafe { std::env::remove_var("GROK_MCP_LIVENESS_WATCHERS") };
     let r = resolve_mcp_liveness_watchers(None, None, None, None, Some(false));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Remote);
@@ -7274,7 +7272,7 @@ fn mcp_liveness_watchers_feature_flag_used_when_no_higher_layer() {
 #[test]
 #[serial]
 fn mcp_auto_restart_default_is_true() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_AUTO_RESTART") };
+    unsafe { std::env::remove_var("GROK_MCP_AUTO_RESTART") };
     let r = resolve_mcp_auto_restart(None, None, None, None, None);
     assert!(r.value, "recovery is on by default");
     assert_eq!(r.source, ConfigSource::Default);
@@ -7282,7 +7280,7 @@ fn mcp_auto_restart_default_is_true() {
 #[test]
 #[serial]
 fn mcp_auto_restart_requirement_wins_over_everything() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_AUTO_RESTART", "false") };
+    unsafe { std::env::set_var("GROK_MCP_AUTO_RESTART", "false") };
     let r = resolve_mcp_auto_restart(
         Some(true),
         Some(false),
@@ -7290,23 +7288,23 @@ fn mcp_auto_restart_requirement_wins_over_everything() {
         Some(false),
         Some(false),
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_AUTO_RESTART") };
+    unsafe { std::env::remove_var("GROK_MCP_AUTO_RESTART") };
     assert!(r.value);
     assert_eq!(r.source, ConfigSource::Requirement);
 }
 #[test]
 #[serial]
 fn mcp_auto_restart_env_wins_over_config_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_AUTO_RESTART", "true") };
+    unsafe { std::env::set_var("GROK_MCP_AUTO_RESTART", "true") };
     let r = resolve_mcp_auto_restart(None, None, Some(false), Some(false), Some(false));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_AUTO_RESTART") };
+    unsafe { std::env::remove_var("GROK_MCP_AUTO_RESTART") };
     assert!(r.value);
     assert_eq!(r.source, ConfigSource::Env);
 }
 #[test]
 #[serial]
 fn mcp_push_server_status_default_is_true() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     let r = resolve_mcp_push_server_status(None, None, None, None, None);
     assert!(r.value, "default-on by spec");
     assert_eq!(r.source, ConfigSource::Default);
@@ -7314,35 +7312,35 @@ fn mcp_push_server_status_default_is_true() {
 #[test]
 #[serial]
 fn mcp_push_server_status_requirement_wins_over_everything() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS", "true") };
+    unsafe { std::env::set_var("GROK_MCP_PUSH_SERVER_STATUS", "true") };
     let r =
         resolve_mcp_push_server_status(Some(false), Some(true), Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     assert!(!r.value, "requirement overrides every other layer");
     assert_eq!(r.source, ConfigSource::Requirement);
 }
 #[test]
 #[serial]
 fn mcp_push_server_status_cli_wins_over_env_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS", "true") };
+    unsafe { std::env::set_var("GROK_MCP_PUSH_SERVER_STATUS", "true") };
     let r = resolve_mcp_push_server_status(None, Some(false), Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Cli);
 }
 #[test]
 #[serial]
 fn mcp_push_server_status_env_wins_over_config_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS", "false") };
+    unsafe { std::env::set_var("GROK_MCP_PUSH_SERVER_STATUS", "false") };
     let r = resolve_mcp_push_server_status(None, None, Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
 }
 #[test]
 #[serial]
 fn mcp_push_server_status_config_wins_over_managed_and_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     let r = resolve_mcp_push_server_status(None, None, Some(false), Some(true), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Config);
@@ -7350,7 +7348,7 @@ fn mcp_push_server_status_config_wins_over_managed_and_feature_flag() {
 #[test]
 #[serial]
 fn mcp_push_server_status_managed_wins_over_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     let r = resolve_mcp_push_server_status(None, None, None, Some(false), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::ManagedConfig);
@@ -7358,7 +7356,7 @@ fn mcp_push_server_status_managed_wins_over_feature_flag() {
 #[test]
 #[serial]
 fn mcp_push_server_status_feature_flag_used_when_no_higher_layer() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS") };
+    unsafe { std::env::remove_var("GROK_MCP_PUSH_SERVER_STATUS") };
     let r = resolve_mcp_push_server_status(None, None, None, None, Some(false));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Remote);
@@ -7366,7 +7364,7 @@ fn mcp_push_server_status_feature_flag_used_when_no_higher_layer() {
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_default_is_true() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     let r = resolve_mcp_recursive_config_watch(None, None, None, None, None);
     assert!(r.value, "default-on by spec");
     assert_eq!(r.source, ConfigSource::Default);
@@ -7374,7 +7372,7 @@ fn mcp_recursive_config_watch_default_is_true() {
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_requirement_wins_over_everything() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH", "true") };
+    unsafe { std::env::set_var("GROK_MCP_RECURSIVE_CONFIG_WATCH", "true") };
     let r = resolve_mcp_recursive_config_watch(
         Some(false),
         Some(true),
@@ -7382,33 +7380,33 @@ fn mcp_recursive_config_watch_requirement_wins_over_everything() {
         Some(true),
         Some(true),
     );
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     assert!(!r.value, "requirement overrides every other layer");
     assert_eq!(r.source, ConfigSource::Requirement);
 }
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_cli_wins_over_env_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH", "true") };
+    unsafe { std::env::set_var("GROK_MCP_RECURSIVE_CONFIG_WATCH", "true") };
     let r =
         resolve_mcp_recursive_config_watch(None, Some(false), Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Cli);
 }
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_env_wins_over_config_and_below() {
-    unsafe { std::env::set_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH", "false") };
+    unsafe { std::env::set_var("GROK_MCP_RECURSIVE_CONFIG_WATCH", "false") };
     let r = resolve_mcp_recursive_config_watch(None, None, Some(true), Some(true), Some(true));
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
 }
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_config_wins_over_managed_and_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     let r = resolve_mcp_recursive_config_watch(None, None, Some(false), Some(true), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Config);
@@ -7416,7 +7414,7 @@ fn mcp_recursive_config_watch_config_wins_over_managed_and_feature_flag() {
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_managed_wins_over_feature_flag() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     let r = resolve_mcp_recursive_config_watch(None, None, None, Some(false), Some(true));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::ManagedConfig);
@@ -7424,7 +7422,7 @@ fn mcp_recursive_config_watch_managed_wins_over_feature_flag() {
 #[test]
 #[serial]
 fn mcp_recursive_config_watch_feature_flag_used_when_no_higher_layer() {
-    unsafe { std::env::remove_var("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH") };
+    unsafe { std::env::remove_var("GROK_MCP_RECURSIVE_CONFIG_WATCH") };
     let r = resolve_mcp_recursive_config_watch(None, None, None, None, Some(false));
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Remote);
@@ -7475,7 +7473,7 @@ fn remote_settings_disarm_requires_prod_proxy_when_keys_embedded() {
         ..Default::default()
     };
     unsafe {
-        std::env::remove_var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL");
+        std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
     }
     apply_remote_settings_side_effects(Some(&settings));
     assert!(
@@ -7489,7 +7487,7 @@ fn remote_settings_disarm_requires_prod_proxy_when_keys_embedded() {
     assert!(xai_grok_config::signed_policy::verification_active());
     unsafe {
         std::env::set_var(
-            "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+            "GROK_CLI_CHAT_PROXY_BASE_URL",
             "https://attacker.example/v1",
         );
     }
@@ -7499,10 +7497,45 @@ fn remote_settings_disarm_requires_prod_proxy_when_keys_embedded() {
         "env-overridden proxy must not be able to disarm keyed verification"
     );
     unsafe {
-        std::env::remove_var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL");
+        std::env::remove_var("GROK_CLI_CHAT_PROXY_BASE_URL");
     }
     xai_grok_config::signed_policy::apply_remote_managed_config_signature_verification(
         Some(true),
         true,
     );
+}
+#[test]
+fn a_status_line_the_parser_could_not_read_in_full_reaches_grok_inspect() {
+    use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+    let raw_config: toml::Value = toml::from_str(
+        r#"
+            [ui]
+            theme = "kanagawa"
+
+            [ui.status_line]
+            type = "disabled"
+            padding = "2"
+            colour = "red"
+            "#,
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("a typo must not fail the config");
+    let warnings = |path: &str, kind: ConfigWarningKind| {
+        cfg.config_warnings
+            .iter()
+            .filter(|w| {
+                w.kind == kind
+                    && matches!(&w.target, WarningTarget::ConfigKey { path: p } if p == path)
+            })
+            .count()
+    };
+    assert_eq!(
+        warnings("ui.status_line", ConfigWarningKind::InvalidValue),
+        1
+    );
+    assert_eq!(
+        warnings("ui.status_line.colour", ConfigWarningKind::UnknownField),
+        1
+    );
+    assert_eq!(cfg.ui.theme.as_deref(), Some("kanagawa"));
 }

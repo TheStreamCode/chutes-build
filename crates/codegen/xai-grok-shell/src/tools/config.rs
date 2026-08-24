@@ -105,7 +105,7 @@ pub struct AskUserQuestionToolConfig {
 #[serde(default)]
 pub struct WebFetchToolConfig {
     /// Egress proxy endpoint. When set, all HTTP requests are routed through
-    /// this URL. Resolution: TOML > `CHUTES_BUILD_WEB_FETCH_PROXY` env > remote settings > None.
+    /// this URL. Resolution: TOML > `GROK_WEB_FETCH_PROXY` env > remote settings > None.
     pub proxy_endpoint: Option<String>,
     /// Domains the tool is allowed to fetch. When set, overrides the built-in
     /// default allowlist. An explicit empty list blocks all fetches.
@@ -113,7 +113,7 @@ pub struct WebFetchToolConfig {
     pub allowed_domains: Option<Vec<String>>,
     /// Allow fetches to explicit loopback hosts only (`localhost` / `127.0.0.0/8`
     /// / `::1`). Private and metadata ranges stay blocked. Default off.
-    /// Resolution: TOML > `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL` env > false.
+    /// Resolution: TOML > `GROK_WEB_FETCH_ALLOW_LOCAL` env > false.
     pub allow_local: Option<bool>,
 }
 
@@ -135,7 +135,7 @@ impl WebFetchToolConfig {
             .proxy_endpoint
             .as_ref()
             .cloned()
-            .or_else(|| env_string("CHUTES_BUILD_WEB_FETCH_PROXY"))
+            .or_else(|| env_string("GROK_WEB_FETCH_PROXY"))
             .or_else(|| remote_proxy.map(|s| s.to_owned()));
 
         let allowed_domains = self
@@ -146,7 +146,7 @@ impl WebFetchToolConfig {
 
         let allow_local = self
             .allow_local
-            .or_else(|| xai_grok_config::env_bool("CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL"));
+            .or_else(|| xai_grok_config::env_bool("GROK_WEB_FETCH_ALLOW_LOCAL"));
 
         xai_grok_tools::implementations::grok_build::web_fetch::WebFetchParams {
             proxy_endpoint,
@@ -212,7 +212,7 @@ impl ShellToolsetConfig {
     pub fn new(base: Option<Self>, sampling_config: Option<SamplerConfig>) -> Self {
         let default_base = SamplerConfig {
             api_key: None,
-            base_url: "https://api.chutes.ai/v1".to_string(),
+            base_url: "https://api.x.ai/v1".to_string(),
             model: String::new(),
             max_completion_tokens: None,
             temperature: None,
@@ -345,7 +345,7 @@ impl HashlineSchemeConfig {
 
 /// Which set of read/edit/search tools to use for file operations.
 ///
-/// Selects between the standard `ChutesBuild` toolset (`read_file`,
+/// Selects between the standard `GrokBuild` toolset (`read_file`,
 /// `search_replace`, `grep`) and the anchor-based `GrokBuildHashline`
 /// toolset (`hashline_read`, `hashline_edit`, `hashline_grep`).
 /// The two are mutually exclusive.

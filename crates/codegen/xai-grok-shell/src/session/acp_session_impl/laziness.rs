@@ -323,7 +323,7 @@ impl SessionActor {
     /// the sampler call goes through `prepare_chat_completion().conversation_collect()`
     /// — a side-channel direct-HTTP call that does NOT publish events
     /// on the per-session shared sampler channel. The client never
-    /// sees "Chutes Build is thinking", streaming token chunks, or any other
+    /// sees "Grok is thinking", streaming token chunks, or any other
     /// session update from a classifier fire. Stalled verdicts only
     /// queue a `<system-reminder>` into chat state via
     /// `push_system_reminder`; no `InputItem` is pushed into
@@ -550,7 +550,7 @@ impl SessionActor {
             temperature: Some(0.0),
             max_output_tokens: Some(LAZINESS_MAX_OUTPUT_TOKENS),
             // Don't pass `reasoning_effort` — `grok-4.5` (and
-            // other tool-flavoured Chutes Build variants) reject the field at
+            // other tool-flavoured Grok variants) reject the field at
             // the proxy with `400 Bad Request: Model does not support
             // parameter reasoningEffort`. Omitting it lets each model
             // apply its own default. The classifier task is one short

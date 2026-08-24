@@ -5,7 +5,7 @@
 
 use crate::session::SessionCommand;
 
-/// Parse a `chutes.ai/queue/{remove,reorder,clear,edit,interject,hold_edit,release_edit}`
+/// Parse a `x.ai/queue/{remove,reorder,clear,edit,interject,hold_edit,release_edit}`
 /// ext-notification's params into the corresponding [`SessionCommand`].
 /// `owner` is the resolved attribution (params `owner`/`clientIdentifier`) used
 /// to scope remove/clear to the requesting client's own items, and recorded as
@@ -97,7 +97,7 @@ pub(super) fn parse_queue_edit_command(
 mod tests {
     use super::*;
 
-    /// Each `chutes.ai/queue/*` ext-notification maps to the
+    /// Each `x.ai/queue/*` ext-notification maps to the
     /// correct versioned/idempotent `SessionCommand`.
     #[test]
     fn parse_queue_edit_command_maps_each_method() {
@@ -201,8 +201,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2
         });
-        match parse_queue_edit_command("chutes.build/queue/interject", &p, Some("grok-tui".into()))
-        {
+        match parse_queue_edit_command("chutes.build/queue/interject", &p, Some("grok-tui".into())) {
             Some(SessionCommand::InterjectQueuedPrompt {
                 id,
                 expected_version,
@@ -274,19 +273,14 @@ mod tests {
                 .is_none()
         );
         assert!(
-            parse_queue_edit_command(
-                "chutes.build/queue/release_edit",
-                &serde_json::json!({}),
-                None
-            )
-            .is_none()
+            parse_queue_edit_command("chutes.build/queue/release_edit", &serde_json::json!({}), None)
+                .is_none()
         );
 
         // unknown method → None. Outbound `changed` is the other production
-        // `chutes.ai/queue/*` method and must not parse as an edit command.
+        // `x.ai/queue/*` method and must not parse as an edit command.
         assert!(
-            parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None)
-                .is_none()
+            parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None).is_none()
         );
         assert!(
             parse_queue_edit_command(
@@ -307,8 +301,7 @@ mod tests {
         );
         // remove without id → None (can't target an entry).
         assert!(
-            parse_queue_edit_command("chutes.build/queue/remove", &serde_json::json!({}), None)
-                .is_none()
+            parse_queue_edit_command("chutes.build/queue/remove", &serde_json::json!({}), None).is_none()
         );
     }
 }

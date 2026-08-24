@@ -23,6 +23,7 @@ pub fn bootstrap(
     auth_manager: &Arc<AuthManager>,
     prefetched: Option<IndexMap<String, ModelEntry>>,
 ) -> Result<(AgentConfig, ModelsManager), String> {
+    xai_grok_telemetry::id::prefetch_agent_id();
     // Remote kill-switch before the gate (settings-only prefetch — no managed-config
     // sync, so a live server cannot heal a tampered policy before fail-closed).
     xai_grok_telemetry::startup::enter(xai_grok_telemetry::startup::StartupPhase::Bootstrap);
@@ -128,14 +129,9 @@ fn resolve_config(cfg: &AgentConfig, auth_manager: &AuthManager) -> AgentConfig 
     ensure_remote_settings_side_effects(&mut cfg, true);
     crate::util::config::sync_campaign_fields(&mut cfg);
 
-    // env var > remote settings > Local. Skip remote settings for Generic (chutes-build -p, subagents).
+    // env var > remote settings > Local. Skip remote settings for Generic (grok -p, subagents).
     let has_xai_auth = auth_manager.current().is_some_and(|a| a.is_xai_auth());
-    // Chutes Build sessions are local-only. The generic resolver below is kept
-    // for source compatibility with upstream, but a remote setting must not be
-    // able to move the session store off this machine.
-    if !chutes_build_core::product::REMOTE_SESSION_REGISTRY {
-        cfg.storage_mode = StorageMode::Local;
-    } else if cfg.storage_mode == StorageMode::Local
+    if cfg.storage_mode == StorageMode::Local
         && cfg.mode != crate::agent::config::AgentMode::Generic
     {
         cfg.storage_mode =
@@ -225,14 +221,12 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
 /// when telemetry is disabled, so it's safe to call repeatedly.
 pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager) {
     // shared_client() aborts (panic = "abort") on an invalid user agent,
-    // and that string comes from the CHUTES_BUILD_CLIENT_NAME env var. Telemetry
-    // init must never take down its caller — `chutes-build update` is a repair
+    // and that string comes from the GROK_CLIENT_NAME env var. Telemetry
+    // init must never take down its caller — `grok update` is a repair
     // command — so validate the one user-controlled input first.
     let user_agent = crate::http::process_user_agent_string();
     if reqwest::header::HeaderValue::from_str(&user_agent).is_err() {
-        tracing::warn!(
-            "telemetry init skipped: CHUTES_BUILD_CLIENT_NAME yields an invalid user agent"
-        );
+        tracing::warn!("telemetry init skipped: GROK_CLIENT_NAME yields an invalid user agent");
         return;
     }
     let grok_auth = auth_manager.current().filter(|a| a.is_xai_auth());

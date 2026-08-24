@@ -57,6 +57,86 @@ fn ask_user_question_merge_writes_subtable_without_splatting_toolset() {
         "scalar [toolset] must be replaced so the write lands"
     );
 }
+/// The `[telemetry]` write merges only `trace_upload`: hand-written sibling
+/// telemetry keys survive, and an all-None config leaves the section alone.
+#[test]
+fn telemetry_merge_writes_trace_upload_without_splatting_section() {
+    let root_val: TomlValue =
+        toml::from_str("[telemetry]\ncustom_telemetry_flag = true\n").unwrap();
+    let mut root = root_val.as_table().unwrap().clone();
+    let telemetry = super::super::mcp::TelemetryPersistConfig {
+        trace_upload: Some(true),
+    };
+    merge_section(&mut root, "telemetry", &telemetry);
+    let section = root.get("telemetry").and_then(|v| v.as_table()).unwrap();
+    assert_eq!(
+        section.get("trace_upload").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        section
+            .get("custom_telemetry_flag")
+            .and_then(|v| v.as_bool()),
+        Some(true),
+        "hand-written sibling keys must survive the merge"
+    );
+    let reparsed = load_config_from_toml(&TomlValue::Table(root.clone()));
+    assert_eq!(reparsed.telemetry.trace_upload, Some(true));
+    let untouched_val: TomlValue = toml::from_str("[telemetry]\nevents_url = \"x\"\n").unwrap();
+    let mut untouched = untouched_val.as_table().unwrap().clone();
+    merge_section(
+        &mut untouched,
+        "telemetry",
+        &super::super::mcp::TelemetryPersistConfig::default(),
+    );
+    assert_eq!(
+        untouched
+            .get("telemetry")
+            .and_then(|v| v.get("events_url"))
+            .and_then(|v| v.as_str()),
+        Some("x"),
+        "all-None must leave the existing section untouched"
+    );
+}
+/// The `[features]` write merges only `feedback_trace_card`: hand-written
+/// sibling feature keys survive, and an all-None config leaves the section
+/// alone.
+#[test]
+fn features_merge_writes_feedback_trace_card_without_splatting_section() {
+    let root_val: TomlValue = toml::from_str("[features]\nweb_fetch = true\n").unwrap();
+    let mut root = root_val.as_table().unwrap().clone();
+    let features = super::super::mcp::FeaturesPersistConfig {
+        feedback_trace_card: Some(false),
+    };
+    merge_section(&mut root, "features", &features);
+    let section = root.get("features").and_then(|v| v.as_table()).unwrap();
+    assert_eq!(
+        section.get("feedback_trace_card").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        section.get("web_fetch").and_then(|v| v.as_bool()),
+        Some(true),
+        "hand-written sibling keys must survive the merge"
+    );
+    let reparsed = load_config_from_toml(&TomlValue::Table(root.clone()));
+    assert_eq!(reparsed.features.feedback_trace_card, Some(false));
+    let untouched_val: TomlValue = toml::from_str("[features]\nvoice_mode = false\n").unwrap();
+    let mut untouched = untouched_val.as_table().unwrap().clone();
+    merge_section(
+        &mut untouched,
+        "features",
+        &super::super::mcp::FeaturesPersistConfig::default(),
+    );
+    assert_eq!(
+        untouched
+            .get("features")
+            .and_then(|v| v.get("voice_mode"))
+            .and_then(|v| v.as_bool()),
+        Some(false),
+        "all-None must leave the existing section untouched"
+    );
+}
 #[test]
 fn transport_oauth_client_id_takes_priority_over_block() {
     let json = r#"{
@@ -98,6 +178,44 @@ fn parse_mcp_config_with_oauth_extracts_byo_client_id() {
         Some("slack-byo-client")
     );
     assert!(!oauth.contains_key("plain"));
+}
+/// The merge recurses into nested tables and only ever inserts, so a key
+/// inside `[ui.status_line]` that this build does not model is not at risk
+/// from a settings write. The status-line parser relies on this: it reports
+/// an unknown key rather than refusing to persist the section over it.
+#[test]
+fn merge_section_preserves_unmodeled_fields_inside_a_nested_table() {
+    let mut table = TomlMap::new();
+    let mut status_line = TomlMap::new();
+    status_line.insert("type".into(), TomlValue::String("builtin".into()));
+    status_line.insert("colour".into(), TomlValue::String("red".into()));
+    let mut ui = TomlMap::new();
+    ui.insert("status_line".into(), TomlValue::Table(status_line));
+    table.insert("ui".into(), TomlValue::Table(ui));
+    let cfg = crate::agent::config::UiConfig {
+        status_line: xai_grok_status_line::test_support::StatusLineConfigFixture::from_kind(
+            xai_grok_status_line::StatusLineType::Command,
+        )
+        .with_command("~/status_line.sh")
+        .into_config(),
+        ..Default::default()
+    };
+    merge_section(&mut table, "ui", &cfg);
+    let written = table
+        .get("ui")
+        .and_then(|v| v.as_table())
+        .and_then(|t| t.get("status_line"))
+        .and_then(|v| v.as_table())
+        .expect("the section survives");
+    assert_eq!(
+        written.get("colour").and_then(|v| v.as_str()),
+        Some("red"),
+        "a key this build does not model must survive a write of the ones it does"
+    );
+    assert_eq!(
+        written.get("type").and_then(|v| v.as_str()),
+        Some("command")
+    );
 }
 #[test]
 fn merge_section_preserves_unmodeled_fields() {
@@ -165,7 +283,7 @@ fn merge_section_updates_modeled_fields_preserving_unmodeled() {
     ui.insert("show_timestamps".into(), TomlValue::Boolean(true));
     ui.insert(
         "auto_light_theme".into(),
-        TomlValue::String("chutesday".into()),
+        TomlValue::String("grokday".into()),
     );
     table.insert("ui".into(), TomlValue::Table(ui));
     let cfg = crate::agent::config::UiConfig {
@@ -186,7 +304,7 @@ fn merge_section_updates_modeled_fields_preserving_unmodeled() {
     );
     assert_eq!(
         ui.get("auto_light_theme").and_then(|v| v.as_str()),
-        Some("chutesday"),
+        Some("grokday"),
         "pre-existing field not in serialized output should be preserved"
     );
 }
@@ -322,14 +440,14 @@ fn ui_config_round_trip_preserves_pager_fields() {
 yolo = true
 show_timestamps = false
 auto_dark_theme = "tokyonight"
-auto_light_theme = "chutesday"
+auto_light_theme = "grokday"
 "#;
     let root: TomlValue = toml::from_str(toml_str).unwrap();
     let cfg = load_config_from_toml(&root);
     assert!(cfg.ui.yolo);
     assert_eq!(cfg.ui.show_timestamps, Some(false));
     assert_eq!(cfg.ui.auto_dark_theme.as_deref(), Some("tokyonight"));
-    assert_eq!(cfg.ui.auto_light_theme.as_deref(), Some("chutesday"));
+    assert_eq!(cfg.ui.auto_light_theme.as_deref(), Some("grokday"));
     let mut table = root.as_table().unwrap().clone();
     merge_section(&mut table, "ui", &cfg.ui);
     let ui = table.get("ui").unwrap().as_table().unwrap();
@@ -343,7 +461,7 @@ auto_light_theme = "chutesday"
     );
     assert_eq!(
         ui.get("auto_light_theme").and_then(|v| v.as_str()),
-        Some("chutesday")
+        Some("grokday")
     );
     assert_eq!(ui.get("yolo").and_then(|v| v.as_bool()), Some(true));
 }
@@ -414,7 +532,7 @@ fn merge_section_full_save_config_simulation() {
 [ui]
 show_timestamps = true
 auto_dark_theme = "tokyonight"
-auto_light_theme = "chutesday"
+auto_light_theme = "grokday"
 
 [models]
 default = "grok-3"
@@ -441,7 +559,7 @@ auto_update = true
     );
     assert_eq!(
         ui.get("auto_light_theme").and_then(|v| v.as_str()),
-        Some("chutesday")
+        Some("grokday")
     );
     let models = table.get("models").unwrap().as_table().unwrap();
     assert_eq!(
@@ -757,7 +875,7 @@ mod resolve_auto_compact {
     use std::sync::Mutex;
     const TEST_MODEL: &str = "grok-4.5";
     const OTHER_MODEL: &str = "grok-4.3";
-    /// Serialize tests that mutate `CHUTES_BUILD_AUTO_COMPACT_THRESHOLD_PERCENT`.
+    /// Serialize tests that mutate `GROK_AUTO_COMPACT_THRESHOLD_PERCENT`.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
     /// Build a `Config` populated with optional per-source values for the
     /// `TEST_MODEL`. Any `None` argument means "that source is unset".
@@ -1023,8 +1141,8 @@ fn settings_helpers_target_correct_ui_fields() {
     assert_eq!(cfg.ui.theme, Some("auto".to_string()));
     let cfg = apply(|cfg| cfg.ui.auto_dark_theme = Some("tokyonight".to_string()));
     assert_eq!(cfg.ui.auto_dark_theme, Some("tokyonight".to_string()));
-    let cfg = apply(|cfg| cfg.ui.auto_light_theme = Some("chutesday".to_string()));
-    assert_eq!(cfg.ui.auto_light_theme, Some("chutesday".to_string()));
+    let cfg = apply(|cfg| cfg.ui.auto_light_theme = Some("grokday".to_string()));
+    assert_eq!(cfg.ui.auto_light_theme, Some("grokday".to_string()));
     let cfg = apply(|cfg| cfg.ui.hunk_tracker_mode = Some("off".to_string()));
     assert_eq!(cfg.ui.hunk_tracker_mode, Some("off".to_string()));
     let cfg = apply(|cfg| cfg.ui.screen_mode = Some("minimal".to_string()));
@@ -1039,7 +1157,7 @@ fn set_theme_round_trips_through_merge() {
     let original = r#"
 [ui]
 compact_mode = true
-theme = "chutesnight"
+theme = "groknight"
 auto_dark_theme = "tokyonight"
 custom_user_key = "preserve-me"
 "#;
@@ -1076,8 +1194,8 @@ fn set_auto_dark_and_light_theme_round_trip_through_merge() {
     let original = r#"
 [ui]
 theme = "auto"
-auto_dark_theme = "chutesnight"
-auto_light_theme = "chutesday"
+auto_dark_theme = "groknight"
+auto_light_theme = "grokday"
 custom_unknown_key = 42
 "#;
     let root: TomlValue = toml::from_str(original).unwrap();

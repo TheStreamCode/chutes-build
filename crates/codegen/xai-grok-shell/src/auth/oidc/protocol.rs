@@ -387,7 +387,7 @@ pub(super) fn build_authorize_url(
     let referrer = oauth2
         .and_then(|o| o.referrer.as_deref())
         .filter(|r| !r.is_empty())
-        .unwrap_or("chutes-build");
+        .unwrap_or("grok-build");
     url.push_str(&format!("&referrer={}", urlencoding::encode(referrer)));
     url
 }
@@ -407,29 +407,19 @@ pub(super) async fn exchange_code(
     redirect_uri: &str,
     client_id: &str,
     code_verifier: &str,
-    client_secret: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
-    tracing::debug!(
-        token_endpoint = %token_endpoint,
-        has_client_secret = client_secret.is_some(),
-        "OIDC: exchanging code for tokens"
-    );
-    let mut form = vec![
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", redirect_uri),
-        ("client_id", client_id),
-        ("code_verifier", code_verifier),
-    ];
-    // Only for a confidential client; the built-in app has no secret.
-    if let Some(secret) = client_secret {
-        form.push(("client_secret", secret));
-    }
+    tracing::debug!(token_endpoint = %token_endpoint, "OIDC: exchanging code for tokens");
     let resp = with_alpha_test_key(
         crate::http::shared_client()
             .post(token_endpoint)
             .header("x-grok-client-version", xai_grok_version::VERSION)
-            .form(&form)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", redirect_uri),
+                ("client_id", client_id),
+                ("code_verifier", code_verifier),
+            ])
             .timeout(std::time::Duration::from_secs(15)),
         token_endpoint,
     )
@@ -478,7 +468,6 @@ pub(super) async fn refresh_tokens(
     token_endpoint: &str,
     refresh_token: &str,
     client_id: &str,
-    client_secret: Option<&str>,
     principal_type: Option<&str>,
     principal_id: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
@@ -495,7 +484,6 @@ pub(super) async fn refresh_tokens(
             token_endpoint,
             refresh_token,
             client_id,
-            client_secret,
             principal_type,
             principal_id,
         )
@@ -527,7 +515,6 @@ async fn refresh_tokens_once(
     token_endpoint: &str,
     refresh_token: &str,
     client_id: &str,
-    client_secret: Option<&str>,
     principal_type: Option<&str>,
     principal_id: Option<&str>,
 ) -> anyhow::Result<TokenResponse> {
@@ -536,9 +523,6 @@ async fn refresh_tokens_once(
         ("refresh_token", refresh_token),
         ("client_id", client_id),
     ];
-    if let Some(secret) = client_secret {
-        params.push(("client_secret", secret));
-    }
     if let Some(pt) = principal_type {
         params.push(("principal_type", pt));
     }
@@ -658,9 +642,6 @@ pub(super) async fn validate_and_extract_user_info(
     expected_client_id: &str,
     expected_nonce: &str,
 ) -> anyhow::Result<OidcUserInfo> {
-    // Both jsonwebtoken providers are enabled in this graph; without an explicit
-    // choice every signature operation panics. See `auth::ensure_crypto_provider`.
-    crate::auth::ensure_crypto_provider();
     let header = jsonwebtoken::decode_header(token)?;
     let kid = header
         .kid
@@ -800,7 +781,6 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "profile".into()],
             audience: Some("api://grok".into()),
-            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://example.okta.com/authorize".into(),
@@ -812,6 +792,8 @@ mod tests {
             code_verifier: "v".into(),
             code_challenge: "c".into(),
         };
+        let nonce = test_nonce();
+        let nonce_q = format!("nonce={nonce}");
         let url = build_authorize_url(
             &config,
             None,
@@ -819,7 +801,7 @@ mod tests {
             "http://127.0.0.1:9999/callback",
             &pkce,
             "state123",
-            "nonce123",
+            &nonce,
         );
         for required in [
             "response_type=code",
@@ -827,10 +809,10 @@ mod tests {
             "code_challenge=c",
             "code_challenge_method=S256",
             "state=state123",
-            "nonce=nonce123",
+            nonce_q.as_str(),
             "scope=openid",
             "audience=api",
-            "referrer=chutes-build",
+            "referrer=grok-build",
         ] {
             assert!(url.contains(required), "missing param: {required}");
         }
@@ -843,24 +825,22 @@ mod tests {
     #[test]
     fn authorize_url_includes_team_principal_params() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.chutes.ai".into(),
+            issuer: "https://auth.x.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
-            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.chutes.ai".into(),
+            issuer: "https://auth.x.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
-            referrer: Some("chutes-build".into()),
-            client_secret: None,
+            referrer: Some("grok-build".into()),
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
-            token_endpoint: "https://auth.chutes.ai/token".into(),
+            authorization_endpoint: "https://auth.x.ai/authorize".into(),
+            token_endpoint: "https://auth.x.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -875,11 +855,11 @@ mod tests {
             "http://127.0.0.1:9999/callback",
             &pkce,
             "state123",
-            "nonce123",
+            &test_nonce(),
         );
         assert!(url.contains("principal_type=Team"));
         assert!(url.contains("principal_id=team-123"));
-        assert!(url.contains("referrer=chutes-build"));
+        assert!(url.contains("referrer=grok-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -889,24 +869,22 @@ mod tests {
     #[test]
     fn authorize_url_uses_oauth2_referrer_override_once() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.chutes.ai".into(),
+            issuer: "https://auth.x.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
-            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.chutes.ai".into(),
+            issuer: "https://auth.x.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-desktop".into()),
-            client_secret: None,
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
-            token_endpoint: "https://auth.chutes.ai/token".into(),
+            authorization_endpoint: "https://auth.x.ai/authorize".into(),
+            token_endpoint: "https://auth.x.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -921,10 +899,10 @@ mod tests {
             "http://127.0.0.1:9999/callback",
             &pkce,
             "state123",
-            "nonce123",
+            &test_nonce(),
         );
         assert!(url.contains("referrer=grok-desktop"));
-        assert!(!url.contains("referrer=chutes-build"));
+        assert!(!url.contains("referrer=grok-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -944,7 +922,7 @@ mod tests {
             &discovery,
             "https://example.okta.com",
             "test-client",
-            "nonce123",
+            &test_nonce(),
             Some("Team"),
             Some("team-123"),
             None,
@@ -1008,7 +986,7 @@ mod tests {
             &discovery,
             &issuer,
             "wrong-client",
-            TEST_NONCE,
+            &test_nonce(),
             None,
             None,
             None,
@@ -1030,7 +1008,6 @@ mod tests {
     fn peek_access_token_principal_matrix() {
         ensure_crypto_provider();
         fn make_jwt(claims: serde_json::Value) -> String {
-            crate::auth::ensure_crypto_provider();
             let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
             jsonwebtoken::encode(
                 &header,
@@ -1041,7 +1018,7 @@ mod tests {
         }
         let team_jwt = make_jwt(serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.chutes.ai",
+            "iss": "https://auth.x.ai",
             "aud": "test-client",
             "exp": 9999999999u64,
             "iat": 1000000000u64,
@@ -1059,7 +1036,7 @@ mod tests {
         assert!(peek_access_token_principal("").is_none());
         let no_principal = make_jwt(serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.chutes.ai",
+            "iss": "https://auth.x.ai",
             "aud": "test-client",
             "exp": 9999999999u64,
             "iat": 1000000000u64,
@@ -1073,7 +1050,6 @@ mod tests {
     fn peek_access_token_principal_id_does_not_require_type() {
         ensure_crypto_provider();
         fn make_jwt(claims: serde_json::Value) -> String {
-            crate::auth::ensure_crypto_provider();
             jsonwebtoken::encode(
                 &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
                 &claims,
@@ -1218,7 +1194,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
+        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await
             .expect("transient 5xx must be retried until success");
         assert_eq!(resp.access_token, "new-at");
@@ -1256,7 +1232,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let err = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
+        let err = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await
             .expect_err("invalid_grant is terminal");
         assert!(
@@ -1303,7 +1279,7 @@ mod tests {
         );
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
-        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None, None)
+        let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await
             .expect("a non-terminal coded 4xx must be retried until success");
         assert_eq!(resp.access_token, "new-at");

@@ -450,8 +450,8 @@ async fn first_catalog_wait_is_bounded() {
 #[tokio::test(start_paused = true)]
 #[serial]
 async fn first_catalog_wait_skips_doomed_signed_out_fetch() {
-    let _no_key = EnvGuard::unset("CHUTES_API_KEY");
-    let _no_legacy_key = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _no_key = EnvGuard::unset("XAI_API_KEY");
+    let _no_legacy_key = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let mgr = cold_manager(config::Config::default(), Arc::new(HangingEndpoint));
     let start = tokio::time::Instant::now();
     mgr.spawn_fetch_inner(None, /*remote_fetch_enabled*/ true);
@@ -994,6 +994,11 @@ fn config_menu_only_model_derives_support_and_default() {
     assert_eq!(mgr.model_reasoning_efforts("menu-only").len(), 2);
     assert!(!mgr.model_supports_reasoning_effort("plain"));
     assert_eq!(mgr.model_default_reasoning_effort("plain"), None);
+
+    mgr.set_current_model_id(acp::ModelId::new("plain"));
+    assert_eq!(mgr.current_model_id().0.as_ref(), "plain");
+    assert_eq!(mgr.model_reasoning_efforts("menu-only").len(), 2);
+    assert!(mgr.model_reasoning_efforts("plain").is_empty());
 }
 
 #[test]
@@ -1165,8 +1170,8 @@ async fn sign_out_clears_catalog_rebuilds_bundled_without_fetching() {
     }
 
     // Unset keys so fetch_auth resolves to Session (the sign-out branch).
-    let _no_key = EnvGuard::unset("CHUTES_API_KEY");
-    let _no_legacy_key = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _no_key = EnvGuard::unset("XAI_API_KEY");
+    let _no_legacy_key = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let calls = Arc::new(AtomicUsize::new(0));
     let tmp = tempfile::TempDir::new().unwrap();
     let auth_manager = Arc::new(AuthManager::new(tmp.path(), GrokComConfig::default()));
@@ -1798,7 +1803,7 @@ use xai_grok_test_support::EnvGuard;
 #[test]
 #[serial]
 fn resolve_custom_endpoint_always_wins() {
-    let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
+    let _key = EnvGuard::set("XAI_API_KEY", "test-key");
     let endpoints = config::EndpointsConfig {
         models_base_url: Some("https://custom.example.com".to_owned()),
         ..config::EndpointsConfig::default()
@@ -1816,7 +1821,7 @@ fn resolve_custom_endpoint_always_wins() {
 #[test]
 #[serial]
 fn resolve_cached_session_wins_over_api_key() {
-    let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
+    let _key = EnvGuard::set("XAI_API_KEY", "test-key");
     let endpoints = config::EndpointsConfig::default();
     assert_eq!(
         ModelFetchAuth::resolve(&endpoints, true),
@@ -1828,7 +1833,7 @@ fn resolve_cached_session_wins_over_api_key() {
 #[test]
 #[serial]
 fn resolve_api_key_used_when_no_session() {
-    let _key = EnvGuard::set("CHUTES_API_KEY", "test-key");
+    let _key = EnvGuard::set("XAI_API_KEY", "test-key");
     let endpoints = config::EndpointsConfig::default();
     assert_eq!(
         ModelFetchAuth::resolve(&endpoints, false),
@@ -1840,8 +1845,8 @@ fn resolve_api_key_used_when_no_session() {
 #[test]
 #[serial]
 fn resolve_falls_back_to_session_when_nothing_set() {
-    let _unset = EnvGuard::unset("CHUTES_API_KEY");
-    let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _unset = EnvGuard::unset("XAI_API_KEY");
+    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let endpoints = config::EndpointsConfig::default();
     assert_eq!(
         ModelFetchAuth::resolve(&endpoints, false),
@@ -1853,8 +1858,8 @@ fn resolve_falls_back_to_session_when_nothing_set() {
 #[test]
 #[serial]
 fn resolve_deployment_key_when_no_session_or_api_key() {
-    let _unset = EnvGuard::unset("CHUTES_API_KEY");
-    let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _unset = EnvGuard::unset("XAI_API_KEY");
+    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let endpoints = config::EndpointsConfig {
         deployment_key: Some("deploy-key".to_owned()),
         ..config::EndpointsConfig::default()
@@ -1868,7 +1873,7 @@ fn resolve_deployment_key_when_no_session_or_api_key() {
 #[test]
 #[serial]
 fn resolve_deployment_key_outranks_ambient_api_key() {
-    let _key = EnvGuard::set("CHUTES_API_KEY", "stray-env-key");
+    let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
     let endpoints = config::EndpointsConfig {
         deployment_key: Some("deploy-key".to_owned()),
         ..config::EndpointsConfig::default()
@@ -1876,7 +1881,7 @@ fn resolve_deployment_key_outranks_ambient_api_key() {
     assert_eq!(
         ModelFetchAuth::resolve(&endpoints, false),
         ModelFetchAuth::Deployment,
-        "managed deployment_key should outrank an ambient CHUTES_API_KEY",
+        "managed deployment_key should outrank an ambient XAI_API_KEY",
     );
     assert_eq!(
         ModelFetchAuth::resolve(&endpoints, true),
@@ -1890,7 +1895,7 @@ fn resolve_deployment_key_outranks_ambient_api_key() {
 #[test]
 #[serial]
 fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
-    let _key = EnvGuard::set("CHUTES_API_KEY", "stray-env-key");
+    let _key = EnvGuard::set("XAI_API_KEY", "stray-env-key");
     let endpoints = config::EndpointsConfig {
         deployment_key: Some("deploy-key".to_owned()),
         models_base_url: Some("https://custom.example.com".to_owned()),
@@ -1910,8 +1915,8 @@ fn prefetch_env_none_when_remote_fetch_disabled_despite_credentials() {
 #[test]
 #[serial]
 fn prefetch_env_resolves_when_remote_fetch_enabled() {
-    let _unset = EnvGuard::unset("CHUTES_API_KEY");
-    let _unset_legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _unset = EnvGuard::unset("XAI_API_KEY");
+    let _unset_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let endpoints = config::EndpointsConfig {
         deployment_key: Some("deploy-key".to_owned()),
         ..config::EndpointsConfig::default()
@@ -2039,6 +2044,7 @@ fn make_entry_config_with_id(
         agent_type: config::default_agent_type(),
         inference_idle_timeout_secs: None,
         max_retries: None,
+        subagent_rate_limit_max_attempts: None,
         hidden: false,
         supported_in_api: true,
         auth_scheme: None,
@@ -2046,7 +2052,6 @@ fn make_entry_config_with_id(
         supports_reasoning_effort: false,
         reasoning_efforts: Vec::new(),
         supports_backend_search: false,
-        supports_tools: true,
         compactions_remaining: None,
         compaction_at_tokens: None,
         show_model_fingerprint: false,
@@ -2059,11 +2064,11 @@ fn make_entry_config_with_id(
 fn build_prefetched_map_distinct_ids_same_slug() {
     let entries = vec![
         make_entry_config_with_id(Some("auto"), "grok-build", Some("Auto")),
-        make_entry_config_with_id(Some("grok-build"), "grok-build", Some("Chutes Build")),
+        make_entry_config_with_id(Some("grok-build"), "grok-build", Some("Grok Build")),
         make_entry_config_with_id(
             Some("experimental-fast"),
             "experimental-fast",
-            Some("Chutes Build Fast"),
+            Some("Grok Fast"),
         ),
     ];
     let map = build_prefetched_map(entries, None);
@@ -2125,7 +2130,7 @@ fn build_prefetched_map_none_id_falls_back_to_slug() {
     let entries = vec![make_entry_config_with_id(
         None,
         "grok-build",
-        Some("Chutes Build"),
+        Some("Grok Build"),
     )];
     let map = build_prefetched_map(entries, None);
 

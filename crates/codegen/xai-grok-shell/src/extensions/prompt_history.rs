@@ -1,4 +1,4 @@
-//! `chutes.ai/prompt_history` extension handler.
+//! `x.ai/prompt_history` extension handler.
 //!
 //! Returns the user-prompt history for a given cwd. Three paths:
 //! - **fast path** (no ids): reads the per-CWD `prompt_history.jsonl` file

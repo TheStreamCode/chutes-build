@@ -65,7 +65,7 @@ pub(crate) fn resolve_default_model(
 
     let model_pref = config::resolve_string_flag(
         cfg.default_model_override.as_deref(),
-        "CHUTES_BUILD_DEFAULT_MODEL",
+        "GROK_DEFAULT_MODEL",
         cfg.models.default.as_deref(),
         cfg.remote_settings
             .as_ref()
@@ -201,12 +201,6 @@ pub(crate) fn resolve_model_catalog(
 ) -> IndexMap<String, ModelEntry> {
     let mut catalog: IndexMap<String, ModelEntry> = config::resolve_model_list(cfg, prefetched);
 
-    add_chutes_auto_router(&mut catalog, cfg);
-
-    for entry in catalog.values_mut() {
-        normalize_chutes_model_capabilities(entry);
-    }
-
     if let Ok(Some(disabled)) = ModelGlobSet::compile(cfg.models.disabled_models.as_ref()) {
         let before = catalog.len();
         catalog.retain(|key, entry| !disabled.matches(key, &entry.model));
@@ -324,148 +318,4 @@ pub(crate) fn validate_selectable(
         }
     }
     Ok(())
-}
-
-fn is_chutes_inference_url(url: &str) -> bool {
-    // The retired standalone router deployment host is deliberately absent:
-    // routing is native to the inference host now.
-    url.to_ascii_lowercase().contains("chutes.ai")
-}
-
-fn normalize_chutes_model_capabilities(entry: &mut ModelEntry) {
-    let uses_chutes = is_chutes_inference_url(&entry.info.base_url)
-        || entry
-            .api_base_url
-            .as_deref()
-            .is_some_and(is_chutes_inference_url);
-    if !uses_chutes {
-        return;
-    }
-
-    // Explicit remote or user-supplied menus always win. This is the forward-
-    // compatibility path for new model generations and updated templates.
-    if !entry.info.reasoning_efforts.is_empty() {
-        entry.info.supports_reasoning_effort = true;
-        let menu_default = entry
-            .info
-            .reasoning_efforts
-            .iter()
-            .find(|option| option.default)
-            .or_else(|| entry.info.reasoning_efforts.first())
-            .map_or(ReasoningEffort::High, |option| option.value);
-        entry.info.reasoning_effort.get_or_insert(menu_default);
-        return;
-    }
-
-    match reasoning_profile(&entry.info.model) {
-        ReasoningProfile::Toggle {
-            default_enabled, ..
-        } => {
-            entry.info.supports_reasoning_effort = true;
-            entry.info.reasoning_efforts = vec![
-                ReasoningEffortOption {
-                    id: "none".to_owned(),
-                    value: ReasoningEffort::None,
-                    label: "Instant".to_owned(),
-                    description: Some("Use the model's native non-thinking mode.".to_owned()),
-                    default: !default_enabled,
-                },
-                ReasoningEffortOption {
-                    id: "high".to_owned(),
-                    value: ReasoningEffort::High,
-                    label: "Thinking".to_owned(),
-                    description: Some("Use the model's native thinking mode.".to_owned()),
-                    default: default_enabled,
-                },
-            ];
-            entry.info.reasoning_effort = Some(if default_enabled {
-                ReasoningEffort::High
-            } else {
-                ReasoningEffort::None
-            });
-        }
-        ReasoningProfile::Glm52 => {
-            entry.info.supports_reasoning_effort = true;
-            entry.info.reasoning_efforts = vec![
-                ReasoningEffortOption {
-                    id: "none".to_owned(),
-                    value: ReasoningEffort::None,
-                    label: "Instant".to_owned(),
-                    description: Some(
-                        "Disable hidden reasoning for the lowest latency.".to_owned(),
-                    ),
-                    default: false,
-                },
-                ReasoningEffortOption {
-                    id: "high".to_owned(),
-                    value: ReasoningEffort::High,
-                    label: "Fast reasoning".to_owned(),
-                    description: Some(
-                        "Use GLM-5.2's quality-oriented fast reasoning tier.".to_owned(),
-                    ),
-                    default: true,
-                },
-                ReasoningEffortOption {
-                    id: "xhigh".to_owned(),
-                    value: ReasoningEffort::Xhigh,
-                    label: "Maximum reasoning".to_owned(),
-                    description: Some("Use maximum reasoning for complex tasks.".to_owned()),
-                    default: false,
-                },
-            ];
-            entry.info.reasoning_effort = Some(ReasoningEffort::High);
-        }
-        ReasoningProfile::Fixed | ReasoningProfile::Unsupported | ReasoningProfile::Unknown => {
-            // A reasoning-capable model is not necessarily configurable. Hide
-            // the effort picker instead of sending guessed parameters.
-            entry.info.supports_reasoning_effort = false;
-            entry.info.reasoning_effort = None;
-        }
-    }
-}
-
-fn add_chutes_auto_router(catalog: &mut IndexMap<String, ModelEntry>, cfg: &config::Config) {
-    // The auto entry sends a native routing string (`default`, a strategy
-    // alias, or an inline `CHUTES_ROUTING_POOL`) to the normal inference
-    // host; Chutes resolves the pool server-side per request.
-    let auto_id = chutes_build_core::routing::auto_model_from_env();
-    if catalog.contains_key(&auto_id)
-        || !catalog.values().any(|entry| {
-            is_chutes_inference_url(&entry.info.base_url)
-                || entry
-                    .api_base_url
-                    .as_deref()
-                    .is_some_and(is_chutes_inference_url)
-        })
-    {
-        return;
-    }
-
-    let inference_url = cfg.endpoints.resolve_inference_base_url();
-    let mut info = config::ModelInfo::fallback(&auto_id);
-    info.id = Some(auto_id.clone());
-    info.name = Some("Auto (Chutes Router)".to_owned());
-    info.description = Some(
-        "Server-side routing: the account's saved pool (chutes.ai/app → Model Routing) \
-         or CHUTES_ROUTING_POOL, with optional :latency / :throughput strategy."
-            .to_owned(),
-    );
-    info.base_url = inference_url.clone();
-    info.context_window = std::num::NonZeroU64::new(131_072).expect("non-zero context window");
-    info.max_completion_tokens = Some(32_768);
-    info.supports_reasoning_effort = false;
-
-    let auto = ModelEntry {
-        info,
-        api_key: None,
-        env_key: None,
-        // Routing is reached with the ambient session credential; a named
-        // helper would point it at a different account.
-        auth_provider: None,
-        api_base_url: Some(inference_url),
-    };
-    let mut with_auto = IndexMap::with_capacity(catalog.len() + 1);
-    with_auto.insert(auto_id, auto);
-    with_auto.extend(std::mem::take(catalog));
-    *catalog = with_auto;
 }

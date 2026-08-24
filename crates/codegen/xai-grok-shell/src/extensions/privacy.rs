@@ -1,4 +1,4 @@
-//! `chutes.ai/privacy/setCodingDataRetention` extension handler.
+//! `x.ai/privacy/setCodingDataRetention` extension handler.
 //!
 //! PUTs the new opt-out flag to cli-chat-proxy and updates local auth state
 //! to match. The local update is fire-and-forget (best-effort cache refresh).
@@ -18,9 +18,6 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_set(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
-    if !chutes_build_core::product::CODING_DATA_RETENTION_CONTROLS {
-        return Err(acp::Error::method_not_found());
-    }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Params {
@@ -32,7 +29,7 @@ async fn handle_set(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let auth = agent.auth_manager.auth().await.map_err(|e| {
         tracing::warn!(error = %e, "privacy: auth resolution failed");
         acp::Error::auth_required()
-            .data("Authentication required. Run `chutes-build login` to re-authenticate.")
+            .data("Authentication required. Run `grok login` to re-authenticate.")
     })?;
 
     let proxy_url = agent.cfg.borrow().endpoints.proxy_url();

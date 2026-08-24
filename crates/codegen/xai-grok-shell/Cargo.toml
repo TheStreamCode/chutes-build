@@ -7,6 +7,8 @@ edition.workspace = true
 [features]
 default = []
 dhat-heap = ["dep:dhat"]
+# Loom model-checking for src/auth/manager/lock/flock_wait.rs; test-only.
+loom = ["dep:loom"]
 # Session synthesis + in-process e2e harness (`session::testkit`) for soak,
 # load, and bench tests. Off by default; the tests/benches that use it declare
 # it via `required-features`.
@@ -27,6 +29,7 @@ agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
 xai-grok-announcements = { workspace = true }
 xai-prompt-queue = { workspace = true }
+loom = { workspace = true, optional = true }
 xai-grok-version = { workspace = true }
 
 async-openai = { workspace = true }

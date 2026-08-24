@@ -81,7 +81,7 @@ impl MvpAgent {
     /// Dispatches by on-disk method name:
     /// - ACP updates (`"session/update"`) → typed `SessionNotification` for correct
     ///   TUI dispatch (direct dispatch preserves Rust types, not method strings).
-    /// - xAI updates (`"_chutes.build/session/update"`) → `ExtNotification`.
+    /// - xAI updates (`"_x.ai/session/update"`) → `ExtNotification`.
     ///
     /// When `mark_replay` is true, the notification is tagged with
     /// `_meta.isReplay: true` so the client knows it's historical data.
@@ -104,14 +104,14 @@ impl MvpAgent {
                 return None;
             }
         };
-        // updates.jsonl only persists `_chutes.build/session/update` and `session/update`.
+        // updates.jsonl only persists `_x.ai/session/update` and `session/update`.
         // Unknown methods fall through to the ACP parse below and are dropped on error.
         let method = env.method.unwrap_or("session/update");
         let Some(raw_params) = env.params else {
             tracing::debug!("replay: skipping JSONL line with no params");
             return None;
         };
-        let is_xai = method == "_chutes.build/session/update";
+        let is_xai = method == "_x.ai/session/update";
 
         if is_xai {
             // The fast-path forwards raw params with no `_meta` round-trip, so it
@@ -123,7 +123,6 @@ impl MvpAgent {
                     serde_json::value::RawValue::from_string(raw_params.get().to_owned())
                     && let Some(owned) = Self::fitted_replay_params(owned)
                 {
-
                     return Some(
                         self.gateway
                             .forward_with_completion(acp::ExtNotification::new(
@@ -132,7 +131,6 @@ impl MvpAgent {
                             )),
                     );
                 }
-
                 return None;
             }
             let Ok(mut params) = serde_json::from_str::<serde_json::Value>(raw_params.get()) else {
@@ -154,7 +152,6 @@ impl MvpAgent {
                         m.insert("chutes.build/leaderClientId".to_string(), tid.clone());
                     }
                 }
-
             }
             if let Ok(raw_val) = serde_json::value::to_raw_value(&params)
                 && let Some(raw_val) = Self::fitted_replay_params(raw_val)
@@ -359,7 +356,6 @@ impl MvpAgent {
             ) {
                 completions.push(rx);
             }
-
         }
 
         if delta_count > 0 && completions.is_empty() {

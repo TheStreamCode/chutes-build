@@ -89,9 +89,7 @@ pub(crate) async fn submit_feedback_workflow(
         author_identity,
     } = opts;
 
-    if let Some(user_meta) =
-        crate::agent::mvp_agent::parse_json_object_env("CHUTES_BUILD_USER_METADATA")
-    {
+    if let Some(user_meta) = crate::agent::mvp_agent::parse_json_object_env("GROK_USER_METADATA") {
         submission.merge_metadata(user_meta);
     }
     // Exhaustive destructure (no `..`) so a new field must be handled, not dropped.
@@ -106,6 +104,24 @@ pub(crate) async fn submit_feedback_workflow(
     }
 
     if let Some(tx) = persistence_tx {
+        // Persist the image inventory, never the payloads: feedback.jsonl
+        // rides in trace archives with a hard per-file size cap (one
+        // screenshot's base64 would sink the whole record), and the bytes
+        // are cleartext terminal captures. Take/restore around the clone so
+        // the megabytes are never copied either.
+        let images = std::mem::take(&mut submission.images);
+        let mut persisted = submission.clone();
+        persisted.images = images
+            .iter()
+            .map(
+                |i| prod_mc_cli_chat_proxy_types::feedback_types::FeedbackImage {
+                    data: format!("<{} base64 bytes stripped>", i.data.len()),
+                    mime_type: i.mime_type.clone(),
+                    file_name: i.file_name.clone(),
+                },
+            )
+            .collect();
+        submission.images = images;
         let entry = LocalFeedbackEntry::UserFeedback(UserFeedbackEntry {
             submitted_at: chrono::Utc::now(),
             session_id: submission.session_id.clone(),
@@ -113,7 +129,7 @@ pub(crate) async fn submit_feedback_workflow(
             solicited,
             request_id: submission.request_id.clone(),
             dismissed: false,
-            submission: Some(submission.clone()),
+            submission: Some(persisted),
         });
         if tx.send(PersistenceMsg::Feedback(entry)).is_err() {
             tracing::warn!(
@@ -214,10 +230,10 @@ pub struct FeedbackManagerConfig {
     /// Interval for syncing signals to the analytics backend (default: 30s)
     pub sync_interval: Duration,
     /// Whether user-facing feedback features are enabled (popups, `/feedback`,
-    /// ratings). Gated by `CHUTES_BUILD_FEEDBACK_ENABLED`.
+    /// ratings). Gated by `GROK_FEEDBACK_ENABLED`.
     pub feedback_enabled: bool,
     /// Whether session analytics (signal sync, turn deltas) are enabled.
-    /// Gated by `CHUTES_BUILD_TELEMETRY_ENABLED`. These are analytics data that
+    /// Gated by `GROK_TELEMETRY_ENABLED`. These are analytics data that
     /// flow continuously without user action.
     pub telemetry_enabled: bool,
     /// Client type (Agent, Tui, Web, Extension)
@@ -229,7 +245,7 @@ pub struct FeedbackManagerConfig {
     pub loc_tracking_enabled: bool,
     /// Preferred timeout for draining the upload queue on shutdown
     /// (default: 30s). Process-exit still clamps this under
-    /// [`SHUTDOWN_DRAIN_CAP`] (or `CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS`) so a
+    /// [`SHUTDOWN_DRAIN_CAP`] (or `GROK_SESSION_EXIT_DRAIN_SECS`) so a
     /// hung upload cannot exceed the agent join grace; abandoned durable
     /// pairs are recovered on next-session startup.
     pub drain_timeout: Duration,
@@ -514,7 +530,7 @@ impl FeedbackManager {
     /// heuristics, sampling, cooldown, and enabled checks.
     ///
     /// Engineers developing clients can call this via the
-    /// `chutes.ai/debug/trigger_feedback` ACP extension method to exercise
+    /// `x.ai/debug/trigger_feedback` ACP extension method to exercise
     /// the full feedback notification ↔ response flow without needing a
     /// real session that meets tier criteria.
     ///
@@ -915,7 +931,7 @@ impl FeedbackManager {
     /// Empty open→exit: `sync_signals_inner(force)` skips the analytics POST
     /// when there are no turns/tools; drain is skipped when pending is also 0.
     /// Non-empty drains use `min(config.drain_timeout, cap)` (default cap 5s,
-    /// `CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS` up to hard max 7s). Incomplete drains
+    /// `GROK_SESSION_EXIT_DRAIN_SECS` up to hard max 7s). Incomplete drains
     /// leave durable pairs on disk for next-session recovery.
     pub async fn shutdown(&self, queue: Option<&xai_file_utils::queue::UploadQueue>) {
         let pending = queue
@@ -976,7 +992,7 @@ pub(crate) const SHUTDOWN_SIGNAL_SYNC_TIMEOUT: Duration = Duration::from_secs(2)
 
 /// Default ceiling on non-empty upload-queue drain at process exit.
 /// Keeps sync+drain under [`crate::agent::activity::SESSION_FLUSH_GRACE`] with
-/// residual time for hooks/memory. Override with `CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS`
+/// residual time for hooks/memory. Override with `GROK_SESSION_EXIT_DRAIN_SECS`
 /// (still hard-capped by [`SHUTDOWN_DRAIN_HARD_MAX`]).
 const SHUTDOWN_DRAIN_CAP: Duration = Duration::from_secs(5);
 
@@ -990,10 +1006,10 @@ const SHUTDOWN_EMPTY_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Non-empty drain wait: honor config (tests / shorter defaults) but never
 /// exceed the process-exit cap. Cap defaults to [`SHUTDOWN_DRAIN_CAP`]; fleets
-/// on slow networks may raise it with `CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS` up to
+/// on slow networks may raise it with `GROK_SESSION_EXIT_DRAIN_SECS` up to
 /// [`SHUTDOWN_DRAIN_HARD_MAX`] without regressing the empty-session fast path.
 fn nonempty_drain_budget(config_timeout: Duration) -> Duration {
-    let cap = std::env::var("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS")
+    let cap = std::env::var("GROK_SESSION_EXIT_DRAIN_SECS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_secs)
@@ -1177,6 +1193,7 @@ fn tier_to_priority(tier: crate::session::feedback::FeedbackTier) -> i32 {
     }
 }
 
+#[allow(clippy::disallowed_methods)] // test clients hit localhost mocks
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1377,8 +1394,7 @@ mod tests {
     fn test_shutdown_budgets_fit_under_session_flush_grace() {
         use crate::agent::activity::SESSION_FLUSH_GRACE;
         // `nonempty_drain_budget` reads env; pin default regardless of CI presets.
-        let _unset =
-            xai_grok_test_support::env::EnvGuard::unset("CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS");
+        let _unset = xai_grok_test_support::env::EnvGuard::unset("GROK_SESSION_EXIT_DRAIN_SECS");
         assert!(
             SHUTDOWN_SIGNAL_SYNC_TIMEOUT + SHUTDOWN_DRAIN_HARD_MAX <= SESSION_FLUSH_GRACE,
             "sync + hard-max drain must fit under flush grace"
@@ -1407,10 +1423,8 @@ mod tests {
     #[serial_test::serial]
     fn test_nonempty_drain_budget_env_raises_cap() {
         {
-            let _guard = xai_grok_test_support::env::EnvGuard::set(
-                "CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS",
-                "7",
-            );
+            let _guard =
+                xai_grok_test_support::env::EnvGuard::set("GROK_SESSION_EXIT_DRAIN_SECS", "7");
             assert_eq!(
                 nonempty_drain_budget(Duration::from_secs(30)),
                 Duration::from_secs(7),
@@ -1418,10 +1432,8 @@ mod tests {
             );
         }
         {
-            let _guard = xai_grok_test_support::env::EnvGuard::set(
-                "CHUTES_BUILD_SESSION_EXIT_DRAIN_SECS",
-                "99",
-            );
+            let _guard =
+                xai_grok_test_support::env::EnvGuard::set("GROK_SESSION_EXIT_DRAIN_SECS", "99");
             assert_eq!(
                 nonempty_drain_budget(Duration::from_secs(30)),
                 SHUTDOWN_DRAIN_HARD_MAX,
@@ -1890,6 +1902,7 @@ mod tests {
     }
 }
 
+#[allow(clippy::disallowed_methods)] // test clients hit localhost mocks
 #[cfg(test)]
 mod author_identity_tests {
     use super::*;
@@ -1943,21 +1956,17 @@ mod author_identity_tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn env_var_identity_reaches_the_wire_end_to_end() {
-        let _email = xai_grok_test_support::env::EnvGuard::set(
-            "CHUTES_BUILD_TEST_WORK_EMAIL",
-            "ada@corp.example",
-        );
-        let _name = xai_grok_test_support::env::EnvGuard::set(
-            "CHUTES_BUILD_TEST_WORK_NAME",
-            "Ada Lovelace",
-        );
+        let _email =
+            xai_grok_test_support::env::EnvGuard::set("GROK_TEST_WORK_EMAIL", "ada@corp.example");
+        let _name =
+            xai_grok_test_support::env::EnvGuard::set("GROK_TEST_WORK_NAME", "Ada Lovelace");
 
         // The loader expands `$VAR` at load, exactly as a trusted config tier ships it.
         let mut value = toml::from_str::<toml::Value>(
             r#"
 [feedback.user]
-name = ["$CHUTES_BUILD_TEST_WORK_NAME"]
-email = ["$CHUTES_BUILD_TEST_WORK_EMAIL"]
+name = ["$GROK_TEST_WORK_NAME"]
+email = ["$GROK_TEST_WORK_EMAIL"]
 "#,
         )
         .unwrap();
@@ -2012,13 +2021,13 @@ email = ["$CHUTES_BUILD_TEST_WORK_EMAIL"]
         assert_eq!(persisted.model_id.as_deref(), Some("grok-4"));
     }
 
-    /// `CHUTES_BUILD_USER_METADATA` is merged into the submission and travels with it:
+    /// `GROK_USER_METADATA` is merged into the submission and travels with it:
     /// onto the wire body for triage and onto the local feedback.jsonl entry.
     #[tokio::test]
     #[serial_test::serial]
     async fn workflow_merges_user_metadata_into_submission() {
         let _guard = xai_grok_test_support::env::EnvGuard::set(
-            "CHUTES_BUILD_USER_METADATA",
+            "GROK_USER_METADATA",
             r#"{"team": "platform-tools"}"#,
         );
         let (addr, captured) = start_capture_server().await;

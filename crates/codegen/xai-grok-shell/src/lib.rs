@@ -19,10 +19,11 @@ pub mod claude_import;
 pub mod claude_import_state;
 pub mod cli_models;
 pub mod config;
+#[cfg(all(test, feature = "config-docs"))]
+pub mod config_docs;
 pub use xai_grok_shell_base::cpu_profile;
 pub use xai_grok_shell_base::env;
 pub mod extensions;
-pub mod waterfall;
 pub use xai_grok_foreign_sessions as foreign_sessions;
 pub mod heap_profile;
 pub use xai_grok_http as http;
@@ -44,3 +45,5 @@ pub mod tier;
 pub mod tools;
 pub mod upload;
 pub mod util;
+#[doc(hidden)]
+pub mod waterfall;

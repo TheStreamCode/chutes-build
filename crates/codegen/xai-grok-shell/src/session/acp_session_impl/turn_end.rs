@@ -89,7 +89,7 @@ impl SessionActor {
         self.emit_transient_notification(notification);
     }
 
-    /// Emit `chutes.ai/git_head_changed` after an edit/shell command that may have
+    /// Emit `x.ai/git_head_changed` after an edit/shell command that may have
     /// moved HEAD (e.g. `git checkout`, `git commit`), so clients update their
     /// status bar and changes panel immediately rather than waiting for the
     /// debounced fs-watch refresh.
@@ -130,12 +130,16 @@ impl SessionActor {
             main_repo,
         };
         if let Ok(raw) = serde_json::value::to_raw_value(&params) {
-            let notification =
-                acp::ExtNotification::new("chutes.build/git_head_changed", raw.into());
+            let notification = acp::ExtNotification::new("chutes.build/git_head_changed", raw.into());
             self.notifications
                 .gateway
                 .forward_fire_and_forget(notification);
         }
+
+        // The row carries `workspace.branch`, and HEAD has just moved. Inside
+        // the `git_head_enabled` gate above, so a client that did not ask for
+        // HEAD notifications refreshes its row at turn end instead.
+        self.emit_status_snapshot_detached();
     }
 
     /// Live subagents and sticky usage-not-applied. `None` if the query failed.
@@ -323,7 +327,7 @@ impl SessionActor {
 
         // Durable twin of the fire-and-forget `prompt_complete` (emitted from
         // `MvpAgent::prompt`): publish the turn's terminal on the persisted +
-        // replayed `_chutes.build/session/update` rail so a viewer that re-attaches
+        // replayed `_x.ai/session/update` rail so a viewer that re-attaches
         // mid-turn finalizes from replay instead of stranding on "Waiting…".
         // The caller flushed the replay buffer first, so this lands strictly
         // after the turn's last `session/update` delta.
@@ -404,6 +408,9 @@ impl SessionActor {
             extra_meta,
         )
         .await;
+
+        // Cost, context occupancy and the turn timer all moved during the turn.
+        self.emit_status_snapshot_detached();
     }
 
     /// Telemetry error category; delegates to `stop_failure_error_type` so the

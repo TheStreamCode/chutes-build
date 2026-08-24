@@ -2,8 +2,8 @@
 //!
 //! Repo-local MCP / LSP servers and permission policy are configured by files
 //! an attacker can ship inside a cloned repository (`.mcp.json`, project
-//! `.chutes-build/config.toml` including `[permission]` / `[mcp_servers]` /
-//! `[plugins].paths`, `~/.claude.json` `projects.<cwd>`, project `.chutes-build/lsp.json`).
+//! `.grok/config.toml` including `[permission]` / `[mcp_servers]` /
+//! `[plugins].paths`, `~/.claude.json` `projects.<cwd>`, project `.grok/lsp.json`).
 //! Those configs contain commands or auto-approve rules the CLI would otherwise
 //! honor automatically — a 1-click RCE / policy bypass. This module resolves a
 //! VS-Code-style trust decision ONCE per workspace, BEFORE any repo-local
@@ -51,9 +51,9 @@ use xai_grok_workspace::folder_trust::{
 use crate::session::managed_mcp::mcp_server_name;
 use crate::util::config::{MCP_SCOPE_PROJECT, RemoteSettings};
 
-// NOTE: this folder-trust store (`~/.chutes-build/trusted_folders.toml`) is SEPARATE
+// NOTE: this folder-trust store (`~/.grok/trusted_folders.toml`) is SEPARATE
 // from the pre-existing per-plugin trust store
-// (`xai_grok_agent::plugins::TrustStore` at `~/.chutes-build/trusted-plugins`, plus the
+// (`xai_grok_agent::plugins::TrustStore` at `~/.grok/trusted-plugins`, plus the
 // hooks' own project-trust gating). Trusting a folder here does NOT imply plugin
 // trust and vice versa; the two are independent and non-contradicting.
 // Unifying them is a tracked follow-up (out of scope for this PR).
@@ -150,7 +150,7 @@ pub(crate) fn project_scope_allowed(cwd: &Path) -> bool {
 /// is on, the workspace is NOT store-trusted, and repo-local code-exec configs
 /// are present (something to gate). Interactivity is forced `true` because the
 /// caller already confirmed the client can prompt (it advertised
-/// `chutes.ai/folderTrust.interactive`); the TTY-based [`decide_inputs`] default is
+/// `x.ai/folderTrust.interactive`); the TTY-based [`decide_inputs`] default is
 /// false under the ACP stdio transport. Mirrors the [`decide`] precedence so it
 /// cannot drift from the gate: feature-off (kill-switch / opt-out) / store-trusted
 /// / no-configs all collapse to a non-`Prompt` verdict and return false.
@@ -173,7 +173,7 @@ pub(crate) fn prompt_warranted(cwd: &Path, remote: Option<&RemoteSettings>) -> b
 /// actually gated the folder (same markers, same cwd→git-root walk).
 ///
 /// ALL detected kinds are reported, including `lsp`: it is a genuine reason the
-/// folder is gated (so an `.chutes-build/lsp.json`-only repo still has a non-empty reason
+/// folder is gated (so an `.grok/lsp.json`-only repo still has a non-empty reason
 /// list). Only the post-grant *hot-reload* skips LSP — project LSP applies on the
 /// next session open (the backend is spawn-baked into the tool bridge). See the
 /// `mvp_agent::folder_trust_prompt` module docs.
@@ -228,7 +228,7 @@ pub(crate) fn record_for_test(cwd: &Path, allowed: bool) {
 /// `allow_prompt` must be `true` ONLY where a blocking stdin y/N read is safe —
 /// i.e. agent `initialize` for the launch directory, before the TUI takes over
 /// the terminal. Every other call site (per-session cwd, leader-served sessions
-/// whose cwd differs from the launch dir, `chutes-build mcp doctor`) passes `false`, so
+/// whose cwd differs from the launch dir, `grok mcp doctor`) passes `false`, so
 /// an unresolved interactive-but-untrusted workspace resolves **fail-closed**
 /// (untrusted, no prompt) — only the launch dir is ever prompted for.
 pub(crate) fn resolve_and_record(
@@ -296,7 +296,7 @@ pub(crate) fn resolve_launch_dir_trust(cwd: &Path, remote: Option<&RemoteSetting
 /// - A cached **grant** (`Some(true)`) is durable and short-circuits — neither
 ///   `store_trusted` nor `recompute` runs.
 /// - A cached **untrusted** verdict (`Some(false)`) is re-checked via
-///   `store_trusted`: a `chutes-build --trust` grant issued AFTER this workspace was
+///   `store_trusted`: a `grok --trust` grant issued AFTER this workspace was
 ///   first resolved writes the store, so honor it on the next session without a
 ///   restart. Without this re-read a long-lived leader would mask the grant.
 /// - An **unrecorded** key (`None`) does a full `recompute`, which reports
@@ -395,7 +395,7 @@ fn compute_from_inputs(
 /// merged server list when the workspace is untrusted.
 ///
 /// SINGLE SOURCE OF TRUTH for "project-scoped MCP names" across ALL gate sites
-/// (session merge, the session-less agent pool, `chutes-build mcp doctor`). It MUST
+/// (session merge, the session-less agent pool, `grok mcp doctor`). It MUST
 /// enumerate every project MCP source the loaders read; adding a new repo-local
 /// MCP source without extending this fn silently re-opens the gate (guarded by
 /// `project_scoped_mcp_names_cover_every_source`).
@@ -405,17 +405,17 @@ fn compute_from_inputs(
 /// agent-pool/doctor paths, which carry no `ConfigSource`. Names use the same
 /// identity the merge dedups on ([`mcp_server_name`]).
 ///
-/// Sources: project `.chutes-build/config.toml [mcp_servers]` (NOT the user-tier global
+/// Sources: project `.grok/config.toml [mcp_servers]` (NOT the user-tier global
 /// config), project `.mcp.json` (`cwd` up to the repo root, never `$HOME`),
 /// project `.cursor/mcp.json`, and `~/.claude.json projects.<cwd>.mcpServers`.
 ///
 /// Edge case: a name declared in BOTH a project config and the global
-/// `~/.chutes-build/config.toml` is dropped when untrusted. This is intended — untrusted
+/// `~/.grok/config.toml` is dropped when untrusted. This is intended — untrusted
 /// project content must not influence the command spawned for a shared name.
 pub(crate) fn project_scoped_mcp_names(cwd: &Path) -> HashSet<String> {
     let mut names = HashSet::new();
 
-    // `.chutes-build/config.toml [mcp_servers]` entries tagged project (the loader's key
+    // `.grok/config.toml [mcp_servers]` entries tagged project (the loader's key
     // is the display name, matching `mcp_server_name` of the merged server).
     for (name, (_cfg, scope)) in crate::util::config::load_mcp_server_configs_with_project(cwd) {
         if scope == MCP_SCOPE_PROJECT {
@@ -668,17 +668,17 @@ mod tests {
         // decide() always trusts an unrecordable root and no grant/store/prompt
         // could ever lift the deny, so the gate must keep allowing after an
         // untrust click. HOME overridden so workspace_key sees the tempdir as
-        // home; CHUTES_BUILD_HOME-isolated store; CHUTES_BUILD_FOLDER_TRUST unset so the
+        // home; CHUTES_BUILD_HOME-isolated store; GROK_FOLDER_TRUST unset so the
         // default-on flag applies.
         let home = tempfile::tempdir().unwrap();
         let _home = EnvGuard::set("HOME", home.path());
         let grok_home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", grok_home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         git2::Repository::init(home.path()).unwrap();
         // Repo-local code-exec config, so the final allow is the unrecordable-key
         // rule at work (a recordable key with configs + empty store would deny).
-        std::fs::create_dir_all(home.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(home.path().join(".grok").join("hooks")).unwrap();
 
         assert!(
             !revoke_folder_trust(home.path()),
@@ -702,10 +702,10 @@ mod tests {
         // `.envrc`-only untrusted clone resolves false (so the call site loads an
         // empty env), while a store-trusted folder resolves true and the loader
         // actually reads `.envrc`. CHUTES_BUILD_HOME-isolated so the trust store is empty;
-        // CHUTES_BUILD_FOLDER_TRUST unset so the default-on feature flag applies.
+        // GROK_FOLDER_TRUST unset so the default-on feature flag applies.
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
         std::fs::write(tmp.path().join(".envrc"), "export GATED_ENVRC=1\n").unwrap();
 
@@ -736,11 +736,11 @@ mod tests {
         // untrusted clone's repo-tree env (which would feed BASH_ENV /
         // GIT_SSH_COMMAND / … to every subprocess) is dropped; a store-trusted
         // folder merges it. CHUTES_BUILD_HOME-isolated so the trust store is empty;
-        // CHUTES_BUILD_FOLDER_TRUST unset so the default-on feature flag applies.
+        // GROK_FOLDER_TRUST unset so the default-on feature flag applies.
         use xai_grok_workspace::permission::claude_settings::load_claude_env_with_project;
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
         let claude = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude).unwrap();
@@ -784,7 +784,7 @@ mod tests {
         use xai_grok_workspace::permission::claude_settings::load_claude_env_with_project;
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
         let subdir = tmp.path().join("sub");
         let claude = subdir.join(".claude");
@@ -833,9 +833,9 @@ mod tests {
         use xai_grok_agent::config::AgentScope;
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        let agents = tmp.path().join(".chutes-build").join("agents");
+        let agents = tmp.path().join(".grok").join("agents");
         std::fs::create_dir_all(&agents).unwrap();
         // Shadows the built-in `explore` subagent and carries a command hook.
         std::fs::write(
@@ -880,16 +880,16 @@ mod tests {
     fn project_scope_allowed_denies_untrusted_repo_with_configs() {
         // Fail-closed (the dangerous case): a release-stamped build with the
         // feature on by default, an untrusted folder that ships repo-local
-        // code-exec config (here `.chutes-build/hooks`), and no store grant must be
+        // code-exec config (here `.grok/hooks`), and no store grant must be
         // DENIED — even though no verdict was recorded first (the gate re-resolves
         // fail-closed rather than defaulting open). CHUTES_BUILD_HOME-isolated (empty
-        // store); CHUTES_BUILD_FOLDER_TRUST unset so the default-on flag applies.
+        // store); GROK_FOLDER_TRUST unset so the default-on flag applies.
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
         assert!(
             !project_scope_allowed(tmp.path()),
             "untrusted folder with repo configs must be denied (fail-closed)"
@@ -908,7 +908,7 @@ mod tests {
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
         assert!(
             project_scope_allowed(tmp.path()),
@@ -921,13 +921,13 @@ mod tests {
     fn project_scope_allowed_allows_store_trusted_repo() {
         // A folder the user explicitly trusted is ALLOWED even with repo-local
         // configs present. CHUTES_BUILD_HOME-isolated so the seeded store is the temp one;
-        // CHUTES_BUILD_FOLDER_TRUST unset so the default-on flag applies.
+        // GROK_FOLDER_TRUST unset so the default-on flag applies.
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
         let mut store = TrustStore::load();
         store.set_trusted(&workspace_key(tmp.path())).unwrap();
         assert!(
@@ -942,15 +942,15 @@ mod tests {
         // On a local/dev build the whole feature is inert (auto-trust): a folder
         // with repo-local configs and an empty store is still ALLOWED. Assert only
         // when compiled unstamped (mirrors the inert tests elsewhere), with
-        // CHUTES_BUILD_TEST_VERSION unset so `is_local_build()` is genuinely true.
+        // GROK_TEST_VERSION unset so `is_local_build()` is genuinely true.
         let _unset_ver = EnvGuard::unset(xai_grok_version::TEST_VERSION_ENV);
-        if option_env!("CHUTES_BUILD_VERSION").is_some() {
+        if option_env!("GROK_VERSION").is_some() {
             return; // a release-stamped test binary is not a local build
         }
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
         assert!(
             project_scope_allowed(tmp.path()),
             "inert local/dev build must allow project scope even with configs"
@@ -960,23 +960,17 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn project_scope_allowed_denies_untrusted_plugin_only_repo() {
-        // A plugin-only untrusted repo (just `.chutes-build/plugins/<x>/`, no
+        // A plugin-only untrusted repo (just `.grok/plugins/<x>/`, no
         // hooks/MCP/LSP, no store grant) is repo-controlled code-exec and must be
         // DENIED — the verdict the shell plugin call sites feed into
         // discover_plugins/build_for_cwd/reload. CHUTES_BUILD_HOME-isolated (empty store);
-        // CHUTES_BUILD_FOLDER_TRUST unset so the default-on flag applies.
+        // GROK_FOLDER_TRUST unset so the default-on flag applies.
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        std::fs::create_dir_all(
-            tmp.path()
-                .join(".chutes-build")
-                .join("plugins")
-                .join("evil"),
-        )
-        .unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("plugins").join("evil")).unwrap();
         assert!(
             !project_scope_allowed(tmp.path()),
             "plugin-only untrusted repo must be denied"
@@ -986,7 +980,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn project_scope_allowed_denies_untrusted_permission_only_repo() {
-        // Bridge: a clone whose ONLY repo-local config is `.chutes-build/config.toml`
+        // Bridge: a clone whose ONLY repo-local config is `.grok/config.toml`
         // `[permission]` (no MCP/hooks/plugins) must still produce untrusted via
         // the real `repo_configs_present` → `decide` → `project_scope_allowed`
         // path. Resolver unit tests inject `project_trusted = false` directly and
@@ -994,9 +988,9 @@ mod tests {
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".chutes-build");
+        let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
             grok.join("config.toml"),
@@ -1018,19 +1012,19 @@ mod tests {
         // configs under a remote kill-switch (folder_trust_enabled = Some(false))
         // must resolve ALLOWED. The session spawn path resolves once with the real
         // RemoteSettings before any gate read, so the gate cache-hits that verdict.
-        // CHUTES_BUILD_HOME-isolated (empty store); CHUTES_BUILD_FOLDER_TRUST unset so the kill-switch
+        // CHUTES_BUILD_HOME-isolated (empty store); GROK_FOLDER_TRUST unset so the kill-switch
         // is the only signal.
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let remote = RemoteSettings {
             folder_trust_enabled: Some(false),
             ..Default::default()
         };
 
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
         assert!(
             resolve_and_record(tmp.path(), Some(&remote), false),
             "kill-switch (feature off) must resolve trusted even with repo configs"
@@ -1044,7 +1038,7 @@ mod tests {
         // misses the kill-switch and denies the same scenario — the exact gap the
         // up-front spawn resolve closes for chat/load sessions.
         let cold = repo_tmp();
-        std::fs::create_dir_all(cold.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(cold.path().join(".grok").join("hooks")).unwrap();
         assert!(
             !project_scope_allowed(cold.path()),
             "cold remote=None gate read denies a kill-switched folder (regression contrast)"
@@ -1063,21 +1057,17 @@ mod tests {
         // un-gating here.
         //
         // CHUTES_BUILD_HOME-isolated so both the folder-trust store and the plugin trust
-        // store start empty (deterministic untrusted); CHUTES_BUILD_FOLDER_TRUST unset so
+        // store start empty (deterministic untrusted); GROK_FOLDER_TRUST unset so
         // the default-on flag applies; `#[serial]` because both are process-global.
         use xai_grok_agent::plugins::discovery::DiscoveryConfig;
         use xai_grok_agent::plugins::{PluginRegistry, SharedPluginRegistryHandle};
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
         // A project plugin. Project scope is default-disabled, so name it in the
         // `enabled` list to isolate the TRUST gate (not the enable gate).
-        let plugin = tmp
-            .path()
-            .join(".chutes-build")
-            .join("plugins")
-            .join("trustgate");
+        let plugin = tmp.path().join(".grok").join("plugins").join("trustgate");
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(plugin.join("plugin.json"), r#"{"name":"trustgate"}"#).unwrap();
         let cfg = DiscoveryConfig {
@@ -1124,13 +1114,13 @@ mod tests {
         // End-to-end load path: the folder-trust verdict threaded into `discover_hooks`
         // excludes a repo-local project hook while untrusted, and includes it after the
         // folder is granted trust — the path where the regression historically re-opened.
-        // CHUTES_BUILD_HOME-isolated so the grant writes to a temp store; CHUTES_BUILD_FOLDER_TRUST unset
+        // CHUTES_BUILD_HOME-isolated so the grant writes to a temp store; GROK_FOLDER_TRUST unset
         // so the default-on flag applies.
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let tmp = repo_tmp();
-        let hooks_dir = tmp.path().join(".chutes-build").join("hooks");
+        let hooks_dir = tmp.path().join(".grok").join("hooks");
         std::fs::create_dir_all(&hooks_dir).unwrap();
         // Top-level `{"hooks":{...}}` wrapper; no matcher => match-all. The parsed
         // spec name is `<file_stem>:PreToolUse[..]`, so the file stem identifies it.
@@ -1191,7 +1181,7 @@ mod tests {
                 (
                     LspServerConfig::default(),
                     ConfigSource::Project {
-                        path: PathBuf::from("/repo/.chutes-build/lsp.json"),
+                        path: PathBuf::from("/repo/.grok/lsp.json"),
                     },
                 ),
             );
@@ -1200,7 +1190,7 @@ mod tests {
                 (
                     LspServerConfig::default(),
                     ConfigSource::User {
-                        path: PathBuf::from("/home/.chutes-build/lsp.json"),
+                        path: PathBuf::from("/home/.grok/lsp.json"),
                     },
                 ),
             );
@@ -1231,11 +1221,11 @@ mod tests {
         use xai_grok_tools::implementations::lsp::config::load_servers_with_plugins_sourced;
         use xai_grok_tools::types::config_source::ConfigSource;
 
-        // A `<cwd>/.chutes-build/lsp.json` server must be tagged `Project` so the gate
+        // A `<cwd>/.grok/lsp.json` server must be tagged `Project` so the gate
         // can distinguish it from user/plugin servers. Asserts on the specific
-        // key, so any real `~/.chutes-build/lsp.json` on the test host is irrelevant.
+        // key, so any real `~/.grok/lsp.json` on the test host is irrelevant.
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".chutes-build");
+        let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("lsp.json"), r#"{"projlsp": {"command": "true"}}"#).unwrap();
 
@@ -1252,9 +1242,9 @@ mod tests {
         use xai_grok_tools::implementations::lsp::config::load_servers_with_plugins_sourced;
 
         // End-to-end of the load-site gate (Sites A/B): a project server loaded
-        // from `<cwd>/.chutes-build/lsp.json` is dropped once the workspace is untrusted.
+        // from `<cwd>/.grok/lsp.json` is dropped once the workspace is untrusted.
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".chutes-build");
+        let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("lsp.json"), r#"{"projlsp": {"command": "true"}}"#).unwrap();
 
@@ -1280,7 +1270,7 @@ mod tests {
     }
 
     /// A git-init'd repo declaring two project-scoped MCP servers: `projjson`
-    /// (`.mcp.json`) and `projtoml` (`.chutes-build/config.toml [mcp_servers]`).
+    /// (`.mcp.json`) and `projtoml` (`.grok/config.toml [mcp_servers]`).
     fn repo_with_project_mcp() -> tempfile::TempDir {
         let tmp = repo_tmp();
         std::fs::write(
@@ -1288,7 +1278,7 @@ mod tests {
             r#"{"mcpServers": {"projjson": {"url": "https://proj.example.com/mcp"}}}"#,
         )
         .unwrap();
-        let grok = tmp.path().join(".chutes-build");
+        let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
             grok.join("config.toml"),
@@ -1300,7 +1290,7 @@ mod tests {
 
     /// Pins the three known repo-local FILE sources of
     /// [`project_scoped_mcp_names`]: a project server declared in each of
-    /// `.chutes-build/config.toml`, `.mcp.json`, and `.cursor/mcp.json` must appear in
+    /// `.grok/config.toml`, `.mcp.json`, and `.cursor/mcp.json` must appear in
     /// the returned set, catching a REGRESSION that drops one of them. It cannot
     /// catch a brand-new source TYPE added only to a loader — the prominent
     /// single-source-of-truth doc on `project_scoped_mcp_names` is that guard.
@@ -1309,7 +1299,7 @@ mod tests {
     #[test]
     fn project_scoped_mcp_names_cover_every_source() {
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".chutes-build");
+        let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
             grok.join("config.toml"),
@@ -1384,7 +1374,7 @@ mod tests {
         let key = workspace_key(tmp.path());
         record(&key, false);
         assert!(!project_scope_allowed(tmp.path()));
-        // Simulate a `chutes-build --trust` grant landing in the store after the
+        // Simulate a `grok --trust` grant landing in the store after the
         // untrusted verdict was cached: the re-read sees trusted, so the next
         // resolve upgrades the cache without a process restart.
         let allowed = resolve_and_record_inner(
@@ -1469,9 +1459,9 @@ mod tests {
         // Drives the real `resolve_and_record` + `project_scope_allowed`. Force
         // the feature on via env (highest precedence) so the test does not depend
         // on the host's folder-trust config.
-        unsafe { std::env::set_var("CHUTES_BUILD_FOLDER_TRUST", "1") };
+        unsafe { std::env::set_var("GROK_FOLDER_TRUST", "1") };
         // Simulate a release-stamped build: an unstamped local/dev build (as in CI,
-        // no CHUTES_BUILD_VERSION) auto-trusts, so the gate would never engage without this.
+        // no GROK_VERSION) auto-trusts, so the gate would never engage without this.
         unsafe { std::env::set_var(xai_grok_version::TEST_VERSION_ENV, "0.0.0-sim") };
         let tmp = repo_tmp();
 
@@ -1483,7 +1473,7 @@ mod tests {
         );
 
         // A repo-local code-exec config appears after the first resolve.
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
 
         // The next resolve re-checks `repo_configs_present` (no stale grant to
         // ride) => headless untrusted, so the newly-added hooks are now gated.
@@ -1494,7 +1484,7 @@ mod tests {
         assert!(!project_scope_allowed(tmp.path()));
 
         unsafe { std::env::remove_var(xai_grok_version::TEST_VERSION_ENV) };
-        unsafe { std::env::remove_var("CHUTES_BUILD_FOLDER_TRUST") };
+        unsafe { std::env::remove_var("GROK_FOLDER_TRUST") };
     }
 
     #[test]
@@ -1507,7 +1497,7 @@ mod tests {
         // precedence) so the test does not depend on the host config; isolate
         // CHUTES_BUILD_HOME so the store is empty/seeded in temp. `#[serial]` because both
         // vars are process-global.
-        let _feature = EnvGuard::set("CHUTES_BUILD_FOLDER_TRUST", "1");
+        let _feature = EnvGuard::set("GROK_FOLDER_TRUST", "1");
         let _sim = simulate_release_build();
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
@@ -1524,14 +1514,14 @@ mod tests {
 
         // (b) Configs present + untrusted (empty store, headless) => false.
         let untrusted = repo_tmp();
-        std::fs::create_dir_all(untrusted.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(untrusted.path().join(".grok").join("hooks")).unwrap();
         let lt = resolve_launch_dir_trust(untrusted.path(), None);
         assert_eq!(lt, resolve_and_record(untrusted.path(), None, false));
         assert!(!lt, "untrusted configs launch dir must be denied");
 
         // (c) Configs present + store-trusted => true.
         let trusted = repo_tmp();
-        std::fs::create_dir_all(trusted.path().join(".chutes-build").join("hooks")).unwrap();
+        std::fs::create_dir_all(trusted.path().join(".grok").join("hooks")).unwrap();
         let mut store = TrustStore::load();
         store.set_trusted(&workspace_key(trusted.path())).unwrap();
         let lt = resolve_launch_dir_trust(trusted.path(), None);
@@ -1547,11 +1537,11 @@ mod tests {
         // EMPTY store still resolves trusted, `resolve_launch_dir_trust` returns
         // true, and the `.envrc` loads without any grant. Assert the local branch
         // ONLY when compiled unstamped (mirrors the workspace
-        // `is_local_build_honors_test_version_override`), with CHUTES_BUILD_TEST_VERSION
+        // `is_local_build_honors_test_version_override`), with GROK_TEST_VERSION
         // unset so `is_local_build()` is genuinely true. CHUTES_BUILD_HOME-isolated so the
         // real store is never touched.
         let _sim = EnvGuard::unset(xai_grok_version::TEST_VERSION_ENV);
-        if option_env!("CHUTES_BUILD_VERSION").is_some() {
+        if option_env!("GROK_VERSION").is_some() {
             return; // a release-stamped test binary is not a local build
         }
         let home = tempfile::tempdir().unwrap();
@@ -1596,10 +1586,10 @@ mod tests {
         std::fs::write(tmp.path().join(".mcp.json"), "{}").unwrap();
         // Simulate a release-stamped build so the inert local-build gate is off
         // and the remote `folder_trust_enabled` flag actually engages.
-        // CHUTES_BUILD_FOLDER_TRUST unset: env outranks the remote flag, so an ambient
+        // GROK_FOLDER_TRUST unset: env outranks the remote flag, so an ambient
         // opt-out would otherwise false-fail the Prompt assertion.
         let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0.0-sim");
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let remote = RemoteSettings {
             folder_trust_enabled: Some(true),
             ..Default::default()
@@ -1614,10 +1604,10 @@ mod tests {
         // feature even on a release-stamped build, so no prompt is warranted even
         // with repo configs present. Simulate a release build so the inert
         // local-build path is not what's under test; CHUTES_BUILD_HOME-isolated and
-        // CHUTES_BUILD_FOLDER_TRUST unset so the kill-switch is the only signal.
+        // GROK_FOLDER_TRUST unset so the kill-switch is the only signal.
         let home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("CHUTES_BUILD_HOME", home.path());
-        let _flag = EnvGuard::unset("CHUTES_BUILD_FOLDER_TRUST");
+        let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
         let _sim = simulate_release_build();
         let tmp = repo_tmp();
         std::fs::write(tmp.path().join(".mcp.json"), "{}").unwrap();
@@ -1663,8 +1653,8 @@ mod tests {
     fn detected_config_kinds_summarizes_present_markers() {
         let tmp = repo_tmp();
         std::fs::write(tmp.path().join(".mcp.json"), "{}").unwrap();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("hooks")).unwrap();
-        std::fs::write(tmp.path().join(".chutes-build").join("lsp.json"), "{}").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
+        std::fs::write(tmp.path().join(".grok").join("lsp.json"), "{}").unwrap();
         std::fs::write(tmp.path().join(".envrc"), "export X=1\n").unwrap();
         let kinds = detected_config_kinds(tmp.path());
         assert!(kinds.contains(&"mcp".to_string()));
@@ -1678,10 +1668,10 @@ mod tests {
     #[test]
     fn detected_config_kinds_reports_lsp_only_repo() {
         // Regression for the "empty configKinds" bug: a repo gated SOLELY by
-        // `.chutes-build/lsp.json` must still produce a non-empty reason list.
+        // `.grok/lsp.json` must still produce a non-empty reason list.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
-        std::fs::write(tmp.path().join(".chutes-build").join("lsp.json"), "{}").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
+        std::fs::write(tmp.path().join(".grok").join("lsp.json"), "{}").unwrap();
         let kinds = detected_config_kinds(tmp.path());
         assert_eq!(kinds, vec!["lsp".to_string()]);
     }

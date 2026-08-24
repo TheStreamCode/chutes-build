@@ -69,6 +69,7 @@ async fn create_test_actor(
     );
     chat_state_handle.record_token_usage(total_tokens);
     SessionActor {
+        status_wake: Default::default(),
         session_info: SessionInfo {
             id: acp::SessionId::new("test-auto-compact"),
             cwd: cwd.as_str().to_string(),
@@ -92,7 +93,7 @@ async fn create_test_actor(
         mcp_state: Arc::new(TokioMutex::new(McpState::new(vec![]))),
         mcp_strategy: std::cell::Cell::new(McpInitStrategy::Blocking),
         delivery_tools: std::cell::RefCell::new(Vec::new()),
-        attach_non_interactive: std::cell::Cell::new(false),
+        attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -153,6 +154,7 @@ async fn create_test_actor(
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(300),
         max_retries: 3,
+        rate_limit_waits: crate::session::acp_session::RateLimitWaitConfig::default(),
         max_turns: None,
         pending_interjections: InterjectionBuffer::new(),
         pending_skill_reminders: Mutex::new(Vec::new()),
@@ -172,6 +174,7 @@ async fn create_test_actor(
         agent: std::cell::RefCell::new(test_agent_default().await),
         last_reported_branch: std::sync::Arc::new(parking_lot::Mutex::new(None)),
         git_head_enabled: false,
+        status_line_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
@@ -533,6 +536,7 @@ async fn create_test_actor_with_memory(
         .as_ref()
         .map_or_else(Default::default, |mc| mc.initial_injection.clone());
     SessionActor {
+        status_wake: Default::default(),
         session_info: SessionInfo {
             id: acp::SessionId::new("test-memory"),
             cwd: cwd.as_str().to_string(),
@@ -556,7 +560,7 @@ async fn create_test_actor_with_memory(
         mcp_state: Arc::new(TokioMutex::new(McpState::new(vec![]))),
         mcp_strategy: std::cell::Cell::new(McpInitStrategy::Blocking),
         delivery_tools: std::cell::RefCell::new(Vec::new()),
-        attach_non_interactive: std::cell::Cell::new(false),
+        attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -616,6 +620,7 @@ async fn create_test_actor_with_memory(
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(300),
         max_retries: 3,
+        rate_limit_waits: crate::session::acp_session::RateLimitWaitConfig::default(),
         max_turns: None,
         pending_interjections: InterjectionBuffer::new(),
         pending_skill_reminders: Mutex::new(Vec::new()),
@@ -643,6 +648,7 @@ async fn create_test_actor_with_memory(
         agent: std::cell::RefCell::new(test_agent_default().await),
         last_reported_branch: std::sync::Arc::new(parking_lot::Mutex::new(None)),
         git_head_enabled: false,
+        status_line_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),
@@ -1319,6 +1325,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
             });
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let actor = SessionActor {
+                status_wake: Default::default(),
                 session_info: SessionInfo {
                     id: acp::SessionId::new("test-idle-resume"),
                     cwd: cwd.as_str().to_string(),
@@ -1355,7 +1362,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 mcp_state: Arc::new(TokioMutex::new(McpState::new(vec![]))),
                 mcp_strategy: std::cell::Cell::new(McpInitStrategy::Blocking),
                 delivery_tools: std::cell::RefCell::new(Vec::new()),
-                attach_non_interactive: std::cell::Cell::new(false),
+                attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
                 chat_state_handle,
                 unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
                 current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -1416,6 +1423,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 session_start: std::time::Instant::now(),
                 inference_idle_timeout: Duration::from_secs(300),
                 max_retries: 3,
+                rate_limit_waits: crate::session::acp_session::RateLimitWaitConfig::default(),
                 max_turns: None,
                 pending_interjections: InterjectionBuffer::new(),
                 pending_skill_reminders: Mutex::new(Vec::new()),
@@ -1435,6 +1443,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 agent: std::cell::RefCell::new(test_agent_default().await),
                 last_reported_branch: std::sync::Arc::new(parking_lot::Mutex::new(None)),
                 git_head_enabled: false,
+                status_line_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 models_manager: Default::default(),
                 display_cwd: std::sync::OnceLock::new(),
                 active_agent_type: parking_lot::Mutex::new(None),

@@ -25,10 +25,10 @@ const MAX_PENDING: usize = 256;
 const DROP_BATCH_SIZE: usize = 64;
 
 /// Build the share URL for a session.
-/// Format: https://chutes.ai/build/{sessionId}
+/// Format: https://grok.com/build/{sessionId}
 pub(crate) fn build_share_url(session_id: &str) -> String {
-    let base_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
-        .unwrap_or_else(|_| "https://chutes.ai".to_string());
+    let base_url =
+        std::env::var("GROK_CODE_WEB_URL").unwrap_or_else(|_| "https://grok.com".to_string());
     format!("{}/build/{}", base_url, session_id)
 }
 
@@ -603,7 +603,7 @@ fn handle_relay_message(
                 // Register session with relay via the WebSocket connection.
                 let upsert = json!({
                     "jsonrpc": "2.0",
-                    "method": "_chutes.build/session/upsert",
+                    "method": "_x.ai/session/upsert",
                     "params": {
                         "sessionId": session_id,
                         "cwd": cwd,
@@ -618,7 +618,7 @@ fn handle_relay_message(
                 tprintln!("📡 Session syncing to relay. View at: {}", share_url);
             }
         }
-        Some("_chutes.build/relay/initialized") => {
+        Some("_x.ai/relay/initialized") => {
             tracing::debug!(session_id = %session_id, "RelaySync: relay confirmed TUI sync mode");
         }
         Some(other) => {
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn test_build_share_url_default() {
         let url = build_share_url("test-session-123");
-        assert_eq!(url, "https://chutes.ai/build/test-session-123");
+        assert_eq!(url, "https://grok.com/build/test-session-123");
     }
 
     #[test]
@@ -854,7 +854,7 @@ mod tests {
         let url = build_share_url("01937d8a-1234-7abc-9def-0123456789ab");
         assert_eq!(
             url,
-            "https://chutes.ai/build/01937d8a-1234-7abc-9def-0123456789ab"
+            "https://grok.com/build/01937d8a-1234-7abc-9def-0123456789ab"
         );
     }
 
@@ -965,10 +965,7 @@ mod tests {
         let notification = make_notification("sess-abc", None);
         let id = resolve_event_id(&notification);
         // Must match {sessionId}-{counter} format, NOT a UUID
-        assert!(
-            id.starts_with("sess-abc-"),
-            "expected id to start with 'sess-abc-', got: {id}"
-        );
+        assert!(id.starts_with("sess-abc-"));
         let counter_part = id.strip_prefix("sess-abc-").unwrap();
         counter_part
             .parse::<u64>()
@@ -981,10 +978,7 @@ mod tests {
         let notification =
             make_notification("sess-xyz", Some(serde_json::json!({ "other": "value" })));
         let id = resolve_event_id(&notification);
-        assert!(
-            id.starts_with("sess-xyz-"),
-            "expected id to start with 'sess-xyz-', got: {id}"
-        );
+        assert!(id.starts_with("sess-xyz-"));
         let counter_part = id.strip_prefix("sess-xyz-").unwrap();
         counter_part
             .parse::<u64>()

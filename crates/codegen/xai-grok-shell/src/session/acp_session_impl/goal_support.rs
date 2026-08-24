@@ -208,7 +208,7 @@ pub(super) fn render_goal_plan_block(plan_path: &std::path::Path, names: &GoalTo
 }
 
 /// Plan path for the goal-mode reminder, or `None` on the legacy path.
-/// `Some` only when the planner is enabled (`CHUTES_BUILD_GOAL_PLANNER`) and a plan
+/// `Some` only when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan
 /// exists; disabled ⇒ `None` ⇒ legacy block (no dangling `Plan:` line).
 /// All three render sites (`setup_goal`, `resume_goal`, continuation nudge)
 /// route through this helper so the gate can't drift. Borrows, no alloc.
@@ -224,7 +224,7 @@ pub(super) fn goal_reminder_plan_path(
 /// Worker rounds a refuted goal may run without re-firing verification
 /// before the continuation directive escalates to a forceful "re-verify
 /// now" block. A refuted weak model can otherwise churn indefinitely —
-/// Override with `CHUTES_BUILD_GOAL_REVERIFY_AFTER` (floored at 1).
+/// Override with `GROK_GOAL_REVERIFY_AFTER` (floored at 1).
 pub(crate) const GOAL_REVERIFY_AFTER_DEFAULT: u32 = 8;
 
 /// Stable substring present in every rendered continuation directive

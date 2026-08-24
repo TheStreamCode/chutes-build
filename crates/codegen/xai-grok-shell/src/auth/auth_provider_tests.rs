@@ -3,7 +3,6 @@
 // on the child command instead.
 
 use super::test_counting_provider as counting_provider;
-use super::test_fixture_provider_config as fixture_config;
 use super::*;
 
 #[tokio::test]
@@ -145,7 +144,13 @@ async fn provider_config_edit_invalidates_cached_token() {
 
     let edited = AuthProviderRef::new(
         "test-freshen".to_owned(),
-        fixture_config(&["print", "edited-token"]),
+        AuthProviderConfig {
+            command: "printf edited-token".to_owned(),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
+        },
     );
     assert_eq!(
         edited.cached_token(),
@@ -172,7 +177,13 @@ async fn provider_401_recovery_reminted_under_edited_config() {
 
     let edited = AuthProviderRef::new(
         "test-401-edited".to_owned(),
-        fixture_config(&["print", "new-config-token"]),
+        AuthProviderConfig {
+            command: "printf new-config-token".to_owned(),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
+        },
     );
     assert_eq!(
         edited.recover_rejected_token(&token).await.as_deref(),
@@ -192,8 +203,11 @@ async fn provider_timeout_edit_does_not_invalidate_token() {
     let retimed = AuthProviderRef::new(
         "test-timeout-edit".to_owned(),
         AuthProviderConfig {
+            command: provider.config.command.clone(),
+            args: None,
+            token_ttl_secs: Some(3600),
             timeout_secs: Some(5),
-            ..provider.config.clone()
+            cwd: None,
         },
     );
     assert_eq!(
@@ -214,8 +228,11 @@ async fn provider_cwd_edit_invalidates_cached_token() {
     let moved = AuthProviderRef::new(
         "test-cwd-edit".to_owned(),
         AuthProviderConfig {
+            command: provider.config.command.clone(),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
             cwd: Some("/some/other/dir".to_owned()),
-            ..provider.config.clone()
         },
     );
     assert_eq!(
@@ -302,18 +319,24 @@ async fn provider_ref_serializes_name_only_and_drops_config() {
 async fn provider_refresh_sets_expired_env() {
     let provider = AuthProviderRef::new(
         "test-expired-env".to_owned(),
-        fixture_config(&["env", "tok-", "CHUTES_BUILD_AUTH_EXPIRED", "0"]),
+        AuthProviderConfig {
+            command: "printf 'tok-%s' \"${GROK_AUTH_EXPIRED:-0}\"".to_owned(),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
+        },
     );
     assert_eq!(
         provider.ensure_fresh_token(None).await.rotated().as_deref(),
         Some("tok-0"),
-        "first mint runs without CHUTES_BUILD_AUTH_EXPIRED"
+        "first mint runs without GROK_AUTH_EXPIRED"
     );
     test_expire_provider_token("test-expired-env");
     assert_eq!(
         provider.ensure_fresh_token(None).await.rotated().as_deref(),
         Some("tok-1"),
-        "re-mints run with CHUTES_BUILD_AUTH_EXPIRED=1"
+        "re-mints run with GROK_AUTH_EXPIRED=1"
     );
 }
 
@@ -323,7 +346,16 @@ async fn provider_concurrent_mints_single_flight() {
     let counter = dir.path().join("count");
     let provider = AuthProviderRef::new(
         "test-single-flight".to_owned(),
-        fixture_config(&["count", &counter.display().to_string(), "300"]),
+        AuthProviderConfig {
+            command: format!(
+                "sleep 0.3; echo run >> {c}; printf 'tok-%s' \"$(wc -l < {c} | tr -d ' ')\"",
+                c = counter.display()
+            ),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
+        },
     );
     let (a, b) = tokio::join!(
         provider.ensure_fresh_token(None),
@@ -351,7 +383,6 @@ async fn provider_expiry_source_precedence() {
         jwt_with_exp(chrono::Utc::now().timestamp() + 7200)
     }
     fn jwt_with_exp(exp: i64) -> String {
-        crate::auth::ensure_crypto_provider();
         jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &serde_json::json!({ "exp": exp }),
@@ -361,15 +392,18 @@ async fn provider_expiry_source_precedence() {
     }
     async fn mints_after_first(
         name: &str,
-        payload: &str,
+        command: String,
         token_ttl_secs: Option<u64>,
         counter: &std::path::Path,
     ) -> usize {
         let provider = AuthProviderRef::new(
             name.to_owned(),
             AuthProviderConfig {
+                command,
+                args: None,
                 token_ttl_secs,
-                ..fixture_config(&["count-print", &counter.display().to_string(), payload])
+                timeout_secs: None,
+                cwd: None,
             },
         );
         let first = provider
@@ -385,22 +419,21 @@ async fn provider_expiry_source_precedence() {
 
     // expires_in=10 (stale) wins over token_ttl_secs=3600 (fresh): re-mints.
     let c1 = dir.path().join("c1");
+    let cmd1 = format!(
+        "echo run >> {}; printf '{{\"access_token\":\"t1\",\"expires_in\":10}}'",
+        c1.display()
+    );
     assert_eq!(
-        mints_after_first(
-            "test-exp-expires-in",
-            "{\"access_token\":\"t1\",\"expires_in\":10}",
-            Some(3600),
-            &c1
-        )
-        .await,
+        mints_after_first("test-exp-expires-in", cmd1, Some(3600), &c1).await,
         2,
         "expires_in must win over token_ttl_secs"
     );
 
     // token_ttl_secs=1 (stale) wins over a 2h JWT exp (fresh): re-mints.
     let c2 = dir.path().join("c2");
+    let cmd2 = format!("echo run >> {}; printf '{}'", c2.display(), long_jwt());
     assert_eq!(
-        mints_after_first("test-exp-ttl", &long_jwt(), Some(1), &c2).await,
+        mints_after_first("test-exp-ttl", cmd2, Some(1), &c2).await,
         2,
         "token_ttl_secs must win over the JWT exp claim"
     );
@@ -408,8 +441,9 @@ async fn provider_expiry_source_precedence() {
     // JWT exp alone: a near-expiry claim (inside the skew) re-mints,
     // proving the claim is consumed when nothing else is configured.
     let c3 = dir.path().join("c3");
+    let cmd3 = format!("echo run >> {}; printf '{}'", c3.display(), short_jwt());
     assert_eq!(
-        mints_after_first("test-exp-jwt", &short_jwt(), None, &c3).await,
+        mints_after_first("test-exp-jwt", cmd3, None, &c3).await,
         2,
         "the JWT exp claim must apply when expires_in and token_ttl_secs are absent"
     );
@@ -420,11 +454,14 @@ async fn provider_unusable_expiry_still_mints() {
     let provider = AuthProviderRef::new(
         "test-overflow".to_owned(),
         AuthProviderConfig {
+            command: format!(
+                "printf '{{\"access_token\":\"t\",\"expires_in\":{}}}'",
+                u64::MAX
+            ),
+            args: None,
             token_ttl_secs: Some(u64::MAX),
-            ..fixture_config(&[
-                "print",
-                &format!("{{\"access_token\":\"t\",\"expires_in\":{}}}", u64::MAX),
-            ])
+            timeout_secs: None,
+            cwd: None,
         },
     );
     assert_eq!(
@@ -444,8 +481,12 @@ async fn provider_args_run_without_a_shell() {
     let provider = AuthProviderRef::new(
         "test-args".to_owned(),
         AuthProviderConfig {
+            command: "printf".to_owned(),
             // Shell metacharacters stay literal under direct exec.
-            ..fixture_config(&["print", "tok-$HOME;42"])
+            args: Some(vec!["tok-$HOME;42".to_owned()]),
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
         },
     );
     assert_eq!(
@@ -459,9 +500,11 @@ async fn provider_command_times_out() {
     let provider = AuthProviderRef::new(
         "test-timeout".to_owned(),
         AuthProviderConfig {
+            command: "sleep 20; printf never".to_owned(),
+            args: None,
             token_ttl_secs: None,
             timeout_secs: Some(1),
-            ..fixture_config(&["sleep", "20000", "never"])
+            cwd: None,
         },
     );
     let start = std::time::Instant::now();
@@ -483,8 +526,11 @@ async fn provider_zero_timeout_clamps_to_one_second() {
     let fast = AuthProviderRef::new(
         "test-zero-timeout-fast".to_owned(),
         AuthProviderConfig {
+            command: "printf tok".to_owned(),
+            args: None,
+            token_ttl_secs: Some(3600),
             timeout_secs: Some(0),
-            ..fixture_config(&["print", "tok"])
+            cwd: None,
         },
     );
     assert_eq!(
@@ -497,8 +543,11 @@ async fn provider_zero_timeout_clamps_to_one_second() {
     let slow = AuthProviderRef::new(
         "test-zero-timeout-slow".to_owned(),
         AuthProviderConfig {
+            command: "sleep 5; printf tok".to_owned(),
+            args: None,
+            token_ttl_secs: Some(3600),
             timeout_secs: Some(0),
-            ..fixture_config(&["sleep", "5000", "tok"])
+            cwd: None,
         },
     );
     assert!(
@@ -517,9 +566,11 @@ async fn mint_error_messages_distinguish_failure_modes() {
     let timed_out = AuthProviderRef::new(
         "test-classify-timeout".to_owned(),
         AuthProviderConfig {
+            command: "sleep 20".to_owned(),
+            args: None,
             token_ttl_secs: None,
             timeout_secs: Some(1),
-            ..fixture_config(&["sleep", "20000"])
+            cwd: None,
         },
     );
     let err = mint_provider_token(&timed_out, false, None)
@@ -547,9 +598,11 @@ async fn mint_error_messages_distinguish_failure_modes() {
     let empty_output = AuthProviderRef::new(
         "test-classify-permanent".to_owned(),
         AuthProviderConfig {
+            command: "printf ''".to_owned(),
+            args: None,
             token_ttl_secs: None,
             timeout_secs: Some(5),
-            ..fixture_config(&["print", ""])
+            cwd: None,
         },
     );
     let err = mint_provider_token(&empty_output, false, None)
@@ -560,21 +613,18 @@ async fn mint_error_messages_distinguish_failure_modes() {
 }
 
 /// On an in-session re-mint, the prior credential is handed back to the command
-/// via `CHUTES_BUILD_AUTH_PROVIDER_*`, so a refresh-grant command can refresh instead of
+/// via `GROK_AUTH_PROVIDER_*`, so a refresh-grant command can refresh instead of
 /// re-authenticating. Nothing is written to disk.
 #[tokio::test]
 async fn re_mint_hands_the_prior_token_back_to_the_command() {
     let provider = AuthProviderRef::new(
         "test-handback".to_owned(),
         AuthProviderConfig {
+            command: "printf 'seen-%s' \"${GROK_AUTH_PROVIDER_ACCESS_TOKEN:-none}\"".to_owned(),
+            args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
-            ..fixture_config(&[
-                "env",
-                "seen-",
-                "CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN",
-                "none",
-            ])
+            cwd: None,
         },
     );
 
@@ -602,7 +652,15 @@ async fn failed_401_remint_invalidates_the_cached_token() {
     let provider = AuthProviderRef::new(
         "test-401-invalidate".to_owned(),
         AuthProviderConfig {
-            ..fixture_config(&["count-fail-after-first", &counter.display().to_string()])
+            command: format!(
+                "echo run >> {c}; n=$(wc -l < {c} | tr -d ' '); \
+                 [ \"$n\" = 1 ] && printf 'tok-1' || exit 1",
+                c = counter.display()
+            ),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
         },
     );
 
@@ -633,7 +691,15 @@ async fn failed_pre_turn_mint_does_not_serve_the_stale_token() {
     let provider = AuthProviderRef::new(
         "test-pre-turn-stale".to_owned(),
         AuthProviderConfig {
-            ..fixture_config(&["count-fail-after-first", &counter.display().to_string()])
+            command: format!(
+                "echo run >> {c}; n=$(wc -l < {c} | tr -d ' '); \
+                 [ \"$n\" = 1 ] && printf 'tok-1' || exit 1",
+                c = counter.display()
+            ),
+            args: None,
+            token_ttl_secs: Some(3600),
+            timeout_secs: None,
+            cwd: None,
         },
     );
 
@@ -661,9 +727,11 @@ async fn provider_output_over_cap_fails_closed() {
     let provider = AuthProviderRef::new(
         "test-stdout-cap".to_owned(),
         AuthProviderConfig {
+            command: format!("head -c {over} /dev/zero"),
+            args: None,
             token_ttl_secs: None,
             timeout_secs: Some(5),
-            ..fixture_config(&["flood", &over.to_string()])
+            cwd: None,
         },
     );
     let err = mint_provider_token(&provider, false, None)
@@ -697,15 +765,15 @@ async fn provider_helper_env_scrubs_first_party_credentials() {
     // The credentials a BYOK helper must never inherit. Editing this list is the
     // audit checkpoint: it must equal the production scrub const.
     const EXPECTED: &[&str] = &[
-        "CHUTES_API_KEY",
-        "CHUTES_BUILD_API_KEY",
-        "CHUTES_BUILD_AUTH",
-        "CHUTES_BUILD_AUTH_PATH",
-        "CHUTES_BUILD_DEPLOYMENT_KEY",
-        "CHUTES_BUILD_EXTRA_AUTH_KEY",
-        "CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE",
+        "XAI_API_KEY",
+        "GROK_CODE_XAI_API_KEY",
+        "GROK_AUTH",
+        "GROK_AUTH_PATH",
+        "GROK_DEPLOYMENT_KEY",
+        "GROK_EXTRA_AUTH_KEY",
+        "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
         "OTEL_EXPORTER_OTLP_HEADERS",
-        "CHUTES_BUILD_INTERNAL_OTLP_HEADERS",
+        "GROK_INTERNAL_OTLP_HEADERS",
     ];
     assert_eq!(
         crate::agent::config::FIRST_PARTY_CREDENTIAL_ENV_VARS,

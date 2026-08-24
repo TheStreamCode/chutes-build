@@ -96,6 +96,14 @@ pub enum ToolInput {
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListInput),
     UpdateGoal(UpdateGoalInput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolInput),
+    Context7Search(crate::implementations::chutes::context7::Context7SearchInput),
+    Context7Docs(crate::implementations::chutes::context7::Context7DocsInput),
+    GetChutesUsage(crate::implementations::chutes::account::GetChutesUsageInput),
+    ListMediaModels(crate::implementations::chutes::media::ListMediaModelsInput),
+    DescribeMediaModel(crate::implementations::chutes::media::DescribeMediaModelInput),
+    GenerateMedia(crate::implementations::chutes::media::GenerateMediaInput),
+    Browser(crate::implementations::chutes::browser::BrowserInput),
+    OcrPage(crate::implementations::chutes::ocr::OcrPageInput),
     /// Dynamic input for runtime-registered tools (MCP, etc.)
     Dynamic(serde_json::Value),
 }

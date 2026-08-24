@@ -19,7 +19,7 @@ impl ManagedConfigSource {
     }
 
     /// The 401/403 error tailored to the credential (don't tell a team user to
-    /// check `CHUTES_BUILD_DEPLOYMENT_KEY`).
+    /// check `GROK_DEPLOYMENT_KEY`).
     pub(super) fn auth_rejected_error(self) -> ManagedConfigError {
         if self.is_team() {
             ManagedConfigError::TeamAuthRejected
@@ -34,15 +34,23 @@ pub enum ManagedConfigError {
     #[error("Can't reach the server. Check your network connection and try again.\n  ({0})")]
     Network(String),
     #[error(
+        "Can't verify the server's security certificate. This usually means your organization's root certificates aren't installed. Install them, then try again.\n  ({0})"
+    )]
+    CertificateUntrusted(String),
+    #[error(
+        "The server's security certificate is invalid (for example expired or issued for a different hostname), so it can't be trusted. Installing a root certificate won't fix this; contact the server administrator.\n  ({0})"
+    )]
+    CertificateInvalid(String),
+    #[error(
         "The connection to the server was interrupted or timed out before completing. This is usually temporary; please try again.\n  ({0})"
     )]
     ConnectionInterrupted(String),
     #[error(
-        "The deployment key was rejected. Confirm that CHUTES_BUILD_DEPLOYMENT_KEY is set correctly and hasn't expired."
+        "The deployment key was rejected. Confirm that GROK_DEPLOYMENT_KEY is set correctly and hasn't expired."
     )]
     DeploymentKeyRejected,
     #[error(
-        "Your team sign-in was rejected. It may have expired or lack access. Run `chutes-build login` to sign in again."
+        "Your team sign-in was rejected. It may have expired or lack access. Run `grok login` to sign in again."
     )]
     TeamAuthRejected,
     #[error("The server returned an unexpected error (HTTP {status}). Try again in a few minutes.")]
@@ -58,7 +66,7 @@ pub enum ManagedConfigError {
     )]
     SignatureRejected,
     #[error(
-        "Can't save the configuration to ~/.chutes-build. Make sure the directory exists and is writable.\n  ({0})"
+        "Can't save the configuration to ~/.grok. Make sure the directory exists and is writable.\n  ({0})"
     )]
     DiskWrite(#[from] std::io::Error),
 }

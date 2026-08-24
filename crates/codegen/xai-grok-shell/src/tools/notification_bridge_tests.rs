@@ -181,7 +181,7 @@ async fn bash_task_completed_injects_bash_task_completed_source() {
 /// must NOT fire the synthetic auto-wake prompt — an async "task completed"
 /// wake mid-goal derails a weak model. It must also NOT be marked
 /// reserved (so surface 2's `TaskCompletionReminder` is free to
-/// drain it). The pager's `chutes.build/task_completed` notification still fires.
+/// drain it). The pager's `x.ai/task_completed` notification still fires.
 #[tokio::test]
 async fn bash_task_completed_suppresses_auto_wake_during_goal_loop() {
     let (config, mut gateway_rx, _persistence_rx, mut cmd_rx) = make_test_config_full();
@@ -379,7 +379,7 @@ async fn task_completed_notification_stamps_will_wake() {
     }
     assert!(
         persisted,
-        "declined admission must still persist chutes.build/task_completed"
+        "declined admission must still persist x.ai/task_completed"
     );
 }
 
@@ -1032,10 +1032,7 @@ async fn acknowledged_scheduler_removal_appends_before_ack_and_broadcast() {
         else {
             panic!("expected durable scheduler tombstone");
         };
-        assert_eq!(
-            notification.meta.unwrap()["chutes.build/schedulerRevision"],
-            17
-        );
+        assert_eq!(notification.meta.unwrap()["chutes.build/schedulerRevision"], 17);
         assert!(gateway_rx.try_recv().is_err());
         assert!(matches!(
             receipt.try_recv(),
@@ -1199,10 +1196,7 @@ async fn scheduled_task_fired_is_not_persisted() {
         panic!("expected scheduler fire notification");
     };
     let value: serde_json::Value = serde_json::from_str(fired.request.params.get()).unwrap();
-    assert_eq!(
-        value["_meta"]["chutes.build/schedulerGeneration"],
-        "generation-a"
-    );
+    assert_eq!(value["_meta"]["chutes.build/schedulerGeneration"], "generation-a");
     assert_eq!(value["_meta"]["chutes.build/schedulerRevision"], 3);
 }
 
@@ -1316,7 +1310,7 @@ async fn block_waited_task_skips_auto_wake_prompt() {
         "block_waited completion should not send Prompt or InjectNotification"
     );
 
-    // The chutes.build/task_completed ExtNotification for UI updates must still be sent.
+    // The x.ai/task_completed ExtNotification for UI updates must still be sent.
     let mut found_ext = false;
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
@@ -1904,7 +1898,7 @@ async fn task_completed_notification_is_frame_bounded() {
             params = Some(args.request.params.get().to_string());
         }
     }
-    let params = params.expect("expected an chutes.build/task_completed notification");
+    let params = params.expect("expected an x.ai/task_completed notification");
     assert!(
         params.len() <= task_completed_frame::FRAME_MAX_BYTES,
         "params is {} bytes",

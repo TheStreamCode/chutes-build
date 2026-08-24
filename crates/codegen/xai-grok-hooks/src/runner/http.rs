@@ -118,14 +118,13 @@ async fn validate_hook_url(url: &str) -> Result<(), String> {
 }
 
 fn build_hook_client(timeout_ms: u64) -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        // `validate_hook_url` only vets the initial URL, not redirect targets.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        // A default fallback would follow redirects and drop the timeout,
-        // reopening the SSRF path; build only fails on a TLS init fault.
-        .expect("hook HTTP client config is valid")
+    xai_grok_extra_ca::build_reqwest_client(|builder| {
+        builder
+            .timeout(Duration::from_millis(timeout_ms))
+            // `validate_hook_url` only vets the initial URL, not redirect targets.
+            .redirect(reqwest::redirect::Policy::none())
+    })
+    .expect("hook HTTP client config is valid")
 }
 
 /// POST the serialized `HookEventEnvelope` to `spec.url` and parse the response
@@ -134,7 +133,7 @@ fn build_hook_client(timeout_ms: u64) -> reqwest::Client {
 pub async fn run_http_hook(
     spec: &HookSpec,
     envelope: &HookEventEnvelope,
-    _ctx: &RunContext<'_>,
+    ctx: &RunContext<'_>,
     mode: GateKind,
 ) -> HookRunOutput {
     let start = Instant::now();
@@ -151,10 +150,20 @@ pub async fn run_http_hook(
     // vars (e.g. `${CLAUDE_PLUGIN_ROOT}/check`) only land in `extra_env` after
     // the plugin adapter runs. Unset refs are preserved so `validate_hook_url`
     // rejects them rather than smuggling a literal `${VAR}` past validation.
-    let expanded_url = crate::env_expand::expand_env_vars_with_extra(raw_url, &spec.extra_env);
+    let mut url_env = spec.extra_env.clone();
+    for (k, v) in [
+        ("GROK_HOOK_EVENT", envelope.hook_event_name.to_string()),
+        ("GROK_HOOK_NAME", spec.name.clone()),
+        ("GROK_SESSION_ID", ctx.session_id.to_string()),
+        ("GROK_WORKSPACE_ROOT", ctx.workspace_root.to_string()),
+        ("CLAUDE_PROJECT_DIR", ctx.workspace_root.to_string()),
+    ] {
+        url_env.insert(k.to_string(), v);
+    }
+    let expanded_url = crate::env_expand::expand_env_vars_with_extra(raw_url, &url_env);
     let url: &str = &expanded_url;
     // Prefer the pre-expansion source for logs so resolved `env` secrets don't
-    // reach `~/.chutes-build/logs`; threaded into the reqwest error format below so
+    // reach `~/.grok/logs`; threaded into the reqwest error format below so
     // reqwest's default `Display` (which appends the URL) can't bypass it.
     let log_url: &str = spec.url_raw.as_deref().unwrap_or(url);
 
@@ -869,7 +878,7 @@ mod tests {
     /// rejects it rather than smuggling the literal placeholder past validation.
     #[tokio::test]
     async fn url_unresolved_var_fails_validation() {
-        let key = "CHUTES_BUILD_HOOKS_HTTP_TEST_UNRESOLVED";
+        let key = "GROK_HOOKS_HTTP_TEST_UNRESOLVED";
         // `with_env_var`'s closure is synchronous (it uses `catch_unwind`), so
         // run the async `validate_hook_url` outside it to avoid nesting runtimes.
         let expanded = with_env_var(key, None, || {

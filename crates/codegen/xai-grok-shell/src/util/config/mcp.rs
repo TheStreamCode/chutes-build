@@ -52,6 +52,28 @@ pub struct Config {
     /// `[privacy]` — local banner ack (not auth-metadata).
     pub privacy: PrivacyConfig,
     pub consent: super::consent::ConsentConfig,
+    /// `[telemetry]` — only the key the pager persists round-trips.
+    pub telemetry: TelemetryPersistConfig,
+    /// `[features]` — only the key the pager persists round-trips.
+    pub features: FeaturesPersistConfig,
+}
+
+/// The `[telemetry]` slice the pager is allowed to write back. Unmodeled
+/// keys under `[telemetry]` are preserved by the deep merge in
+/// `save_config_locked`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct TelemetryPersistConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_upload: Option<bool>,
+}
+
+/// The `[features]` slice the pager is allowed to write back. Unmodeled
+/// keys under `[features]` are preserved by the deep merge in
+/// `save_config_locked`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct FeaturesPersistConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback_trace_card: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -69,8 +91,8 @@ pub(crate) fn get_mcp_server_config(name: &str) -> Option<McpServerConfig> {
 }
 
 /// Get MCP server config by name, checking project-scoped configs first.
-/// Walks from cwd up to the git repo root checking `.chutes-build/config.toml` at each level.
-/// Project-scoped `.chutes-build/config.toml` entries override global `~/.chutes-build/config.toml`
+/// Walks from cwd up to the git repo root checking `.grok/config.toml` at each level.
+/// Project-scoped `.grok/config.toml` entries override global `~/.grok/config.toml`
 /// entries entirely (no deep merge of individual fields).
 /// Closer directories (cwd) take priority over further ones (repo root).
 pub(crate) fn get_mcp_server_config_with_project(
@@ -102,7 +124,7 @@ pub(crate) const MCP_SCOPE_PROJECT: &str = "project";
 const MCP_SCOPE_USER: &str = "user";
 
 /// Scope an MCP server resolves at: project when defined in any project-scoped
-/// `.chutes-build/config.toml`, otherwise user (global config, `~/.claude.json`,
+/// `.grok/config.toml`, otherwise user (global config, `~/.claude.json`,
 /// `~/.cursor/mcp.json`, etc.). See [`MCP_SCOPE_PROJECT`] / `MCP_SCOPE_USER`.
 pub(crate) fn mcp_server_scope(name: &str, cwd: &std::path::Path) -> &'static str {
     for config_path in crate::config::find_project_configs(cwd) {
@@ -202,11 +224,11 @@ pub fn worktree_pool_from_toml(root: &TomlValue) -> PoolConfig {
     }
 }
 
-/// Load MCP servers with project-scoped overrides from `.chutes-build/config.toml`.
+/// Load MCP servers with project-scoped overrides from `.grok/config.toml`.
 ///
 /// Merge strategy:
-/// 1. Load MCP servers from global `~/.chutes-build/config.toml`
-/// 2. Walk from git repo root down to `cwd`, loading `.chutes-build/config.toml` at each level
+/// 1. Load MCP servers from global `~/.grok/config.toml`
+/// 2. Walk from git repo root down to `cwd`, loading `.grok/config.toml` at each level
 ///    (matching the convention used by skills and AGENTS.md discovery)
 /// 3. Each level's entries replace entries with the same name entirely
 ///    (no deep merge — omitted fields fall back to defaults)
@@ -292,7 +314,7 @@ pub(crate) fn reload_mcp_servers_merged(
                 tracing::info!(
                     count = project_servers.len(),
                     path = %config_path.display(),
-                    "Loaded project-scoped MCP servers from .chutes-build/config.toml"
+                    "Loaded project-scoped MCP servers from .grok/config.toml"
                 );
                 for (name, config) in project_servers {
                     servers.insert(name, config);
@@ -507,7 +529,7 @@ pub struct McpSetupServerEntry {
 }
 
 /// Collect MCP configs that declare a `setup` schema from config and plugins.
-/// Used to surface setup-required rows and drive `chutes.ai/mcp/setup`.
+/// Used to surface setup-required rows and drive `x.ai/mcp/setup`.
 ///
 /// User/project **TOML** includes `enabled = false` so Space-disabled setup
 /// servers stay visible (`handle_list` derives `session.enabled` from
@@ -949,7 +971,7 @@ fn set_mcp_server_enabled_field(
     }
 }
 
-/// Upsert an MCP server entry in `~/.chutes-build/config.toml`.
+/// Upsert an MCP server entry in `~/.grok/config.toml`.
 ///
 /// Creates or replaces `[mcp_servers.<name>]` with the given config.
 /// Also removes the server from `disabled_mcp_servers` if present (a newly
@@ -964,7 +986,7 @@ pub(crate) async fn save_mcp_server_config(
 /// Upsert an MCP server entry in the config file at `path`.
 ///
 /// Same semantics as [`save_mcp_server_config`] but targets an explicit
-/// config file, e.g. a project-scoped `.chutes-build/config.toml`.
+/// config file, e.g. a project-scoped `.grok/config.toml`.
 pub async fn save_mcp_server_config_at(
     path: &std::path::Path,
     server_name: &str,
@@ -1009,7 +1031,7 @@ pub async fn save_mcp_server_config_at(
     Ok(())
 }
 
-/// Delete an MCP server entry from `~/.chutes-build/config.toml`.
+/// Delete an MCP server entry from `~/.grok/config.toml`.
 ///
 /// Removes `[mcp_servers.<name>]`, cleans up `disabled_mcp_servers` and
 /// `[disabled_mcp_tools.<name>]` entries. Returns `true` if the entry existed.
@@ -1020,7 +1042,7 @@ pub(crate) async fn delete_mcp_server_config(server_name: &str) -> Result<bool> 
 /// Delete an MCP server entry from the config file at `path`.
 ///
 /// Same semantics as [`delete_mcp_server_config`] but targets an explicit
-/// config file, e.g. a project-scoped `.chutes-build/config.toml`. OAuth credential
+/// config file, e.g. a project-scoped `.grok/config.toml`. OAuth credential
 /// cleanup is keyed by server name against the global credential store, so it
 /// also drops credentials a same-named server in another config file uses.
 pub async fn delete_mcp_server_config_at(
@@ -1140,7 +1162,7 @@ fn deserialize_mcp_server_config(
 }
 
 /// Turn a failed `[mcp_servers.<name>]` entry into an actionable problem. The
-/// transport-less case is steered to `disabled_mcp_servers`, Chutes Build's real
+/// transport-less case is steered to `disabled_mcp_servers`, Grok's real
 /// disable mechanism.
 fn diagnose_invalid_entry(name: &str, value: &TomlValue, error: &str) -> McpServerConfigProblem {
     let has_command = value.get("command").is_some();
@@ -1150,12 +1172,12 @@ fn diagnose_invalid_entry(name: &str, value: &TomlValue, error: &str) -> McpServ
             "`mcp_servers.{name}` has no transport. To run it, set `command = \"...\"` or \
              `url = \"...\"`. To turn it off, add \"{name}\" to `disabled_mcp_servers` instead of \
              leaving an entry with no transport. \
-             See ~/.chutes-build/docs/user-guide/07-mcp-servers.md"
+             See ~/.grok/docs/user-guide/07-mcp-servers.md"
         )
     } else {
         format!(
             "`mcp_servers.{name}` has an invalid transport: {error}. \
-             See ~/.chutes-build/docs/user-guide/07-mcp-servers.md"
+             See ~/.grok/docs/user-guide/07-mcp-servers.md"
         )
     };
     McpServerConfigProblem {
@@ -1195,7 +1217,7 @@ pub(crate) fn parse_mcp_servers_with_problems(root: &TomlValue) -> ParsedMcpServ
                         severity: McpServerProblemSeverity::Warning,
                         message: format!(
                             "`mcp_servers.{name}` has an unrecognized field `{field}`; it is \
-                             ignored. See ~/.chutes-build/docs/user-guide/07-mcp-servers.md"
+                             ignored. See ~/.grok/docs/user-guide/07-mcp-servers.md"
                         ),
                     });
                 }
@@ -1209,7 +1231,7 @@ pub(crate) fn parse_mcp_servers_with_problems(root: &TomlValue) -> ParsedMcpServ
                         message: format!(
                             "`mcp_servers.{name}` is enabled but its `{field}` is blank. \
                              Set a value, or add \"{name}\" to `disabled_mcp_servers` to turn it \
-                             off. See ~/.chutes-build/docs/user-guide/07-mcp-servers.md"
+                             off. See ~/.grok/docs/user-guide/07-mcp-servers.md"
                         ),
                     });
                     continue;
@@ -1667,7 +1689,7 @@ fn load_all_mcp_configs(cwd: &std::path::Path) -> IndexMap<String, McpServerConf
 /// Load all configured MCP servers with the scope each definition came from
 /// (`"user"` or `"project"`).
 ///
-/// Overlays project-scoped `.chutes-build/config.toml` files from `cwd` up to the
+/// Overlays project-scoped `.grok/config.toml` files from `cwd` up to the
 /// repo root onto the user-tier config, nearest definition winning — the same
 /// override semantics as [`get_mcp_server_config_with_project`].
 pub fn load_mcp_server_configs_with_project(
@@ -1695,7 +1717,7 @@ pub fn load_mcp_server_configs_with_project(
 }
 
 /// MCP config problems across the same layers as
-/// [`load_mcp_server_configs_with_project`], for `chutes-build inspect`.
+/// [`load_mcp_server_configs_with_project`], for `grok inspect`.
 pub(crate) fn load_mcp_server_problems_with_project(
     cwd: &std::path::Path,
 ) -> Vec<McpServerConfigProblem> {
@@ -1733,7 +1755,7 @@ pub fn disabled_mcp_server_names(cwd: &std::path::Path) -> std::collections::Has
     disabled
 }
 
-/// Names `chutes-build mcp enable`/`disable` may target: user/project TOML (including
+/// Names `grok mcp enable`/`disable` may target: user/project TOML (including
 /// setup-required/invalid entries that session merge drops), the user
 /// `disabled_mcp_servers` list, compat JSON (`.mcp.json`, Claude, Cursor), and
 /// **plugin** MCP servers (same discovery as doctor/`/mcps`).
@@ -1764,16 +1786,19 @@ pub fn cli_known_mcp_server_names(cwd: &std::path::Path) -> std::collections::Ha
 }
 
 /// Plugin registry for one-shot CLI discovery (matches mcp doctor gating).
-fn load_cli_plugin_registry(cwd: &std::path::Path) -> xai_grok_agent::plugins::PluginRegistry {
+///
+/// Resolves the same cwd-effective `[plugins]` table as session startup
+/// (`resolve_effective_plugins_config`), so trusted project `[plugins].paths`
+/// plugins are included, not just the global config. Also used by the pager's
+/// `/agents` modal to list plugin-provided agents without a live session
+/// registry snapshot.
+pub fn load_cli_plugin_registry(cwd: &std::path::Path) -> xai_grok_agent::plugins::PluginRegistry {
     let trust_store = xai_grok_agent::plugins::TrustStore::load();
-    let mut plugins_cfg: crate::agent::config::PluginsConfig =
-        crate::config::load_effective_config()
-            .ok()
-            .and_then(|t| t.get("plugins").and_then(|v| v.clone().try_into().ok()))
-            .unwrap_or_default();
-    plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
-    let mut plugin_config = plugins_cfg.to_discovery_config();
+    // Resolve/record the folder-trust verdict first: the effective-plugins
+    // resolve below gates project [plugins].paths on the cached verdict.
     let project_trusted = crate::agent::folder_trust::resolve_and_record(cwd, None, false);
+    let plugins_cfg = crate::config::resolve_effective_plugins_config(cwd);
+    let mut plugin_config = plugins_cfg.to_discovery_config();
     let discovered = xai_grok_agent::plugins::discover_plugins(
         Some(cwd),
         &plugin_config,
@@ -1792,14 +1817,14 @@ fn config_path() -> PathBuf {
     crate::util::grok_home::grok_home().join("config.toml")
 }
 
-/// Path to the user-level config file (`~/.chutes-build/config.toml`).
+/// Path to the user-level config file (`~/.grok/config.toml`).
 pub fn user_config_path() -> PathBuf {
     config_path()
 }
 
-/// Path to a project-level config file (`<dir>/.chutes-build/config.toml`).
+/// Path to a project-level config file (`<dir>/.grok/config.toml`).
 pub fn project_config_path(dir: &std::path::Path) -> PathBuf {
-    dir.join(".chutes-build").join("config.toml")
+    dir.join(".grok").join("config.toml")
 }
 
 /// True when the config file at `path` defines `[mcp_servers.<name>]`.
@@ -1879,8 +1904,8 @@ pub(crate) fn session_registry_from_toml_opt(root: &TomlValue) -> Option<bool> {
     }
 }
 
-/// Overrides `[cli] session_registry`; usable before `~/.chutes-build/config.toml` exists.
-pub const SESSION_REGISTRY_ENV_VAR: &str = "CHUTES_BUILD_SESSION_REGISTRY";
+/// Overrides `[cli] session_registry`; usable before `~/.grok/config.toml` exists.
+pub const SESSION_REGISTRY_ENV_VAR: &str = "GROK_SESSION_REGISTRY";
 
 pub(crate) fn session_registry_from_env_opt() -> Option<bool> {
     xai_grok_config::env_bool(SESSION_REGISTRY_ENV_VAR)
@@ -1950,6 +1975,56 @@ mod tests {
             let _g = xai_grok_test_support::EnvGuard::unset(SESSION_REGISTRY_ENV_VAR);
             assert_eq!(session_registry_local_override_sourced(None), None);
         }
+    }
+
+    /// A trusted project's `[plugins].paths` plugin (session-startup config
+    /// source) must be discovered by the one-shot CLI registry, including its
+    /// agents. Dev builds are folder-trust-inert, so the project path merges.
+    #[test]
+    #[serial_test::serial]
+    fn load_cli_plugin_registry_includes_project_config_path_plugins() {
+        let home = tempfile::tempdir().unwrap();
+        let _env = xai_grok_test_support::EnvGuard::set("CHUTES_BUILD_HOME", home.path());
+
+        let repo = tempfile::tempdir().unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+
+        // Project-declared [plugins].paths plugin providing one agent.
+        let plugin_dir = repo.path().join("proj-plugin");
+        let agents_dir = plugin_dir.join("agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"name": "proj-plugin", "agents": "./agents"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            agents_dir.join("reviewer.md"),
+            "---\nname: reviewer\ndescription: Project reviewer\n---\nBody.\n",
+        )
+        .unwrap();
+
+        let grok = repo.path().join(".grok");
+        std::fs::create_dir_all(&grok).unwrap();
+        std::fs::write(
+            grok.join("config.toml"),
+            format!("[plugins]\npaths = [\"{}\"]\n", plugin_dir.display()),
+        )
+        .unwrap();
+
+        let registry = load_cli_plugin_registry(repo.path());
+        assert!(
+            registry.get("proj-plugin").is_some(),
+            "project [plugins].paths plugin must be discovered"
+        );
+        let agents = xai_grok_agent::discovery::plugin_agents(&registry);
+        assert!(
+            agents
+                .iter()
+                .any(|a| a.qualified_name == "proj-plugin:reviewer"),
+            "project config-path plugin agent must be enumerable, got: {:?}",
+            agents.iter().map(|a| &a.qualified_name).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -2348,8 +2423,8 @@ enabled = false
         let root = toml::from_str::<TomlValue>(
             r#"
 [skills]
-paths = ["~/.chutes-build/skills", "~/.chutes-build/skills/special/SKILL.md"]
-ignore = ["~/.chutes-build/skills/noisy/SKILL.md"]
+paths = ["~/.grok/skills", "~/.grok/skills/special/SKILL.md"]
+ignore = ["~/.grok/skills/noisy/SKILL.md"]
 "#,
         )
         .unwrap();
@@ -2362,12 +2437,9 @@ ignore = ["~/.chutes-build/skills/noisy/SKILL.md"]
             .unwrap_or_default();
         assert_eq!(
             cfg.paths,
-            vec![
-                "~/.chutes-build/skills",
-                "~/.chutes-build/skills/special/SKILL.md"
-            ]
+            vec!["~/.grok/skills", "~/.grok/skills/special/SKILL.md"]
         );
-        assert_eq!(cfg.ignore, vec!["~/.chutes-build/skills/noisy/SKILL.md"]);
+        assert_eq!(cfg.ignore, vec!["~/.grok/skills/noisy/SKILL.md"]);
     }
 
     #[test]
@@ -2571,7 +2643,7 @@ expose_image_base64 = true
             r#"{
                 "mcpServers": {
                     "api": {
-                        "url": "${CHUTES_BUILD_TEST_MCP_UNSET_VAR_12345:-https://fallback.example.com}/mcp"
+                        "url": "${GROK_TEST_MCP_UNSET_VAR_12345:-https://fallback.example.com}/mcp"
                     }
                 }
             }"#,
@@ -2584,14 +2656,14 @@ expose_image_base64 = true
             acp::McpServer::Http(acp::McpServerHttp { url, .. }) => {
                 assert_eq!(url, "https://fallback.example.com/mcp");
             }
-            other => panic!("expected Http, got {:?}", other),
+            _other => panic!("expected Http"),
         }
     }
 
     #[test]
     fn mcp_json_all_toml_names_includes_disabled() {
         let tmp = tempfile::tempdir().unwrap();
-        let grok_dir = tmp.path().join(".chutes-build");
+        let grok_dir = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok_dir).unwrap();
         std::fs::write(
             grok_dir.join("config.toml"),
@@ -2775,8 +2847,8 @@ enabled = false
         let tmp = tempfile::tempdir().unwrap();
         git2::Repository::init(tmp.path()).unwrap();
         let nested = tmp.path().join("pkg");
-        std::fs::create_dir_all(nested.join(".chutes-build")).unwrap();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(nested.join(".grok")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
 
         let sticky = r#"
 # keep me
@@ -2784,8 +2856,8 @@ enabled = false
 command = "npx"
 enabled = false
 "#;
-        let ancestor = tmp.path().join(".chutes-build").join("config.toml");
-        let nearer = nested.join(".chutes-build").join("config.toml");
+        let ancestor = tmp.path().join(".grok").join("config.toml");
+        let nearer = nested.join(".grok").join("config.toml");
         std::fs::write(&ancestor, sticky).unwrap();
         std::fs::write(&nearer, sticky).unwrap();
 

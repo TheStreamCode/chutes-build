@@ -301,7 +301,7 @@ impl SessionActor {
 
         let payload = self.build_stop_payload(continuations_this_turn > 0).await;
         // Gate envelope via `make_hook_envelope`, not the observe-notify
-        // `fire_hook`: client hooks get the awaited `chutes.build/hooks/run` request
+        // `fire_hook`: client hooks get the awaited `x.ai/hooks/run` request
         // below, not a fire-and-forget event.
         let envelope = self.make_hook_envelope(event, Some(prompt_id.to_string()), payload);
 

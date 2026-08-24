@@ -1,4 +1,4 @@
-//! Keeps `chutes.build/task_completed` lines short enough for a client to read, both
+//! Keeps `x.ai/task_completed` lines short enough for a client to read, both
 //! when this build sends one and when replay reaches one an earlier build
 //! wrote. Bounding the output field alone does not bound the line: the
 //! wrapper and the JSON encoding go on top of it.

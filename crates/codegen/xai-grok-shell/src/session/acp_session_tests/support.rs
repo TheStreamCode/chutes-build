@@ -48,7 +48,7 @@ pub(crate) async fn test_agent_with_goal_tool() -> xai_grok_agent::Agent {
     use xai_grok_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<UpdateGoalTool>()]).await
 }
-/// Chutes Build-build agent with the real `TodoWriteTool` (id `todo_write`, kind
+/// Grok-build agent with the real `TodoWriteTool` (id `todo_write`, kind
 /// `Plan`) registered, so `tool_for_kind(ToolKind::Plan)` resolves through the
 /// live toolset instead of the literal fallback.
 #[cfg(test)]
@@ -255,6 +255,7 @@ pub(crate) async fn create_test_actor_with_terminal(
     );
     chat_state_handle.record_token_usage(total_tokens);
     let actor = SessionActor {
+        status_wake: Default::default(),
         session_info: SessionInfo {
             id: acp::SessionId::new("test-actor"),
             cwd: cwd.as_str().to_string(),
@@ -277,7 +278,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         mcp_state: Arc::new(TokioMutex::new(McpState::new(vec![]))),
         mcp_strategy: std::cell::Cell::new(McpInitStrategy::Blocking),
         delivery_tools: std::cell::RefCell::new(Vec::new()),
-        attach_non_interactive: std::cell::Cell::new(false),
+        attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -335,6 +336,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         session_start: std::time::Instant::now(),
         inference_idle_timeout: Duration::from_secs(300),
         max_retries: 3,
+        rate_limit_waits: crate::session::acp_session::RateLimitWaitConfig::default(),
         max_turns: None,
         pending_interjections: InterjectionBuffer::new(),
         pending_skill_reminders: Mutex::new(Vec::new()),
@@ -351,6 +353,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         agent: std::cell::RefCell::new(test_agent_default().await),
         last_reported_branch: std::sync::Arc::new(parking_lot::Mutex::new(None)),
         git_head_enabled: false,
+        status_line_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         models_manager: Default::default(),
         display_cwd: std::sync::OnceLock::new(),
         active_agent_type: parking_lot::Mutex::new(None),

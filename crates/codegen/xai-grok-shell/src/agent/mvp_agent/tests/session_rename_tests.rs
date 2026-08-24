@@ -1,4 +1,4 @@
-//! `chutes.build/session/rename` ext-handler coverage: resident `ManualTitleRenamed`
+//! `x.ai/session/rename` ext-handler coverage: resident `ManualTitleRenamed`
 //! enqueue, non-resident skip, and control-char stripping at the boundary.
 
 use agent_client_protocol as acp;

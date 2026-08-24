@@ -6,7 +6,7 @@ use super::{Empty, ExtResult, to_ext_response, to_ext_response_partial};
 use xai_grok_workspace::session::git::{CommitData, StageData};
 use xai_grok_workspace::session::jj;
 
-/// Handle a `chutes.ai/git/*` method for a jj-colocated repo.
+/// Handle a `x.ai/git/*` method for a jj-colocated repo.
 ///
 /// Returns `Some(result)` if handled, `None` to fall through to git.
 pub(crate) async fn try_handle(
@@ -19,16 +19,12 @@ pub(crate) async fn try_handle(
         "chutes.build/git/info" => Some(to_ext_response(jj::info(git_root).await)),
         // git HEAD points at `@-` in a colocated repo; route to jj so we report
         // the working-copy commit (`@`), consistent with `status`/`info`.
-        "chutes.build/git/current_commit" => {
-            Some(to_ext_response(jj::current_commit(git_root).await))
-        }
+        "chutes.build/git/current_commit" => Some(to_ext_response(jj::current_commit(git_root).await)),
         "chutes.build/git/branches" => Some(to_ext_response(jj::list_bookmarks(git_root).await)),
 
         // jj has no staging area — stage/unstage are no-ops
         "chutes.build/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
-        "chutes.build/git/stage/content" | "chutes.build/git/unstage" => {
-            Some(to_ext_response(Ok(Empty {})))
-        }
+        "chutes.build/git/stage/content" | "chutes.build/git/unstage" => Some(to_ext_response(Ok(Empty {}))),
 
         "chutes.build/git/discard" => {
             #[derive(serde::Deserialize)]

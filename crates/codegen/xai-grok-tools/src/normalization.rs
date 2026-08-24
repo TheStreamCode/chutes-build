@@ -129,6 +129,14 @@ pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
         | ToolInput::SchedulerList(_)
         | ToolInput::UpdateGoal(_)
         | ToolInput::Workflow(_)
+        | ToolInput::Context7Search(_)
+        | ToolInput::Context7Docs(_)
+        | ToolInput::GetChutesUsage(_)
+        | ToolInput::ListMediaModels(_)
+        | ToolInput::DescribeMediaModel(_)
+        | ToolInput::GenerateMedia(_)
+        | ToolInput::Browser(_)
+        | ToolInput::OcrPage(_)
         | ToolInput::Dynamic(_) => return None,
     })
 }

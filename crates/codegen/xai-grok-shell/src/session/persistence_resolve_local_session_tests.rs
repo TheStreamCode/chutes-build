@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 // resolve_local_session delegates to the same _in_root helpers tested above,
 // so we test the composition logic via the public function indirectly by
-// setting up the on-disk structures under a fake Chutes Build home.
+// setting up the on-disk structures under a fake grok home.
 // For unit isolation, we test the equivalent logic via the inner helpers.
 
 fn setup_session(root: &std::path::Path, cwd: &str, session_id: &str) {

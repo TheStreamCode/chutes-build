@@ -140,12 +140,12 @@ impl SessionActor {
             BuiltinAction::HooksAdd { path } => {
                 if path.is_empty() {
                     self.send_host_turn_slash_command_output(
-                        "Usage: /hooks add <path>\nProvide a path to a hook JSON file or directory under ~/.chutes-build/.",
+                        "Usage: /hooks add <path>\nProvide a path to a hook JSON file or directory under ~/.grok/.",
                     )
                     .await;
                 } else {
                     // CWE-427: Use shared add_hooks_path() which validates
-                    // paths are under ~/.chutes-build/ to prevent hook path injection.
+                    // paths are under ~/.grok/ to prevent hook path injection.
                     match crate::config::add_hooks_path(&path) {
                         Ok(()) => {
                             xai_grok_telemetry::session_ctx::log_event(
@@ -849,7 +849,7 @@ impl SessionActor {
                         self.send_host_turn_slash_command_output(&format!(
                             "Deep research '{display}' started in the background. It will \
                              cross-check candidate claims and return a concise cited report here. \
-                             Use /workflows to follow progress."
+                             Use /workflow runs to follow progress."
                         ))
                         .await;
                         tokio::spawn(async move {

@@ -13,7 +13,7 @@
 //! parsed again. Non-table values are dropped with a warning.
 //!
 //! Warnings are retained on `Config::config_warnings` and surfaced by
-//! `chutes-build inspect`.
+//! `grok inspect`.
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -40,7 +40,7 @@ pub enum ConfigWarningKind {
     UnparseableEntry,
 }
 
-/// What a [`ConfigWarning`] is about. Serialize-only: `chutes-build inspect --json`
+/// What a [`ConfigWarning`] is about. Serialize-only: `grok inspect --json`
 /// emits it, nothing deserializes it back.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "target", rename_all = "camelCase")]
@@ -273,7 +273,7 @@ pub(crate) fn log_config_warnings(warnings: &[ConfigWarning]) {
     if !warnings.is_empty() {
         tracing::warn!(
             warnings = warnings.len(),
-            "config: parsed with warnings; run `chutes-build inspect` for details"
+            "config: parsed with warnings; run `grok inspect` for details"
         );
     }
 }
@@ -711,6 +711,7 @@ mod tests {
             agent_type: Some("agent".into()),
             inference_idle_timeout_secs: Some(60),
             max_retries: Some(3),
+            subagent_rate_limit_max_attempts: Some(8),
             hidden: Some(false),
             supported_in_api: Some(true),
             reasoning_effort: Some(ReasoningEffort::High),

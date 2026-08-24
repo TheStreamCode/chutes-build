@@ -90,7 +90,7 @@ async fn make_actor_with_auth_and_credentials(
 ) -> (Arc<SessionActor>, mpsc::UnboundedReceiver<PersistenceMsg>) {
     let method_id = match auth_type {
         xai_chat_state::AuthType::SessionToken => "cached_token",
-        xai_chat_state::AuthType::ApiKey => "chutes.api_key",
+        xai_chat_state::AuthType::ApiKey => "xai.api_key",
     };
     make_actor_with_method_and_credentials(auth_manager, method_id, auth_type, api_key).await
 }
@@ -98,7 +98,7 @@ async fn make_actor_with_auth_and_credentials(
 /// Pin the ACP `auth_method_id` and credential `auth_type` independently. The
 /// gate keys off the stable `auth_method_id`, so this reproduces the regression:
 /// a session method whose `creds.auth_type` has transiently collapsed to
-/// `ApiKey` (session-token cache miss + `CHUTES_API_KEY`).
+/// `ApiKey` (session-token cache miss + `XAI_API_KEY`).
 async fn make_actor_with_method_and_credentials(
     auth_manager: Option<Arc<AuthManager>>,
     auth_method_id: &str,
@@ -144,7 +144,7 @@ async fn no_emit_when_auth_manager_is_none() {
         .run_until(async {
             let (actor, _rx) = make_actor_with_auth_manager(None).await;
             crate::auth::attribution::reset_test_emit_count();
-            let _ = actor.handle_sampling_failure(auth_error()).await;
+            let _ = actor.handle_sampling_failure(auth_error(), 0).await;
             assert_eq!(
                 crate::auth::attribution::test_emit_count(),
                 0,
@@ -170,7 +170,7 @@ async fn no_recovery_without_auth_manager() {
             )
             .await;
             crate::auth::attribution::reset_test_emit_count();
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 result.is_err(),
                 "no auth manager must fall through to terminal error"
@@ -197,7 +197,7 @@ async fn sampler_401_recovery_returns_refresh_and_retry() {
                 });
             let (_dir, am) = auth_manager_with_refresher(refresher);
             let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 matches!(
                     result,
@@ -214,7 +214,7 @@ async fn sampler_401_recovery_returns_refresh_and_retry() {
 }
 
 /// Regression: sampler 401 with API-key auth (BYOK `env_key` /
-/// `CHUTES_API_KEY`) must NOT attempt an OIDC session-token refresh. The
+/// `XAI_API_KEY`) must NOT attempt an OIDC session-token refresh. The
 /// bearer on the wire is the static API key, so refreshing the session
 /// token reports success but the retry re-sends the same rejected key —
 /// an invisible 401 loop that hangs the turn. Recovery is skipped and
@@ -238,7 +238,7 @@ async fn sampler_401_with_api_key_auth_skips_refresh_and_surfaces_error() {
             )
             .await;
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
 
             assert!(
                 result.is_err(),
@@ -560,7 +560,9 @@ async fn legacy_auth_hint_on_404_model_not_found() {
             });
 
             let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
-            let result = actor.handle_sampling_failure(model_not_found_error()).await;
+            let result = actor
+                .handle_sampling_failure(model_not_found_error(), 0)
+                .await;
             let err = match result {
                 Err(e) => e,
                 Ok(_) => panic!("expected Err from handle_sampling_failure"),
@@ -572,23 +574,19 @@ async fn legacy_auth_hint_on_404_model_not_found() {
                 "404 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build update"),
-                "hint must mention `chutes-build update` before re-login, got: {msg}"
+                msg.contains("grok update"),
+                "hint must mention `grok update` before re-login, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build logout"),
-                "hint must mention `chutes-build logout`, got: {msg}"
+                msg.contains("grok logout"),
+                "hint must mention `grok logout`, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build login"),
-                "hint must mention `chutes-build login`, got: {msg}"
+                msg.contains("grok login"),
+                "hint must mention `grok login`, got: {msg}"
             );
-            let update_at = msg
-                .find("chutes-build update")
-                .expect("chutes-build update");
-            let logout_at = msg
-                .find("chutes-build logout")
-                .expect("chutes-build logout");
+            let update_at = msg.find("grok update").expect("grok update");
+            let logout_at = msg.find("grok logout").expect("grok logout");
             assert!(
                 update_at < logout_at,
                 "update must come before logout, got: {msg}"
@@ -614,7 +612,7 @@ async fn legacy_auth_hint_on_404_model_not_found() {
 fn unauthorized_401_error() -> xai_grok_sampler::SamplingErrorInfo {
     xai_grok_sampler::SamplingErrorInfo {
             kind: xai_grok_sampler::SamplingErrorKind::Api,
-            message: "Unauthorized (401) from https://cli-chat-proxy.chutes.ai/v1/responses: {\"error\":\"Invalid or expired credentials (auth_kind=bearer, x_xai_token_auth=xai-grok-cli, upstream=Unauthenticated, reason=no auth context)\"}".into(),
+            message: "Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/responses: {\"error\":\"Invalid or expired credentials (auth_kind=bearer, x_xai_token_auth=xai-grok-cli, upstream=Unauthenticated, reason=no auth context)\"}".into(),
             status_code: Some(401),
             is_retryable: false,
             retry_after_secs: None,
@@ -645,7 +643,7 @@ async fn legacy_auth_hint_on_401_unauthorized() {
 
             let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
             let result = actor
-                .handle_sampling_failure(unauthorized_401_error())
+                .handle_sampling_failure(unauthorized_401_error(), 0)
                 .await;
             let err = match result {
                 Err(e) => e,
@@ -658,23 +656,19 @@ async fn legacy_auth_hint_on_401_unauthorized() {
                 "401 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build update"),
-                "hint must mention `chutes-build update` before re-login, got: {msg}"
+                msg.contains("grok update"),
+                "hint must mention `grok update` before re-login, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build logout"),
-                "hint must mention `chutes-build logout`, got: {msg}"
+                msg.contains("grok logout"),
+                "hint must mention `grok logout`, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build login"),
-                "hint must mention `chutes-build login`, got: {msg}"
+                msg.contains("grok login"),
+                "hint must mention `grok login`, got: {msg}"
             );
-            let update_at = msg
-                .find("chutes-build update")
-                .expect("chutes-build update");
-            let logout_at = msg
-                .find("chutes-build logout")
-                .expect("chutes-build logout");
+            let update_at = msg.find("grok update").expect("grok update");
+            let logout_at = msg.find("grok logout").expect("grok logout");
             assert!(
                 update_at < logout_at,
                 "update must come before logout, got: {msg}"
@@ -701,7 +695,7 @@ async fn no_legacy_hint_on_401_for_oidc_auth() {
 
             let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
             let result = actor
-                .handle_sampling_failure(unauthorized_401_error())
+                .handle_sampling_failure(unauthorized_401_error(), 0)
                 .await;
             let err = match result {
                 Err(e) => e,
@@ -742,7 +736,9 @@ async fn no_legacy_hint_for_oidc_auth() {
             });
 
             let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
-            let result = actor.handle_sampling_failure(model_not_found_error()).await;
+            let result = actor
+                .handle_sampling_failure(model_not_found_error(), 0)
+                .await;
             let err = match result {
                 Err(e) => e,
                 Ok(_) => panic!("expected Err from handle_sampling_failure"),
@@ -814,7 +810,7 @@ async fn sampler_401_session_method_with_stale_api_key_auth_type_still_recovers(
             )
             .await;
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
 
             assert!(
                 matches!(
@@ -851,7 +847,7 @@ async fn sampler_401_oidc_method_with_stale_api_key_auth_type_still_recovers() {
             )
             .await;
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
 
             assert!(
                 matches!(
@@ -895,7 +891,7 @@ async fn reconstruct_full_config_wires_bearer_resolver_for_session_method_despit
         .await;
 }
 
-/// Negative: a genuine `chutes.api_key` method keeps its configured key on the
+/// Negative: a genuine `xai.api_key` method keeps its configured key on the
 /// wire (no live resolver).
 #[tokio::test(flavor = "current_thread")]
 async fn reconstruct_full_config_no_bearer_resolver_for_api_key_method() {
@@ -905,7 +901,7 @@ async fn reconstruct_full_config_no_bearer_resolver_for_api_key_method() {
             let (_dir, am) = auth_manager_with_valid_token("session-token");
             let (actor, _rx) = make_actor_with_method_and_credentials(
                 Some(am),
-                "chutes.api_key",
+                "xai.api_key",
                 xai_chat_state::AuthType::ApiKey,
                 "xai-static-key".to_string(),
             )
@@ -954,7 +950,7 @@ async fn pre_flight_refresh_heals_session_method_with_stale_api_key_auth_type() 
         .await;
 }
 
-/// End-to-end for the frozen-gate bug: a session born on `chutes.api_key` (gate
+/// End-to-end for the frozen-gate bug: a session born on `xai.api_key` (gate
 /// inactive) must adopt a later OIDC `/login` on the SAME actor -- the shared
 /// `auth_method_id` handle is flipped in place (no re-spawn), so the next turn
 /// wires the live bearer resolver and heals the stale key.
@@ -966,7 +962,7 @@ async fn session_born_on_api_key_recovers_after_oidc_login_without_restart() {
             let (_dir, am) = auth_manager_with_valid_token("fresh-oidc-token");
             let (actor, _rx) = make_actor_with_method_and_credentials(
                 Some(am),
-                "chutes.api_key",
+                "xai.api_key",
                 xai_chat_state::AuthType::ApiKey,
                 "stale-session-jwt".to_string(),
             )
@@ -1174,7 +1170,7 @@ async fn set_session_model_invalidates_byok_memo_for_same_model_id() {
                 header_injector: None,
             };
             let _ = actor
-                .handle_set_session_model(cfg, false, false, true, 85)
+                .handle_set_session_model(cfg, false, false, false, true, 85)
                 .await;
 
             assert!(
@@ -1211,7 +1207,7 @@ async fn seed_provider_memo(actor: &Arc<SessionActor>, provider: crate::auth::Au
 
 /// Regression: switching from a provider-backed model to a first-party model
 /// must drop the minted provider token from the chat credentials, so it can
-/// never ride a later request to `api.chutes.ai`. Mirrors the forward direction in
+/// never ride a later request to `api.x.ai`. Mirrors the forward direction in
 /// `set_session_model_invalidates_byok_memo_for_same_model_id`.
 #[tokio::test(flavor = "current_thread")]
 async fn switch_to_first_party_model_drops_minted_provider_token() {
@@ -1237,7 +1233,7 @@ async fn switch_to_first_party_model_drops_minted_provider_token() {
 
             let cfg = xai_grok_sampler::SamplerConfig {
                 api_key: Some("session-jwt".to_string()),
-                base_url: "https://api.chutes.ai/v1".to_string(),
+                base_url: "https://api.x.ai/v1".to_string(),
                 model,
                 max_completion_tokens: None,
                 temperature: None,
@@ -1268,7 +1264,7 @@ async fn switch_to_first_party_model_drops_minted_provider_token() {
                 header_injector: None,
             };
             let _ = actor
-                .handle_set_session_model(cfg, false, false, true, 85)
+                .handle_set_session_model(cfg, false, false, false, true, 85)
                 .await;
 
             let creds = actor.chat_state_handle.get_credentials().await;
@@ -1302,7 +1298,7 @@ async fn sampler_401_on_provider_model_remints_and_resubmits() {
                 std::time::Duration::from_secs(60),
             );
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 matches!(
                     result,
@@ -1344,7 +1340,7 @@ async fn sampler_non_auth_kind_401_on_provider_model_still_recovers() {
 
             let mut error = auth_error();
             error.kind = xai_grok_sampler::SamplingErrorKind::Api;
-            let result = actor.handle_sampling_failure(error).await;
+            let result = actor.handle_sampling_failure(error, 0).await;
             assert!(
                 matches!(
                     result,
@@ -1379,7 +1375,7 @@ async fn sampler_401_with_no_key_on_provider_model_mints_and_resubmits() {
             actor.chat_state_handle.update_credentials(creds);
             seed_provider_memo(&actor, provider).await;
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 matches!(
                     result,
@@ -1425,7 +1421,7 @@ async fn sampler_401_on_provider_model_never_refreshes_session() {
                 std::time::Duration::from_secs(60),
             );
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 matches!(
                     result,
@@ -1509,7 +1505,7 @@ async fn sampler_401_on_fresh_provider_token_surfaces_error() {
             .await;
             seed_provider_memo(&actor, provider).await;
 
-            let result = actor.handle_sampling_failure(auth_error()).await;
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
             assert!(
                 result.is_err(),
                 "a fresh-minted rejected token must surface the 401, not loop"

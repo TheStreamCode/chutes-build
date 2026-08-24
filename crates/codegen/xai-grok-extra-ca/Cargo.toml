@@ -10,7 +10,7 @@ reqwest = { workspace = true }
 # Explicit pin (not `workspace = true`): the workspace rustls pin enables
 # aws-lc-rs. This crate only needs RootCertStore + PEM parse, so stay
 # default-features = false with `std` (enables pki-types/std for PEM).
-rustls = { version = "0.23", default-features = false, features = ["std"] }
+rustls = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

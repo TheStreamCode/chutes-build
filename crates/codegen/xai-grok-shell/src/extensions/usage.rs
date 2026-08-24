@@ -1,4 +1,4 @@
-//! `chutes.build/session/usage` — cumulative session token/cost as [`PromptUsage`].
+//! `x.ai/session/usage` — cumulative session token/cost as [`PromptUsage`].
 //!
 //! Projects the in-memory [`xai_chat_state::UsageLedger`] (main-loop + folded
 //! subagent spend). Partial costs are scrubbed (absence ≠ free). Totals reset
@@ -17,7 +17,7 @@ struct SessionUsageRequest {
     session_id: String,
 }
 
-/// Wire response for `chutes.build/session/usage`.
+/// Wire response for `x.ai/session/usage`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUsageResponse {

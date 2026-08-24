@@ -1,4 +1,4 @@
-//! `chutes.build/auth/*` and legacy `chutes.build/{get,set}ApiKey` extension handlers.
+//! `x.ai/auth/*` and legacy `x.ai/{get,set}ApiKey` extension handlers.
 //!
 //! These methods let the client read/write the API key via the agent and
 //! drive the OAuth login flow. The agent is the single source of truth for
@@ -81,18 +81,18 @@ fn handle_set_api_key(args: &acp::ExtRequest) -> ExtResult {
             crate::auth::clear_api_key(&grok_home)
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // SAFETY: ext_method is single-threaded per agent
-            unsafe { std::env::remove_var("CHUTES_API_KEY") };
+            unsafe { std::env::remove_var("XAI_API_KEY") };
         } else {
             crate::auth::store_api_key(&grok_home, k)
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // SAFETY: ext_method is single-threaded per agent
-            unsafe { std::env::set_var("CHUTES_API_KEY", k) };
+            unsafe { std::env::set_var("XAI_API_KEY", k) };
         }
     } else {
         crate::auth::clear_api_key(&grok_home)
             .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
         // SAFETY: ext_method is single-threaded per agent
-        unsafe { std::env::remove_var("CHUTES_API_KEY") };
+        unsafe { std::env::remove_var("XAI_API_KEY") };
     }
     ExtMethodResult::success(serde_json::json!({ "ok": true }))
         .to_ext_response()

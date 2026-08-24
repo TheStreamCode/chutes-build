@@ -1,6 +1,6 @@
 //! Merged session listing — combines local and remote session data.
 //!
-//! Used by both the ACP `chutes.ai/session/list` handler and the `chutes-build sessions`
+//! Used by both the ACP `x.ai/session/list` handler and the `grok sessions`
 //! CLI command. Deduplicates by session ID (remote wins), filters local
 //! results by query, and sorts by the same key the picker UI displays
 //! (`last_active_at` falling back to `updated_at`) descending.
@@ -229,7 +229,7 @@ pub(crate) async fn fetch_lanes(
         }
         local.retain(|s| Path::new(&s.info.cwd).is_absolute());
     }
-    // `chutes-build --resume <uuid>` resolves across every cwd. `/resume` search was
+    // `grok --resume <uuid>` resolves across every cwd. `/resume` search was
     // cwd-scoped, so pasting that same id showed nothing. Promote an exact
     // UUID hit from any local directory into the lane before merge filters.
     if let Some(id) = query

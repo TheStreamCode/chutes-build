@@ -36,7 +36,7 @@ pub(crate) struct NotificationBridgeConfig {
     pub persistence: PersistenceHandle,
     /// When true, send incremental `output_delta` instead of full `output`
     /// in bash streaming updates. The client must opt in via the
-    /// `chutes.ai/incrementalBashOutput` capability.
+    /// `x.ai/incrementalBashOutput` capability.
     pub incremental_bash_output: bool,
     /// Plan mode tracker shared with the session actor.
     /// Used to transition state on `PlanModeEntered` / `PlanModeExited`
@@ -81,7 +81,7 @@ pub(crate) struct NotificationBridgeConfig {
     /// `InjectNotification` path instead of immediate synthetic prompts.
     pub auto_wake_enabled: bool,
     /// When `true`, an approved `PlanModeExited` also arms the tracker's
-    /// next-turn exit reminder. Chutes Build-build leaves this `false` — its
+    /// next-turn exit reminder. Grok-build leaves this `false` — its
     /// exit-plan tool result already informs the model, and a deferred
     /// reminder would arrive stale. Shared with the session actor (the
     /// `gateway_enabled` pattern) and refreshed on zero-turn rebuilds so the
@@ -112,10 +112,7 @@ fn stamp_scheduler_meta(
 ) {
     stamp_event_id(config, meta);
     let meta = meta.get_or_insert_with(acp::Meta::new);
-    meta.insert(
-        "chutes.build/schedulerGeneration".to_owned(),
-        generation.into(),
-    );
+    meta.insert("chutes.build/schedulerGeneration".to_owned(), generation.into());
     meta.insert("chutes.build/schedulerRevision".to_owned(), revision.into());
 }
 fn durable_append_landed(result: Result<(), DurableAppendError>) -> Result<(), String> {

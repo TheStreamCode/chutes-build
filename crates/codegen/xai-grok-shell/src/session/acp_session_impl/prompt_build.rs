@@ -117,7 +117,7 @@ mod partition_rules_by_scope_tests {
         let files = vec![
             file("/repo/config/AGENTS.md"),
             file("/repo/config/rules/global.md"),
-            file("/repo/config/.chutes-build/rules/project.md"),
+            file("/repo/config/.grok/rules/project.md"),
             file("/repo/config/src/AGENTS.md"),
         ];
         let (workspace, user) =
@@ -129,7 +129,7 @@ mod partition_rules_by_scope_tests {
         assert_eq!(
             paths(&workspace),
             vec![
-                "/repo/config/.chutes-build/rules/project.md",
+                "/repo/config/.grok/rules/project.md",
                 "/repo/config/src/AGENTS.md",
             ]
         );
@@ -198,7 +198,7 @@ mod partition_rules_by_scope_tests {
             },
             AgentConfigFile {
                 file_name: "AGENTS.md".into(),
-                file_path: "/home/user/.chutes-build/AGENTS.md".into(),
+                file_path: "/home/user/.grok/AGENTS.md".into(),
                 content: "home-grok-body".into(),
             },
             AgentConfigFile {
@@ -208,14 +208,14 @@ mod partition_rules_by_scope_tests {
             },
             AgentConfigFile {
                 file_name: "x.md".into(),
-                file_path: "/repo/.chutes-build/rules/x.md".into(),
+                file_path: "/repo/.grok/rules/x.md".into(),
                 content: "repo-grok-rules-x".into(),
             },
         ];
         let vendor_homes = vec![(Path::new("/home/user/.claude").to_path_buf(), true)];
         let (workspace, user) = partition_rules_by_scope(
             files.clone(),
-            Path::new("/home/user/.chutes-build"),
+            Path::new("/home/user/.grok"),
             &vendor_homes,
             &[Path::new("/repo")],
         );
@@ -234,36 +234,36 @@ mod partition_rules_by_scope_tests {
         }
         assert!(rules.contains("name=\"/repo/AGENTS.md\""));
         assert!(rules.contains("name=\"/repo/CLAUDE.md\""));
-        assert!(rules.contains("name=\"/repo/.chutes-build/rules/x.md\""));
-        assert!(rules.contains("<user_rule>home-grok-body</user_rule>"));
-        assert!(rules.contains("<user_rule>home-claude-body</user_rule>"));
+        assert!(rules.contains("name=\"/repo/.grok/rules/x.md\""));
+        assert!(rules.contains("<user_rule>\nhome-grok-body\n</user_rule>"));
+        assert!(rules.contains("<user_rule>\nhome-claude-body\n</user_rule>"));
         assert!(!rules.contains("## From:"));
         assert!(!rules.contains("<system-reminder>"));
     }
     #[test]
     fn fork_ondisk_and_display_prefixes_both_count_as_workspace() {
         let files = vec![
-            file("/home/user/.chutes-build/worktrees/repo/AGENTS.md"),
+            file("/home/user/.grok/worktrees/repo/AGENTS.md"),
             file("/home/user/repo/crates/foo/AGENTS.md"),
-            file("/home/user/.chutes-build/AGENTS.md"),
+            file("/home/user/.grok/AGENTS.md"),
         ];
         let (workspace, user) = partition_rules_by_scope(
             files,
-            Path::new("/home/user/.chutes-build"),
+            Path::new("/home/user/.grok"),
             &[],
             &[
-                Path::new("/home/user/.chutes-build/worktrees/repo"),
+                Path::new("/home/user/.grok/worktrees/repo"),
                 Path::new("/home/user/repo/crates/foo"),
             ],
         );
         assert_eq!(
             paths(&workspace),
             vec![
-                "/home/user/.chutes-build/worktrees/repo/AGENTS.md",
+                "/home/user/.grok/worktrees/repo/AGENTS.md",
                 "/home/user/repo/crates/foo/AGENTS.md",
             ]
         );
-        assert_eq!(paths(&user), vec!["/home/user/.chutes-build/AGENTS.md"]);
+        assert_eq!(paths(&user), vec!["/home/user/.grok/AGENTS.md"]);
     }
 }
 /// True iff `conversation` already contains a project-instructions reminder,

@@ -2,7 +2,7 @@
 //! snapshots, for the truncation `read_file` path and the monitor file tail.
 //!
 //! TODO: fallback until clients push exact output via an
-//! `chutes.ai/terminal/output_delta` notification (tracked separately).
+//! `x.ai/terminal/output_delta` notification (tracked separately).
 
 use std::path::PathBuf;
 

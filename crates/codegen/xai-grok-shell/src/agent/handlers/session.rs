@@ -28,7 +28,7 @@ fn backfill_session_summary(summary: &mut Summary) {
     }
 }
 
-/// Router for chutes.ai/session/* and chutes.ai/session_summaries/* methods.
+/// Router for x.ai/session/* and x.ai/session_summaries/* methods.
 pub(crate) async fn handle(
     agent: &MvpAgent,
     args: &acp::ExtRequest,
@@ -45,10 +45,10 @@ pub(crate) async fn handle(
     }
 }
 
-/// `chutes.ai/sessions/list` — the FleetView roster. Returns every
+/// `x.ai/sessions/list` — the FleetView roster. Returns every
 /// resident session plus recently-touched on-disk `Dormant` sessions. Clients
 /// poll this while the dashboard is open and reconcile against the
-/// `chutes.ai/sessions/changed` broadcast.
+/// `x.ai/sessions/changed` broadcast.
 async fn handle_roster_list(
     agent: &MvpAgent,
     _args: &acp::ExtRequest,

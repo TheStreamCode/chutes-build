@@ -5,8 +5,8 @@
 //! actors) plus recently-touched on-disk (`Dormant`) sessions. Clients read it
 //! two ways:
 //!
-//!   - request/response `chutes.ai/sessions/list` → `{ "sessions": [RosterEntry, …] }`
-//!   - broadcast notification `chutes.ai/sessions/changed` →
+//!   - request/response `x.ai/sessions/list` → `{ "sessions": [RosterEntry, …] }`
+//!   - broadcast notification `x.ai/sessions/changed` →
 //!     `{ "upserted": [RosterEntry, …], "removed": ["sess-abc", …] }`
 //!
 //! The wire shape is intentionally small and current-state only — no event
@@ -80,13 +80,13 @@ pub struct RosterEntry {
     pub origin: RosterOrigin,
 }
 
-/// Response payload for `chutes.ai/sessions/list`.
+/// Response payload for `x.ai/sessions/list`.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct RosterListResponse {
     pub sessions: Vec<RosterEntry>,
 }
 
-/// Params payload for the `chutes.ai/sessions/changed` broadcast notification.
+/// Params payload for the `x.ai/sessions/changed` broadcast notification.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct RosterChanged {
     #[serde(default)]

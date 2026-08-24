@@ -1,4 +1,4 @@
-//! `chutes.ai/plugins/*` extension handlers.
+//! `x.ai/plugins/*` extension handlers.
 //!
 //! Provides the plugins list endpoint for the pager's hooks/plugins modal.
 

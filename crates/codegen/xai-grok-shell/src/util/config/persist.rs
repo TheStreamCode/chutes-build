@@ -4,7 +4,7 @@ use anyhow::Result;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 use xai_grok_agent::prompt::skills::SkillsConfig;
-/// Process-wide write lock for `~/.chutes-build/config.toml`.
+/// Process-wide write lock for `~/.grok/config.toml`.
 ///
 /// Serializes the read-modify-write in `save_config` so two rapid
 /// settings toggles can't interleave and clobber each other.
@@ -54,6 +54,8 @@ async fn save_config_locked(config: &Config) -> Result<()> {
     } else {
         merge_section(table, "skills", &config.skills);
     }
+    merge_section(table, "telemetry", &config.telemetry);
+    merge_section(table, "features", &config.features);
     let toml_str = toml::to_string_pretty(&root)?;
     if let Some(parent) = path.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;

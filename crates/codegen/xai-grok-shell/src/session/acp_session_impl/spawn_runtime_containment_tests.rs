@@ -8,8 +8,8 @@ use super::build_session_runtime;
 use xai_tty_utils::runtime::MAX_BLOCKING_THREADS;
 
 /// Env marker dispatching the re-exec'd test binary into child logic.
-const CHILD_ENV: &str = "XAI_CHUTES_BUILD_SHELL_RUNTIME_CONTAINMENT_CHILD";
-const BLOCKING_POOL_CHILD_ENV: &str = "XAI_CHUTES_BUILD_SHELL_BLOCKING_POOL_CONTAINMENT_CHILD";
+const CHILD_ENV: &str = "XAI_GROK_SHELL_RUNTIME_CONTAINMENT_CHILD";
+const BLOCKING_POOL_CHILD_ENV: &str = "XAI_GROK_SHELL_BLOCKING_POOL_CONTAINMENT_CHILD";
 const PASS_MARK: &str = "runtime-build-contained:";
 const BLOCKING_PASS_MARK: &str = "blocking-pool-contained:";
 const SKIP_MARK: &str = "skip-child:";

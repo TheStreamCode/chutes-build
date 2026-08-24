@@ -2,7 +2,9 @@
 //! session. Split from `acp_agent.rs`, whose trait impl delegates all four.
 //!
 //! [session setup]: https://agentclientprotocol.com/protocol/v1/session-setup
-use super::reasoning_effort::{EffortTarget, NewSessionEffort, split_new_session_effort};
+use super::reasoning_effort::{
+    EffortTarget, NewSessionEffort, resolve_new_session_effort_hint, split_new_session_effort,
+};
 use super::*;
 /// Refusals resume must give verbatim, so a test cannot mistake some other
 /// `invalid_params` for the guard it is pinning.
@@ -120,7 +122,7 @@ impl AttachPolicy {
         }
     }
 }
-/// Client-supplied routing an attach's replay must echo: the `chutes.build/persist`
+/// Client-supplied routing an attach's replay must echo: the `x.ai/persist`
 /// blob, the leader unicast target, and the reconnect cursor. All ride the
 /// load request's `_meta`.
 struct ReplayRouting<'a> {
@@ -407,7 +409,10 @@ impl MvpAgent {
         });
         let effort_route = split_new_session_effort(
             resolved_custom_model,
-            parse_reasoning_effort_meta(arguments.meta.as_ref()),
+            resolve_new_session_effort_hint(
+                parse_reasoning_effort_meta(arguments.meta.as_ref()),
+                self.models_manager.current_reasoning_effort(),
+            ),
         );
         let spawn_effort = match effort_route {
             NewSessionEffort::Spawn(effort) => Some(effort),
@@ -661,6 +666,7 @@ impl MvpAgent {
             );
             insert_applied_tool_overrides(obj, applied_tool_overrides.as_ref());
         }
+        self.attach_status_line(&session_id, arguments.meta.as_ref(), init);
         #[cfg(all(feature = "local-workspace", unix))]
         local_ws_reap_guard.disarm();
         Ok(acp::NewSessionResponse::new(session_id)
@@ -871,6 +877,7 @@ impl MvpAgent {
                 no_replay,
             )
             .await?;
+        self.attach_status_line(&session_id, request_meta.as_ref(), init);
         let ClientCaps {
             code_nav: client_code_nav_enabled,
             terminal: client_terminal,
@@ -1059,7 +1066,7 @@ impl MvpAgent {
                 supplied_cwd = %cwd.as_str(),
                 persisted_cwd = %summary.info.cwd,
                 target_sha = %target_sha,
-                "restore_code: skipping session HEAD checkout — supplied cwd is neither a chutes-build worktree nor the session's persisted cwd (refusing to detach the source repo)"
+                "restore_code: skipping session HEAD checkout — supplied cwd is neither a grok worktree nor the session's persisted cwd (refusing to detach the source repo)"
             );
             xai_grok_telemetry::unified_log::warn(
                 "restore_code: skipped session HEAD checkout (unsafe cwd)",

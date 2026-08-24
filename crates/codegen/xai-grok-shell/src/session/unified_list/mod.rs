@@ -47,13 +47,13 @@ pub(crate) fn facet_registry() -> &'static FacetRegistry {
 pub(crate) fn conversations_lane_enabled() -> bool {
     false
 }
-/// Env lane (desktop `CHUTES_BUILD_SESSION_LIST_CONVERSATIONS`) OR process-wide
-/// `--chat` (`CHUTES_BUILD_CHAT_MODE`); hard-off in release builds.
+/// Env lane (desktop `GROK_SESSION_LIST_CONVERSATIONS`) OR process-wide
+/// `--chat` (`GROK_CHAT_MODE`); hard-off in release builds.
 /// The single predicate `MvpAgent::conversations_client()` keys on.
 pub fn conversations_lane_active() -> bool {
     conversations_lane_enabled() || crate::agent::chat_modes::process_chat_mode_enabled()
 }
-/// Parse `chutes.ai/session/list` params and, under process-wide chat mode, force
+/// Parse `x.ai/session/list` params and, under process-wide chat mode, force
 /// the conversations-only `kind` facet (see [`force_kind_chat`]).
 ///
 /// Client-sent `kind` of `chat`/`build` is honored only behind
@@ -122,7 +122,7 @@ pub struct ListReq {
     pub meta: Option<serde_json::Value>,
 }
 /// Directory scope the returned sessions were drawn from. Wire form is the
-/// `as_str` value (`chutes.ai/listScope`), so no serde derive is needed.
+/// `as_str` value (`x.ai/listScope`), so no serde derive is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ListScope {
     /// Scoped to the request cwd.
@@ -503,10 +503,7 @@ pub(crate) struct ExtListResponseMeta {
     #[serde(rename = "chutes.build/partial")]
     pub partial: PartialInfo,
     /// Present only when the listing relaxed beyond the cwd.
-    #[serde(
-        rename = "chutes.build/listScope",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "chutes.build/listScope", skip_serializing_if = "Option::is_none")]
     pub list_scope: Option<&'static str>,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -841,7 +838,7 @@ mod tests {
             )
             .await;
         let _env = xai_grok_test_support::EnvGuard::set(
-            "CHUTES_BUILD_CONVERSATIONS_BASE_URL",
+            "GROK_CONVERSATIONS_BASE_URL",
             format!("http://{addr}"),
         );
         let home = tempfile::tempdir().expect("tempdir");
@@ -907,22 +904,15 @@ mod tests {
     #[serial_test::serial]
     fn conversations_lane_env_gating_matrix() {
         {
-            let _off =
-                xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
+            let _off = xai_grok_test_support::EnvGuard::unset("GROK_SESSION_LIST_CONVERSATIONS");
             assert!(!conversations_lane_enabled());
         }
         {
-            let _on = xai_grok_test_support::EnvGuard::set(
-                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
-                "1",
-            );
+            let _on = xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "1");
             assert_eq!(conversations_lane_enabled(), false);
         }
         {
-            let _off = xai_grok_test_support::EnvGuard::set(
-                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
-                "0",
-            );
+            let _off = xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "0");
             assert!(!conversations_lane_enabled());
         }
     }
@@ -931,23 +921,21 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn conversations_lane_active_truth_table() {
-        use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
-        let _chat_off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
+        use crate::agent::chat_modes::GROK_CHAT_MODE_ENV;
+        let _chat_off = xai_grok_test_support::EnvGuard::unset(GROK_CHAT_MODE_ENV);
         let _desktop_off =
-            xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_SESSION_LIST_CONVERSATIONS");
+            xai_grok_test_support::EnvGuard::unset("GROK_SESSION_LIST_CONVERSATIONS");
         assert!(
             !conversations_lane_active(),
             "no env ⇒ lane off (Build-mode default)"
         );
         {
-            let _desktop = xai_grok_test_support::EnvGuard::set(
-                "CHUTES_BUILD_SESSION_LIST_CONVERSATIONS",
-                "1",
-            );
+            let _desktop =
+                xai_grok_test_support::EnvGuard::set("GROK_SESSION_LIST_CONVERSATIONS", "1");
             assert_eq!(conversations_lane_active(), false);
         }
         {
-            let _chat = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
+            let _chat = xai_grok_test_support::EnvGuard::set(GROK_CHAT_MODE_ENV, "1");
             assert_eq!(
                 conversations_lane_active(),
                 false,
@@ -960,13 +948,13 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn parse_list_req_forces_kind_under_process_chat_mode_only() {
-        use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
+        use crate::agent::chat_modes::GROK_CHAT_MODE_ENV;
         let raw = serde_json::json!({
             "_meta": { "chutes.build/facetFilters": { "kind": ["build"], "starred": [true] } },
         })
         .to_string();
         {
-            let _off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
+            let _off = xai_grok_test_support::EnvGuard::unset(GROK_CHAT_MODE_ENV);
             let req = parse_list_req(&raw).expect("parse");
             let parsed = ParsedMeta::parse(req.meta.as_ref());
             assert_eq!(
@@ -976,7 +964,7 @@ mod tests {
             );
         }
         {
-            let _on = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
+            let _on = xai_grok_test_support::EnvGuard::set(GROK_CHAT_MODE_ENV, "1");
             let req = parse_list_req(&raw).expect("parse");
             let parsed = ParsedMeta::parse(req.meta.as_ref());
             let expected_build = if cfg!(feature = "local-workspace") {
@@ -1017,7 +1005,7 @@ mod tests {
             }
         }
     }
-    /// Wire pin for the cross-crate `chutes.ai/partial` envelope the pager parses:
+    /// Wire pin for the cross-crate `x.ai/partial` envelope the pager parses:
     /// the serialized reason strings must not drift (the pager maps unknown
     /// reasons to a generic retry notice, masking a rename).
     #[test]
@@ -1108,7 +1096,7 @@ mod tests {
             "placeholder-only scan keeps the scoped view"
         );
     }
-    /// Send-side wire pin: `chutes.ai/listScope` present iff the scope relaxed.
+    /// Send-side wire pin: `x.ai/listScope` present iff the scope relaxed.
     #[test]
     fn ext_list_response_serializes_scope() {
         let result = |scope| UnifiedListResult {
@@ -1120,10 +1108,7 @@ mod tests {
         };
         let with =
             serde_json::to_value(ext_list_response(result(ListScope::Repo))).expect("serialize");
-        assert_eq!(
-            with["_meta"]["chutes.build/listScope"],
-            serde_json::json!("repo")
-        );
+        assert_eq!(with["_meta"]["chutes.build/listScope"], serde_json::json!("repo"));
         let without =
             serde_json::to_value(ext_list_response(result(ListScope::Cwd))).expect("serialize");
         assert!(without["_meta"].get("chutes.build/listScope").is_none());

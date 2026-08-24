@@ -1,4 +1,4 @@
-//! ACP extension handler for session search (`chutes.ai/session/search`).
+//! ACP extension handler for session search (`x.ai/session/search`).
 //!
 //! Exposes session full-text search as an ACP extension method.
 //! The client sends a query and receives ranked results across all
@@ -68,7 +68,7 @@ pub struct SearchSessionHit {
     pub snippet: Option<String>,
 }
 
-/// Route `chutes.ai/session/search` extension method calls.
+/// Route `x.ai/session/search` extension method calls.
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/session/search" => {

@@ -141,9 +141,9 @@ fn ensure_plan_mode_tools(tool_config: &mut xai_grok_tools::registry::types::Too
     use xai_grok_tools::implementations::grok_build;
     let existing: std::collections::HashSet<&str> =
         tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
-    let missing_enter = !existing.contains("GrokBuild:enter_plan_mode");
-    let missing_exit = !existing.contains("GrokBuild:exit_plan_mode");
-    let missing_ask = !existing.contains("GrokBuild:ask_user_question");
+    let missing_enter = !existing.contains("ChutesBuild:enter_plan_mode");
+    let missing_exit = !existing.contains("ChutesBuild:exit_plan_mode");
+    let missing_ask = !existing.contains("ChutesBuild:ask_user_question");
     drop(existing);
     if missing_enter {
         tool_config
@@ -710,7 +710,30 @@ impl AgentBuilder {
         } else {
             std::collections::HashSet::new()
         };
-        let tool_bridge_builder = ToolBridge::get_builder();
+        let mut tool_bridge_builder = ToolBridge::get_builder();
+        {
+            // Chutes-native tools: registered up front so curated agent
+            // toolsets listing `ChutesBuild:*` ids resolve at finalize time.
+            use xai_grok_tools::implementations::chutes;
+            use xai_grok_tools::implementations::grok_build;
+            tool_bridge_builder.register::<chutes::Context7SearchTool>();
+            tool_bridge_builder.register::<chutes::Context7DocsTool>();
+            tool_bridge_builder.register::<chutes::GetChutesUsageTool>();
+            tool_bridge_builder.register::<chutes::ListMediaModelsTool>();
+            tool_bridge_builder.register::<chutes::DescribeMediaModelTool>();
+            tool_bridge_builder.register::<chutes::GenerateMediaTool>();
+            tool_bridge_builder.register::<chutes::BrowserTool>();
+            tool_bridge_builder.register::<chutes::OcrPageTool>();
+            tool_bridge_builder
+                .register::<grok_build::SchedulerCreateTool>();
+            tool_bridge_builder
+                .register::<grok_build::SchedulerDeleteTool>();
+            tool_bridge_builder
+                .register::<grok_build::SchedulerListTool>();
+            tool_bridge_builder.register::<grok_build::MonitorTool>();
+            tool_bridge_builder
+                .register::<grok_build::update_goal::UpdateGoalTool>();
+        }
         let state_path = self.state_path.clone().unwrap_or_default();
         let mut tool_config = definition.tool_config.clone();
         if !definition.inject_default_tools && tool_config.tools.is_empty() {
@@ -775,7 +798,7 @@ impl AgentBuilder {
             ensure_plan_mode_tools(&mut tool_config);
         }
         if self.memory_backend.is_none() {
-            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::GrokBuild.to_string();
+            let grok_build_ns = xai_grok_tools::types::tool::ToolNamespace::ChutesBuild.to_string();
             let mem_search_id = format!(
                 "{grok_build_ns}:{}",
                 xai_grok_tools::implementations::memory::MEMORY_SEARCH_TOOL_NAME
@@ -795,7 +818,7 @@ impl AgentBuilder {
         } else if !self.ask_user_question_enabled {
             let ask_user_id = format!(
                 "{}:ask_user_question",
-                xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
+                xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
             );
             tool_config.tools.retain(|tool| tool.id != ask_user_id);
         }
@@ -806,7 +829,7 @@ impl AgentBuilder {
         );
         let task_tool_id = format!(
             "{}:{}",
-            xai_grok_tools::types::tool::ToolNamespace::GrokBuild,
+            xai_grok_tools::types::tool::ToolNamespace::ChutesBuild,
             "task"
         );
         let mut task_stripped = false;
@@ -854,8 +877,8 @@ impl AgentBuilder {
                                 .unwrap_or(true))
                 })
             };
-            if !has_satisfier(ToolNamespace::GrokBuild, "run_terminal_cmd", true)
-                && !has_satisfier(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
+            if !has_satisfier(ToolNamespace::ChutesBuild, "run_terminal_cmd", true)
+                && !has_satisfier(ToolNamespace::ChutesBuildConcise, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::OpenCode, "bash", false)
             {
                 let lifecycle = ["get_task_output", "wait_tasks", "kill_task"];
@@ -870,14 +893,14 @@ impl AgentBuilder {
             && let Ok(params_value) = serde_json::to_value(params)
             && let Some(obj) = params_value.as_object()
         {
-            merge_tool_params(&mut tool_config, &["GrokBuild:web_fetch"], obj);
+            merge_tool_params(&mut tool_config, &["ChutesBuild:web_fetch"], obj);
         }
         if let Some(ref bash_params) = self.bash_params_json {
             merge_tool_params(
                 &mut tool_config,
                 &[
-                    "GrokBuild:run_terminal_cmd",
-                    "GrokBuildConcise:run_terminal_cmd",
+                    "ChutesBuild:run_terminal_cmd",
+                    "ChutesBuildConcise:run_terminal_cmd",
                 ],
                 bash_params,
             );
@@ -885,14 +908,14 @@ impl AgentBuilder {
         if let Some(ref ask_params) = self.ask_user_question_params_json {
             merge_tool_params(
                 &mut tool_config,
-                &["GrokBuild:ask_user_question"],
+                &["ChutesBuild:ask_user_question"],
                 ask_params,
             );
         }
         if self.is_non_interactive {
             let mut ni = serde_json::Map::new();
             ni.insert("non_interactive".into(), serde_json::Value::Bool(true));
-            merge_tool_params(&mut tool_config, &["GrokBuild:ask_user_question"], &ni);
+            merge_tool_params(&mut tool_config, &["ChutesBuild:ask_user_question"], &ni);
         }
         if !definition.disallowed_tools.is_empty() {
             let before: std::collections::HashSet<String> =
@@ -1846,7 +1869,7 @@ mod tests {
                 .tool_config
                 .tools
                 .iter()
-                .any(|tc| tc.id == "GrokBuild:ask_user_question"),
+                .any(|tc| tc.id == "ChutesBuild:ask_user_question"),
             "test premise: the profile must not pre-declare ask_user_question"
         );
         let mut params = serde_json::Map::new();
@@ -1998,7 +2021,7 @@ mod tests {
         let mut def = crate::config::AgentDefinition::general_purpose();
         assert!(def.session_tools_allowed("read_file"));
         def.session_tools_allowlist = Some(vec!["read_file".into()]);
-        assert!(def.session_tools_allowed("GrokBuild:read_file"));
+        assert!(def.session_tools_allowed("ChutesBuild:read_file"));
         assert!(!def.session_tools_allowed("grep"));
         def.session_tools_denylist = Some(vec!["read_file".into()]);
         assert!(!def.session_tools_allowed("read_file"));

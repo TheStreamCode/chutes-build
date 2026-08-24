@@ -1,4 +1,4 @@
-//! `chutes.ai/memory/flush`, `chutes.ai/memory/rewrite`, and `chutes.ai/compact_conversation`
+//! `x.ai/memory/flush`, `x.ai/memory/rewrite`, and `x.ai/compact_conversation`
 //! extension handlers.
 //!
 //! - `compact_conversation`: trigger an on-demand compaction for a session.
@@ -17,9 +17,7 @@ use crate::session::{CompactConversationRequest, CompactConversationResponse, Se
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        m if m.starts_with("chutes.build/compact_conversation") => {
-            handle_compact(agent, args).await
-        }
+        m if m.starts_with("chutes.build/compact_conversation") => handle_compact(agent, args).await,
         "chutes.build/memory/flush" => handle_flush(agent, args).await,
         "chutes.build/memory/rewrite" => handle_rewrite(agent, args).await,
         _ => Err(acp::Error::method_not_found()),

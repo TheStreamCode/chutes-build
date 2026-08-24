@@ -78,7 +78,7 @@ fn recorded_completion(output: String) -> Value {
 }
 
 fn replay_line(record: &Value) -> String {
-    serde_json::json!({ "method": "_chutes.build/session/update", "params": record }).to_string()
+    serde_json::json!({ "method": "_x.ai/session/update", "params": record }).to_string()
 }
 
 /// The branch a plain resume takes: `_meta` is added to the record, so the fit
@@ -152,7 +152,7 @@ async fn replay_leaves_other_oversized_records_alone() {
         r#"{{"sessionId":"s","update":{{"sessionUpdate":"subagent_spawned","subagent_id":"{}"}}}}"#,
         "x".repeat(64 * 1024)
     );
-    let line = format!(r#"{{"method":"_chutes.build/session/update","params":{recorded}}}"#);
+    let line = format!(r#"{{"method":"_x.ai/session/update","params":{recorded}}}"#);
     agent.forward_raw_replay_line(
         &line,
         /*persist_data*/ None,
@@ -187,7 +187,7 @@ async fn a_stale_task_completion_is_frame_bounded() {
     let (agent, mut rx) = build_agent_with_gateway();
     let dir = tempfile::tempdir().unwrap();
     let line = format!(
-        r#"{{"timestamp":1,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"{}","cwd":"/tmp"}}}}}}"#,
+        r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"{}","cwd":"/tmp"}}}}}}"#,
         "c".repeat(64 * 1024)
     );
     let path = dir.path().join("updates.jsonl");

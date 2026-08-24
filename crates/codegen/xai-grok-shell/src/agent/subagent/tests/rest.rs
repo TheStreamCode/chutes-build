@@ -573,21 +573,23 @@ fn subagent_worktree_snapshot_gate_local_enables() {
     ctx.agent_config = Some(config);
     assert!(ctx.resolve_subagent_worktree_snapshot_enabled());
 }
-/// Subagent spawns carry concrete ask_user_question timeout params (the
-/// session-level config follows the child) while bash stays on tool
-/// defaults. Tier precedence itself is pinned by the resolver's own
-/// tests; asserting concrete values here would read the host's disk
-/// layers and flake on configured dev machines.
 #[test]
-fn subagent_tool_params_carry_ask_user_question_timeouts() {
-    let ctx = ctx_with_toggle(std::collections::HashMap::new());
-    let params = ctx.resolve_tool_params_json();
-    assert!(params.bash.is_none(), "bash must stay on tool defaults");
-    let ask = params
-        .ask_user_question
-        .expect("subagents must receive resolved ask_user_question params");
-    assert!(ask.get("timeout_enabled").is_some_and(|v| v.is_boolean()));
-    assert!(ask.get("timeout_secs").is_some_and(|v| v.is_u64()));
+fn subagent_tool_filter_removes_ask_user_question() {
+    let mut tools = vec![
+            xai_grok_sampling_types::ToolSpec {
+                name: "read_file".to_owned(),
+                description: None,
+                parameters: serde_json::json!({}),
+            },
+            xai_grok_sampling_types::ToolSpec {
+                name: "ask_user_question".to_owned(),
+                description: None,
+                parameters: serde_json::json!({}),
+            },
+        ];
+    strip_ask_user_question_tool(&mut tools);
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "read_file");
 }
 /// The gate keeping a worktree must leave no resume pointer. A pointer sends
 /// resume down the rehydrate path, which deletes the directory and rebuilds
@@ -1022,7 +1024,7 @@ fn resume_source_worktree_reuse() {
         child_session_id: "child-wt".into(),
         child_cwd: "/tmp/worktree".into(),
         worktree_path: Some(
-            PathBuf::from("/home/user/.chutes-build/worktrees/myrepo/subagent-sub-wt"),
+            PathBuf::from("/home/user/.grok/worktrees/myrepo/subagent-sub-wt"),
         ),
         snapshot_ref: None,
         subagent_type: "general-purpose".into(),
@@ -1033,7 +1035,7 @@ fn resume_source_worktree_reuse() {
     assert_eq!(
             worktree.as_deref(),
             Some(Path::new(
-                "/home/user/.chutes-build/worktrees/myrepo/subagent-sub-wt",
+                "/home/user/.grok/worktrees/myrepo/subagent-sub-wt",
             )),
             "should reuse source worktree"
         );
@@ -1115,7 +1117,7 @@ fn select_override_cwd_resume_never_falls_through_to_request_cwd() {
         child_session_id: "child-wt".into(),
         child_cwd: "/tmp/whatever".into(),
         worktree_path: Some(
-            PathBuf::from("/home/user/.chutes-build/worktrees/repo/subagent-sub-wt"),
+            PathBuf::from("/home/user/.grok/worktrees/repo/subagent-sub-wt"),
         ),
         snapshot_ref: None,
         subagent_type: "general-purpose".into(),
@@ -2180,7 +2182,7 @@ async fn read_parent_sampling_config_keeps_auto_when_catalog_has_slug_key_only()
         .unwrap()
         .update_sampling_config(xai_grok_sampling_types::SamplingConfig {
             api_backend: crate::sampling::ApiBackend::Responses,
-            base_url: "https://api.chutes.ai/v1".to_string(),
+            base_url: "https://api.x.ai/v1".to_string(),
             ..test_sampling_config("grok-4.5")
         });
     let (config, model_id) = read_parent_sampling_config(&ctx).await;
@@ -2241,7 +2243,7 @@ async fn read_parent_sampling_config_fallback_wires_bearer_resolver() {
         crate::agent::auth_method::CACHED_TOKEN_AUTH_METHOD_ID,
     );
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.chutes.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_some());
 }
@@ -2271,7 +2273,7 @@ async fn read_parent_sampling_config_live_never_strips_a_fallback_key() {
     assert_eq!(config.api_key.as_deref(), Some("xai-env-fallback"));
 }
 /// `would_strip_fallback_key` on the inherit-fallback path: the baseline
-/// keeps the env `CHUTES_API_KEY` even while `auth_type` flips to
+/// keeps the env `XAI_API_KEY` even while `auth_type` flips to
 /// `SessionToken`, and no resolver may displace it.
 #[tokio::test]
 async fn read_parent_sampling_config_fallback_never_strips_a_fallback_key() {
@@ -2282,7 +2284,7 @@ async fn read_parent_sampling_config_fallback_never_strips_a_fallback_key() {
     );
     ctx.auth = None;
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.chutes.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
     ctx.sampling_config.api_key = Some("xai-env-fallback".to_string());
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_none());
@@ -2296,7 +2298,7 @@ async fn read_parent_sampling_config_fallback_no_resolver_for_api_key_method() {
         crate::agent::auth_method::XAI_API_KEY_METHOD_ID,
     );
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.chutes.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_none());
 }
@@ -2330,7 +2332,7 @@ fn resolve_model_override_wires_resolver_for_fresh_and_hard_expired_session_keys
         assert!(config.bearer_resolver.is_some(), "key={key}");
     }
 }
-/// `would_strip_fallback_key` on the override path. `CHUTES_API_KEY`'s
+/// `would_strip_fallback_key` on the override path. `XAI_API_KEY`'s
 /// presence varies by environment, so assert the rule itself rather
 /// than one branch of it.
 #[test]
@@ -2388,7 +2390,7 @@ async fn read_parent_sampling_config_fallback_resolves_backend_search_from_catal
     ctx.parent_chat_state = None;
     ctx.sampling_config.model = "grok-4.5".to_string();
     ctx.sampling_config.api_backend = crate::sampling::ApiBackend::Responses;
-    ctx.sampling_config.base_url = "https://api.chutes.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
     ctx.sampling_config.supports_backend_search = false;
     ctx.models_manager = crate::agent::models::ModelsManager::new(
         None,
@@ -3222,7 +3224,7 @@ async fn progress_publisher_delivers_ticks_to_parent_cmd_channel() {
             tokio::task::yield_now().await;
             let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
             let cancel = tokio_util::sync::CancellationToken::new();
-            spawn_progress_publisher(
+            let _publisher = spawn_progress_publisher(
                 signals,
                 test_gateway(),
                 "parent-1".to_string(),
