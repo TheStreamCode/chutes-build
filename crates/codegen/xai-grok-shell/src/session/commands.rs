@@ -409,7 +409,7 @@ pub enum SessionCommand {
     ReloadPlugins {
         registry: Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>,
     },
-    /// Re-discover the session's own project hooks (`.grok/hooks`,
+    /// Re-discover the session's own project hooks (`.chutes-build/hooks`,
     /// `.cursor/hooks.json`, …) mid-session, re-evaluating folder trust. Used by
     /// the interactive folder-trust grant so a granted folder's repo-local hooks
     /// start without a session restart (plugin-contributed hooks are handled by
@@ -439,7 +439,7 @@ pub enum SessionCommand {
         request: RewindRequest,
         respond_to: oneshot::Sender<anyhow::Result<RewindResponse>>,
     },
-    /// Out-of-band history repair (`x.ai/session/repair`): fix tool-pairing
+    /// Out-of-band history repair (`chutes.ai/session/repair`): fix tool-pairing
     /// violations (orphaned/displaced `ToolResult`s, duplicates, unanswered
     /// calls) that would otherwise 400 on every request. `dry_run` only
     /// reports. Refused while a turn is in flight.
@@ -851,7 +851,7 @@ pub enum SessionCommand {
     Interject {
         text: String,
         /// Client-minted id echoed back on the broadcast
-        /// `x.ai/session/interjection` so the originating pager can dedup its
+        /// `chutes.ai/session/interjection` so the originating pager can dedup its
         /// optimistic local block. `None` from older clients.
         id: Option<String>,
         /// Pasted images riding along with the interjection. Empty from

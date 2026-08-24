@@ -1012,7 +1012,7 @@ impl MvpAgent {
                     .data(
                         serde_json::json!({
                 "code": "local_workspace_intent_missing",
-                "message": "x.ai/local_workspace intent required for mid-session add",
+                "message": "chutes.build/local_workspace intent required for mid-session add",
             }),
                     ),
             );
@@ -1409,7 +1409,7 @@ impl MvpAgent {
             );
             return Err(acp::Error::auth_required().data(msg));
         };
-        let meta = if method_id.0.as_ref() == auth_method::GROK_COM_METHOD_ID {
+        let meta = if method_id.0.as_ref() == auth_method::CHUTES_BUILD_COM_METHOD_ID {
             serde_json::json!({ "use_oauth": true }).as_object().cloned()
         } else {
             arguments.meta
@@ -1909,7 +1909,7 @@ impl MvpAgent {
         let accepted = self
             .gateway
             .forward_fire_and_forget(
-                acp::ExtNotification::new("x.ai/announcements/update", params.into()),
+                acp::ExtNotification::new("chutes.build/announcements/update", params.into()),
             );
         if !accepted {
             return;
@@ -1985,7 +1985,7 @@ impl MvpAgent {
             let _ = self
                 .gateway
                 .ext_notification(
-                    acp::ExtNotification::new("x.ai/session_notification", params.into()),
+                    acp::ExtNotification::new("chutes.build/session_notification", params.into()),
                 )
                 .await;
         }
@@ -3093,7 +3093,7 @@ impl MvpAgent {
                 };
                 if let Ok(params) = serde_json::value::to_raw_value(&notification) {
                     let ext_notification = acp::ExtNotification::new(
-                        "x.ai/session_notification",
+                        "chutes.build/session_notification",
                         params.into(),
                     );
                     let _ = gateway.ext_notification(ext_notification).await;
@@ -3441,10 +3441,10 @@ impl MvpAgent {
             title,
         );
         meta.insert(
-            "x.ai/sessionConfig".to_string(),
+            "chutes.build/sessionConfig".to_string(),
             serde_json::json!({ "options": config_options }),
         );
-        meta.insert("x.ai/sessionDetail".to_string(), serde_json::json!(detail));
+        meta.insert("chutes.build/sessionDetail".to_string(), serde_json::json!(detail));
         if let Some(background_loops) = self
             .resident_handle(session_id)
             .map(|handle| handle.scheduler_background_loops)
@@ -4127,7 +4127,7 @@ impl MvpAgent {
             .client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/fs_notify"))
+            .and_then(|m| m.get("chutes.build/fs_notify"))
             .and_then(|v| {
                 use crate::session::{ClientFsConfig, ClientFsMode};
                 use xai_fsnotify::FsConfig;
@@ -4193,7 +4193,7 @@ impl MvpAgent {
                 .client_capabilities
                 .meta
                 .as_ref()
-                .and_then(|m| m.get("x.ai/hunkTracker"))
+                .and_then(|m| m.get("chutes.build/hunkTracker"))
                 .and_then(|v| v.get("mode"))
                 .and_then(|v| v.as_str()),
         );
@@ -4201,14 +4201,14 @@ impl MvpAgent {
             .client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/incrementalBashOutput"))
+            .and_then(|m| m.get("chutes.build/incrementalBashOutput"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let no_color = init
             .client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/bashOutputNoColor"))
+            .and_then(|m| m.get("chutes.build/bashOutputNoColor"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let hunk_tracking_enabled = hunk_plan.enabled();
@@ -4750,7 +4750,7 @@ impl MvpAgent {
                 .client_capabilities
                 .meta
                 .as_ref()
-                .and_then(|m| m.get("x.ai/gitHeadChanged"))
+                .and_then(|m| m.get("chutes.build/gitHeadChanged"))
                 .and_then(|v| v.as_bool());
             let status_line_enabled = std::sync::Arc::new(
                 std::sync::atomic::AtomicBool::new(

@@ -826,6 +826,7 @@ impl SessionActor {
                     objective: query.clone(),
                     args: serde_json::json!({ "query": query }),
                     agent_budget: None,
+                    effort: None,
                     resume_run_id: None,
                 };
                 let launched = self.workflow_manager.lock().await.launch(resolved, spec);

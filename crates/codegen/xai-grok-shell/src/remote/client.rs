@@ -907,6 +907,7 @@ pub(crate) fn parse_remote_model_value(
         base_url,
         name,
         description: get_string(obj, "description"),
+        subagent_rate_limit_max_attempts: None,
         // `max_output_length` is the Chutes catalogue's name for the same bound —
         // but only when it is *smaller* than the window. Several Chutes models
         // publish the two as the same number, which means "output may use the whole

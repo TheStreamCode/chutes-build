@@ -324,6 +324,12 @@ fn map_transport_failure(failure: crate::http::TransportFailure) -> ManagedConfi
         }
         // A builder/redirect failure is a client-side defect, not a bad server response: terminal.
         TransportFailureKind::Permanent => ManagedConfigError::RequestFailed(failure.detail),
+        TransportFailureKind::CertificateUntrusted => {
+            ManagedConfigError::Network(format!("untrusted TLS certificate: {}", failure.detail))
+        }
+        TransportFailureKind::CertificateInvalid => {
+            ManagedConfigError::Network(format!("invalid TLS certificate: {}", failure.detail))
+        }
     }
 }
 

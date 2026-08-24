@@ -473,6 +473,16 @@ impl ModelsManager {
         self.inner.catalog.read().models.clone()
     }
 
+    /// Config-declared display name for a catalog id, if any.
+    pub fn display_name(&self, id: &str) -> Option<String> {
+        self.inner
+            .catalog
+            .read()
+            .models
+            .get(id)
+            .and_then(|entry| entry.info.name.clone())
+    }
+
     pub fn endpoints(&self) -> config::EndpointsConfig {
         self.inner.cfg.read().endpoints.clone()
     }

@@ -1115,6 +1115,8 @@ pub struct ModelsConfig {
     pub inference_idle_timeout_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_rate_limit_max_attempts: Option<u32>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -3723,6 +3725,9 @@ fn apply_global_scalar_defaults(
         if let Some(v) = models.stream_tool_calls {
             info.stream_tool_calls.get_or_insert(v);
         }
+        if let Some(v) = models.subagent_rate_limit_max_attempts {
+            info.subagent_rate_limit_max_attempts.get_or_insert(v);
+        }
     }
 }
 /// Built-in default models. Prefer `resolve_model_list()`.
@@ -3854,7 +3859,8 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 compaction_at_tokens: m.compaction_at_tokens,
                 show_model_fingerprint: m.show_model_fingerprint,
                 stream_tool_calls: None,
-                laziness_detector: LazinessDetectorPerModelConfig::default(),
+                subagent_rate_limit_max_attempts: None,
+            laziness_detector: LazinessDetectorPerModelConfig::default(),
             };
             (key, config)
         })
@@ -3980,6 +3986,9 @@ pub struct ModelEntryConfig {
     /// flag should leave this unset to avoid request errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_tool_calls: Option<bool>,
+    /// Per-model cap overriding the subagent rate-limit retry budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_rate_limit_max_attempts: Option<u32>,
     /// Per-model Layer-3 LazinessDetector configuration. Defaults to
     /// the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
@@ -4243,6 +4252,9 @@ pub struct ModelInfo {
     pub show_model_fingerprint: bool,
     /// When `Some(true)`, the sampler injects `stream_tool_calls: true`
     pub stream_tool_calls: Option<bool>,
+    /// Per-model cap overriding the subagent rate-limit retry budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_rate_limit_max_attempts: Option<u32>,
     /// Per-model Layer-3 LazinessDetector configuration. Defaults to
     /// the all-disabled state — the feature is per-model opt-in with a
     /// second-step `max_nudges_per_session > 0` opt-in for actually
@@ -4288,6 +4300,7 @@ impl ModelInfo {
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
+            subagent_rate_limit_max_attempts: None,
             laziness_detector: LazinessDetectorPerModelConfig::default(),
         }
     }
@@ -4299,6 +4312,7 @@ impl ModelInfo {
             model: entry.model.clone(),
             model_family: entry.model_family.clone(),
             base_url: entry.base_url.clone(),
+            subagent_rate_limit_max_attempts: entry.subagent_rate_limit_max_attempts,
             name: entry.name.clone(),
             description: entry.description.clone(),
             max_completion_tokens: entry.max_completion_tokens,
@@ -5110,6 +5124,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 compaction_at_tokens: None,
                 show_model_fingerprint: false,
                 stream_tool_calls: None,
+                subagent_rate_limit_max_attempts: None,
                 laziness_detector: LazinessDetectorPerModelConfig::default(),
             },
             api_key: Some(bearer),
@@ -5348,7 +5363,9 @@ fn resolve_hidden_default_web_search_sampling_config(
             compaction_at_tokens: None,
             show_model_fingerprint: false,
             stream_tool_calls: None,
-            laziness_detector: LazinessDetectorPerModelConfig::default(),
+            subagent_rate_limit_max_attempts: None,
+        laziness_detector: LazinessDetectorPerModelConfig::default(),
+
         },
         api_key: None,
         env_key: None,

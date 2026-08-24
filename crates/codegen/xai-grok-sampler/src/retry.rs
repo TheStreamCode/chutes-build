@@ -50,6 +50,9 @@ use xai_grok_sampling_types::{SamplingError, is_retryable_api_status};
 /// no point burning a long backoff just to be rate-limited again.
 pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 2;
 
+/// `rate_limit_retry_threshold` that disables the sampler's own 429 retry; `1`, not `0` (which means unset).
+pub const RATE_LIMIT_RETRY_DISABLED: u32 = 1;
+
 /// Default retry budget when no env or model override is set: at most 14
 /// retries (the attempt reaching this count is fatal). With the 30s cap:
 /// retries 1-4 exponential (2+4+8+16s ≈ 30s), 5-14 flat ~30s (≈ 5 min) —

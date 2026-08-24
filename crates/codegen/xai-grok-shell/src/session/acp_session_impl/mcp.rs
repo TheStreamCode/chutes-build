@@ -105,6 +105,7 @@ impl SessionActor {
                     .or_default()
                     .push(crate::extensions::mcp::McpToolEntry {
                         name: unqualified.clone(),
+                        icons: Vec::new(),
                         display_name: None,
                         description: Some(reg.description.clone()),
                         meta: Some(meta.clone()),
@@ -1305,6 +1306,7 @@ impl SessionActor {
                                             .or_default()
                                             .push(crate::extensions::mcp::McpToolEntry {
                                                 name: unqualified.clone(),
+                                                icons: Vec::new(),
                                                 display_name: None,
                                                 description: Some(reg.description.clone()),
                                                 meta: Some(meta.clone()),
