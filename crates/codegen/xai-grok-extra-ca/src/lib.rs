@@ -63,6 +63,11 @@ pub fn with_extra_root_certificates_blocking(
     builder
 }
 
+/// Interim no-op placeholder for the upstream TLS-policy entry point.
+/// With the current feature set, rustls falls back to its default process
+/// provider, so there is nothing to install yet.
+pub fn ensure_default_crypto_provider() {}
+
 /// Configure and build an async client under the crate's root policy.
 ///
 /// Interim compat surface for the 1.0.8 tool callers: applies

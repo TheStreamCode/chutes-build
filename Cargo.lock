@@ -14459,6 +14459,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-grok-status-line"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "toml",
+]
+
+[[package]]
 name = "xai-grok-subagent-resolution"
 version = "0.1.0"
 dependencies = [
@@ -14756,7 +14766,6 @@ dependencies = [
  "regex",
  "reqwest 0.12.24",
  "rustc-hash 2.1.1",
- "rustls",
  "serde",
  "serde_json",
  "sha1",
@@ -14792,6 +14801,7 @@ dependencies = [
  "xai-grok-config-types",
  "xai-grok-diag-server",
  "xai-grok-env",
+ "xai-grok-extra-ca",
  "xai-grok-hooks",
  "xai-grok-mcp",
  "xai-grok-paths",

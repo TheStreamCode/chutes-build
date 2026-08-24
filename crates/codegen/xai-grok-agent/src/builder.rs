@@ -96,7 +96,7 @@ pub struct AgentBuilder {
     image_gen_config: xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig,
     video_gen_config: xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig,
     app_builder_deployer_config:
-        xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     subagents_enabled: bool,
     background_workflows_enabled: bool,
@@ -700,7 +700,7 @@ impl AgentBuilder {
     /// Set the deploy service configuration.
     pub fn with_app_builder_deployer_config(
         mut self,
-        config: xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        config: xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig,
     ) -> Self {
         self.app_builder_deployer_config = config;
         self
@@ -1029,7 +1029,7 @@ impl AgentBuilder {
                 })
             };
             if !has_satisfier(ToolNamespace::ChutesBuild, "run_terminal_cmd", true)
-                && !has_satisfier(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
+                && !has_satisfier(ToolNamespace::ChutesBuildConcise, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::OpenCode, "bash", false)
             {
                 let lifecycle = ["get_task_output", "wait_tasks", "kill_task"];

@@ -55,6 +55,7 @@ members = [
     "crates/codegen/xai-grok-session-events",
     "crates/codegen/xai-grok-session-search",
     "crates/codegen/xai-grok-shared",
+    "crates/codegen/xai-grok-status-line",
     "crates/codegen/xai-grok-shell",
     "crates/codegen/xai-grok-shell-base",
     "crates/codegen/xai-grok-shell-session-support",

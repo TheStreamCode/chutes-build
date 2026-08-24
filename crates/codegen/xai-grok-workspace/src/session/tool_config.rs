@@ -326,7 +326,7 @@ pub(crate) use crate::ENV_TEST_LOCK as TOOL_STATE_ENV_LOCK;
 pub struct WorkspaceSessionContextFactory {
     auth: Option<xai_computer_hub_sdk::SharedAuthProvider>,
     api_base_url: Option<String>,
-    /// Resolved `$CHUTES_BUILD_WORKSPACE_HOME` when tool-state persistence is enabled;
+    /// Resolved `$GROK_WORKSPACE_HOME` when tool-state persistence is enabled;
     /// `None` disables it. Resolved once by the caller so the factory performs
     /// no per-build env reads.
     tool_state_home: Option<PathBuf>,
@@ -353,7 +353,7 @@ impl WorkspaceSessionContextFactory {
         }
     }
     /// Enable session-keyed tool-state persistence rooted at `home`
-    /// (`$CHUTES_BUILD_WORKSPACE_HOME`). Callers should only invoke this when
+    /// (`$GROK_WORKSPACE_HOME`). Callers should only invoke this when
     /// [`tool_state_enabled`] is `true`.
     pub fn with_tool_state_home(mut self, home: PathBuf) -> Self {
         self.tool_state_home = Some(home);
@@ -404,7 +404,7 @@ impl SessionContextFactory for WorkspaceSessionContextFactory {
         session_env: Arc<HashMap<String, String>>,
         backend: Arc<dyn xai_grok_tools::computer::types::TerminalBackend>,
     ) -> xai_grok_tools::registry::types::SessionContext {
-        use xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
+        use xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig;
         use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
         use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
         use xai_grok_tools::implementations::web_search::WebSearchConfig;
@@ -514,7 +514,7 @@ fn build_proxy_headers(base_url: &str) -> indexmap::IndexMap<String, String> {
     headers.insert("x-grok-client-version".to_string(), version.to_string());
     headers.insert(
         "x-grok-client-identifier".to_string(),
-        std::env::var("CHUTES_BUILD_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string()),
+        std::env::var("GROK_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string()),
     );
     if base_url.contains("cli-chat-proxy") || base_url.contains("chat-proxy") {
         headers.insert("X-XAI-Token-Auth".to_string(), "xai-grok-cli".to_string());
@@ -526,24 +526,24 @@ fn build_proxy_headers(base_url: &str) -> indexmap::IndexMap<String, String> {
     headers
 }
 /// Build web fetch config. Enabled with default params unless
-/// `CHUTES_BUILD_DISABLE_WEB_FETCH=1` is set.
+/// `GROK_DISABLE_WEB_FETCH=1` is set.
 fn build_web_fetch_config() -> xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig
 {
     use xai_grok_tools::implementations::grok_build::web_fetch::{WebFetchConfig, WebFetchParams};
-    if std::env::var("CHUTES_BUILD_DISABLE_WEB_FETCH").is_ok_and(|v| v == "1" || v == "true") {
+    if std::env::var("GROK_DISABLE_WEB_FETCH").is_ok_and(|v| v == "1" || v == "true") {
         return WebFetchConfig::Disabled;
     }
     let mut params = WebFetchParams::default();
-    if let Ok(proxy) = std::env::var("CHUTES_BUILD_WEB_FETCH_PROXY") {
+    if let Ok(proxy) = std::env::var("GROK_WEB_FETCH_PROXY") {
         params.proxy_endpoint = Some(proxy);
     }
-    if xai_grok_config::env_bool("CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL") == Some(true) {
+    if xai_grok_config::env_bool("GROK_WEB_FETCH_ALLOW_LOCAL") == Some(true) {
         params.allow_local = Some(true);
     }
     WebFetchConfig::Enabled { params }
 }
 fn default_web_search_model() -> String {
-    std::env::var("CHUTES_BUILD_WEB_SEARCH_MODEL").unwrap_or_else(|_| "grok-4.5".to_string())
+    std::env::var("GROK_WEB_SEARCH_MODEL").unwrap_or_else(|_| "grok-4.5".to_string())
 }
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
@@ -561,6 +561,7 @@ pub mod test_support {
     /// Test factory: builds a `SessionContext` rooted at a per-test temp dir.
     pub struct TestSessionContextFactory {
         pub temp: TempDir,
+        tool_state: bool,
     }
     impl Default for TestSessionContextFactory {
         fn default() -> Self {
@@ -571,6 +572,14 @@ pub mod test_support {
         pub fn new() -> Self {
             Self {
                 temp: TempDir::new().expect("create temp dir"),
+                tool_state: true,
+            }
+        }
+        /// Matches production, where `CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED` is unset and the real factory returns an empty path.
+        pub fn without_tool_state() -> Self {
+            Self {
+                tool_state: false,
+                ..Self::new()
             }
         }
     }
@@ -598,7 +607,11 @@ pub mod test_support {
                 subagent: None,
                 parent_scheduler_handle: None,
                 skills: vec![],
-                state_path: session_root.join("tool_state.json"),
+                state_path: if self.tool_state {
+                    session_root.join("tool_state.json")
+                } else {
+                    PathBuf::new()
+                },
                 memory_backend: None,
                 web_search_config: Default::default(),
                 web_fetch_config: Default::default(),
@@ -1173,7 +1186,9 @@ mod tests {
             let counter = res.get_or_default::<State<WebCitationCounter>>();
             counter.counter = 123;
         }
-        ts_a.save_and_flush_persistence().await;
+        ts_a.save_and_flush_persistence()
+            .await
+            .expect("the test factory gives this session a state path");
         drop(ts_a);
         let (_eff, ts_b, _backend_b) = resolve_session_toolset(
             test_support::baseline_config(),

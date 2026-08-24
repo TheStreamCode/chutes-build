@@ -19,7 +19,7 @@
 //! is written atomically with owner-only (`0600`) permissions.
 //!
 //! The store is rooted at [`xai_grok_config::user_grok_home`] — the **Option**
-//! home that resolves to `None` (rather than a cwd-relative `./.grok`) when
+//! home that resolves to `None` (rather than a cwd-relative `./.chutes-build`) when
 //! neither `$CHUTES_BUILD_HOME` nor a home directory is set (e.g. a minimal container /
 //! CI). In that no-home environment [`TrustStore::load`] yields an **empty,
 //! trust-nothing** store that persists nothing, so a cloned repo can never ship
@@ -106,7 +106,7 @@ impl TrustStore {
     ///
     /// Resolves via [`xai_grok_config::user_grok_home`], never
     /// [`xai_grok_config::grok_home`], so it never falls back to a cwd-relative
-    /// `./.grok` — that fallback would let an untrusted cloned repo's `.grok`
+    /// `./.chutes-build` — that fallback would let an untrusted cloned repo's `.chutes-build`
     /// masquerade as the user-global store and self-trust the checkout.
     pub fn default_path() -> Option<PathBuf> {
         Self::default_path_in(xai_grok_config::user_grok_home())
@@ -724,7 +724,7 @@ mod tests {
 
         // With NO resolvable home the path is `None` — never a synthesized
         // fallback. This is the regression guard that keeps the store off the
-        // cwd-relative `./.grok` that grok_home() would invent, which is exactly
+        // cwd-relative `./.chutes-build` that grok_home() would invent, which is exactly
         // how a cloned repo's own `<repo>/.chutes-build/trusted_folders.toml` could
         // masquerade as the user-global store and self-trust the checkout.
         assert_eq!(TrustStore::default_path_in(None), None);
@@ -746,7 +746,7 @@ mod tests {
         // Simulate the no-home environment where `default_path()` is `None`:
         // `load()` yields `empty()`, a store with no backing path. It must
         // trust nothing and silently no-op on writes — never touching a
-        // cwd-relative `./.grok`.
+        // cwd-relative `./.chutes-build`.
         let mut store = TrustStore::empty();
         assert!(store.is_empty());
 

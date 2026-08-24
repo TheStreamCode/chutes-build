@@ -104,6 +104,10 @@ pub struct PermissionEvent {
     /// requester gone mid-classify).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classifier_verdict: Option<String>,
+    /// Whether the `remember_tool_approvals` gate was enabled for this
+    /// decision. `None` on legacy traces only; the manager always sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remember_tool_approvals: Option<bool>,
 }
 /// A permission decision plus the authoritative manager [`PermissionEvent`] that
 /// produced it. The manager builds exactly one event per decision, sends one
@@ -129,10 +133,10 @@ pub enum ClientType {
     #[default]
     #[serde(rename = "generic", alias = "grok-shell", alias = "grok_shell")]
     Generic,
-    /// Chutes Build TUI client - show fancy options with interactive bash term selection
+    /// Grok TUI client - show fancy options with interactive bash term selection
     #[serde(rename = "grok-tui", alias = "grok_tui")]
     GrokTUI,
-    /// Chutes Build Web client - identified by clientIdentifier "grok-web"
+    /// Grok Web client - identified by clientIdentifier "grok-web"
     #[serde(rename = "grok_web")]
     GrokWeb,
     /// Named client (`"nebula"`) — uses the generic permission UI
@@ -141,7 +145,7 @@ pub enum ClientType {
     /// IDE extension client (VS Code and similar) - identified by clientIdentifier "grok-code-extension"
     #[serde(rename = "extension")]
     Extension,
-    /// Chutes Build Pager client - TUI-like terminal pager with interactive permission UI.
+    /// Grok Pager client - TUI-like terminal pager with interactive permission UI.
     /// Treated identically to GrokTUI for permission options (gets bash highlights +
     /// interactive selection). Reports as "pager" for telemetry attribution.
     ///
@@ -150,7 +154,7 @@ pub enum ClientType {
     /// `"grok_pager"` form for symmetry with the rest of this enum.
     #[serde(rename = "grok-pager", alias = "grok_pager")]
     GrokPager,
-    /// Chutes Build Desktop (Electron) client - identified by clientIdentifier "grok-desktop".
+    /// Grok Desktop (Electron) client - identified by clientIdentifier "grok-desktop".
     /// Uses TUI-style bash permission options (primary command extraction + prefix matching)
     /// but without interactive `<`/`>` word selection.
     #[serde(rename = "grok_desktop")]
@@ -586,6 +590,7 @@ mod tests {
             queue_depth: Some(3),
             security_findings: Some(vec!["opaque_shell".into()]),
             classifier_verdict: Some("block".into()),
+            remember_tool_approvals: Some(true),
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["subagent_session_id"], "child-1");
@@ -601,6 +606,7 @@ mod tests {
         assert_eq!(json["queue_depth"], 3);
         assert_eq!(json["security_findings"][0], "opaque_shell");
         assert_eq!(json["classifier_verdict"], "block");
+        assert_eq!(json["remember_tool_approvals"], true);
     }
     #[test]
     fn permission_event_skips_none_optional_fields() {
@@ -629,6 +635,7 @@ mod tests {
             queue_depth: None,
             security_findings: None,
             classifier_verdict: None,
+            remember_tool_approvals: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(!json.contains("subagent_session_id"));
@@ -643,6 +650,7 @@ mod tests {
         assert!(!json.contains("queue_depth"));
         assert!(!json.contains("security_findings"));
         assert!(!json.contains("classifier_verdict"));
+        assert!(!json.contains("remember_tool_approvals"));
     }
     #[test]
     fn hashline_edit_maps_to_edit_access() {

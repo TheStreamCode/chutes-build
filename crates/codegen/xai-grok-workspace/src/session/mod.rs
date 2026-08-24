@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use xai_computer_hub_mcp_adapter::McpBridgeHandle;
 use xai_grok_mcp::servers::McpState;
-use xai_grok_tools::notification::types::{ToolNotification, ToolNotificationHandle};
+use xai_grok_tools::notification::AcknowledgedToolNotification;
+use xai_grok_tools::notification::types::ToolNotificationHandle;
 use xai_grok_tools::registry::types::{FinalizedToolset, ToolConfig, ToolServerConfig};
 use xai_hunk_tracker::HunkTrackerHandle;
 use xai_tool_protocol::ToolId;
@@ -129,8 +130,9 @@ pub struct WorkspaceSession {
     system_notify_handle: Option<ToolNotificationHandle>,
     /// Receiver paired with `system_notify_handle`, taken once by the forwarder.
     #[allow(dead_code)]
-    pending_notif_rx:
-        tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<ToolNotification>>>,
+    pending_notif_rx: tokio::sync::Mutex<
+        Option<tokio::sync::mpsc::UnboundedReceiver<AcknowledgedToolNotification>>,
+    >,
     /// Spawned system-notify producers (forwarder, preview-state watcher).
     /// Sync mutex so the sync teardown path can abort without an await.
     system_notify_producers: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -167,7 +169,7 @@ impl WorkspaceSession {
         #[allow(dead_code)] system_notifications: bool,
         system_notify_channel: Option<(
             ToolNotificationHandle,
-            tokio::sync::mpsc::UnboundedReceiver<ToolNotification>,
+            tokio::sync::mpsc::UnboundedReceiver<AcknowledgedToolNotification>,
         )>,
     ) -> Self {
         let (system_notify_handle, pending_notif_rx) = match system_notify_channel {
@@ -223,12 +225,11 @@ impl WorkspaceSession {
     pub(crate) fn system_notify_handle(&self) -> Option<ToolNotificationHandle> {
         self.system_notify_handle.clone()
     }
-    /// Take the stashed notification receiver (once) for the per-session
-    /// forwarder to own.
+    /// Hand the notification receiver to the forwarder. Works once.
     #[allow(dead_code)]
     pub(crate) async fn take_pending_notif_rx(
         &self,
-    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<ToolNotification>> {
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<AcknowledgedToolNotification>> {
         self.pending_notif_rx.lock().await.take()
     }
     /// True once a producer set has been tracked; finalize spawns at most one
@@ -515,7 +516,7 @@ pub struct WorkspaceShared {
     pub(crate) activity_notify_handle:
         arc_swap::ArcSwap<Option<xai_grok_tools::notification::types::ToolNotificationHandle>>,
     /// Sink for workspace-originated ext-notifications to the client (e.g.
-    /// `chutes.ai/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
+    /// `x.ai/search/fuzzy/status`). Mode-agnostic: the shell wires it to the
     /// agent gateway in local mode, and to the server in proxy mode. `None` until
     /// set via [`WorkspaceHandle::set_client_ext_sink`](crate::handle::WorkspaceHandle::set_client_ext_sink).
     pub(crate) client_ext_sink: arc_swap::ArcSwap<Option<ClientExtSink>>,
@@ -543,23 +544,23 @@ pub struct WorkspaceShared {
     pub(crate) codebase_indexes:
         std::sync::Arc<parking_lot::Mutex<crate::file_system::CodebaseIndexManager>>,
     /// Finalize the FS rewind checkpoint on non-`Completed` turn-end outcomes
-    /// (from `CHUTES_BUILD_WORKSPACE_REWIND_ALL_OUTCOMES`, default off).
+    /// (from `GROK_WORKSPACE_REWIND_ALL_OUTCOMES`, default off).
     pub(crate) workspace_rewind_all_outcomes: bool,
-    /// Resolved `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root
+    /// Resolved `$GROK_WORKSPACE_HOME` — the workspace-owned on-disk state root
     /// (`<grok_home>/workspace` by default). The upload queue spills here.
     pub(crate) workspace_home: std::path::PathBuf,
     pub(crate) upload_queue: Option<std::sync::Arc<xai_file_utils::queue::UploadQueue>>,
     /// Whether collection is disabled (opt-out, or the fail-closed default).
     pub(crate) data_collection_disabled: bool,
     /// Whether per-session `events.jsonl` recording is enabled
-    /// (`CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED=true`). When `false`, every
+    /// (`GROK_WORKSPACE_EVENTS_ENABLED=true`). When `false`, every
     /// [`session_event_writer`](Self::session_event_writer) hands back an
     /// [`EventWriter::noop()`](xai_grok_session_events::EventWriter::noop) and
     /// no session directory or `events.jsonl` is ever created — the legacy
     /// behaviour, preserved bit-for-bit.
     pub(crate) events_enabled: bool,
     /// Whether per-session `workspace_tool_definitions.json` emission is
-    /// enabled (`CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED=true`).
+    /// enabled (`GROK_WORKSPACE_TOOL_DEFS_ENABLED=true`).
     pub(crate) tool_defs_enabled: bool,
     /// `session_id` → last `ToolsChanged` re-emit `Instant`, debouncing
     /// re-emits per session. The initial bind emission does not consult this map.
@@ -599,7 +600,7 @@ impl WorkspaceShared {
     pub fn root_cwd(&self) -> &std::path::Path {
         &self.root_cwd
     }
-    /// Resolved `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root.
+    /// Resolved `$GROK_WORKSPACE_HOME` — the workspace-owned on-disk state root.
     pub fn workspace_home(&self) -> &std::path::Path {
         &self.workspace_home
     }

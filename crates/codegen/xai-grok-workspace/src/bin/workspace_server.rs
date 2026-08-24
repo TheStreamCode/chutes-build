@@ -1,6 +1,6 @@
 //! Standalone workspace ToolServer for remote sandboxes.
 //!
-//! Reads OIDC credentials from `~/.grok/auth.json`, connects to a
+//! Reads OIDC credentials from `~/.chutes-build/auth.json`, connects to a
 //! server, exposes workspace tools, and refreshes tokens
 //! automatically.
 use clap::Parser;
@@ -69,7 +69,7 @@ struct Args {
     /// launcher a definitive feature probe.
     #[arg(long)]
     capabilities: bool,
-    #[arg(long, default_value = "wss://computer-hub.grok.com/v1/tools")]
+    #[arg(long, default_value = "wss://computer-hub.chutes-build.com/v1/tools")]
     hub_url: String,
     #[arg(long)]
     auth_config: Option<PathBuf>,
@@ -108,11 +108,11 @@ struct Args {
     /// `gcs::upload_bytes` path.
     ///
     /// Enabled by default. Pass `--upload-queue-enabled false` (or set the
-    /// `GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
+    /// `CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
     /// the legacy inline path. Accepts `true`/`false`.
     #[arg(
         long,
-        env = "GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED",
+        env = "CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -121,11 +121,11 @@ struct Args {
     /// instead of widening to the built-in default catalog.
     #[arg(long)]
     require_explicit_toolset: bool,
-    /// Trust project-scoped LSP servers from `<repo>/.grok/lsp.json`.
+    /// Trust project-scoped LSP servers from `<repo>/.chutes-build/lsp.json`.
     /// Defaults off; sandbox opts in only after workspace trust is established.
     #[arg(
         long,
-        env = "GROK_WORKSPACE_PROJECT_LSP_TRUSTED",
+        env = "CHUTES_BUILD_WORKSPACE_PROJECT_LSP_TRUSTED",
         default_value_t = false,
         action = clap::ArgAction::Set,
     )]
@@ -133,10 +133,10 @@ struct Args {
     /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`,
     /// absolute-outside-root, symlink escapes). On by default: the standalone
     /// server always backs a remote-sandbox workspace, a real tenant boundary.
-    /// Override with `GROK_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
+    /// Override with `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
     #[arg(
         long,
-        env = "GROK_WORKSPACE_CONFINE_FS_TO_ROOT",
+        env = "CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -301,10 +301,12 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(run(args, cwd, oom_protection, oom_protect_applied))
 }
 /// Whether to arm `GROK_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
-///
 /// Always-on success must arm so children do not inherit -900. `--oom-protect`
 /// forces the env even when the early write failed (pre-unshare may still have
 /// left the score at -900).
+// The only caller sits in the unix-only OOM-protection path; on Windows the
+// truth-table test below is what keeps it alive.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn should_set_reset_child_oom(early_protect_ok: bool, oom_protect_flag: bool) -> bool {
     early_protect_ok || oom_protect_flag
 }
@@ -340,7 +342,7 @@ async fn run(
     } else {
         tracing::info!("kernel OOM-kill protection not active");
     }
-    let direct_otlp = match std::env::var("GROK_WORKSPACE_OTLP_ENDPOINT") {
+    let direct_otlp = match std::env::var("CHUTES_BUILD_WORKSPACE_OTLP_ENDPOINT") {
         Ok(endpoint) if !endpoint.is_empty() => {
             match xai_tracing::init_fastrace(endpoint.clone(), SERVICE_NAME.to_owned(), None) {
                 Ok(()) => {
@@ -830,7 +832,7 @@ mod tests {
     }
     #[test]
     fn project_lsp_trust_defaults_off_and_is_opt_in() {
-        unsafe { std::env::remove_var("GROK_WORKSPACE_PROJECT_LSP_TRUSTED") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PROJECT_LSP_TRUSTED") };
         let args = Args::try_parse_from(["xai-workspace-server"]).unwrap();
         assert!(!args.project_lsp_trusted);
         let args = Args::try_parse_from(["xai-workspace-server", "--project-lsp-trusted", "true"])
