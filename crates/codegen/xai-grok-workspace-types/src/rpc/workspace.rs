@@ -18,7 +18,7 @@ impl WorkspaceRpc for WorkspaceInfoReq {
     type Response = Value;
 }
 
-/// `workspace.load_project_config` ÔÇö project config discovered at the
+/// `workspace.load_project_config` — project config discovered at the
 /// workspace root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadProjectConfigReq {}
@@ -29,7 +29,7 @@ impl WorkspaceRpc for LoadProjectConfigReq {
     type Response = Value;
 }
 
-/// `workspace.load_permissions` ÔÇö permission settings discovered at the
+/// `workspace.load_permissions` — permission settings discovered at the
 /// workspace root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadPermissionsReq {}
@@ -40,7 +40,7 @@ impl WorkspaceRpc for LoadPermissionsReq {
     type Response = Value;
 }
 
-/// `workspace.load_envrc` ÔÇö `.envrc` environment loaded at the workspace
+/// `workspace.load_envrc` — `.envrc` environment loaded at the workspace
 /// root (empty object when absent).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadEnvrcReq {}
@@ -51,7 +51,7 @@ impl WorkspaceRpc for LoadEnvrcReq {
     type Response = Value;
 }
 
-/// `workspace.tool_definitions` ÔÇö tool definitions for a session's
+/// `workspace.tool_definitions` — tool definitions for a session's
 /// finalized toolset.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ToolDefinitionsReq {
@@ -64,7 +64,7 @@ impl WorkspaceRpc for ToolDefinitionsReq {
     type Response = Value;
 }
 
-/// `workspace.resolve_file_references` ÔÇö resolve `@file` references
+/// `workspace.resolve_file_references` — resolve `@file` references
 /// against the workspace root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolveFileReferencesReq {
@@ -77,7 +77,7 @@ impl WorkspaceRpc for ResolveFileReferencesReq {
     type Response = Value;
 }
 
-/// `workspace.update_tool_config` ÔÇö replace a session's tool config.
+/// `workspace.update_tool_config` — replace a session's tool config.
 ///
 /// Rejected with the retryable [`TURN_ACTIVE`](super::envelope::TURN_ACTIVE)
 /// wire code while the target session has an active turn and the new config
@@ -102,7 +102,7 @@ impl WorkspaceRpc for UpdateToolConfigReq {
     type Response = Value;
 }
 
-/// `workspace.drop_session` ÔÇö drop a workspace session.
+/// `workspace.drop_session` — drop a workspace session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DropSessionReq {
     /// Deprecated: self-attested and no longer trusted. The server derives
@@ -122,7 +122,7 @@ impl WorkspaceRpc for DropSessionReq {
     type Response = Value;
 }
 
-/// `workspace.configure_mcp` ÔÇö start MCP servers for the caller's bound session.
+/// `workspace.configure_mcp` — start MCP servers for the caller's bound session.
 /// `mcp_servers` stays raw JSON (the shape is the ACP `McpServer` list)
 /// so this crate carries no `agent-client-protocol` dependency.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -136,7 +136,7 @@ impl WorkspaceRpc for ConfigureMcpReq {
     type Response = Value;
 }
 
-/// `workspace.install_plugin` ÔÇö no-op on the server (installation needs
+/// `workspace.install_plugin` — no-op on the server (installation needs
 /// shell-side auth + registry); always returns `null`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallPluginReq {}
@@ -147,7 +147,7 @@ impl WorkspaceRpc for InstallPluginReq {
     type Response = Value;
 }
 
-/// `workspace.refresh_plugins` ÔÇö re-discover plugins at the workspace root.
+/// `workspace.refresh_plugins` — re-discover plugins at the workspace root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RefreshPluginsReq {}
 
@@ -169,14 +169,14 @@ pub struct BackgroundTaskSummaryWire {
     pub tool_name: Option<String>,
 }
 
-/// Response of `workspace.list_background_tasks` ÔÇö outstanding (not-completed)
+/// Response of `workspace.list_background_tasks` — outstanding (not-completed)
 /// background terminal tasks only.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBackgroundTasksResponse {
     pub tasks: Vec<BackgroundTaskSummaryWire>,
 }
 
-/// `workspace.list_background_tasks` ÔÇö list the outstanding background terminal
+/// `workspace.list_background_tasks` — list the outstanding background terminal
 /// commands for `session_id`, for post-compaction `<system-reminder>` state.
 /// `WorkspaceClient` is session-agnostic, so the caller supplies the hub-bound
 /// session id.
@@ -260,7 +260,7 @@ pub struct KillTaskResponse {
     pub outcome: KillTaskOutcome,
 }
 
-/// `workspace.kill_task` ÔÇö terminate a background terminal task by id.
+/// `workspace.kill_task` — terminate a background terminal task by id.
 /// Caller supplies the hub-bound session id (same as `tasks_snapshot`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KillTaskReq {
@@ -274,6 +274,26 @@ impl WorkspaceRpc for KillTaskReq {
     type Response = KillTaskResponse;
 }
 
+/// Response of `workspace.delete_scheduled_task`. `deleted` is false when the task id was not found (already removed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteScheduledTaskResponse {
+    pub task_id: String,
+    pub deleted: bool,
+}
+
+/// `workspace.delete_scheduled_task`: delete a scheduled (loop) task by id. Caller supplies the hub-bound session id (same as `tasks_snapshot`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeleteScheduledTaskReq {
+    pub session_id: String,
+    pub task_id: String,
+}
+
+impl WorkspaceRpc for DeleteScheduledTaskReq {
+    const METHOD: &'static str = "workspace.delete_scheduled_task";
+    const ACTIVITY: RpcActivityClass = RpcActivityClass::Mutation;
+    type Response = DeleteScheduledTaskResponse;
+}
+
 /// One TODO list item (slim DTO over `xai_grok_tools`'s `TodoState`). `status`
 /// is the snake_case tag: `pending` | `in_progress` | `completed` | `cancelled`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,13 +303,13 @@ pub struct TodoSummaryWire {
     pub status: String,
 }
 
-/// Response of `workspace.list_todos` ÔÇö the full TODO list for the session.
+/// Response of `workspace.list_todos` — the full TODO list for the session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTodosResponse {
     pub todos: Vec<TodoSummaryWire>,
 }
 
-/// `workspace.list_todos` ÔÇö list the session's TODO items for post-compaction
+/// `workspace.list_todos` — list the session's TODO items for post-compaction
 /// `<system-reminder>` state. Caller supplies the hub-bound session id.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTodosReq {

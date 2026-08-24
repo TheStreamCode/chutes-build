@@ -1,6 +1,6 @@
 //! Standalone workspace ToolServer for remote sandboxes.
 //!
-//! Reads OIDC credentials from `~/.chutes-build/auth.json`, connects to a
+//! Reads OIDC credentials from `~/.grok/auth.json`, connects to a
 //! server, exposes workspace tools, and refreshes tokens
 //! automatically.
 use clap::Parser;
@@ -69,7 +69,7 @@ struct Args {
     /// launcher a definitive feature probe.
     #[arg(long)]
     capabilities: bool,
-    #[arg(long, default_value = "wss://computer-hub.chutes.ai/v1/tools")]
+    #[arg(long, default_value = "wss://computer-hub.grok.com/v1/tools")]
     hub_url: String,
     #[arg(long)]
     auth_config: Option<PathBuf>,
@@ -108,11 +108,11 @@ struct Args {
     /// `gcs::upload_bytes` path.
     ///
     /// Enabled by default. Pass `--upload-queue-enabled false` (or set the
-    /// `CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
+    /// `GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED` env var to `false`) to fall back to
     /// the legacy inline path. Accepts `true`/`false`.
     #[arg(
         long,
-        env = "CHUTES_BUILD_WORKSPACE_UPLOAD_QUEUE_ENABLED",
+        env = "GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -121,22 +121,22 @@ struct Args {
     /// instead of widening to the built-in default catalog.
     #[arg(long)]
     require_explicit_toolset: bool,
-    /// Trust project-scoped LSP servers from `<repo>/.chutes-build/lsp.json`.
+    /// Trust project-scoped LSP servers from `<repo>/.grok/lsp.json`.
     /// Defaults off; sandbox opts in only after workspace trust is established.
     #[arg(
         long,
-        env = "CHUTES_BUILD_WORKSPACE_PROJECT_LSP_TRUSTED",
+        env = "GROK_WORKSPACE_PROJECT_LSP_TRUSTED",
         default_value_t = false,
         action = clap::ArgAction::Set,
     )]
     project_lsp_trusted: bool,
-    /// Confine `chutes.ai/fs/*` resolution to the workspace root (reject `..`,
+    /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`,
     /// absolute-outside-root, symlink escapes). On by default: the standalone
     /// server always backs a remote-sandbox workspace, a real tenant boundary.
-    /// Override with `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
+    /// Override with `GROK_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
     #[arg(
         long,
-        env = "CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT",
+        env = "GROK_WORKSPACE_CONFINE_FS_TO_ROOT",
         default_value_t = true,
         action = clap::ArgAction::Set,
     )]
@@ -158,7 +158,7 @@ struct Args {
     #[arg(long, default_value = daemonize::DEFAULT_PIDFILE_PATH)]
     pid_file: PathBuf,
     /// Record `workspace_oom_protect_applied`, lower or recheck `oom_score_adj`
-    /// to -900, and force `CHUTES_BUILD_TOOLS_RESET_CHILD_OOM` so shell/pty children
+    /// to -900, and force `GROK_TOOLS_RESET_CHILD_OOM` so shell/pty children
     /// reset to 0. Complements always-on self-protect after pre-unshare
     /// inheritance; arms child reset even if the early write failed. Off by default.
     #[arg(long)]
@@ -202,7 +202,14 @@ struct PreviewCliArgs {
     preview_workspace_server_port: Option<u16>,
 }
 impl PreviewCliArgs {
-    fn into_preview_args(self, workspace_dir: PathBuf) -> PreviewArgs {
+    /// `discovery_refresh_ms` is env-sourced (`StatusConfig`), not a CLI flag.
+    /// `None` keeps `--discovery-refresh-ms` out of the proxy argv (see
+    /// [`PreviewArgs::discovery_refresh_ms`]).
+    fn into_preview_args(
+        self,
+        workspace_dir: PathBuf,
+        discovery_refresh_ms: Option<u64>,
+    ) -> PreviewArgs {
         PreviewArgs {
             enabled: self.preview_enabled,
             port: self.preview_port,
@@ -212,6 +219,7 @@ impl PreviewCliArgs {
             auth_redirect: self.preview_auth_redirect,
             allow_public: self.preview_allow_public,
             workspace_server_port: self.preview_workspace_server_port,
+            discovery_refresh_ms,
             workspace_dir,
         }
     }
@@ -292,7 +300,7 @@ fn main() -> anyhow::Result<()> {
     let rt = xai_tty_utils::runtime::build_with_blocking_pool(&mut builder)?;
     rt.block_on(run(args, cwd, oom_protection, oom_protect_applied))
 }
-/// Whether to arm `CHUTES_BUILD_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
+/// Whether to arm `GROK_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
 ///
 /// Always-on success must arm so children do not inherit -900. `--oom-protect`
 /// forces the env even when the early write failed (pre-unshare may still have
@@ -314,7 +322,7 @@ async fn run(
     oom_protection: std::io::Result<()>,
     oom_protect_applied: Option<bool>,
 ) -> anyhow::Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    xai_grok_extra_ca::ensure_default_crypto_provider();
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -332,7 +340,7 @@ async fn run(
     } else {
         tracing::info!("kernel OOM-kill protection not active");
     }
-    let direct_otlp = match std::env::var("CHUTES_BUILD_WORKSPACE_OTLP_ENDPOINT") {
+    let direct_otlp = match std::env::var("GROK_WORKSPACE_OTLP_ENDPOINT") {
         Ok(endpoint) if !endpoint.is_empty() => {
             match xai_tracing::init_fastrace(endpoint.clone(), SERVICE_NAME.to_owned(), None) {
                 Ok(()) => {
@@ -350,14 +358,14 @@ async fn run(
     let url = Url::parse(&args.hub_url).map_err(|e| anyhow::anyhow!("invalid --hub-url: {e}"))?;
     {
         use xai_grok_sandbox::{ProfileName, SandboxManager};
-        let profile = match std::env::var("CHUTES_BUILD_SANDBOX_PROFILE").ok() {
+        let profile = match std::env::var("GROK_SANDBOX_PROFILE").ok() {
             Some(val) => {
                 let parsed = val
                     .parse::<ProfileName>()
                     .expect("ProfileName::from_str is infallible");
                 if matches!(parsed, ProfileName::Custom(_)) {
                     tracing::warn!(value = %val,
-                        "Unrecognized CHUTES_BUILD_SANDBOX_PROFILE, defaulting to workspace");
+                        "Unrecognized GROK_SANDBOX_PROFILE, defaulting to workspace");
                     ProfileName::Workspace
                 } else {
                     parsed
@@ -368,7 +376,7 @@ async fn run(
         };
         let profile_name = profile.to_string();
         if profile == ProfileName::Off {
-            tracing::info!(profile = %profile_name, "Sandbox explicitly disabled via CHUTES_BUILD_SANDBOX_PROFILE=off");
+            tracing::info!(profile = %profile_name, "Sandbox explicitly disabled via GROK_SANDBOX_PROFILE=off");
         } else {
             let mut sandbox = SandboxManager::new(profile, &cwd);
             if let Err(e) = sandbox.apply(&cwd) {
@@ -398,7 +406,7 @@ async fn run(
         "Starting workspace server"
     );
     let cwd_display = cwd.display().to_string();
-    let session_id = std::env::var("CHUTES_BUILD_SESSION_ID").ok();
+    let session_id = std::env::var("GROK_SESSION_ID").ok();
     let parsed_metadata = match args.metadata {
         Some(json_str) => Some(
             serde_json::from_str(&json_str)
@@ -447,7 +455,9 @@ async fn run(
     status_config.preview_control_port = args.preview.preview_control_port;
     let preview_shutdown = if args.preview.preview_enabled {
         let control_port = args.preview.preview_control_port;
-        let cfg = args.preview.into_preview_args(cwd.clone());
+        let cfg = args
+            .preview
+            .into_preview_args(cwd.clone(), status_config.preview_discovery_refresh_ms());
         let (tx, rx) = tokio::sync::watch::channel(false);
         tokio::spawn(preview_supervisor::supervise_preview(cfg, rx));
         Some((tx, control_port))
@@ -571,6 +581,36 @@ async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The env-resolved discovery refresh must reach the proxy argv only when
+    /// set; `None` (env unset or 0) yields a refresh-free argv.
+    #[test]
+    fn into_preview_args_forwards_the_discovery_refresh_only_when_resolved() {
+        let cli = || PreviewCliArgs {
+            preview_enabled: true,
+            preview_port: None,
+            preview_control_port: Some(6015),
+            preview_visibility: None,
+            preview_instance_suffix: None,
+            preview_auth_redirect: None,
+            preview_allow_public: false,
+            preview_workspace_server_port: None,
+        };
+        let argv = cli()
+            .into_preview_args(PathBuf::from("/workspace"), Some(500))
+            .to_argv();
+        assert_eq!(
+            argv,
+            vec!["--control-port", "6015", "--discovery-refresh-ms", "500"],
+        );
+        let argv = cli()
+            .into_preview_args(PathBuf::from("/workspace"), None)
+            .to_argv();
+        assert_eq!(
+            argv,
+            vec!["--control-port", "6015"],
+            "without the env the flag must be omitted"
+        );
+    }
     #[test]
     fn hub_connect_failed_dwell_is_within_design_bounds() {
         assert!(HUB_CONNECT_FAILED_DWELL >= Duration::from_millis(500));
@@ -790,7 +830,7 @@ mod tests {
     }
     #[test]
     fn project_lsp_trust_defaults_off_and_is_opt_in() {
-        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PROJECT_LSP_TRUSTED") };
+        unsafe { std::env::remove_var("GROK_WORKSPACE_PROJECT_LSP_TRUSTED") };
         let args = Args::try_parse_from(["xai-workspace-server"]).unwrap();
         assert!(!args.project_lsp_trusted);
         let args = Args::try_parse_from(["xai-workspace-server", "--project-lsp-trusted", "true"])
@@ -882,7 +922,9 @@ mod tests {
     fn preview_defaults_are_inert() {
         let args = Args::try_parse_from(["xai-workspace-server"]).unwrap();
         assert!(!args.preview.preview_enabled);
-        let cfg = args.preview.into_preview_args(PathBuf::from("/workspace"));
+        let cfg = args
+            .preview
+            .into_preview_args(PathBuf::from("/workspace"), None);
         assert!(!cfg.enabled);
         assert!(
             cfg.to_argv().is_empty(),
@@ -903,14 +945,16 @@ mod tests {
             "--preview-instance-suffix",
             ".inst.example",
             "--preview-auth-redirect",
-            "https://chutes.ai/preview-auth",
+            "https://grok.com/preview-auth",
             "--preview-allow-public",
             "--preview-workspace-server-port",
             "8470",
         ])
         .unwrap();
         assert!(args.preview.preview_enabled);
-        let cfg = args.preview.into_preview_args(PathBuf::from("/workspace"));
+        let cfg = args
+            .preview
+            .into_preview_args(PathBuf::from("/workspace"), None);
         assert!(cfg.enabled);
         assert_eq!(cfg.port, Some(6014));
         assert_eq!(cfg.control_port, Some(6015));
@@ -918,7 +962,7 @@ mod tests {
         assert_eq!(cfg.instance_suffix.as_deref(), Some(".inst.example"));
         assert_eq!(
             cfg.auth_redirect.as_deref(),
-            Some("https://chutes.ai/preview-auth")
+            Some("https://grok.com/preview-auth")
         );
         assert!(cfg.allow_public);
         assert_eq!(cfg.workspace_server_port, Some(8470));
@@ -935,7 +979,7 @@ mod tests {
                 "--instance-suffix",
                 ".inst.example",
                 "--auth-redirect",
-                "https://chutes.ai/preview-auth",
+                "https://grok.com/preview-auth",
                 "--allow-public",
                 "--workspace-server-port",
                 "8470",
@@ -963,7 +1007,9 @@ mod tests {
             "owner",
         ])
         .unwrap();
-        let cfg = args.preview.into_preview_args(PathBuf::from("/workspace"));
+        let cfg = args
+            .preview
+            .into_preview_args(PathBuf::from("/workspace"), None);
         assert_eq!(cfg.visibility, Some(PreviewVisibility::Owner));
         assert_eq!(cfg.to_argv(), vec!["--visibility", "owner"]);
     }

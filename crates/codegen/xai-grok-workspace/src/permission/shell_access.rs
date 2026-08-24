@@ -298,25 +298,50 @@ pub(crate) fn command_words_write_paths(words: &[String]) -> Vec<String> {
 /// `git --output`, `cp`/`mv` dest, `tee`/`truncate`, in-place `sed`/`rustfmt`,
 /// `uniq` output, ...). No safe-sink filtering — the caller decides.
 pub(crate) fn command_write_paths_in_tree(root: Node<'_>, src: &str) -> Vec<String> {
-    let mut out = Vec::new();
+    let split = command_write_paths_split(root, src);
+    let mut out = split.redirect_paths;
+    out.extend(split.word_paths);
+    out
+}
 
+/// [`command_write_paths_in_tree`] split by provenance: redirect targets
+/// (`> f`, `>> f` — invisible to allow-rule word matching) vs command-word
+/// operands (`touch f`, `sed -i` — part of the words a rule matches). The
+/// distinction decides whether a narrow allow rule can vouch for the write.
+pub(crate) struct WritePathsSplit {
+    pub(crate) redirect_paths: Vec<String>,
+    /// A write redirect had no extractable target (`> $OUT`, `> "$(…)"`).
+    /// Fail-closed signal: the write exists but nothing can vouch for it.
+    pub(crate) unextracted_write_redirect: bool,
+    pub(crate) word_paths: Vec<String>,
+}
+
+pub(crate) fn command_write_paths_split(root: Node<'_>, src: &str) -> WritePathsSplit {
     // Output redirects (`> f`, `>> f`); fd-dups/heredocs are already skipped.
-    for redirect in shell_redirect_targets(root, src) {
-        if matches!(redirect.mode, ShellFileMode::Write)
-            && let Some(path) = redirect.path
-        {
-            out.push(path);
+    let mut redirect_paths = Vec::new();
+    let mut unextracted_write_redirect = false;
+    for r in shell_redirect_targets(root, src) {
+        if matches!(r.mode, ShellFileMode::Write) {
+            match r.path {
+                Some(path) => redirect_paths.push(path),
+                None => unextracted_write_redirect = true,
+            }
         }
     }
     // Per-command writers, after peeling env/timeout/... wrappers.
+    let mut word_paths = Vec::new();
     for invocation in shell_command_invocations(root, src) {
         let words = InvocationSlice {
             words: &invocation.words,
         }
         .literal_words();
-        out.extend(command_words_write_paths(&words));
+        word_paths.extend(command_words_write_paths(&words));
     }
-    out
+    WritePathsSplit {
+        redirect_paths,
+        unextracted_write_redirect,
+        word_paths,
+    }
 }
 
 /// Safe write sinks that do not touch a real file. Exact match.
@@ -374,10 +399,10 @@ impl ProtectedEditReason {
                 "Note: This edit contains changes under `/etc`, which is system configuration and can affect this machine beyond the current project.",
             ),
             Self::GrokConfig => Some(
-                "Note: This edit contains changes to Chutes Build config, which can alter permissions, tools, and other behavior in later sessions.",
+                "Note: This edit contains changes to Grok config, which can alter permissions, tools, and other behavior in later sessions.",
             ),
             Self::GrokSandbox => Some(
-                "Note: This edit contains changes to the Chutes Build sandbox config, which can loosen filesystem and network restrictions on commands.",
+                "Note: This edit contains changes to the Grok sandbox config, which can loosen filesystem and network restrictions on commands.",
             ),
             Self::ClaudeSettings => Some(
                 "Note: This edit contains changes to Claude-compatible settings, which can install hooks or change permission mode without a separate execution approval.",
@@ -490,12 +515,12 @@ fn protected_edit_reason(path: &Path) -> Option<ProtectedEditReason> {
     None
 }
 
-/// Chutes Build config files that alter permissions (`config.toml`, the
+/// Grok config files that alter permissions (`config.toml`, the
 /// `managed_config.toml` defaults tier, the user `requirements.toml` layer) or
 /// sandbox restrictions (`sandbox.toml`) in the running and later sessions; a
 /// silent edit would let the agent loosen its own guardrails. Matched directly
 /// inside any `.grok` dir (user-global default and workspace overlays) and
-/// directly under a custom `$CHUTES_BUILD_HOME`, which the component match cannot see.
+/// directly under a custom `$GROK_HOME`, which the component match cannot see.
 fn protected_grok_config_file(path: &Path, components: &[&str]) -> Option<ProtectedEditReason> {
     protected_grok_config_file_with_home(
         path,
@@ -518,12 +543,12 @@ fn protected_grok_config_file_with_home(
         Some("sandbox.toml") => ProtectedEditReason::GrokSandbox,
         _ => return None,
     };
-    let in_dot_grok = components.len() >= 2 && components[components.len() - 2] == ".chutes-build";
+    let in_dot_grok = components.len() >= 2 && components[components.len() - 2] == ".grok";
     let in_grok_home = || grok_home_matches(user_grok_home, |home| path.parent() == Some(home));
     (in_dot_grok || in_grok_home()).then_some(reason)
 }
 
-/// True when `pred` holds for the user chutes-build home in either its lexical or
+/// True when `pred` holds for the user grok home in either its lexical or
 /// physically-resolved form. Both forms are checked because callers hold a
 /// lexical and a resolved candidate path, and the home itself may sit behind a
 /// symlink. The comparison is byte-exact (no case folding), like every other
@@ -541,10 +566,8 @@ fn path_is_under_user_grok_hook_root(path: &Path, grok_home: &Path) -> bool {
 }
 
 fn protected_grok_hook_root(path: &Path, components: &[&str]) -> bool {
-    components
-        .windows(2)
-        .any(|pair| pair == [".chutes-build", "hooks"])
-        || components.ends_with(&[".chutes-build", "hooks-paths"])
+    components.windows(2).any(|pair| pair == [".grok", "hooks"])
+        || components.ends_with(&[".grok", "hooks-paths"])
         || grok_home_matches(xai_grok_config::user_grok_home().as_deref(), |home| {
             path_is_under_user_grok_hook_root(path, home)
         })
@@ -1449,8 +1472,8 @@ mod tests {
             "/etc",
             "/etc/grok-test",
             "/work/subdir/../.git/hooks/pre-commit",
-            "/home/user/.chutes-build/sandbox.toml",
-            "/work/project/.chutes-build/sandbox.toml",
+            "/home/user/.grok/sandbox.toml",
+            "/work/project/.grok/sandbox.toml",
         ] {
             assert!(
                 edit_target_protection(Path::new(path)).is_some(),
@@ -1459,7 +1482,7 @@ mod tests {
         }
         for path in [
             "/work/src/main.rs",
-            "/work/project/.chutes-build/config.toml/backup",
+            "/work/project/.grok/config.toml/backup",
             "/work/project/sandbox.toml",
             "/work/project/requirements.toml",
             "/work/project/managed_config.toml",
@@ -1502,7 +1525,7 @@ mod tests {
     fn edit_target_protection_classifies_reasons() {
         let cases = [
             (
-                "/home/user/.chutes-build/hooks/evil.json",
+                "/home/user/.grok/hooks/evil.json",
                 ProtectedEditReason::HookRoot,
             ),
             ("/work/.git/hooks/pre-commit", ProtectedEditReason::GitHooks),
@@ -1510,23 +1533,23 @@ mod tests {
             ("/home/user/.zshrc", ProtectedEditReason::StartupFile),
             ("/etc/hosts", ProtectedEditReason::Etc),
             (
-                "/home/user/.chutes-build/config.toml",
+                "/home/user/.grok/config.toml",
                 ProtectedEditReason::GrokConfig,
             ),
             (
-                "/home/user/.chutes-build/sandbox.toml",
+                "/home/user/.grok/sandbox.toml",
                 ProtectedEditReason::GrokSandbox,
             ),
             (
-                "/work/project/.chutes-build/sandbox.toml",
+                "/work/project/.grok/sandbox.toml",
                 ProtectedEditReason::GrokSandbox,
             ),
             (
-                "/home/user/.chutes-build/managed_config.toml",
+                "/home/user/.grok/managed_config.toml",
                 ProtectedEditReason::GrokConfig,
             ),
             (
-                "/home/user/.chutes-build/requirements.toml",
+                "/home/user/.grok/requirements.toml",
                 ProtectedEditReason::GrokConfig,
             ),
             (
@@ -1556,14 +1579,14 @@ mod tests {
     #[test]
     fn sensitive_edit_targets_include_hook_roots() {
         for path in [
-            "/home/user/.chutes-build/hooks/evil.json",
-            "/home/user/.chutes-build/hooks/nested/deep.json",
-            "/home/user/.chutes-build/hooks-paths",
+            "/home/user/.grok/hooks/evil.json",
+            "/home/user/.grok/hooks/nested/deep.json",
+            "/home/user/.grok/hooks-paths",
             "/home/user/.claude/settings.json",
             "/home/user/.claude/settings.local.json",
             "/home/user/.cursor/hooks.json",
-            "/work/project/.chutes-build/hooks/local.json",
-            "/work/project/.chutes-build/hooks-paths",
+            "/work/project/.grok/hooks/local.json",
+            "/work/project/.grok/hooks-paths",
         ] {
             assert!(
                 edit_target_protection(Path::new(path)).is_some(),
@@ -1571,8 +1594,8 @@ mod tests {
             );
         }
         for path in [
-            "/home/user/.chutes-build/hooks-disabled/note.json",
-            "/home/user/.chutes-build/hooks-evil/note.json",
+            "/home/user/.grok/hooks-disabled/note.json",
+            "/home/user/.grok/hooks-evil/note.json",
             "/home/user/project/src/hooks.json",
             "/home/user/.claude/other.json",
             "/home/user/.cursor/settings.json",
@@ -1595,7 +1618,7 @@ mod tests {
         ] {
             assert!(
                 path_is_under_user_grok_hook_root(Path::new(path), home),
-                "must match under custom chutes-build home: {path}"
+                "must match under custom grok home: {path}"
             );
         }
         for path in [
@@ -1633,7 +1656,7 @@ mod tests {
             ws.path().join("module-hooks-link"),
         )
         .unwrap();
-        let grok_hook = outside.path().join(".chutes-build/hooks/evil.json");
+        let grok_hook = outside.path().join(".grok/hooks/evil.json");
         std::fs::create_dir_all(grok_hook.parent().unwrap()).unwrap();
         std::fs::write(&grok_hook, b"{}").unwrap();
         symlink(&grok_hook, ws.path().join("grok-hook-link")).unwrap();
@@ -1652,7 +1675,7 @@ mod tests {
         }
     }
 
-    /// A custom `$CHUTES_BUILD_HOME` has no `.grok` path component, so the live
+    /// A custom `$GROK_HOME` has no `.grok` path component, so the live
     /// `config.toml` / `sandbox.toml` must be caught by the home-prefix branch.
     #[test]
     fn grok_config_files_under_custom_grok_home_are_protected() {
@@ -1669,7 +1692,7 @@ mod tests {
             assert_eq!(
                 protected_grok_config_file_with_home(&path, &components, Some(home_path)),
                 Some(reason),
-                "{file} directly under $CHUTES_BUILD_HOME must be protected"
+                "{file} directly under $GROK_HOME must be protected"
             );
         }
         // Same file names elsewhere (or with no resolvable home) stay ordinary.
@@ -1692,7 +1715,7 @@ mod tests {
         );
     }
 
-    /// The resolved-symlink arm of the grok-home match must decide: `$CHUTES_BUILD_HOME`
+    /// The resolved-symlink arm of the grok-home match must decide: `$GROK_HOME`
     /// points at a symlink while the edit targets the physical home directory,
     /// so the lexical parent-equality arm cannot fire.
     #[test]

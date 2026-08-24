@@ -352,7 +352,7 @@ fn snapshot_worktree_to_ref_inner(
     message: &str,
 ) -> Result<String> {
     // Synthetic identity scoped to this call so it is never written to git config.
-    const NAME: &str = "Chutes Build Snapshot";
+    const NAME: &str = "Grok Snapshot";
     const EMAIL: &str = "grok-snapshot@example.com";
 
     let tree = write_worktree_tree(worktree_path, IndexSeed::Head)?;
@@ -640,6 +640,8 @@ fn rehydrate_worktree_from_ref_inner(
         commit,
         unignored_copy: CopyReport::default(),
         ignored_copy: None,
+        resolved_strategy: crate::worktree::STRATEGY_GIT,
+        strategy_metadata: None,
     })
 }
 
@@ -1330,7 +1332,7 @@ mod tests {
         xai_test_utils::require_git!();
         let temp = TempDir::new().unwrap();
 
-        // Isolate the worktree DB (lock + CHUTES_BUILD_HOME → private tmp + restore).
+        // Isolate the worktree DB (lock + GROK_HOME → private tmp + restore).
         let fx = crate::db::GrokHomeFixture::new();
 
         let (repo_path, wt) = repo_with_worktree(&temp);
@@ -1340,13 +1342,13 @@ mod tests {
 
         // Rehydrate into a UNIQUE-basename dest so its DB id can't collide with
         // the `wt` id other concurrent rehydrate tests write to this (process-
-        // global CHUTES_BUILD_HOME) DB and INSERT-OR-REPLACE our row.
+        // global GROK_HOME) DB and INSERT-OR-REPLACE our row.
         let dest = temp.path().join("subagent-db-rehydrate");
         let report =
             rehydrate_worktree_from_ref(&dest, &repo_path, &snap, Some("subagent-42")).unwrap();
 
         // Filter to OUR record by path: concurrent open_default writers may add
-        // other subagent rows since CHUTES_BUILD_HOME is process-global. Match the
+        // other subagent rows since GROK_HOME is process-global. Match the
         // canonical path register_worktree stores (/var → /private/var on macOS).
         let dest_canon = dunce::canonicalize(&dest).unwrap_or_else(|_| dest.clone());
         let db = crate::db::WorktreeDb::open(&fx.home).unwrap();

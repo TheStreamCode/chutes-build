@@ -1,13 +1,13 @@
-//! [`WorkspaceOps`] ÔÇö dual-mode workspace operations handle.
+//! [`WorkspaceOps`] — dual-mode workspace operations handle.
 //!
 //! Two modes:
 //!
-//! - **`Local`** ÔÇö extensions dispatch through [`WorkspaceHandle`]; tool
+//! - **`Local`** — extensions dispatch through [`WorkspaceHandle`]; tool
 //!   calls dispatch through the workspace session's [`FinalizedToolset`].
 //!   The toolset is installed via [`WorkspaceOps::bind_local_session`]
 //!   after the agent is built.
 //!
-//! - **`Proxy`** ÔÇö everything routes through hub WebSocket to a remote
+//! - **`Proxy`** — everything routes through hub WebSocket to a remote
 //!   workspace server.
 //!
 //! ## Type safety
@@ -15,7 +15,7 @@
 //! Each RPC method has a corresponding request struct that implements
 //! [`WorkspaceRpc`]. The struct carries a `METHOD` constant and derives
 //! `Serialize + Deserialize`. Both the proxy client (`WorkspaceOps`) and
-//! the server (`WorkspaceRpcHandler::dispatch`) use the same struct ÔÇö
+//! the server (`WorkspaceRpcHandler::dispatch`) use the same struct —
 //! add/rename a field and the compiler catches both sides.
 use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::file_system::ContentSearchRequest;
@@ -70,8 +70,9 @@ pub use xai_grok_workspace_types::rpc::skills::DiscoverSkillsReq;
 pub use xai_grok_workspace_types::rpc::workspace::WorkspaceInfoReq;
 pub use xai_grok_workspace_types::rpc::worktree::{
     CreateWorktreeFromWorktreeRequestWire, CreateWorktreeFromWorktreeSyncReq,
-    PrepareWorktreeFromWorktreeResponse, WorktreeDbPathReq, WorktreeDbPathResponse,
-    WorktreeDbRebuildReq, WorktreeDbStatsReq, WorktreeGcReq, WorktreeListReq, WorktreeShowReq,
+    PrepareWorktreeFromWorktreeResponse, WorktreeCleanArtifactsReq, WorktreeDbPathReq,
+    WorktreeDbPathResponse, WorktreeDbRebuildReq, WorktreeDbStatsReq, WorktreeDetachReq,
+    WorktreeGcReq, WorktreeListReq, WorktreeSalvageReq, WorktreeShowReq,
 };
 pub use xai_grok_workspace_types::rpc::{RpcActivityClass, WorkspaceRpc};
 /// Implements [`WorkspaceRpc`] for request types whose responses
@@ -102,6 +103,12 @@ pub trait WorkspaceOp: WorkspaceRpc + DeserializeOwned + Send + Sync {
 }
 /// Prepare a worktree fork from an existing worktree (validation + path resolution).
 /// Returns a serialized result with `spawn_task` flag and the response.
+fn hub_transfer_client() -> WorkspaceResult<reqwest::Client> {
+    xai_grok_extra_ca::build_reqwest_client(|builder| {
+        builder.timeout(std::time::Duration::from_secs(600))
+    })
+    .map_err(|e| WorkspaceError::HubError(format!("failed to create HTTP client: {e}")))
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareWorktreeFromWorktreeReq {
     pub inner: crate::worktree::CreateWorktreeFromWorktreeRequest,
@@ -260,23 +267,23 @@ fn session_tracker(
         .ok_or_else(|| WorkspaceError::SessionNotFound(sid.to_owned()))?;
     Ok(session.hunk_tracker().clone())
 }
-/// Ancestor hop budget when locating `.chutes-build/repos.json`.
+/// Ancestor hop budget when locating `.grok/repos.json`.
 ///
-/// Grove rewrite is one hop (`/workspace/app` ÔåÆ `/workspace`). Desktop
+/// Grove rewrite is one hop (`/workspace/app` → `/workspace`). Desktop
 /// workspaces can sit deeper than that; this is a backstop only. Primary
-/// bounds are the sandbox root (`/workspace`) and the user-global Chutes Build home.
+/// bounds are the sandbox root (`/workspace`) and the user-global grok home.
 const REPOS_MANIFEST_MAX_ANCESTOR_HOPS: usize = 16;
 /// Directories to probe for [`REPOS_MANIFEST_RELATIVE_PATH`], starting at
 /// `root_cwd` (post-grove-rewrite agent cwd) and walking up.
 ///
-/// Does not escape the sandbox workspace or load `~/.chutes-build/repos.json` /
-/// `$CHUTES_BUILD_HOME/repos.json` (user-global, not a provisioned workspace).
+/// Does not escape the sandbox workspace or load `~/.grok/repos.json` /
+/// `$GROK_HOME/repos.json` (user-global, not a provisioned workspace).
 fn repos_manifest_search_dirs(start: &std::path::Path) -> Vec<std::path::PathBuf> {
     let rel = xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH;
     #[allow(deprecated)]
     let home = std::env::home_dir();
     let mut global_manifests = Vec::with_capacity(2);
-    if let Some(v) = std::env::var_os("CHUTES_BUILD_HOME")
+    if let Some(v) = std::env::var_os("GROK_HOME")
         && !v.is_empty()
     {
         global_manifests.push(std::path::PathBuf::from(v).join("repos.json"));
@@ -1369,6 +1376,57 @@ impl WorkspaceOp for WorktreeGcReq {
     }
 }
 #[async_trait]
+impl WorkspaceOp for WorktreeDetachReq {
+    async fn execute(
+        &self,
+        _ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let id = self.id_or_path.clone();
+        let allow_copy = self.allow_copy;
+        let report = tokio::task::spawn_blocking(move || {
+            crate::worktree::detach_worktree_mgmt(&id, allow_copy)
+        })
+        .await
+        .map_err(|e| WorkspaceError::HubError(e.to_string()))?
+        .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
+        serde_json::to_value(report).map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for WorktreeSalvageReq {
+    async fn execute(
+        &self,
+        _ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let id = self.id_or_path.clone();
+        let out = self.out.clone();
+        let report =
+            tokio::task::spawn_blocking(move || crate::worktree::salvage_worktree_mgmt(&id, &out))
+                .await
+                .map_err(|e| WorkspaceError::HubError(e.to_string()))?
+                .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
+        serde_json::to_value(report).map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
+impl WorkspaceOp for WorktreeCleanArtifactsReq {
+    async fn execute(
+        &self,
+        _ws: &WorkspaceHandle,
+        _session_id: Option<&str>,
+    ) -> WorkspaceResult<Self::Response> {
+        let id = self.id_or_path.clone();
+        let report =
+            tokio::task::spawn_blocking(move || crate::worktree::clean_artifacts_mgmt(&id))
+                .await
+                .map_err(|e| WorkspaceError::HubError(e.to_string()))?
+                .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
+        serde_json::to_value(report).map_err(|e| WorkspaceError::HubError(e.to_string()))
+    }
+}
+#[async_trait]
 impl WorkspaceOp for WorktreeDbStatsReq {
     async fn execute(
         &self,
@@ -1382,27 +1440,27 @@ impl WorkspaceOp for WorktreeDbStatsReq {
 }
 /// Dual-mode workspace operations handle.
 ///
-/// - **`Local`** ÔÇö wraps a [`WorkspaceHandle`]. Extensions dispatch
+/// - **`Local`** — wraps a [`WorkspaceHandle`]. Extensions dispatch
 ///   through the handle; tool calls dispatch through the workspace
 ///   session's [`FinalizedToolset`](xai_grok_tools::registry::types::FinalizedToolset).
 ///   Call [`bind_local_session`](Self::bind_local_session) after building
 ///   the agent to install the toolset on the workspace session.
 ///
-/// - **`Proxy`** ÔÇö wraps a [`WorkspaceClient`] connected to a remote hub.
+/// - **`Proxy`** — wraps a [`WorkspaceClient`] connected to a remote hub.
 ///   Everything routes through hub WebSocket to a remote workspace server.
 #[derive(Clone)]
 pub enum WorkspaceOps {
-    /// Local in-process mode ÔÇö extensions through the handle, tool calls
+    /// Local in-process mode — extensions through the handle, tool calls
     /// through the workspace session's toolset.
     Local { handle: WorkspaceHandle },
-    /// Proxy mode ÔÇö routes through hub RPC.
+    /// Proxy mode — routes through hub RPC.
     Proxy { client: WorkspaceClient },
 }
 impl WorkspaceOps {
     /// Construct a local-mode ops handle.
     ///
     /// Extensions dispatch through the handle immediately. Tool calls
-    /// require a workspace session ÔÇö call [`bind_local_session`](Self::bind_local_session)
+    /// require a workspace session — call [`bind_local_session`](Self::bind_local_session)
     /// after building the agent to install the toolset.
     pub fn local(handle: WorkspaceHandle) -> Self {
         Self::Local { handle }
@@ -1450,7 +1508,7 @@ impl WorkspaceOps {
     ///
     /// The installed toolset keeps the shell's own terminal backend; the
     /// session-owned backend minted at create stays idle and is what
-    /// `drop_session`/evict cancel ÔÇö deliberately never adopted from the
+    /// `drop_session`/evict cancel — deliberately never adopted from the
     /// external toolset, or teardown would SIGKILL a backend the shell shares.
     ///
     /// No-op in proxy mode (the workspace server owns sessions).
@@ -1672,7 +1730,7 @@ impl WorkspaceOps {
                         "session_not_found",
                         format!(
                             "workspace session not found: {session_id} \
-                             ÔÇö call bind_local_session() first"
+                             — call bind_local_session() first"
                         ),
                     )
                 })?;
@@ -1717,7 +1775,7 @@ impl WorkspaceOps {
     /// Test variant backed by a temp dir.
     ///
     /// Supports extension dispatch (`dispatch()`). Tool calls via
-    /// `call_tool()` require a workspace session ÔÇö call
+    /// `call_tool()` require a workspace session — call
     /// `bind_local_session()` with a test toolset first.
     pub fn for_test() -> Self {
         Self::Local {
@@ -1789,7 +1847,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ops = WorkspaceOps::for_test_in(tmp.path());
         let empty = ops.repos_list().await.expect("empty list");
-        assert!(empty.repos.is_empty(), "missing manifest ÔåÆ empty list");
+        assert!(empty.repos.is_empty(), "missing manifest → empty list");
         assert_eq!(
             empty.version,
             xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_VERSION
@@ -1801,7 +1859,7 @@ mod tests {
             base_branch: "main".into(),
             session_branch: "conv/1".into(),
         }]);
-        std::fs::create_dir_all(tmp.path().join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
         std::fs::write(
             tmp.path()
                 .join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH),
@@ -1850,7 +1908,7 @@ mod tests {
             base_branch: "".into(),
             session_branch: "conv/1".into(),
         }]);
-        std::fs::create_dir_all(sandbox_ws.join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(sandbox_ws.join(".grok")).unwrap();
         std::fs::write(
             sandbox_ws.join(xai_grok_workspace_types::rpc::repos::REPOS_MANIFEST_RELATIVE_PATH),
             one.to_json_bytes().unwrap(),
@@ -1867,7 +1925,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home = crate::TestEnvGuard::set("HOME", home.path());
-        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let _unset_grok = crate::TestEnvGuard::unset("GROK_HOME");
         let dirs = repos_manifest_search_dirs(std::path::Path::new("/workspace/app"));
         assert_eq!(
             dirs,
@@ -1883,7 +1941,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let _home = crate::TestEnvGuard::unset("HOME");
-        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let _unset_grok = crate::TestEnvGuard::unset("GROK_HOME");
         let dirs = repos_manifest_search_dirs(std::path::Path::new("/workspace/app"));
         assert!(
             dirs.contains(&std::path::PathBuf::from("/workspace/app")),
@@ -1901,7 +1959,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home = crate::TestEnvGuard::set("HOME", home.path());
-        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let _unset_grok = crate::TestEnvGuard::unset("GROK_HOME");
         let start = home.path().join("src").join("org").join("app");
         let dirs = repos_manifest_search_dirs(&start);
         assert!(dirs.contains(&start));
@@ -1909,7 +1967,7 @@ mod tests {
         assert!(dirs.contains(&home.path().join("src")));
         assert!(
             !dirs.iter().any(|d| d == home.path()),
-            "must not probe $HOME/.chutes-build/repos.json: {dirs:?}"
+            "must not probe $HOME/.grok/repos.json: {dirs:?}"
         );
     }
     /// Sync + `block_on` so `ENV_TEST_LOCK` is not held across `.await`
@@ -1921,7 +1979,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home = crate::TestEnvGuard::set("HOME", home.path());
-        let _unset_grok = crate::TestEnvGuard::unset("CHUTES_BUILD_HOME");
+        let _unset_grok = crate::TestEnvGuard::unset("GROK_HOME");
         let global = RepoManifest::new(vec![ProvisionedRepo {
             name: "global".into(),
             repository: "acme/global".into(),
@@ -1929,9 +1987,9 @@ mod tests {
             base_branch: "main".into(),
             session_branch: "x".into(),
         }]);
-        std::fs::create_dir_all(home.path().join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(home.path().join(".grok")).unwrap();
         std::fs::write(
-            home.path().join(".chutes-build").join("repos.json"),
+            home.path().join(".grok").join("repos.json"),
             global.to_json_bytes().unwrap(),
         )
         .unwrap();
@@ -1945,13 +2003,13 @@ mod tests {
         let listed = rt.block_on(ops.repos_list()).expect("list");
         assert!(
             listed.repos.is_empty(),
-            "missing workspace manifest must not fall back to ~/.chutes-build/repos.json: {:?}",
+            "missing workspace manifest must not fall back to ~/.grok/repos.json: {:?}",
             listed.repos
         );
     }
     /// Regression: a long-lived (leader) workspace must reclaim the per-session
-    /// `FinalizedToolset` ÔÇö and the MCP tools / `McpState` / `events.jsonl`
-    /// `EventWriter` it transitively pins ÔÇö when a session ends.
+    /// `FinalizedToolset` — and the MCP tools / `McpState` / `events.jsonl`
+    /// `EventWriter` it transitively pins — when a session ends.
     /// `bind_local_session` installs the toolset on a leader-level workspace
     /// session; without `end_local_session` that session (and everything it
     /// holds) leaks for the life of the process.
@@ -2110,7 +2168,7 @@ mod tests {
         );
     }
     /// `HookRegistry` round-trips through the wire mirror in both directions
-    /// (heavy ÔåÆ wire serializes identically; wire ÔåÆ heavy is the inverse).
+    /// (heavy → wire serializes identically; wire → heavy is the inverse).
     #[test]
     fn hook_registry_wire_round_trip_both_directions() {
         let spec = xai_grok_hooks::config::HookSpec {
@@ -2125,18 +2183,18 @@ mod tests {
             url: None,
             url_raw: None,
             timeout_ms: 5000,
-            source_dir: std::path::PathBuf::from("/home/u/.chutes-build/hooks"),
+            source_dir: std::path::PathBuf::from("/home/u/.grok/hooks"),
             extra_env: std::collections::HashMap::from([("FOO".to_string(), "bar".to_string())]),
             layer: xai_grok_hooks::config::HookProvenance::File,
         };
         let mut registry = xai_grok_hooks::discovery::HookRegistry::default();
         registry.append_specs(vec![spec]);
-        let wire = hook_registry_to_wire(&registry).expect("heavy ÔåÆ wire");
+        let wire = hook_registry_to_wire(&registry).expect("heavy → wire");
         assert_eq!(
             serde_json::to_value(&registry).unwrap(),
             serde_json::to_value(&wire).unwrap()
         );
-        let back = wire_to_hook_registry(&wire).expect("wire ÔåÆ heavy");
+        let back = wire_to_hook_registry(&wire).expect("wire → heavy");
         assert_eq!(
             serde_json::to_value(&back).unwrap(),
             serde_json::to_value(&registry).unwrap()
@@ -2255,7 +2313,7 @@ mod tests {
             url: None,
             url_raw: None,
             timeout_ms: 5000,
-            source_dir: std::path::PathBuf::from("/home/u/.chutes-build/hooks"),
+            source_dir: std::path::PathBuf::from("/home/u/.grok/hooks"),
             extra_env: std::collections::HashMap::from([("FOO".to_string(), "bar".to_string())]),
             layer: xai_grok_hooks::config::HookProvenance::Managed,
         };
@@ -2276,6 +2334,7 @@ mod tests {
             git_ref: Some("main".to_string()),
             worktree_type: Some(crate::worktree::WorktreeType::Linked),
             label: None,
+            grove_worktree: None,
             cancellation_token: None,
             resolved_dest_path: None,
         };
@@ -2547,7 +2606,7 @@ mod tests {
         assert_eq!(recovered.results[0].content.as_deref(), Some("contents"));
     }
     /// Code-nav must resolve its index at the per-session root the client
-    /// sends, not the shared workspace root ÔÇö otherwise a second window would
+    /// sends, not the shared workspace root — otherwise a second window would
     /// query the first window's index.
     #[tokio::test]
     async fn index_root_for_uses_explicit_per_window_root() {

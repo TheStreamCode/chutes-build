@@ -15,15 +15,15 @@ pub(crate) const META_LAST_AUTO_GC_AT: &str = "last_auto_gc_at";
 pub(crate) const META_LAST_AUTO_REBUILD_AT: &str = "last_auto_rebuild_at";
 
 /// `0` / `false` / `off` / empty disables auto-GC.
-pub const ENV_AUTO_GC: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC";
+pub const ENV_AUTO_GC: &str = "GROK_WORKTREE_AUTO_GC";
 /// `1` / `true` / `on` forces age-count without delete.
-pub const ENV_AUTO_GC_DRY_RUN: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_DRY_RUN";
+pub const ENV_AUTO_GC_DRY_RUN: &str = "GROK_WORKTREE_AUTO_GC_DRY_RUN";
 /// Default max age in seconds (overrides TOML/remote when set and parseable).
-pub const ENV_AUTO_GC_MAX_AGE: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_MAX_AGE";
+pub const ENV_AUTO_GC_MAX_AGE: &str = "GROK_WORKTREE_AUTO_GC_MAX_AGE";
 /// `1` / `true` / `on` enables optional discovery rebuild + stale git prune.
-pub const ENV_AUTO_GC_REBUILD: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_REBUILD";
+pub const ENV_AUTO_GC_REBUILD: &str = "GROK_WORKTREE_AUTO_GC_REBUILD";
 
-/// Remove every `CHUTES_BUILD_WORKTREE_AUTO_GC*` env var so a test starts from a clean
+/// Remove every `GROK_WORKTREE_AUTO_GC*` env var so a test starts from a clean
 /// slate. Exposed (not `cfg(test)`) so other crates' tests can share the single
 /// source of truth for the var list; not intended for production use.
 ///
@@ -285,7 +285,7 @@ pub(crate) fn env_auto_gc_rebuild() -> bool {
     env_var_truthy(ENV_AUTO_GC_REBUILD)
 }
 
-/// Parse `CHUTES_BUILD_WORKTREE_AUTO_GC_MAX_AGE` as seconds; invalid/absent → None.
+/// Parse `GROK_WORKTREE_AUTO_GC_MAX_AGE` as seconds; invalid/absent → None.
 pub(crate) fn env_auto_gc_max_age() -> Option<u64> {
     match std::env::var(ENV_AUTO_GC_MAX_AGE) {
         Ok(v) => {
@@ -397,13 +397,10 @@ pub fn maybe_auto_gc(db: &WorktreeDb, auto_opts: &ResolvedWorktreeAutoGc) -> Res
         }
     }
 
-    // Rebuild before the prune-repo snapshot so newly registered worktrees'
-    // source repos are included. Snapshot still happens before dead-GC so
-    // sole-dead source repos remain in the set after unregister.
-    //
-    // Rebuild meta is **not** stamped here: if GC fails after a successful
-    // rebuild, we must leave rebuild unthrottled so the next pass can pick up
-    // worktrees created between this rebuild and the failed GC.
+    // Rebuild before the prune snapshot (so new worktrees' source repos are in
+    // it) and before dead-GC (so sole-dead repos survive unregister). Meta is
+    // stamped by the caller after GC succeeds, not here: a GC failure must leave
+    // rebuild unthrottled so the next pass sees worktrees made in between.
     let (rebuild, rebuild_due_to_stamp) = maybe_run_rebuild(
         db,
         include_rebuild,
@@ -418,7 +415,7 @@ pub fn maybe_auto_gc(db: &WorktreeDb, auto_opts: &ResolvedWorktreeAutoGc) -> Res
         BTreeSet::new()
     };
 
-    // The current process's cwd is "in use" — never reclaim the worktree we run in.
+    // The current process's cwd is "in use"; never reclaim the worktree we run in.
     let mut in_use = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         in_use.push(cwd);
@@ -521,7 +518,7 @@ pub fn maybe_auto_gc(db: &WorktreeDb, auto_opts: &ResolvedWorktreeAutoGc) -> Res
 enum RebuildMetaClass {
     Due,
     Throttled,
-    /// Meta read failed — skip rebuild, do not abort GC.
+    /// Meta read failed: skip rebuild, do not abort GC.
     SkipFailed,
 }
 
@@ -564,7 +561,7 @@ fn classify_rebuild_meta(
 /// Optional rebuild; never fails the GC pass.
 ///
 /// Returns `(report, due_to_stamp)`. Stamp is applied by the caller **only
-/// after** GC succeeds — stamping here would throttle rebuild while GC can
+/// after** GC succeeds: stamping here would throttle rebuild while GC can
 /// still `Err` and leave `last_auto_gc_at` unstamped.
 fn maybe_run_rebuild(
     db: &WorktreeDb,
@@ -589,7 +586,7 @@ fn maybe_run_rebuild(
     let home = match resolve_grok_home() {
         Ok(h) => h,
         Err(e) => {
-            tracing::warn!(error = %e, "auto worktree rebuild skipped: Chutes Build home unresolved");
+            tracing::warn!(error = %e, "auto worktree rebuild skipped: grok home unresolved");
             return (None, false);
         }
     };
@@ -602,7 +599,6 @@ fn maybe_run_rebuild(
                 already_tracked = report.already_tracked,
                 "auto worktree db rebuild complete"
             );
-            // Defer META_LAST_AUTO_REBUILD_AT until after GC succeeds.
             (Some(report), true)
         }
         Err(e) => {
@@ -630,12 +626,12 @@ fn collect_source_repos_for_prune(db: &WorktreeDb) -> BTreeSet<PathBuf> {
 }
 
 /// Scrub stale grok-owned registrations from each known source repo,
-/// scoped to worktrees under the Chutes Build home to prove ownership (see
+/// scoped to worktrees under the grok home to prove ownership (see
 /// [`crate::git::remove_stale_worktree_registrations_under`] for why a blanket
 /// `git worktree prune` is unsafe here).
 fn prune_stale_git_worktree_registrations(repos: &BTreeSet<PathBuf>) -> u64 {
     let Ok(grok_home) = resolve_grok_home() else {
-        tracing::warn!("auto worktree registration scrub skipped: Chutes Build home unresolved");
+        tracing::warn!("auto worktree registration scrub skipped: grok home unresolved");
         return 0;
     };
     let cleaned: u64 = repos
@@ -712,8 +708,7 @@ mod tests {
         }
     }
 
-    /// Base test options: GC always due, orphan cleaners off. Tests override
-    /// only the fields under test via `..auto_opts()`.
+    /// Base test options: GC always due, orphan cleaners off.
     fn auto_opts() -> ResolvedWorktreeAutoGc {
         ResolvedWorktreeAutoGc {
             min_interval_secs: 0,
@@ -730,8 +725,7 @@ mod tests {
     }
 
     /// Base options for the rebuild tests: rebuild enabled and always due
-    /// (`rebuild_min_interval_secs: 0`). Tests override extra fields via
-    /// `..rebuild_opts()`.
+    /// (`rebuild_min_interval_secs: 0`).
     fn rebuild_opts() -> ResolvedWorktreeAutoGc {
         ResolvedWorktreeAutoGc {
             include_rebuild: true,
@@ -761,8 +755,6 @@ mod tests {
             .unwrap_or(0)
     }
 
-    // ---- Pure helpers: age gate + GcOptions builder --------------------
-
     #[test]
     fn age_expiry_allowed_table() {
         for (scan, dry_run, expected) in [
@@ -781,8 +773,8 @@ mod tests {
 
     /// Builder invariants across the dry-run matrix: `force` is never set, the
     /// dry-run flag propagates, and the real age path (`max_age` + kind map) is
-    /// present iff `age_expiry_allowed(scan, dry_run)` — `scan` being the
-    /// compile-time platform capability.
+    /// present iff `age_expiry_allowed(scan, dry_run)` (`scan` is the
+    /// compile-time platform capability).
     #[test]
     fn build_auto_gc_options_table() {
         let _g = env_guard();
@@ -816,16 +808,14 @@ mod tests {
         }
     }
 
-    // ---- maybe_auto_gc: age path, liveness, kind policy ----------------
-
     /// Real age-expiry (scan platform): an unguarded expired session is
     /// deleted while a live `creator_pid` session and a Manual tree (never
     /// age-expires by default) both survive. `force` is never applied by the
-    /// auto path — the live tree would be deleted if it were.
+    /// auto path; the live tree would be deleted if it were.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn maybe_auto_gc_age_path_expires_unguarded_protects_live_and_manual() {
-        // Age path needs a successful CWD scan — serialize with chdir tests.
+        // Age path needs a successful CWD scan; serialize with chdir tests.
         let _g = env_guard();
         let _cwd_lock = crate::api::cwd_test_guard();
         clear_auto_gc_env();
@@ -937,8 +927,6 @@ mod tests {
         assert!(all.is_empty());
     }
 
-    // ---- Orphan-snapshot cleaner gating (platform trio) ----------------
-
     /// Orphan cleaners are gated: dry-run never invokes them (all platforms);
     /// a real pass invokes them only on Linux (compile-gated symbols),
     /// otherwise they are always absent.
@@ -947,7 +935,6 @@ mod tests {
         let _g = env_guard();
         clear_auto_gc_env();
 
-        // dry-run: cleaners never run, regardless of platform.
         let tmp = tempfile::TempDir::new().unwrap();
         let db = WorktreeDb::open(tmp.path()).unwrap();
         let dry = maybe_auto_gc(
@@ -965,7 +952,6 @@ mod tests {
             "dry_run must not invoke orphan cleaners"
         );
 
-        // real pass: present on Linux, absent on every other platform.
         let tmp2 = tempfile::TempDir::new().unwrap();
         let db2 = WorktreeDb::open(tmp2.path()).unwrap();
         let real = maybe_auto_gc(
@@ -990,9 +976,7 @@ mod tests {
         );
     }
 
-    // ---- Enable / disable dispositions ---------------------------------
-
-    /// Kill switch: env `CHUTES_BUILD_WORKTREE_AUTO_GC=0` or `opts.enabled=false` both
+    /// Kill switch: env `GROK_WORKTREE_AUTO_GC=0` or `opts.enabled=false` both
     /// short-circuit to `Disabled` with no stamp; an enabled pass with a clean
     /// env runs and stamps.
     #[test]
@@ -1108,8 +1092,6 @@ mod tests {
         clear_auto_gc_env();
     }
 
-    // ---- Throttle + stamp dispositions ---------------------------------
-
     #[test]
     fn is_throttled_logic() {
         assert!(!is_throttled(1000, 2000, 3600), "future stamp is due");
@@ -1122,7 +1104,7 @@ mod tests {
     }
 
     /// Fail-closed: a broken schema surfaces as `Err` (never a silent success)
-    /// and never stamps — for both a GC-time failure (worktrees table gone,
+    /// and never stamps, for both a GC-time failure (worktrees table gone,
     /// which fails after the meta read) and a meta-read failure (meta table
     /// gone, which fails before GC even starts).
     #[test]
@@ -1192,11 +1174,8 @@ mod tests {
         assert!(!report.stamped, "failed set_meta must report stamped=false");
     }
 
-    // ---- Layer resolution: precedence + clamps -------------------------
-
     /// `resolve_worktree_auto_gc_from_layers` precedence (env > local > remote
-    /// > defaults), kind-map merge, and numeric clamps — one row per distinct
-    /// assertion the split resolver tests used to make.
+    /// > defaults), kind-map merge, and numeric clamps.
     #[test]
     fn resolve_worktree_auto_gc_layers_table() {
         let _g = env_guard();
@@ -1409,15 +1388,12 @@ mod tests {
             for (k, v) in &env {
                 unsafe { std::env::set_var(k, v) };
             }
-            // Scope any check failure to its row for triage.
             eprintln!("resolve layer case: {name}");
             let policy = resolve_worktree_auto_gc_from_layers(local.as_ref(), remote.as_ref());
             check(&policy);
             clear_auto_gc_env();
         }
     }
-
-    // ---- Rebuild + prune -----------------------------------------------
 
     #[test]
     fn include_rebuild_true_registers_untracked_under_grok_home() {
@@ -1596,7 +1572,7 @@ mod tests {
     }
 
     /// A real rebuild pass prunes a stale grok-owned git registration. The
-    /// source repo is discovered from the tracked row's snapshot — which holds
+    /// source repo is discovered from the tracked row's snapshot, which holds
     /// even when that row is the sole record and is *dead* (GC unregisters it
     /// only after the prune snapshot is taken).
     #[test]
@@ -1755,7 +1731,7 @@ mod tests {
         let wt = fx.home.join("worktrees/repo/env-rebuild-sess");
         std::fs::create_dir_all(wt.join(".git")).unwrap();
 
-        // opts.include_rebuild false — env must still enable.
+        // opts.include_rebuild false; env must still enable.
         let report = maybe_auto_gc(
             &db,
             &ResolvedWorktreeAutoGc {
