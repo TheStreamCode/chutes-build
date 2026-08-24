@@ -10,11 +10,16 @@ const MAX_WORKFLOW_NAME_BYTES: usize = 64;
 pub(crate) struct BuiltinWorkflow {
     pub name: &'static str,
     pub script: &'static str,
+    pub path: &'static str,
 }
 
 pub(crate) const BUILTIN_WORKFLOWS: &[BuiltinWorkflow] = &[BuiltinWorkflow {
     name: "deep-research",
     script: include_str!("../workflows/deep_research.rhai"),
+    path: concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/session/workflows/deep_research.rhai"
+    ),
 }];
 
 pub(crate) struct ResolvedWorkflow {
@@ -63,6 +68,13 @@ pub(crate) fn user_workflow_dir() -> PathBuf {
     crate::util::grok_home::grok_home().join("workflows")
 }
 
+/// Runtime-updated builtins from the GCS subagent bundle (`~/.grok/bundled/workflows`).
+pub(crate) fn bundled_workflow_dir() -> PathBuf {
+    crate::util::grok_home::grok_home()
+        .join("bundled")
+        .join("workflows")
+}
+
 pub(crate) struct WorkflowRegistry {
     entries: Vec<RegistryEntry>,
     duplicate_names: BTreeMap<String, &'static str>,
@@ -103,7 +115,7 @@ fn cached_builtin_entries() -> Vec<RegistryEntry> {
             script: builtin.script.to_string(),
             source: WorkflowSource::Builtin,
             source_label: "builtin",
-            path: None,
+            path: Some(PathBuf::from(builtin.path)),
         })
         .collect()
 }
@@ -112,8 +124,14 @@ impl WorkflowRegistry {
     pub(crate) fn scan(session_cwd: Option<&Path>) -> Self {
         let mut entries = Vec::new();
         let mut duplicate_names = BTreeMap::new();
-        let mut builtin_entries = cached_builtin_entries();
 
+        // Bundled first so a GCS-shipped `deep-research.rhai` shadows include_str!.
+        // Project/user still cannot override a compiled-in name (same as today).
+        let mut bundled_entries = scan_directory(&bundled_workflow_dir(), "bundled");
+        reject_same_scope_duplicates(&mut bundled_entries, "bundled", &mut duplicate_names);
+        merge_scope(&mut entries, bundled_entries);
+
+        let mut builtin_entries = cached_builtin_entries();
         reject_same_scope_duplicates(&mut builtin_entries, "builtin", &mut duplicate_names);
         merge_scope(&mut entries, builtin_entries);
 
@@ -121,10 +139,7 @@ impl WorkflowRegistry {
         if let Some(cwd) = session_cwd
             && crate::agent::folder_trust::project_scope_allowed(cwd)
         {
-            dirs.push((
-                project_root(cwd).join(".chutes-build").join("workflows"),
-                "project",
-            ));
+            dirs.push((project_root(cwd).join(".grok").join("workflows"), "project"));
         }
         dirs.push((user_workflow_dir(), "user"));
 
@@ -238,15 +253,51 @@ fn scan_directory(dir: &Path, source_label: &'static str) -> Vec<RegistryEntry> 
         .filter_map(|path| {
             let script = read_trusted_source(&path).ok()?;
             let meta = parse_workflow(&script, Some(&path)).ok()?;
+            // A GCS update of a compiled-in name stays privileged (fork
+            // context, telemetry name, not user-savable). New bundled-only
+            // names stay file-scoped.
+            let compiled_in = source_label == "bundled"
+                && is_compiled_in_builtin(&meta.name)
+                && bundled_file_is_managed(&path);
             Some(RegistryEntry {
                 meta,
                 script,
-                source: WorkflowSource::File(path.clone()),
-                source_label,
+                source: if compiled_in {
+                    WorkflowSource::Builtin
+                } else {
+                    WorkflowSource::File(path.clone())
+                },
+                source_label: if compiled_in { "builtin" } else { source_label },
                 path: Some(path),
             })
         })
         .collect()
+}
+
+fn is_compiled_in_builtin(name: &str) -> bool {
+    BUILTIN_WORKFLOWS.iter().any(|builtin| builtin.name == name)
+}
+
+/// Privilege only if this file is still the extractor-managed bundle bytes.
+fn bundled_file_is_managed(path: &Path) -> bool {
+    let Some(workflows_dir) = path.parent() else {
+        return false;
+    };
+    if workflows_dir.file_name().and_then(|name| name.to_str()) != Some("workflows") {
+        return false;
+    }
+    let Some(root) = workflows_dir.parent() else {
+        return false;
+    };
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let relative = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    crate::bundle::is_managed_bundle_file(root, &relative)
 }
 
 pub(crate) fn resolve_by_name(
@@ -307,7 +358,7 @@ pub(crate) fn resolve_by_path(
     if !in_project && !in_user_or_session {
         return Err(ResolveError::UntrustedPath {
             path: candidate.display().to_string(),
-            reason: "outside the project, Chutes Build home, and session workflow runs".into(),
+            reason: "outside the project, grok home, and session workflow runs".into(),
         });
     }
 
@@ -488,7 +539,7 @@ pub(crate) fn save_project_workflow(
         path: root.display().to_string(),
         error: error.to_string(),
     })?;
-    let dir = canonical_root.join(".chutes-build").join("workflows");
+    let dir = canonical_root.join(".grok").join("workflows");
     create_contained_workflow_dir(&canonical_root, &dir)?;
     let canonical_dir = dunce::canonicalize(&dir).map_err(|error| ResolveError::Io {
         path: dir.display().to_string(),
@@ -650,7 +701,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
         let cwd = dir.path().join("nested");
-        let wf_dir = dir.path().join(".chutes-build").join("workflows");
+        let wf_dir = dir.path().join(".grok").join("workflows");
         std::fs::create_dir_all(&cwd).unwrap();
         std::fs::create_dir_all(&wf_dir).unwrap();
         std::fs::write(wf_dir.join("alpha.rhai"), script("alpha")).unwrap();
@@ -695,7 +746,7 @@ mod tests {
     fn project_workflows_follow_folder_trust() {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        let workflows = dir.path().join(".chutes-build/workflows");
+        let workflows = dir.path().join(".grok/workflows");
         std::fs::create_dir_all(&workflows).unwrap();
         std::fs::write(workflows.join("project-only.rhai"), script("project-only")).unwrap();
 
@@ -718,6 +769,82 @@ mod tests {
             trusted.resolve_by_name("project-only").unwrap().meta.name,
             "project-only"
         );
+    }
+
+    #[test]
+    fn bundled_workflow_shadows_compiled_in_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundled = dir.path().join("workflows");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(
+            bundled.join("deep-research.rhai"),
+            "let meta = #{ name: \"deep-research\", description: \"from-bundle\" };\ncomplete(\"ok\");",
+        )
+        .unwrap();
+
+        let mut entries = scan_directory(&bundled, "bundled");
+        merge_scope(&mut entries, cached_builtin_entries());
+        let hit = entries
+            .iter()
+            .find(|entry| entry.meta.name == "deep-research")
+            .expect("deep-research");
+        assert_eq!(hit.source_label, "bundled");
+        assert!(matches!(hit.source, WorkflowSource::File(_)));
+        assert_eq!(hit.meta.description, "from-bundle");
+    }
+
+    #[test]
+    fn managed_bundled_override_keeps_builtin_privileges() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("bundled");
+        let workflows = root.join("workflows");
+        std::fs::create_dir_all(&workflows).unwrap();
+        let path = workflows.join("deep-research.rhai");
+        let script = "let meta = #{ name: \"deep-research\", description: \"from-bundle\" };\ncomplete(\"ok\");";
+        std::fs::write(&path, script).unwrap();
+        let checksum = crate::bundle::checksum_file(&path).unwrap();
+        let manifest = serde_json::json!({
+            "version": "test",
+            "checksums": { "workflows/deep-research.rhai": checksum },
+        });
+        std::fs::write(root.join("manifest.json"), manifest.to_string()).unwrap();
+
+        let entries = scan_directory(&workflows, "bundled");
+        let hit = entries
+            .iter()
+            .find(|entry| entry.meta.name == "deep-research")
+            .expect("deep-research");
+        assert_eq!(hit.source_label, "builtin");
+        assert_eq!(hit.source, WorkflowSource::Builtin);
+        assert_eq!(hit.meta.description, "from-bundle");
+    }
+
+    #[test]
+    fn bundled_only_workflow_stays_file_scoped() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundled = dir.path().join("workflows");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(bundled.join("bundle-only.rhai"), script("bundle-only")).unwrap();
+
+        let entries = scan_directory(&bundled, "bundled");
+        let hit = entries
+            .iter()
+            .find(|entry| entry.meta.name == "bundle-only")
+            .expect("bundle-only");
+        assert_eq!(hit.source_label, "bundled");
+        assert!(matches!(hit.source, WorkflowSource::File(_)));
+    }
+
+    #[test]
+    fn compiled_in_workflow_remains_when_bundled_dir_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entries = scan_directory(&dir.path().join("missing"), "bundled");
+        merge_scope(&mut entries, cached_builtin_entries());
+        let hit = entries
+            .iter()
+            .find(|entry| entry.meta.name == "deep-research")
+            .expect("deep-research");
+        assert_eq!(hit.source_label, "builtin");
     }
 
     #[test]
@@ -805,7 +932,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project");
-        let workflows = project.join(".chutes-build/workflows");
+        let workflows = project.join(".grok/workflows");
         let target = dir.path().join("linked.rhai");
         std::fs::create_dir_all(&workflows).unwrap();
         std::fs::write(&target, script("linked")).unwrap();
@@ -851,7 +978,7 @@ mod tests {
         let path = save_project_workflow(&linked, "safe", &script("safe")).unwrap();
         assert_eq!(
             dunce::canonicalize(path).unwrap(),
-            project.join(".chutes-build/workflows/safe.rhai")
+            project.join(".grok/workflows/safe.rhai")
         );
     }
 
@@ -863,9 +990,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project");
         let attacker = dir.path().join("attacker");
-        std::fs::create_dir_all(project.join(".chutes-build")).unwrap();
+        std::fs::create_dir_all(project.join(".grok")).unwrap();
         std::fs::create_dir_all(&attacker).unwrap();
-        symlink(&attacker, project.join(".chutes-build/workflows")).unwrap();
+        symlink(&attacker, project.join(".grok/workflows")).unwrap();
 
         assert!(matches!(
             save_project_workflow(&project, "safe", &script("safe")),

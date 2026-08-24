@@ -93,6 +93,8 @@ pub(crate) use types::*;
 pub use types::{TodoGateDecision, TodoGateReason};
 #[path = "acp_session_impl/goal.rs"]
 mod goal;
+#[path = "acp_session_impl/named_workflow_args.rs"]
+mod named_workflow_args;
 #[path = "acp_session_impl/tool_layer_images.rs"]
 mod tool_layer_images;
 #[path = "acp_session_impl/turn.rs"]
@@ -104,6 +106,11 @@ use tool_layer_images::*;
 mod auth_retry;
 pub(crate) use auth_retry::{
     AuthRetryDecision, AuthRetrySchedule, human_duration, pace_uncharged_resubmit,
+};
+#[path = "acp_session_impl/rate_limit_waits.rs"]
+mod rate_limit_waits;
+pub(crate) use rate_limit_waits::{
+    RateLimitWaitBudget, RateLimitWaitConfig, RateLimitWaitDecision,
 };
 #[path = "acp_session_impl/image_strip.rs"]
 mod image_strip;
@@ -195,6 +202,8 @@ mod run_loop;
 mod session_setup;
 #[path = "acp_session_impl/side_call.rs"]
 mod side_call;
+#[path = "acp_session_impl/status_line.rs"]
+pub(crate) mod status_line;
 #[path = "acp_session_impl/title_refresh.rs"]
 mod title_refresh;
 #[path = "acp_session_impl/turn_end.rs"]
@@ -209,7 +218,7 @@ mod spawn;
 use super::acp_types::*;
 pub use spawn::SessionThread;
 pub(crate) use spawn::*;
-/// Client-registered hook gates (the `chutes.ai/hooks/run` reverse request).
+/// Client-registered hook gates (the `x.ai/hooks/run` reverse request).
 mod hooks;
 pub(crate) struct InputItem {
     pub(crate) prompt_id: String,
@@ -508,6 +517,7 @@ fn managed_gateway_error_to_tool_error(
         }
     }
 }
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod managed_gateway_error_tests {
     use super::*;
@@ -730,6 +740,9 @@ pub(crate) struct SessionActor {
     pub(crate) rewind_pending_prompt: std::sync::Mutex<Option<String>>,
     /// Startup hints for the session: currently responsible for customizing the user message prefix and the git status mode (fast no untracked for non-interactive mode)
     pub(crate) startup_hints: StartupHints,
+    /// Wakes the status-line emitter task, and on drop ends it. See
+    /// [`status_line::run_status_emitter`] and the `Drop` beside it.
+    pub(crate) status_wake: status_line::StatusWake,
     /// Delivery-tool names for the CURRENT attachment, seeded from the spawn
     /// `startupHints.deliveryTools` and re-applied when a resident
     /// `session/load` carries explicit hints (`UpdateAttachPolicy`). Kept
@@ -738,12 +751,9 @@ pub(crate) struct SessionActor {
     /// per-attachment policy may.
     pub(crate) delivery_tools: std::cell::RefCell<Vec<String>>,
     /// `nonInteractive` for the CURRENT attachment (same lifecycle as
-    /// `delivery_tools`). Drives operational can-a-human-act-now decisions —
-    /// today the MCP OAuth interactivity on (re)init, which pairs with the
-    /// `UpdateMcpServers` sent by the same resident load. The frozen
     /// `startup_hints.non_interactive` keeps governing spawn-time structure
     /// (system prompt variant, user-message prefix, git-status mode).
-    pub(crate) attach_non_interactive: std::cell::Cell<bool>,
+    pub(crate) attach_non_interactive: std::rc::Rc<std::cell::Cell<bool>>,
     /// Verbatim mirror-fork override: when `Some`, every turn sends this exact
     /// parent tool schema instead of the locally-built toolset, keeping the
     /// child's request prefix byte-identical to the parent for radix cache reuse.
@@ -755,11 +765,11 @@ pub(crate) struct SessionActor {
     pub(crate) memory: super::memory_state::SessionMemory,
     /// Telemetry counters for session summary.
     pub(crate) session_start: std::time::Instant,
-    /// Per-chunk idle timeout for inference streaming. If no SSE chunk is received
-    /// within this duration, the stream is aborted with a non-retryable error.
-    /// Resolved at construction: per-model config.toml → remote settings → 300s default.
+    /// Per-chunk idle timeout for inference streaming; a stall aborts the stream.
     pub(crate) inference_idle_timeout: Duration,
     pub(crate) max_retries: u32,
+    /// Fixed bounds on a subagent turn's 429 waiting.
+    pub(crate) rate_limit_waits: RateLimitWaitConfig,
     /// Maximum tool-use turns before the session stops. `None` = unlimited.
     pub(crate) max_turns: Option<usize>,
     /// Pending mid-turn interjections from the user (Ctrl+Enter).
@@ -797,12 +807,21 @@ pub(crate) struct SessionActor {
     /// Wrapped in `RefCell` for mid-session mutation (skill refresh, prompt regen).
     /// Safe: session actor is single-threaded (LocalSet), no concurrent access.
     pub(crate) agent: std::cell::RefCell<xai_grok_agent::Agent>,
-    /// Dedup slot for `chutes.ai/git_head_changed`, shared with the fs-watch
+    /// Dedup slot for `x.ai/git_head_changed`, shared with the fs-watch
     /// `GitHead` consumer (see `git_head_dedup_key`).
     pub(crate) last_reported_branch: Arc<parking_lot::Mutex<Option<String>>>,
-    /// Client opted into `chutes.ai/gitHeadChanged`. When false (headless/SDK),
+    /// Client opted into `x.ai/gitHeadChanged`. When false (headless/SDK),
     /// `maybe_notify_git_branch` no-ops — no git subprocess.
     git_head_enabled: bool,
+    /// A client that will draw a status row has attached (`x.ai/statusLine`).
+    /// While false, the emitter wakes and returns without building anything: no
+    /// git discovery, no chat-state round trips.
+    ///
+    /// Live rather than fixed at spawn, because a resident session outlives the
+    /// client that created it and a later attach may be the one that draws a
+    /// row. Assigned from the attaching client's capability; see
+    /// [`crate::session::handle::SessionHandle::set_status_line_wanted`].
+    pub(crate) status_line_enabled: Arc<std::sync::atomic::AtomicBool>,
     /// Shared models manager for etag-triggered refresh from response headers.
     pub(crate) models_manager: crate::agent::models::ModelsManager,
     /// Stable display path for forked sessions (original project path).
@@ -913,7 +932,7 @@ pub(crate) struct SessionActor {
     /// `Default` (all `InheritCurrent`, empty pool) reproduces today's
     /// behavior. Consumed by the per-role spawn wiring.
     pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Kill-switch (`CHUTES_BUILD_GOAL_USE_CURRENT_MODEL_ONLY` / `[features]
+    /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features]
     /// goal_use_current_model_only`) resolved at actor build. When `true`,
     /// every `/goal` role inherits the current model. `goal_role_models`
     /// already reflects it (planner/strategist `InheritCurrent`, empty pool),
@@ -992,7 +1011,6 @@ pub(crate) struct SessionActor {
     /// Safe: session actor is single-threaded (LocalSet), no concurrent access.
     pub(crate) hook_registry:
         std::cell::RefCell<Option<Arc<xai_grok_hooks::discovery::HookRegistry>>>,
-
     /// The turn's single end-of-turn hook report. Actor-scoped rather than turn-local because the
     /// gate runs on the turn task while a cancel runs on the command loop.
     pub(crate) turn_report: turn_report_slot::TurnReportSlot,
@@ -1001,7 +1019,7 @@ pub(crate) struct SessionActor {
     /// Set once by [`turn_end_hooks::TurnEndQueue::spawn`]; `None` before the loop starts.
     pub(crate) turn_end_tx:
         std::cell::RefCell<Option<tokio::sync::mpsc::UnboundedSender<turn_end_hooks::QueueItem>>>,
-    /// Client hooks from `session/new` `_meta["chutes.ai/hooks"]`; gated in
+    /// Client hooks from `session/new` `_meta["x.ai/hooks"]`; gated in
     /// [`crate::session::acp_session::hooks`]. `RefCell` so `load_session` reconnect can
     /// replace the set on the live actor (see `SessionCommand::SetClientHooks`).
     pub(crate) client_hooks: std::cell::RefCell<crate::extensions::hooks::ClientHooks>,
@@ -1386,7 +1404,7 @@ const PROMPT_CONTEXT_FILENAME: &str = "prompt_context.json";
 /// Persist the structured prompt context to `{session_dir}/prompt_context.json`.
 ///
 /// This is best-effort: failures are logged but do not block session creation.
-/// The saved JSON enables deterministic re-rendering, `chutes-build prompt --json`
+/// The saved JSON enables deterministic re-rendering, `grok prompt --json`
 /// inspection, and post-hoc debugging of what went into a session's system prompt.
 fn save_prompt_context(session_info: &SessionInfo, prompt_context: &xai_grok_agent::PromptContext) {
     let dir = match crate::session::persistence::ensure_owner_only_session_dir(session_info) {
@@ -1832,13 +1850,13 @@ mod tool_meta_stamp_tests {
                     }
                 }
                 let early = early.expect("early ToolCall emitted");
-                let t = tool_meta(early.as_ref()).expect("early ToolCall carries chutes.ai/tool");
+                let t = tool_meta(early.as_ref()).expect("early ToolCall carries x.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
                 assert_eq!(t["namespace"], "grok_build");
                 assert!(t.get("input").is_none(), "identity-only before parse");
                 let refined = refined.expect("refinement ToolCallUpdate emitted");
-                let t = tool_meta(refined.as_ref()).expect("refinement carries chutes.ai/tool");
+                let t = tool_meta(refined.as_ref()).expect("refinement carries x.ai/tool");
                 assert_eq!(t["input"]["path"], "/tmp/stamp.txt");
             })
             .await;
@@ -1899,7 +1917,7 @@ mod tool_meta_stamp_tests {
                     .take()
                     .expect("permission request must have been issued");
                 let t = tool_meta(update.meta.as_ref())
-                    .expect("permission-request ToolCallUpdate carries chutes.ai/tool");
+                    .expect("permission-request ToolCallUpdate carries x.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
                 assert_eq!(t["input"]["path"], "/tmp/stamp.txt");
@@ -2006,8 +2024,14 @@ mod parallel_dispatch_tests;
 #[path = "acp_session_tests/prompt_context_persistence_tests.rs"]
 mod prompt_context_persistence_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/turn/rate_limit_backoff_tests.rs"]
+mod rate_limit_backoff_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/session_thread_tests.rs"]
 mod session_thread_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/status_line_payload_tests.rs"]
+mod status_line_payload_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/tool_layer_images_bridge_tests.rs"]
 mod tool_layer_images_bridge_tests;

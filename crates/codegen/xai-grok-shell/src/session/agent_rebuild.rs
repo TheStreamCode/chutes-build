@@ -49,7 +49,7 @@ use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_agent::{Agent, AgentBuilder, CompactionPolicy, ReminderPolicy};
 use xai_grok_tools::computer::types::{AsyncFileSystem, TerminalBackend};
 use xai_grok_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest;
-use xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
+use xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig;
 use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
 use xai_grok_tools::implementations::grok_build::monitor::types::MonitorEventBuffer;
 use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, TaskModelValidator};

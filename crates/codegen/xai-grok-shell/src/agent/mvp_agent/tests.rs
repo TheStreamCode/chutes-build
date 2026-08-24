@@ -1121,7 +1121,7 @@ async fn file_toolset_override_e2e_to_finalized_toolset() {
         lsp: None,
         image_gen_config: xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig::default(),
         video_gen_config: xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig::default(),
-        app_builder_deployer_config: xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig::default(),
+        app_builder_deployer_config: xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig::default(),
         api_key_provider: None,
         auth_provider: None,
         attribution_callback: None,

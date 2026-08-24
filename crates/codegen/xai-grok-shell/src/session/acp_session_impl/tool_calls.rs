@@ -206,7 +206,7 @@ fn split_exit_plan_tail(
 pub(super) enum PlanEditGate {
     /// Execute normally (plan mode inactive, not an edit, or allowed target).
     Allow,
-    /// Chutes Build-toolset edit outside the plan file (plan-file-only rule).
+    /// Grok-toolset edit outside the plan file (plan-file-only rule).
     RejectNonPlanFile,
 }
 /// Gate edit-class tool calls while plan mode is active.
@@ -343,6 +343,69 @@ impl SessionActor {
         )
         .and_then(|v| v.as_object().cloned())
     }
+    #[tracing::instrument(
+        name = "tools.execute",
+        skip_all,
+        fields(
+            tool_count = tool_calls.len(),
+            model_id,
+            session_id = %self.session_info.id.0
+        )
+    )]
+    pub(super) async fn execute_tool_calls(
+        &self,
+        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
+    ) -> Result<ToolLoop, acp::Error> {
+        if let Some(cfg) = self.chat_state_handle.get_sampling_config().await {
+            tracing::Span::current().record("model_id", cfg.model.as_str());
+        }
+        let mut final_result: Option<ToolLoop> = None;
+        let mut deferred_followups: Vec<ConversationItem> = Vec::new();
+        let tool_calls = self.reject_excess_media_gen_calls(tool_calls).await?;
+        if !tool_calls.is_empty() {
+            if tool_calls.len() > 1 {
+                let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
+                let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
+                if !body.is_empty() {
+                    self.execute_tool_calls_batch(body, &mut deferred_followups, &mut final_result)
+                        .await?;
+                }
+                if !tail.is_empty() {
+                    self.execute_tool_calls_batch(tail, &mut deferred_followups, &mut final_result)
+                        .await?;
+                }
+            } else {
+                self.execute_tool_calls_batch(
+                    tool_calls,
+                    &mut deferred_followups,
+                    &mut final_result,
+                )
+                .await?;
+            }
+        }
+        {
+            let _span = if !deferred_followups.is_empty() {
+                Some(
+                    tracing::info_span!(
+                        "tools.deferred_followups",
+                        count = deferred_followups.len()
+                    )
+                    .entered(),
+                )
+            } else {
+                None
+            };
+            for chat in deferred_followups {
+                self.chat_state_handle.push_user_message(chat);
+            }
+        }
+        self.drain_interjections_at_safe_point().await;
+        self.flush_pending_skill_reminders().await;
+        if let Some(final_result) = final_result {
+            return Ok(final_result);
+        }
+        Ok(ToolLoop::Continue)
+    }
     /// Per-name media-gen counts that exceed this session's cap.
     pub(super) fn media_gen_over_cap(
         &self,
@@ -424,69 +487,6 @@ impl SessionActor {
             "media_gen batch limit rejected tool calls"
         );
         Ok(allowed)
-    }
-    #[tracing::instrument(
-        name = "tools.execute",
-        skip_all,
-        fields(
-            tool_count = tool_calls.len(),
-            model_id,
-            session_id = %self.session_info.id.0
-        )
-    )]
-    pub(super) async fn execute_tool_calls(
-        &self,
-        tool_calls: Vec<crate::sampling::types::ToolCallResponse>,
-    ) -> Result<ToolLoop, acp::Error> {
-        if let Some(cfg) = self.chat_state_handle.get_sampling_config().await {
-            tracing::Span::current().record("model_id", cfg.model.as_str());
-        }
-        let mut final_result: Option<ToolLoop> = None;
-        let mut deferred_followups: Vec<ConversationItem> = Vec::new();
-        let tool_calls = self.reject_excess_media_gen_calls(tool_calls).await?;
-        if !tool_calls.is_empty() {
-            if tool_calls.len() > 1 {
-                let kind_of = |name: &str| self.agent.borrow().tool_bridge().tool_kind(name);
-                let (body, tail) = split_exit_plan_tail(tool_calls, kind_of);
-                if !body.is_empty() {
-                    self.execute_tool_calls_batch(body, &mut deferred_followups, &mut final_result)
-                        .await?;
-                }
-                if !tail.is_empty() {
-                    self.execute_tool_calls_batch(tail, &mut deferred_followups, &mut final_result)
-                        .await?;
-                }
-            } else {
-                self.execute_tool_calls_batch(
-                    tool_calls,
-                    &mut deferred_followups,
-                    &mut final_result,
-                )
-                .await?;
-            }
-        }
-        {
-            let _span = if !deferred_followups.is_empty() {
-                Some(
-                    tracing::info_span!(
-                        "tools.deferred_followups",
-                        count = deferred_followups.len()
-                    )
-                    .entered(),
-                )
-            } else {
-                None
-            };
-            for chat in deferred_followups {
-                self.chat_state_handle.push_user_message(chat);
-            }
-        }
-        self.drain_interjections_at_safe_point().await;
-        self.flush_pending_skill_reminders().await;
-        if let Some(final_result) = final_result {
-            return Ok(final_result);
-        }
-        Ok(ToolLoop::Continue)
     }
     /// Prepare → dispatch → post-flight. Caller owns the outer tail flush.
     async fn execute_tool_calls_batch(
@@ -744,9 +744,9 @@ impl SessionActor {
                 duration_ms,
             );
             let mut post_tool_use_result: Option<serde_json::Value> = None;
-            let tool_result_size_bytes = match &result {
-                Ok(tool_result) => tool_result.prompt_text.len() as i64,
-                Err(_) => 0,
+            let tool_result_size_bytes: Option<u64> = match &result {
+                Ok(tool_result) => Some(tool_result.prompt_text.len() as u64),
+                Err(_) => None,
             };
             let tool_failed = match &result {
                 Ok(tool_result) => tool_result.output.is_error(),
@@ -917,6 +917,7 @@ impl SessionActor {
                     tool_name: prepared.tool_name.clone(),
                     outcome: tool_outcome,
                     duration_ms,
+                    tool_result_size_bytes,
                     file_path: ext_file_path,
                     parameters: ext_parameters,
                 },
@@ -931,7 +932,7 @@ impl SessionActor {
                     segment_index = artifact.segment_index().map(|i| i as i64),
                     success = matches!(tool_outcome, crate::session::events::ToolOutcome::Success),
                     duration_ms = duration_ms as i64,
-                    tool_result_size_bytes = tool_result_size_bytes,
+                    tool_result_size_bytes = tool_result_size_bytes.map_or(0, |n| n as i64),
                 )
                 .in_scope(|| {});
             }
@@ -1561,7 +1562,7 @@ impl SessionActor {
         };
         Ok(Ok(prepared))
     }
-    /// Issue the `chutes.ai/exit_plan_mode` reverse-request and await the user's
+    /// Issue the `x.ai/exit_plan_mode` reverse-request and await the user's
     /// decision. Shared by the mid-turn intercept and the resume
     /// re-park. Marks `awaiting_plan_approval` while the request is
     /// outstanding and clears it on every exit path via [`AwaitingApprovalGuard`].
@@ -2170,11 +2171,14 @@ impl SessionActor {
         );
         self.signals_handle().record_tool_failure(function_name);
         let message = build_tool_parse_error_message(function_name, &err, raw_arguments);
+        let title = (err.kind == xai_tool_runtime::ToolErrorKind::NotFound)
+            .then(|| format!("Agent tried calling a tool that doesn't exist: {function_name}"));
         self.send_update(
             acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
                 tool_call_id.clone(),
                 acp::ToolCallUpdateFields::new()
                     .status(Some(acp::ToolCallStatus::Failed))
+                    .title(title)
                     .content(Some(vec![acp::ToolCallContent::from(
                         acp::ContentBlock::Text(acp::TextContent::new(message.clone())),
                     )])),
@@ -3197,7 +3201,7 @@ mod plan_mode_edit_gate_tests {
             content: "x".into(),
         })
     }
-    /// Chutes Build edit tools are plan-file-only while plan mode is active — the
+    /// Grok edit tools are plan-file-only while plan mode is active — the
     /// enforcement that makes plan mode read-only even under always-approve.
     #[test]
     fn grok_edits_outside_plan_file_rejected() {

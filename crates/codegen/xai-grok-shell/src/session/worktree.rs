@@ -10,6 +10,10 @@ use std::path::Path;
 use xai_grok_workspace::session::git::find_git_root_from_path;
 pub use xai_grok_workspace::worktree::*;
 const WORKTREE_LOG: &str = "xai_worktree";
+/// Resume always consults the grove gate with `remote = None` (fail closed).
+pub(crate) fn resume_grove_worktree_flag() -> Option<bool> {
+    Some(crate::util::config::grove_worktree_enabled(None))
+}
 impl From<ShellWorktreeType> for WorktreeType {
     fn from(t: ShellWorktreeType) -> Self {
         match t {
@@ -31,7 +35,7 @@ impl From<WorktreeType> for ShellWorktreeType {
 /// Create a worktree for the resume-session flow, detecting jj vs git automatically.
 ///
 /// When `git_ref` is set, forces a clean checkout of that ref (same as the
-/// manual `create_from_worktree_sync` path used by `chutes-build -w --ref`).
+/// manual `create_from_worktree_sync` path used by `grok -w --ref`).
 async fn create_worktree_for_resume(
     source_cwd: &str,
     copy_mode: WorktreeCopyMode,
@@ -50,6 +54,7 @@ async fn create_worktree_for_resume(
         git_ref,
         worktree_type: Some(WorktreeType::from(worktree_type)),
         label: None,
+        grove_worktree: resume_grove_worktree_flag(),
         cancellation_token: None,
         resolved_dest_path: None,
     };
@@ -545,6 +550,18 @@ pub(crate) async fn rehydrate_session_in_worktree(
 mod tests {
     use super::*;
     use serial_test::serial;
+    #[test]
+    #[serial]
+    fn resume_grove_worktree_flag_runs_gate_fail_closed() {
+        unsafe { std::env::set_var("GROK_WORKTREE_TYPE", "grove") };
+        let flag = resume_grove_worktree_flag();
+        unsafe { std::env::remove_var("GROK_WORKTREE_TYPE") };
+        assert_eq!(
+            flag,
+            Some(false),
+            "resume must call the grove gate; remote=None is fail-closed even when env asked for grove"
+        );
+    }
     #[test]
     fn resume_request_deserializes_with_defaults() {
         let json = r#"{"sessionId":"s1","sourceCwd":"/project"}"#;
@@ -1171,7 +1188,7 @@ mod tests {
             .unwrap();
         let list_out = String::from_utf8_lossy(&stash_list.stdout).into_owned();
         assert!(
-            list_out.contains("chutes-build: pre-restore-code sess-dirty-wt"),
+            list_out.contains("grok: pre-restore-code sess-dirty-wt"),
             "stash list missing session label: {list_out}"
         );
     }

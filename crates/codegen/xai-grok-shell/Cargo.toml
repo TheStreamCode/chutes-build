@@ -145,6 +145,7 @@ xai-chat-state = { path = "../xai-chat-state" }
 xai-compaction-transcript = { workspace = true }
 xai-grok-compaction = { path = "../../common/xai-grok-compaction" }
 xai-grok-extra-ca = { workspace = true }
+xai-grok-status-line = { workspace = true }
 xai-grok-sampler = { path = "../xai-grok-sampler" }
 # Session FTS search; owns this crate's only rusqlite/bundled-SQLite use.
 xai-grok-session-search = { workspace = true }

@@ -188,17 +188,10 @@ impl AuthManager {
             self.hold_sleep_ack_until_refresh_drains(SLEEP_ACK_MAX_WAIT);
         } else {
             self.sleep_gate.lower("wake");
-            // End any in-progress dark-wake deferral run on a *genuine* full
-            // wake so the next dark wake starts with a fresh budget — but only
-            // if we are not still in a dark wake. macOS delivers
-            // `SYSTEM_HAS_POWERED_ON` (→ `DidWake`) for dark wakes too;
-            // unconditionally clearing here would reset the
-            // `DARK_WAKE_DEFER_MAX` budget on every dark-wake cycle so it could
-            // never exhaust, and the forced refresh would never run on a machine
-            // stuck in continuous dark wake. (`should_defer_for_dark_wake` also
-            // clears lazily under the same `!is_dark_wake()` condition.)
+            // `DidWake` fires for dark wakes too; clearing unconditionally would reset
+            // the defer budget every cycle and it could never exhaust.
             if !self.is_dark_wake() {
-                *self.dark_wake_defer_since.write() = None;
+                self.end_dark_wake_defer_run();
             }
             // Re-arm the proactive-refresh loop; its monotonic timer did not
             // advance during the suspend (see [`AuthManager::notify_wake`]).
@@ -294,20 +287,17 @@ impl AuthManager {
     /// not a concern there and because a screenless Mac can read as a permanent
     /// dark wake (no video capability), which would otherwise wedge refresh.
     ///
-    /// `CHUTES_BUILD_AUTH_FORCE_DARK_WAKE=1|0` forces the answer for testing (unset
+    /// `GROK_AUTH_FORCE_DARK_WAKE=1|0` forces the answer for testing (unset
     /// = ask the OS), read **before** the `power_listener_started` check so
     /// a headless run — which never starts the listener — can drive the
     /// dark-wake paths against a real binary. Pair with
-    /// `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` for a seconds-long repro.
+    /// `GROK_AUTH_EARLY_INVALIDATION_SECS` for a seconds-long repro.
     pub(crate) fn is_dark_wake(&self) -> bool {
         #[cfg(test)]
         if let Some(forced) = *self.dark_wake_override.lock() {
             return forced;
         }
-        match std::env::var("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE")
-            .ok()
-            .as_deref()
-        {
+        match std::env::var("GROK_AUTH_FORCE_DARK_WAKE").ok().as_deref() {
             Some("1") => return true,
             Some("0") => return false,
             _ => {}
@@ -319,6 +309,12 @@ impl AuthManager {
             xai_system_power::current_power_state(),
             xai_system_power::PowerState::DarkWake
         )
+    }
+
+    /// Ends the current dark-wake deferral run so the next one starts with a
+    /// fresh [`DARK_WAKE_DEFER_MAX`] budget.
+    pub(super) fn end_dark_wake_defer_run(&self) {
+        *self.dark_wake_defer_since.write() = None;
     }
 
     /// Whether `refresh_chain` should defer this refresh because the system is

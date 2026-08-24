@@ -106,15 +106,15 @@ pub struct EntryGetResult {
 }
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/bundle/sync" => {
+        "x.ai/bundle/sync" => {
             let req: BundleSyncRequest = parse_params(args)?;
             to_ext_response(sync_bundle(agent, req).await)
         }
-        "chutes.build/bundle/status" => {
+        "x.ai/bundle/status" => {
             let _req: BundleStatusRequest = parse_params(args)?;
             to_ext_response(status_bundle())
         }
-        "chutes.build/bundle/entry/get" => {
+        "x.ai/bundle/entry/get" => {
             let req: EntryGetRequest = parse_params(args)?;
             to_ext_response(get_entry(&req.kind, &req.name))
         }
@@ -419,6 +419,7 @@ fn list_cached_skill_entries(root: &Path, manifest: &BundleManifest) -> Vec<Stri
     names.sort();
     names
 }
+#[allow(clippy::disallowed_methods)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,15 +698,15 @@ mod tests {
         let root = tmp.path().join("bundled");
         bundle::write_bundle_to_cache(&root, &sample_bundle()).unwrap();
         let project_root = tmp.path().join("workspace");
-        std::fs::create_dir_all(project_root.join(".chutes-build/personas")).unwrap();
-        std::fs::create_dir_all(project_root.join(".chutes-build/roles")).unwrap();
+        std::fs::create_dir_all(project_root.join(".grok/personas")).unwrap();
+        std::fs::create_dir_all(project_root.join(".grok/roles")).unwrap();
         std::fs::write(
-            project_root.join(".chutes-build/personas/researcher.toml"),
+            project_root.join(".grok/personas/researcher.toml"),
             "instructions = \"project persona\"\n",
         )
         .unwrap();
         std::fs::write(
-            project_root.join(".chutes-build/roles/reviewer.toml"),
+            project_root.join(".grok/roles/reviewer.toml"),
             "description = \"project role\"\n",
         )
         .unwrap();

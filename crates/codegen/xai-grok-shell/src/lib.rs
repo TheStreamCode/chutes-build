@@ -22,6 +22,7 @@ pub mod config;
 pub use xai_grok_shell_base::cpu_profile;
 pub use xai_grok_shell_base::env;
 pub mod extensions;
+pub mod waterfall;
 pub use xai_grok_foreign_sessions as foreign_sessions;
 pub mod heap_profile;
 pub use xai_grok_http as http;

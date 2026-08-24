@@ -1,7 +1,7 @@
 use super::*;
 use xai_agent_lifecycle::ShutdownPolicy;
 
-/// Running-turn display fields for `chutes.ai/queue/changed` (clients paint turn-start UI).
+/// Running-turn display fields for `x.ai/queue/changed` (clients paint turn-start UI).
 pub(super) struct RunningPromptDisplay {
     pub id: String,
     pub text: String,
@@ -511,7 +511,7 @@ impl SessionActor {
             entry_count = payload.entries.len(),
             entries = ?payload.entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             session = self.session_info.id.0.as_ref(),
-            "broadcasting chutes.ai/queue/changed to subscribers",
+            "broadcasting x.ai/queue/changed to subscribers",
         );
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {
             self.notifications
@@ -569,6 +569,45 @@ impl SessionActor {
 
     fn send_now_cancels_running_turn(state: &State, goal_active: bool) -> bool {
         state.running_prompt_id().is_some() && !goal_active && !Self::front_awaiting_commit(state)
+    }
+
+    /// True when the next drainable user row (FIFO, non-synthetic, not the running front) is free
+    /// of a live edit hold. The goal round loop yields on this so queued user work runs between
+    /// rounds instead of starving behind continuations. A row under an unexpired hold must not
+    /// yield: promote is blocked while editing, so a yield would only re-arm the goal behind a
+    /// parked queue. Synthetics ahead of the user row do not block the yield. A hold older than
+    /// `EDIT_HOLD_TTL` counts as expired here: the leaked-hold GC runs only in
+    /// `maybe_start_running_task`, which cannot fire while the in-turn goal loop keeps looping, so
+    /// without this a crashed or disconnected editor's stale hold would park the queue for the
+    /// whole goal.
+    pub(super) async fn has_runnable_queued_user_row(&self) -> bool {
+        let state = self.state.lock().await;
+        let running = state.running_prompt_id();
+        state
+            .pending_inputs
+            .iter()
+            .filter(|item| running != Some(item.prompt_id.as_str()))
+            .find(|item| !item.input_origin.is_synthetic())
+            .is_some_and(|next| match state.edit_holds.get(next.prompt_id.as_str()) {
+                Some(since) => since.elapsed() >= super::EDIT_HOLD_TTL,
+                None => true,
+            })
+    }
+
+    /// True when a goal continuation (`GoalSummary` / `GoalClassifierNudge`) is
+    /// already queued to resume the goal. A user turn that runs while one is
+    /// pending must not also drive the in-turn goal loop: the queued
+    /// continuation is the single resume point, so driving the goal from the
+    /// user turn as well would run the goal twice.
+    pub(super) async fn has_pending_goal_continuation(&self) -> bool {
+        let state = self.state.lock().await;
+        state.pending_inputs.iter().any(|item| {
+            matches!(
+                item.input_origin.as_prompt_origin(),
+                crate::session::PromptOrigin::GoalSummary
+                    | crate::session::PromptOrigin::GoalClassifierNudge
+            )
+        })
     }
 
     fn enqueue_prompt_as_planner_steering(&self, item: &InputItem) {
@@ -762,7 +801,7 @@ impl SessionActor {
     /// During an active goal, plain prompts become steering while bash stays queued.
     /// Missing, stale, running, or foreign rows are benign no-ops.
     ///
-    /// Always re-broadcasts `chutes.ai/queue/changed` so every client reconciles
+    /// Always re-broadcasts `x.ai/queue/changed` so every client reconciles
     /// (the row vanishes on success, is unchanged on a no-op).
     /// `new_text` (when `Some`) replaces the stored queue text in the
     /// interjection — the client edited the row before interjecting. It rides
@@ -952,11 +991,11 @@ impl SessionActor {
     ///    user has explicitly typed replacement text).
     /// 2. Update `queue_meta.text`, bump `queue_meta.version`, and record
     ///    `last_editor` (the original `owner` attribution is preserved).
-    /// 3. Re-broadcast `chutes.ai/queue/changed` so every subscriber renders the
+    /// 3. Re-broadcast `x.ai/queue/changed` so every subscriber renders the
     ///    new text and version.
     ///
-    /// **No-op cases** (each is a benign discard with no rebroadcast — nothing
-    /// changed):
+    /// **No-op cases** (edit discarded; the id's hold is still cleared so promote is not parked,
+    /// since promote or remove already broadcast the queue change):
     /// - The id is not in `pending_inputs` (already drained / removed).
     /// - The id names the currently-running turn — editing the live turn is
     ///   out of scope.

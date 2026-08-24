@@ -357,8 +357,12 @@ impl UnauthorizedRecovery {
     async fn try_reload_from_disk(&self) -> Option<GrokAuth> {
         let _lock = self
             .auth_manager
-            .try_lock_auth_file_async(crate::auth::manager::AUTH_LOCK_TIMEOUT)
-            .await;
+            .try_lock_auth_file_async(
+                crate::auth::manager::AUTH_LOCK_TIMEOUT,
+                crate::auth::manager::lock::Heartbeat::Skip,
+            )
+            .await
+            .into_guard();
         if _lock.is_none() {
             tracing::warn!("auth recovery: proceeding without file lock");
         }
@@ -1085,7 +1089,7 @@ mod tests {
     // -- force_login_team_uuid pin enforced on the 401-recovery path -------
 
     fn ensure_crypto_provider() {
-        crate::auth::ensure_crypto_provider();
+        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
     }
 
     fn team_jwt(principal_id: &str) -> String {

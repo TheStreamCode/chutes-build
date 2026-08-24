@@ -14390,6 +14390,7 @@ dependencies = [
  "xai-grok-shared",
  "xai-grok-shell-base",
  "xai-grok-shell-session-support",
+ "xai-grok-status-line",
  "xai-grok-subagent-resolution",
  "xai-grok-telemetry",
  "xai-grok-test-support",

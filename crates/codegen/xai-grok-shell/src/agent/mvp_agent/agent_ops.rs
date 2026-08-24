@@ -2223,8 +2223,8 @@ impl MvpAgent {
     /// Build deploy-service config. The tool talks directly to the deployer service.
     pub(super) fn prepare_app_builder_deployer_config(
         &self,
-    ) -> xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig {
-        use xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
+    ) -> xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig {
+        use xai_grok_tools::implementations::grok_build::app_builder::AppBuilderDeployerConfig;
         AppBuilderDeployerConfig::Disabled
     }
     /// Build video generation config. Video tools call the xAI API directly.
