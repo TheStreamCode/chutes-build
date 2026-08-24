@@ -459,6 +459,7 @@ pub(crate) fn cached_token_auth_method() -> acp::AuthMethod {
     )
 }
 
+pub const CHUTES_BUILD_COM_METHOD_ID: &str = GROK_COM_METHOD_ID;
 pub const GROK_COM_METHOD_ID: &str = "grok.com";
 
 /// xAI OAuth2/OIDC auth. Method id `"grok.com"` kept for ACP wire-compat.

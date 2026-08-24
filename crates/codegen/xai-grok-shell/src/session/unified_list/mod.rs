@@ -503,7 +503,10 @@ pub(crate) struct ExtListResponseMeta {
     #[serde(rename = "chutes.build/partial")]
     pub partial: PartialInfo,
     /// Present only when the listing relaxed beyond the cwd.
-    #[serde(rename = "chutes.build/listScope", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "chutes.build/listScope",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub list_scope: Option<&'static str>,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -1108,7 +1111,10 @@ mod tests {
         };
         let with =
             serde_json::to_value(ext_list_response(result(ListScope::Repo))).expect("serialize");
-        assert_eq!(with["_meta"]["chutes.build/listScope"], serde_json::json!("repo"));
+        assert_eq!(
+            with["_meta"]["chutes.build/listScope"],
+            serde_json::json!("repo")
+        );
         let without =
             serde_json::to_value(ext_list_response(result(ListScope::Cwd))).expect("serialize");
         assert!(without["_meta"].get("chutes.build/listScope").is_none());

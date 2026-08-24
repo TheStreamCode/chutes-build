@@ -724,15 +724,11 @@ impl AgentBuilder {
             tool_bridge_builder.register::<chutes::GenerateMediaTool>();
             tool_bridge_builder.register::<chutes::BrowserTool>();
             tool_bridge_builder.register::<chutes::OcrPageTool>();
-            tool_bridge_builder
-                .register::<grok_build::SchedulerCreateTool>();
-            tool_bridge_builder
-                .register::<grok_build::SchedulerDeleteTool>();
-            tool_bridge_builder
-                .register::<grok_build::SchedulerListTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerCreateTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerDeleteTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerListTool>();
             tool_bridge_builder.register::<grok_build::MonitorTool>();
-            tool_bridge_builder
-                .register::<grok_build::update_goal::UpdateGoalTool>();
+            tool_bridge_builder.register::<grok_build::update_goal::UpdateGoalTool>();
         }
         let state_path = self.state_path.clone().unwrap_or_default();
         let mut tool_config = definition.tool_config.clone();

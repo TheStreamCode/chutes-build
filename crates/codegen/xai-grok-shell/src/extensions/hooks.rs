@@ -429,7 +429,8 @@ mod tests {
         assert!(reconnect_client_hooks(None).is_none());
         assert!(reconnect_client_hooks(serde_json::json!({ "other": true }).as_object()).is_none());
 
-        let cleared = reconnect_client_hooks(serde_json::json!({ "chutes.build/hooks": {} }).as_object());
+        let cleared =
+            reconnect_client_hooks(serde_json::json!({ "chutes.build/hooks": {} }).as_object());
         assert!(cleared.is_some_and(|h| h.is_empty()));
 
         let set = reconnect_client_hooks(

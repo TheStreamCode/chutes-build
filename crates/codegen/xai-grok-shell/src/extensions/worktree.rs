@@ -34,7 +34,8 @@ impl WorktreeNotificationSender for GatewayWorktreeNotifier {
                 return;
             }
         };
-        let notification = acp::ExtNotification::new("chutes.build/git/worktree/status", params.into());
+        let notification =
+            acp::ExtNotification::new("chutes.build/git/worktree/status", params.into());
         if let Err(e) = self.gateway.send(notification).await {
             tracing::warn!("Failed to send worktree progress notification: {}", e);
         }

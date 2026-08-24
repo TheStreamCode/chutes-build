@@ -1032,7 +1032,10 @@ async fn acknowledged_scheduler_removal_appends_before_ack_and_broadcast() {
         else {
             panic!("expected durable scheduler tombstone");
         };
-        assert_eq!(notification.meta.unwrap()["chutes.build/schedulerRevision"], 17);
+        assert_eq!(
+            notification.meta.unwrap()["chutes.build/schedulerRevision"],
+            17
+        );
         assert!(gateway_rx.try_recv().is_err());
         assert!(matches!(
             receipt.try_recv(),
@@ -1196,7 +1199,10 @@ async fn scheduled_task_fired_is_not_persisted() {
         panic!("expected scheduler fire notification");
     };
     let value: serde_json::Value = serde_json::from_str(fired.request.params.get()).unwrap();
-    assert_eq!(value["_meta"]["chutes.build/schedulerGeneration"], "generation-a");
+    assert_eq!(
+        value["_meta"]["chutes.build/schedulerGeneration"],
+        "generation-a"
+    );
     assert_eq!(value["_meta"]["chutes.build/schedulerRevision"], 3);
 }
 

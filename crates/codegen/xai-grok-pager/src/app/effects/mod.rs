@@ -3525,6 +3525,7 @@ pub(crate) fn execute(
                         client_type: ClientType::Tui,
                         rating_type: None,
                         rating_value: None,
+                        images: Vec::new(),
                         feedback_text: Some(feedback_text.clone()),
                         feedback_categories: vec![],
                         context_type: None,

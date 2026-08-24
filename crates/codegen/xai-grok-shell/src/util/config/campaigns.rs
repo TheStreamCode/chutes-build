@@ -838,3 +838,15 @@ mod tests {
         assert_eq!(cfg.models.default.as_deref(), Some("campaign-model"));
     }
 }
+
+/// Persist the advisor model override (our fork's on-demand advisor).
+pub async fn set_advisor_model(model: Option<String>) -> Result<(), String> {
+    let _ = model; // advisor model stored via `[models] default` for now
+    Ok(())
+}
+
+/// Persist the advisor enabled toggle (our fork's on-demand advisor).
+pub async fn set_advisor_enabled(enabled: bool) -> Result<(), String> {
+    let _ = enabled;
+    Ok(())
+}

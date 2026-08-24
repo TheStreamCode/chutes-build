@@ -201,7 +201,8 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2
         });
-        match parse_queue_edit_command("chutes.build/queue/interject", &p, Some("grok-tui".into())) {
+        match parse_queue_edit_command("chutes.build/queue/interject", &p, Some("grok-tui".into()))
+        {
             Some(SessionCommand::InterjectQueuedPrompt {
                 id,
                 expected_version,
@@ -273,14 +274,19 @@ mod tests {
                 .is_none()
         );
         assert!(
-            parse_queue_edit_command("chutes.build/queue/release_edit", &serde_json::json!({}), None)
-                .is_none()
+            parse_queue_edit_command(
+                "chutes.build/queue/release_edit",
+                &serde_json::json!({}),
+                None
+            )
+            .is_none()
         );
 
         // unknown method → None. Outbound `changed` is the other production
         // `x.ai/queue/*` method and must not parse as an edit command.
         assert!(
-            parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None)
+                .is_none()
         );
         assert!(
             parse_queue_edit_command(
@@ -301,7 +307,8 @@ mod tests {
         );
         // remove without id → None (can't target an entry).
         assert!(
-            parse_queue_edit_command("chutes.build/queue/remove", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command("chutes.build/queue/remove", &serde_json::json!({}), None)
+                .is_none()
         );
     }
 }

@@ -112,7 +112,10 @@ fn stamp_scheduler_meta(
 ) {
     stamp_event_id(config, meta);
     let meta = meta.get_or_insert_with(acp::Meta::new);
-    meta.insert("chutes.build/schedulerGeneration".to_owned(), generation.into());
+    meta.insert(
+        "chutes.build/schedulerGeneration".to_owned(),
+        generation.into(),
+    );
     meta.insert("chutes.build/schedulerRevision".to_owned(), revision.into());
 }
 fn durable_append_landed(result: Result<(), DurableAppendError>) -> Result<(), String> {

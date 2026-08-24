@@ -14,6 +14,7 @@ loom = ["dep:loom"]
 # it via `required-features`.
 test-support = []
 test-util = []
+config-docs = []
 # Local Computer Hub workspace_server (own/attach + crash-restart). Requires
 local-workspace = []
 default-bazel = [

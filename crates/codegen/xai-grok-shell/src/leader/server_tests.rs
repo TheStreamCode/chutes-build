@@ -1507,12 +1507,10 @@ fn inject_capabilities_does_not_override_existing_model_id() {
 
 #[test]
 fn extract_yolo_mode_change_returns_value() {
-    let payload =
-        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
     assert_eq!(extract_yolo_mode_change(&pv(payload)), Some(true));
 
-    let payload =
-        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":false}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":false}}"#;
     assert_eq!(extract_yolo_mode_change(&pv(payload)), Some(false));
 }
 
@@ -1525,12 +1523,10 @@ fn extract_yolo_mode_change_returns_none_for_other_methods() {
 /// Branch 1: an explicit `auto_mode` flag wins, even over `permission_mode`.
 #[test]
 fn extract_auto_mode_change_explicit_flag_wins() {
-    let payload =
-        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":true}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":true}}"#;
     assert_eq!(extract_auto_mode_change(&pv(payload)), Some(true));
 
-    let payload =
-        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":false}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"auto_mode":false}}"#;
     assert_eq!(extract_auto_mode_change(&pv(payload)), Some(false));
 
     // Explicit flag wins even when permission_mode would say otherwise.
@@ -1563,8 +1559,7 @@ fn extract_auto_mode_change_returns_none_when_no_auto_signal() {
     let payload = r#"{"jsonrpc":"2.0","method":"other/method","params":{"auto_mode":true}}"#;
     assert_eq!(extract_auto_mode_change(&pv(payload)), None);
 
-    let payload =
-        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#;
     assert_eq!(extract_auto_mode_change(&pv(payload)), None);
 }
 
@@ -2039,8 +2034,9 @@ fn extract_target_client_id_none_when_absent() {
 
 #[test]
 fn inject_yolo_notification_adds_client_identifier() {
-    let mut json =
-        pv(r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#);
+    let mut json = pv(
+        r#"{"jsonrpc":"2.0","method":"chutes.build/yolo_mode_changed","params":{"yolo_mode":true}}"#,
+    );
 
     assert!(inject_client_identity_into_yolo_notification(
         &mut json, "grok-tui"

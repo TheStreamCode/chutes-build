@@ -358,7 +358,8 @@ pub(super) fn apply_soft_default_permission_mode(
     effective_ui: Option<&toml::Value>,
     remote: Option<&str>,
 ) {
-    let mode = xai_grok_shell::util::config::resolve_permission_mode(effective_ui, remote);
+    let mode = xai_grok_shell::util::config::selected_permission_mode(effective_ui, remote)
+        .unwrap_or(xai_grok_telemetry::enums::PermissionMode::Ask);
     app.default_yolo = mode.is_always_approve() && app.yolo_policy_block.is_none();
     let auto = mode.is_auto() && app.auto_mode_gate && !app.default_yolo;
     app.current_ui.permission_mode = Some(if auto {

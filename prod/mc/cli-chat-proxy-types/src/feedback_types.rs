@@ -1631,7 +1631,8 @@ fn default_feedback_mode_stars_text() -> String {
     "stars_text".to_string()
 }
 fn default_tier1_prompt() -> String {
-    "You've been using Chutes Build productively! Would you mind sharing quick feedback?".to_string()
+    "You've been using Chutes Build productively! Would you mind sharing quick feedback?"
+        .to_string()
 }
 fn default_tier2_prompt() -> String {
     "You've worked through a complex session. Your feedback would help us improve.".to_string()

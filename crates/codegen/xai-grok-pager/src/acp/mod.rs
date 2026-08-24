@@ -300,6 +300,7 @@ pub async fn connect_via_leader(
         auto_mode: flags.default_auto_mode && !flags.default_yolo_mode,
         default_model: agent_config.models.default.clone(),
         client_version: Some(PAGER_CLIENT_VERSION.to_string()),
+        status_line: false,
         code_nav_enabled: false,
         terminal: flags.terminal,
         fs_read: flags.fs_read,

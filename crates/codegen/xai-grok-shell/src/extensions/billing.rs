@@ -106,6 +106,9 @@ pub struct BillingConfig {
     pub billing_period_end: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<BillingPeriodUsage>,
+    /// Usage windows from the external OTLP config (our fork).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_windows: Vec<serde_json::Value>,
 }
 
 /// Top-level response (primarily from `GET /rest/grok/credits` + auto-topup-rule).
