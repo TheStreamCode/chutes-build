@@ -2,7 +2,7 @@ use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
 /// Env override for the **remember tool approvals** permission-panel gate.
-pub(crate) const ENV_REMEMBER_TOOL_APPROVALS: &str = "GROK_REMEMBER_TOOL_APPROVALS";
+pub(crate) const ENV_REMEMBER_TOOL_APPROVALS: &str = "CHUTES_BUILD_REMEMBER_TOOL_APPROVALS";
 
 /// Default for the `remember_tool_approvals` gate when no layer sets it.
 /// Shared with the pager settings modal so the displayed default cannot
@@ -34,7 +34,7 @@ fn resolve_remember_tool_approvals_layers(
 }
 
 /// Resolve whether the granular per-tool "Always allow …" prompt options are
-/// shown. Precedence: requirements > env (`GROK_REMEMBER_TOOL_APPROVALS`) >
+/// shown. Precedence: requirements > env (`CHUTES_BUILD_REMEMBER_TOOL_APPROVALS`) >
 /// `[ui].remember_tool_approvals` > managed > remote settings > default `true`
 /// ([`DEFAULT_REMEMBER_TOOL_APPROVALS`]).
 pub fn resolve_remember_tool_approvals(
@@ -117,7 +117,7 @@ mod remember_tool_approvals_gate_tests {
     use super::*;
     use crate::agent::config::ConfigSource;
 
-    // `GROK_REMEMBER_TOOL_APPROVALS` is process-global; serialize and force it
+    // `CHUTES_BUILD_REMEMBER_TOOL_APPROVALS` is process-global; serialize and force it
     // unset at the top of each test so a developer's shell value can't make
     // these flaky.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

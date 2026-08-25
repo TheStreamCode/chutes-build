@@ -1,4 +1,4 @@
-//! `x.ai/rewind/*` extension handlers.
+//! `chutes.ai/rewind/*` extension handlers.
 //!
 //! - `rewind/execute`: rewind a session to a target prompt index, optionally
 //!   forcing past in-flight prompts and choosing a `RewindMode`.

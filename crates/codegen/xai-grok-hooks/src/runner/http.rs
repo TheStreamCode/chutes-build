@@ -152,10 +152,16 @@ pub async fn run_http_hook(
     // rejects them rather than smuggling a literal `${VAR}` past validation.
     let mut url_env = spec.extra_env.clone();
     for (k, v) in [
-        ("GROK_HOOK_EVENT", envelope.hook_event_name.to_string()),
-        ("GROK_HOOK_NAME", spec.name.clone()),
-        ("GROK_SESSION_ID", ctx.session_id.to_string()),
-        ("GROK_WORKSPACE_ROOT", ctx.workspace_root.to_string()),
+        (
+            "CHUTES_BUILD_HOOK_EVENT",
+            envelope.hook_event_name.to_string(),
+        ),
+        ("CHUTES_BUILD_HOOK_NAME", spec.name.clone()),
+        ("CHUTES_BUILD_SESSION_ID", ctx.session_id.to_string()),
+        (
+            "CHUTES_BUILD_WORKSPACE_ROOT",
+            ctx.workspace_root.to_string(),
+        ),
         ("CLAUDE_PROJECT_DIR", ctx.workspace_root.to_string()),
     ] {
         url_env.insert(k.to_string(), v);
@@ -163,7 +169,7 @@ pub async fn run_http_hook(
     let expanded_url = crate::env_expand::expand_env_vars_with_extra(raw_url, &url_env);
     let url: &str = &expanded_url;
     // Prefer the pre-expansion source for logs so resolved `env` secrets don't
-    // reach `~/.grok/logs`; threaded into the reqwest error format below so
+    // reach `~/.chutes-build/logs`; threaded into the reqwest error format below so
     // reqwest's default `Display` (which appends the URL) can't bypass it.
     let log_url: &str = spec.url_raw.as_deref().unwrap_or(url);
 
@@ -878,7 +884,7 @@ mod tests {
     /// rejects it rather than smuggling the literal placeholder past validation.
     #[tokio::test]
     async fn url_unresolved_var_fails_validation() {
-        let key = "GROK_HOOKS_HTTP_TEST_UNRESOLVED";
+        let key = "CHUTES_BUILD_HOOKS_HTTP_TEST_UNRESOLVED";
         // `with_env_var`'s closure is synchronous (it uses `catch_unwind`), so
         // run the async `validate_hook_url` outside it to avoid nesting runtimes.
         let expanded = with_env_var(key, None, || {

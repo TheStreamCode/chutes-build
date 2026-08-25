@@ -607,7 +607,7 @@ impl MvpAgent {
     }
     /// Pre-session command availability snapshot.
     ///
-    /// Used by the `x.ai/commands/list` ext method and the
+    /// Used by the `chutes.ai/commands/list` ext method and the
     /// `InitializeResponse._meta` path (`builtin_commands()`), both of
     /// which fire before any session exists. The eventual agent's toolset
     /// is unknown (depends on the model the user picks), so we fail-closed
@@ -1176,7 +1176,7 @@ impl MvpAgent {
     /// Operator-attested FS-only toolset for mid-session attach.
     #[cfg(feature = "local-workspace")]
     fn ensure_attach_fs_only_advertised_tools() -> Result<(), String> {
-        const ENV: &str = "GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS";
+        const ENV: &str = "CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS";
         const ALLOW: &[&str] = &[
             "workspace.fs_list",
             "workspace.fs_exists",
@@ -1192,7 +1192,7 @@ impl MvpAgent {
             .filter(|s| !s.is_empty()) else {
             return Err(
                 "attached workspace_server advertised toolset is uncheckable; refuse attach \
-                 (set GROK_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS to a comma-separated FS-only catalog)"
+                 (set CHUTES_BUILD_CHAT_LOCAL_WORKSPACE_ADVERTISED_TOOLS to a comma-separated FS-only catalog)"
                     .into(),
             );
         };
@@ -1225,7 +1225,7 @@ impl MvpAgent {
     #[cfg(feature = "local-workspace")]
     /// After chat+local stamp, wait for handshake success.
     ///
-    /// Only fail-closed for `x.ai/local_workspace` intent (not generic
+    /// Only fail-closed for `chutes.ai/local_workspace` intent (not generic
     /// GatewayAttach). Handshake errors propagate; session + bridge are reaped
     /// on failure / timeout.
     pub(crate) async fn await_existing_workspace_handshake(
@@ -1354,7 +1354,7 @@ impl MvpAgent {
     ///     `grok.com`, `oidc`) -- even if the in-memory token is currently
     ///     expired or missing.
     ///
-    /// Returns `ApiKey` only when the auth method is BYOK (`xai.api_key`) or
+    /// Returns `ApiKey` only when the auth method is BYOK (`chutes.api_key`) or
     ///   no auth method has been selected yet AND no live credential exists.
     ///
     /// The session-based clause is load-bearing: without it, chat_state can get
@@ -1366,7 +1366,7 @@ impl MvpAgent {
             xai_chat_state::AuthType::ApiKey
         }
     }
-    /// Fall through to `xai.api_key` if the startup probe still allows it,
+    /// Fall through to `chutes.api_key` if the startup probe still allows it,
     /// else `grok.com`. `None` when `preferred_method` is pinned.
     pub(super) fn cached_token_fallthrough_method_id(
         &self,
@@ -1409,7 +1409,7 @@ impl MvpAgent {
             );
             return Err(acp::Error::auth_required().data(msg));
         };
-        let meta = if method_id.0.as_ref() == auth_method::GROK_COM_METHOD_ID {
+        let meta = if method_id.0.as_ref() == auth_method::CHUTES_BUILD_COM_METHOD_ID {
             serde_json::json!({ "use_oauth": true }).as_object().cloned()
         } else {
             arguments.meta
@@ -1429,7 +1429,7 @@ impl MvpAgent {
     pub(crate) fn deployment_key(&self) -> Option<String> {
         self.cfg.borrow().endpoints.deployment_key.clone()
     }
-    /// Apply settings side effects + push `x.ai/settings/update` to clients.
+    /// Apply settings side effects + push `chutes.ai/settings/update` to clients.
     /// Shared tail for every settings-arrival site.
     pub(super) fn on_remote_settings_changed(&self) {
         crate::agent::config::apply_remote_settings_side_effects(
@@ -1608,7 +1608,7 @@ impl MvpAgent {
         self.on_remote_settings_changed();
     }
     /// Re-fetch remote settings, re-init the telemetry client, apply side
-    /// effects, and push `x.ai/settings/update` to clients. Called from both
+    /// effects, and push `chutes.ai/settings/update` to clients. Called from both
     /// auth handlers (first install + reauth/account switch).
     ///
     /// Agent-level fields materialised at startup (`worktree_type`,
@@ -1778,7 +1778,7 @@ impl MvpAgent {
     /// Resolve post-auth remote settings in the background so a slow or hung
     /// `/settings` can't gate `authenticate` (and thus the client's first draw).
     /// The external-OTEL gate stays fail-closed until this resolves; the result
-    /// reaches clients via `x.ai/settings/update`. Its own guard keeps an
+    /// reaches clients via `chutes.ai/settings/update`. Its own guard keeps an
     /// in-flight reapply from coalescing away the authenticated identity.
     pub(super) fn spawn_post_auth_settings(&self, auth: crate::auth::GrokAuth) {
         let agent_ref = LocalRef::new(self);
@@ -1877,7 +1877,7 @@ impl MvpAgent {
         stored.announcements = fresh.announcements;
     }
     /// The single announcements push gate — every `remote_settings` writer
-    /// funnels through here. Emits `x.ai/announcements/update` and advances
+    /// funnels through here. Emits `chutes.ai/announcements/update` and advances
     /// the last-emitted baseline per [`announcements_push_payload`] (`mode`
     /// decides when an unchanged list still pushes), but only once the
     /// gateway accepts the send — a failed enqueue leaves the baseline
@@ -1921,7 +1921,7 @@ impl MvpAgent {
             "pushing announcements update to clients"
         );
     }
-    /// Next generation for an `x.ai/announcements/update` push. Strictly
+    /// Next generation for an `chutes.ai/announcements/update` push. Strictly
     /// increasing within the process, and seeded from unix-epoch seconds so a
     /// restarted leader's pushes still clear pager watermarks that survived
     /// re-election (`AppView.announcements_last_gen` outlives the agent).
@@ -2318,13 +2318,13 @@ impl MvpAgent {
     }
     /// Prepare the web fetch configuration based on feature flags.
     ///
-    /// Enabled gate: `disable_web_search` kill-switch > `GROK_WEB_FETCH` env >
+    /// Enabled gate: `disable_web_search` kill-switch > `CHUTES_BUILD_WEB_FETCH` env >
     /// remote settings `web_fetch_enabled` > default (false).
     ///
     /// Params resolution (TOML > env > remote settings > default):
-    /// - `proxy_endpoint`: `[toolset.web_fetch] proxy_endpoint` > `GROK_WEB_FETCH_PROXY` > remote settings > None
+    /// - `proxy_endpoint`: `[toolset.web_fetch] proxy_endpoint` > `CHUTES_BUILD_WEB_FETCH_PROXY` > remote settings > None
     /// - `allowed_domains`: `[toolset.web_fetch] allowed_domains` > remote settings > built-in defaults
-    /// - `allow_local`: `[toolset.web_fetch] allow_local` > `GROK_WEB_FETCH_ALLOW_LOCAL` > false
+    /// - `allow_local`: `[toolset.web_fetch] allow_local` > `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL` > false
     pub(super) fn prepare_web_fetch_config(
         &self,
     ) -> xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig {
@@ -2403,7 +2403,7 @@ impl MvpAgent {
         if relay_sync_enabled {
             tracing::info!("[grok] Relay sync: ENABLED");
         } else if tui_mode && relay_config_enabled && !has_xai_auth {
-            tracing::info!("[grok] Relay sync: DISABLED (no auth - run 'grok login' first)");
+            tracing::info!("[grok] Relay sync: DISABLED (no auth - run 'chutes-build login' first)");
         } else if tui_mode && !relay_config_enabled {
             tracing::debug!("Relay sync: DISABLED (not configured in config.toml or env)");
         } else {
@@ -2543,7 +2543,7 @@ impl MvpAgent {
         }
         instance
     }
-    /// Handle `x.ai/internal/evict_sessions` — the leader server tells us a
+    /// Handle `chutes.ai/internal/evict_sessions` — the leader server tells us a
     /// client disconnected and these sessions lost their IPC owner.
     ///
     /// **This is the no-evict keystone.** A disconnect must
@@ -2887,7 +2887,7 @@ impl MvpAgent {
         }
     }
     /// Cancel a subagent by id, returning a typed outcome that backs the pager's
-    /// `x.ai/subagent/cancel`. Active/pending → cancelled (a finish follows);
+    /// `chutes.ai/subagent/cancel`. Active/pending → cancelled (a finish follows);
     /// already-finished → its terminal status; unknown id → `NotFound`.
     pub(crate) async fn cancel_subagent(
         &self,
@@ -3017,7 +3017,7 @@ impl MvpAgent {
     /// Create a RelaySync instance if enabled and auth is available.
     /// RelaySync is only enabled when:
     /// 1. Running in TUI interactive mode (cfg.enable_relay_sync)
-    /// 2. Config file/env enables it ([relay] enabled or GROK_RELAY_SYNC_ENABLED)
+    /// 2. Config file/env enables it ([relay] enabled or CHUTES_BUILD_RELAY_SYNC_ENABLED)
     /// 3. User is authenticated
     ///
     /// Returns a `RelaySync` instance whose connection state can be observed
@@ -3117,7 +3117,7 @@ impl MvpAgent {
     ) -> Option<crate::session::SessionHandle> {
         self.resident_handle(session_id)
     }
-    /// Get hooks list for a session (for `x.ai/hooks/list` extension).
+    /// Get hooks list for a session (for `chutes.ai/hooks/list` extension).
     pub(crate) async fn list_hooks(
         &self,
         session_id: &acp::SessionId,
@@ -3125,7 +3125,7 @@ impl MvpAgent {
         let handle = self.get_session_handle(session_id)?;
         handle.get_hooks_list().await
     }
-    /// Execute a hooks management action (for `x.ai/hooks/action`).
+    /// Execute a hooks management action (for `chutes.ai/hooks/action`).
     pub(crate) async fn execute_hooks_action(
         &self,
         session_id: &acp::SessionId,
@@ -3141,7 +3141,7 @@ impl MvpAgent {
         let handle = self.get_session_handle(session_id)?;
         handle.execute_hooks_action(action).await
     }
-    /// Execute a plugins management action (for `x.ai/plugins/action`).
+    /// Execute a plugins management action (for `chutes.ai/plugins/action`).
     pub(crate) async fn execute_plugins_action(
         &self,
         session_id: &acp::SessionId,
@@ -3159,7 +3159,7 @@ impl MvpAgent {
         }
         outcome
     }
-    /// Get a snapshot of the shared plugin registry (for `x.ai/plugins/list`).
+    /// Get a snapshot of the shared plugin registry (for `chutes.ai/plugins/list`).
     pub(crate) fn plugin_registry_snapshot(
         &self,
     ) -> Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>> {
@@ -3421,8 +3421,8 @@ impl MvpAgent {
             current_effort,
         )
     }
-    /// Insert the per-session `_meta` keys (`x.ai/sessionConfig`,
-    /// `x.ai/sessionDetail`, `x.ai/schedulerBackgroundLoops`) shared by
+    /// Insert the per-session `_meta` keys (`chutes.ai/sessionConfig`,
+    /// `chutes.ai/sessionDetail`, `chutes.ai/schedulerBackgroundLoops`) shared by
     /// `new_session` and `load_session`. Keeping both response paths on this one
     /// builder stops them drifting.
     pub(super) fn insert_session_config_meta(
@@ -3872,10 +3872,10 @@ impl MvpAgent {
     /// 2. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
     /// 3. `agent_profile_path` from CLI `--agent-profile`.
     /// 4. `agent_config` from config.toml `[agent]`.
-    /// 5. `GROK_AGENT` env var.
+    /// 5. `CHUTES_BUILD_AGENT` env var.
     /// 6. Built-in default agent.
     ///
-    /// `GROK_AGENT` and an explicit `[agent] name` bypass step 1.
+    /// `CHUTES_BUILD_AGENT` and an explicit `[agent] name` bypass step 1.
     /// Strict-harness classification is structural — see
     /// [`xai_grok_agent::config::is_strict_harness_agent_type`].
     ///
@@ -3889,7 +3889,7 @@ impl MvpAgent {
         model_agent_type: Option<&str>,
     ) -> xai_grok_agent::AgentDefinition {
         use xai_grok_agent::AgentDefinition;
-        let grok_agent_env_set = std::env::var("GROK_AGENT")
+        let grok_agent_env_set = std::env::var("CHUTES_BUILD_AGENT")
             .ok()
             .is_some_and(|s| !s.trim().is_empty());
         let config_agent_explicitly_set = agent_config.name.is_some();
@@ -3964,7 +3964,7 @@ impl MvpAgent {
                 name
             );
         }
-        let agent_name = std::env::var("GROK_AGENT").ok();
+        let agent_name = std::env::var("CHUTES_BUILD_AGENT").ok();
         let resolved = match agent_name.as_deref() {
             Some("browser-use") | Some("browser_use") => AgentDefinition::browser_use(),
             Some("grok-build-concise") | Some("grok_build_concise") => {
@@ -4236,7 +4236,7 @@ impl MvpAgent {
                 .as_ref()
                 .and_then(|s| s.loc_tracking)
                 .unwrap_or(false)
-                || std::env::var("GROK_LOC_TRACKING")
+                || std::env::var("CHUTES_BUILD_LOC_TRACKING")
                     .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                     .unwrap_or(false));
         let (feedback_resolved, feedback_flags) = {
@@ -4536,7 +4536,7 @@ impl MvpAgent {
             if servers.is_empty() {
                 let user_path = xai_grok_tools::util::grok_home::grok_home()
                     .join("lsp.json");
-                let project_path = tool_ctx.cwd.as_path().join(".grok").join("lsp.json");
+                let project_path = tool_ctx.cwd.as_path().join(".chutes-build").join("lsp.json");
                 tracing::debug!(
                     cwd = %tool_ctx.cwd,
                     user_lsp_path = %user_path.display(),

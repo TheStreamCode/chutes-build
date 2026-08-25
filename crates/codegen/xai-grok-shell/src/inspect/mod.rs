@@ -1,6 +1,6 @@
-//! `grok inspect` — configuration introspection.
+//! `chutes-build inspect` — configuration introspection.
 //!
-//! Shows everything Grok discovers in the current directory: project
+//! Shows everything Chutes Build discovers in the current directory: project
 //! instructions, permissions, hooks, skills, agents, plugins, MCP servers,
 //! LSP config, and config.toml sources. Supports `--json` for machine output.
 
@@ -147,7 +147,7 @@ pub(crate) struct SkippedRule {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoginPolicyReport {
-    /// Raw `disable_api_key_auth` knob (env `GROK_DISABLE_API_KEY_AUTH`).
+    /// Raw `disable_api_key_auth` knob (env `CHUTES_BUILD_DISABLE_API_KEY_AUTH`).
     pub disable_api_key_auth: Option<bool>,
     /// Configured team pin: single string, list, or null when unset.
     pub force_login_team_uuid: Option<ForceLoginTeam>,
@@ -267,14 +267,14 @@ pub(crate) struct LspServerEntry {
 pub(crate) struct ConfigSources {
     /// Config layers (system + user managed, user + system requirements, user
     /// config.toml, the macOS MDM managed-preferences layer, and project
-    /// .grok/config.toml files). Driven from the same resolvers used at runtime
+    /// .chutes-build/config.toml files). Driven from the same resolvers used at runtime
     /// (`ConfigLayers`, `requirements_layers`) so system + MDM layers and
     /// precedence are included, and emptiness reflects real contribution after
     /// stripping (version_overrides, fail_closed, etc).
     pub layers: Vec<ConfigLayer>,
 }
 
-/// A single config layer entry for `grok inspect`.
+/// A single config layer entry for `chutes-build inspect`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConfigLayer {
@@ -294,7 +294,7 @@ pub async fn inspect(cwd: &Path, json: bool) -> anyhow::Result<()> {
     write_inspect(&report, json, &mut std::io::stdout().lock())
 }
 
-/// Write the report. A closed stdout (`grok inspect | head`) is a clean stop.
+/// Write the report. A closed stdout (`chutes-build inspect | head`) is a clean stop.
 fn write_inspect(report: &InspectReport, json: bool, out: &mut impl Write) -> anyhow::Result<()> {
     let written = if json {
         writeln!(out, "{}", serde_json::to_string_pretty(report)?)
@@ -497,7 +497,7 @@ fn instruction_file_type(
     if path
         .parent()
         .is_some_and(|parent| parent == grok_home.join("rules"))
-        || has_rules_directory(file_path, ".grok")
+        || has_rules_directory(file_path, ".chutes-build")
         || has_rules_directory(file_path, ".cursor")
         || (!claude_imported && has_rules_directory(file_path, ".claude"))
         || extra_rule_prefixes
@@ -577,7 +577,7 @@ async fn list_instructions(cwd: &Path) -> Vec<InstructionFile> {
 }
 
 /// Calls the production permission resolver (`resolve_permissions_with_provenance`)
-/// which handles both Grok TOML and vendor settings fallback in one codepath.
+/// which handles both Chutes Build TOML and vendor settings fallback in one codepath.
 async fn list_permissions(cwd: &Path, project_trusted: bool) -> PermissionsReport {
     use xai_grok_workspace::permission::resolution;
 
@@ -1044,7 +1044,7 @@ fn list_lsp_servers(
     // Folder-trust gate (display-only): inspect never spawns servers, but mark the
     // repo-local (project-scoped) entries a session would skip in an untrusted
     // clone so the listing matches the live gate. `remote = None` mirrors
-    // `grok mcp doctor` (no loaded RemoteSettings in a standalone command).
+    // `chutes-build mcp doctor` (no loaded RemoteSettings in a standalone command).
     crate::agent::folder_trust::resolve_and_record(cwd, None, false);
     let project_allowed = crate::agent::folder_trust::project_scope_allowed(cwd);
 
@@ -1068,7 +1068,7 @@ fn list_lsp_servers(
 /// probing the canonical locations used by `ConfigLayers::load` and
 /// `requirements_layers`: system + user `managed_config.toml`, user
 /// `config.toml`, user + system `requirements.toml`, and project
-/// `.grok/config.toml` files (via `find_project_configs`). The macOS MDM
+/// `.chutes-build/config.toml` files (via `find_project_configs`). The macOS MDM
 /// managed-preferences layer has no file on disk, so it is sourced directly
 /// from `requirements_layers()` rather than a path probe.
 ///
@@ -1570,7 +1570,10 @@ fn print_human(r: &InspectReport, out: &mut impl Write) -> std::io::Result<()> {
     if r.mcp_servers.is_empty() {
         writeln!(out)?;
         writeln!(out, "  MCP Servers (0)")?;
-        writeln!(out, "  {TREE} (none) \u{2014} see `grok mcp add --help`")?;
+        writeln!(
+            out,
+            "  {TREE} (none) \u{2014} see `chutes-build mcp add --help`"
+        )?;
     } else {
         print_columns(
             out,
@@ -1756,7 +1759,8 @@ mod tests {
             ("claude", "/repo/.claude/rules/team.md"),
             ("claude", r"C:\repo\.claude\rules\team.md"),
         ] {
-            let file_type = instruction_file_type(path, Path::new("/home/user/.grok"), false, &[]);
+            let file_type =
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), false, &[]);
             assert_eq!(file_type, "rules");
             assert_eq!(
                 instruction_compat_status(&Some(vendor.to_owned()), file_type, &report),
@@ -1764,9 +1768,12 @@ mod tests {
             );
         }
 
-        for path in ["/repo/.grok/rules/team.md", r"C:\repo\.grok\rules\team.md"] {
+        for path in [
+            "/repo/.chutes-build/rules/team.md",
+            r"C:\repo\.chutes-build\rules\team.md",
+        ] {
             assert_eq!(
-                instruction_file_type(path, Path::new("/home/user/.grok"), false, &[]),
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), false, &[]),
                 "rules"
             );
         }
@@ -1775,7 +1782,7 @@ mod tests {
             r"C:\repo\.cursor\rules\team.md",
         ] {
             assert_eq!(
-                instruction_file_type(path, Path::new("/home/user/.grok"), true, &[]),
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), true, &[]),
                 "rules"
             );
         }
@@ -1783,7 +1790,8 @@ mod tests {
             "/repo/.claude/rules/team.md",
             r"C:\repo\.claude\rules\team.md",
         ] {
-            let file_type = instruction_file_type(path, Path::new("/home/user/.grok"), true, &[]);
+            let file_type =
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), true, &[]);
             assert_eq!(file_type, "agents_md");
             assert_eq!(
                 instruction_compat_status(&Some("claude".to_owned()), file_type, &report),
@@ -1795,7 +1803,7 @@ mod tests {
             r"C:\repo\.cursor\ruleset\team.md",
         ] {
             assert_eq!(
-                instruction_file_type(path, Path::new("/home/user/.grok"), false, &[]),
+                instruction_file_type(path, Path::new("/home/user/.chutes-build"), false, &[]),
                 "agents_md"
             );
         }
@@ -1812,7 +1820,7 @@ mod tests {
             ));
         }
         for path in [
-            "/repo/config/.grok/rules/project.md",
+            "/repo/config/.chutes-build/rules/project.md",
             "/repo/config/src/AGENTS.md",
         ] {
             assert!(matches!(
@@ -1931,7 +1939,7 @@ mod tests {
     fn requirements_layer_contributes_requires_non_empty_post_strip_table() {
         // A `fail_closed`-only file is kept by the loader but with an empty
         // post-strip table, so it must not count as contributing.
-        let path = "/home/u/.grok/requirements.toml";
+        let path = "/home/u/.chutes-build/requirements.toml";
         let layer = |v| crate::config::RequirementsLayer {
             value: v,
             source: crate::config::RequirementsSource::File(std::path::PathBuf::from(path)),
@@ -2066,24 +2074,36 @@ mod tests {
 
     #[test]
     fn skill_entry_source_maps_scopes() {
-        let s = skill_fixture("a", "/repo/.grok/skills/a/SKILL.md", SkillScope::Local);
+        let s = skill_fixture(
+            "a",
+            "/repo/.chutes-build/skills/a/SKILL.md",
+            SkillScope::Local,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("b", "/repo/.grok/skills/b/SKILL.md", SkillScope::Repo);
+        let s = skill_fixture(
+            "b",
+            "/repo/.chutes-build/skills/b/SKILL.md",
+            SkillScope::Repo,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Project { .. }
         ));
 
-        let s = skill_fixture("c", "/home/u/.grok/skills/c/SKILL.md", SkillScope::User);
+        let s = skill_fixture(
+            "c",
+            "/home/u/.chutes-build/skills/c/SKILL.md",
+            SkillScope::User,
+        );
         assert!(matches!(skill_entry_source(&s), ConfigSource::User { .. }));
 
         let s = skill_fixture(
             "d",
-            "/home/u/.grok/server-skills/d/SKILL.md",
+            "/home/u/.chutes-build/server-skills/d/SKILL.md",
             SkillScope::Server,
         );
         assert!(matches!(
@@ -2091,7 +2111,11 @@ mod tests {
             ConfigSource::Server { .. }
         ));
 
-        let s = skill_fixture("e", "/home/u/.grok/bundled/e/SKILL.md", SkillScope::Bundled);
+        let s = skill_fixture(
+            "e",
+            "/home/u/.chutes-build/bundled/e/SKILL.md",
+            SkillScope::Bundled,
+        );
         assert!(matches!(
             skill_entry_source(&s),
             ConfigSource::Bundled { .. }
@@ -2201,7 +2225,7 @@ mod tests {
             )
             .unwrap();
         };
-        // Test-unique names: discovery also reads this machine's real ~/.grok dirs.
+        // Test-unique names: discovery also reads this machine's real ~/.chutes-build dirs.
         let extra = tempfile::tempdir().unwrap();
         write(&extra.path().join("inspect-cfg-extra"), "inspect-cfg-extra");
         write(

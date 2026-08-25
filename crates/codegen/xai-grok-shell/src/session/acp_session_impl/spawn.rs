@@ -354,7 +354,7 @@ pub(crate) async fn spawn_session_actor(
                 "CLI --allow catch-all ignored: always-approve disabled by managed policy"
             );
             if startup_hints.non_interactive {
-                eprintln!("grok: --allow catch-all ignored: {reason}");
+                eprintln!("chutes-build: --allow catch-all ignored: {reason}");
             }
         }
         if !cli_permission_rules.is_empty() {
@@ -511,7 +511,7 @@ pub(crate) async fn spawn_session_actor(
         },
         |mc| mc.pruning.clone(),
     );
-    let context_window_override = std::env::var("GROK_DEBUG_CONTEXT_WINDOW")
+    let context_window_override = std::env::var("CHUTES_BUILD_DEBUG_CONTEXT_WINDOW")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .and_then(std::num::NonZeroU64::new);
@@ -524,7 +524,7 @@ pub(crate) async fn spawn_session_actor(
         tracing::warn!(
             override_context_window = cw.get(),
             original_context_window = baseline_context_window.get(),
-            "GROK_DEBUG_CONTEXT_WINDOW override active"
+            "CHUTES_BUILD_DEBUG_CONTEXT_WINDOW override active"
         );
     }
     let chat_state_sampling_config = xai_grok_sampling_types::SamplingConfig {
@@ -934,7 +934,7 @@ pub(crate) async fn spawn_session_actor(
             tracing::info!(
                 session_id = %session_info.id.0,
                 acp_mcp_servers = acp_server_count,
-                "Registered in-process SDK MCP servers (x.ai/mcp/sdk_call)"
+                "Registered in-process SDK MCP servers (chutes.ai/mcp/sdk_call)"
             );
         }
         Arc::new(TokioMutex::new(state))
@@ -1371,7 +1371,7 @@ pub(crate) async fn spawn_session_actor(
                     let _ = ack.send(WorkflowLaunchAck::Rejected {
                         code: "workflows_disabled",
                         detail: "Background workflows are disabled for this session \
-                                 ([workflows] enabled = false / GROK_WORKFLOWS=0 / remote flag)."
+                                 ([workflows] enabled = false / CHUTES_BUILD_WORKFLOWS=0 / remote flag)."
                             .into(),
                     });
                     continue;

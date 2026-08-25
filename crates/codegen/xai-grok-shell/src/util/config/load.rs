@@ -23,7 +23,7 @@ fn toml_bool_sync(env_var: Option<&str>, section: &str, key: &str) -> bool {
     }
 }
 pub(crate) fn load_relay_sync_enabled_sync() -> bool {
-    toml_bool_sync(Some("GROK_RELAY_SYNC_ENABLED"), "relay", "enabled")
+    toml_bool_sync(Some("CHUTES_BUILD_RELAY_SYNC_ENABLED"), "relay", "enabled")
 }
 /// `[harness]` blocking-upload settings from ONE effective-config parse:
 /// `block_for_upload` (default false — prompt handling waits for turn-end

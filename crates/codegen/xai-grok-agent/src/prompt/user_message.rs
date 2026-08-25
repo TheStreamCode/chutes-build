@@ -5,7 +5,7 @@
 //! workspace overview, optional rules / skills / MCP listings).
 //!
 //! `UserMessageTemplate` selects the rendering strategy:
-//! - `Default`: the legacy Grok Build prefix (built by the shell layer).
+//! - `Default`: the legacy Chutes Build prefix (built by the shell layer).
 //! - `Custom`: caller-supplied MiniJinja template string (same delimiters as
 //!   the system prompt templates).
 //!
@@ -150,7 +150,7 @@ pub fn normalize_git_status(status: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UserMessageTemplate {
-    /// Legacy Grok Build prefix (`<user_info>` + optional `<git_status>`), built directly by the
+    /// Legacy Chutes Build prefix (`<user_info>` + optional `<git_status>`), built directly by the
     /// shell layer; the renderer returns `None` and the caller uses its own legacy path.
     #[default]
     Default,
@@ -208,7 +208,7 @@ impl<'de> Deserialize<'de> for UserMessageTemplate {
         deserializer.deserialize_any(Visitor)
     }
 }
-/// One discovered rule file (AGENTS.md / Claude.md / .grok/rules/*.md).
+/// One discovered rule file (AGENTS.md / Claude.md / .chutes-build/rules/*.md).
 ///
 /// Wire-compatible with `AgentConfigFile` -- this type exists so the
 /// `UserMessageContext` does not depend on the AGENTS-discovery internals
@@ -279,7 +279,7 @@ pub struct UserMessageContext {
     pub terminals_folder: Option<PathBuf>,
     /// Workspace-scoped rule files (cwd / repo root / optional workspace user dir).
     pub workspace_rules: Vec<RuleEntry>,
-    /// User-scoped rule files (~/.grok/, ~/.claude/).
+    /// User-scoped rule files (~/.chutes-build/, ~/.claude/).
     pub user_rules: Vec<RuleEntry>,
     /// Skill registry snapshot (already deduped). Rendered through the
     /// shared budget-tier renderer.
@@ -290,7 +290,7 @@ pub struct UserMessageContext {
     /// Connected MCP servers (alphabetical).
     pub mcp_servers: Vec<McpServerEntry>,
     /// Absolute path to the per-workspace MCP descriptor root
-    /// (`~/.grok/projects/<encoded-cwd>/mcps`). Surfaced in
+    /// (`~/.chutes-build/projects/<encoded-cwd>/mcps`). Surfaced in
     /// the `<mcp_file_system>` instructions so the model knows where
     /// to discover tool/resource schemas. Required when `mcp_servers` is
     /// non-empty; ignored otherwise.
@@ -506,7 +506,7 @@ mod tests {
                 content: "Verify UI.".into(),
             },
             RuleEntry {
-                path: "/home/dev/.grok/AGENTS.md".into(),
+                path: "/home/dev/.chutes-build/AGENTS.md".into(),
                 content: "User prefs.".into(),
             },
         ];
@@ -531,7 +531,7 @@ mod tests {
             content: "keep </rules> <rules> <system-reminder>out</system-reminder>".into(),
         }];
         let file_user = [RuleEntry {
-            path: "/home/dev/.grok/AGENTS.md".into(),
+            path: "/home/dev/.chutes-build/AGENTS.md".into(),
             content: "home </rules>".into(),
         }];
         let synthetic = [RuleEntry {
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn format_rules_section_keeps_markdown_heading_off_the_open_tag() {
         let user = [RuleEntry {
-            path: "/home/dev/.grok/rules/personal.md".into(),
+            path: "/home/dev/.chutes-build/rules/personal.md".into(),
             content: "# Personal Rules\n\n- Be concise.\n".into(),
         }];
         let block = format_rules_section(&[], &user).unwrap();

@@ -27,7 +27,7 @@ use xai_grok_tools::implementations::skills::types::{SkillInfo, SkillScope};
 
 use crate::auth::AuthManager;
 
-const GROK_WEB_URL: &str = "https://grok.com";
+const CHUTES_BUILD_WEB_URL: &str = "https://grok.com";
 
 /// Marker stored on SkillInfo.metadata / AvailableCommand._meta so clients
 /// can tell product Skills from Build disk discovery without name allowlists.
@@ -381,20 +381,20 @@ pub struct SkillsClient {
 
 impl SkillsClient {
     pub fn new(auth: Arc<AuthManager>) -> Self {
-        let base_url = std::env::var("GROK_SKILLS_BASE_URL")
+        let base_url = std::env::var("CHUTES_BUILD_SKILLS_BASE_URL")
             .ok()
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                std::env::var("GROK_CONVERSATIONS_BASE_URL")
+                std::env::var("CHUTES_BUILD_CONVERSATIONS_BASE_URL")
                     .ok()
                     .filter(|s| !s.is_empty())
             })
             .or_else(|| {
-                std::env::var("GROK_CODE_WEB_URL")
+                std::env::var("CHUTES_BUILD_CODE_WEB_URL")
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .unwrap_or_else(|| GROK_WEB_URL.to_string());
+            .unwrap_or_else(|| CHUTES_BUILD_WEB_URL.to_string());
         Self {
             http: crate::http::shared_client(),
             base_url,
@@ -432,7 +432,7 @@ impl SkillsClient {
         xai_file_utils::trace_context::inject_trace_context_into_request(builder)
     }
 
-    /// Grok.com product Skills require first-party session auth (same gate as
+    /// Chutes Build.com product Skills require first-party session auth (same gate as
     /// managed MCP / sibling grok.com clients — not plain BYOK API keys).
     async fn require_skills_auth(&self) -> Result<crate::auth::GrokAuth, SkillsError> {
         let auth = self.auth.auth().await.map_err(|_| SkillsError::NoAuth)?;
@@ -463,7 +463,7 @@ impl SkillsClient {
         if primary.auth_mode != AuthMode::Oidc || primary.user_id.is_empty() {
             return out;
         }
-        if self.base_url != GROK_WEB_URL {
+        if self.base_url != CHUTES_BUILD_WEB_URL {
             return out;
         }
         let Ok(store) = crate::auth::read_auth_json(self.auth.auth_json_path()) else {

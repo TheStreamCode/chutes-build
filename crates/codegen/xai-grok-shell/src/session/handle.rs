@@ -138,7 +138,7 @@ pub struct SessionHandle {
     /// client behaviors like yolo broadcasts.
     pub origin_client: Option<crate::http::OriginClientInfo>,
     /// Whether the client that created this session advertised
-    /// `x.ai/codeNavigation.enabled`.  Stored per-session so that in leader
+    /// `chutes.ai/codeNavigation.enabled`.  Stored per-session so that in leader
     /// mode a later `initialize()` from a different client cannot retroactively
     /// change code-nav eligibility for already-running sessions.
     pub code_nav_enabled: bool,
@@ -151,13 +151,13 @@ pub struct SessionHandle {
     /// per-session so subagents inherit it at spawn.
     pub non_interactive: bool,
     /// Plan mode tracker — shared with the session actor via Arc.
-    /// Exposed so the `x.ai/toggle_plan_mode` handler can toggle plan mode
+    /// Exposed so the `chutes.ai/toggle_plan_mode` handler can toggle plan mode
     /// without going through the session command channel.
     pub plan_mode: std::sync::Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
     /// Debug flag: when set to `true`, the next turn unconditionally triggers
     /// auto-compaction regardless of context window usage. Consumed (reset to
     /// `false`) atomically on use via `compare_exchange`.
-    /// Set via `x.ai/debug/arm_auto_compact`.
+    /// Set via `chutes.ai/debug/arm_auto_compact`.
     pub force_compact: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub permission_handle: xai_grok_workspace::permission::PermissionHandle,
     /// The parent SessionActor's live `Auth401AttributionCallback`

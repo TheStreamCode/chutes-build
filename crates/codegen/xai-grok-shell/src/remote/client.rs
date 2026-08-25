@@ -5,13 +5,13 @@ use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-const GROK_CODE_BACKEND_URL: &str = "https://code.grok.com";
+const CHUTES_BUILD_CODE_BACKEND_URL: &str = "https://code.chutes.ai";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const GROK_CODE_WEB_URL: &str = "https://grok.com";
+const CHUTES_BUILD_CODE_WEB_URL: &str = "https://chutes.ai";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
-    let web_url =
-        std::env::var("GROK_CODE_WEB_URL").unwrap_or_else(|_| GROK_CODE_WEB_URL.to_string());
+    let web_url = std::env::var("CHUTES_BUILD_CODE_WEB_URL")
+        .unwrap_or_else(|_| CHUTES_BUILD_CODE_WEB_URL.to_string());
     format!("{}/build/share/{}", web_url, permission_id)
 }
 fn add_cli_chat_proxy_headers_blocking(
@@ -303,8 +303,8 @@ impl BackendClient {
         Self {
             client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
             reqwest_client,
-            base_url: std::env::var("GROK_CODE_BACKEND_URL")
-                .unwrap_or_else(|_| GROK_CODE_BACKEND_URL.to_string()),
+            base_url: std::env::var("CHUTES_BUILD_CODE_BACKEND_URL")
+                .unwrap_or_else(|_| CHUTES_BUILD_CODE_BACKEND_URL.to_string()),
             auth_manager: None,
         }
     }
@@ -769,7 +769,7 @@ pub(crate) fn fetch_models_blocking(
                 })
                 .map_err(|_| {
                     BackendError::Auth(
-                        "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
+                        "No API key for custom models endpoint. Set CHUTES_API_KEY.".into(),
                     )
                 })?;
             request = request.header("Authorization", format!("Bearer {}", api_key));

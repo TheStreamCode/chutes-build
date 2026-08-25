@@ -2,7 +2,7 @@ use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
 /// Env override for showing agent thinking blocks in the TUI.
-pub const ENV_SHOW_THINKING_BLOCKS: &str = "GROK_SHOW_THINKING_BLOCKS";
+pub const ENV_SHOW_THINKING_BLOCKS: &str = "CHUTES_BUILD_SHOW_THINKING_BLOCKS";
 
 #[cfg(test)]
 static SHOW_THINKING_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -32,7 +32,7 @@ fn resolve_ui_bool(
 
 /// Resolve whether the TUI should show agent thinking/reasoning blocks.
 ///
-/// Precedence: requirements > env (`GROK_SHOW_THINKING_BLOCKS`) >
+/// Precedence: requirements > env (`CHUTES_BUILD_SHOW_THINKING_BLOCKS`) >
 /// `[ui] show_thinking_blocks` > managed > remote settings > default `true`.
 pub fn resolve_show_thinking_blocks(
     requirements: Option<&TomlValue>,
@@ -52,7 +52,7 @@ pub fn resolve_show_thinking_blocks(
 }
 
 /// Env override for grouping consecutive non-destructive tool calls in the TUI.
-pub const ENV_GROUP_TOOL_VERBS: &str = "GROK_GROUP_TOOL_VERBS";
+pub const ENV_GROUP_TOOL_VERBS: &str = "CHUTES_BUILD_GROUP_TOOL_VERBS";
 
 #[cfg(test)]
 static GROUP_TOOL_VERBS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -60,7 +60,7 @@ static GROUP_TOOL_VERBS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new((
 /// Resolve whether the TUI folds runs of consecutive non-destructive tool
 /// calls (reads/searches/lists) into one transcript row.
 ///
-/// Precedence: requirements > env (`GROK_GROUP_TOOL_VERBS`) >
+/// Precedence: requirements > env (`CHUTES_BUILD_GROUP_TOOL_VERBS`) >
 /// `[ui] group_tool_verbs` > managed > remote settings > default `true`
 /// (remote `Some(false)` is the kill switch).
 pub fn resolve_group_tool_verbs(
@@ -81,7 +81,7 @@ pub fn resolve_group_tool_verbs(
 }
 
 /// Env override for the collapsed-Edit-blocks default in the TUI.
-pub const ENV_COLLAPSED_EDIT_BLOCKS: &str = "GROK_COLLAPSED_EDIT_BLOCKS";
+pub const ENV_COLLAPSED_EDIT_BLOCKS: &str = "CHUTES_BUILD_COLLAPSED_EDIT_BLOCKS";
 
 #[cfg(test)]
 static COLLAPSED_EDIT_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -89,7 +89,7 @@ static COLLAPSED_EDIT_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// Resolve whether the TUI shows Edit tool calls as a collapsed one-line
 /// `+N/-M` diffstat summary by default (expand for the diff).
 ///
-/// Precedence: requirements > env (`GROK_COLLAPSED_EDIT_BLOCKS`) >
+/// Precedence: requirements > env (`CHUTES_BUILD_COLLAPSED_EDIT_BLOCKS`) >
 /// `[ui] collapsed_edit_blocks` > managed > remote (GrowthBook) > default
 /// `false` (rollout flag: off keeps the legacy expanded-diff view).
 pub fn resolve_collapsed_edit_blocks(
@@ -115,7 +115,7 @@ pub fn resolve_collapsed_edit_blocks(
 /// user can flip terminal mouse capture and hand selection back to the terminal
 /// for native click-drag copy/paste.
 ///
-/// Precedence: `GROK_MOUSE_REPORTING_TOGGLE` env > `[ui] mouse_reporting_toggle`
+/// Precedence: `CHUTES_BUILD_MOUSE_REPORTING_TOGGLE` env > `[ui] mouse_reporting_toggle`
 /// in effective config > the parsed [`UiConfig`] field (defends against a
 /// partial deserialize) > default (`false`). Returns [`Resolved`] so callers can
 /// log the winning source.
@@ -131,7 +131,7 @@ pub fn resolve_mouse_reporting_toggle(
         .and_then(|c| c.get("ui"))
         .and_then(|ui| ui.get("mouse_reporting_toggle"))
         .and_then(|v| v.as_bool());
-    BoolFlag::env("GROK_MOUSE_REPORTING_TOGGLE")
+    BoolFlag::env("CHUTES_BUILD_MOUSE_REPORTING_TOGGLE")
         .config(from_effective.or(ui.mouse_reporting_toggle))
         .resolve()
 }
@@ -140,7 +140,7 @@ pub fn resolve_mouse_reporting_toggle(
 mod tests {
     use super::*;
 
-    // Assumes GROK_MOUSE_REPORTING_TOGGLE is unset in the test env.
+    // Assumes CHUTES_BUILD_MOUSE_REPORTING_TOGGLE is unset in the test env.
     #[test]
     fn resolve_mouse_reporting_toggle_defaults_off() {
         use crate::agent::config::{ConfigSource, UiConfig};

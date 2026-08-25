@@ -3,7 +3,7 @@ license = "Apache-2.0"
 name = "xai-grok-hooks"
 version = "0.1.0"
 edition.workspace = true
-description = "Runtime hook system for Grok — file-based discovery, command execution, and policy enforcement"
+description = "Runtime hook system for Chutes Build — file-based discovery, command execution, and policy enforcement"
 
 [dependencies]
 fastrand = { workspace = true }

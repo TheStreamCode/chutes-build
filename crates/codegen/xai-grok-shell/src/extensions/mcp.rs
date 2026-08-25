@@ -1,10 +1,10 @@
 //! MCP extension methods and business logic.
 //!
-//! - `x.ai/mcp/list` — list available MCP servers (agent-scoped or session-annotated)
-//! - `x.ai/mcp/call` — invoke an MCP tool directly, outside the LLM loop
-//! - `x.ai/mcp/servers_updated` — local/plugin catalog after launch-dir discovery
+//! - `chutes.ai/mcp/list` — list available MCP servers (agent-scoped or session-annotated)
+//! - `chutes.ai/mcp/call` — invoke an MCP tool directly, outside the LLM loop
+//! - `chutes.ai/mcp/servers_updated` — local/plugin catalog after launch-dir discovery
 //!   or a folder-trust grant (not gateway connectors)
-//! - `x.ai/mcp/server_status` — per-server delta pushed by the
+//! - `chutes.ai/mcp/server_status` — per-server delta pushed by the
 //!   `StatusDispatcher` (transport-closed pollers, handshake failures,
 //!   config diffs, server-pushed list-changed notifications). See
 //!   [`crate::session::mcp_dispatcher`] for the coalescing /
@@ -25,7 +25,7 @@ use xai_grok_mcp::wire;
 
 use super::{ExtResult, parse_params, to_ext_response};
 
-/// Agent-only `x.ai/mcp/*` ACP method/notification names.
+/// Agent-only `chutes.ai/mcp/*` ACP method/notification names.
 ///
 /// Unlike [`wire::MCP_CALL`] (the cross-SDK contract, which stays in
 /// `xai_grok_mcp::wire`), these methods are private to the agent↔client channel and
@@ -272,9 +272,9 @@ pub struct McpToolsChanged {
     pub tools: Vec<McpToolEntry>,
 }
 
-// Re-export the `x.ai/mcp/server_status` schema +
+// Re-export the `chutes.ai/mcp/server_status` schema +
 // method constant from the dispatcher module so external callers
-// have a single import point alongside the other `x.ai/mcp/*`
+// have a single import point alongside the other `chutes.ai/mcp/*`
 // types.
 //
 // The canonical definitions still live in
@@ -333,13 +333,13 @@ pub async fn notify_servers_updated(
     if let Ok(params) = serde_json::value::to_raw_value(&payload) {
         let notification = acp::ExtNotification::new(mcp_methods::SERVERS_UPDATED, params.into());
         let _ = gateway.ext_notification(notification).await;
-        tracing::info!("Sent x.ai/mcp/servers_updated notification to client");
+        tracing::info!("Sent chutes.ai/mcp/servers_updated notification to client");
     }
 }
 
 // ── Dispatch ────────────────────────────────────────────────────────
 
-/// Inbound `x.ai/mcp/*` methods this agent services, resolved from the wire string.
+/// Inbound `chutes.ai/mcp/*` methods this agent services, resolved from the wire string.
 ///
 /// Single source of truth for forward-method routing: [`handle`] maps each variant to
 /// its handler, and an unknown method yields `None` → `method_not_found`. The reverse
@@ -1937,7 +1937,7 @@ async fn handle_delete(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 mod tests {
     use super::*;
 
-    /// The emit-only reverse method (`x.ai/mcp/sdk_call`) shares the `x.ai/mcp/`
+    /// The emit-only reverse method (`chutes.ai/mcp/sdk_call`) shares the `chutes.ai/mcp/`
     /// prefix, so `mvp_agent`'s dispatcher routes an inbound copy of it to this
     /// module's `handle`. It must NOT collide with any forward route — i.e. it has no
     /// `McpRoute`, so `handle` returns `method_not_found` instead of misrouting a stray
@@ -1951,7 +1951,7 @@ mod tests {
         assert_eq!(
             route_mcp_method(wire::MCP_SDK_CALL),
             None,
-            "inbound x.ai/mcp/sdk_call must not resolve to a forward handler"
+            "inbound chutes.ai/mcp/sdk_call must not resolve to a forward handler"
         );
         // Sanity: the forward sibling on the same prefix DOES route.
         assert_eq!(route_mcp_method(wire::MCP_CALL), Some(McpRoute::Call));
@@ -2100,7 +2100,7 @@ mod tests {
                         url: "https://mcp.linear.app".to_string(),
                         scope: Some("team".to_string()),
                         scope_id: Some("team-uuid-123".to_string()),
-                        scope_name: Some("Grok CLI".to_string()),
+                        scope_name: Some("Chutes Build CLI".to_string()),
                     },
                     source_label: None,
                     setup: None,
@@ -2144,7 +2144,7 @@ mod tests {
         assert_eq!(json["servers"][0]["url"], "https://mcp.linear.app");
         assert_eq!(json["servers"][0]["scope"], "team");
         assert_eq!(json["servers"][0]["scopeId"], "team-uuid-123");
-        assert_eq!(json["servers"][0]["scopeName"], "Grok CLI");
+        assert_eq!(json["servers"][0]["scopeName"], "Chutes Build CLI");
         assert!(json["servers"][0].get("session").is_none());
         // Managed gateway connectors are not serialized as local transports.
         let gateway = serde_json::to_value(McpServerEntry {

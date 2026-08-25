@@ -146,7 +146,7 @@ pub fn reset_oom_score_adj() -> io::Result<()> {
 /// protective (negative) `oom_score_adj`, so the commands it spawns stay
 /// ordinary OOM candidates instead of inheriting that protection.
 #[cfg(unix)]
-pub const RESET_CHILD_OOM_ENV: &str = "GROK_TOOLS_RESET_CHILD_OOM";
+pub const RESET_CHILD_OOM_ENV: &str = "CHUTES_BUILD_TOOLS_RESET_CHILD_OOM";
 
 /// Lower this process's `oom_score_adj` to -900 so the kernel OOM killer
 /// prefers any ordinary child (score 0) while the server remains a last-resort
@@ -424,7 +424,7 @@ fn bind_to_parent_death(parent_pid: u32, armed_thread: std::thread::ThreadId) ->
 /// Bind the child's lifetime to the spawning process: on Linux the kernel
 /// delivers `SIGTERM` to the child when the parent dies
 /// (`PR_SET_PDEATHSIG`), so helper processes cannot outlive a crashed or
-/// killed grok and pile up on shared hosts. No-op on non-Linux platforms
+/// killed chutes-build and pile up on shared hosts. No-op on non-Linux platforms
 /// (macOS and Windows have no pdeathsig equivalent).
 ///
 /// **Caveat: pdeathsig binds to the death of the spawning *thread*, not
@@ -468,7 +468,7 @@ pub fn kill_on_parent_death_std(cmd: &mut std::process::Command) {
 ///
 /// This is the child-side variant of [`kill_on_parent_death_std`] for protocol
 /// servers whose parents are not spawned from this workspace (IDE clients,
-/// the agent SDKs, `grok-desktop` all spawn `grok agent … stdio`): the
+/// the agent SDKs, `grok-desktop` all spawn `chutes-build agent … stdio`): the
 /// child arms the binding itself at startup instead of relying on every
 /// external spawner to.
 ///

@@ -16,9 +16,9 @@ use super::{NotificationEvent, NotificationEventSink};
 const DEFAULT_IDLE_NOTIFICATION_DELAY: Duration = Duration::from_secs(60);
 
 /// Debounce between the session settling idle and the `idle_prompt` notification, so it fires only on sustained inactivity.
-/// `GROK_IDLE_NOTIFICATION_DELAY_MS` overrides it (used by E2E tests).
+/// `CHUTES_BUILD_IDLE_NOTIFICATION_DELAY_MS` overrides it (used by E2E tests).
 fn idle_notification_delay() -> Duration {
-    resolve_idle_notification_delay(std::env::var("GROK_IDLE_NOTIFICATION_DELAY_MS").ok())
+    resolve_idle_notification_delay(std::env::var("CHUTES_BUILD_IDLE_NOTIFICATION_DELAY_MS").ok())
 }
 
 /// Split from [`idle_notification_delay`] so the env parsing is testable without touching the process env.
@@ -30,7 +30,7 @@ fn resolve_idle_notification_delay(raw: Option<String>) -> Duration {
 
 /// Fires the `idle_prompt` notification hook once the session stays idle for the delay. Synthetic turns (auto-wake, drain, cron) only defer an
 /// earned ping: they cancel the timer like any turn start, and their own idle settle re-arms it.
-/// Covered by the headless E2E via `GROK_IDLE_NOTIFICATION_DELAY_MS`.
+/// Covered by the headless E2E via `CHUTES_BUILD_IDLE_NOTIFICATION_DELAY_MS`.
 struct IdlePromptExtension {
     notification_event_sink: Rc<dyn NotificationEventSink>,
     timer: TaskSlot<()>,
@@ -110,7 +110,7 @@ mod idle_notification_delay_tests {
         );
     }
 
-    /// Pins the public `GROK_IDLE_NOTIFICATION_DELAY_MS` contract: a valid override is interpreted as milliseconds (the E2E seam depends on this).
+    /// Pins the public `CHUTES_BUILD_IDLE_NOTIFICATION_DELAY_MS` contract: a valid override is interpreted as milliseconds (the E2E seam depends on this).
     #[test]
     fn env_override_parses_millis() {
         assert_eq!(

@@ -2441,7 +2441,7 @@ impl WorkspaceHandle {
     }
     /// Run a content search (ripgrep) and return results.
     /// Run a streaming content (ripgrep) search rooted at `cwd`, emitting each
-    /// batch as `x.ai/search/content/status` via the client sink, and returning
+    /// batch as `chutes.ai/search/content/status` via the client sink, and returning
     /// the final result. Co-located with the sink so it streams in both modes.
     pub async fn run_content_search(
         &self,
@@ -2459,7 +2459,7 @@ impl WorkspaceHandle {
                 "done": batch.done,
                 "truncated": batch.truncated,
             });
-            handle.emit_client_ext("x.ai/search/content/status".to_string(), params);
+            handle.emit_client_ext("chutes.ai/search/content/status".to_string(), params);
         })
         .await
         .map_err(|e| WorkspaceError::HubError(e.to_string()))
@@ -4015,7 +4015,7 @@ pub(crate) async fn stream_hash_and_range(
 /// registers its tools on the server so external clients can reach them.
 /// Sessions are bound dynamically by clients calling `bind_server`.
 ///
-/// `confine_fs_to_workspace_root` confines `x.ai/fs/*` resolution to the root.
+/// `confine_fs_to_workspace_root` confines `chutes.ai/fs/*` resolution to the root.
 /// The standalone workspace server defaults it on (it always backs a remote
 /// sandbox; override via `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT`); the CLI leader
 /// passes `false`.
@@ -4048,7 +4048,7 @@ pub async fn connect_local_workspace(
             workspace_home.display()
         ))
     })?;
-    let api_base_url = std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL")
+    let api_base_url = std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL")
         .unwrap_or_else(|_| "https://cli-chat-proxy.chutes-build.com/v1".to_string());
     let data_collection_disabled =
         std::env::var("CHUTES_BUILD_WORKSPACE_DATA_COLLECTION_DISABLED").as_deref() != Ok("false");
@@ -4435,7 +4435,7 @@ fn reduce_enqueue_outcomes(
     }
 }
 /// Per-process ephemeral workspace home for handles constructed without a
-/// backing upload queue (tests, local mode). Never the real grok home —
+/// backing upload queue (tests, local mode). Never the real Chutes Build home —
 /// only [`connect_local_workspace`] resolves `$CHUTES_BUILD_WORKSPACE_HOME` — so the
 /// queue-less default path can never collide with a real workspace's state dir.
 fn ephemeral_workspace_home() -> std::path::PathBuf {

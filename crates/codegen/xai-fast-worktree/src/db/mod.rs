@@ -227,9 +227,9 @@ impl WorktreeDb {
             .with_context(|| format!("failed to set journal mode {}", mode.as_str()))
     }
 
-    /// Open the default DB at `~/.grok/worktrees.db`.
+    /// Open the default DB at `~/.chutes-build/worktrees.db`.
     ///
-    /// Discovers grok home via `xai_grok_home::resolve_grok_home` (`$GROK_HOME`,
+    /// Discovers Chutes Build home via `xai_grok_home::resolve_grok_home` (`$CHUTES_BUILD_HOME`,
     /// else the canonicalized `<home>/.grok`).
     /// Path is resolved fresh each call (env read plus a canonicalize) to
     /// support test overrides. Each call opens its own connection — callers in
@@ -457,25 +457,25 @@ pub fn now_epoch_secs() -> i64 {
     crate::time::epoch_secs()
 }
 
-/// Resolve the grok home: `$GROK_HOME`, else `<home>/.grok`.
+/// Resolve the Chutes Build home: `$CHUTES_BUILD_HOME`, else `<home>/.grok`.
 pub fn resolve_grok_home() -> Result<PathBuf> {
     xai_grok_home::resolve_grok_home()
-        .context("neither $GROK_HOME nor a home directory could be resolved")
+        .context("neither $CHUTES_BUILD_HOME nor a home directory could be resolved")
 }
 
-/// Serializes tests that mutate the process-global `GROK_HOME` env var so they
+/// Serializes tests that mutate the process-global `CHUTES_BUILD_HOME` env var so they
 /// don't clobber each other under `cargo test`, where tests share one process
 /// (nextest isolates per-process, but the suite must also pass under `cargo test`).
 #[cfg(test)]
-static GROK_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static CHUTES_BUILD_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Test-only isolation for code that resolves the DB via `open_default()`.
 ///
-/// Holds [`GROK_HOME_ENV_LOCK`] (serializing concurrent setters), points
-/// `GROK_HOME` at a fresh private tmp dir, and restores the prior value on drop.
+/// Holds [`CHUTES_BUILD_HOME_ENV_LOCK`] (serializing concurrent setters), points
+/// `CHUTES_BUILD_HOME` at a fresh private tmp dir, and restores the prior value on drop.
 /// Use instead of hand-rolling the lock + restore guard + tmp dir per test.
 ///
-/// `Drop` restores `GROK_HOME` before `_lock` releases, so the env is correct
+/// `Drop` restores `CHUTES_BUILD_HOME` before `_lock` releases, so the env is correct
 /// before another waiting setter proceeds.
 #[cfg(test)]
 pub(crate) struct GrokHomeFixture {
@@ -485,7 +485,7 @@ pub(crate) struct GrokHomeFixture {
     prev_grove_data_dir: Option<std::ffi::OsString>,
     prev_home: Option<std::ffi::OsString>,
     touched_grove_env: bool,
-    /// The isolated grok home; pass to `WorktreeDb::open` to read the same DB
+    /// The isolated Chutes Build home; pass to `WorktreeDb::open` to read the same DB
     /// `open_default()` writes to.
     pub home: PathBuf,
     _tmp: tempfile::TempDir,
@@ -494,20 +494,22 @@ pub(crate) struct GrokHomeFixture {
 #[cfg(test)]
 impl GrokHomeFixture {
     pub(crate) fn new() -> Self {
-        let lock = GROK_HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = CHUTES_BUILD_HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().join("grok-home");
         std::fs::create_dir_all(&home).unwrap();
         // Warm up the DB (journal-mode conversion + schema) before exposing it
-        // via GROK_HOME, sparing the test hot loop set_journal_mode's retry
+        // via CHUTES_BUILD_HOME, sparing the test hot loop set_journal_mode's retry
         // sleeps. This open has exclusive access (nothing reaches the path
-        // until GROK_HOME points here); set_journal_mode's retry is the actual
+        // until CHUTES_BUILD_HOME points here); set_journal_mode's retry is the actual
         // race fix.
         let _ = WorktreeDb::open(&home);
-        let prev = std::env::var_os("GROK_HOME");
-        // SAFETY: the fixture holds the GROK_HOME env lock for its whole
+        let prev = std::env::var_os("CHUTES_BUILD_HOME");
+        // SAFETY: the fixture holds the CHUTES_BUILD_HOME env lock for its whole
         // lifetime, so no other test thread reads or writes the environment.
-        unsafe { std::env::set_var("GROK_HOME", &home) };
+        unsafe { std::env::set_var("CHUTES_BUILD_HOME", &home) };
         Self {
             _lock: lock,
             prev,
@@ -544,12 +546,12 @@ impl GrokHomeFixture {
 #[cfg(test)]
 impl Drop for GrokHomeFixture {
     fn drop(&mut self) {
-        // SAFETY: the fixture still holds the GROK_HOME env lock here, so no
+        // SAFETY: the fixture still holds the CHUTES_BUILD_HOME env lock here, so no
         // other test thread reads or writes the environment during restore.
         unsafe {
             match self.prev.take() {
-                Some(p) => std::env::set_var("GROK_HOME", p),
-                None => std::env::remove_var("GROK_HOME"),
+                Some(p) => std::env::set_var("CHUTES_BUILD_HOME", p),
+                None => std::env::remove_var("CHUTES_BUILD_HOME"),
             }
             if self.touched_grove_env {
                 match self.prev_xdg_data_home.take() {

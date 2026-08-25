@@ -1,4 +1,4 @@
-//! `grok mcp doctor` -- runtime health check for MCP servers.
+//! `chutes-build mcp doctor` -- runtime health check for MCP servers.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -148,14 +148,14 @@ fn discover_servers(cwd: &Path) -> (Vec<ConfigSourceStatus>, Vec<DiscoveredServe
     let user_config = grok_home.join("config.toml");
     if user_config.is_file() {
         sources.push(ConfigSourceStatus {
-            path: "~/.grok/config.toml".to_string(),
+            path: "~/.chutes-build/config.toml".to_string(),
             status: ConfigSourceState::Found {
                 server_count: config_count,
             },
         });
     } else {
         sources.push(ConfigSourceStatus {
-            path: "~/.grok/config.toml".to_string(),
+            path: "~/.chutes-build/config.toml".to_string(),
             status: ConfigSourceState::NotFound,
         });
     }
@@ -456,13 +456,13 @@ pub async fn run_doctor(cwd: &Path, name_filter: Option<&str>) -> DoctorReport {
 
     let disabled_names = crate::util::config::disabled_mcp_server_names(cwd);
 
-    // Folder-trust gate: `grok mcp doctor` actually STARTS each server
+    // Folder-trust gate: `chutes-build mcp doctor` actually STARTS each server
     // (`check_server_start`), so in an untrusted clone it would spawn the repo's
     // project-scoped servers. Resolve the doctor cwd once (no prompt), then skip
     // (do not start) any project-scoped server when untrusted. Reuses the same
     // name primitive as the session/agent-pool gates.
     //
-    // `remote = None` is intentional: standalone `grok mcp doctor` has no loaded
+    // `remote = None` is intentional: standalone `chutes-build mcp doctor` has no loaded
     // `RemoteSettings`, so a remote-only org `folder_trust_enabled = false`
     // opt-out isn't seen here — gating conservatively (treating the feature as
     // enabled) is the deliberate fail-secure direction. Local env/user/managed
@@ -562,7 +562,7 @@ pub fn print_report(report: &DoctorReport) {
 
     if report.servers.is_empty() {
         println!("  No MCP servers configured.");
-        println!("  Run `grok mcp add --help` to get started.");
+        println!("  Run `chutes-build mcp add --help` to get started.");
         println!();
         return;
     }
@@ -592,7 +592,7 @@ pub fn print_report(report: &DoctorReport) {
         report.healthy_count,
         report.failing_count,
         if report.failing_count > 0 {
-            " Run `grok mcp doctor --json` for full diagnostics."
+            " Run `chutes-build mcp doctor --json` for full diagnostics."
         } else {
             ""
         }

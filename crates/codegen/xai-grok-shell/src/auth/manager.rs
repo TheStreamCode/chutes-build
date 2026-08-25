@@ -344,22 +344,22 @@ impl AuthManager {
                 "grok_home": grok_home.display().to_string(),
                 "HOME": std::env::var("HOME").unwrap_or_else(|_| "(unset)".into()),
                 "CHUTES_BUILD_HOME": std::env::var("CHUTES_BUILD_HOME").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH_PATH": std::env::var("GROK_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH": std::env::var("GROK_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
+                "CHUTES_BUILD_AUTH_PATH": std::env::var("CHUTES_BUILD_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
+                "CHUTES_BUILD_AUTH": std::env::var("CHUTES_BUILD_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
             })),
         );
 
-        // GROK_AUTH_PATH: custom file path (overrides default $CHUTES_BUILD_HOME/auth.json).
-        // Resolved before the GROK_AUTH branch so inline-credential managers
+        // CHUTES_BUILD_AUTH_PATH: custom file path (overrides default $CHUTES_BUILD_HOME/auth.json).
+        // Resolved before the CHUTES_BUILD_AUTH branch so inline-credential managers
         // also honor it: their later refresh persistence (`update()`) writes to
         // this path, and previously the inline branch hardcoded the default —
         // silently splitting reads (inline) from writes (default path).
-        let path = std::env::var("GROK_AUTH_PATH")
+        let path = std::env::var("CHUTES_BUILD_AUTH_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| grok_home.join("auth.json"));
 
-        // GROK_AUTH: inline JSON credentials (highest priority, read-only).
-        if let Ok(inline_json) = std::env::var("GROK_AUTH") {
+        // CHUTES_BUILD_AUTH: inline JSON credentials (highest priority, read-only).
+        if let Ok(inline_json) = std::env::var("CHUTES_BUILD_AUTH") {
             if let Ok(auth) = serde_json::from_str::<GrokAuth>(&inline_json) {
                 return Self::assemble(
                     Some(auth),
@@ -370,7 +370,9 @@ impl AuthManager {
                     None,
                 );
             }
-            tracing::warn!("GROK_AUTH set but failed to parse as JSON, falling back to file");
+            tracing::warn!(
+                "CHUTES_BUILD_AUTH set but failed to parse as JSON, falling back to file"
+            );
         }
 
         let (auth, auth_read_detail, initial_disk_state) = match read_auth_json(&path) {
@@ -450,7 +452,7 @@ impl AuthManager {
     }
 
     /// Single field-assembly point for [`Self::new`]'s two construction paths
-    /// (inline `GROK_AUTH` vs. on-disk `auth.json`), which differ only in the
+    /// (inline `CHUTES_BUILD_AUTH` vs. on-disk `auth.json`), which differ only in the
     /// threaded fields. One literal means a newly added field can't be silently
     /// dropped from one branch.
     fn assemble(
@@ -1027,7 +1029,7 @@ impl AuthManager {
     }
 
     /// Path to the `auth.json` this manager reads/writes (respects
-    /// `GROK_AUTH_PATH` / constructor home). Prefer this over
+    /// `CHUTES_BUILD_AUTH_PATH` / constructor home). Prefer this over
     /// `grok_home()/auth.json` so temp-home tests and custom stores stay isolated.
     pub(crate) fn auth_json_path(&self) -> &Path {
         &self.path
@@ -1368,7 +1370,7 @@ impl AuthManager {
             "is_expired": auth.map(is_expired),
         });
         match new_state {
-            // Recovery (or first observation in GROK_AUTH mode).
+            // Recovery (or first observation in CHUTES_BUILD_AUTH mode).
             DiskAuthState::Ok => {
                 xai_grok_telemetry::unified_log::info(
                     "auth disk state: entry present",
@@ -1538,7 +1540,7 @@ impl AuthManager {
             }
             TokenType::LegacySession => {
                 // Deliberate side effect: re-read auth.json under the
-                // assumption that a sibling process (`grok login` from
+                // assumption that a sibling process (`chutes-build login` from
                 // another shell, the desktop app, etc.) may have refreshed
                 // the on-disk credentials. `pick_up_sibling_token` only
                 // mutates inner when the disk holds a *different valid*

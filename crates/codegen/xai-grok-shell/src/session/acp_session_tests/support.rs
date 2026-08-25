@@ -48,7 +48,7 @@ pub(crate) async fn test_agent_with_goal_tool() -> xai_grok_agent::Agent {
     use xai_grok_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<UpdateGoalTool>()]).await
 }
-/// Grok-build agent with the real `TodoWriteTool` (id `todo_write`, kind
+/// Chutes Build-build agent with the real `TodoWriteTool` (id `todo_write`, kind
 /// `Plan`) registered, so `tool_for_kind(ToolKind::Plan)` resolves through the
 /// live toolset instead of the literal fallback.
 #[cfg(test)]

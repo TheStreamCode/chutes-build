@@ -122,7 +122,7 @@ fn unknown_data_is_omitted_rather_than_faked() {
             "cost": { "total_duration_ms": 0 },
             "context_window": {},
         }),
-        "what Grok cannot source is omitted; a context window reported as 0 \
+        "what Chutes Build cannot source is omitted; a context window reported as 0 \
          would paint `0% ctx` over a full one"
     );
 }

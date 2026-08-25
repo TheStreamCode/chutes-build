@@ -105,7 +105,7 @@ pub fn worktree_type() -> WorktreeType {
 
 /// Env override for grove vs copy (`grove` | `grove-fuse` | `grove-nfs` | `nfs` | `copy`).
 /// Distinct from [`WorktreeType`] (`linked` | `standalone` | `git`).
-pub const ENV_WORKTREE_TYPE: &str = "GROK_WORKTREE_TYPE";
+pub const ENV_WORKTREE_TYPE: &str = "CHUTES_BUILD_WORKTREE_TYPE";
 
 fn grove_from_str(s: &str) -> Option<bool> {
     match s.trim().to_ascii_lowercase().as_str() {

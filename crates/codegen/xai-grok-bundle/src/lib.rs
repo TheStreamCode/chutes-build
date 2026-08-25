@@ -1,5 +1,5 @@
 //! On-disk cache for the xAI-published subagent bundle: personas, roles,
-//! agents, skills, and workflows written under `<grok home>/bundled`.
+//! agents, skills, and workflows written under `<Chutes Build home>/bundled`.
 //!
 //! Writes are checksum-tracked through `manifest.json`, so a file the user
 //! edited by hand is never overwritten and never pruned. Archive extraction

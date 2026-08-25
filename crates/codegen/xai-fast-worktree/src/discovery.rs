@@ -11,7 +11,7 @@ use crate::db::{
 pub const WORKTREES_DIR: &str = "worktrees";
 pub const WORKTREE_POOL_DIR: &str = "worktree_pool";
 /// Depth of a worktree below its managed root: `<root>/<repo>/<worktree>`.
-/// [`scan_two_level_dir`] and `grok du`'s bucketing have to agree on it.
+/// [`scan_two_level_dir`] and `chutes-build du`'s bucketing have to agree on it.
 pub const WORKTREE_DEPTH: usize = 2;
 
 #[derive(Debug)]
@@ -245,7 +245,7 @@ fn rebuild_worktree_db_from_grove_dirs(
     let existing: Vec<crate::nfs::NfsIdentity> =
         crate::nfs::identities_from_worktree_records(&recs);
     // Union every grove data dir before writing metadata. A leftover
-    // ~/.grok/grove marker must not rewrite backing/source_pin alone and
+    // ~/.chutes-build/grove marker must not rewrite backing/source_pin alone and
     // outrank the live XDG identity (pin-GC already unions first).
     let mut by_id: HashMap<String, crate::nfs::NfsIdentity> = HashMap::new();
     for data_dir in grove_data_dirs {
@@ -267,7 +267,7 @@ fn rebuild_worktree_db_from_grove_dirs(
         if !path_under_worktree_roots(&path, &roots) {
             tracing::warn!(
                 path = %path.display(),
-                "rebuild skipped path outside grok worktrees/worktree_pool"
+                "rebuild skipped path outside chutes-build worktrees/worktree_pool"
             );
             continue;
         }
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn rebuild_nfs_under_managed_roots_is_not_labeled_linked() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
+        let grok_home = tmp.path().join("chutes-build");
         let data = tmp.path().join("grove");
         let dest = grok_home.join("worktrees/repo/nfs-sess");
         let local = grok_home.join("worktrees/repo/local-sess");
@@ -744,7 +744,7 @@ mod tests {
     #[test]
     fn rebuild_registers_nfs_from_backing_marker() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
+        let grok_home = tmp.path().join("chutes-build");
         let data = tmp.path().join("grove");
         std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
         // Dest is outside managed roots so FS discovery does not register a
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     fn rebuild_dest_equivalent_does_not_overwrite_live_nfs_metadata() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
+        let grok_home = tmp.path().join("chutes-build");
         let data = tmp.path().join("grove");
         std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
         let dest = tmp.path().join("shared-dest");
@@ -878,7 +878,7 @@ mod tests {
     #[test]
     fn rebuild_skips_symlink_escape_outside_managed_roots() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
+        let grok_home = tmp.path().join("chutes-build");
         let outside = tmp.path().join("outside-real");
         make_fake_standalone_worktree(&outside);
         let link_parent = grok_home.join("worktrees/repo");
@@ -940,7 +940,7 @@ mod tests {
     #[test]
     fn rebuild_skips_destless_nfs_identity() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let grok_home = tmp.path().join("grok");
+        let grok_home = tmp.path().join("chutes-build");
         std::fs::create_dir_all(grok_home.join("worktrees")).unwrap();
         let data = tmp.path().join("grove");
         std::fs::create_dir_all(&data).unwrap();

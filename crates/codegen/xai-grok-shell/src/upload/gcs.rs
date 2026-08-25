@@ -113,10 +113,10 @@ impl WithAuth for TraceExportConfig {
     }
 }
 /// Default GCS bucket for session trace uploads. Override at runtime with
-/// `GROK_TELEMETRY_GCS_BUCKET`; `None` disables trace uploads until a bucket
+/// `CHUTES_BUILD_TELEMETRY_GCS_BUCKET`; `None` disables trace uploads until a bucket
 /// is configured.
 pub(crate) const SESSION_TRACES_BUCKET: Option<&str> =
-    option_env!("GROK_SESSION_TRACES_BUCKET_DEFAULT");
+    option_env!("CHUTES_BUILD_SESSION_TRACES_BUCKET_DEFAULT");
 /// Upload bytes to the `auth-diagnostics/{version}/{user_id}/{ts}.jsonl` path
 /// for easy aggregation across users. Used by both the auth refresh failure
 /// uploader and the 401/404 error trace uploader.

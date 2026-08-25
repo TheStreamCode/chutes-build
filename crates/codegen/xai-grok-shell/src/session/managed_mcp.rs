@@ -658,9 +658,9 @@ mod tests {
     fn toml_claim_survives_when_client_cursor_insert_skipped() {
         let cwd = empty_cwd();
         write_cursor_project_mcp(cwd.path(), "killswitch-cache");
-        std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
+        std::fs::create_dir_all(cwd.path().join(".chutes-build")).unwrap();
         std::fs::write(
-            cwd.path().join(".grok").join("config.toml"),
+            cwd.path().join(".chutes-build").join("config.toml"),
             r#"
 [mcp_servers.killswitch-cache]
 command = "echo"
@@ -940,9 +940,9 @@ args = ["ok"]
     #[test]
     fn lower_precedence_http_servers_are_blocked_by_toml_name_claims() {
         let cwd = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
+        std::fs::create_dir_all(cwd.path().join(".chutes-build")).unwrap();
         std::fs::write(
-            cwd.path().join(".grok").join("config.toml"),
+            cwd.path().join(".chutes-build").join("config.toml"),
             r#"
 [mcp_servers.github]
 url = "https://config.example.com/mcp"
@@ -979,9 +979,9 @@ enabled = false
     /// ClickHouse endpoint, two orgs).
     fn same_url_project_repo() -> tempfile::TempDir {
         let cwd = empty_cwd();
-        std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
+        std::fs::create_dir_all(cwd.path().join(".chutes-build")).unwrap();
         std::fs::write(
-            cwd.path().join(".grok").join("config.toml"),
+            cwd.path().join(".chutes-build").join("config.toml"),
             r#"
 [mcp_servers.gb5207-org1]
 url = "https://dup-url.example.test/mcp"
@@ -1102,7 +1102,7 @@ Authorization = "Bearer org2-token"
             "mcpServers": {
                 "echo-mcp": {
                     "command": "python3",
-                    "args": ["${GROK_PLUGIN_ROOT}/mcp-echo-server.py"]
+                    "args": ["${CHUTES_BUILD_PLUGIN_ROOT}/mcp-echo-server.py"]
                 }
             }
         }))
@@ -1111,8 +1111,8 @@ Authorization = "Bearer org2-token"
         let (servers, _) = load_plugin_mcp_servers_from_config(
             &config,
             "team-tool",
-            "/home/user/.grok/plugins/team-tool",
-            "/home/user/.grok/plugin-data/team-tool",
+            "/home/user/.chutes-build/plugins/team-tool",
+            "/home/user/.chutes-build/plugin-data/team-tool",
         );
 
         assert_eq!(servers.len(), 1, "should create one server");
@@ -1127,7 +1127,7 @@ Authorization = "Bearer org2-token"
                 assert_eq!(command.display().to_string(), "python3");
                 assert_eq!(
                     args.as_slice(),
-                    &["/home/user/.grok/plugins/team-tool/mcp-echo-server.py"]
+                    &["/home/user/.chutes-build/plugins/team-tool/mcp-echo-server.py"]
                 );
             }
             _other => panic!("expected Stdio server"),

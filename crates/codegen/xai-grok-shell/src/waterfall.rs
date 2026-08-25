@@ -1,6 +1,6 @@
 //! Sweep-harness stage marks for the subagent spawn pipeline. Disabled by
 //! default: the disabled path is a single atomic sink check and reads no clock.
-//! `GROK_SUBAGENT_WATERFALL=1` writes to stderr; a `/path` value appends to
+//! `CHUTES_BUILD_SUBAGENT_WATERFALL=1` writes to stderr; a `/path` value appends to
 //! that file so the regression tier can parse its own marks back. Timestamps
 //! are monotonic micros from a process epoch ([`now_us`]): wall clocks step
 //! under NTP and skew segment math.
@@ -36,7 +36,7 @@ pub mod stage {
     pub const MOCK_REQ: &str = "mock_req";
 }
 
-pub const ENV: &str = "GROK_SUBAGENT_WATERFALL";
+pub const ENV: &str = "CHUTES_BUILD_SUBAGENT_WATERFALL";
 /// Line shape: `WATERFALL id=<id> stage=<stage> t_us=<micros>`.
 pub const LINE_PREFIX: &str = "WATERFALL";
 /// Harness burst-origin line: `WATERFALL-T0 n=<n> t_us=<micros>`.

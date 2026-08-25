@@ -1206,7 +1206,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
 /// the running turn and removes ONLY the running prompt (the front of
 /// `pending_inputs`). Every queued prompt is PRESERVED so the `Cancel`
 /// handler's follow-up `maybe_start_running_task` promotes the new front (the
-/// user's next queued prompt) and rebroadcasts `x.ai/queue/changed`. The
+/// user's next queued prompt) and rebroadcasts `chutes.ai/queue/changed`. The
 /// cancelling client never pulls a queued prompt back into its input — the
 /// server queue is the single source of truth for what runs next.
 ///

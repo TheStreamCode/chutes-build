@@ -1,4 +1,4 @@
-//! `x.ai/feedback`, `x.ai/feedback/dismiss`, `x.ai/btw`, and `x.ai/review/*`
+//! `chutes.ai/feedback`, `chutes.ai/feedback/dismiss`, `chutes.ai/btw`, and `chutes.ai/review/*`
 //! extension handlers.
 //!
 //! - `feedback`/`feedback/dismiss`: persist user ratings/text locally and
@@ -39,7 +39,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         _ => Err(acp::Error::method_not_found()),
     }
 }
-/// Handle `x.ai/btw` -- a side question that doesn't interrupt the current turn.
+/// Handle `chutes.ai/btw` -- a side question that doesn't interrupt the current turn.
 async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -79,7 +79,7 @@ async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     if !agent.cfg.borrow().is_feedback_enabled() {
         return Err(acp::Error::internal_error().data(
-            "Feedback is disabled. To enable, set GROK_FEEDBACK_ENABLED=true or \
+            "Feedback is disabled. To enable, set CHUTES_BUILD_FEEDBACK_ENABLED=true or \
              [features] feedback = true in config.toml.",
         ));
     }
@@ -381,8 +381,8 @@ async fn handle_upload_trace(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRes
 /// Record inline code review events.
 ///
 /// Methods:
-/// - `x.ai/review/comment`: record a new inline code comment to cloud storage
-/// - `x.ai/review/comment/delete`: record a tombstone event for a deleted comment
+/// - `chutes.ai/review/comment`: record a new inline code comment to cloud storage
+/// - `chutes.ai/review/comment/delete`: record a tombstone event for a deleted comment
 async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/review/comment" => {

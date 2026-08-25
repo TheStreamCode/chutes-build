@@ -247,8 +247,8 @@ fn write_oom_score_adj_raw(value: &'static [u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Build the unspawned proxy command. Secrets (`GROK_SERVER_KEY` /
-/// `GROK_SESSION_ID`) reach the proxy by env inheritance — never argv.
+/// Build the unspawned proxy command. Secrets (`CHUTES_BUILD_SERVER_KEY` /
+/// `CHUTES_BUILD_SESSION_ID`) reach the proxy by env inheritance — never argv.
 fn build_preview_command(cfg: &PreviewArgs) -> io::Result<tokio::process::Command> {
     use std::process::Stdio;
 
@@ -1792,7 +1792,7 @@ mod tests {
     /// test below. A distinct (non-zero) success code so a filter that matched
     /// no test (libtest would exit 0) can't masquerade as a pass.
     #[cfg(target_os = "linux")]
-    const PDEATHSIG_HELPER_ENV: &str = "GROK_PDEATHSIG_HELPER";
+    const PDEATHSIG_HELPER_ENV: &str = "CHUTES_BUILD_PDEATHSIG_HELPER";
     #[cfg(target_os = "linux")]
     const PDEATHSIG_HELPER_OK: i32 = 42;
 

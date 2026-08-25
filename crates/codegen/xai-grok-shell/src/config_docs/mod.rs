@@ -5,7 +5,7 @@
 //! source. Edit that file; CI fails when a registered key has no row, a
 //! `features.*` / MCP row names an unknown key, or a Requirements / Managed
 //! cell disagrees with the resolver metadata. The pager extracts the file to
-//! `~/.grok/docs/user-guide/` on launch.
+//! `~/.chutes-build/docs/user-guide/` on launch.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,7 +22,7 @@ const USER_ONLY_KEYS: &[&str] = &["features.remember_mode", "privacy.privacy_ban
 
 /// Nested GrokComConfig / OAuth2 / OIDC leaves enterprise writes today.
 /// Keep in sync with `src/auth/config.rs`.
-const GROK_COM_CONFIG_LEAVES: &[&str] = &[
+const CHUTES_BUILD_COM_CONFIG_LEAVES: &[&str] = &[
     "grok_com_config.grok_ws_origin",
     "grok_com_config.grok_ws_url",
     "grok_com_config.token_header",
@@ -55,12 +55,12 @@ struct Row {
 }
 
 fn committed_markdown_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("GROK_CONFIG_REFERENCE_MD") {
+    if let Some(path) = std::env::var_os("CHUTES_BUILD_CONFIG_REFERENCE_MD") {
         return PathBuf::from(path);
     }
     let root = find_monorepo_root().unwrap_or_else(|| {
         panic!(
-            "committed config-reference user-guide not found; set GROK_CONFIG_REFERENCE_MD or run from the monorepo (CARGO_MANIFEST_DIR={})",
+            "committed config-reference user-guide not found; set CHUTES_BUILD_CONFIG_REFERENCE_MD or run from the monorepo (CARGO_MANIFEST_DIR={})",
             env!("CARGO_MANIFEST_DIR")
         )
     });
@@ -101,7 +101,7 @@ fn load_markdown() -> String {
 }
 
 fn agents_md_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("GROK_CONFIG_DOCS_AGENTS_MD") {
+    if let Some(path) = std::env::var_os("CHUTES_BUILD_CONFIG_DOCS_AGENTS_MD") {
         return PathBuf::from(path);
     }
     let crate_agents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("AGENTS.md");
@@ -110,7 +110,7 @@ fn agents_md_path() -> PathBuf {
     }
     let root = find_monorepo_root().unwrap_or_else(|| {
         panic!(
-            "xai-grok-shell AGENTS.md not found; set GROK_CONFIG_DOCS_AGENTS_MD or run from the monorepo (CARGO_MANIFEST_DIR={})",
+            "xai-grok-shell AGENTS.md not found; set CHUTES_BUILD_CONFIG_DOCS_AGENTS_MD or run from the monorepo (CARGO_MANIFEST_DIR={})",
             env!("CARGO_MANIFEST_DIR")
         )
     });
@@ -331,7 +331,7 @@ mod tests {
     fn grok_com_config_nested_fields_and_auth_aliases() {
         let (config, _, _) = page();
         let map = by_key(&config);
-        for leaf in GROK_COM_CONFIG_LEAVES {
+        for leaf in CHUTES_BUILD_COM_CONFIG_LEAVES {
             let row = map.get(*leaf).unwrap_or_else(|| panic!("missing {leaf}"));
             let alias = leaf.replacen("grok_com_config.", "auth.", 1);
             let alias_row = map
@@ -389,8 +389,8 @@ mod tests {
                     | "features.image_edit"
             ) {
                 assert!(
-                    !row.details.contains("GROK_CONFIG"),
-                    "{} must not claim GROK_CONFIG",
+                    !row.details.contains("CHUTES_BUILD_CONFIG"),
+                    "{} must not claim CHUTES_BUILD_CONFIG",
                     row.key
                 );
             }

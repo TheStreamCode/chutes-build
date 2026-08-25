@@ -130,7 +130,7 @@ struct Args {
         action = clap::ArgAction::Set,
     )]
     project_lsp_trusted: bool,
-    /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`,
+    /// Confine `chutes.ai/fs/*` resolution to the workspace root (reject `..`,
     /// absolute-outside-root, symlink escapes). On by default: the standalone
     /// server always backs a remote-sandbox workspace, a real tenant boundary.
     /// Override with `CHUTES_BUILD_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
@@ -158,7 +158,7 @@ struct Args {
     #[arg(long, default_value = daemonize::DEFAULT_PIDFILE_PATH)]
     pid_file: PathBuf,
     /// Record `workspace_oom_protect_applied`, lower or recheck `oom_score_adj`
-    /// to -900, and force `GROK_TOOLS_RESET_CHILD_OOM` so shell/pty children
+    /// to -900, and force `CHUTES_BUILD_TOOLS_RESET_CHILD_OOM` so shell/pty children
     /// reset to 0. Complements always-on self-protect after pre-unshare
     /// inheritance; arms child reset even if the early write failed. Off by default.
     #[arg(long)]
@@ -300,7 +300,7 @@ fn main() -> anyhow::Result<()> {
     let rt = xai_tty_utils::runtime::build_with_blocking_pool(&mut builder)?;
     rt.block_on(run(args, cwd, oom_protection, oom_protect_applied))
 }
-/// Whether to arm `GROK_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
+/// Whether to arm `CHUTES_BUILD_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
 /// Always-on success must arm so children do not inherit -900. `--oom-protect`
 /// forces the env even when the early write failed (pre-unshare may still have
 /// left the score at -900).
@@ -360,14 +360,14 @@ async fn run(
     let url = Url::parse(&args.hub_url).map_err(|e| anyhow::anyhow!("invalid --hub-url: {e}"))?;
     {
         use xai_grok_sandbox::{ProfileName, SandboxManager};
-        let profile = match std::env::var("GROK_SANDBOX_PROFILE").ok() {
+        let profile = match std::env::var("CHUTES_BUILD_SANDBOX_PROFILE").ok() {
             Some(val) => {
                 let parsed = val
                     .parse::<ProfileName>()
                     .expect("ProfileName::from_str is infallible");
                 if matches!(parsed, ProfileName::Custom(_)) {
                     tracing::warn!(value = %val,
-                        "Unrecognized GROK_SANDBOX_PROFILE, defaulting to workspace");
+                        "Unrecognized CHUTES_BUILD_SANDBOX_PROFILE, defaulting to workspace");
                     ProfileName::Workspace
                 } else {
                     parsed
@@ -378,7 +378,7 @@ async fn run(
         };
         let profile_name = profile.to_string();
         if profile == ProfileName::Off {
-            tracing::info!(profile = %profile_name, "Sandbox explicitly disabled via GROK_SANDBOX_PROFILE=off");
+            tracing::info!(profile = %profile_name, "Sandbox explicitly disabled via CHUTES_BUILD_SANDBOX_PROFILE=off");
         } else {
             let mut sandbox = SandboxManager::new(profile, &cwd);
             if let Err(e) = sandbox.apply(&cwd) {
@@ -408,7 +408,7 @@ async fn run(
         "Starting workspace server"
     );
     let cwd_display = cwd.display().to_string();
-    let session_id = std::env::var("GROK_SESSION_ID").ok();
+    let session_id = std::env::var("CHUTES_BUILD_SESSION_ID").ok();
     let parsed_metadata = match args.metadata {
         Some(json_str) => Some(
             serde_json::from_str(&json_str)
@@ -947,7 +947,7 @@ mod tests {
             "--preview-instance-suffix",
             ".inst.example",
             "--preview-auth-redirect",
-            "https://grok.com/preview-auth",
+            "https://chutes.ai/preview-auth",
             "--preview-allow-public",
             "--preview-workspace-server-port",
             "8470",
@@ -964,7 +964,7 @@ mod tests {
         assert_eq!(cfg.instance_suffix.as_deref(), Some(".inst.example"));
         assert_eq!(
             cfg.auth_redirect.as_deref(),
-            Some("https://grok.com/preview-auth")
+            Some("https://chutes.ai/preview-auth")
         );
         assert!(cfg.allow_public);
         assert_eq!(cfg.workspace_server_port, Some(8470));
@@ -981,7 +981,7 @@ mod tests {
                 "--instance-suffix",
                 ".inst.example",
                 "--auth-redirect",
-                "https://grok.com/preview-auth",
+                "https://chutes.ai/preview-auth",
                 "--allow-public",
                 "--workspace-server-port",
                 "8470",

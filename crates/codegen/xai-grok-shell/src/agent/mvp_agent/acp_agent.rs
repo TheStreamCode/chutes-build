@@ -145,7 +145,7 @@ impl acp::Agent for MvpAgent {
             client_type = ?client_type,
             event = "code_nav_capability_parsed",
             "code-nav capability initialized from initialize request; \
-             index will start lazily on first x.ai/code/* request if eligible"
+             index will start lazily on first chutes.ai/code/* request if eligible"
         );
         let interactive_trust_client = Self::parse_interactive_trust_capability(
             &arguments,
@@ -232,7 +232,7 @@ impl acp::Agent for MvpAgent {
                 &crate::util::grok_home::grok_home(),
             )
         {
-            unsafe { std::env::set_var("XAI_API_KEY", &api_key) };
+            unsafe { std::env::set_var("CHUTES_API_KEY", &api_key) };
             tracing::info!("auth: loaded API key from auth.json (chutes::api_key scope)");
             xai_grok_telemetry::unified_log::info(
                 "auth: loaded API key from auth.json (chutes::api_key scope)",
@@ -392,7 +392,7 @@ impl acp::Agent for MvpAgent {
                         .map(|m| auth_method::AuthMethodKind::from_id(m.id())),
                     Some(auth_method::AuthMethodKind::XaiApiKey)
                 ),
-            "BYOK invariant violated: xai.api_key MUST be auth_methods.first() \
+            "BYOK invariant violated: chutes.api_key MUST be auth_methods.first() \
              when has_external_api_key is true; got {:?}",
             auth_methods.first().map(|m| m.id()),
         );
@@ -477,14 +477,14 @@ impl acp::Agent for MvpAgent {
                 )
                 .auth_methods(auth_methods)
                 .meta({
-                    let metadata = parse_json_object_env("GROK_AGENT_METADATA");
+                    let metadata = parse_json_object_env("CHUTES_BUILD_AGENT_METADATA");
                     serde_json::json!({
                     "grokShell": true,
                     // Re-deriving this precedence client-side has regressed OIDC
                     // refresh, so clients consume the agent's choice from here.
                     "defaultAuthMethodId": default_auth_method_id_wire,
                     // The agent can drive in-process SDK MCP servers over the ACP reverse
-                    // channel (`x.ai/mcp/sdk_call`); the SDK reads this to enable transport="acp".
+                    // channel (`chutes.ai/mcp/sdk_call`); the SDK reads this to enable transport="acp".
                     (xai_grok_mcp::wire::MCP_SDK): true,
                     // `session/new` / `session/load` accept per-session plugin roots in
                     // `_meta.pluginDirs`; the SDKs gate `GrokOptions.plugins` on this.
@@ -506,7 +506,7 @@ impl acp::Agent for MvpAgent {
                     // Resolved session-recap state (remote settings / config / env;
                     // default ON). The client gates BOTH its automatic
                     // away-recap poll and the manual `/recap` on this so a
-                    // disabled feature produces zero `x.ai/recap` traffic.
+                    // disabled feature produces zero `chutes.ai/recap` traffic.
                     "sessionRecap": self.cfg.borrow().is_session_recap_enabled(),
                     "feedbackTraceOffer": self.feedback_trace_offer(),
                     "voiceMode": self.cfg.borrow().is_voice_mode_enabled(),
@@ -584,7 +584,7 @@ impl acp::Agent for MvpAgent {
                         return Err(
                             acp::Error::auth_required()
                                 .data(
-                                    "Set XAI_API_KEY or add api_key/env_key to config.toml.",
+                                    "Set CHUTES_API_KEY or add api_key/env_key to config.toml.",
                                 ),
                         );
                     }
@@ -759,7 +759,7 @@ impl acp::Agent for MvpAgent {
                 self.spawn_post_auth_settings(auth_for_settings);
                 Ok(self.auth_response_with_meta())
             }
-            auth_method::GROK_COM_METHOD_ID | auth_method::OIDC_METHOD_ID => {
+            auth_method::CHUTES_BUILD_COM_METHOD_ID | auth_method::OIDC_METHOD_ID => {
                 let grok_ctx = self.auth_manager.grok_com_config();
                 let auth_meta = AuthRequestMeta::from_json(arguments.meta.as_ref());
                 tracing::info!(
@@ -2278,7 +2278,7 @@ impl acp::Agent for MvpAgent {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
-                    "Run `grok login` to authenticate.",
+                    "Run `chutes-build login` to authenticate.",
                 )?;
                 let params: serde_json::Value = serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::invalid_params().data(e.to_string()))?;
@@ -2310,7 +2310,7 @@ impl acp::Agent for MvpAgent {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
-                    "Run `grok login` to authenticate.",
+                    "Run `chutes-build login` to authenticate.",
                 )?;
                 let sandbox_client = crate::remote::SandboxClient::new(
                     self.cli_chat_proxy_base_url(),
@@ -2335,7 +2335,7 @@ impl acp::Agent for MvpAgent {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
-                    "Run `grok login` to authenticate.",
+                    "Run `chutes-build login` to authenticate.",
                 )?;
                 let params: serde_json::Value = serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::invalid_params().data(e.to_string()))?;
@@ -2392,7 +2392,7 @@ impl acp::Agent for MvpAgent {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
-                    "Run `grok login` to authenticate.",
+                    "Run `chutes-build login` to authenticate.",
                 )?;
                 let params: serde_json::Value = serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::invalid_params().data(e.to_string()))?;
@@ -2452,7 +2452,7 @@ impl acp::Agent for MvpAgent {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
-                    "Run `grok login` to authenticate.",
+                    "Run `chutes-build login` to authenticate.",
                 )?;
                 let params: serde_json::Value = serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::invalid_params().data(e.to_string()))?;
@@ -2777,7 +2777,7 @@ impl acp::Agent for MvpAgent {
         {
             crate::extensions::terminal::handle_pty_input(&params).await;
         }
-        if args.method.as_ref() == "_x.ai/session/update" {
+        if args.method.as_ref() == "_chutes.build/session/update" {
             if let Ok(notification) = serde_json::from_str::<
                 SessionNotification,
             >(args.params.get()) {

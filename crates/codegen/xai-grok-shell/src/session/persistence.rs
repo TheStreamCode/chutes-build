@@ -35,7 +35,7 @@ use tokio::sync::{mpsc, watch};
 pub const CHAT_FORMAT_VERSION: u8 = 1;
 
 /// Maximum Unicode scalars in a session title (`/rename`, dashboard editor,
-/// and the `x.ai/session/rename` ext boundary). Counted after control-strip
+/// and the `chutes.ai/session/rename` ext boundary). Counted after control-strip
 /// and trim.
 pub const MAX_TITLE_SCALARS: usize = 100;
 
@@ -148,7 +148,7 @@ fn default_btw_attempts() -> u32 {
 
 // Local feedback persistence types
 
-/// A feedback entry persisted to `~/.grok/sessions/.../feedback.jsonl`.
+/// A feedback entry persisted to `~/.chutes-build/sessions/.../feedback.jsonl`.
 ///
 /// Uses a tagged enum so different feedback types are self-describing in the
 /// JSONL file (currently only `UserFeedback`).
@@ -385,7 +385,7 @@ fn session_exists_for_cwd_in_root(session_id: &str, cwd: &str, sessions_root: &P
 ///
 /// When a remote session is restored, a new local child is created with
 /// `summary.parent_session_id == remote_session_id`.  On a second
-/// `grok -r <remote_id>` in the same cwd, this function returns the already-restored
+/// `chutes-build -r <remote_id>` in the same cwd, this function returns the already-restored
 /// child so no duplicate restore is performed.
 ///
 /// If multiple children match (e.g., from pre-fix duplicate restores), the
@@ -495,7 +495,7 @@ fn find_local_child_for_remote_in_root(
     }
 
     // Collect all matching children.  Multiple can exist when a user ran
-    // `grok -r <remote_id>` before this fix was deployed.
+    // `chutes-build -r <remote_id>` before this fix was deployed.
     // Tuple: (updated_at, dir_mtime_nanos, session_id) — all sorted descending.
     let mut candidates: Vec<(String, u128, String)> = Vec::new();
 
@@ -540,11 +540,11 @@ fn find_local_child_for_remote_in_root(
 }
 
 /// Check if a session exists locally by session ID.
-/// Searches across ALL cwd directories under `~/.grok/sessions/`.
+/// Searches across ALL cwd directories under `~/.chutes-build/sessions/`.
 ///
 /// Use `session_exists_for_cwd` instead when the target cwd is known
 /// (e.g., the `-r` resume path) to avoid false-positive matches.
-/// Find a session by ID across **all** CWD directories under `~/.grok/sessions/`.
+/// Find a session by ID across **all** CWD directories under `~/.chutes-build/sessions/`.
 ///
 /// Unlike [`resolve_local_session`] which only checks a single CWD,
 /// this scans every encoded-CWD subdirectory. Returns the decoded CWD path
@@ -772,7 +772,7 @@ pub(crate) fn ensure_owner_only_session_dir(info: &Info) -> std::io::Result<Path
     ensure_owner_only_session_dir_in(&grok_home(), info)
 }
 
-/// Inner implementation with an injectable grok home for tests.
+/// Inner implementation with an injectable Chutes Build home for tests.
 fn ensure_owner_only_session_dir_in(grok_home: &Path, info: &Info) -> std::io::Result<PathBuf> {
     let _ = crate::util::grok_home::ensure_sessions_cwd_dir_in(grok_home, &info.cwd);
     let dir = session_dir_in(grok_home, info);
@@ -780,7 +780,7 @@ fn ensure_owner_only_session_dir_in(grok_home: &Path, info: &Info) -> std::io::R
     Ok(dir)
 }
 
-/// `session_dir` with an injectable grok home (pure path computation).
+/// `session_dir` with an injectable Chutes Build home (pure path computation).
 fn session_dir_in(grok_home: &Path, info: &Info) -> PathBuf {
     crate::util::grok_home::sessions_cwd_dir_in(grok_home, &info.cwd).join(info.id.to_string())
 }
@@ -789,7 +789,7 @@ pub(crate) fn get_prompt_file_path(info: &Info, prompt_index: usize) -> PathBuf 
     get_prompt_file_path_in(&grok_home(), info, prompt_index)
 }
 
-/// Inner implementation with an injectable grok home for tests.
+/// Inner implementation with an injectable Chutes Build home for tests.
 fn get_prompt_file_path_in(grok_home: &Path, info: &Info, prompt_index: usize) -> PathBuf {
     // Best-effort; failures surface on the prompt-file write itself.
     let _ = ensure_owner_only_session_dir_in(grok_home, info);
@@ -2013,7 +2013,7 @@ impl SessionPersistence {
     }
 }
 
-/// Collect MCP server stderr logs from `~/.grok/logs/mcp/` for inclusion in the session archive.
+/// Collect MCP server stderr logs from `~/.chutes-build/logs/mcp/` for inclusion in the session archive.
 fn collect_mcp_stderr_logs(files: &mut Vec<CopiedSessionFile>) {
     let mcp_log_dir = xai_grok_config::grok_home().join("logs").join("mcp");
     let Ok(entries) = std::fs::read_dir(&mcp_log_dir) else {
@@ -2109,7 +2109,7 @@ fn init_remote_sync(
             let auth_manager = auth_manager.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::PermissionDenied,
-                    "Writeback storage mode requires authentication. Run 'grok login' first.",
+                    "Writeback storage mode requires authentication. Run 'chutes-build login' first.",
                 )
             })?;
             if let Some(auth) = auth_manager.current_or_expired() {
@@ -2216,7 +2216,7 @@ pub(crate) fn io_error_to_acp(e: &io::Error) -> acp::Error {
 mod io_error_to_acp_tests;
 
 /// Best-effort worktree liveness touch: stamp `last_accessed_at` on the
-/// worktree containing this session's cwd so `grok worktree gc` expires by
+/// worktree containing this session's cwd so `chutes-build worktree gc` expires by
 /// last use, not creation time. Lives here — not in a `StorageAdapter` —
 /// so every session create/load path shares it regardless of backend.
 fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
@@ -2803,7 +2803,7 @@ static CLEANUP_SESSIONS_ONCE: std::sync::Once = std::sync::Once::new();
 /// Default TTL for stale session files (30 days).
 const DEFAULT_CLEANUP_TTL_DAYS: u32 = 30;
 
-/// Walk `~/.grok/sessions/` and delete files with mtime older than `ttl_days`.
+/// Walk `~/.chutes-build/sessions/` and delete files with mtime older than `ttl_days`.
 /// Removes empty session directories after file cleanup.
 /// Skips `skip_session_dir` if provided (current session).
 ///

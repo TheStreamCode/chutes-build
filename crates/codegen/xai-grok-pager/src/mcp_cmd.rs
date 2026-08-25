@@ -113,7 +113,7 @@ pub struct AddArgs {
     command_or_url: Option<String>,
 
     /// Arguments passed to the server command. Place them after `--` so
-    /// flags such as `-y` are passed to the server instead of chutes-build.
+    /// flags such as `-y` are passed to the server instead of grok.
     #[arg(value_name = "ARGS")]
     args: Vec<String>,
 

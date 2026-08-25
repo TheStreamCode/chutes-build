@@ -218,7 +218,7 @@ mod spawn;
 use super::acp_types::*;
 pub use spawn::SessionThread;
 pub(crate) use spawn::*;
-/// Client-registered hook gates (the `x.ai/hooks/run` reverse request).
+/// Client-registered hook gates (the `chutes.ai/hooks/run` reverse request).
 mod hooks;
 pub(crate) struct InputItem {
     pub(crate) prompt_id: String,
@@ -807,13 +807,13 @@ pub(crate) struct SessionActor {
     /// Wrapped in `RefCell` for mid-session mutation (skill refresh, prompt regen).
     /// Safe: session actor is single-threaded (LocalSet), no concurrent access.
     pub(crate) agent: std::cell::RefCell<xai_grok_agent::Agent>,
-    /// Dedup slot for `x.ai/git_head_changed`, shared with the fs-watch
+    /// Dedup slot for `chutes.ai/git_head_changed`, shared with the fs-watch
     /// `GitHead` consumer (see `git_head_dedup_key`).
     pub(crate) last_reported_branch: Arc<parking_lot::Mutex<Option<String>>>,
-    /// Client opted into `x.ai/gitHeadChanged`. When false (headless/SDK),
+    /// Client opted into `chutes.ai/gitHeadChanged`. When false (headless/SDK),
     /// `maybe_notify_git_branch` no-ops — no git subprocess.
     git_head_enabled: bool,
-    /// A client that will draw a status row has attached (`x.ai/statusLine`).
+    /// A client that will draw a status row has attached (`chutes.ai/statusLine`).
     /// While false, the emitter wakes and returns without building anything: no
     /// git discovery, no chat-state round trips.
     ///
@@ -932,7 +932,7 @@ pub(crate) struct SessionActor {
     /// `Default` (all `InheritCurrent`, empty pool) reproduces today's
     /// behavior. Consumed by the per-role spawn wiring.
     pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features]
+    /// Kill-switch (`CHUTES_BUILD_GOAL_USE_CURRENT_MODEL_ONLY` / `[features]
     /// goal_use_current_model_only`) resolved at actor build. When `true`,
     /// every `/goal` role inherits the current model. `goal_role_models`
     /// already reflects it (planner/strategist `InheritCurrent`, empty pool),
@@ -1404,7 +1404,7 @@ const PROMPT_CONTEXT_FILENAME: &str = "prompt_context.json";
 /// Persist the structured prompt context to `{session_dir}/prompt_context.json`.
 ///
 /// This is best-effort: failures are logged but do not block session creation.
-/// The saved JSON enables deterministic re-rendering, `grok prompt --json`
+/// The saved JSON enables deterministic re-rendering, `chutes-build prompt --json`
 /// inspection, and post-hoc debugging of what went into a session's system prompt.
 fn save_prompt_context(session_info: &SessionInfo, prompt_context: &xai_grok_agent::PromptContext) {
     let dir = match crate::session::persistence::ensure_owner_only_session_dir(session_info) {
@@ -1850,13 +1850,13 @@ mod tool_meta_stamp_tests {
                     }
                 }
                 let early = early.expect("early ToolCall emitted");
-                let t = tool_meta(early.as_ref()).expect("early ToolCall carries x.ai/tool");
+                let t = tool_meta(early.as_ref()).expect("early ToolCall carries chutes.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
                 assert_eq!(t["namespace"], "grok_build");
                 assert!(t.get("input").is_none(), "identity-only before parse");
                 let refined = refined.expect("refinement ToolCallUpdate emitted");
-                let t = tool_meta(refined.as_ref()).expect("refinement carries x.ai/tool");
+                let t = tool_meta(refined.as_ref()).expect("refinement carries chutes.ai/tool");
                 assert_eq!(t["input"]["path"], "/tmp/stamp.txt");
             })
             .await;
@@ -1917,7 +1917,7 @@ mod tool_meta_stamp_tests {
                     .take()
                     .expect("permission request must have been issued");
                 let t = tool_meta(update.meta.as_ref())
-                    .expect("permission-request ToolCallUpdate carries x.ai/tool");
+                    .expect("permission-request ToolCallUpdate carries chutes.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
                 assert_eq!(t["input"]["path"], "/tmp/stamp.txt");

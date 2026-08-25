@@ -81,7 +81,7 @@ impl MvpAgent {
     /// Dispatches by on-disk method name:
     /// - ACP updates (`"session/update"`) → typed `SessionNotification` for correct
     ///   TUI dispatch (direct dispatch preserves Rust types, not method strings).
-    /// - xAI updates (`"_x.ai/session/update"`) → `ExtNotification`.
+    /// - xAI updates (`"_chutes.build/session/update"`) → `ExtNotification`.
     ///
     /// When `mark_replay` is true, the notification is tagged with
     /// `_meta.isReplay: true` so the client knows it's historical data.
@@ -104,14 +104,14 @@ impl MvpAgent {
                 return None;
             }
         };
-        // updates.jsonl only persists `_x.ai/session/update` and `session/update`.
+        // updates.jsonl only persists `_chutes.build/session/update` and `session/update`.
         // Unknown methods fall through to the ACP parse below and are dropped on error.
         let method = env.method.unwrap_or("session/update");
         let Some(raw_params) = env.params else {
             tracing::debug!("replay: skipping JSONL line with no params");
             return None;
         };
-        let is_xai = method == "_x.ai/session/update";
+        let is_xai = method == "_chutes.build/session/update";
 
         if is_xai {
             // The fast-path forwards raw params with no `_meta` round-trip, so it

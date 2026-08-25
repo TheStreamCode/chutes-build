@@ -1,7 +1,7 @@
 use super::*;
 use xai_agent_lifecycle::ShutdownPolicy;
 
-/// Running-turn display fields for `x.ai/queue/changed` (clients paint turn-start UI).
+/// Running-turn display fields for `chutes.ai/queue/changed` (clients paint turn-start UI).
 pub(super) struct RunningPromptDisplay {
     pub id: String,
     pub text: String,
@@ -511,7 +511,7 @@ impl SessionActor {
             entry_count = payload.entries.len(),
             entries = ?payload.entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             session = self.session_info.id.0.as_ref(),
-            "broadcasting x.ai/queue/changed to subscribers",
+            "broadcasting chutes.ai/queue/changed to subscribers",
         );
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {
             self.notifications
@@ -801,7 +801,7 @@ impl SessionActor {
     /// During an active goal, plain prompts become steering while bash stays queued.
     /// Missing, stale, running, or foreign rows are benign no-ops.
     ///
-    /// Always re-broadcasts `x.ai/queue/changed` so every client reconciles
+    /// Always re-broadcasts `chutes.ai/queue/changed` so every client reconciles
     /// (the row vanishes on success, is unchanged on a no-op).
     /// `new_text` (when `Some`) replaces the stored queue text in the
     /// interjection — the client edited the row before interjecting. It rides
@@ -991,7 +991,7 @@ impl SessionActor {
     ///    user has explicitly typed replacement text).
     /// 2. Update `queue_meta.text`, bump `queue_meta.version`, and record
     ///    `last_editor` (the original `owner` attribution is preserved).
-    /// 3. Re-broadcast `x.ai/queue/changed` so every subscriber renders the
+    /// 3. Re-broadcast `chutes.ai/queue/changed` so every subscriber renders the
     ///    new text and version.
     ///
     /// **No-op cases** (edit discarded; the id's hold is still cleared so promote is not parked,

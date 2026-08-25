@@ -1,4 +1,4 @@
-//! `x.ai/hooks/*` extension handlers.
+//! `chutes.ai/hooks/*` extension handlers.
 //!
 //! The file-hook list/action endpoints for the pager's hooks modal, plus the
 //! client-registered hook wire types and `parse_client_hooks`.
@@ -77,7 +77,7 @@ pub(crate) fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> Hook
     }
 }
 
-// Wire types for client-registered hooks (`x.ai/hooks/run`); the gate that uses
+// Wire types for client-registered hooks (`chutes.ai/hooks/run`); the gate that uses
 // them lives in `session::acp_session::hooks`.
 
 /// A matcher group from the client's registration: `{ matcher, hookCallbackIds, timeout }`.
@@ -97,7 +97,7 @@ pub(crate) type ClientHooks = HashMap<HookEventName, Vec<ClientHookGroup>>;
 
 /// One hook dispatched to a client callback: the shared [`HookEventEnvelope`]
 /// (flattened, camelCase) plus the `hookCallbackId` it targets. The same shape is sent
-/// for both the `x.ai/hooks/run` request (gate) and the `x.ai/hooks/event` notification
+/// for both the `chutes.ai/hooks/run` request (gate) and the `chutes.ai/hooks/event` notification
 /// (observe-only), so the client decodes one payload for every hook.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,7 +130,7 @@ pub(crate) enum ClientHookDecision {
     Other,
 }
 
-/// Response payload for `x.ai/hooks/run` (client to agent). `Default` (used on
+/// Response payload for `chutes.ai/hooks/run` (client to agent). `Default` (used on
 /// timeout, transport error, or a malformed reply) proceeds.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -163,7 +163,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     for (event_name, value) in map {
         let de = serde::de::value::StrDeserializer::<serde::de::value::Error>::new(event_name);
         let Ok(event) = HookEventName::deserialize(de) else {
-            tracing::warn!(event = %event_name, "ignoring unknown x.ai/hooks event");
+            tracing::warn!(event = %event_name, "ignoring unknown chutes.ai/hooks event");
             continue;
         };
         let Some(array) = value.as_array() else {
@@ -184,7 +184,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
 }
 
 /// Hooks to apply on a `load_session` reconnect: `Some` (possibly empty, an explicit
-/// clear) when the request meta carries `x.ai/hooks`, else `None` so a reconnect that
+/// clear) when the request meta carries `chutes.ai/hooks`, else `None` so a reconnect that
 /// omits the key leaves the live registrations from `session/new` untouched.
 pub(crate) fn reconnect_client_hooks(meta: Option<&acp::Meta>) -> Option<ClientHooks> {
     meta.and_then(|m| m.get("chutes.build/hooks"))
@@ -208,10 +208,10 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
     }
 
     let group = WireGroup::deserialize(value)
-        .inspect_err(|err| tracing::warn!(%event, %err, "ignoring malformed x.ai/hooks group"))
+        .inspect_err(|err| tracing::warn!(%event, %err, "ignoring malformed chutes.ai/hooks group"))
         .ok()?;
     if group.hook_callback_ids.is_empty() {
-        tracing::warn!(%event, "ignoring x.ai/hooks group with no hookCallbackIds");
+        tracing::warn!(%event, "ignoring chutes.ai/hooks group with no hookCallbackIds");
         return None;
     }
     // Drop a non-finite/non-positive timeout (fall back to the default gate timeout) and
@@ -236,7 +236,7 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
         Some(pattern) => match HookMatcher::new(pattern) {
             Ok(matcher) => Some(matcher),
             Err(err) => {
-                tracing::warn!(%event, pattern, %err, "ignoring x.ai/hooks group with invalid matcher");
+                tracing::warn!(%event, pattern, %err, "ignoring chutes.ai/hooks group with invalid matcher");
                 return None;
             }
         },
@@ -421,7 +421,7 @@ mod tests {
         assert!(!hooks.contains_key(&HookEventName::SubagentEnd));
     }
 
-    /// Reconnect refresh applies hooks only when the load meta carries `x.ai/hooks`:
+    /// Reconnect refresh applies hooks only when the load meta carries `chutes.ai/hooks`:
     /// an absent key returns `None` (don't wipe `session/new` registrations); a present
     /// key returns `Some` (an empty object is an explicit clear).
     #[test]

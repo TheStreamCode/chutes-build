@@ -14,7 +14,7 @@ pub fn resolve_zdr_access_enabled(
     fn from_toml(v: Option<&TomlValue>) -> Option<bool> {
         v?.get("features")?.get("zdr_access_enabled")?.as_bool()
     }
-    BoolFlag::env("GROK_ZDR_ACCESS_ENABLED")
+    BoolFlag::env("CHUTES_BUILD_ZDR_ACCESS_ENABLED")
         .requirement(from_toml(requirements))
         .config(from_toml(user))
         .managed(from_toml(managed))
@@ -30,7 +30,7 @@ pub fn resolve_zdr_access_enabled(
 ///
 /// Precedence: requirements (MDM > system > user) > managed
 /// (`managed_config.toml` > system managed) > user `config.toml` > default
-/// (true). Overlay-free: the `GROK_CONFIG` / `GROK_CONFIG_PATH` overlay is
+/// (true). Overlay-free: the `CHUTES_BUILD_CONFIG` / `CHUTES_BUILD_CONFIG_PATH` overlay is
 /// deliberately excluded (an egress gate, matching the overlay-free contract in
 /// `ConfigLayers::env_overlay`), so an overlay cannot re-arm a user's or a
 /// deployment's "never fetch" decision. Callable before an `AgentConfig` exists
@@ -73,7 +73,7 @@ fn remote_fetch_value(v: &TomlValue) -> Option<bool> {
 fn remote_fetch_enabled_from_layers(layers: &crate::config::ConfigLayers) -> bool {
     // Exhaustive destructure (no `..`): a future layer must be slotted into the
     // walk deliberately instead of silently keeping stale precedence.
-    // `env_overlay` is deliberately NOT in the walk: the `GROK_CONFIG` overlay
+    // `env_overlay` is deliberately NOT in the walk: the `CHUTES_BUILD_CONFIG` overlay
     // is soft, user-tier input, and this is an egress gate, so it must never
     // arm/disarm remote_fetch (the overlay-free contract in
     // `ConfigLayers::env_overlay`). `campaigns` is excluded for the same reason:

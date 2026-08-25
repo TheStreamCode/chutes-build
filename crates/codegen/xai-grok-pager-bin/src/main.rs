@@ -1949,7 +1949,10 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     }
     if args.chat() {
         unsafe {
-            std::env::set_var(xai_grok_shell::agent::chat_modes::GROK_CHAT_MODE_ENV, "1");
+            std::env::set_var(
+                xai_grok_shell::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV,
+                "1",
+            );
         }
     }
     if let Some(ref socket) = args.leader_socket {

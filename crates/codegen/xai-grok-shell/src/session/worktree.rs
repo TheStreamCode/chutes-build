@@ -35,7 +35,7 @@ impl From<WorktreeType> for ShellWorktreeType {
 /// Create a worktree for the resume-session flow, detecting jj vs git automatically.
 ///
 /// When `git_ref` is set, forces a clean checkout of that ref (same as the
-/// manual `create_from_worktree_sync` path used by `grok -w --ref`).
+/// manual `create_from_worktree_sync` path used by `chutes-build -w --ref`).
 async fn create_worktree_for_resume(
     source_cwd: &str,
     copy_mode: WorktreeCopyMode,
@@ -553,9 +553,9 @@ mod tests {
     #[test]
     #[serial]
     fn resume_grove_worktree_flag_runs_gate_fail_closed() {
-        unsafe { std::env::set_var("GROK_WORKTREE_TYPE", "grove") };
+        unsafe { std::env::set_var("CHUTES_BUILD_WORKTREE_TYPE", "grove") };
         let flag = resume_grove_worktree_flag();
-        unsafe { std::env::remove_var("GROK_WORKTREE_TYPE") };
+        unsafe { std::env::remove_var("CHUTES_BUILD_WORKTREE_TYPE") };
         assert_eq!(
             flag,
             Some(false),
@@ -1188,7 +1188,7 @@ mod tests {
             .unwrap();
         let list_out = String::from_utf8_lossy(&stash_list.stdout).into_owned();
         assert!(
-            list_out.contains("grok: pre-restore-code sess-dirty-wt"),
+            list_out.contains("chutes-build: pre-restore-code sess-dirty-wt"),
             "stash list missing session label: {list_out}"
         );
     }

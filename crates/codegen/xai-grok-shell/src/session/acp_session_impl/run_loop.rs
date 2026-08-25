@@ -1264,7 +1264,7 @@ pub(super) async fn run_session(
                             // Re-seed the session-scoped MCP output cap
                             // (repo `[mcp] max_output_bytes`) BEFORE the
                             // unchanged-diff early-exit below: this command
-                            // also fires for `<cwd>/.grok/config.toml` edits,
+                            // also fires for `<cwd>/.chutes-build/config.toml` edits,
                             // and a cap-only edit changes no server configs.
                             session.reseed_mcp_output_cap().await;
 

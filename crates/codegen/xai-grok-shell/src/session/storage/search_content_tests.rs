@@ -17,7 +17,7 @@ fn acp_update(session_update_json: &str) -> String {
 
 fn xai_update(session_update_json: &str) -> String {
     format!(
-        r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
+        r#"{{"timestamp":1,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
     )
 }
 

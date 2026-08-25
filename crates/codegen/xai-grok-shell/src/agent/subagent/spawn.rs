@@ -29,7 +29,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{SubagentRequest, 
 /// Floor keeps the pool responsive when `available_parallelism` is tiny.
 const MIN_WORKER_THREADS: usize = 2;
 /// Four suffice for 32 children (each runs on its own OS thread);
-/// `GROK_SUBAGENT_WORKER_THREADS` overrides.
+/// `CHUTES_BUILD_SUBAGENT_WORKER_THREADS` overrides.
 const MAX_WORKER_THREADS: usize = 4;
 /// Pool for the per-child pipeline: a dedicated multi-thread runtime so
 /// concurrent subagents run in parallel, off the user-facing session's
@@ -50,7 +50,7 @@ pub(crate) fn worker_runtime() -> Result<&'static tokio::runtime::Handle, std::i
     Ok(WORKER.get_or_init(|| runtime).handle())
 }
 fn build_worker_runtime() -> std::io::Result<tokio::runtime::Runtime> {
-    let workers = std::env::var("GROK_SUBAGENT_WORKER_THREADS")
+    let workers = std::env::var("CHUTES_BUILD_SUBAGENT_WORKER_THREADS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|&n| n > 0)
@@ -298,7 +298,7 @@ pub(crate) fn spawn_subagent_coordinator(
     let config = coordinator::CoordinatorConfig {
         foreground_budget:
             xai_grok_tools::implementations::grok_build::task::backend::env_duration_or(
-                "GROK_SUBAGENT_AWAIT_BUDGET_MS",
+                "CHUTES_BUILD_SUBAGENT_AWAIT_BUDGET_MS",
                 std::time::Duration::from_secs(600),
             ),
         limits,

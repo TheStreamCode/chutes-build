@@ -3,7 +3,7 @@ use toml::Value as TomlValue;
 
 /// Machine-readable channel name derived from the GCS stable pointer cache.
 ///
-/// Reads `stable_version` from `~/.grok/version.json` (written by the
+/// Reads `stable_version` from `~/.chutes-build/version.json` (written by the
 /// auto-updater) and compares the compiled-in version against it:
 /// - `Some("alpha")` when the current version is ahead of stable,
 /// - `Some("stable")` when at or behind stable,
@@ -55,10 +55,10 @@ impl VersionKnob {
 
     pub(crate) fn env_var(self) -> &'static str {
         match self {
-            VersionKnob::Minimum => "GROK_MINIMUM_VERSION",
-            VersionKnob::Maximum => "GROK_MAXIMUM_VERSION",
-            VersionKnob::RequiredMinimum => "GROK_REQUIRED_MINIMUM_VERSION",
-            VersionKnob::RequiredMaximum => "GROK_REQUIRED_MAXIMUM_VERSION",
+            VersionKnob::Minimum => "CHUTES_BUILD_MINIMUM_VERSION",
+            VersionKnob::Maximum => "CHUTES_BUILD_MAXIMUM_VERSION",
+            VersionKnob::RequiredMinimum => "CHUTES_BUILD_REQUIRED_MINIMUM_VERSION",
+            VersionKnob::RequiredMaximum => "CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION",
         }
     }
 
@@ -347,8 +347,8 @@ mod tests {
             "",
         );
         let tighten = |var: &str| match var {
-            "GROK_MINIMUM_VERSION" => Some("0.2.150".to_string()),
-            "GROK_MAXIMUM_VERSION" => Some("0.2.180".to_string()),
+            "CHUTES_BUILD_MINIMUM_VERSION" => Some("0.2.150".to_string()),
+            "CHUTES_BUILD_MAXIMUM_VERSION" => Some("0.2.180".to_string()),
             _ => None,
         };
         let p = VersionPolicy::from_layers(&l, &tighten);
@@ -356,8 +356,8 @@ mod tests {
         assert_eq!(p.maximum, Some(v("0.2.180")));
 
         let loosen = |var: &str| match var {
-            "GROK_MINIMUM_VERSION" => Some("0.2.1".to_string()),
-            "GROK_MAXIMUM_VERSION" => Some("0.2.999".to_string()),
+            "CHUTES_BUILD_MINIMUM_VERSION" => Some("0.2.1".to_string()),
+            "CHUTES_BUILD_MAXIMUM_VERSION" => Some("0.2.999".to_string()),
             _ => None,
         };
         let p = VersionPolicy::from_layers(&l, &loosen);
@@ -385,16 +385,18 @@ mod tests {
         // Managed floor; an env ceiling below it would make the range
         // contradictory and naively drop both. The managed floor must survive.
         let l = layers("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
-        let low_ceiling =
-            |var: &str| (var == "GROK_REQUIRED_MAXIMUM_VERSION").then(|| "0.2.50".to_string());
+        let low_ceiling = |var: &str| {
+            (var == "CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION").then(|| "0.2.50".to_string())
+        };
         let p = VersionPolicy::from_layers(&l, &low_ceiling);
         assert_eq!(p.required_minimum, Some(v("0.2.100")));
         assert_eq!(p.required_maximum, None);
 
         // Symmetric: a user floor can't cancel a managed ceiling.
         let l = layers("[cli]\nrequired_maximum_version = \"0.2.100\"\n", "", "");
-        let high_floor =
-            |var: &str| (var == "GROK_REQUIRED_MINIMUM_VERSION").then(|| "0.2.200".to_string());
+        let high_floor = |var: &str| {
+            (var == "CHUTES_BUILD_REQUIRED_MINIMUM_VERSION").then(|| "0.2.200".to_string())
+        };
         let p = VersionPolicy::from_layers(&l, &high_floor);
         assert_eq!(p.required_maximum, Some(v("0.2.100")));
         assert_eq!(p.required_minimum, None);
@@ -402,8 +404,8 @@ mod tests {
         // Tightening BOTH sides into a contradiction must not drop the managed floor.
         let l = layers("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
         let both = |var: &str| match var {
-            "GROK_REQUIRED_MINIMUM_VERSION" => Some("99.0.0".to_string()),
-            "GROK_REQUIRED_MAXIMUM_VERSION" => Some("0.0.1".to_string()),
+            "CHUTES_BUILD_REQUIRED_MINIMUM_VERSION" => Some("99.0.0".to_string()),
+            "CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION" => Some("0.0.1".to_string()),
             _ => None,
         };
         let p = VersionPolicy::from_layers(&l, &both);

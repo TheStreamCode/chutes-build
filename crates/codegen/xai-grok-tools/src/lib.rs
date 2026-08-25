@@ -1,4 +1,4 @@
-//! Grok tools library.
+//! Chutes Build tools library.
 
 pub use xai_grok_version::VERSION;
 

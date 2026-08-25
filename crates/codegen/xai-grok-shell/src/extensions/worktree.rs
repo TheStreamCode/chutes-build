@@ -1,4 +1,4 @@
-//! Handler for x.ai/git/worktree/* extension methods.
+//! Handler for chutes.ai/git/worktree/* extension methods.
 
 use agent_client_protocol as acp;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
@@ -608,10 +608,10 @@ mod tests {
     #[test]
     fn db_path_response_serializes() {
         let resp = WorktreeDbPathResponse {
-            path: "/home/user/.grok/worktrees.db".into(),
+            path: "/home/user/.chutes-build/worktrees.db".into(),
         };
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"path\":\"/home/user/.grok/worktrees.db\""));
+        assert!(json.contains("\"path\":\"/home/user/.chutes-build/worktrees.db\""));
     }
 
     #[test]

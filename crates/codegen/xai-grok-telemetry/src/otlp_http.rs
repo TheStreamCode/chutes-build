@@ -120,7 +120,7 @@ pub(crate) fn build_blocking_client_with_identity(
         .name("otlp-client-build".into())
         .spawn(move || {
             // Two additive trust sources on top of the embedded webpki
-            // roots: the process-wide `GROK_EXTRA_CA_BUNDLE` (fail-open,
+            // roots: the process-wide `CHUTES_EXTRA_CA_BUNDLE` (fail-open,
             // handled inside xai-grok-extra-ca) and the external stream's
             // per-call `OTEL_EXPORTER_OTLP_CERTIFICATE` files (fail-closed,
             // validated above).

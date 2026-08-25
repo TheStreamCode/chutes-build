@@ -133,7 +133,7 @@ impl ModelsCacheManager {
         }
     }
 
-    /// Per-writer temp path: `~/.grok` is shared across concurrent CLI
+    /// Per-writer temp path: `~/.chutes-build` is shared across concurrent CLI
     fn unique_tmp_path(&self) -> std::path::PathBuf {
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

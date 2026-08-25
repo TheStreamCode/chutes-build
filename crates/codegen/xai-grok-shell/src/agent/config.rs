@@ -155,46 +155,46 @@ pub struct EndpointsConfig {
     /// non-production feature, and only for matching first-party hosts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_test_key: Option<String>,
-    /// Env: `GROK_MODELS_BASE_URL`. Enables custom endpoint mode.
+    /// Env: `CHUTES_BUILD_MODELS_BASE_URL`. Enables custom endpoint mode.
     /// List URL defaults to `{models_base_url}/models`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_base_url: Option<String>,
-    /// Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
+    /// Env: `CHUTES_BUILD_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
     #[serde(alias = "models_endpoint", skip_serializing_if = "Option::is_none")]
     pub models_list_url: Option<String>,
-    /// Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go.
+    /// Env: `CHUTES_BUILD_FEEDBACK_BASE_URL`. Where feedback submissions go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_base_url: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go.
+    /// Env: `CHUTES_BUILD_TRACE_UPLOAD_URL`. Where trace uploads go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_url: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_BUCKET`. Direct bucket (`gs://` or `s3://`), bypasses proxy.
+    /// Env: `CHUTES_BUILD_TRACE_UPLOAD_BUCKET`. Direct bucket (`gs://` or `s3://`), bypasses proxy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_bucket: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_REGION`. AWS region (S3 only).
+    /// Env: `CHUTES_BUILD_TRACE_UPLOAD_REGION`. AWS region (S3 only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_region: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`. Path to GCS SA key or AWS credentials file.
+    /// Env: `CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE`. Path to GCS SA key or AWS credentials file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_credentials_file: Option<String>,
     /// Inline credentials (JSON/INI). Takes precedence over `credentials_file`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_credentials: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
+    /// Env: `CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_endpoint_url: Option<String>,
-    /// Env: `GROK_DEPLOYMENT_KEY`. Management API key for enterprise deployments.
+    /// Env: `CHUTES_BUILD_DEPLOYMENT_KEY`. Management API key for enterprise deployments.
     /// Sent on telemetry and service requests for deployment-level attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_key: Option<String>,
-    /// Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.
+    /// Env: `CHUTES_BUILD_MANAGED_CONFIG_URL`. Override the managed config endpoint.
     /// Defaults to `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_config_url: Option<String>,
     /// Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. OTLP collector base; `/v1/traces` is
     /// appended. Legacy repoint of the INTERNAL trace pipeline — deprecated in
-    /// favor of `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`, and ignored by the internal
-    /// pipeline when `GROK_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then
+    /// favor of `CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT`, and ignored by the internal
+    /// pipeline when `CHUTES_BUILD_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then
     /// route the external stream only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub otel_exporter_otlp_endpoint: Option<String>,
@@ -207,19 +207,19 @@ pub struct EndpointsConfig {
     /// Same legacy/deprecation semantics as `otel_exporter_otlp_endpoint`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub otel_exporter_otlp_headers: Option<String>,
-    /// Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint,
+    /// Env: `CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint,
     /// used verbatim. Dev/debug repoint of the internal span firehose (replaces
     /// the legacy `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` behavior; used by
     /// local-ic-testing / internal dev flows). Wins over the legacy `OTEL_*` vars.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grok_internal_otlp_traces_endpoint: Option<String>,
-    /// Env: `GROK_INTERNAL_OTLP_HEADERS`. `k=v,k2=v2` extra headers for the
+    /// Env: `CHUTES_BUILD_INTERNAL_OTLP_HEADERS`. `k=v,k2=v2` extra headers for the
     /// internal export (debug). Wins over the legacy `OTEL_EXPORTER_OTLP_HEADERS`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grok_internal_otlp_headers: Option<String>,
     /// External-OTEL master switch, captured at construction via
     /// [`external_otel_master_switch_resolved`] — the same layered resolution
-    /// (requirement pin > `GROK_EXTERNAL_OTEL` env > `[telemetry].otel_enabled`
+    /// (requirement pin > `CHUTES_BUILD_EXTERNAL_OTEL` env > `[telemetry].otel_enabled`
     /// config, managed layers included) that activates the external stream.
     /// When set, the standard `OTEL_EXPORTER_OTLP_*` vars are reserved for the
     /// external OTEL stream and the internal trace pipeline ignores them
@@ -254,7 +254,7 @@ fn blank_as_unset(opt: &Option<String>) -> Option<String> {
         .map(str::to_owned)
 }
 /// Parse a `k=v,k2=v2` OTLP header list (the `OTEL_EXPORTER_OTLP_HEADERS`
-/// format, shared with `GROK_INTERNAL_OTLP_HEADERS`): split on `,`,
+/// format, shared with `CHUTES_BUILD_INTERNAL_OTLP_HEADERS`): split on `,`,
 /// `split_once('=')`, trim key/value, skip blank keys, keep empty values.
 fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
@@ -319,7 +319,7 @@ impl EndpointsConfig {
     pub(crate) fn resolve_trace_upload_url(&self) -> String {
         blank_as_unset(&self.trace_upload_url).unwrap_or_else(|| self.proxy_url())
     }
-    /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`,
+    /// Managed deployment-config URL (`chutes-build setup`): explicit `managed_config_url`,
     /// else `proxy_url` + `/deployment/config`. Never `xai_api_base_url`, so the
     /// deployment key reaches the proxy, not the inference host.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
@@ -351,7 +351,7 @@ impl EndpointsConfig {
             tracing::warn!(
                 "Repointing the internal trace pipeline via OTEL_EXPORTER_OTLP_ENDPOINT / \
                  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is deprecated; use \
-                 GROK_INTERNAL_OTLP_TRACES_ENDPOINT instead — the standard OTEL_* vars will \
+                 CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT instead — the standard OTEL_* vars will \
                  route the external OTEL stream only in a future release"
             );
             return legacy;
@@ -403,7 +403,7 @@ impl EndpointsConfig {
         endpoint_consumed || headers_consumed
     }
     /// Trace export enabled unless `OTEL_TRACES_EXPORTER=none`. Deliberately
-    /// still honored by the internal pipeline even with `GROK_EXTERNAL_OTEL`
+    /// still honored by the internal pipeline even with `CHUTES_BUILD_EXTERNAL_OTEL`
     /// set: disabling internal span export is the safe direction.
     pub(crate) fn resolve_traces_export_enabled(&self) -> bool {
         !matches!(
@@ -514,7 +514,7 @@ impl EndpointsConfig {
     pub fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
         resolve_string_flag(
             None,
-            "GROK_TELEMETRY_GCS_BUCKET",
+            "CHUTES_BUILD_TELEMETRY_GCS_BUCKET",
             self.trace_upload_bucket.as_deref(),
             None,
         )
@@ -538,26 +538,28 @@ impl EndpointsConfig {
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
-            cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
-            xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
+            cli_chat_proxy_base_url: std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL").ok(),
+            xai_api_base_url: std::env::var("CHUTES_BUILD_XAI_API_BASE_URL")
                 .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
-            models_base_url: env_string("GROK_MODELS_BASE_URL"),
-            models_list_url: env_string("GROK_MODELS_LIST_URL"),
-            feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
-            trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
-            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
-            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
+            models_base_url: env_string("CHUTES_BUILD_MODELS_BASE_URL"),
+            models_list_url: env_string("CHUTES_BUILD_MODELS_LIST_URL"),
+            feedback_base_url: env_string("CHUTES_BUILD_FEEDBACK_BASE_URL"),
+            trace_upload_url: env_string("CHUTES_BUILD_TRACE_UPLOAD_URL"),
+            trace_upload_bucket: env_string("CHUTES_BUILD_TRACE_UPLOAD_BUCKET"),
+            trace_upload_region: env_string("CHUTES_BUILD_TRACE_UPLOAD_REGION"),
+            trace_upload_credentials_file: env_string("CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE"),
             trace_upload_credentials: None,
-            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
-            deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
-            managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
+            trace_upload_endpoint_url: env_string("CHUTES_BUILD_TRACE_UPLOAD_ENDPOINT_URL"),
+            deployment_key: env_string("CHUTES_BUILD_DEPLOYMENT_KEY"),
+            managed_config_url: env_string("CHUTES_BUILD_MANAGED_CONFIG_URL"),
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
             otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
-            grok_internal_otlp_traces_endpoint: env_string("GROK_INTERNAL_OTLP_TRACES_ENDPOINT"),
-            grok_internal_otlp_headers: env_string("GROK_INTERNAL_OTLP_HEADERS"),
+            grok_internal_otlp_traces_endpoint: env_string(
+                "CHUTES_BUILD_INTERNAL_OTLP_TRACES_ENDPOINT",
+            ),
+            grok_internal_otlp_headers: env_string("CHUTES_BUILD_INTERNAL_OTLP_HEADERS"),
             external_otel_master_switch: external_otel_master_switch_resolved(),
             otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),
             otel_traces_export_interval: env_string("OTEL_BSP_SCHEDULE_DELAY")
@@ -657,23 +659,23 @@ pub struct RuntimeResolutionContext<'a> {
     pub storage_mode: Option<&'a str>,
 }
 /// First-party credential env vars scrubbed from a BYOK auth-provider helper's
-/// environment so it can't inherit the keys Grok uses for its own first-party
+/// environment so it can't inherit the keys Chutes Build uses for its own first-party
 /// requests. Keep in sync with every first-party credential env read across the
-/// crate: `auth::manager` (`GROK_AUTH`/`GROK_AUTH_PATH`), `auth_method`
-/// (`XAI_API_KEY`/legacy), and the credential-bearing `env_string(...)` reads in
+/// crate: `auth::manager` (`CHUTES_BUILD_AUTH`/`CHUTES_BUILD_AUTH_PATH`), `auth_method`
+/// (`CHUTES_API_KEY`/legacy), and the credential-bearing `env_string(...)` reads in
 /// `EndpointsConfig::default`. The `provider_helper_env_scrubs_first_party_credentials`
 /// test pins this against an independent audited literal, so any change here must
 /// be mirrored (and re-audited) there.
 pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
-    crate::agent::auth_method::XAI_API_KEY_ENV_VAR,
-    crate::agent::auth_method::LEGACY_XAI_API_KEY_ENV_VAR,
-    "GROK_AUTH",
-    "GROK_AUTH_PATH",
-    "GROK_DEPLOYMENT_KEY",
-    "GROK_EXTRA_AUTH_KEY",
-    "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
+    crate::agent::auth_method::CHUTES_API_KEY_ENV_VAR,
+    crate::agent::auth_method::LEGACY_CHUTES_API_KEY_ENV_VAR,
+    "CHUTES_BUILD_AUTH",
+    "CHUTES_BUILD_AUTH_PATH",
+    "CHUTES_BUILD_DEPLOYMENT_KEY",
+    "CHUTES_BUILD_EXTRA_AUTH_KEY",
+    "CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE",
     "OTEL_EXPORTER_OTLP_HEADERS",
-    "GROK_INTERNAL_OTLP_HEADERS",
+    "CHUTES_BUILD_INTERNAL_OTLP_HEADERS",
 ];
 /// Read an env var as a trimmed string. Returns `None` if unset or empty/whitespace-only.
 pub(crate) fn env_string(name: &str) -> Option<String> {
@@ -914,7 +916,7 @@ impl PluginsConfig {
     /// read here: a malicious repo could pre-populate `enabledPlugins` to
     /// bypass the project-plugin auto-disable logic in `populate_plugin_lists`,
     /// enabling attacker-controlled hooks (e.g. SessionStart → RCE).
-    /// Native `.grok/config.toml` entries already present take precedence:
+    /// Native `.chutes-build/config.toml` entries already present take precedence:
     /// a name is only added if it isn't already in the opposite list.
     pub(crate) fn merge_claude_enabled_plugins(&mut self, _cwd: Option<&std::path::Path>) {
         if crate::claude_import::is_claude_import_marked_with_log("merge_claude_enabled_plugins") {
@@ -1005,18 +1007,18 @@ pub struct CliConfig {
     pub worktree_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_registry: Option<bool>,
-    /// Env `GROK_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`] for
+    /// Env `CHUTES_BUILD_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`] for
     /// the version-policy knobs. (Unrelated to
     /// `version_overrides[].maximum_version`, which gates config patches.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimum_version: Option<String>,
-    /// Env `GROK_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
+    /// Env `CHUTES_BUILD_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum_version: Option<String>,
-    /// Env `GROK_REQUIRED_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
+    /// Env `CHUTES_BUILD_REQUIRED_MINIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_minimum_version: Option<String>,
-    /// Env `GROK_REQUIRED_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
+    /// Env `CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION`. See [`crate::util::config::VersionPolicy`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_maximum_version: Option<String>,
     /// Group sessions by repo in the picker and CLI listings.
@@ -1204,12 +1206,17 @@ impl SandboxSettingsConfig {
         if let Some(val) = requirement {
             return Resolved::new(val.to_owned(), ConfigSource::Requirement);
         }
-        resolve_string_flag(cli_arg, "GROK_SANDBOX", self.profile.as_deref(), None)
-            .unwrap_or_else(|| Resolved::new("off".to_owned(), ConfigSource::Default))
+        resolve_string_flag(
+            cli_arg,
+            "CHUTES_BUILD_SANDBOX",
+            self.profile.as_deref(),
+            None,
+        )
+        .unwrap_or_else(|| Resolved::new("off".to_owned(), ConfigSource::Default))
     }
     /// Resolve auto_allow_bash: requirement > env > config > default (false).
     pub(crate) fn resolve_auto_allow_bash(&self, requirement: Option<bool>) -> Resolved<bool> {
-        BoolFlag::env("GROK_SANDBOX_AUTO_ALLOW_BASH")
+        BoolFlag::env("CHUTES_BUILD_SANDBOX_AUTO_ALLOW_BASH")
             .requirement(requirement)
             .config(self.auto_allow_bash)
             .resolve()
@@ -1255,8 +1262,8 @@ pub struct StorageConfig {
 }
 /// `[paths]` configuration: extra directories to scan for skills, rules, etc.
 ///
-/// These supplement the built-in scan locations (`.grok/skills/`,
-/// `.agents/skills/`, `~/.grok/skills/`). They're written by `/import-claude`
+/// These supplement the built-in scan locations (`.chutes-build/skills/`,
+/// `.agents/skills/`, `~/.chutes-build/skills/`). They're written by `/import-claude`
 /// to preserve previously-discovered Claude directories after the runtime
 /// `.claude/` cutoff (see `[claude_compat] imported`).
 ///
@@ -1435,7 +1442,7 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     /// Storage mode for session persistence.
     /// When running in relay/headless mode, this should be set to Writeback.
-    /// Defaults to reading from GROK_STORAGE_MODE env var.
+    /// Defaults to reading from CHUTES_BUILD_STORAGE_MODE env var.
     #[serde(skip)]
     pub storage_mode: StorageMode,
     /// CLI override for the default model ID.
@@ -1487,7 +1494,7 @@ pub struct Config {
     #[serde(skip)]
     pub cli_agent_overrides: CliAgentOverrides,
     /// Whether subagent (task tool) support is enabled. Enabled by default;
-    /// disabled only via `GROK_SUBAGENTS=0` or `[subagents] enabled = false`.
+    /// disabled only via `CHUTES_BUILD_SUBAGENTS=0` or `[subagents] enabled = false`.
     /// Not remotely gated.
     #[serde(skip)]
     pub subagents_enabled: bool,
@@ -1668,7 +1675,7 @@ pub use xai_grok_shared::ui_config::{ContextualHints, UiConfig};
 ///
 /// ```toml
 /// [agent]
-/// # Use a named agent (looked up via discovery: .grok/agents/, ~/.grok/agents/, built-ins)
+/// # Use a named agent (looked up via discovery: .chutes-build/agents/, ~/.chutes-build/agents/, built-ins)
 /// name = "my-custom-agent"
 ///
 /// # OR: path to an agent definition file (.md with YAML frontmatter)
@@ -1679,7 +1686,7 @@ pub use xai_grok_shared::ui_config::{ContextualHints, UiConfig};
 /// 1. ACP session-level `_meta.agentProfile`
 /// 2. CLI `--agent-profile` flag
 /// 3. `[agent]` config.toml section (this config)
-/// 4. `GROK_AGENT` env var
+/// 4. `CHUTES_BUILD_AGENT` env var
 /// 5. Default `grok-build` agent
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -1691,7 +1698,7 @@ pub struct AgentSelectionConfig {
     pub name: Option<String>,
     /// Path to an agent definition file (.md with YAML frontmatter).
     /// When set, the agent is loaded from this file.
-    /// Supports environment variable expansion (e.g., `$HOME/.grok/agents/my-agent.md`).
+    /// Supports environment variable expansion (e.g., `$HOME/.chutes-build/agents/my-agent.md`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub definition: Option<PathBuf>,
     /// Global system-prompt identity label. Per-model override wins.
@@ -1905,7 +1912,7 @@ fn is_non_serde_config_path(path: &str) -> bool {
             .is_some_and(|key| UNMIRRORED_BOOLEAN_FEATURES.contains(&key))
 }
 /// Parse `[auth_provider.<name>]` tables leniently: a malformed entry warns
-/// (surfaced by `grok inspect`) and is skipped, so it fails closed for the
+/// (surfaced by `chutes-build inspect`) and is skipped, so it fails closed for the
 /// models referencing it instead of failing the whole config.
 fn parse_auth_providers(
     raw_config: &toml::Value,
@@ -2433,7 +2440,7 @@ impl Config {
     }
     fn apply_env_overrides(&mut self) {
         self.telemetry.apply_env_overrides();
-        if let Some(mode) = env_telemetry_mode("GROK_TELEMETRY_ENABLED") {
+        if let Some(mode) = env_telemetry_mode("CHUTES_BUILD_TELEMETRY_ENABLED") {
             self.features.telemetry = Some(mode);
         }
         self.grok_com_config.force_login_team_uuid = crate::auth::resolve_force_login_team(
@@ -2467,7 +2474,7 @@ impl Config {
         if let Some(mode) = self.requirements.telemetry.pinned() {
             return Resolved::new(mode, ConfigSource::Requirement);
         }
-        if let Some(mode) = env_telemetry_mode("GROK_TELEMETRY_ENABLED") {
+        if let Some(mode) = env_telemetry_mode("CHUTES_BUILD_TELEMETRY_ENABLED") {
             return Resolved::new(mode, ConfigSource::Env);
         }
         if let Some(mode) = self.features.telemetry {
@@ -2494,7 +2501,7 @@ impl Config {
                 .as_ref()
                 .and_then(|s| s.trace_upload_enabled)
         };
-        BoolFlag::env("GROK_TELEMETRY_TRACE_UPLOAD")
+        BoolFlag::env("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD")
             .requirement(self.requirements.trace_upload.pinned())
             .config(self.telemetry.trace_upload)
             .feature_flag(ff)
@@ -2544,8 +2551,8 @@ impl Config {
             "telemetry_source": telemetry.source.to_string(),
             "in_requirement_pin": req.pinned(),
             "in_requirement_src": req.source().map(|s| s.to_string()),
-            "in_env_trace_upload": std::env::var("GROK_TELEMETRY_TRACE_UPLOAD").ok(),
-            "in_env_telemetry_enabled": std::env::var("GROK_TELEMETRY_ENABLED").ok(),
+            "in_env_trace_upload": std::env::var("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD").ok(),
+            "in_env_telemetry_enabled": std::env::var("CHUTES_BUILD_TELEMETRY_ENABLED").ok(),
             "in_cfg_telemetry_trace_upload": self.telemetry.trace_upload,
             "in_cfg_features_telemetry": self.features.telemetry.map(|m| m.to_string()),
             "in_remote_trace_upload_enabled": self
@@ -2561,7 +2568,7 @@ impl Config {
     /// PER-FIELD across the `[doom_loop_recovery]` TOML table and the
     /// remote settings `doom_loop_recovery` object (a partial remote object only
     /// overrides the fields it sets). Gate precedence: env
-    /// `GROK_DOOM_LOOP_RECOVERY` > TOML `enabled` > remote `enabled` >
+    /// `CHUTES_BUILD_DOOM_LOOP_RECOVERY` > TOML `enabled` > remote `enabled` >
     /// default ON — each layer's `false` is an independent kill switch, and
     /// `None` IS the off state, so disabled has exactly one spelling.
     /// Tunables have no env layer (TOML > remote > default) and are clamped
@@ -2576,7 +2583,7 @@ impl Config {
             .remote_settings
             .as_ref()
             .and_then(|s| s.doom_loop_recovery.as_ref());
-        let enabled = BoolFlag::env("GROK_DOOM_LOOP_RECOVERY")
+        let enabled = BoolFlag::env("CHUTES_BUILD_DOOM_LOOP_RECOVERY")
             .config(self.doom_loop_recovery.enabled)
             .feature_flag(remote.and_then(|s| s.enabled))
             .default(true)
@@ -2616,7 +2623,7 @@ impl Config {
         )
     }
     /// Gate first-run auto-registration of the official xAI marketplace source.
-    /// Precedence: env `GROK_OFFICIAL_MARKETPLACE_AUTO_REGISTER` > remote settings >
+    /// Precedence: env `CHUTES_BUILD_OFFICIAL_MARKETPLACE_AUTO_REGISTER` > remote settings >
     /// default off (so only remote settings-targeted teams get it pre-public). No
     /// managed `.requirement` pin: `marketplace_allowlist` already gates sources.
     pub(crate) fn resolve_official_marketplace_auto_register(&self) -> Resolved<bool> {
@@ -2624,7 +2631,7 @@ impl Config {
             .remote_settings
             .as_ref()
             .and_then(|s| s.official_marketplace_auto_register);
-        BoolFlag::env("GROK_OFFICIAL_MARKETPLACE_AUTO_REGISTER")
+        BoolFlag::env("CHUTES_BUILD_OFFICIAL_MARKETPLACE_AUTO_REGISTER")
             .feature_flag(ff)
             .default(false)
             .resolve()
@@ -2656,7 +2663,7 @@ impl Config {
     /// tier. Unset it follows `turn_summary`; set it to decouple them.
     pub(crate) fn resolve_title_refresh(&self) -> Resolved<bool> {
         let ff = self.remote_settings.as_ref().and_then(|s| s.title_refresh);
-        BoolFlag::env("GROK_TITLE_REFRESH")
+        BoolFlag::env("CHUTES_BUILD_TITLE_REFRESH")
             .requirement(self.requirements.title_refresh.pinned())
             .config(self.features.title_refresh)
             .feature_flag(ff)
@@ -2680,7 +2687,7 @@ impl Config {
         {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("GROK_IMAGE_GEN")
+        BoolFlag::env("CHUTES_BUILD_IMAGE_GEN")
             .config(self.features.image_gen)
             .feature_flag(
                 self.remote_settings
@@ -2704,7 +2711,9 @@ impl Config {
         {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("GROK_IMAGE_EDIT").default(true).resolve()
+        BoolFlag::env("CHUTES_BUILD_IMAGE_EDIT")
+            .default(true)
+            .resolve()
     }
     /// `image_to_video` / `reference_to_video` (+ `/imagine-video`). Default on.
     ///
@@ -2724,7 +2733,7 @@ impl Config {
         }) {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("GROK_VIDEO_GEN")
+        BoolFlag::env("CHUTES_BUILD_VIDEO_GEN")
             .config(self.features.video_gen)
             .feature_flag(
                 self.remote_settings
@@ -2736,13 +2745,13 @@ impl Config {
     }
     /// Optional Imagine model override for `image_gen`. When set (non-empty),
     /// `image_gen` calls this model slug instead of the default quality model.
-    /// Precedence: env `GROK_IMAGE_GEN_MODEL_OVERRIDE` > `[features]
+    /// Precedence: env `CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE` > `[features]
     /// image_gen_model_override` config > remote settings `image_gen_model_override`.
     /// `None` → default model (`grok-imagine-image-quality`).
     pub(crate) fn resolve_image_gen_model_override(&self) -> Option<String> {
         resolve_string_flag(
             None,
-            "GROK_IMAGE_GEN_MODEL_OVERRIDE",
+            "CHUTES_BUILD_IMAGE_GEN_MODEL_OVERRIDE",
             self.features.image_gen_model_override.as_deref(),
             self.remote_settings
                 .as_ref()
@@ -2753,7 +2762,7 @@ impl Config {
     pub(crate) fn resolve_image_edit_model_override(&self) -> Option<String> {
         resolve_string_flag(
             None,
-            "GROK_IMAGE_EDIT_MODEL_OVERRIDE",
+            "CHUTES_BUILD_IMAGE_EDIT_MODEL_OVERRIDE",
             self.features.image_edit_model_override.as_deref(),
             self.remote_settings
                 .as_ref()
@@ -2770,13 +2779,13 @@ impl Config {
         if ff == Some(false) {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("GROK_GOAL")
+        BoolFlag::env("CHUTES_BUILD_GOAL")
             .config(self.goal.enabled)
             .feature_flag(ff)
             .default(true)
             .resolve()
     }
-    /// Background workflows (`workflow` tool, `.grok/workflows/*.rhai`,
+    /// Background workflows (`workflow` tool, `.chutes-build/workflows/*.rhai`,
     /// `/deep-research`, host-owned `/goal` driver). Default ON: deployments
     /// that never receive remote settings still get workflows; `Some(false)`
     /// remote / config / env remains a kill-switch.
@@ -2788,7 +2797,7 @@ impl Config {
         if ff == Some(false) {
             return Resolved::new(false, ConfigSource::Remote);
         }
-        BoolFlag::env("GROK_WORKFLOWS")
+        BoolFlag::env("CHUTES_BUILD_WORKFLOWS")
             .config(self.workflows.enabled)
             .feature_flag(ff)
             .default(true)
@@ -2800,7 +2809,7 @@ impl Config {
     /// value the actor stores), passed in so a sub-role default can never
     /// disagree with whether `/goal` is on.
     pub(crate) fn resolve_goal_classifier_enabled(&self, goal_enabled: bool) -> Resolved<bool> {
-        BoolFlag::env("GROK_GOAL_CLASSIFIER")
+        BoolFlag::env("CHUTES_BUILD_GOAL_CLASSIFIER")
             .config(self.goal.classifier_enabled)
             .feature_flag(
                 self.remote_settings
@@ -2811,7 +2820,7 @@ impl Config {
             .resolve()
     }
     pub(crate) fn resolve_goal_planner_enabled(&self, goal_enabled: bool) -> Resolved<bool> {
-        BoolFlag::env("GROK_GOAL_PLANNER")
+        BoolFlag::env("CHUTES_BUILD_GOAL_PLANNER")
             .config(self.goal.planner_enabled)
             .feature_flag(
                 self.remote_settings
@@ -2822,7 +2831,7 @@ impl Config {
             .resolve()
     }
     pub(crate) fn resolve_goal_summary_enabled(&self, goal_enabled: bool) -> Resolved<bool> {
-        BoolFlag::env("GROK_GOAL_SUMMARY")
+        BoolFlag::env("CHUTES_BUILD_GOAL_SUMMARY")
             .config(self.goal.summary_enabled)
             .feature_flag(
                 self.remote_settings
@@ -2861,7 +2870,7 @@ impl Config {
             GOAL_VERIFIER_SKEPTIC_COUNT, GOAL_VERIFIER_SKEPTIC_MAX, GOAL_VERIFIER_SKEPTIC_MIN,
         };
         Self::resolve_goal_u32(
-            "GROK_GOAL_VERIFIER_N",
+            "CHUTES_BUILD_GOAL_VERIFIER_N",
             self.goal.verifier_count,
             self.remote_settings
                 .as_ref()
@@ -2877,7 +2886,7 @@ impl Config {
             GOAL_CLASSIFIER_MAX_RUNS_DEFAULT, GOAL_CLASSIFIER_MAX_RUNS_MIN,
         };
         Self::resolve_goal_u32(
-            "GROK_GOAL_CLASSIFIER_MAX",
+            "CHUTES_BUILD_GOAL_CLASSIFIER_MAX",
             self.goal.classifier_max_runs,
             self.remote_settings
                 .as_ref()
@@ -2891,7 +2900,7 @@ impl Config {
     /// (`max(1, cap / 2)`); floored at 1 so it can never silently disable.
     pub(crate) fn resolve_goal_strategist_every(&self, classifier_max_runs: u32) -> Resolved<u32> {
         Self::resolve_goal_u32(
-            "GROK_GOAL_STRATEGIST_EVERY",
+            "CHUTES_BUILD_GOAL_STRATEGIST_EVERY",
             self.goal.strategist_every,
             self.remote_settings
                 .as_ref()
@@ -2903,7 +2912,7 @@ impl Config {
     /// Re-verify escalation threshold; floored at 1. No remote layer.
     pub(crate) fn resolve_goal_reverify_after(&self) -> Resolved<u32> {
         Self::resolve_goal_u32(
-            "GROK_GOAL_REVERIFY_AFTER",
+            "CHUTES_BUILD_GOAL_REVERIFY_AFTER",
             self.goal.reverify_after,
             None,
             crate::session::acp_session::GOAL_REVERIFY_AFTER_DEFAULT,
@@ -2913,7 +2922,7 @@ impl Config {
     /// When `true`, every `/goal` role inherits the current model regardless of
     /// configured pairs.
     pub(crate) fn resolve_goal_use_current_model_only(&self) -> Resolved<bool> {
-        BoolFlag::env("GROK_GOAL_USE_CURRENT_MODEL_ONLY")
+        BoolFlag::env("CHUTES_BUILD_GOAL_USE_CURRENT_MODEL_ONLY")
             .config(self.goal.use_current_model_only)
             .default(false)
             .resolve()
@@ -3003,12 +3012,12 @@ impl Config {
             _ => Resolved::new(Vec::new(), ConfigSource::Default),
         }
     }
-    /// Resolve the mode (env `GROK_COMPACTION_MODE` > config > remote settings >
+    /// Resolve the mode (env `CHUTES_BUILD_COMPACTION_MODE` > config > remote settings >
     /// default, unrecognized falling through) and, for `Segments`, attach the
     /// separately-resolved detail level.
     pub(crate) fn resolve_compaction_mode(&self) -> xai_chat_state::CompactionMode {
         resolve_compaction_mode_from(
-            env_string("GROK_COMPACTION_MODE").as_deref(),
+            env_string("CHUTES_BUILD_COMPACTION_MODE").as_deref(),
             self.features.compaction_mode.as_deref(),
             self.remote_settings
                 .as_ref()
@@ -3027,13 +3036,13 @@ impl Config {
                 .and_then(|r| r.compaction_tool_choice.as_deref()),
         )
     }
-    /// Precedence: env `GROK_COMPACTION_DETAIL`, then config
+    /// Precedence: env `CHUTES_BUILD_COMPACTION_DETAIL`, then config
     /// `features.compaction_detail`, then remote settings
     /// `remote_settings.compaction_detail`, then default (`verbose`). Drives the
     /// `segments` verbatim detail level.
     fn resolve_compaction_detail(&self) -> xai_chat_state::CompactionDetail {
         resolve_compaction_detail_from(
-            env_string("GROK_COMPACTION_DETAIL").as_deref(),
+            env_string("CHUTES_BUILD_COMPACTION_DETAIL").as_deref(),
             self.features.compaction_detail.as_deref(),
             self.remote_settings
                 .as_ref()
@@ -3045,9 +3054,9 @@ impl Config {
     /// Enterprise OIDC (`oidc` in config.toml) always wins — this only gates
     /// the default xAI OAuth2 fallback when no enterprise OIDC is configured.
     ///
-    /// Priority: `--oauth` > GROK_OAUTH_ENABLED env > default (true = OAuth).
+    /// Priority: `--oauth` > CHUTES_BUILD_OAUTH_ENABLED env > default (true = OAuth).
     pub(crate) fn resolve_grok_oauth(&self, cli_oidc: Option<bool>) -> Resolved<bool> {
-        BoolFlag::env("GROK_OAUTH_ENABLED")
+        BoolFlag::env("CHUTES_BUILD_OAUTH_ENABLED")
             .cli(cli_oidc)
             .default(true)
             .resolve()
@@ -3056,7 +3065,7 @@ impl Config {
 /// Canonical resolver for `mcp.liveness_watchers`. Stacks the full
 /// 7-step `BoolFlag` precedence:
 ///
-/// `requirement > cli > env (GROK_MCP_LIVENESS_WATCHERS) > config >
+/// `requirement > cli > env (CHUTES_BUILD_MCP_LIVENESS_WATCHERS) > config >
 /// managed > feature_flag > default (true)`.
 ///
 /// `util::config::resolve_mcp_liveness_watchers` delegates here so the
@@ -3072,7 +3081,7 @@ pub(crate) fn resolve_mcp_liveness_watchers(
     managed: Option<bool>,
     feature_flag: Option<bool>,
 ) -> Resolved<bool> {
-    BoolFlag::env("GROK_MCP_LIVENESS_WATCHERS")
+    BoolFlag::env("CHUTES_BUILD_MCP_LIVENESS_WATCHERS")
         .requirement(requirement)
         .cli(cli)
         .config(config)
@@ -3084,14 +3093,14 @@ pub(crate) fn resolve_mcp_liveness_watchers(
 /// Canonical resolver for `mcp.auto_restart`. Stacks the full 7-step
 /// `BoolFlag` precedence:
 ///
-/// `requirement > cli > env (GROK_MCP_AUTO_RESTART) > config >
+/// `requirement > cli > env (CHUTES_BUILD_MCP_AUTO_RESTART) > config >
 /// managed > feature_flag > default (true)`.
 ///
 /// Mirrors [`resolve_mcp_liveness_watchers`]. Both
 /// `util::config::resolve_mcp_auto_restart` delegates here so the
 /// precedence is single-sourced.
 ///
-/// Recovery is on by default; opt out via `GROK_MCP_AUTO_RESTART=false`,
+/// Recovery is on by default; opt out via `CHUTES_BUILD_MCP_AUTO_RESTART=false`,
 /// `[features] mcp_auto_restart`, or `requirements.toml`.
 pub(crate) fn resolve_mcp_auto_restart(
     requirement: Option<bool>,
@@ -3100,7 +3109,7 @@ pub(crate) fn resolve_mcp_auto_restart(
     managed: Option<bool>,
     feature_flag: Option<bool>,
 ) -> Resolved<bool> {
-    BoolFlag::env("GROK_MCP_AUTO_RESTART")
+    BoolFlag::env("CHUTES_BUILD_MCP_AUTO_RESTART")
         .requirement(requirement)
         .cli(cli)
         .config(config)
@@ -3113,7 +3122,7 @@ pub(crate) fn resolve_mcp_auto_restart(
 /// 7-step `BoolFlag` precedence as
 /// [`resolve_mcp_liveness_watchers`]:
 ///
-/// `requirement > cli > env (GROK_MCP_PUSH_SERVER_STATUS) > config >
+/// `requirement > cli > env (CHUTES_BUILD_MCP_PUSH_SERVER_STATUS) > config >
 /// managed > feature_flag > default (true)`.
 ///
 /// `util::config::resolve_mcp_push_server_status` delegates here so
@@ -3129,7 +3138,7 @@ pub fn resolve_mcp_push_server_status(
     managed: Option<bool>,
     feature_flag: Option<bool>,
 ) -> Resolved<bool> {
-    BoolFlag::env("GROK_MCP_PUSH_SERVER_STATUS")
+    BoolFlag::env("CHUTES_BUILD_MCP_PUSH_SERVER_STATUS")
         .requirement(requirement)
         .cli(cli)
         .config(config)
@@ -3142,7 +3151,7 @@ pub fn resolve_mcp_push_server_status(
 /// same 7-step `BoolFlag` precedence as
 /// [`resolve_mcp_liveness_watchers`]:
 ///
-/// `requirement > cli > env (GROK_MCP_RECURSIVE_CONFIG_WATCH) >
+/// `requirement > cli > env (CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH) >
 /// config > managed > feature_flag > default (true)`.
 ///
 /// `util::config::resolve_mcp_recursive_config_watch` delegates here
@@ -3152,7 +3161,7 @@ pub fn resolve_mcp_push_server_status(
 /// non-recursive cwd watches default-on. The flag exists primarily
 /// as a kill switch during the rollout: if the FSEvents flakiness
 /// on macOS or an inotify-quota issue on Linux causes a regression,
-/// operators flip this flag (e.g. via `GROK_MCP_RECURSIVE_CONFIG_
+/// operators flip this flag (e.g. via `CHUTES_BUILD_MCP_RECURSIVE_CONFIG_
 /// WATCH=0`) and the leader falls back to the prior behavior (no cwd
 /// watches; user-triggered refresh is the only project-config
 /// reload path).
@@ -3168,7 +3177,7 @@ pub(crate) fn resolve_mcp_recursive_config_watch(
     managed: Option<bool>,
     feature_flag: Option<bool>,
 ) -> Resolved<bool> {
-    BoolFlag::env("GROK_MCP_RECURSIVE_CONFIG_WATCH")
+    BoolFlag::env("CHUTES_BUILD_MCP_RECURSIVE_CONFIG_WATCH")
         .requirement(requirement)
         .cli(cli)
         .config(config)
@@ -3285,7 +3294,7 @@ pub(crate) fn is_telemetry_explicitly_disabled_sync() -> bool {
 pub fn is_error_reporting_disabled_sync() -> bool {
     !SyncBoolFlag::new(error_reporting_enabled_from_toml)
         .disable_env("DISABLE_ERROR_REPORTING")
-        .enable_env(|| env_bool("GROK_ERROR_REPORTING"))
+        .enable_env(|| env_bool("CHUTES_BUILD_ERROR_REPORTING"))
         .inherit(|| !is_telemetry_disabled_sync())
         .resolve()
 }
@@ -3306,12 +3315,12 @@ fn error_reporting_enabled_from_toml(root: &toml::Value) -> Option<bool> {
         .get("error_reporting")?
         .as_bool()
 }
-/// `GROK_TELEMETRY_ENABLED` resolved through `TelemetryMode::parse` so the
+/// `CHUTES_BUILD_TELEMETRY_ENABLED` resolved through `TelemetryMode::parse` so the
 /// extended string forms (e.g. `"session_metrics"`) are accepted.
 fn grok_telemetry_env_enabled() -> Option<bool> {
-    env_telemetry_mode("GROK_TELEMETRY_ENABLED").map(|m| !m.is_disabled())
+    env_telemetry_mode("CHUTES_BUILD_TELEMETRY_ENABLED").map(|m| !m.is_disabled())
 }
-/// Load `~/.grok/requirements.toml` standalone so the admin pin can beat
+/// Load `~/.chutes-build/requirements.toml` standalone so the admin pin can beat
 /// env vars. The merged config layer can't express that — last-merge-wins
 /// loses provenance.
 pub(crate) fn read_requirements_toml() -> Option<toml::Value> {
@@ -3320,7 +3329,7 @@ pub(crate) fn read_requirements_toml() -> Option<toml::Value> {
     toml::from_str(&content).ok()
 }
 /// Resolve the external-OTEL master switch exactly the way the external
-/// stream's activation does: **requirement pin > `GROK_EXTERNAL_OTEL` env >
+/// stream's activation does: **requirement pin > `CHUTES_BUILD_EXTERNAL_OTEL` env >
 /// `[telemetry].otel_enabled` config layer (managed config included) > off**.
 ///
 /// The internal trace pipeline keys its "ignore `OTEL_EXPORTER_OTLP_*`"
@@ -3333,7 +3342,7 @@ pub(crate) fn read_requirements_toml() -> Option<toml::Value> {
 pub(crate) fn external_otel_master_switch_resolved() -> bool {
     external_otel_master_switch_from(
         xai_grok_config::load_merged_requirements().as_ref(),
-        env_bool("GROK_EXTERNAL_OTEL"),
+        env_bool("CHUTES_BUILD_EXTERNAL_OTEL"),
         crate::config::load_effective_config().ok().as_ref(),
     )
 }
@@ -3361,7 +3370,7 @@ pub(crate) fn external_otel_master_switch_from(
 /// Layering follows `resolve_telemetry_mode`: **requirement > env > config >
 /// remote > default**, where the `[telemetry]` `otel_*` keys from the
 /// effective config (which already includes managed-config layers distributed
-/// by `grok setup`) sit under the env vars, requirements pins are applied on
+/// by `chutes-build setup`) sit under the env vars, requirements pins are applied on
 /// top, and the remote layer is restrictive-only + asynchronous
 /// ([`apply_external_otel_remote_policy`]).
 pub fn resolve_external_otel_config(
@@ -3898,12 +3907,12 @@ pub struct ModelEntryConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     /// The API key for this model's provider.
-    /// If not set, falls back to env_key, then XAI_API_KEY.
+    /// If not set, falls back to env_key, then CHUTES_API_KEY.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     /// Environment variable name(s) that hold the provider API key.
     /// Accepts a string or an array (first set, non-empty value wins).
-    /// If not set, falls back to XAI_API_KEY.
+    /// If not set, falls back to CHUTES_API_KEY.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env_key: Option<EnvKeys>,
     /// Which API backend to use for this model.
@@ -3962,7 +3971,7 @@ pub struct ModelEntryConfig {
     pub inference_idle_timeout_secs: Option<u64>,
     /// Maximum number of retries for transient API errors (429, 500, 502, etc.)
     /// during a single inference request. Default: 5.
-    /// Can also be set via the `GROK_MAX_RETRIES` environment variable.
+    /// Can also be set via the `CHUTES_BUILD_MAX_RETRIES` environment variable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4198,7 +4207,7 @@ pub struct ModelInfo {
     /// (e.g. "xai"); `None` = unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_family: Option<String>,
-    /// The base URL of the model (session endpoint). e.g. "https://cli-chat-proxy.grok.com/v1"
+    /// The base URL of the model (session endpoint). e.g. "https://cli-chat-proxy.chutes.ai/v1"
     pub base_url: String,
     /// Human-readable name of the model. Honored by both the picker
     /// (`/model`) and `/session-info` -- when set, that's the label shown
@@ -4631,7 +4640,7 @@ pub struct Features {
     /// Default: true (index any git repo). Patterns can explicitly match non-git directories.
     #[serde(default)]
     pub codebase_indexing: CodebaseIndexingSetting,
-    /// Show a blocking warning when Grok starts outside a Git repository.
+    /// Show a blocking warning when Chutes Build starts outside a Git repository.
     /// Default: false. Used as the local fallback when the `non_git_warning` remote settings
     /// flag in `grok_build_settings` is absent. When the remote flag is present it takes
     /// precedence — `Some(false)` from remote settings overrides `true` here.
@@ -4657,11 +4666,11 @@ pub struct Features {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_edit_model_override: Option<String>,
     /// `summary` (default) | `transcript` | `segments`. `None` = defer to CLI /
-    /// env (`GROK_COMPACTION_MODE`). Parsed via `CompactionMode::parse`.
+    /// env (`CHUTES_BUILD_COMPACTION_MODE`). Parsed via `CompactionMode::parse`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_mode: Option<String>,
     /// `none` | `minimal` | `balanced` | `verbose` (default). `None` = defer to
-    /// env (`GROK_COMPACTION_DETAIL`). The `segments` verbatim detail level.
+    /// env (`CHUTES_BUILD_COMPACTION_DETAIL`). The `segments` verbatim detail level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4691,7 +4700,7 @@ pub struct Features {
     /// auto-restarted (their existing `reset_transport` path
     /// covers the recovery). `None` = defer to env / default
     /// (recovery is on by default; set `false` here / via
-    /// `GROK_MCP_AUTO_RESTART` to opt out).
+    /// `CHUTES_BUILD_MCP_AUTO_RESTART` to opt out).
     ///
     /// Not read through this struct: the live resolver re-reads the
     /// `[features]` key out-of-band from raw TOML in
@@ -4720,17 +4729,17 @@ pub struct Features {
     ///
     /// Practical consequence: setting
     /// `[features] mcp_push_server_status = false` in
-    /// `~/.grok/config.toml` will NOT disable the pager's
+    /// `~/.chutes-build/config.toml` will NOT disable the pager's
     /// subscription on a freshly-launched process. To disable the
-    /// pager subscription, set `GROK_MCP_PUSH_SERVER_STATUS=0` in
+    /// pager subscription, set `CHUTES_BUILD_MCP_PUSH_SERVER_STATUS=0` in
     /// the env before launch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_push_server_status: Option<bool>,
     /// Whether the leader's `ConfigFileWatcher` adds the two narrow
-    /// non-recursive watches for `<cwd>/` and `<cwd>/.grok/`.
+    /// non-recursive watches for `<cwd>/` and `<cwd>/.chutes-build/`.
     ///
     /// When `true` (default), edits to `<cwd>/.mcp.json`,
-    /// `<cwd>/.grok/config.toml`, or `<cwd>/.claude.json` flow
+    /// `<cwd>/.chutes-build/config.toml`, or `<cwd>/.claude.json` flow
     /// through the watcher → reloader → `ConfigUpdate::
     /// ProjectMcpServersChanged { cwd }` → `app.rs` ACP-injection
     /// pipeline and the affected sessions reload their MCP servers
@@ -4840,7 +4849,7 @@ pub(crate) fn first_own_credential(
         .or_else(|| env_key.and_then(EnvKeys::resolve_value))
 }
 /// Priority: model api_key/env_key > cached auth-provider token > session
-/// token > XAI_API_KEY.
+/// token > CHUTES_API_KEY.
 pub(crate) fn resolve_credentials(
     model: &ModelEntry,
     session_key: Option<&str>,

@@ -10,23 +10,23 @@
 //!
 //! Provides:
 //! - [`MockInferenceServer`] — Mock /v1/chat/completions + /v1/responses with request logging
-//! - [`GrokStdioClient`] — ACP client that drives `grok agent stdio` as a subprocess
+//! - [`GrokStdioClient`] — ACP client that drives `chutes-build agent stdio` as a subprocess
 //! - [`RawStdioClient`] — raw-wire ACP driver for bytes the typed client can't
 //!   produce (Foundation `\/` methods, string UUID ids)
-//! - [`leader::LeaderStdioClient`] — ACP client that drives `grok agent --leader stdio` (unix)
+//! - [`leader::LeaderStdioClient`] — ACP client that drives `chutes-build agent --leader stdio` (unix)
 //! - [`TestSandbox`] — Own isolated paths, hermetic child env, optional git setup, diagnostics
 //! - [`TestProcess`] — Own detached child lifecycle, process-tree teardown, bounded output tails
-//! - [`run_headless`] — Run `grok -p` against the mock server and capture output
+//! - [`run_headless`] — Run `chutes-build -p` against the mock server and capture output
 //! - [`git_workdir`] — Create a git-initialized [`TestSandbox`]
-//! - [`grok_binary`] — Resolve the grok binary path (GROK_BINARY env or cargo_bin)
+//! - [`grok_binary`] — Resolve the grok binary path (CHUTES_BUILD_BINARY env or cargo_bin)
 //! - [`spawn_counting_server`] — Connection-counting HTTP/1.1 server for wire/pooling tests
 //! - [`uds_proxy::UdsProxy`] — Frame-aware fault-injection proxy for leader IPC sockets (unix)
 //! - [`ResourceSnapshot`] — RSS/threads/fds sampling for soak tests
-/// Multiply a harness timeout by `GROK_TEST_TIMEOUT_SCALE` (positive integer,
+/// Multiply a harness timeout by `CHUTES_BUILD_TEST_TIMEOUT_SCALE` (positive integer,
 /// default 1). CI lanes on shared runner pools raise it so pool load slows
-/// tests instead of failing them (see the Grok Build merge CI workflow).
+/// tests instead of failing them (see the Chutes Build merge CI workflow).
 pub fn scaled(base: std::time::Duration) -> std::time::Duration {
-    let scale = std::env::var("GROK_TEST_TIMEOUT_SCALE")
+    let scale = std::env::var("CHUTES_BUILD_TEST_TIMEOUT_SCALE")
         .ok()
         .and_then(|v| v.parse::<u32>().ok())
         .filter(|&v| v > 0)

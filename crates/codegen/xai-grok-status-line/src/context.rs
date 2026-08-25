@@ -2,7 +2,7 @@
 //! `xai-grok-pager/docs/user-guide/25-status-line.md`, which a test holds to
 //! this type; the comments here record only what that guide cannot.
 //!
-//! Two rules hold it together: a value Grok cannot source is `None` rather
+//! Two rules hold it together: a value Chutes Build cannot source is `None` rather
 //! than zero, and fields are snake_case, the one exception to the camelCase
 //! rule in `xai-grok-pager/docs/internal/28-extension-methods.md`, because
 //! renaming one silently breaks every script that reads it.

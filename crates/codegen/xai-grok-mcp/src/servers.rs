@@ -419,10 +419,10 @@ impl InitProgress {
 }
 
 /// One in-process SDK MCP server registration: its tool-namespace name and the
-/// SDK-side id echoed back in `x.ai/mcp/sdk_call`. A named struct (rather than a
+/// SDK-side id echoed back in `chutes.ai/mcp/sdk_call`. A named struct (rather than a
 /// `(String, String)` tuple) so callers can't transpose the two strings.
 ///
-/// `Deserialize`d straight from a `_meta["x.ai/mcp/servers"]` entry, so the
+/// `Deserialize`d straight from a `_meta["chutes.ai/mcp/servers"]` entry, so the
 /// `serverId` wire field name is declared (and serde-checked) exactly once here.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AcpServerEntry {
@@ -431,7 +431,7 @@ pub struct AcpServerEntry {
     pub server_id: String,
 }
 
-/// The session's in-process SDK MCP servers (declared via `_meta["x.ai/mcp/servers"]`,
+/// The session's in-process SDK MCP servers (declared via `_meta["chutes.ai/mcp/servers"]`,
 /// reached over the ACP reverse channel), bundled with the shared reverse-RPC invoker.
 /// Held as `McpState::acp_mcp: Option<_>` so the set is one atom — present together or
 /// absent, never "servers without an invoker" — and survives `update_configs` clears
@@ -441,7 +441,7 @@ struct AcpMcpRegistry {
     /// Registered servers (`name -> serverId`).
     servers: Vec<AcpServerEntry>,
     /// Shared reverse-RPC invoker all these servers' tools are called through (emits
-    /// `x.ai/mcp/sdk_call` over the ACP connection).
+    /// `chutes.ai/mcp/sdk_call` over the ACP connection).
     invoker: Arc<dyn crate::acp_transport::AcpReverseInvoker>,
 }
 
@@ -482,7 +482,7 @@ pub struct McpState {
     /// as `Ready`. Cleared when the server begins a fresh init attempt.
     pub init_failed: std::collections::HashMap<McpServerName, String>,
     /// Per-server set of unqualified tool names that the user has disabled.
-    /// Persisted to `~/.grok/config.toml` under `[mcp_servers.<name>].disabled_tools`.
+    /// Persisted to `~/.chutes-build/config.toml` under `[mcp_servers.<name>].disabled_tools`.
     pub disabled_tools: HashMap<McpServerName, std::collections::HashSet<ToolName>>,
     /// Stashed registrations for disabled tools so they can be re-enabled
     /// without a full MCP re-init (no need to call `list_tools` again).
@@ -492,7 +492,7 @@ pub struct McpState {
     /// task.  When `Some`, the state — and every [`McpClient`] reached
     /// through [`Self::all_clients`] / [`Self::get_client`] — forwards
     /// [`McpClientEvent`]s here for coalescing and fan-out as ACP
-    /// `x.ai/mcp/server_status` notifications.
+    /// `chutes.ai/mcp/server_status` notifications.
     ///
     /// Intentionally `None` in subagent-pool / shared-pool snapshots
     /// ([`SharedMcpPool`]) where the **parent** session is the
@@ -1326,8 +1326,8 @@ pub struct McpTool {
 ///   so the LLM can invoke them during a conversation.
 /// - **App-visible only** (`["app"]`): not registered in `ToolBridge`, so the LLM
 ///   never sees them. These are UI-only actions (e.g. refresh buttons) surfaced to
-///   the frontend via `x.ai/mcp/tools_changed` notifications and callable via
-///   `x.ai/mcp/call`.
+///   the frontend via `chutes.ai/mcp/tools_changed` notifications and callable via
+///   `chutes.ai/mcp/call`.
 pub struct McpToolRegistration {
     pub name: String,
     pub description: String,
@@ -2548,7 +2548,7 @@ enum PendingTransport {
         auth_manager: Arc<tokio::sync::Mutex<rmcp::transport::auth::AuthorizationManager>>,
     },
     /// In-process SDK MCP server reached over the ACP reverse channel
-    /// (`x.ai/mcp/sdk_call`). Rebuildable from its `server_id` + invoker, so handshake
+    /// (`chutes.ai/mcp/sdk_call`). Rebuildable from its `server_id` + invoker, so handshake
     /// failures restore like Http (unlike the consumed Stdio child).
     Acp {
         server_id: String,
@@ -2646,7 +2646,7 @@ pub enum LivenessCheck {
 /// 3. The session/managed-config layer when a server is added, removed,
 ///    or successfully (re-)initialized.
 ///
-/// Consumers fan these out to ACP `x.ai/mcp/server_status` after 50 ms
+/// Consumers fan these out to ACP `chutes.ai/mcp/server_status` after 50 ms
 /// of tumbling-window coalescing keyed by `(server, kind)`; see the
 /// session-actor `StatusDispatcher`.
 #[derive(Debug, Clone)]
@@ -3386,7 +3386,7 @@ impl McpClient {
     }
 
     /// Build a client for an in-process SDK MCP server reached over the ACP reverse
-    /// channel. `server_id` is the id the agent echoes back in `x.ai/mcp/sdk_call`; the
+    /// channel. `server_id` is the id the agent echoes back in `chutes.ai/mcp/sdk_call`; the
     /// `invoker` performs the reverse request. Same downstream path as HTTP/stdio.
     pub fn new_acp(
         server_name: String,
@@ -3801,7 +3801,7 @@ impl McpClient {
                     })
             }
             PendingTransport::Acp { server_id, invoker } => {
-                // Per-reverse-call backstop on `x.ai/mcp/sdk_call`: the larger of the
+                // Per-reverse-call backstop on `chutes.ai/mcp/sdk_call`: the larger of the
                 // startup and tool timeouts, so it never undercuts the real outer bound
                 // (the handshake `initialize` is bounded by the serve `timeout` below;
                 // tool calls by `tool_timeout_for` in `try_call_tool`). The bridge
@@ -4324,7 +4324,7 @@ fn sanitize_mcp_log_filename(name: &str) -> String {
     }
 }
 
-/// Copy an MCP server's stderr to `~/.grok/logs/mcp/<server>.stderr.log`
+/// Copy an MCP server's stderr to `~/.chutes-build/logs/mcp/<server>.stderr.log`
 /// in a background task. Truncated per spawn.
 fn drain_mcp_stderr_to_log(server_name: &str, mut stderr: tokio::process::ChildStderr) {
     let log_dir = xai_grok_config::grok_home().join("logs").join("mcp");
@@ -4505,7 +4505,7 @@ fn apply_stdio_env(cmd: &mut Command, env: &[acp::EnvVariable], session_id: Opti
         cmd.env(&env_variable.name, &env_variable.value);
     }
     if let Some(session_id) = session_id {
-        cmd.env("GROK_SESSION_ID", session_id);
+        cmd.env("CHUTES_BUILD_SESSION_ID", session_id);
     }
 }
 
@@ -4792,7 +4792,7 @@ impl McpClient {
 /// Plumbs server-pushed notifications through an
 /// [`tokio::sync::mpsc::UnboundedSender<McpClientEvent>`] so the
 /// session-actor dispatcher can fan them out as ACP
-/// `x.ai/mcp/server_status` events.
+/// `chutes.ai/mcp/server_status` events.
 ///
 /// ## RPIT, not `#[async_trait]`
 ///

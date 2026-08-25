@@ -182,7 +182,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     }
 }
 
-/// Request/response for `x.ai/suggestPrompt` — predict the user's likely next
+/// Request/response for `chutes.ai/suggestPrompt` — predict the user's likely next
 /// prompt after a completed turn (tab-autocomplete ghost text).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

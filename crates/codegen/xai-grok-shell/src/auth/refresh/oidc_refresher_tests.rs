@@ -1384,7 +1384,7 @@ fn transient_blip_budget_is_scoped_to_the_credential() {
 
 /// Network-unreachable failures (DNS/connect/timeout — the post-wake offline
 /// window) must never consume the escalation budget: no amount of them may
-/// produce a `PermanentFailure` ("Run `grok login`") verdict, because they
+/// produce a `PermanentFailure` ("Run `chutes-build login`") verdict, because they
 /// prove nothing about the credential. Counted failures accrued before or
 /// after are unaffected (the budget is neither consumed nor reset).
 #[test]

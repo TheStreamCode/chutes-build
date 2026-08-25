@@ -366,7 +366,7 @@ mod tests {
         });
     }
 
-    /// What a command exiting right after emitting (`grok login`) relies on.
+    /// What a command exiting right after emitting (`chutes-build login`) relies on.
     /// Asserts on the wait, not on the gauge: it is process-global and other
     /// tests in this binary emit concurrently.
     #[tokio::test]

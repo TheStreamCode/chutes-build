@@ -15,15 +15,15 @@ pub(crate) const META_LAST_AUTO_GC_AT: &str = "last_auto_gc_at";
 pub(crate) const META_LAST_AUTO_REBUILD_AT: &str = "last_auto_rebuild_at";
 
 /// `0` / `false` / `off` / empty disables auto-GC.
-pub const ENV_AUTO_GC: &str = "GROK_WORKTREE_AUTO_GC";
+pub const ENV_AUTO_GC: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC";
 /// `1` / `true` / `on` forces age-count without delete.
-pub const ENV_AUTO_GC_DRY_RUN: &str = "GROK_WORKTREE_AUTO_GC_DRY_RUN";
+pub const ENV_AUTO_GC_DRY_RUN: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_DRY_RUN";
 /// Default max age in seconds (overrides TOML/remote when set and parseable).
-pub const ENV_AUTO_GC_MAX_AGE: &str = "GROK_WORKTREE_AUTO_GC_MAX_AGE";
+pub const ENV_AUTO_GC_MAX_AGE: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_MAX_AGE";
 /// `1` / `true` / `on` enables optional discovery rebuild + stale git prune.
-pub const ENV_AUTO_GC_REBUILD: &str = "GROK_WORKTREE_AUTO_GC_REBUILD";
+pub const ENV_AUTO_GC_REBUILD: &str = "CHUTES_BUILD_WORKTREE_AUTO_GC_REBUILD";
 
-/// Remove every `GROK_WORKTREE_AUTO_GC*` env var so a test starts from a clean
+/// Remove every `CHUTES_BUILD_WORKTREE_AUTO_GC*` env var so a test starts from a clean
 /// slate. Exposed (not `cfg(test)`) so other crates' tests can share the single
 /// source of truth for the var list; not intended for production use.
 ///
@@ -285,7 +285,7 @@ pub(crate) fn env_auto_gc_rebuild() -> bool {
     env_var_truthy(ENV_AUTO_GC_REBUILD)
 }
 
-/// Parse `GROK_WORKTREE_AUTO_GC_MAX_AGE` as seconds; invalid/absent → None.
+/// Parse `CHUTES_BUILD_WORKTREE_AUTO_GC_MAX_AGE` as seconds; invalid/absent → None.
 pub(crate) fn env_auto_gc_max_age() -> Option<u64> {
     match std::env::var(ENV_AUTO_GC_MAX_AGE) {
         Ok(v) => {
@@ -586,7 +586,7 @@ fn maybe_run_rebuild(
     let home = match resolve_grok_home() {
         Ok(h) => h,
         Err(e) => {
-            tracing::warn!(error = %e, "auto worktree rebuild skipped: grok home unresolved");
+            tracing::warn!(error = %e, "auto worktree rebuild skipped: Chutes Build home unresolved");
             return (None, false);
         }
     };
@@ -626,12 +626,12 @@ fn collect_source_repos_for_prune(db: &WorktreeDb) -> BTreeSet<PathBuf> {
 }
 
 /// Scrub stale grok-owned registrations from each known source repo,
-/// scoped to worktrees under the grok home to prove ownership (see
+/// scoped to worktrees under the Chutes Build home to prove ownership (see
 /// [`crate::git::remove_stale_worktree_registrations_under`] for why a blanket
 /// `git worktree prune` is unsafe here).
 fn prune_stale_git_worktree_registrations(repos: &BTreeSet<PathBuf>) -> u64 {
     let Ok(grok_home) = resolve_grok_home() else {
-        tracing::warn!("auto worktree registration scrub skipped: grok home unresolved");
+        tracing::warn!("auto worktree registration scrub skipped: Chutes Build home unresolved");
         return 0;
     };
     let cleaned: u64 = repos
@@ -976,7 +976,7 @@ mod tests {
         );
     }
 
-    /// Kill switch: env `GROK_WORKTREE_AUTO_GC=0` or `opts.enabled=false` both
+    /// Kill switch: env `CHUTES_BUILD_WORKTREE_AUTO_GC=0` or `opts.enabled=false` both
     /// short-circuit to `Disabled` with no stamp; an enabled pass with a clean
     /// env runs and stamps.
     #[test]

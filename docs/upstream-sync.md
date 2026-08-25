@@ -1246,36 +1246,56 @@ the fork's before the agent commit.
 (`--version`, `--help` branding sweep, `models`, `du`) all green. Gitleaks scans
 the worktree and the full history clean.
 
-## Sync 1.0.6..1.0.8 in corso (branch sync/upstream-1.0.8-wip, 2026-08-24)
+## Review record: 2026-08-25 — sync 1.0.6..1.0.8 (`d71f6e0c` → `07b2f714`)
 
-Aree portate e verdi per-crate: proxy-types+ptyctl, chat-state+tracing+
-proto-build(pbjson_exclude solo; scartato il regressivo /dev/stdout),
-pager-render(kitty), **tools** (elicitation MCP, shared_http cache,
-task capability_mode harness-internal via xai-tool-types, registry
-generate_schema_cached/RwLock, taxonomy InitOrUpdateApp), telemetry
-(OTLP esterno con master switch nostro) + version(IS_DEV_BUILD/full_version)
-+tty-utils(metriche processo) + extra-ca(build_reqwest_client/
-build_blocking_reqwest_client interim) + mcp(elicitation/owned_clients)
-+ session-events(McpOAuthProbeResolved), **fast-worktree** (backend NFS
-completo + stub), **workspace stack** (workspace-types DeleteScheduledTask
-e worktree detach/salvage/clean; hub-sdk/core; diag-server revive_connected;
-status-line NUOVO crate in members; daemon preview_supervisor; workspace:
-permission/shell_access split, handle acknowledged-notify + guarded insert,
-workspace_ops repos .chutes-build, commands EmitStatusSnapshot/is_family_switch,
-config ModelInfo.subagent_rate_limit_max_attempts, bins allineati).
+Ported by hand on `sync/upstream-1.0.8-wip`, one area per commit, then merged
+for 1.3.0. The delta was 688 files (+64k/-11k); `port_assist.py --base
+d71f6e0c` classified 138 as clean takes and 116 as mechanical, leaving the
+rest to judgement.
 
-### Da fare per chiudere (in ordine)
-1. **xai-grok-agent**: builder.rs rifattorizzato upstream (tool registration
-   spostata su ToolBridgeBuilder); riportare le registrazioni Chutes
-   (~14 register! + match arms, salvate in %TEMP%/opencode/our_builder.rs)
-   nella nuova forma. Poi config/discovery già presi; subagent_prompts.rs e
-   templates/*.md restano NOSTRI (identità).
-2. shell residui: spawn.rs inferenza (Agent vs tuple) si sblocca col punto 1;
-   compaction.rs:1673 u32::from(persist_compaction_segment) -> helper ora
-   restituisce () in helpers/session_compact.rs: adattare contatore.
-3. **Telemetria (mandato utente)**: deadenare compile-time ogni export
-   (external::init no-op, is_active=false costante, exporter mai costruiti);
-   restano solo eventi locali jsonl. Aggiornare PRIVACY.md.
-4. pager (delta intero), poi root Cargo.toml/clippy.toml(+fix call-site),
-   seam_sweep --base v1.2.4, dead_modules, known_failures compare,
-   smoke binario, upstream.json -> 07b2f714, CHANGELOG, release.
+Areas taken: proxy-types + ptyctl; chat-state/tracing/proto-build (pbjson
+exclude only — the `/dev/stdout` regression was left); pager-render kitty
+keyboard support; tools (MCP elicitation, shared-HTTP reuse, cached schema
+generation, taxonomy updates); telemetry stream + version/tty-utils/extra-ca
+shims + MCP owned clients + McpOAuthProbeResolved; fast-worktree NFS backend;
+the workspace stack (DeleteScheduledTask, detach/salvage, hub sdk/core,
+diag-server revive, the new `xai-grok-status-line` crate, shell_access split,
+guarded handle inserts); agent tool registration on ToolBridgeBuilder; and
+the restructured session lifecycle.
+
+Deliberate divergences:
+
+- **Telemetry stays compile-time deadened** (user mandate). Upstream's OTLP
+  stream is inert here: `init` no-op, `is_active()` false constant, no exporter.
+- **The advisor subagent is gone entirely** — catalogue, definitions,
+  slash command, config writers, docs. Twelve discovery tests that could only
+  pass while it existed now assert the three-builtin catalogue directly.
+- **Auth defaults carry no OAuth provider.** Upstream's `Default` builds a
+  hardcoded provider and its tests assume it; ours creates one only from
+  explicit configuration (a fresh install with `CHUTES_API_KEY` must never be
+  sent to an OAuth device flow). Issuer-compatibility and device-flow tests
+  build their app explicitly. `API_KEY_SCOPE` stayed `chutes::api_key`.
+- **Static API-key env names are Chutes'**: `CHUTES_API_KEY` /
+  `CHUTES_BUILD_API_KEY`; upstream's `XAI_API_KEY` name is not read.
+- Templates/prompt identity remain ours; `xai-grok-agent` prompt sources are
+  hand-checked, never merged wholesale.
+
+The port also surfaced two silent-loss catches worth recording:
+
+1. `dead_modules.py` flagged `tool_text_recovery.rs` — the session port had
+   dropped both its declaration and the sampler integration shipped in
+   1.2.x, leaving a feature compiling to nothing. Restored with tests.
+2. `seam_sweep --base v1.2.4` reports zero literal/constant divergence after
+   fixing `API_KEY_SCOPE`, which had come back as the upstream value.
+
+Windows-specific test work this round: the auth suite (54 failures) now runs
+green via the `auth-provider-fixture` binary replacing POSIX one-liners,
+synthesized process outputs replacing `true`/`false` spawns, explicit env
+isolation for static-key tests, and Unix-only lock holder-info reads (Windows
+byte-range locks block cross-handle reads). The routing env-resolution flake
+is fixed with a shared env lock instead of the stale "single-threaded harness"
+assumption. Known-failure baselines were re-recorded from a full local run:
+pager 4, tools 74, workspace 54.
+
+Deferred: `clippy.toml` workspace lint for `reqwest::Client::new`
+(call-site fixes land with the remaining unported crates).

@@ -7,11 +7,11 @@
 //!
 //! | Method | Description |
 //! |--------|-------------|
-//! | `x.ai/code/goto-definition` | Definition location(s) for symbol at position |
-//! | `x.ai/code/goto-references` | Reference location(s) for symbol at position |
-//! | `x.ai/code/find-definitions` | All definitions of a symbol by name |
-//! | `x.ai/code/find-references` | All references to a symbol by name |
-//! | `x.ai/code/status` | Indexing status |
+//! | `chutes.ai/code/goto-definition` | Definition location(s) for symbol at position |
+//! | `chutes.ai/code/goto-references` | Reference location(s) for symbol at position |
+//! | `chutes.ai/code/find-definitions` | All definitions of a symbol by name |
+//! | `chutes.ai/code/find-references` | All references to a symbol by name |
+//! | `chutes.ai/code/status` | Indexing status |
 
 use std::path::{Path, PathBuf};
 
@@ -129,7 +129,7 @@ pub struct SymbolLocation {
     pub matched_symbol: Option<String>,
 }
 
-/// Reason string for the `x.ai/code/status` response.
+/// Reason string for the `chutes.ai/code/status` response.
 ///
 /// Serialised as a camelCase string so clients can pattern-match on it.
 #[derive(Debug, Serialize)]
@@ -142,7 +142,7 @@ pub(crate) enum IndexStatusReason {
     NotStarted,
     /// Client type is not web (web-only for initial rollout).
     ClientNotWeb,
-    /// Client did not advertise `x.ai/codeNavigation.enabled`.
+    /// Client did not advertise `chutes.ai/codeNavigation.enabled`.
     CapabilityNotAdvertised,
     /// `codebase_indexing` feature is disabled in config.
     DisabledByConfig,
@@ -425,7 +425,7 @@ fn eligibility_error(reason: CodeNavEligibility) -> acp::Error {
             "code navigation is currently only enabled for grok-web clients"
         }
         CodeNavEligibility::CapabilityNotAdvertised => {
-            "client must advertise x.ai/codeNavigation.enabled to use code navigation"
+            "client must advertise chutes.ai/codeNavigation.enabled to use code navigation"
         }
         CodeNavEligibility::DisabledByConfig => "code navigation is disabled by configuration",
         CodeNavEligibility::NotGitRepo => {

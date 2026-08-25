@@ -50,7 +50,7 @@ pub(crate) async fn run_external_refresh(command: &str) -> Option<GrokAuth> {
     tracing::info!(cmd = %command, timeout_secs = EXTERNAL_AUTH_REFRESH_TIMEOUT.as_secs(), "auth: running external auth provider (headless refresh)");
 
     let mut cmd = shell_c(command);
-    cmd.env("GROK_AUTH_EXPIRED", "1");
+    cmd.env("CHUTES_BUILD_AUTH_EXPIRED", "1");
     // Route through the group-killing runner so a provider that spawns helpers
     // is torn down as a unit on timeout.
     let output = match run_detached_with_timeout(
@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(auth.oidc_issuer.as_deref(), Some(issuer));
         assert!(auth.is_xai_auth());
 
-        // Non-x.ai issuer is stored but stays third-party.
+        // Non-chutes.ai issuer is stored but stays third-party.
         let auth = parse_output(&ok(
             r#"{"access_token":"t","issuer":"https://idp.acme.example"}"#,
         ))
@@ -161,7 +161,12 @@ mod tests {
 
     #[tokio::test]
     async fn sets_grok_auth_expired_env_on_refresh() {
-        let cmd = crate::auth::provider_fixture_command(&["env", "", "GROK_AUTH_EXPIRED", "unset"]);
+        let cmd = crate::auth::provider_fixture_command(&[
+            "env",
+            "",
+            "CHUTES_BUILD_AUTH_EXPIRED",
+            "unset",
+        ]);
         let auth = run_external_refresh(&cmd).await.unwrap();
         assert_eq!(auth.key, "1");
     }

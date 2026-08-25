@@ -1,4 +1,4 @@
-//! `x.ai/memory/flush`, `x.ai/memory/rewrite`, and `x.ai/compact_conversation`
+//! `chutes.ai/memory/flush`, `chutes.ai/memory/rewrite`, and `chutes.ai/compact_conversation`
 //! extension handlers.
 //!
 //! - `compact_conversation`: trigger an on-demand compaction for a session.

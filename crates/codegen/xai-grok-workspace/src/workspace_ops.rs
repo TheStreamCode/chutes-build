@@ -271,7 +271,7 @@ fn session_tracker(
 ///
 /// Grove rewrite is one hop (`/workspace/app` → `/workspace`). Desktop
 /// workspaces can sit deeper than that; this is a backstop only. Primary
-/// bounds are the sandbox root (`/workspace`) and the user-global grok home.
+/// bounds are the sandbox root (`/workspace`) and the user-global Chutes Build home.
 const REPOS_MANIFEST_MAX_ANCESTOR_HOPS: usize = 16;
 /// Directories to probe for [`REPOS_MANIFEST_RELATIVE_PATH`], starting at
 /// `root_cwd` (post-grove-rewrite agent cwd) and walking up.

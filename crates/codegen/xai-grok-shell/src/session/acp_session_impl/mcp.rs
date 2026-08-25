@@ -165,7 +165,7 @@ impl SessionActor {
             );
         }
     }
-    /// Emit per-server `x.ai/mcp/tools_changed` notifications.
+    /// Emit per-server `chutes.ai/mcp/tools_changed` notifications.
     ///
     /// Each emission carries the owning
     /// `sessionId` so the pager can route via `find_session_match`
@@ -197,7 +197,7 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client (x.ai/mcp/auth_trigger).
+    /// Handle explicit auth trigger from the client (chutes.ai/mcp/auth_trigger).
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server
     /// and registers its tools.
@@ -545,7 +545,7 @@ impl SessionActor {
     /// (`util::config::disabled_mcp_server_names`). Used by the
     /// auto-restart task to gate on the live configuration each
     /// backoff iteration — the user may have toggled the server off
-    /// or removed it from `~/.grok/config.toml` while we were
+    /// or removed it from `~/.chutes-build/config.toml` while we were
     /// sleeping.
     ///
     /// HTTP / HttpAuth entries always return `false` here, which is
@@ -556,8 +556,8 @@ impl SessionActor {
     ///
     /// Performs one synchronous read of the per-cwd disabled-MCP
     /// list (`crate::util::config::disabled_mcp_server_names`,
-    /// which parses `~/.grok/config.toml` + the project
-    /// `.grok/config.toml`) on every call. The auto-restart task
+    /// which parses `~/.chutes-build/config.toml` + the project
+    /// `.chutes-build/config.toml`) on every call. The auto-restart task
     /// calls this at most:
     ///   - once at schedule time (`maybe_schedule_restart`), and
     ///   - once per backoff iteration (≤3 per restart window).

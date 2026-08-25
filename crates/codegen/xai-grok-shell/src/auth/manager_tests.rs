@@ -170,7 +170,7 @@ fn legacy_scope_fallback_reads_old_auth_json() {
     let auth_path = dir.path().join("auth.json");
 
     // Write auth.json with the legacy scope key (as `x setup` copies from
-    // a machine that was authenticated with an older grok version).
+    // a machine that was authenticated with an older chutes-build version).
     let legacy_auth = make_auth(Some(Utc::now() + Duration::hours(1)), Utc::now());
     let mut store = AuthStore::new();
     store.insert(LEGACY_SCOPE.to_string(), legacy_auth);
@@ -469,7 +469,7 @@ async fn team_login_then_personal_evicts_team_token() {
 
 /// Regression test: clear() must only remove the current scope, not the
 /// legacy scope. Previously, logging in with OAuth would also delete the
-/// legacy `https://accounts.x.ai/sign-in` entry from auth.json.
+/// legacy `https://accounts.chutes.ai/sign-in` entry from auth.json.
 #[test]
 fn clear_does_not_remove_legacy_scope() {
     let dir = tempfile::tempdir().unwrap();
@@ -1624,7 +1624,7 @@ async fn auth_returns_expired_api_key_consistently_with_current() {
 
     // Async path: must NOT clone the stale key for downstream
     // consumers. Surface `TokenExpiredNoRefresh` so callers can
-    // funnel the user back through `grok login`.
+    // funnel the user back through `chutes-build login`.
     let err = mgr.auth().await.unwrap_err();
     assert!(
         matches!(err, AuthError::TokenExpiredNoRefresh),
@@ -1992,7 +1992,7 @@ async fn refresh_chain_demotes_when_attributed_tried_rt_differs_from_disk() {
     assert!(
         mgr.permanent_failure().is_none(),
         "demotion must not record a sticky verdict that locks out every \
-         sibling process until the user re-runs `grok login`",
+         sibling process until the user re-runs `chutes-build login`",
     );
 }
 
@@ -2372,11 +2372,11 @@ async fn permanent_failure_reads_absent_after_clear_so_auth_reports_not_logged_i
     );
     assert!(mgr.permanent_failure().is_some());
 
-    // User runs `grok logout` which calls clear().
+    // User runs `chutes-build logout` which calls clear().
     mgr.clear().unwrap();
 
     // The diagnostic the user now sees on the next request should be
-    // "Not logged in. Run `grok login`.", not the stale invalid_grant.
+    // "Not logged in. Run `chutes-build login`.", not the stale invalid_grant.
     let err = mgr.auth().await.unwrap_err();
     assert!(
         matches!(err, AuthError::NotLoggedIn),
@@ -3428,8 +3428,8 @@ async fn current_api_key_async_drives_refresh_chain() {
 
     let _chutes = EnvGuard::unset("CHUTES_API_KEY");
     let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
-    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
+    let _old = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     mgr.hot_swap(GrokAuth {
@@ -4333,8 +4333,8 @@ async fn shared_api_key_provider_static_fallthrough() {
     let provider = shared_api_key_provider(mgr.clone());
 
     {
-        let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-        let _upstream = EnvGuard::unset("XAI_API_KEY");
+        let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+        let _upstream = EnvGuard::unset("CHUTES_API_KEY");
         let _key = EnvGuard::set("CHUTES_API_KEY", "env-only-key");
         assert_eq!(
             provider.current_api_key_async().await.as_deref(),
@@ -4345,8 +4345,8 @@ async fn shared_api_key_provider_static_fallthrough() {
     {
         let _chutes = EnvGuard::unset("CHUTES_API_KEY");
         let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
-        let _upstream = EnvGuard::unset("XAI_API_KEY");
-        let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _upstream = EnvGuard::unset("CHUTES_API_KEY");
+        let _old = EnvGuard::unset("CHUTES_BUILD_API_KEY");
         crate::auth::store_api_key(dir.path(), "disk-api-key").unwrap();
         assert_eq!(
             provider.current_api_key_async().await.as_deref(),
@@ -4374,7 +4374,7 @@ async fn shared_api_key_provider_static_fallthrough() {
 async fn shared_api_key_provider_kill_switch_blocks_static() {
     use xai_grok_test_support::EnvGuard;
 
-    let _key = EnvGuard::set("XAI_API_KEY", "blocked");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "blocked");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(
         dir.path(),
@@ -4394,7 +4394,7 @@ async fn shared_api_key_provider_kill_switch_blocks_static() {
 async fn shared_api_key_provider_oidc_preferred_blocks_static() {
     use xai_grok_test_support::EnvGuard;
 
-    let _key = EnvGuard::set("XAI_API_KEY", "should-not-use");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "should-not-use");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(
         dir.path(),
@@ -4415,8 +4415,8 @@ async fn shared_api_key_provider_oidc_preferred_blocks_static() {
 async fn shared_api_key_provider_api_key_preferred_skips_session() {
     use xai_grok_test_support::EnvGuard;
 
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
     let _key = EnvGuard::set("CHUTES_API_KEY", "static-preferred");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(
@@ -4447,8 +4447,8 @@ async fn shared_api_key_provider_api_key_preferred_skips_session() {
 async fn shared_api_key_provider_sync_falls_through_when_session_expired() {
     use xai_grok_test_support::EnvGuard;
 
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
     let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let _key = EnvGuard::set("CHUTES_API_KEY", "static-after-expiry");
     let dir = tempfile::tempdir().unwrap();
@@ -4480,7 +4480,7 @@ async fn shared_api_key_provider_sync_buffered_session_beats_static() {
     use xai_grok_test_support::EnvGuard;
     use xai_grok_tools::types::ApiKeyProvider;
 
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let _key = EnvGuard::set("CHUTES_API_KEY", "leftover-static");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
@@ -4505,8 +4505,8 @@ async fn shared_api_key_provider_disk_memo_follows_rewrites() {
 
     let _chutes = EnvGuard::unset("CHUTES_API_KEY");
     let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
-    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
+    let _old = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let provider = shared_api_key_provider(mgr);
@@ -4533,8 +4533,8 @@ async fn process_key_from_model_env_key() {
 
     let _chutes = EnvGuard::unset("CHUTES_API_KEY");
     let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
-    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
+    let _old = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let _tok = EnvGuard::set(ENV, TOKEN);
 
     let dm = crate::models::default_model();
@@ -4574,8 +4574,8 @@ async fn process_key_precedence() {
 
     let _chutes = EnvGuard::unset("CHUTES_API_KEY");
     let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
-    let _upstream = EnvGuard::unset("XAI_API_KEY");
-    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _upstream = EnvGuard::unset("CHUTES_API_KEY");
+    let _old = EnvGuard::unset("CHUTES_BUILD_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let provider = shared_api_key_provider(mgr.clone());
@@ -4941,9 +4941,9 @@ fn dark_wake_defer_budget_survives_powered_on_during_dark_wake() {
 /// those processes never treat the OS power state as a dark wake. Exercises the
 /// guard directly (no dark-wake override installed).
 #[test]
-#[serial_test::serial(force_dark_wake_env)] // reads GROK_AUTH_FORCE_DARK_WAKE
+#[serial_test::serial(force_dark_wake_env)] // reads CHUTES_BUILD_AUTH_FORCE_DARK_WAKE
 fn is_dark_wake_false_when_power_listener_not_started() {
-    let _unset = xai_grok_test_support::EnvGuard::unset("GROK_AUTH_FORCE_DARK_WAKE");
+    let _unset = xai_grok_test_support::EnvGuard::unset("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE");
     let dir = tempfile::tempdir().unwrap();
     let mgr = AuthManager::new(dir.path(), GrokComConfig::default());
     assert!(
@@ -4952,7 +4952,7 @@ fn is_dark_wake_false_when_power_listener_not_started() {
     );
 }
 
-/// `GROK_AUTH_FORCE_DARK_WAKE` forces the dark-wake answer for manual and
+/// `CHUTES_BUILD_AUTH_FORCE_DARK_WAKE` forces the dark-wake answer for manual and
 /// integration testing — read BEFORE the `power_listener_started` check,
 /// because a headless run never starts the listener and the override
 /// exists precisely so such a run can drive the dark-wake paths against a
@@ -4966,20 +4966,20 @@ fn is_dark_wake_env_override_forces_both_states() {
     // Precondition: no power listener, so without the override this is
     // unconditionally false.
     {
-        let _g = EnvGuard::set("GROK_AUTH_FORCE_DARK_WAKE", "1");
+        let _g = EnvGuard::set("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE", "1");
         assert!(
             mgr.is_dark_wake(),
             "=1 must force dark wake even without a power listener"
         );
     }
     {
-        let _g = EnvGuard::set("GROK_AUTH_FORCE_DARK_WAKE", "0");
+        let _g = EnvGuard::set("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE", "0");
         assert!(!mgr.is_dark_wake(), "=0 must force full wake");
     }
     {
         // Unrecognized values fall through to the OS query (listener not
         // started here, so false) rather than picking a state.
-        let _g = EnvGuard::set("GROK_AUTH_FORCE_DARK_WAKE", "yes");
+        let _g = EnvGuard::set("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE", "yes");
         assert!(!mgr.is_dark_wake(), "non-1/0 values must not force a state");
     }
 }

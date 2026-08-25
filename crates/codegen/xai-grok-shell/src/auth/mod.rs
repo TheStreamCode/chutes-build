@@ -23,11 +23,11 @@ pub(crate) mod token_type;
 /// Isolate the static API-key environment tier for a test.
 ///
 /// Production reads `CHUTES_API_KEY` (legacy `CHUTES_BUILD_API_KEY`);
-/// upstream's `XAI_API_KEY` name is no longer read but is cleared anyway so
+/// upstream's `CHUTES_API_KEY` name is no longer read but is cleared anyway so
 /// an ambient developer shell cannot leak into assertions through any tier.
 #[cfg(test)]
 pub(crate) fn static_key_env_names() -> [&'static str; 3] {
-    ["CHUTES_API_KEY", "CHUTES_BUILD_API_KEY", "XAI_API_KEY"]
+    ["CHUTES_API_KEY", "CHUTES_BUILD_API_KEY", "CHUTES_API_KEY"]
 }
 
 /// Locate the `auth-provider-fixture` binary beside this test binary.

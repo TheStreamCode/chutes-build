@@ -908,9 +908,9 @@ fn models_fetch_endpoint_matches_auth_mode() {
     use crate::agent::config::EndpointsConfig;
     use crate::agent::models::ModelFetchAuth;
     for k in [
-        "GROK_CLI_CHAT_PROXY_BASE_URL",
-        "GROK_XAI_API_BASE_URL",
-        "GROK_MODELS_LIST_URL",
+        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+        "CHUTES_BUILD_XAI_API_BASE_URL",
+        "CHUTES_BUILD_MODELS_LIST_URL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
@@ -946,20 +946,20 @@ fn models_fetch_endpoint_matches_auth_mode() {
     assert_eq!(ep.url, "https://models.acme.com/v1/models");
     assert_eq!(ep.auth, EndpointAuth::ApiKey);
 }
-/// REGRESSION: `grok setup` must send the deployment key to
+/// REGRESSION: `chutes-build setup` must send the deployment key to
 /// the proxy, never the inference endpoint.
 #[test]
 #[serial_test::serial]
 fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
     use crate::agent::config::EndpointsConfig;
     for k in [
-        "GROK_CLI_CHAT_PROXY_BASE_URL",
-        "GROK_MANAGED_CONFIG_URL",
-        "GROK_XAI_API_BASE_URL",
+        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+        "CHUTES_BUILD_MANAGED_CONFIG_URL",
+        "CHUTES_BUILD_XAI_API_BASE_URL",
     ] {
         unsafe { std::env::remove_var(k) };
     }
-    unsafe { std::env::set_var("GROK_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
+    unsafe { std::env::set_var("CHUTES_BUILD_DEPLOYMENT_KEY", "xai-token-ENTERPRISE") };
     let managed: toml::Value = toml::from_str(
         r#"[endpoints]
             deployment_key = "xai-token-ENTERPRISE"
@@ -982,7 +982,7 @@ fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
         EndpointsConfig::from_config_value(&pinned).resolve_managed_config_url(),
         "https://proxy.acme-corp.example/v1/deployment/config"
     );
-    unsafe { std::env::remove_var("GROK_DEPLOYMENT_KEY") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_DEPLOYMENT_KEY") };
 }
 #[derive(Clone)]
 struct DualBundleServerState {

@@ -3,14 +3,14 @@
 //! Hooks registered at `session/new` (`_meta["chutes.build/hooks"]`) come in two flavors,
 //! both matched by the agent ([`xai_grok_hooks::matcher::HookMatcher`], shared with
 //! file hooks):
-//! - **Gates** (awaited reverse *requests* `x.ai/hooks/run`):
+//! - **Gates** (awaited reverse *requests* `chutes.ai/hooks/run`):
 //!   - `PreToolUse`: a `deny` blocks the tool.
 //!   - `Stop` / `SubagentStop` (turn-end gate): a `deny` blocks the agent from
 //!     stopping (its `systemMessage` becomes the feedback), `continue: false`
 //!     (+ `stopReason`) force-stops overriding blocks, and `additionalContext`
 //!     keeps the agent working with non-error feedback: the same vocabulary
 //!     file hooks produce, aggregated in [`Self::run_stop_client_hooks`].
-//! - **All other events**: fire-and-forget *notifications* `x.ai/hooks/event`,
+//! - **All other events**: fire-and-forget *notifications* `chutes.ai/hooks/event`,
 //!   observe-only (the callback's return is ignored). Sent per matching callback.
 
 use std::future::Future;
@@ -43,7 +43,7 @@ const CLIENT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 /// silently drop a ported goal policy that runs a build or test suite.
 const CLIENT_STOP_GATE_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Outcome of the `x.ai/hooks/run` reverse request, before interpreting it as a
+/// Outcome of the `chutes.ai/hooks/run` reverse request, before interpreting it as a
 /// decision. Separate so [`classify`] stays pure and unit-testable.
 enum ReverseOutcome {
     Responded(Arc<RawValue>),
@@ -73,7 +73,7 @@ fn classify(outcome: ReverseOutcome) -> (ClientHookResponse, ClientHookGateOutco
                     (resp, label)
                 }
                 Err(err) => {
-                    tracing::warn!(%err, "malformed x.ai/hooks/run response; failing open");
+                    tracing::warn!(%err, "malformed chutes.ai/hooks/run response; failing open");
                     (
                         ClientHookResponse::default(),
                         ClientHookGateOutcome::Malformed,
@@ -208,7 +208,7 @@ impl SessionActor {
         Ok(ToolLoop::HookDenied { hook_name })
     }
 
-    /// Fan one `x.ai/hooks/run` gate dispatch out to every matching callback,
+    /// Fan one `chutes.ai/hooks/run` gate dispatch out to every matching callback,
     /// yielding `(callback_id, response)` in completion order. Independent
     /// per-callback timeouts stop one slow callback starving another; timeout,
     /// transport error, and malformed replies fail open per callback.
@@ -266,7 +266,7 @@ impl SessionActor {
     }
 
     /// Run the client-registered `PreToolUse` hooks for `call`, firing
-    /// `x.ai/hooks/run` once per matching callback with the shared `envelope` (the
+    /// `chutes.ai/hooks/run` once per matching callback with the shared `envelope` (the
     /// same payload file hooks and observe events receive).
     ///
     /// Returns `Some(ToolLoop::HookDenied)` on the first deny, else `None`.
@@ -414,7 +414,7 @@ impl SessionActor {
         out
     }
 
-    /// Issue one `x.ai/hooks/run` reverse request, bounded by a per-callback `timeout`.
+    /// Issue one `chutes.ai/hooks/run` reverse request, bounded by a per-callback `timeout`.
     async fn send_hook_run(
         &self,
         dispatch: &ClientHookDispatch<'_>,
@@ -434,7 +434,7 @@ impl SessionActor {
     }
 
     /// Fire observe-only client hooks for `envelope`'s event: send an
-    /// `x.ai/hooks/event` notification to each matching registered callback.
+    /// `chutes.ai/hooks/event` notification to each matching registered callback.
     /// Fire-and-forget (no decision is consumed); independent of file hooks, so it
     /// runs even when no on-disk hook registry exists. No-op when nothing is registered.
     pub(super) fn notify_client_hooks(&self, envelope: &HookEventEnvelope) {

@@ -157,7 +157,7 @@ pub(crate) fn session_info_update(
 }
 
 /// Manual-rename fan-out: same payload as [`session_info_update`] plus
-/// `_meta.x.ai/titleIsManual`. Old clients ignore the unknown key.
+/// `_meta.chutes.ai/titleIsManual`. Old clients ignore the unknown key.
 pub(crate) fn session_info_update_manual(
     session_id: acp::SessionId,
     title: &str,
@@ -170,7 +170,7 @@ pub(crate) fn session_info_update_manual(
 }
 
 /// Unpin fan-out: no title (avoid blanking list-driven clients) +
-/// `_meta.x.ai/titleIsManual: false`.
+/// `_meta.chutes.ai/titleIsManual: false`.
 pub(crate) fn session_info_update_unpinned(session_id: acp::SessionId) -> acp::SessionNotification {
     acp::SessionNotification::new(
         session_id,

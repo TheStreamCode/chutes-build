@@ -135,9 +135,9 @@ pub(crate) fn embedding_session_credentials(
 /// Every call site **must** pass the correct `client_identifier` so that
 /// the API proxy (and telemetry / metrics backends) can properly attribute requests:
 ///
-/// - `"grok-shell"`   — classic Grok CLI / TUI (xai-grok-shell)
-/// - `"grok-pager"`   — new Grok Pager / TUI (xai-grok-pager)
-/// - `"grok-desktop"` — Grok Desktop app
+/// - `"grok-shell"`   — classic Chutes Build CLI / TUI (xai-grok-shell)
+/// - `"grok-pager"`   — new Chutes Build Pager / TUI (xai-grok-pager)
+/// - `"grok-desktop"` — Chutes Build Desktop app
 /// - `"grok-extension"` — VS Code / browser extension
 ///
 /// The factory forwards both:
@@ -446,10 +446,10 @@ mod tests {
     use chrono::{Duration as ChronoDuration, Utc};
     use std::sync::Mutex;
     use xai_grok_auth::AuthCredentialProvider;
-    /// Serializes tests that pin `GROK_AUTH_EARLY_INVALIDATION_SECS`, since
+    /// Serializes tests that pin `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS`, since
     /// env vars are process-global and parallel tests would race.
     static EARLY_INVALIDATION_LOCK: Mutex<()> = Mutex::new(());
-    /// RAII guard: pins `GROK_AUTH_EARLY_INVALIDATION_SECS` to the production
+    /// RAII guard: pins `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` to the production
     /// default (300s) while held, restoring the previous value on drop.
     /// Acquires `EARLY_INVALIDATION_LOCK` so concurrent test runners can't
     /// observe a half-mutated env.
@@ -462,8 +462,8 @@ mod tests {
             let lock = EARLY_INVALIDATION_LOCK
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            let previous = std::env::var("GROK_AUTH_EARLY_INVALIDATION_SECS").ok();
-            unsafe { std::env::set_var("GROK_AUTH_EARLY_INVALIDATION_SECS", "300") };
+            let previous = std::env::var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS").ok();
+            unsafe { std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", "300") };
             Self {
                 _lock: lock,
                 previous,
@@ -474,8 +474,10 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 match self.previous.take() {
-                    Some(prev) => std::env::set_var("GROK_AUTH_EARLY_INVALIDATION_SECS", prev),
-                    None => std::env::remove_var("GROK_AUTH_EARLY_INVALIDATION_SECS"),
+                    Some(prev) => {
+                        std::env::set_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS", prev)
+                    }
+                    None => std::env::remove_var("CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS"),
                 }
             }
         }
@@ -652,7 +654,10 @@ mod tests {
         );
         let api_key_provider: xai_grok_tools::types::SharedApiKeyProvider =
             Arc::new(crate::auth::manager::SharedAuthKeyProvider(mgr.clone()));
-        for denied in ["https://byok.attacker.example/v1", "http://api.x.ai/v1"] {
+        for denied in [
+            "https://byok.attacker.example/v1",
+            "http://api.chutes.ai/v1",
+        ] {
             let resolved =
                 embedding_session_credentials(denied, Some(&mgr), Some(api_key_provider.clone()));
             assert!(
@@ -660,7 +665,7 @@ mod tests {
                 "session credentials must not reach {denied}"
             );
         }
-        // First-party is *.chutes.ai over https; upstream's api.x.ai is a
+        // First-party is *.chutes.ai over https; upstream's api.chutes.ai is a
         // third-party host here and must not receive session credentials.
         let resolved = embedding_session_credentials(
             "https://llm.chutes.ai/v1",

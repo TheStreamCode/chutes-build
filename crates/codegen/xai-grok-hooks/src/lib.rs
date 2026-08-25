@@ -1,12 +1,12 @@
 //! # xai-grok-hooks
 //!
-//! Runtime hook system for Grok — file-based discovery, command execution,
+//! Runtime hook system for Chutes Build — file-based discovery, command execution,
 //! and policy enforcement.
 //!
 //! ## Overview
 //!
-//! This crate provides a minimal hooks system for Grok. Hooks are discovered
-//! from dedicated directories (`~/.grok/hooks/` and `<git-worktree-root>/.grok/hooks/`),
+//! This crate provides a minimal hooks system for Chutes Build. Hooks are discovered
+//! from dedicated directories (`~/.chutes-build/hooks/` and `<git-worktree-root>/.chutes-build/hooks/`),
 //! defined in JSON files (compatible settings format), and executed as child processes.
 //!
 //! ## v0 scope
@@ -24,8 +24,8 @@
 //! use xai_grok_hooks::event::HookEventName;
 //!
 //! let (registry, errors) = load_hooks(
-//!     Some(Path::new("/home/user/.grok/hooks")),
-//!     Some(Path::new("/project/.grok/hooks")),
+//!     Some(Path::new("/home/user/.chutes-build/hooks")),
+//!     Some(Path::new("/project/.chutes-build/hooks")),
 //! );
 //!
 //! for err in &errors {

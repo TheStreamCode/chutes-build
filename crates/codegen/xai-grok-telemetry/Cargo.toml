@@ -3,7 +3,7 @@ license = "Apache-2.0"
 name = "xai-grok-telemetry"
 version = "0.1.0"
 edition.workspace = true
-description = "Telemetry engine: product events + Mixpanel emission + Sentry error reporting for Grok Build sessions"
+description = "Telemetry engine: product events + Mixpanel emission + Sentry error reporting for Chutes Build sessions"
 authors = ["xAI"]
 
 [features]
@@ -83,7 +83,7 @@ opentelemetry-http = { workspace = true }
 # collectors working on hosts with no readable system CA store (parity with
 # the HTTP transport's embedded-roots reqwest client in `otlp_http.rs`).
 webpki-roots = { workspace = true }
-# Re-encodes the validated GROK_EXTRA_CA_BUNDLE DERs as PEM for tonic's
+# Re-encodes the validated CHUTES_EXTRA_CA_BUNDLE DERs as PEM for tonic's
 # `Certificate::from_pem` (the gRPC transport's extra-CA parity with HTTP).
 base64 = { workspace = true }
 http = { workspace = true }

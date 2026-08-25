@@ -260,12 +260,12 @@ fn transport_failure_maps_to_managed_config_error() {
 #[test]
 fn certificate_detail_names_the_bundle_env_only_when_set() {
     assert_eq!(
-        certificate_detail("UnknownIssuer".into(), Some("GROK_EXTRA_CA_BUNDLE"), 2),
-        "UnknownIssuer; GROK_EXTRA_CA_BUNDLE is set: verify it includes the issuing root CA"
+        certificate_detail("UnknownIssuer".into(), Some("CHUTES_EXTRA_CA_BUNDLE"), 2),
+        "UnknownIssuer; CHUTES_EXTRA_CA_BUNDLE is set: verify it includes the issuing root CA"
     );
     assert_eq!(
-        certificate_detail("UnknownIssuer".into(), Some("GROK_EXTRA_CA_BUNDLE"), 0),
-        "UnknownIssuer; GROK_EXTRA_CA_BUNDLE is set but no usable roots were loaded from it: check that the file is readable, contains PEM certificates, and is under the size cap"
+        certificate_detail("UnknownIssuer".into(), Some("CHUTES_EXTRA_CA_BUNDLE"), 0),
+        "UnknownIssuer; CHUTES_EXTRA_CA_BUNDLE is set but no usable roots were loaded from it: check that the file is readable, contains PEM certificates, and is under the size cap"
     );
     assert_eq!(
         certificate_detail("UnknownIssuer".into(), None, 0),
@@ -495,7 +495,7 @@ fn auth_mode_classification() {
     assert_eq!(auth_mode(false, &Err(err())), AuthMode::Unknown);
 }
 
-/// The `GROK_CONFIG` overlay must not arm or disarm the managed-config sync gate:
+/// The `CHUTES_BUILD_CONFIG` overlay must not arm or disarm the managed-config sync gate:
 /// the reader is overlay-free, so an overlay value never reaches it in either
 /// direction. Requirements/managed layers still resolve normally.
 #[test]

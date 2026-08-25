@@ -215,7 +215,7 @@ impl TestSandboxBuilder {
     pub fn build(self) -> TestSandbox {
         let root = TempDir::new().expect("create test sandbox root");
         let home = root.path().join("home");
-        let grok_home = home.join(".grok");
+        let grok_home = home.join(".chutes-build");
         let workspace = root.path().join("workspace");
         let temp = root.path().join("tmp");
         for path in [&home, &grok_home, &workspace, &temp] {
@@ -248,7 +248,7 @@ impl TestSandbox {
     fn init_git_workspace(&self) {
         run_git(self, &["init"]);
         run_git(self, &["config", "user.email", "test@test.invalid"]);
-        run_git(self, &["config", "user.name", "Grok Test"]);
+        run_git(self, &["config", "user.name", "Chutes Build Test"]);
         std::fs::write(self.workspace.join("README.md"), "test file\n")
             .expect("write sandbox git fixture");
         run_git(self, &["add", "-A"]);
@@ -280,18 +280,18 @@ fn run_git(sandbox: &TestSandbox, args: &[&str]) {
 
 fn apply_mock_url(env: &mut BTreeMap<OsString, OsString>, url: String) {
     for key in [
-        "GROK_CLI_CHAT_PROXY_BASE_URL",
-        "GROK_XAI_API_BASE_URL",
-        "GROK_MODELS_BASE_URL",
-        "GROK_FEEDBACK_BASE_URL",
-        "GROK_TRACE_UPLOAD_URL",
-        "GROK_MANAGED_CONFIG_URL",
-        "GROK_CODE_WEB_URL",
-        "GROK_CONVERSATIONS_BASE_URL",
+        "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
+        "CHUTES_BUILD_XAI_API_BASE_URL",
+        "CHUTES_BUILD_MODELS_BASE_URL",
+        "CHUTES_BUILD_FEEDBACK_BASE_URL",
+        "CHUTES_BUILD_TRACE_UPLOAD_URL",
+        "CHUTES_BUILD_MANAGED_CONFIG_URL",
+        "CHUTES_BUILD_CODE_WEB_URL",
+        "CHUTES_BUILD_CONVERSATIONS_BASE_URL",
     ] {
         env.insert(key.into(), url.clone().into());
     }
-    env.insert("XAI_API_KEY".into(), TEST_API_KEY.into());
+    env.insert("CHUTES_API_KEY".into(), TEST_API_KEY.into());
 }
 
 fn baseline_env(
@@ -325,7 +325,7 @@ fn baseline_env_from_parent(
     for (key, value) in [
         ("HOME", home),
         ("USERPROFILE", home),
-        ("GROK_HOME", grok_home),
+        ("CHUTES_BUILD_HOME", grok_home),
         ("TMPDIR", temp),
         ("TMP", temp),
         ("TEMP", temp),
@@ -333,24 +333,24 @@ fn baseline_env_from_parent(
         env.insert(key.into(), value.as_os_str().to_owned());
     }
     for (key, value) in [
-        ("GROK_TELEMETRY_ENABLED", "false"),
-        ("GROK_TELEMETRY_TRACE_UPLOAD", "false"),
-        ("GROK_FEEDBACK_ENABLED", "false"),
-        ("GROK_TRACE_UPLOAD", "false"),
-        ("GROK_INSTRUMENTATION", "disabled"),
+        ("CHUTES_BUILD_TELEMETRY_ENABLED", "false"),
+        ("CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD", "false"),
+        ("CHUTES_BUILD_FEEDBACK_ENABLED", "false"),
+        ("CHUTES_BUILD_TRACE_UPLOAD", "false"),
+        ("CHUTES_BUILD_INSTRUMENTATION", "disabled"),
         ("OTEL_SDK_DISABLED", "true"),
         ("DISABLE_TELEMETRY", "1"),
         ("DISABLE_FEEDBACK_COMMAND", "1"),
-        ("GROK_DISABLE_AUTOUPDATER", "1"),
-        ("GROK_PROMPT_SUGGESTIONS", "false"),
+        ("CHUTES_BUILD_DISABLE_AUTOUPDATER", "1"),
+        ("CHUTES_BUILD_PROMPT_SUGGESTIONS", "false"),
         // The sandbox's empty home is exactly the "no mode configured" state
         // that soft-defaults interactive launches into auto. Pin the gate off
         // for deterministic ask-mode behavior; auto-mode tests re-enable it
         // via `set_env` (later overrides win).
-        ("GROK_AUTO_PERMISSION_MODE", "0"),
+        ("CHUTES_BUILD_AUTO_PERMISSION_MODE", "0"),
         // Post-turn summary side-calls would add unscripted requests to the
         // mock server and break exact wire-traffic assertions.
-        ("GROK_TURN_SUMMARY", "0"),
+        ("CHUTES_BUILD_TURN_SUMMARY", "0"),
         ("NO_PROXY", "127.0.0.1,localhost,::1"),
         ("no_proxy", "127.0.0.1,localhost,::1"),
         ("GIT_CONFIG_NOSYSTEM", "1"),
@@ -476,7 +476,13 @@ fn diagnostic_value_is_sensitive(key: &OsStr) -> bool {
         || is_endpoint_key(&key)
         || matches!(
             key.to_ascii_uppercase().as_str(),
-            "HOME" | "USERPROFILE" | "GROK_HOME" | "TMPDIR" | "TMP" | "TEMP" | "GIT_CONFIG_GLOBAL"
+            "HOME"
+                | "USERPROFILE"
+                | "CHUTES_BUILD_HOME"
+                | "TMPDIR"
+                | "TMP"
+                | "TEMP"
+                | "GIT_CONFIG_GLOBAL"
         )
 }
 
@@ -529,7 +535,7 @@ mod tests {
         }
         assert_ne!(sandbox.home(), sandbox.workspace());
         assert_ne!(sandbox.home(), sandbox.temp_dir());
-        assert_eq!(sandbox.grok_home(), sandbox.home().join(".grok"));
+        assert_eq!(sandbox.grok_home(), sandbox.home().join(".chutes-build"));
     }
 
     #[test]
@@ -569,7 +575,7 @@ mod tests {
         let root = tempfile::tempdir().expect("create baseline fixture");
         baseline_env_from_parent(
             &root.path().join("home"),
-            &root.path().join("home/.grok"),
+            &root.path().join("home/.chutes-build"),
             &root.path().join("tmp"),
             parent_cwd,
             &parent_env,
@@ -633,7 +639,7 @@ mod tests {
         );
         let sandbox = TestSandbox {
             home: root.path().join("home"),
-            grok_home: root.path().join("home/.grok"),
+            grok_home: root.path().join("home/.chutes-build"),
             workspace: root.path().join("workspace"),
             temp: root.path().join("tmp"),
             root,
@@ -700,7 +706,7 @@ mod tests {
             .build();
         assert_eq!(env_value(&sandbox, "HOME"), Some(sandbox.home().into()));
         assert_eq!(
-            env_value(&sandbox, "GROK_HOME"),
+            env_value(&sandbox, "CHUTES_BUILD_HOME"),
             Some(sandbox.grok_home().into())
         );
         assert_eq!(
@@ -708,15 +714,15 @@ mod tests {
             Some(sandbox.temp_dir().into())
         );
         assert_eq!(
-            env_value(&sandbox, "XAI_API_KEY").as_deref(),
+            env_value(&sandbox, "CHUTES_API_KEY").as_deref(),
             Some(OsStr::new(TEST_API_KEY))
         );
         assert_eq!(
-            env_value(&sandbox, "GROK_DISABLE_AUTOUPDATER").as_deref(),
+            env_value(&sandbox, "CHUTES_BUILD_DISABLE_AUTOUPDATER").as_deref(),
             Some(OsStr::new("1"))
         );
         assert_eq!(
-            env_value(&sandbox, "GROK_TELEMETRY_TRACE_UPLOAD").as_deref(),
+            env_value(&sandbox, "CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD").as_deref(),
             Some(OsStr::new("false"))
         );
         assert_eq!(
@@ -733,9 +739,9 @@ mod tests {
         ] {
             assert_eq!(env_value(&sandbox, proxy), None, "{proxy} must not leak");
         }
-        assert_eq!(env_value(&sandbox, "GROK_LEADER_SOCKET"), None);
-        assert_eq!(env_value(&sandbox, "GROK_DISABLE_WEB_FETCH"), None);
-        assert_eq!(env_value(&sandbox, "GROK_WEB_FETCH"), None);
+        assert_eq!(env_value(&sandbox, "CHUTES_BUILD_LEADER_SOCKET"), None);
+        assert_eq!(env_value(&sandbox, "CHUTES_BUILD_DISABLE_WEB_FETCH"), None);
+        assert_eq!(env_value(&sandbox, "CHUTES_BUILD_WEB_FETCH"), None);
     }
 
     #[cfg(unix)]
@@ -766,16 +772,16 @@ mod tests {
         let sandbox = TestSandbox::new();
         let mut cmd = Command::new("unused");
         cmd.env("AMBIENT_SECRET", "must-disappear")
-            .env("GROK_PROMPT_SUGGESTIONS", "ambient");
+            .env("CHUTES_BUILD_PROMPT_SUGGESTIONS", "ambient");
         sandbox.apply_to_std_command(&mut cmd);
-        cmd.env("GROK_PROMPT_SUGGESTIONS", "command");
+        cmd.env("CHUTES_BUILD_PROMPT_SUGGESTIONS", "command");
         let env: BTreeMap<_, _> = cmd
             .get_envs()
             .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
             .collect();
         assert!(!env.contains_key(OsStr::new("AMBIENT_SECRET")));
         assert_eq!(
-            env.get(OsStr::new("GROK_PROMPT_SUGGESTIONS"))
+            env.get(OsStr::new("CHUTES_BUILD_PROMPT_SUGGESTIONS"))
                 .map(OsString::as_os_str),
             Some(OsStr::new("command"))
         );
@@ -786,22 +792,25 @@ mod tests {
         let mut sandbox = TestSandbox::new();
         sandbox
             .set_env("TERM_PROGRAM", "vscode")
-            .set_env("GROK_PROMPT_SUGGESTIONS", "true")
+            .set_env("CHUTES_BUILD_PROMPT_SUGGESTIONS", "true")
             .set_env("NO_PROXY", "override.invalid")
-            .remove_env("GROK_DISABLE_AUTOUPDATER");
+            .remove_env("CHUTES_BUILD_DISABLE_AUTOUPDATER");
         assert_eq!(
             env_value(&sandbox, "TERM_PROGRAM").as_deref(),
             Some(OsStr::new("vscode"))
         );
         assert_eq!(
-            env_value(&sandbox, "GROK_PROMPT_SUGGESTIONS").as_deref(),
+            env_value(&sandbox, "CHUTES_BUILD_PROMPT_SUGGESTIONS").as_deref(),
             Some(OsStr::new("true"))
         );
         assert_eq!(
             env_value(&sandbox, "NO_PROXY").as_deref(),
             Some(OsStr::new("override.invalid"))
         );
-        assert_eq!(env_value(&sandbox, "GROK_DISABLE_AUTOUPDATER"), None);
+        assert_eq!(
+            env_value(&sandbox, "CHUTES_BUILD_DISABLE_AUTOUPDATER"),
+            None
+        );
     }
 
     #[test]
@@ -836,8 +845,8 @@ mod tests {
             ("DB_PASSWORD_FILE", "/secret/password-file"),
             ("AWS_CREDENTIALS", "credentials-do-not-print"),
             ("SESSION_COOKIE", "cookie-do-not-print"),
-            ("GROK_DEPLOYMENT_KEY", "deployment-key-do-not-print"),
-            ("GROK_EXTRA_AUTH_KEY", "alpha-test-key-do-not-print"),
+            ("CHUTES_BUILD_DEPLOYMENT_KEY", "deployment-key-do-not-print"),
+            ("CHUTES_BUILD_EXTRA_AUTH_KEY", "alpha-test-key-do-not-print"),
             ("AWS_ACCESS_KEY_ID", "aws-access-key-do-not-print"),
             ("PRIVATE_KEY", "private-key-do-not-print"),
         ] {
@@ -852,8 +861,8 @@ mod tests {
             "DB_PASSWORD_FILE",
             "AWS_CREDENTIALS",
             "SESSION_COOKIE",
-            "GROK_DEPLOYMENT_KEY",
-            "GROK_EXTRA_AUTH_KEY",
+            "CHUTES_BUILD_DEPLOYMENT_KEY",
+            "CHUTES_BUILD_EXTRA_AUTH_KEY",
             "AWS_ACCESS_KEY_ID",
             "PRIVATE_KEY",
         ] {

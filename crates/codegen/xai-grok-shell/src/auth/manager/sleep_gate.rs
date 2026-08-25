@@ -287,17 +287,20 @@ impl AuthManager {
     /// not a concern there and because a screenless Mac can read as a permanent
     /// dark wake (no video capability), which would otherwise wedge refresh.
     ///
-    /// `GROK_AUTH_FORCE_DARK_WAKE=1|0` forces the answer for testing (unset
+    /// `CHUTES_BUILD_AUTH_FORCE_DARK_WAKE=1|0` forces the answer for testing (unset
     /// = ask the OS), read **before** the `power_listener_started` check so
     /// a headless run — which never starts the listener — can drive the
     /// dark-wake paths against a real binary. Pair with
-    /// `GROK_AUTH_EARLY_INVALIDATION_SECS` for a seconds-long repro.
+    /// `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` for a seconds-long repro.
     pub(crate) fn is_dark_wake(&self) -> bool {
         #[cfg(test)]
         if let Some(forced) = *self.dark_wake_override.lock() {
             return forced;
         }
-        match std::env::var("GROK_AUTH_FORCE_DARK_WAKE").ok().as_deref() {
+        match std::env::var("CHUTES_BUILD_AUTH_FORCE_DARK_WAKE")
+            .ok()
+            .as_deref()
+        {
             Some("1") => return true,
             Some("0") => return false,
             _ => {}

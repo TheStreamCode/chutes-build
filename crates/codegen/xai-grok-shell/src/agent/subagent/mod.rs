@@ -340,7 +340,7 @@ impl SubagentSpawnContext {
     /// Would installing a live bearer resolver strip this subagent's only
     /// credential? A wired resolver is the sampler's sole auth source, so
     /// with no session key at spawn it must not displace a real fallback
-    /// key (env `XAI_API_KEY`). Keyed on the resolved config key, not the
+    /// key (env `CHUTES_API_KEY`). Keyed on the resolved config key, not the
     /// session cache alone — the cache is empty in exactly the post-wake /
     /// mid-refresh states the resolver targets, and gating on it would
     /// freeze the subagent for life. Shared by all three resolver-wiring
@@ -1958,7 +1958,7 @@ fn goal_tick_cmd_tx(
 ///
 /// Notifications are **not** persisted to JSONL — they are transient UI
 /// hints, not authoritative lifecycle events. The TUI can resync via
-/// `x.ai/subagent/list_running` on reconnect.
+/// `chutes.ai/subagent/list_running` on reconnect.
 #[allow(clippy::too_many_arguments)]
 fn spawn_progress_publisher(
     signals_handle: crate::session::signals::SessionSignalsHandle,

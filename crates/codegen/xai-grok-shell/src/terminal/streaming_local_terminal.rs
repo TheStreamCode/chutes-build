@@ -38,7 +38,7 @@ const READ_BUFFER_SIZE: usize = 8192;
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn notification_interval() -> Duration {
-    std::env::var("GROK_TERMINAL_NOTIFICATION_INTERVAL_MS")
+    std::env::var("CHUTES_BUILD_TERMINAL_NOTIFICATION_INTERVAL_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_millis)

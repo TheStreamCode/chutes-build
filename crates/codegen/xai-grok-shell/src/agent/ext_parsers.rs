@@ -5,7 +5,7 @@
 
 use crate::session::SessionCommand;
 
-/// Parse a `x.ai/queue/{remove,reorder,clear,edit,interject,hold_edit,release_edit}`
+/// Parse a `chutes.ai/queue/{remove,reorder,clear,edit,interject,hold_edit,release_edit}`
 /// ext-notification's params into the corresponding [`SessionCommand`].
 /// `owner` is the resolved attribution (params `owner`/`clientIdentifier`) used
 /// to scope remove/clear to the requesting client's own items, and recorded as
@@ -97,7 +97,7 @@ pub(super) fn parse_queue_edit_command(
 mod tests {
     use super::*;
 
-    /// Each `x.ai/queue/*` ext-notification maps to the
+    /// Each `chutes.ai/queue/*` ext-notification maps to the
     /// correct versioned/idempotent `SessionCommand`.
     #[test]
     fn parse_queue_edit_command_maps_each_method() {
@@ -283,7 +283,7 @@ mod tests {
         );
 
         // unknown method → None. Outbound `changed` is the other production
-        // `x.ai/queue/*` method and must not parse as an edit command.
+        // `chutes.ai/queue/*` method and must not parse as an edit command.
         assert!(
             parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None)
                 .is_none()

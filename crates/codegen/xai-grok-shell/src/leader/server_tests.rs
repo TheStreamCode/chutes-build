@@ -362,7 +362,7 @@ async fn connect_and_register_with_mode(
 /// Relay demand gate (relay-on-demand): Stdio registrations must NOT
 /// signal relay demand — a leader serving only interactive clients (TUI
 /// dashboard, IDE) keeps the grok.com relay off. The first Headless
-/// registration (devbox / `grok agent headless` flow) flips the watch so
+/// registration (devbox / `chutes-build agent headless` flow) flips the watch so
 /// `run_leader` starts the deferred relay connection.
 #[tokio::test]
 async fn relay_demand_signals_only_on_headless_registration() {
@@ -830,7 +830,7 @@ fn is_scheduled_task_inject_prompt_detects_only_inject() {
     // Gateway-wrapped form (the actual wire shape): `_`-prefixed top-level
     // method with the real method + params nested under `params`.
     assert!(is_scheduled_task_inject_prompt(&pv(
-        r#"{"method":"_x.ai/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}}"#
+        r#"{"method":"_chutes.build/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"s1","taskId":"t1","prompt":"echo hi"}}}"#
     )));
     // The sibling informational notification is NOT driver-routed (it fans
     // out so every dashboard updates its tasks pane).
@@ -904,7 +904,7 @@ fn extract_interaction_tool_call_id_handles_direct_and_nested() {
     // params.params.toolCallId.
     assert_eq!(
         extract_interaction_tool_call_id(&pv(
-            r#"{"id":1,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-w"}}}"#
+            r#"{"id":1,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"s","toolCallId":"tc-w"}}}"#
         ))
         .as_deref(),
         Some("tc-w")
@@ -927,7 +927,7 @@ fn extract_interaction_resolved_tool_call_id_matches_only_resolved() {
     // Gateway-wrapped form (the actual wire shape).
     assert_eq!(
         extract_interaction_resolved_tool_call_id(&pv(
-            r#"{"method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-rw"}}}}"#
+            r#"{"method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"s","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-rw"}}}}"#
         ))
         .as_deref(),
         Some("tc-rw")
@@ -1754,15 +1754,15 @@ fn extract_session_id_from_params_works() {
 #[test]
 fn extract_session_id_from_nested_params_works() {
     // ext/notification: sessionId is nested inside params.params
-    // Wire format: {"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-nested"}}}
-    let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-nested"}}}"#;
+    // Wire format: {"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-nested"}}}
+    let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-nested"}}}"#;
     assert_eq!(
         extract_session_id(&pv(payload)),
         Some("sess-nested".to_string())
     );
 
     // Also works with snake_case session_id in nested params
-    let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/fs_notify","params":{"method":"chutes.build/fs_notify","params":{"session_id":"sess-nested-2","event":{}}}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/fs_notify","params":{"method":"chutes.build/fs_notify","params":{"session_id":"sess-nested-2","event":{}}}}"#;
     assert_eq!(
         extract_session_id(&pv(payload)),
         Some("sess-nested-2".to_string())
@@ -1811,7 +1811,7 @@ fn extract_child_session_event_finished() {
 
 #[test]
 fn extract_child_session_event_nested_ext_notification() {
-    let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-3"}}}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-3"}}}}"#;
     match extract_child_session_event(&pv(payload)) {
         Some(ChildSessionEvent::Spawned(id)) => assert_eq!(id, "child-3"),
         other => panic!("Expected Spawned, got {:?}", other),
@@ -1820,7 +1820,7 @@ fn extract_child_session_event_nested_ext_notification() {
 
 #[test]
 fn extract_child_session_event_nested_ext_notification_finished() {
-    let payload = r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-4"}}}}"#;
+    let payload = r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"parent","update":{"sessionUpdate":"subagent_finished","child_session_id":"child-4"}}}}"#;
     match extract_child_session_event(&pv(payload)) {
         Some(ChildSessionEvent::Finished(id)) => assert_eq!(id, "child-4"),
         other => panic!("Expected Finished, got {:?}", other),
@@ -2017,7 +2017,7 @@ fn extract_target_client_id_some_when_meta_present() {
     assert_eq!(extract_target_client_id(&pv(direct)), Some(ClientId(9)));
 
     // ExtNotification shape: real params (and _meta) nested under params.params.
-    let nested = r#"{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{"params":{"sessionId":"sess-1","_meta":{"chutes.build/leaderClientId":11}}}}"#;
+    let nested = r#"{"jsonrpc":"2.0","method":"_chutes.build/session/update","params":{"params":{"sessionId":"sess-1","_meta":{"chutes.build/leaderClientId":11}}}}"#;
     assert_eq!(extract_target_client_id(&pv(nested)), Some(ClientId(11)));
 }
 
@@ -2622,7 +2622,7 @@ async fn ext_notification_with_nested_session_id_routes_correctly() {
 
     // ext/notification with nested sessionId for session A
     response_tx
-        .send(r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-A","update":{"sessionUpdate":"retry_state","attempt":1,"maxRetries":3,"reason":"transient"}}}}"#.into())
+        .send(r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-A","update":{"sessionUpdate":"retry_state","attempt":1,"maxRetries":3,"reason":"transient"}}}}"#.into())
         .unwrap();
 
     // Client A receives it
@@ -2634,7 +2634,7 @@ async fn ext_notification_with_nested_session_id_routes_correctly() {
     match msg {
         ServerMessage::Acp { payload } => {
             let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
-            assert_eq!(json["method"], "_x.ai/session_notification");
+            assert_eq!(json["method"], "_chutes.build/session_notification");
         }
         other => panic!("Expected Acp message, got {:?}", other),
     }
@@ -3433,9 +3433,9 @@ async fn scheduled_task_inject_prompt_routes_to_driver_only() {
     tokio::time::sleep(Duration::from_millis(30)).await;
 
     // The agent fires a scheduled task → inject_prompt notification, in the
-    // real gateway-WRAPPED wire form (`_x.ai/...` top-level, nested method +
+    // real gateway-WRAPPED wire form (`_chutes.build/...` top-level, nested method +
     // params) — the shape that previously fell through to broadcast.
-    let inject = r#"{"method":"_x.ai/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"sess-cron","taskId":"task-1","prompt":"echo hello","humanSchedule":"every 1m"}}}"#;
+    let inject = r#"{"method":"_chutes.build/scheduled_task_inject_prompt","params":{"method":"chutes.build/scheduled_task_inject_prompt","params":{"sessionId":"sess-cron","taskId":"task-1","prompt":"echo hello","humanSchedule":"every 1m"}}}"#;
     response_tx.send(inject.to_string()).unwrap();
 
     let got_a = next_acp_payload(&mut reader_a).await;
@@ -3478,9 +3478,9 @@ async fn interaction_request_broadcasts_to_all_subscribers() {
     tokio::time::sleep(Duration::from_millis(30)).await;
 
     // The agent raises an `ask_user_question` reverse-request in the real
-    // gateway-WRAPPED wire form (`_x.ai/...` top-level, method+params nested).
+    // gateway-WRAPPED wire form (`_chutes.build/...` top-level, method+params nested).
     // This is the shape that previously fell through to driver-only.
-    let req = r#"{"jsonrpc":"2.0","id":501,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-q","questions":[]}}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":501,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-q","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
 
     let got_a = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
@@ -3514,7 +3514,7 @@ async fn pending_interaction_replayed_to_late_joiner() {
 
     // Interaction raised (wrapped wire form) while only A is attached →
     // cached by the leader.
-    let req = r#"{"jsonrpc":"2.0","id":601,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-late","questions":[]}}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":601,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-late","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -4232,7 +4232,7 @@ async fn pending_interaction_survives_disconnect_and_replays_on_reconnect() {
     let _ = next_acp_payload(&mut reader_a).await;
     tokio::time::sleep(Duration::from_millis(30)).await;
 
-    let req = r#"{"jsonrpc":"2.0","id":801,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-reconnect","questions":[]}}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":801,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-reconnect","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -4270,7 +4270,7 @@ async fn interaction_raised_with_no_subscriber_is_cached_and_replayed_on_first_a
         setup_persistent_server_with_agent(&temp).await;
 
     // Interaction raised BEFORE any client attaches/subscribes.
-    let req = r#"{"jsonrpc":"2.0","id":901,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-nosub","questions":[]}}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":901,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-nosub","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
     tokio::time::sleep(Duration::from_millis(40)).await;
 
@@ -4304,11 +4304,11 @@ async fn resolved_interaction_not_replayed_to_late_joiner() {
 
     // Raise then resolve the interaction (wrapped wire form), no other client
     // attached yet.
-    let req = r#"{"jsonrpc":"2.0","id":701,"method":"_x.ai/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-ev","questions":[]}}}"#;
+    let req = r#"{"jsonrpc":"2.0","id":701,"method":"_chutes.build/ask_user_question","params":{"method":"chutes.build/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-ev","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
 
-    let resolved = r#"{"method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-int","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-ev"}}}}"#;
+    let resolved = r#"{"method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-int","update":{"sessionUpdate":"interaction_resolved","tool_call_id":"tc-ev"}}}}"#;
     response_tx.send(resolved.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "interaction_resolved").await;
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -4433,7 +4433,7 @@ async fn roster_changed_broadcasts_to_all_clients() {
 /// sessionId; it must broadcast to every registered client so every model
 /// picker refreshes after a config.toml / models_cache.json hot-reload —
 /// not just the last-active client. Uses the production wire form: agent
-/// ext notifications arrive `_`-prefixed (`_x.ai/models/update`).
+/// ext notifications arrive `_`-prefixed (`_chutes.build/models/update`).
 #[tokio::test]
 async fn models_update_broadcasts_to_all_clients() {
     let temp = TempDir::new().unwrap();
@@ -4443,7 +4443,7 @@ async fn models_update_broadcasts_to_all_clients() {
     let (mut reader_b, _writer_b) = connect_and_register(&sock_path, "client-b").await;
     tokio::time::sleep(Duration::from_millis(20)).await;
 
-    let update = r#"{"jsonrpc":"2.0","method":"_x.ai/models/update","params":{"currentModelId":"grok-new","availableModels":[{"modelId":"grok-new","name":"Grok New"}]}}"#;
+    let update = r#"{"jsonrpc":"2.0","method":"_chutes.build/models/update","params":{"currentModelId":"grok-new","availableModels":[{"modelId":"grok-new","name":"Chutes Build New"}]}}"#;
     response_tx.send(update.to_string()).unwrap();
 
     let got_a = next_acp_payload(&mut reader_a).await;
@@ -4475,7 +4475,7 @@ async fn mcp_servers_updated_broadcasts_to_all_clients() {
     let (mut reader_b, _writer_b) = connect_and_register(&sock_path, "client-b").await;
     tokio::time::sleep(Duration::from_millis(20)).await;
 
-    let update = r#"{"jsonrpc":"2.0","method":"_x.ai/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[{"name":"grok_com_slack","source":"managed"}]}}}"#;
+    let update = r#"{"jsonrpc":"2.0","method":"_chutes.build/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[{"name":"grok_com_slack","source":"managed"}]}}}"#;
     response_tx.send(update.to_string()).unwrap();
 
     let got_a = next_acp_payload(&mut reader_a).await;
@@ -4516,16 +4516,16 @@ fn machine_wide_broadcast_classifier_matches_both_wire_forms() {
     )));
     // `_`-prefixed production ext-notification forms.
     assert!(is_machine_wide_broadcast_notification(&pv(
-        r#"{"jsonrpc":"2.0","method":"_x.ai/sessions/changed","params":{}}"#
+        r#"{"jsonrpc":"2.0","method":"_chutes.build/sessions/changed","params":{}}"#
     )));
     assert!(is_machine_wide_broadcast_notification(&pv(
-        r#"{"jsonrpc":"2.0","method":"_x.ai/models/update","params":{}}"#
+        r#"{"jsonrpc":"2.0","method":"_chutes.build/models/update","params":{}}"#
     )));
     assert!(is_machine_wide_broadcast_notification(&pv(
-        r#"{"jsonrpc":"2.0","method":"_x.ai/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[]}}}"#
+        r#"{"jsonrpc":"2.0","method":"_chutes.build/mcp/servers_updated","params":{"method":"chutes.build/mcp/servers_updated","params":{"mcpServers":[]}}}"#
     )));
     assert!(is_machine_wide_broadcast_notification(&pv(
-        r#"{"jsonrpc":"2.0","method":"_x.ai/announcements/update","params":{"method":"chutes.build/announcements/update","params":{"gen":2,"announcements":[]}}}"#
+        r#"{"jsonrpc":"2.0","method":"_chutes.build/announcements/update","params":{"method":"chutes.build/announcements/update","params":{"gen":2,"announcements":[]}}}"#
     )));
     // Non-broadcast methods. `x.ai/settings/update` must stay unicast —
     // it carries auth/gate state resolved for the requesting client.
@@ -4829,7 +4829,7 @@ async fn subagent_child_session_not_leaked_to_other_client() {
 
     // SubagentSpawned with ext/notification wrapper format
     response_tx
-        .send(r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-789"}}}}"#.into())
+        .send(r#"{"jsonrpc":"2.0","method":"_chutes.build/session_notification","params":{"method":"chutes.build/session_notification","params":{"sessionId":"sess-parent","update":{"sessionUpdate":"subagent_spawned","child_session_id":"child-789"}}}}"#.into())
         .unwrap();
     let _: ServerMessage =
         tokio::time::timeout(Duration::from_millis(200), read_message(&mut reader_a))
@@ -4993,7 +4993,7 @@ async fn leader_client_id_dropped_when_target_disconnected() {
         .unwrap();
     response_tx
         .send(format!(
-            r#"{{"jsonrpc":"2.0","method":"_x.ai/session/update","params":{{"params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"hook_annotation","message":"m"}},"_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}}}}}}}}"#,
+            r#"{{"jsonrpc":"2.0","method":"_chutes.build/session/update","params":{{"params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"hook_annotation","message":"m"}},"_meta":{{"isReplay":true,"chutes.build/leaderClientId":{}}}}}}}}}"#,
             id_a
         ))
         .unwrap();

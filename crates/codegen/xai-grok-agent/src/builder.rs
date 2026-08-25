@@ -15,8 +15,8 @@ use xai_grok_tools::computer::types::{AsyncFileSystem, TerminalBackend};
 use xai_grok_tools::notification::ToolNotificationHandle;
 use xai_grok_tools::registry::types::SessionContext;
 use xai_grok_tools::types::tool::ToolKind;
-/// The Grok [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
-/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Grok
+/// The Chutes Build [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so
+/// a plugin's upstream allowlist still binds. Backed by the shared vendor-to-Chutes Build
 /// tool registry in `xai-grok-tools` (also used by the hook matcher).
 fn claude_tool_kind(name: &str) -> Option<ToolKind> {
     xai_grok_tools::types::kind_for(name)
@@ -44,7 +44,7 @@ pub struct AgentBuilder {
     /// Model-facing working directory for the system prompt `<user_info>` block.
     ///
     /// In forked sessions, the real `working_directory` is an overlay/worktree
-    /// path (e.g., `~/.grok/worktrees/project/fork-...-overlay`) that must stay
+    /// path (e.g., `~/.chutes-build/worktrees/project/fork-...-overlay`) that must stay
     /// hidden from the model. When set, `PromptContext.working_directory` uses
     /// this value instead of `self.working_directory`, so the system prompt
     /// shows the original project path. Tool execution (`ToolContext.cwd`,
@@ -461,7 +461,7 @@ impl AgentBuilder {
     /// When `Enabled`, the `web_fetch` tool is registered and a `WebFetchClient`
     /// is injected into `Resources`. When `Disabled` (default), the tool is not
     /// registered. Feature-flagged via remote settings `web_fetch_enabled` and
-    /// `GROK_WEB_FETCH` env var.
+    /// `CHUTES_BUILD_WEB_FETCH` env var.
     pub fn with_web_fetch_config(
         mut self,
         config: xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig,
@@ -562,7 +562,7 @@ impl AgentBuilder {
         self.background_workflows_enabled = enabled;
         self
     }
-    /// Set public model slugs advertised in the GrokBuild Task description.
+    /// Set public model slugs advertised in the ChutesBuild Task description.
     pub fn with_task_model_slugs(mut self, slugs: Vec<String>) -> Self {
         self.task_model_slugs = slugs;
         self
@@ -570,7 +570,7 @@ impl AgentBuilder {
     /// Enable or disable the `ask_user_question` tool for a primary agent.
     ///
     /// Subagents never receive this tool. Otherwise, when disabled,
-    /// `GrokBuild:ask_user_question` is stripped from the agent's tool config
+    /// `ChutesBuild:ask_user_question` is stripped from the agent's tool config
     /// after `ensure_plan_mode_tools` injection, so the model cannot ask the
     /// user structured questions regardless of which built-in profile is in
     /// use. Driven by the shell's resolved gate (the `ask_user_question`
@@ -601,8 +601,8 @@ impl AgentBuilder {
         self
     }
     /// Set the skills config (custom paths, ignore globs) from config.toml.
-    /// Without this, only auto-discovered skills (cwd/.grok/skills, ~/.grok/skills)
-    /// are included — custom paths added via `x.ai/skills/add` would be ignored.
+    /// Without this, only auto-discovered skills (cwd/.chutes-build/skills, ~/.chutes-build/skills)
+    /// are included — custom paths added via `chutes.ai/skills/add` would be ignored.
     pub fn with_skills_config(mut self, config: crate::prompt::skills::SkillsConfig) -> Self {
         self.skills_config = config;
         self
@@ -1620,7 +1620,7 @@ mod tests {
         use xai_grok_tools::notification::ToolNotificationHandle;
         let tmp = tempfile::tempdir().unwrap();
         let write_skill = |dir: &str, content: &str| {
-            let d = tmp.path().join(".grok/skills").join(dir);
+            let d = tmp.path().join(".chutes-build/skills").join(dir);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join("SKILL.md"), content).unwrap();
         };
@@ -2134,7 +2134,7 @@ mod tests {
             Some(vec!["worker".into()])
         );
     }
-    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Grok
+    /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Chutes Build
     /// equivalents by `ToolKind` — a real restricted toolset, not zero tools.
     #[tokio::test]
     async fn claude_tool_names_map_to_grok_equivalents() {
@@ -2344,7 +2344,7 @@ mod tests {
         .from_definition(definition)
         .with_web_search_config(WebSearchConfig::Enabled {
             api_key: "test-key".into(),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.chutes.ai/v1".into(),
             model: "test-web-search-model".into(),
             extra_headers: Default::default(),
             alpha_test_key: None,
@@ -2473,7 +2473,7 @@ mod tests {
         let web_search_config = if web_search_enabled {
             WebSearchConfig::Enabled {
                 api_key: "test-key".into(),
-                base_url: "https://api.x.ai/v1".into(),
+                base_url: "https://api.chutes.ai/v1".into(),
                 model: "test-web-search-model".into(),
                 extra_headers: Default::default(),
                 alpha_test_key: None,

@@ -36,16 +36,16 @@ pub(crate) type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 pub enum PendingKind {
     /// `request_permission` for a tool action.
     Permission,
-    /// `x.ai/ask_user_question`.
+    /// `chutes.ai/ask_user_question`.
     Question,
-    /// `x.ai/exit_plan_mode` plan approval.
+    /// `chutes.ai/exit_plan_mode` plan approval.
     PlanApproval,
     McpElicitation,
 }
 
 /// Whether a blocking plan-approval reverse-request is parked in `pending`.
 ///
-/// The resume re-park issues `x.ai/exit_plan_mode` from a detached task
+/// The resume re-park issues `chutes.ai/exit_plan_mode` from a detached task
 /// with no running turn, making it the one parked interaction that also carries a
 /// persisted gate (`awaiting_plan_approval`). `session_has_live_work` consults
 /// this to keep such a session resident until the decision is answered or a real

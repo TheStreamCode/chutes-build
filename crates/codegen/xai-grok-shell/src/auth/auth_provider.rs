@@ -275,7 +275,7 @@ fn scrub_first_party_credentials(cmd: &mut tokio::process::Command) {
 ///
 /// On timeout the child's entire process group is killed. The helper is a group
 /// leader (`detach_command`'s `setsid`), so a compound `sh -c` helper's
-/// grandchildren -- and the `GROK_AUTH_PROVIDER_*` credentials in their env --
+/// grandchildren -- and the `CHUTES_BUILD_AUTH_PROVIDER_*` credentials in their env --
 /// do not outlive the reported timeout; `kill_on_drop` alone would reap only the
 /// direct child.
 async fn run_capped(
@@ -397,17 +397,20 @@ async fn mint_provider_token(
         // additionally kills the whole process group on timeout.
         .kill_on_drop(true);
     if mark_expired {
-        cmd.env("GROK_AUTH_EXPIRED", "1");
+        cmd.env("CHUTES_BUILD_AUTH_EXPIRED", "1");
     }
     // Git-credential-helper handback: give the command the last stored
     // credential so it can refresh instead of re-authenticating.
     if let Some(prev) = previous {
-        cmd.env("GROK_AUTH_PROVIDER_ACCESS_TOKEN", &prev.token);
+        cmd.env("CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN", &prev.token);
         if let Some(refresh) = &prev.refresh_token {
-            cmd.env("GROK_AUTH_PROVIDER_REFRESH_TOKEN", refresh);
+            cmd.env("CHUTES_BUILD_AUTH_PROVIDER_REFRESH_TOKEN", refresh);
         }
         if let Some(expires_at) = prev.expires_at {
-            cmd.env("GROK_AUTH_PROVIDER_EXPIRES_AT", expires_at.to_rfc3339());
+            cmd.env(
+                "CHUTES_BUILD_AUTH_PROVIDER_EXPIRES_AT",
+                expires_at.to_rfc3339(),
+            );
         }
     }
     xai_grok_tools::util::detach_command(&mut cmd);

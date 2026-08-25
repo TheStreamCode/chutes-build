@@ -16,7 +16,7 @@
 //!
 //! Each surviving entry is emitted as an ACP
 //! [`agent_client_protocol::ExtNotification`] with method
-//! `x.ai/mcp/server_status` and the payload schema defined by
+//! `chutes.ai/mcp/server_status` and the payload schema defined by
 //! [`McpServerStatusPayload`].
 //!
 //! ## Doc-comment ↔ implementation contract
@@ -457,7 +457,7 @@ pub(crate) fn build_payload(
 /// Per-flush side effects:
 /// - update `shutting_down` for `TransportClosed` /
 ///   `ConfigRemoved` keys,
-/// - emit one ACP `x.ai/mcp/server_status` push per surviving
+/// - emit one ACP `chutes.ai/mcp/server_status` push per surviving
 ///   buffer entry, via the provided gateway.
 ///
 /// `gateway` is a [`xai_acp_lib::AcpAgentGatewaySender`] (forwarded
@@ -685,7 +685,7 @@ pub(crate) async fn drop_dead_clients(
 ///    gated on client identity (see [`collect_close_candidates`]).
 ///    Stale `TransportClosed` keys are stripped from the window so they
 ///    push no status, emit no disconnect span, and schedule no restart.
-/// 3. `flush_window` — emit ACP `x.ai/mcp/server_status` per
+/// 3. `flush_window` — emit ACP `chutes.ai/mcp/server_status` per
 ///    surviving entry.
 /// 4. `maybe_schedule_restart` — for every
 ///    `TransportClosed` / `HandshakeFailed` key, the

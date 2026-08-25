@@ -219,7 +219,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
 
             // The workspace runs the streaming search and emits
-            // `x.ai/search/content/status` batches through the client sink.
+            // `chutes.ai/search/content/status` batches through the client sink.
             let mut op = req.params;
             op.cwd = Some(cwd);
             op.context_id = Some(context_id);

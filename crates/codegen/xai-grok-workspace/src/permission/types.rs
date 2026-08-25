@@ -133,10 +133,10 @@ pub enum ClientType {
     #[default]
     #[serde(rename = "generic", alias = "grok-shell", alias = "grok_shell")]
     Generic,
-    /// Grok TUI client - show fancy options with interactive bash term selection
+    /// Chutes Build TUI client - show fancy options with interactive bash term selection
     #[serde(rename = "grok-tui", alias = "grok_tui")]
     GrokTUI,
-    /// Grok Web client - identified by clientIdentifier "grok-web"
+    /// Chutes Build Web client - identified by clientIdentifier "grok-web"
     #[serde(rename = "grok_web")]
     GrokWeb,
     /// Named client (`"nebula"`) — uses the generic permission UI
@@ -145,7 +145,7 @@ pub enum ClientType {
     /// IDE extension client (VS Code and similar) - identified by clientIdentifier "grok-code-extension"
     #[serde(rename = "extension")]
     Extension,
-    /// Grok Pager client - TUI-like terminal pager with interactive permission UI.
+    /// Chutes Build Pager client - TUI-like terminal pager with interactive permission UI.
     /// Treated identically to GrokTUI for permission options (gets bash highlights +
     /// interactive selection). Reports as "pager" for telemetry attribution.
     ///
@@ -154,7 +154,7 @@ pub enum ClientType {
     /// `"grok_pager"` form for symmetry with the rest of this enum.
     #[serde(rename = "grok-pager", alias = "grok_pager")]
     GrokPager,
-    /// Grok Desktop (Electron) client - identified by clientIdentifier "grok-desktop".
+    /// Chutes Build Desktop (Electron) client - identified by clientIdentifier "grok-desktop".
     /// Uses TUI-style bash permission options (primary command extraction + prefix matching)
     /// but without interactive `<`/`>` word selection.
     #[serde(rename = "grok_desktop")]

@@ -60,7 +60,7 @@ pub(crate) fn merge_tips(
 /// Resolve the merged tip list from pre-loaded config layers.
 ///
 /// Priority: requirements > remote > user config > managed config.
-/// `GROK_TIPS_OVERRIDE` env var overrides everything (debug builds only).
+/// `CHUTES_BUILD_TIPS_OVERRIDE` env var overrides everything (debug builds only).
 /// `[cli] show_tips = false` in requirements or user config kills all tips.
 pub fn resolve_tips(
     requirements: Option<&TomlValue>,
@@ -76,7 +76,7 @@ pub fn resolve_tips(
     }
 
     #[cfg(debug_assertions)]
-    if let Ok(raw) = std::env::var("GROK_TIPS_OVERRIDE") {
+    if let Ok(raw) = std::env::var("CHUTES_BUILD_TIPS_OVERRIDE") {
         return raw.split('|').map(str::to_string).collect();
     }
 
@@ -104,7 +104,7 @@ fn slash_command_tags_from_toml(root: &TomlValue) -> std::collections::HashMap<S
     out
 }
 
-/// Parse a `GROK_SLASH_COMMAND_TAGS` payload (a JSON object of string→string)
+/// Parse a `CHUTES_BUILD_SLASH_COMMAND_TAGS` payload (a JSON object of string→string)
 /// into a name → tag map. `None`/empty → empty; malformed → warn + empty. Split
 /// from env-reading so the parse is unit-testable without mutating process env.
 fn parse_slash_command_tags_json(raw: Option<&str>) -> std::collections::HashMap<String, String> {
@@ -118,17 +118,21 @@ fn parse_slash_command_tags_json(raw: Option<&str>) -> std::collections::HashMap
         Err(e) => {
             tracing::warn!(
                 error = %e,
-                "ignoring malformed GROK_SLASH_COMMAND_TAGS; expected a JSON object of string values"
+                "ignoring malformed CHUTES_BUILD_SLASH_COMMAND_TAGS; expected a JSON object of string values"
             );
             std::collections::HashMap::new()
         }
     }
 }
 
-/// Read per-command tags from the `GROK_SLASH_COMMAND_TAGS` env var. Unset →
+/// Read per-command tags from the `CHUTES_BUILD_SLASH_COMMAND_TAGS` env var. Unset →
 /// empty; malformed → warn + empty.
 fn slash_command_tags_from_env() -> std::collections::HashMap<String, String> {
-    parse_slash_command_tags_json(std::env::var("GROK_SLASH_COMMAND_TAGS").ok().as_deref())
+    parse_slash_command_tags_json(
+        std::env::var("CHUTES_BUILD_SLASH_COMMAND_TAGS")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// Pure per-key merge of the three tag sources. Precedence lowest → highest:
@@ -160,7 +164,7 @@ fn resolve_slash_command_tags_with_env(
 }
 
 /// Resolve per-command slash-dropdown tags. Precedence lowest → highest: remote
-/// settings (base) → local `[slash_command_tags]` → `GROK_SLASH_COMMAND_TAGS`
+/// settings (base) → local `[slash_command_tags]` → `CHUTES_BUILD_SLASH_COMMAND_TAGS`
 /// env var (wins). Empty/missing everywhere → empty map.
 pub fn resolve_slash_command_tags(
     effective_config: &TomlValue,
@@ -237,7 +241,7 @@ mod tests {
     }
 
     // Hermetic: drive the resolver through `_with_env` with an EXPLICIT env map
-    // so ambient `GROK_SLASH_COMMAND_TAGS` can't affect these assertions.
+    // so ambient `CHUTES_BUILD_SLASH_COMMAND_TAGS` can't affect these assertions.
     #[test]
     fn resolve_slash_command_tags_local_overrides_remote_per_key() {
         let mut remote = std::collections::BTreeMap::new();

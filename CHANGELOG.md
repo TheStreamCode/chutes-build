@@ -4,6 +4,23 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-25
+
+### Added
+
+- **Opt-in model switching around plan mode.** `[models] plan_model` switches to a stronger model when plan mode engages and `[models] build_model` back to a cheaper one when it exits; each direction fires only when its key is set, a key that resolves to nothing logs a warning and keeps the current model, and the mode change itself never fails because of it. Client-driven transitions (Shift+Tab, `/plan`, the toggle ext method) are covered; approving an `exit_plan_mode` proposal keeps the current model.
+
+### Changed
+
+- **The runtime is synced to upstream `1.0.8` (`07b2f714`).** Ported by hand per area: MCP elicitation, shared HTTP client reuse, task-tool capability modes, kitty keyboard protocol, NFS fast-worktree backend, scheduled-task management, worktree detach/salvage, a new `xai-grok-status-line` crate, session-events, auth-manager bounded refresh, and the restructured agent tool registration.
+- **The advisor subagent is removed.** The always-registered read-only reviewer (and its `/advisor` command writing untyped config tables) was an upstream concept this fork had no Chutes reason to keep; removing it shrinks the task-tool catalogue advertised to every model. Historical mentions in past changelog entries are records of past states.
+- **Telemetry deadening verified end-to-end.** The external OTEL stream stays compile-time inert — `init` is a no-op, `is_active()` is constantly false, no exporter is ever constructed, and the silence tests pass regardless of environment or remote settings.
+
+### Fixed
+
+- **A fresh install is never sent through xAI's OAuth device flow.** The ported auth default constructed a hardcoded provider with the upstream issuer, so an unconfigured install opened `https://accounts.x.ai/oauth2/device` even with `CHUTES_API_KEY` present; the default now creates a provider only from explicit configuration, and the API-key scope constant returned to its Chutes value.
+- **Tool calls a model emits as text are recovered again.** The upstream session port silently dropped the recovery shipped in 1.2.x — the module stayed in the tree unreferenced, compiling to nothing; the declaration, implementation, and call site are restored, and a new checker makes that failure mode impossible to miss.
+
 ## [1.2.4] - 2026-08-24
 
 ### Fixed

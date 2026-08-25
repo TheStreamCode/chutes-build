@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// and ONE upward walk.
 ///
 /// The folder-trust gate's `repo_configs_present` probes a dozen repo-local
-/// code-exec markers (`.mcp.json`, `.grok/config.toml`, `.claude/settings.json`,
+/// code-exec markers (`.mcp.json`, `.chutes-build/config.toml`, `.claude/settings.json`,
 /// project plugin/agent dirs, …) back-to-back on the agent startup path. Each
 /// marker walker used to run its own `discover` + cwd→root walk; sharing one
 /// `RepoDirChain` collapses that to a single traversal (each redundant syscall

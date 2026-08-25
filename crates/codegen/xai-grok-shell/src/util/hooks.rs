@@ -56,29 +56,31 @@ pub(crate) fn discover_hook_source_paths(
     let include_claude = include_claude_hooks(compat);
     let include_cursor = include_cursor_hooks(compat);
 
-    // Soft hooks-paths I/O keeps fixed slots; hard resolve omits Grok globals.
-    let mut global: Vec<PathBuf> =
-        match resolve_global_hook_sources(grok.as_deref(), /* reject_symlinks */ false) {
-            Ok(resolved) => {
-                if let Some(e) = &resolved.configured_error {
-                    tracing::warn!(
-                        error = %e,
-                        "hooks-paths unreadable; retaining fixed Grok hook discovery sources only"
-                    );
-                }
-                resolved
-                    .discovery_sources()
-                    .map(|s| s.path.clone())
-                    .collect()
-            }
-            Err(e) => {
+    // Soft hooks-paths I/O keeps fixed slots; hard resolve omits Chutes Build globals.
+    let mut global: Vec<PathBuf> = match resolve_global_hook_sources(
+        grok.as_deref(),
+        /* reject_symlinks */ false,
+    ) {
+        Ok(resolved) => {
+            if let Some(e) = &resolved.configured_error {
                 tracing::warn!(
                     error = %e,
-                    "global hook source resolve hard-failed; omitting Grok global sources"
+                    "hooks-paths unreadable; retaining fixed Chutes Build hook discovery sources only"
                 );
-                Vec::new()
             }
-        };
+            resolved
+                .discovery_sources()
+                .map(|s| s.path.clone())
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "global hook source resolve hard-failed; omitting Chutes Build global sources"
+            );
+            Vec::new()
+        }
+    };
 
     if let Some(h) = home.as_deref() {
         if include_claude {
@@ -96,7 +98,7 @@ pub(crate) fn discover_hook_source_paths(
             project.push(root.join(".claude").join("settings.json"));
             project.push(root.join(".claude").join("settings.local.json"));
         }
-        project.push(root.join(".grok").join("hooks"));
+        project.push(root.join(".chutes-build").join("hooks"));
         if include_cursor {
             project.push(root.join(".cursor").join("hooks.json"));
         }

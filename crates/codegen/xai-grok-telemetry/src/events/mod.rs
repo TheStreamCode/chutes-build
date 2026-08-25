@@ -64,7 +64,7 @@ pub enum ContextualTipKind {
     SmallScreen,
     /// Double-click fold/nav path → tip to enable Word select in settings.
     WordSelect,
-    /// SSH session without `grok wrap` → tip to wrap the ssh command locally.
+    /// SSH session without `chutes-build wrap` → tip to wrap the ssh command locally.
     SshWrap,
 }
 
@@ -156,13 +156,13 @@ impl CliUpdateInstaller {
 /// as `--trigger=<value>`; [`CliUpdateTrigger::as_str`] and `FromStr` are
 /// the one rendering (round-trip pinned with the wire values in tests).
 ///
-/// Volume caveat: one-shot `grok update` resolves telemetry from disk+env
+/// Volume caveat: one-shot `chutes-build update` resolves telemetry from disk+env
 /// only, so `user_command` under-reports relative to the in-process
 /// `leader_converge` — the triggers are not directly comparable.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CliUpdateTrigger {
-    /// A human ran `grok update` or accepted an update prompt.
+    /// A human ran `chutes-build update` or accepted an update prompt.
     UserCommand,
     /// TUI/stdio launch check spawned a detached update child.
     AutoBackground,
@@ -1903,7 +1903,7 @@ pub struct ClipboardCopy {
     pub osc52_ok: bool,
     /// Evidence classification: `confirmed` | `unverified` | `failed`.
     pub delivery: &'static str,
-    /// An explicit `grok wrap` OSC 52 sink was active.
+    /// An explicit `chutes-build wrap` OSC 52 sink was active.
     pub osc52_sink: bool,
     /// The process was inside a container without a display server.
     pub container_no_display: bool,
@@ -2138,7 +2138,7 @@ pub struct CreditLimitUpsellClicked {
 /// Emitted when a previously access-gated user re-authenticates and the gate
 /// is lifted — i.e. they subscribed (externally on grok.com) and came back.
 /// This is the actual conversion signal for SuperGrok Heavy subscriptions
-/// attributed to Grok Build: the user saw the gate in Grok Build, went and
+/// attributed to Chutes Build: the user saw the gate in Chutes Build, went and
 /// paid, then returned with access.
 #[derive(Serialize)]
 pub struct SubscriptionActivated {
@@ -2146,7 +2146,7 @@ pub struct SubscriptionActivated {
     pub auth_method: Option<String>,
     /// Whether the subscribe CTA was shown in this session before the gate
     /// was lifted (`access_gate_shown_logged`). When `true`, the conversion
-    /// is strongly attributable to Grok Build's upsell surface.
+    /// is strongly attributable to Chutes Build's upsell surface.
     pub upsell_shown_this_session: bool,
 }
 

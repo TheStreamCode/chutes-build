@@ -6,7 +6,7 @@
 //! returns an `UnblockResult` so the agent can re-fetch settings and lift
 //! the gate through its own settings seam.
 //!
-//! The pager drives the polling via `x.ai/auth/check_subscription`: the 5s
+//! The pager drives the polling via `chutes.ai/auth/check_subscription`: the 5s
 //! paywall chain, the free-tier watch, the refocus check, and
 //! verify-before-paywall gate deferral (see the pager's `app::subscription`
 //! module).
@@ -16,7 +16,7 @@ use crate::auth::manager::{BEST_EFFORT_REFRESH_TIMEOUT, BoundedRefresh, RefreshR
 use crate::auth::token_type::TokenType;
 use std::sync::Arc;
 use std::time::Duration;
-/// Whether a `/user?include=subscription` tier qualifies for Grok Build
+/// Whether a `/user?include=subscription` tier qualifies for Chutes Build
 /// access. Any active subscription qualifies -- the proxy only returns a
 /// tier when an active subscription exists (`None` otherwise), and the
 /// access gate in remote settings controls which tiers are actually
@@ -74,7 +74,7 @@ async fn fetch_user_info(
     }
 }
 /// Single-shot subscription check. Called by the pager every 5s while
-/// the paywall is shown (`x.ai/auth/check_subscription`).
+/// the paywall is shown (`chutes.ai/auth/check_subscription`).
 ///
 /// Queries `/user?include=subscription` for the live tier. If a qualifying
 /// tier is found, does a best-effort JWT refresh and returns

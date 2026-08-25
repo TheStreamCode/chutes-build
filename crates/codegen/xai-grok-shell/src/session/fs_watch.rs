@@ -70,7 +70,7 @@ pub(crate) fn forward_to_hunk_tracker(
     }
 }
 
-/// Dedup key for `x.ai/git_head_changed`, shared by the watcher's `GitHead`
+/// Dedup key for `chutes.ai/git_head_changed`, shared by the watcher's `GitHead`
 /// consumer and the post-edit `maybe_notify_git_branch` path so both compute
 /// the same identity (branch | is_worktree | main_repo | commit). The commit
 /// SHA is included so a same-branch commit (agent runs `git commit`) still
@@ -264,7 +264,7 @@ pub(crate) struct CapabilityInputs {
     pub client_notify: bool,
     pub hunk_tracking: bool,
     pub code_nav: bool,
-    /// `x.ai/gitHeadChanged`; opt-in (absent => off).
+    /// `chutes.ai/gitHeadChanged`; opt-in (absent => off).
     pub git_head_changed: Option<bool>,
 }
 
@@ -323,7 +323,7 @@ impl ClientNotify {
 
         match self.mode {
             ClientFsMode::Events => {
-                // Present-tense strings are the `x.ai/fs_notify` wire protocol;
+                // Present-tense strings are the `chutes.ai/fs_notify` wire protocol;
                 // do not sync to internal variant names.
                 let kind_str = match kind {
                     FsEventKind::Created => "Create",

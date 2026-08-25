@@ -120,12 +120,16 @@ fn ensure_local_grok_binary(binary: &Path) {
     );
 }
 
-/// Resolve grok binary: `GROK_BINARY` env (CI) or a locally built `xai-grok-pager` binary.
+/// Resolve grok binary: `CHUTES_BUILD_BINARY` env (CI) or a locally built `xai-grok-pager` binary.
 pub fn grok_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("GROK_BINARY") {
+    if let Ok(path) = std::env::var("CHUTES_BUILD_BINARY") {
         let p = PathBuf::from(path);
-        assert!(p.exists(), "GROK_BINARY does not exist: {}", p.display());
-        // Bazel's GROK_BINARY is runfiles-relative; the harness spawns the child
+        assert!(
+            p.exists(),
+            "CHUTES_BUILD_BINARY does not exist: {}",
+            p.display()
+        );
+        // Bazel's CHUTES_BUILD_BINARY is runfiles-relative; the harness spawns the child
         // with a different cwd, so absolutize against the (runfiles-root) cwd now.
         return std::path::absolute(&p).unwrap_or(p);
     }

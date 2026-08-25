@@ -86,7 +86,7 @@ async fn client_hooks_fire_without_file_registry() {
                 .try_recv()
                 .expect("client hook must fire with no file registry");
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
-                panic!("expected an x.ai/hooks/event ext notification");
+                panic!("expected an chutes.ai/hooks/event ext notification");
             };
             assert_eq!(args.request.method.as_ref(), "chutes.build/hooks/event");
             let params: serde_json::Value =
@@ -725,7 +725,7 @@ fn file_registry(
 }
 
 /// A file-hook force-stop skips the client run gate (its signals would be discarded)
-/// but still delivers the observe `x.ai/hooks/event` notification.
+/// but still delivers the observe `chutes.ai/hooks/event` notification.
 #[tokio::test(flavor = "current_thread")]
 async fn file_force_stop_skips_client_gate_but_notifies() {
     let local = tokio::task::LocalSet::new();
@@ -934,7 +934,7 @@ async fn subagent_session_gates_on_subagent_stop() {
 }
 
 /// Alias fire sites serialize the canonical event name: a `SubagentEnd` envelope reads
-/// `"subagent_stop"` on the wire, matching `GROK_HOOK_EVENT`.
+/// `"subagent_stop"` on the wire, matching `CHUTES_BUILD_HOOK_EVENT`.
 #[tokio::test(flavor = "current_thread")]
 async fn alias_envelope_serializes_canonical_event_name() {
     let local = tokio::task::LocalSet::new();

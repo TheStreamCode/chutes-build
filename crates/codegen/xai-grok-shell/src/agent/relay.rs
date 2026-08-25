@@ -170,7 +170,7 @@ async fn attempt_auth_recovery(
     context: &str,
 ) -> bool {
     let Some(ref am) = config.auth_manager else {
-        teprintln!("Authentication required. Run `grok login` to re-authenticate.");
+        teprintln!("Authentication required. Run `chutes-build login` to re-authenticate.");
         cancel.cancel();
         return false;
     };
@@ -322,7 +322,7 @@ async fn run_relay_loop(
                     event = "relay_disconnected",
                     ws_url = %config.ws_url,
                 );
-                tprintln!("Disconnected from Grok WebSocket server");
+                tprintln!("Disconnected from Chutes Build WebSocket server");
                 info!("WebSocket disconnected, will reconnect");
             }
             Err(e) => {

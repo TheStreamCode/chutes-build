@@ -265,9 +265,9 @@ pub async fn run_stdio_agent(
         &grok_home::grok_home(),
         xai_file_utils::queue::DEFAULT_MAX_AGE,
     );
-    if let Ok(version) = std::env::var("GROK_CLIENT_VERSION") {
+    if let Ok(version) = std::env::var("CHUTES_BUILD_CLIENT_VERSION") {
         crate::unified_log::info(
-            "GROK_CLIENT_VERSION",
+            "CHUTES_BUILD_CLIENT_VERSION",
             None,
             Some(serde_json::json!({ "version": version })),
         );
@@ -334,7 +334,7 @@ pub async fn run_headless(
     use crate::agent::relay::spawn_relay_connection_with_callback;
     use tokio_util::sync::CancellationToken;
     const HEADLESS_NO_SESSION: &str = "Headless mode requires a grok.com session. \
-        Run `grok login` to sign in, or use `grok agent stdio` for API-key access.";
+        Run `chutes-build login` to sign in, or use `chutes-build agent stdio` for API-key access.";
     xai_file_utils::queue::cleanup_orphaned_uploads(
         &grok_home::grok_home(),
         xai_file_utils::queue::DEFAULT_MAX_AGE,
@@ -409,7 +409,7 @@ pub async fn run_headless(
         if !did_browser_flow {
             eprintln!();
             eprintln!(
-                "Open Grok Build: {} (press Enter to open in browser)",
+                "Open Chutes Build: {} (press Enter to open in browser)",
                 grok_code_url
             );
             eprintln!();
@@ -577,7 +577,7 @@ fn relay_config_for_session(
 /// parking the [`RelayHandle`](crate::agent::relay::RelayHandle) in `slot`
 /// once the connection task is running.
 ///
-/// * `relay_on_demand == false` (default — explicit `grok agent leader`
+/// * `relay_on_demand == false` (default — explicit `chutes-build agent leader`
 ///   invocation: devbox / systemd / nohup): connect **eagerly**, right now.
 ///   A bare leader has no local IPC clients; remote prompts arrive *through*
 ///   the relay, so it must be up before any demand signal could ever exist.
@@ -1473,7 +1473,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn embedded_otel_gate_keeps_a_session_user_fail_closed() {
-        use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
+        use crate::agent::auth_method::{CHUTES_API_KEY_ENV_VAR, LEGACY_CHUTES_API_KEY_ENV_VAR};
         use xai_grok_telemetry::external::{
             is_settings_gate_open, mark_external_otel_settings_resolved,
         };
@@ -1492,23 +1492,23 @@ mod tests {
         impl Drop for Restore {
             fn drop(&mut self) {
                 unsafe {
-                    set_or_clear(XAI_API_KEY_ENV_VAR, self.key.take());
-                    set_or_clear(LEGACY_XAI_API_KEY_ENV_VAR, self.legacy.take());
+                    set_or_clear(CHUTES_API_KEY_ENV_VAR, self.key.take());
+                    set_or_clear(LEGACY_CHUTES_API_KEY_ENV_VAR, self.legacy.take());
                     set_or_clear(PROXY_ENV_VAR, self.proxy.take());
                 }
                 mark_external_otel_settings_resolved();
             }
         }
-        const PROXY_ENV_VAR: &str = "GROK_CLI_CHAT_PROXY_BASE_URL";
+        const PROXY_ENV_VAR: &str = "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL";
         let _restore = Restore {
-            key: std::env::var_os(XAI_API_KEY_ENV_VAR),
-            legacy: std::env::var_os(LEGACY_XAI_API_KEY_ENV_VAR),
+            key: std::env::var_os(CHUTES_API_KEY_ENV_VAR),
+            legacy: std::env::var_os(LEGACY_CHUTES_API_KEY_ENV_VAR),
             proxy: std::env::var_os(PROXY_ENV_VAR),
         };
         let cfg = GrokComConfig::default();
         unsafe {
-            std::env::set_var(XAI_API_KEY_ENV_VAR, "test-key");
-            std::env::remove_var(LEGACY_XAI_API_KEY_ENV_VAR);
+            std::env::set_var(CHUTES_API_KEY_ENV_VAR, "test-key");
+            std::env::remove_var(LEGACY_CHUTES_API_KEY_ENV_VAR);
             std::env::remove_var(PROXY_ENV_VAR);
         }
         let session = GrokAuth {
@@ -1541,7 +1541,7 @@ mod tests {
         }
     }
     /// Regression test for the bare-leader relay gating bug: a bare
-    /// `grok agent leader` (devbox/systemd — no local IPC clients,
+    /// `chutes-build agent leader` (devbox/systemd — no local IPC clients,
     /// `relay_on_demand == false`) must connect the grok.com relay eagerly.
     /// Remote prompts arrive *through* the relay, so on such a leader no
     /// headless-registration demand signal can ever fire; gating the relay on
@@ -1774,7 +1774,7 @@ mod tests {
         assert!(line.ends_with('\n'), "must be a newline-terminated line");
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
-            msg["method"], "_x.ai/internal/reload_models",
+            msg["method"], "_chutes.build/internal/reload_models",
             "wire method must carry the `_` ext prefix or the ACP decoder \
              rejects it with method_not_found"
         );
@@ -1793,7 +1793,7 @@ mod tests {
             serde_json::json!({}),
         );
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        assert_eq!(msg["method"], "_x.ai/internal/auth_cleared");
+        assert_eq!(msg["method"], "_chutes.build/internal/auth_cleared");
     }
     #[tokio::test]
     async fn auto_update_cancels_when_update_available_and_agent_idle() {

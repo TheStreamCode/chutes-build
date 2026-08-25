@@ -3,13 +3,13 @@
 use std::sync::{Once, OnceLock};
 
 /// Overrides the agent ID for this process; nothing is computed or persisted.
-const ENV_AGENT_ID: &str = "GROK_AGENT_ID";
+const ENV_AGENT_ID: &str = "CHUTES_BUILD_AGENT_ID";
 
 static AGENT_ID: OnceLock<String> = OnceLock::new();
 static AGENT_INSTANCE_ID: OnceLock<String> = OnceLock::new();
 
-/// Returns the stable agent ID: `GROK_AGENT_ID` if set, else the value cached
-/// in `$GROK_HOME/agent_id`, else a machine-derived UUID computed once and
+/// Returns the stable agent ID: `CHUTES_BUILD_AGENT_ID` if set, else the value cached
+/// in `$CHUTES_BUILD_HOME/agent_id`, else a machine-derived UUID computed once and
 /// persisted there. The first call in a process may block while the
 /// computation runs; [`prefetch_agent_id`] starts it early.
 pub fn agent_id() -> String {
@@ -165,10 +165,10 @@ pub fn has_workspace_env_markers() -> bool {
     std::env::var("XAI_ROOT").is_ok() && std::env::var("XAI_USER").is_ok()
 }
 
-/// Opt-in special-user gate for telemetry (`GROK_TELEMETRY_SPECIAL_USER`).
+/// Opt-in special-user gate for telemetry (`CHUTES_BUILD_TELEMETRY_SPECIAL_USER`).
 pub fn is_special_user() -> bool {
     matches!(
-        std::env::var("GROK_TELEMETRY_SPECIAL_USER").as_deref(),
+        std::env::var("CHUTES_BUILD_TELEMETRY_SPECIAL_USER").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
     )
 }

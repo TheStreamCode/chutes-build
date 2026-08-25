@@ -37,7 +37,7 @@ pub(crate) const DEFAULT_SUGGEST_MODEL: &str = "grok-build-0.1";
 /// that can never render ghost text. Skipping keeps the per-turn cost at
 /// zero; deliberately NOT a session-model fallback — a per-turn background
 /// call must stay on a small cheap model. The env pin bypasses the guard so
-/// `GROK_PROMPT_SUGGESTIONS_MODEL` keeps working for models the catalog does
+/// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` keeps working for models the catalog does
 /// not list (mirrors the pager, which forwards the env value unchecked).
 pub(crate) fn effective_suggest_model(
     pin: &PromptSuggestModelPin,
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn effective_model_env_pin_bypasses_catalog_guard() {
-        // GROK_PROMPT_SUGGESTIONS_MODEL is the explicit escape hatch: used
+        // CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL is the explicit escape hatch: used
         // verbatim even when the catalog does not list the model (mirrors
         // the pager, which forwards the env value unchecked).
         assert_eq!(

@@ -1,10 +1,10 @@
-pub const ENV_SYSTEM_PROMPT_LABEL: &str = "GROK_SYSTEM_PROMPT_LABEL";
+pub const ENV_SYSTEM_PROMPT_LABEL: &str = "CHUTES_BUILD_SYSTEM_PROMPT_LABEL";
 
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL;
 
 /// Resolve system-prompt identity label.
 /// Precedence: env → config per-model → `[agent]` → GB per-model → GB global →
-/// `"Grok"`. Empty/whitespace falls through.
+/// `"Chutes Build"`. Empty/whitespace falls through.
 ///
 /// Per-model TOML is looked up by session catalog id, then routing slug
 /// (`ModelInfo.model`). Do not use CLI `-m` alone — it may outlive a mid-session
@@ -61,7 +61,7 @@ mod system_prompt_label_tests {
         resolve_system_prompt_label_from_tiers,
     };
 
-    /// Serialize access to `GROK_SYSTEM_PROMPT_LABEL` and clear it for tier tests.
+    /// Serialize access to `CHUTES_BUILD_SYSTEM_PROMPT_LABEL` and clear it for tier tests.
     /// `env_wins_over_all_tiers` mutates the env; without this lock, parallel tests
     /// that expect the var unset (e.g. `gb_per_model_beats_gb_global`) flake.
     fn with_env_cleared<R>(f: impl FnOnce() -> R) -> R {

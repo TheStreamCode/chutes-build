@@ -387,7 +387,7 @@ pub(super) fn build_authorize_url(
     let referrer = oauth2
         .and_then(|o| o.referrer.as_deref())
         .filter(|r| !r.is_empty())
-        .unwrap_or("grok-build");
+        .unwrap_or("chutes-build");
     url.push_str(&format!("&referrer={}", urlencoding::encode(referrer)));
     url
 }
@@ -813,7 +813,7 @@ mod tests {
             nonce_q.as_str(),
             "scope=openid",
             "audience=api",
-            "referrer=grok-build",
+            "referrer=chutes-build",
         ] {
             assert!(url.contains(required), "missing param: {required}");
         }
@@ -826,24 +826,24 @@ mod tests {
     #[test]
     fn authorize_url_includes_team_principal_params() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
             client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
-            referrer: Some("grok-build".into()),
+            referrer: Some("chutes-build".into()),
             client_secret: None,
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.x.ai/authorize".into(),
-            token_endpoint: "https://auth.x.ai/token".into(),
+            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
+            token_endpoint: "https://auth.chutes.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -862,7 +862,7 @@ mod tests {
         );
         assert!(url.contains("principal_type=Team"));
         assert!(url.contains("principal_id=team-123"));
-        assert!(url.contains("referrer=grok-build"));
+        assert!(url.contains("referrer=chutes-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -872,14 +872,14 @@ mod tests {
     #[test]
     fn authorize_url_uses_oauth2_referrer_override_once() {
         let config = OidcAuthConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
             client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.chutes.ai".into(),
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             principal_type: None,
@@ -888,8 +888,8 @@ mod tests {
             client_secret: None,
         };
         let discovery = Discovery {
-            authorization_endpoint: "https://auth.x.ai/authorize".into(),
-            token_endpoint: "https://auth.x.ai/token".into(),
+            authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
+            token_endpoint: "https://auth.chutes.ai/token".into(),
             jwks_uri: None,
             id_token_signing_alg_values_supported: None,
         };
@@ -907,7 +907,7 @@ mod tests {
             &test_nonce(),
         );
         assert!(url.contains("referrer=grok-desktop"));
-        assert!(!url.contains("referrer=grok-build"));
+        assert!(!url.contains("referrer=chutes-build"));
         assert_eq!(
             url.matches("referrer=").count(),
             1,
@@ -1023,7 +1023,7 @@ mod tests {
         }
         let team_jwt = make_jwt(serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.x.ai",
+            "iss": "https://auth.chutes.ai",
             "aud": "test-client",
             "exp": 9999999999u64,
             "iat": 1000000000u64,
@@ -1041,7 +1041,7 @@ mod tests {
         assert!(peek_access_token_principal("").is_none());
         let no_principal = make_jwt(serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.x.ai",
+            "iss": "https://auth.chutes.ai",
             "aud": "test-client",
             "exp": 9999999999u64,
             "iat": 1000000000u64,

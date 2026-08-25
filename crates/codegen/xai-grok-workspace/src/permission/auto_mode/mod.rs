@@ -1,6 +1,6 @@
 //! Auto permission mode: LLM transcript classifier with safe fast-paths.
 //!
-//! Port of common agent auto-permission classifier semantics adapted to Grok's
+//! Port of common agent auto-permission classifier semantics adapted to Chutes Build's
 //! `AccessKind` permission gate.
 
 use std::future::Future;
@@ -1136,7 +1136,7 @@ pub fn access_requires_user_interaction(tool_name: &str, access: &AccessKind) ->
 pub type SharedClassifier = Arc<dyn PermissionClassifier>;
 
 /// Tools / access kinds that never need a classifier call (safe allowlist
-/// mapped to Grok access kinds + known names).
+/// mapped to Chutes Build access kinds + known names).
 pub fn is_auto_mode_allowlisted_access(access: &AccessKind) -> bool {
     matches!(
         access,

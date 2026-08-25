@@ -12,7 +12,7 @@ use crate::session::ExtMethodResult;
 
 type ExtResult = Result<acp::ExtResponse, acp::Error>;
 
-/// Wire DTO for the `x.ai/task/kill` ext request.
+/// Wire DTO for the `chutes.ai/task/kill` ext request.
 ///
 /// `pub` (with both serde directions) so ACP clients (xai-grok-pager) build
 /// the request from the same type the agent parses — keeping the wire
@@ -29,7 +29,7 @@ pub struct KillTaskRequest {
     pub source: TaskKillSource,
 }
 
-/// Client-facing kill reason on `x.ai/task/kill`. Older clients omit it.
+/// Client-facing kill reason on `chutes.ai/task/kill`. Older clients omit it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskKillSource {
@@ -47,7 +47,7 @@ impl From<TaskKillSource> for KillSource {
     }
 }
 
-/// Wire DTO for the `x.ai/task/kill` ext response payload (nested under
+/// Wire DTO for the `chutes.ai/task/kill` ext response payload (nested under
 /// `result` in the `ExtMethodResult` envelope).
 ///
 /// `pub` (with both serde directions) so ACP clients deserialize the typed
@@ -71,7 +71,7 @@ struct ListTasksResponse {
     tasks: Vec<TaskSnapshot>,
 }
 
-/// Wire DTO for the `x.ai/subagent/cancel` ext request.
+/// Wire DTO for the `chutes.ai/subagent/cancel` ext request.
 ///
 /// `pub` (with both serde directions) so ACP clients (xai-grok-pager) build
 /// the request from the same type the agent parses.
@@ -117,7 +117,7 @@ impl From<SubagentCancelOutcome> for SubagentCancelOutcomeDto {
     }
 }
 
-/// Wire DTO for the `x.ai/subagent/cancel` response payload (under `result` in
+/// Wire DTO for the `chutes.ai/subagent/cancel` response payload (under `result` in
 /// the `ExtMethodResult` envelope). `pub` + both serde dirs so clients read it typed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -409,7 +409,7 @@ struct DeleteScheduledTaskResponse {
     deleted: bool,
 }
 
-/// Handle `x.ai/scheduler/*` extension methods.
+/// Handle `chutes.ai/scheduler/*` extension methods.
 pub(crate) async fn handle_scheduler(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/scheduler/delete" => {
@@ -427,7 +427,7 @@ pub(crate) async fn handle_scheduler(agent: &MvpAgent, args: &acp::ExtRequest) -
     }
 }
 
-/// Handle `x.ai/subagent/*` extension methods.
+/// Handle `chutes.ai/subagent/*` extension methods.
 pub(crate) async fn handle_subagent(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
         "chutes.build/subagent/cancel" => {
@@ -863,7 +863,7 @@ mod tests {
         assert_eq!(json["forkParentPromptId"], "prompt-5");
     }
 
-    // ── x.ai/subagent/cancel outcome wire DTO ──────────────────────────
+    // ── chutes.ai/subagent/cancel outcome wire DTO ──────────────────────────
 
     #[test]
     fn subagent_cancel_outcome_dto_maps_from_coordinator_outcome() {

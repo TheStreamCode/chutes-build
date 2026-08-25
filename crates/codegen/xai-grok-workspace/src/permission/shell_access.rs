@@ -399,10 +399,10 @@ impl ProtectedEditReason {
                 "Note: This edit contains changes under `/etc`, which is system configuration and can affect this machine beyond the current project.",
             ),
             Self::GrokConfig => Some(
-                "Note: This edit contains changes to Grok config, which can alter permissions, tools, and other behavior in later sessions.",
+                "Note: This edit contains changes to Chutes Build config, which can alter permissions, tools, and other behavior in later sessions.",
             ),
             Self::GrokSandbox => Some(
-                "Note: This edit contains changes to the Grok sandbox config, which can loosen filesystem and network restrictions on commands.",
+                "Note: This edit contains changes to the Chutes Build sandbox config, which can loosen filesystem and network restrictions on commands.",
             ),
             Self::ClaudeSettings => Some(
                 "Note: This edit contains changes to Claude-compatible settings, which can install hooks or change permission mode without a separate execution approval.",
@@ -515,7 +515,7 @@ fn protected_edit_reason(path: &Path) -> Option<ProtectedEditReason> {
     None
 }
 
-/// Grok config files that alter permissions (`config.toml`, the
+/// Chutes Build config files that alter permissions (`config.toml`, the
 /// `managed_config.toml` defaults tier, the user `requirements.toml` layer) or
 /// sandbox restrictions (`sandbox.toml`) in the running and later sessions; a
 /// silent edit would let the agent loosen its own guardrails. Matched directly
@@ -548,7 +548,7 @@ fn protected_grok_config_file_with_home(
     (in_dot_grok || in_grok_home()).then_some(reason)
 }
 
-/// True when `pred` holds for the user grok home in either its lexical or
+/// True when `pred` holds for the user Chutes Build home in either its lexical or
 /// physically-resolved form. Both forms are checked because callers hold a
 /// lexical and a resolved candidate path, and the home itself may sit behind a
 /// symlink. The comparison is byte-exact (no case folding), like every other
@@ -1620,7 +1620,7 @@ mod tests {
         ] {
             assert!(
                 path_is_under_user_grok_hook_root(Path::new(path), home),
-                "must match under custom grok home: {path}"
+                "must match under custom Chutes Build home: {path}"
             );
         }
         for path in [

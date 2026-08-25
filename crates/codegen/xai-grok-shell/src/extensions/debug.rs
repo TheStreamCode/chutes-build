@@ -1,4 +1,4 @@
-//! `x.ai/debug/*` extension handlers for local client testing.
+//! `chutes.ai/debug/*` extension handlers for local client testing.
 //!
 //! These methods bypass heuristics, sampling, cooldowns, and enabled checks
 //! so client engineers can exercise notification → response flows without

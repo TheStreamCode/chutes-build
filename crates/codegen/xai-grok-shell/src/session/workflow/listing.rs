@@ -141,13 +141,15 @@ mod tests {
             "Review a GitHub PR and post findings.",
             Some("Review a pull request"),
             "user",
-            Some("/Users/dev/.grok/workflows/review-pr.rhai"),
+            Some("/Users/dev/.chutes-build/workflows/review-pr.rhai"),
         )])
         .unwrap();
         assert!(text.contains("- review-pr: Review a GitHub PR and post findings."));
         assert!(text.contains("  Use when: Review a pull request"));
         assert!(!text.contains("Source:"));
-        assert!(text.contains("  Absolute path: /Users/dev/.grok/workflows/review-pr.rhai"));
+        assert!(
+            text.contains("  Absolute path: /Users/dev/.chutes-build/workflows/review-pr.rhai")
+        );
     }
 
     #[test]

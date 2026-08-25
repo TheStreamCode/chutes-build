@@ -1,4 +1,4 @@
-//! `x.ai/marketplace/*` extension handlers.
+//! `chutes.ai/marketplace/*` extension handlers.
 //!
 //! Provides marketplace browsing and install endpoints for the pager modal.
 //! Delegates to `xai-grok-plugin-marketplace` crate for scanning and install logic.
@@ -788,7 +788,7 @@ fn to_plugin_entry(
     }
 }
 
-/// Add a new git or local-path marketplace source to `~/.grok/config.toml`.
+/// Add a new git or local-path marketplace source to `~/.chutes-build/config.toml`.
 async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome {
     use crate::plugin::{self, MarketplaceAddInput};
     use xai_hooks_plugins_types::{ActionOutcome, OutcomeStatus};
@@ -882,7 +882,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
                     status: OutcomeStatus::ValidationError,
                     message: format!(
                         "{e}. Not a reachable git repository — to add it anyway (e.g. a \
-                         VPN-gated host), run: grok plugin marketplace add {url} --force"
+                         VPN-gated host), run: chutes-build plugin marketplace add {url} --force"
                     ),
                     requires_reload: false,
                     requires_restart: false,
@@ -1033,7 +1033,7 @@ fn add_marketplace_source(
     crate::util::config::atomic_write_string(config_path, &doc.to_string())
 }
 
-/// Remove a marketplace source from `~/.grok/config.toml` and uninstall all
+/// Remove a marketplace source from `~/.chutes-build/config.toml` and uninstall all
 /// plugins that were installed from it.
 async fn handle_remove_source(source_url_or_path: &str) -> xai_hooks_plugins_types::ActionOutcome {
     let src = source_url_or_path.to_string();

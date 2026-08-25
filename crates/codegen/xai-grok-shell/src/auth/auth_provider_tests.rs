@@ -323,7 +323,7 @@ async fn provider_refresh_sets_expired_env() {
             command: crate::auth::provider_fixture_command(&[
                 "env",
                 "tok-",
-                "GROK_AUTH_EXPIRED",
+                "CHUTES_BUILD_AUTH_EXPIRED",
                 "0",
             ]),
             args: None,
@@ -335,13 +335,13 @@ async fn provider_refresh_sets_expired_env() {
     assert_eq!(
         provider.ensure_fresh_token(None).await.rotated().as_deref(),
         Some("tok-0"),
-        "first mint runs without GROK_AUTH_EXPIRED"
+        "first mint runs without CHUTES_BUILD_AUTH_EXPIRED"
     );
     test_expire_provider_token("test-expired-env");
     assert_eq!(
         provider.ensure_fresh_token(None).await.rotated().as_deref(),
         Some("tok-1"),
-        "re-mints run with GROK_AUTH_EXPIRED=1"
+        "re-mints run with CHUTES_BUILD_AUTH_EXPIRED=1"
     );
 }
 
@@ -631,7 +631,7 @@ async fn mint_error_messages_distinguish_failure_modes() {
 }
 
 /// On an in-session re-mint, the prior credential is handed back to the command
-/// via `GROK_AUTH_PROVIDER_*`, so a refresh-grant command can refresh instead of
+/// via `CHUTES_BUILD_AUTH_PROVIDER_*`, so a refresh-grant command can refresh instead of
 /// re-authenticating. Nothing is written to disk.
 #[tokio::test]
 async fn re_mint_hands_the_prior_token_back_to_the_command() {
@@ -641,7 +641,7 @@ async fn re_mint_hands_the_prior_token_back_to_the_command() {
             command: crate::auth::provider_fixture_command(&[
                 "env",
                 "seen-",
-                "GROK_AUTH_PROVIDER_ACCESS_TOKEN",
+                "CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN",
                 "none",
             ]),
             args: None,
@@ -788,13 +788,13 @@ async fn provider_helper_env_scrubs_first_party_credentials() {
     const EXPECTED: &[&str] = &[
         "CHUTES_API_KEY",
         "CHUTES_BUILD_API_KEY",
-        "GROK_AUTH",
-        "GROK_AUTH_PATH",
-        "GROK_DEPLOYMENT_KEY",
-        "GROK_EXTRA_AUTH_KEY",
-        "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
+        "CHUTES_BUILD_AUTH",
+        "CHUTES_BUILD_AUTH_PATH",
+        "CHUTES_BUILD_DEPLOYMENT_KEY",
+        "CHUTES_BUILD_EXTRA_AUTH_KEY",
+        "CHUTES_BUILD_TRACE_UPLOAD_CREDENTIALS_FILE",
         "OTEL_EXPORTER_OTLP_HEADERS",
-        "GROK_INTERNAL_OTLP_HEADERS",
+        "CHUTES_BUILD_INTERNAL_OTLP_HEADERS",
     ];
     assert_eq!(
         crate::agent::config::FIRST_PARTY_CREDENTIAL_ENV_VARS,

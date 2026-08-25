@@ -391,13 +391,13 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
 /// must be **broadcast to every client** instead of falling through to the
 /// last-active-client fallback:
 ///
-/// - `x.ai/sessions/changed` — roster delta; every open dashboard must stay
+/// - `chutes.ai/sessions/changed` — roster delta; every open dashboard must stay
 ///   in sync.
-/// - `x.ai/models/update` — the model catalog changed (config.toml
+/// - `chutes.ai/models/update` — the model catalog changed (config.toml
 ///   `[model.*]`/`[models]` hot-reload, `models_cache.json` external write,
 ///   auth change, response-header etag refresh). Every connected client's
 ///   model picker must refresh, not just the most recently active one.
-/// - `x.ai/mcp/servers_updated` — the MCP catalog resolved/changed (managed
+/// - `chutes.ai/mcp/servers_updated` — the MCP catalog resolved/changed (managed
 ///   connectors fetched in the background after `initialize`). Deliberately
 ///   session-agnostic on the wire (no `sessionId`, see
 ///   `extensions::mcp::notify_servers_updated`); the push fires seconds after
@@ -406,15 +406,15 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
 ///   connectors then "disappeared" from every other client's `/mcp` view.
 ///   Broadcast is safe: the pager handler only debounce-refetches `mcp/list`
 ///   for agents with an open extensions modal.
-/// - `x.ai/announcements/update` — the announcements list changed (startup
+/// - `chutes.ai/announcements/update` — the announcements list changed (startup
 ///   one-shot or the periodic settings refresh). Session-agnostic; every
 ///   client renders its own banner, so last-active-client fallback would
 ///   leave every other client's banner stale. Broadcast is safe: the pager
 ///   handler is idempotent and drops stale generations via its `gen` gate.
-///   (`x.ai/settings/update` stays non-broadcast — it carries auth/gate state.)
+///   (`chutes.ai/settings/update` stays non-broadcast — it carries auth/gate state.)
 ///
 /// Matched via [`method_of`], NOT the raw top-level `method`: agent ext
-/// notifications arrive `_`-prefixed on the wire (`_x.ai/sessions/changed`),
+/// notifications arrive `_`-prefixed on the wire (`_chutes.build/sessions/changed`),
 /// so a raw compare would miss the production form.
 fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
     matches!(
@@ -427,7 +427,7 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
         )
     )
 }
-/// Whether a payload is the `x.ai/scheduled_task_inject_prompt` notification.
+/// Whether a payload is the `chutes.ai/scheduled_task_inject_prompt` notification.
 ///
 /// This notification tells the receiving client to enqueue AND drive a
 /// scheduled (`/loop`) cron prompt. Unlike ordinary `sessionId`-bearing
@@ -439,8 +439,8 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
 /// `session/update` deltas, exactly like any other turn the driver runs.
 /// The namespaced method a leader payload carries, normalizing the two ext wire
 /// forms the gateway produces:
-///   - direct:  `{"method":"chutes.build/foo", ...}`                                 -> `x.ai/foo`
-///   - wrapped: `{"method":"_x.ai/foo","params":{"method":"chutes.build/foo",...}}`  -> `x.ai/foo`
+///   - direct:  `{"method":"chutes.build/foo", ...}`                                 -> `chutes.ai/foo`
+///   - wrapped: `{"method":"_chutes.build/foo","params":{"method":"chutes.build/foo",...}}`  -> `chutes.ai/foo`
 ///
 /// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`
 /// — e.g. `ask_user_question`, `exit_plan_mode`, `scheduled_task_inject_prompt`,
@@ -475,7 +475,7 @@ fn interaction_inner_params(json: &serde_json::Value) -> Option<&serde_json::Val
         Some(params)
     }
 }
-/// Whether a payload is the `x.ai/scheduled_task_inject_prompt` notification.
+/// Whether a payload is the `chutes.ai/scheduled_task_inject_prompt` notification.
 ///
 /// This notification tells the receiving client to enqueue AND drive a
 /// scheduled (`/loop`) cron prompt. Unlike ordinary `sessionId`-bearing
@@ -527,7 +527,7 @@ fn extract_interaction_tool_call_id(json: &serde_json::Value) -> Option<String> 
         .map(String::from)
 }
 /// If a payload is the `InteractionResolved` broadcast (an
-/// `x.ai/session_notification` whose `update.sessionUpdate ==
+/// `chutes.ai/session_notification` whose `update.sessionUpdate ==
 /// "interaction_resolved"`), return its `tool_call_id` so the leader can evict
 /// the cached interaction request (first-answer-wins). Tolerant of the gateway
 /// wrapper and camel/snake spelling for the inner field.
@@ -816,7 +816,7 @@ fn inject_client_identity_into_initialize(
     }
     (mutated, true)
 }
-/// Extract yolo_mode change from x.ai/yolo_mode_changed notification.
+/// Extract yolo_mode change from chutes.ai/yolo_mode_changed notification.
 ///
 /// Returns Some(yolo_mode) if this is a yolo mode change notification.
 fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
@@ -827,7 +827,7 @@ fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
     let params = json.get("params")?;
     params.get("yolo_mode").and_then(|v| v.as_bool())
 }
-/// Extract the auto-mode intent from an `x.ai/yolo_mode_changed` notification, so
+/// Extract the auto-mode intent from an `chutes.ai/yolo_mode_changed` notification, so
 /// the leader can keep `ClientCapabilities.auto_mode` fresh the same way it tracks
 /// `yolo_mode`. Without this, a stale connect-time `auto_mode` capability would be
 /// injected into later `session/new` requests, re-enabling Auto after the user opted

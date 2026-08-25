@@ -2,7 +2,7 @@
 //!
 //! The canonical manifest location is `plugin.json` at the plugin root.
 //! Fallback locations (checked in order when the root manifest is absent):
-//! 1. `.grok-plugin/plugin.json`
+//! 1. `.chutes-build-plugin/plugin.json`
 //! 2. `.claude-plugin/plugin.json`
 //!
 //! If no manifest is found at all, the plugin can still function via
@@ -292,7 +292,7 @@ fn resolve_dirs(
 /// Manifest search order within a plugin directory.
 const MANIFEST_PATHS: &[&str] = &[
     "plugin.json",
-    ".grok-plugin/plugin.json",
+    ".chutes-build-plugin/plugin.json",
     ".claude-plugin/plugin.json",
 ];
 
@@ -358,8 +358,8 @@ pub fn name_from_dirname(dir: &Path) -> Option<String> {
 
 /// Perform plugin-token substitution in a string.
 ///
-/// Replaces `${GROK_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`,
-/// `${GROK_PLUGIN_DATA}`, and `${CLAUDE_PLUGIN_DATA}` with the provided values.
+/// Replaces `${CHUTES_BUILD_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`,
+/// `${CHUTES_BUILD_PLUGIN_DATA}`, and `${CLAUDE_PLUGIN_DATA}` with the provided values.
 ///
 /// Delegates to [`xai_grok_tools::util::substitute_plugin_tokens`], the single
 /// source of truth shared with plugin skill/command body substitution.
@@ -567,11 +567,11 @@ mod tests {
     fn load_manifest_fallback_paths() {
         let tmp = tempfile::tempdir().unwrap();
         let plugin_root = tmp.path().join("fallback-plugin");
-        std::fs::create_dir_all(plugin_root.join(".grok-plugin")).unwrap();
+        std::fs::create_dir_all(plugin_root.join(".chutes-build-plugin")).unwrap();
 
-        // Write manifest in .grok-plugin/ fallback location
+        // Write manifest in .chutes-build-plugin/ fallback location
         std::fs::write(
-            plugin_root.join(".grok-plugin/plugin.json"),
+            plugin_root.join(".chutes-build-plugin/plugin.json"),
             r#"{"name": "fallback-plugin"}"#,
         )
         .unwrap();
@@ -586,12 +586,12 @@ mod tests {
     fn load_manifest_root_wins_over_fallback() {
         let tmp = tempfile::tempdir().unwrap();
         let plugin_root = tmp.path().join("priority-test");
-        std::fs::create_dir_all(plugin_root.join(".grok-plugin")).unwrap();
+        std::fs::create_dir_all(plugin_root.join(".chutes-build-plugin")).unwrap();
 
         // Write both root and fallback
         std::fs::write(plugin_root.join("plugin.json"), r#"{"name": "root-wins"}"#).unwrap();
         std::fs::write(
-            plugin_root.join(".grok-plugin/plugin.json"),
+            plugin_root.join(".chutes-build-plugin/plugin.json"),
             r#"{"name": "fallback-loses"}"#,
         )
         .unwrap();
@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn substitute_env_vars_replaces_all() {
-        let input = "${GROK_PLUGIN_ROOT}/bin:${CLAUDE_PLUGIN_ROOT}/lib:${GROK_PLUGIN_DATA}/cache";
+        let input = "${CHUTES_BUILD_PLUGIN_ROOT}/bin:${CLAUDE_PLUGIN_ROOT}/lib:${CHUTES_BUILD_PLUGIN_DATA}/cache";
         let result = substitute_env_vars(input, "/home/user/plugin", "/home/user/.data/plugin");
         assert_eq!(
             result,

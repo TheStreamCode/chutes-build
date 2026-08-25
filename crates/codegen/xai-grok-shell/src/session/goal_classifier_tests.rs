@@ -3196,29 +3196,29 @@ fn cfg_strategist(config: Option<u32>, remote: Option<u32>) -> crate::agent::con
 #[test]
 #[serial]
 fn resolve_goal_verifier_count_env_clamps() {
-    unsafe { std::env::set_var("GROK_GOAL_VERIFIER_N", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_VERIFIER_N", "0") };
     assert_eq!(
         cfg_verifier(None, None).resolve_goal_verifier_count().value,
         GOAL_VERIFIER_SKEPTIC_MIN
     );
-    unsafe { std::env::set_var("GROK_GOAL_VERIFIER_N", "99") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_VERIFIER_N", "99") };
     assert_eq!(
         cfg_verifier(None, None).resolve_goal_verifier_count().value,
         GOAL_VERIFIER_SKEPTIC_MAX
     );
-    unsafe { std::env::set_var("GROK_GOAL_VERIFIER_N", "garbage") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_VERIFIER_N", "garbage") };
     assert_eq!(
         cfg_verifier(None, None).resolve_goal_verifier_count().value,
         GOAL_VERIFIER_SKEPTIC_COUNT,
         "invalid env falls through to the default"
     );
-    unsafe { std::env::remove_var("GROK_GOAL_VERIFIER_N") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_VERIFIER_N") };
 }
 
 #[test]
 #[serial]
 fn resolve_goal_verifier_count_default_when_nothing_set() {
-    unsafe { std::env::remove_var("GROK_GOAL_VERIFIER_N") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_VERIFIER_N") };
     // Literal 3 (not the const) so a regression that flips the production
     // default fails LOUDLY here, where a `== CONST` tautology would pass.
     assert_eq!(
@@ -3237,7 +3237,7 @@ fn prod_default_skeptic_count_is_three() {
 #[test]
 #[serial]
 fn resolve_goal_verifier_count_precedence_and_clamp() {
-    unsafe { std::env::remove_var("GROK_GOAL_VERIFIER_N") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_VERIFIER_N") };
     // config > remote.
     let r = cfg_verifier(Some(4), Some(2)).resolve_goal_verifier_count();
     assert_eq!(r.value, 4);
@@ -3250,11 +3250,11 @@ fn resolve_goal_verifier_count_precedence_and_clamp() {
         4
     );
     // env > config.
-    unsafe { std::env::set_var("GROK_GOAL_VERIFIER_N", "2") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_VERIFIER_N", "2") };
     let r = cfg_verifier(Some(4), None).resolve_goal_verifier_count();
     assert_eq!(r.value, 2);
     assert_eq!(r.source, ConfigSource::Env);
-    unsafe { std::env::remove_var("GROK_GOAL_VERIFIER_N") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_VERIFIER_N") };
     // config is clamped to [MIN, MAX].
     assert_eq!(
         cfg_verifier(Some(99), None)
@@ -3273,14 +3273,14 @@ fn resolve_goal_verifier_count_precedence_and_clamp() {
 #[test]
 #[serial]
 fn resolve_goal_classifier_max_runs_env_clamps_and_no_ceiling() {
-    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER_MAX", "0") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX", "0") };
     assert_eq!(
         cfg_max_runs(None, None)
             .resolve_goal_classifier_max_runs()
             .value,
         GOAL_CLASSIFIER_MAX_RUNS_MIN
     );
-    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER_MAX", "999") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX", "999") };
     assert_eq!(
         cfg_max_runs(None, None)
             .resolve_goal_classifier_max_runs()
@@ -3288,20 +3288,20 @@ fn resolve_goal_classifier_max_runs_env_clamps_and_no_ceiling() {
         999,
         "no upper ceiling"
     );
-    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER_MAX", "garbage") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX", "garbage") };
     assert_eq!(
         cfg_max_runs(None, None)
             .resolve_goal_classifier_max_runs()
             .value,
         GOAL_CLASSIFIER_MAX_RUNS_DEFAULT
     );
-    unsafe { std::env::remove_var("GROK_GOAL_CLASSIFIER_MAX") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX") };
 }
 
 #[test]
 #[serial]
 fn resolve_goal_classifier_max_runs_default_when_nothing_set() {
-    unsafe { std::env::remove_var("GROK_GOAL_CLASSIFIER_MAX") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX") };
     // Literal 10 so a regression flipping the production default fails here.
     assert_eq!(
         cfg_max_runs(None, None)
@@ -3314,7 +3314,7 @@ fn resolve_goal_classifier_max_runs_default_when_nothing_set() {
 #[test]
 #[serial]
 fn resolve_goal_classifier_max_runs_precedence_and_floor() {
-    unsafe { std::env::remove_var("GROK_GOAL_CLASSIFIER_MAX") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX") };
     // config > remote.
     let r = cfg_max_runs(Some(6), Some(8)).resolve_goal_classifier_max_runs();
     assert_eq!(r.value, 6);
@@ -3327,11 +3327,11 @@ fn resolve_goal_classifier_max_runs_precedence_and_floor() {
         6
     );
     // env > config.
-    unsafe { std::env::set_var("GROK_GOAL_CLASSIFIER_MAX", "4") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX", "4") };
     let r = cfg_max_runs(Some(6), None).resolve_goal_classifier_max_runs();
     assert_eq!(r.value, 4);
     assert_eq!(r.source, ConfigSource::Env);
-    unsafe { std::env::remove_var("GROK_GOAL_CLASSIFIER_MAX") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_CLASSIFIER_MAX") };
     // config floored at MIN.
     let r = cfg_max_runs(Some(0), None).resolve_goal_classifier_max_runs();
     assert_eq!(r.value, GOAL_CLASSIFIER_MAX_RUNS_MIN);
@@ -3343,7 +3343,7 @@ fn resolve_goal_classifier_max_runs_precedence_and_floor() {
 #[test]
 #[serial]
 fn resolve_strategist_every_default_tracks_cap_floored_at_one() {
-    unsafe { std::env::remove_var("GROK_GOAL_STRATEGIST_EVERY") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_STRATEGIST_EVERY") };
     // Default N = max(1, cap / 2).
     assert_eq!(
         cfg_strategist(None, None)
@@ -3377,19 +3377,19 @@ fn resolve_strategist_every_precedence_and_floor() {
         4
     );
     // env > config + remote.
-    unsafe { std::env::set_var("GROK_GOAL_STRATEGIST_EVERY", "7") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_STRATEGIST_EVERY", "7") };
     let r = cfg_strategist(Some(3), Some(4)).resolve_goal_strategist_every(10);
     assert_eq!(r.value, 7);
     assert_eq!(r.source, ConfigSource::Env);
     // invalid env falls through to the default (cap/2).
-    unsafe { std::env::set_var("GROK_GOAL_STRATEGIST_EVERY", "not-a-number") };
+    unsafe { std::env::set_var("CHUTES_BUILD_GOAL_STRATEGIST_EVERY", "not-a-number") };
     assert_eq!(
         cfg_strategist(None, None)
             .resolve_goal_strategist_every(10)
             .value,
         5
     );
-    unsafe { std::env::remove_var("GROK_GOAL_STRATEGIST_EVERY") };
+    unsafe { std::env::remove_var("CHUTES_BUILD_GOAL_STRATEGIST_EVERY") };
     // 0 from config/remote floors to 1 (the `every > 0` trigger guard).
     assert_eq!(
         cfg_strategist(Some(0), None)

@@ -6,7 +6,7 @@ use super::{Empty, ExtResult, to_ext_response, to_ext_response_partial};
 use xai_grok_workspace::session::git::{CommitData, StageData};
 use xai_grok_workspace::session::jj;
 
-/// Handle a `x.ai/git/*` method for a jj-colocated repo.
+/// Handle a `chutes.ai/git/*` method for a jj-colocated repo.
 ///
 /// Returns `Some(result)` if handled, `None` to fall through to git.
 pub(crate) async fn try_handle(
