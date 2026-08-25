@@ -2353,7 +2353,7 @@ impl SessionActor {
                 })),
             );
             let model_timer = std::time::Instant::now();
-            let (response, latency) = match self
+            let (mut response, latency) = match self
                 .run_turn_via_sampler(request.clone(), &mut rate_limit_waits)
                 .await
             {
@@ -2495,6 +2495,11 @@ impl SessionActor {
                 }
             };
             auth_retry_schedule.reset_on_success();
+            // Before anything reads `tool_calls`, `stop_reason` or the assistant
+            // text: a chute with no server-side tool-call parser delivers the
+            // call as text, and everything downstream would treat the turn as a
+            // plain answer.
+            self.recover_text_tool_calls(&mut response).await;
             let model_elapsed_ms = model_timer.elapsed().as_millis() as u64;
             let usage = response.usage.as_ref();
             let prompt_tokens = usage.map(|u| u.prompt_tokens);
