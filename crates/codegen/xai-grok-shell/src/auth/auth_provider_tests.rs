@@ -501,7 +501,9 @@ async fn provider_unusable_expiry_still_mints() {
     let provider = AuthProviderRef::new(
         "test-overflow".to_owned(),
         AuthProviderConfig {
-            command: crate::auth::provider_fixture_bin().to_string_lossy().into_owned(),
+            command: crate::auth::provider_fixture_bin()
+                .to_string_lossy()
+                .into_owned(),
             args: Some(vec![
                 "print".to_owned(),
                 format!(r#"{{"access_token":"t","expires_in":{}}}"#, u64::MAX),
