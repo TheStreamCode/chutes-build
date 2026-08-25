@@ -1058,11 +1058,8 @@ pub const PLAN_SUBAGENT: BuiltinSubagent = BuiltinSubagent {
 };
 
 /// The built-in subagent types advertised to the model, in display order.
-pub const BUILTIN_SUBAGENTS: [BuiltinSubagent; 3] = [
-    GENERAL_PURPOSE_SUBAGENT,
-    EXPLORE_SUBAGENT,
-    PLAN_SUBAGENT,
-];
+pub const BUILTIN_SUBAGENTS: [BuiltinSubagent; 3] =
+    [GENERAL_PURPOSE_SUBAGENT, EXPLORE_SUBAGENT, PLAN_SUBAGENT];
 
 /// Look up a built-in subagent by its `subagent_type` name
 /// (e.g. `"explore"`), or `None` for user-defined / unknown types.
