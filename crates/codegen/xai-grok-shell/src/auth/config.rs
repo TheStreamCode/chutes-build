@@ -38,7 +38,7 @@ fn default_oidc_scopes() -> Vec<String> {
 /// though the spec says to list it. If a flow ever fails with `invalid_scope`,
 /// this is the one to suspect first — drop it and the flow degrades to plain
 /// OAuth2 without an ID token.
-fn default_oauth2_scopes() -> Vec<String> {
+pub(crate) fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
         "profile".into(),
@@ -66,7 +66,7 @@ fn default_team_oauth2_scopes() -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreferredAuthMethod {
-    /// `CHUTES_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`chutes.api_key`).
+    /// `CHUTES_API_KEY` / auth.json `chutes::api_key` / per-model BYOK (`chutes.api_key`).
     ApiKey,
     /// OIDC / OAuth2 session (`cached_token`, interactive `grok.com` / `oidc`,
     /// including devbox-minted OIDC).

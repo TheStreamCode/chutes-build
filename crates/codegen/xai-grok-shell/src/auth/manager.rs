@@ -2515,7 +2515,7 @@ fn auth_file_stamp(path: &Path) -> Option<AuthFileStamp> {
 }
 
 impl AuthManager {
-    /// `xai::api_key` from this manager's auth file, memoized on
+    /// `chutes::api_key` from this manager's auth file, memoized on
     /// [`AuthFileStamp`]: bearer resolution runs per tool call, so this
     /// costs a `stat` instead of a read+parse on the hot path.
     fn cached_disk_api_key(&self) -> Option<String> {

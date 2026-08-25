@@ -142,17 +142,26 @@ fn has_usable_token_covers_memory_and_disk() {
 }
 
 #[test]
-fn auth_scope_uses_oauth2_when_present() {
-    let cfg = GrokComConfig::default();
-    // Default config always has oauth2 set to the xAI defaults.
-    assert_eq!(
-        cfg.auth_scope(),
-        format!(
-            "{}::{}",
-            crate::auth::config::XAI_OAUTH2_ISSUER,
-            obfstr::obfstr!("b1a00492-073a-47ea-816f-4c329264a828"),
-        )
-    );
+fn auth_scope_follows_the_configured_oauth_app() {
+    use xai_grok_test_support::EnvGuard;
+
+    {
+        let _unset = EnvGuard::unset("CHUTES_BUILD_OAUTH2_CLIENT_ID");
+        let cfg = GrokComConfig::default();
+        assert!(
+            cfg.oauth2.is_none(),
+            "no app configured means no OAuth provider"
+        );
+        assert_eq!(cfg.auth_scope(), "chutes::api_key");
+    }
+    {
+        let _set = EnvGuard::set("CHUTES_BUILD_OAUTH2_CLIENT_ID", "cid_example");
+        let cfg = GrokComConfig::default();
+        assert_eq!(
+            cfg.auth_scope(),
+            format!("{}::cid_example", crate::auth::config::XAI_OAUTH2_ISSUER)
+        );
+    }
 }
 
 #[test]
@@ -3417,8 +3426,10 @@ async fn current_api_key_async_drives_refresh_chain() {
     use xai_grok_test_support::EnvGuard;
     use xai_grok_tools::types::ApiKeyProvider;
 
-    let _xai = EnvGuard::unset("XAI_API_KEY");
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _chutes = EnvGuard::unset("CHUTES_API_KEY");
+    let _legacy = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     mgr.hot_swap(GrokAuth {
@@ -4311,7 +4322,7 @@ async fn shared_api_key_provider_resolves_live_bearer() {
     );
 }
 
-/// No OAuth session → env or auth.json `xai::api_key` for voice/tools.
+/// No OAuth session → env or auth.json `chutes::api_key` for voice/tools.
 #[tokio::test]
 #[serial_test::serial]
 async fn shared_api_key_provider_static_fallthrough() {
@@ -4323,7 +4334,8 @@ async fn shared_api_key_provider_static_fallthrough() {
 
     {
         let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-        let _key = EnvGuard::set("XAI_API_KEY", "env-only-key");
+        let _upstream = EnvGuard::unset("XAI_API_KEY");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "env-only-key");
         assert_eq!(
             provider.current_api_key_async().await.as_deref(),
             Some("env-only-key")
@@ -4331,8 +4343,10 @@ async fn shared_api_key_provider_static_fallthrough() {
     }
 
     {
-        let _xai = EnvGuard::unset("XAI_API_KEY");
-        let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+        let _chutes = EnvGuard::unset("CHUTES_API_KEY");
+        let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+        let _upstream = EnvGuard::unset("XAI_API_KEY");
+        let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
         crate::auth::store_api_key(dir.path(), "disk-api-key").unwrap();
         assert_eq!(
             provider.current_api_key_async().await.as_deref(),
@@ -4341,7 +4355,7 @@ async fn shared_api_key_provider_static_fallthrough() {
     }
 
     {
-        let _key = EnvGuard::set("XAI_API_KEY", "env-should-lose");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "env-should-lose");
         mgr.hot_swap(GrokAuth {
             key: "session-bearer".into(),
             expires_at: Some(Utc::now() + Duration::hours(1)),
@@ -4402,7 +4416,8 @@ async fn shared_api_key_provider_api_key_preferred_skips_session() {
     use xai_grok_test_support::EnvGuard;
 
     let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let _key = EnvGuard::set("XAI_API_KEY", "static-preferred");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "static-preferred");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(
         dir.path(),
@@ -4433,7 +4448,9 @@ async fn shared_api_key_provider_sync_falls_through_when_session_expired() {
     use xai_grok_test_support::EnvGuard;
 
     let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let _key = EnvGuard::set("XAI_API_KEY", "static-after-expiry");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "static-after-expiry");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     mgr.hot_swap(GrokAuth {
@@ -4464,7 +4481,7 @@ async fn shared_api_key_provider_sync_buffered_session_beats_static() {
     use xai_grok_tools::types::ApiKeyProvider;
 
     let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    let _key = EnvGuard::set("XAI_API_KEY", "leftover-static");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "leftover-static");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     // Two minutes out: inside the 5-minute buffer, but accepted on the wire.
@@ -4486,8 +4503,10 @@ async fn shared_api_key_provider_sync_buffered_session_beats_static() {
 async fn shared_api_key_provider_disk_memo_follows_rewrites() {
     use xai_grok_test_support::EnvGuard;
 
-    let _xai = EnvGuard::unset("XAI_API_KEY");
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _chutes = EnvGuard::unset("CHUTES_API_KEY");
+    let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let provider = shared_api_key_provider(mgr);
@@ -4512,8 +4531,10 @@ async fn process_key_from_model_env_key() {
     const ENV: &str = "TEST_MODEL_ENV_KEY";
     const TOKEN: &str = "model-env-token";
 
-    let _xai = EnvGuard::unset("XAI_API_KEY");
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _chutes = EnvGuard::unset("CHUTES_API_KEY");
+    let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let _tok = EnvGuard::set(ENV, TOKEN);
 
     let dm = crate::models::default_model();
@@ -4551,8 +4572,10 @@ async fn process_key_from_model_env_key() {
 async fn process_key_precedence() {
     use xai_grok_test_support::EnvGuard;
 
-    let _xai = EnvGuard::unset("XAI_API_KEY");
-    let _legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
+    let _chutes = EnvGuard::unset("CHUTES_API_KEY");
+    let _build = EnvGuard::unset("CHUTES_BUILD_API_KEY");
+    let _upstream = EnvGuard::unset("XAI_API_KEY");
+    let _old = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(AuthManager::new(dir.path(), GrokComConfig::default()));
     let provider = shared_api_key_provider(mgr.clone());
@@ -4572,7 +4595,7 @@ async fn process_key_precedence() {
     );
 
     {
-        let _key = EnvGuard::set("XAI_API_KEY", "env");
+        let _key = EnvGuard::set("CHUTES_API_KEY", "env");
         assert_eq!(
             provider.current_api_key_async().await.as_deref(),
             Some("env")

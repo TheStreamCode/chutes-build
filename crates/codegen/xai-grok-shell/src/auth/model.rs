@@ -12,7 +12,7 @@ const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes
 pub(super) const LEGACY_SCOPE: &str = "https://accounts.x.ai/sign-in";
 
 /// auth.json scope key for plain API key auth (desktop login, `grok login --api-key`).
-pub(super) const API_KEY_SCOPE: &str = "xai::api_key";
+pub(super) const API_KEY_SCOPE: &str = "chutes::api_key";
 
 const BLOCKED_REASON_NO_LOGS: &str = "BLOCKED_REASON_NO_LOGS";
 const BLOCKED_REASON_NO_LOGS_MODERATED: &str = "BLOCKED_REASON_NO_LOGS_MODERATED";

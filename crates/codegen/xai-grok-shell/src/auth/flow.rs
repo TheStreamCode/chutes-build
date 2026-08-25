@@ -1339,11 +1339,33 @@ mod tests {
         format!("http://127.0.0.1:{port}")
     }
 
+    /// A config that expects an OAuth2 issuer, the way a deployment with a
+    /// registered app does. Chutes `default()` carries no provider (no app
+    /// configured means no OAuth), so tests that exercise issuer-compatibility
+    /// or device-flow behavior build one explicitly.
+    fn cfg_with_oauth2() -> GrokComConfig {
+        GrokComConfig {
+            oauth2: Some(crate::auth::OAuth2ProviderConfig {
+                issuer: XAI_OAUTH2_ISSUER.into(),
+                client_id: "test-client".into(),
+                scopes: crate::auth::config::default_oauth2_scopes(),
+                principal_type: None,
+                principal_id: None,
+                referrer: None,
+                client_secret: None,
+            }),
+            ..GrokComConfig::default()
+        }
+    }
+
     #[tokio::test]
     async fn mint_session_noninteractive_uses_external_provider() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(crate::auth::provider_fixture_command(&[
+                "print",
+                "xai-ext-token",
+            ])),
             ..GrokComConfig::default()
         };
         let mgr = Arc::new(
@@ -1356,7 +1378,8 @@ mod tests {
 
     #[tokio::test]
     async fn interactive_login_carries_no_expired_flag_even_over_a_stale_credential() {
-        let echo_env = "printf '%s' \"e=${GROK_AUTH_EXPIRED:-unset}\"";
+        let echo_env =
+            crate::auth::provider_fixture_command(&["env", "e=", "GROK_AUTH_EXPIRED", "unset"]);
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1367,7 +1390,7 @@ mod tests {
             ..oidc_session("stale-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider(echo_env, &mgr, true, None)
+        let (auth, _) = run_external_auth_provider(&echo_env, &mgr, true, None)
             .await
             .expect("provider output must parse");
         assert_eq!(
@@ -1377,10 +1400,12 @@ mod tests {
     }
 
     /// The script is the one published in `README.md`, which operators copy.
+    /// `gate` mirrors its shape portably: refuse while the environment says
+    /// the credential is expired, mint otherwise.
     #[tokio::test]
     async fn a_provider_written_to_the_published_contract_can_sign_in_after_an_expiry() {
         let conforming =
-            r#"if [ "$GROK_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
+            crate::auth::provider_fixture_command(&["gate", "GROK_AUTH_EXPIRED", "1", "sso-token"]);
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1391,7 +1416,7 @@ mod tests {
             ..oidc_session("stale-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider(conforming, &mgr, true, None)
+        let (auth, _) = run_external_auth_provider(&conforming, &mgr, true, None)
             .await
             .expect("the sign-in run must reach the binary's interactive branch");
         assert_eq!(auth.key, "sso-token");
@@ -1406,7 +1431,8 @@ mod tests {
             AuthManager::new(dir.path(), pinned_cfg("team-good"))
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = format!("printf '%s' {}", team_jwt("team-wrong"));
+        let team_wrong = team_jwt("team-wrong");
+        let cmd = crate::auth::provider_fixture_command(&["print", team_wrong.as_str()]);
 
         assert!(
             run_external_auth_provider(&cmd, &mgr, false, None)
@@ -1433,7 +1459,7 @@ mod tests {
             AuthManager::new(dir.path(), pinned_cfg("team-good"))
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = format!("printf '%s' {jwt}");
+        let cmd = crate::auth::provider_fixture_command(&["print", jwt.as_str()]);
 
         let (auth, _) = run_external_auth_provider(&cmd, &mgr, false, None)
             .await
@@ -1466,9 +1492,14 @@ mod tests {
         );
         assert!(mgr.current_or_expired().is_none(), "precondition: no auth");
 
-        let (auth, _) = run_external_auth_provider("printf '%s' fresh-token", &mgr, true, None)
-            .await
-            .unwrap();
+        let (auth, _) = run_external_auth_provider(
+            &crate::auth::provider_fixture_command(&["print", "fresh-token"]),
+            &mgr,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "flags must come from /user fetch");
         assert_eq!(auth.user_id, "u-1");
@@ -1488,9 +1519,14 @@ mod tests {
             ..oidc_session("old-token", None)
         });
 
-        let (auth, _) = run_external_auth_provider("printf '%s' fresh-token", &mgr, true, None)
-            .await
-            .unwrap();
+        let (auth, _) = run_external_auth_provider(
+            &crate::auth::provider_fixture_command(&["print", "fresh-token"]),
+            &mgr,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "flags must carry from previous auth");
         assert_eq!(auth.user_id, "test-user");
@@ -1505,9 +1541,12 @@ mod tests {
         // pick up the provider instead of starting an interactive device login.
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
-            auth_provider_command: Some("printf '%s' xai-ext-token".to_string()),
+            auth_provider_command: Some(crate::auth::provider_fixture_command(&[
+                "print",
+                "xai-ext-token",
+            ])),
             // oauth2=Some, oidc=None → the device flow is available (opt-in).
-            ..GrokComConfig::default()
+            ..cfg_with_oauth2()
         };
         assert!(
             cli_should_use_device(&cfg, LoginTransportOverride::ForceDevice).await,
@@ -1635,8 +1674,9 @@ mod tests {
             !cli_should_use_device(&cfg, LoginTransportOverride::ForceDevice).await,
             "enterprise OIDC must stay on loopback"
         );
-        // The xAI OAuth2 provider (oidc=None, oauth2=Some) does use device.
-        let xai = GrokComConfig::default();
+        // An OAuth2 app with no enterprise OIDC (oauth2=Some, oidc=None) does
+        // use device. Built explicitly: Chutes `default()` carries no provider.
+        let xai = cfg_with_oauth2();
         assert!(xai.oauth2.is_some() && xai.oidc.is_none());
         assert!(cli_should_use_device(&xai, LoginTransportOverride::ForceDevice).await);
     }
@@ -1817,7 +1857,9 @@ mod tests {
 
     #[test]
     fn weblogin_cred_is_never_compatible() {
-        let cfg = GrokComConfig::default();
+        // A deployment with a registered app expects its issuer; a legacy
+        // weblogin credential carries none, so it is never reused.
+        let cfg = cfg_with_oauth2();
         assert!(!is_cached_credential_compatible(&legacy_auth(), &cfg));
     }
 
@@ -1832,7 +1874,7 @@ mod tests {
 
     #[test]
     fn external_cred_compatibility_follows_issuer() {
-        let cfg = GrokComConfig::default();
+        let cfg = cfg_with_oauth2();
 
         // A first-party external credential (provider emitted the issuer) is
         // reused by interactive login like an OIDC session instead of
@@ -2045,9 +2087,11 @@ mod tests {
     #[tokio::test]
     async fn run_auth_flow_falls_through_when_no_refresh_token() {
         let dir = tempfile::tempdir().unwrap();
-        // Point the OAuth2 issuer at a non-routable address so the OIDC
-        // discovery fails immediately without opening a browser window.
-        let mut cfg = GrokComConfig::default();
+        // A deployment with a registered app whose issuer points at a
+        // non-routable address, so OIDC discovery fails immediately without
+        // opening a browser window. Chutes `default()` carries no provider,
+        // so the test builds one explicitly.
+        let mut cfg = cfg_with_oauth2();
         cfg.oauth2.as_mut().unwrap().issuer = "http://127.0.0.1:1".into();
 
         let writer = Arc::new(
@@ -2135,8 +2179,9 @@ mod tests {
             AuthManager::new(dir.path(), GrokComConfig::default())
                 .with_proxy_base_url(&dead_proxy_url()),
         );
-        let cmd = r#"sh -c 'i=0; while [ $i -lt 2000 ]; do printf "%s" "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" >&2; i=$((i+1)); done; printf token'"#;
-        let (auth, _) = run_external_auth_provider(cmd, &mgr, false, None)
+        // 2000 x 40 bytes = 80 KiB of stderr: past the ~64 KiB pipe buffer.
+        let cmd = crate::auth::provider_fixture_command(&["stderr", "80000", "token"]);
+        let (auth, _) = run_external_auth_provider(&cmd, &mgr, false, None)
             .await
             .expect("CLI path must inherit stderr so large stderr does not deadlock");
         assert_eq!(auth.key, "token");

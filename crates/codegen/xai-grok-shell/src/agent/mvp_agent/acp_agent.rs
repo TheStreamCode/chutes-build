@@ -233,9 +233,9 @@ impl acp::Agent for MvpAgent {
             )
         {
             unsafe { std::env::set_var("XAI_API_KEY", &api_key) };
-            tracing::info!("auth: loaded API key from auth.json (xai::api_key scope)");
+            tracing::info!("auth: loaded API key from auth.json (chutes::api_key scope)");
             xai_grok_telemetry::unified_log::info(
-                "auth: loaded API key from auth.json (xai::api_key scope)",
+                "auth: loaded API key from auth.json (chutes::api_key scope)",
                 None,
                 None,
             );
