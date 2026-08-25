@@ -48,9 +48,9 @@ pub use events::{
 pub use handle::SamplerHandle;
 pub use metrics::{InferenceLatencyStats, compute_percentiles};
 pub use retry::{
-    DEFAULT_MAX_RETRIES, MAX_RETRY_BACKOFF, RATE_LIMIT_RETRY_DISABLED, RATE_LIMIT_RETRY_THRESHOLD, RetryDecision,
-    classify_error, format_sampling_error, resolve_max_retries, retry_after_or_backoff,
-    retry_backoff_with_jitter,
+    DEFAULT_MAX_RETRIES, MAX_RETRY_BACKOFF, RATE_LIMIT_RETRY_DISABLED, RATE_LIMIT_RETRY_THRESHOLD,
+    RetryDecision, classify_error, format_sampling_error, resolve_max_retries,
+    retry_after_or_backoff, retry_backoff_with_jitter,
 };
 pub use sampling_log::AuthInfo;
 pub use stream::{collect_response, stream_chat_completions, stream_messages, stream_responses};

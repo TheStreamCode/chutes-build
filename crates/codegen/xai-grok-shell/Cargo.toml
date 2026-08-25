@@ -212,6 +212,7 @@ criterion = { workspace = true }
 ctor = { workspace = true }
 filetime = { workspace = true }
 pretty_assertions = { workspace = true }
+xai-grok-status-line = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }
 # `extensions::bundle` tests build archives with `bundle::test_helpers`, which
 # is `#[cfg(test)]`-only inside xai-grok-bundle without this feature.

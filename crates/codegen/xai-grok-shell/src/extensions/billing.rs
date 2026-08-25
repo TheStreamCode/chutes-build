@@ -423,6 +423,7 @@ mod tests {
                 is_unified_billing_user: Some(true),
                 billing_period_start: None,
                 billing_period_end: None,
+                usage_windows: vec![],
                 history: vec![
                     BillingPeriodUsage {
                         billing_cycle: Some(BillingCycle {
@@ -477,6 +478,7 @@ mod tests {
             is_unified_billing_user: None,
             billing_period_start: Some("2025-04-01T00:00:00Z".to_string()),
             billing_period_end: Some("2025-05-01T00:00:00Z".to_string()),
+            usage_windows: Vec::new(),
             history: vec![BillingPeriodUsage {
                 billing_cycle: Some(BillingCycle {
                     year: 2025,
@@ -535,6 +537,7 @@ mod tests {
             is_unified_billing_user: None,
             billing_period_start: None,
             billing_period_end: None,
+            usage_windows: vec![],
             history: vec![],
         };
         let json = serde_json::to_value(&config).unwrap();
