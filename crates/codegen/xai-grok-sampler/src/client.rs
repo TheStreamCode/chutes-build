@@ -311,8 +311,8 @@ struct StreamingChatRequest<'a> {
 }
 
 /// Non-streaming body wrapper: carries the Chutes chat-template controls next
-/// to the flattened request, mirroring [`StreamingChatRequest`] so compaction,
-/// title generation and the advisor apply the same reasoning plan instead of
+/// to the flattened request, mirroring [`StreamingChatRequest`] so compaction
+/// and title generation apply the same reasoning plan instead of
 /// silently dropping it.
 #[derive(Serialize)]
 struct NonStreamingChatRequest<'a> {
@@ -1218,8 +1218,8 @@ impl SamplingClient {
     /// candidates on the same policy as the streaming path.
     ///
     /// The two paths diverged for no reason anyone chose: the streaming one
-    /// grew the chain and this one did not, so compaction, title generation and
-    /// the advisor surfaced a bare `429 Infrastructure is at maximum capacity`
+    /// grew the chain and this one did not, so compaction and title generation
+    /// surfaced a bare `429 Infrastructure is at maximum capacity`
     /// while an interactive turn quietly recovered. Nothing here can be
     /// mid-stream, so `stream_started` is always false.
     pub async fn chat_completion(
@@ -1275,7 +1275,7 @@ impl SamplingClient {
         // Mirror the streaming path: apply the Chutes reasoning plan and map
         // the legacy `model-router` id to the native routing string. This
         // path used to send the bare payload to the configured inference
-        // base, so compaction, title generation and the advisor dropped the
+        // base, so compaction and title generation dropped the
         // thinking switches and never routed under `model-router`.
         let mut payload = payload;
         let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);

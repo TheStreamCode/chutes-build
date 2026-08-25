@@ -9,7 +9,7 @@ privacy-sensitive cloud behavior.
 1. **Terminal and CLI:** command parsing, interactive rendering, sessions,
    approvals, keyboard input, and the animated Chutes Build welcome identity.
 2. **Agent loop:** prompt construction, planning, tool dispatch, compaction,
-   goals, advisor consultation, and subagent orchestration.
+   goals, and subagent orchestration.
 3. **Chutes routing:** model selection, live capability lookup, ordered fallback,
    image-capability delegation, retry classification, and streaming safeguards.
 4. **Tools:** coding/filesystem tools, MCP, Context7, web search, isolated browser
@@ -39,7 +39,7 @@ invalid-request, and mid-stream errors do not silently switch models.
 The chain covers **both** request paths, which it did not always: it was wired
 into `chat_completion_stream` and not into `chat_completion`, so an interactive
 turn recovered from `429 Infrastructure is at maximum capacity` while
-compaction, title generation and the advisor surfaced it raw. Both now share
+compaction and title generation surfaced it raw. Both now share
 one chain and one `FallbackPolicy`. Nothing on the non-streaming path can be
 mid-stream, so the rule that matters — never switch models once bytes have
 reached the user — holds there by construction, and the streaming path keeps
@@ -126,13 +126,11 @@ shows the monthly and rolling four-hour percentages in the compact status item
 when both are available, exposes all windows through `/usage`, and preserves
 each window type even when the API omits a reset timestamp.
 
-## Advisor and workers
+## Workers
 
-The executor owns the main loop and all mutations. The advisor is a read-only
-subagent with the current conversation context; it returns recommendations that
-the executor may accept or reject. Worker subagents can run concurrently in
-foreground/background modes, wait as a group, and use isolated worktrees.
-Nesting is bounded to prevent unreviewable recursive swarms.
+The executor owns the main loop and all mutations. Worker subagents can run
+concurrently in foreground/background modes, wait as a group, and use isolated
+worktrees. Nesting is bounded to prevent unreviewable recursive swarms.
 
 ## Privacy boundary
 
@@ -211,7 +209,7 @@ guarantee.
 **Retained upstream infrastructure** (the proven agent runtime this fork
 builds on, not specific to any provider):
 
-- `xai-grok-agent` — prompt construction, planning, subagent/advisor
+- `xai-grok-agent` — prompt construction, planning, subagent
   orchestration, goal tracking.
 - `xai-grok-shell`, `xai-grok-shell-base` — session lifecycle, config
   resolution/persistence, credential provider, ACP session handling.

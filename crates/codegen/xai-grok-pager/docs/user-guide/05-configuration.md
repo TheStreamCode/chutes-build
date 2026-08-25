@@ -310,14 +310,9 @@ plan = false
 
 [subagents.models]
 explore = "chutes-build"               # route to different models
-
-[subagents.roles.advisor]
-model = "..."                         # pin the read-only advisor
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. The
-built-in advisor also reads `[subagents.roles.advisor]`, which `/advisor` writes for
-you.
+To pin the model a subagent uses, set its entry under `[subagents.models]`.
 
 ### Voice
 

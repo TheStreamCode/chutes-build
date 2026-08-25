@@ -416,22 +416,6 @@ including terminals that cannot report key releases and therefore cannot do
 hold-to-talk. Transport and language are configured under `[voice]` — see
 [Configuration](05-configuration.md#voice).
 
-### `/advisor`
-
-Enable, disable, or pin the model of the built-in read-only advisor — an on-demand
-senior reviewer for architecture, correctness, security, and trade-offs. See
-[Subagents](16-subagents.md#per-type-toggles-and-model-overrides).
-
-```
-/advisor on
-/advisor off
-/advisor <model>      # pin the advisor to one model
-/advisor default      # clear the pin, inherit the session's model
-```
-
-Writes `[subagents.toggle].advisor` and `[subagents.roles.advisor].model`. Never
-changes the running session's own model.
-
 ---
 
 ## Account and Billing

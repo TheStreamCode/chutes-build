@@ -62,7 +62,6 @@ The `spawn_subagent` tool accepts a `subagent_type` parameter that selects the c
 | `general-purpose` | Default type. Full-capability agent for any task.    |
 | `explore`         | Research agent. Searches, reads, greps, and runs shell commands, but does not edit files. Use it for codebase investigation. |
 | `plan`            | Planning agent. Explores the codebase and produces a structured implementation plan; does not edit files. |
-| `advisor`         | On-demand senior reviewer for architecture, correctness, security, and trade-offs. Read-only: repository inspection, Context7, memory, and web fetch, with no shell and no editing, so it can review a claim without acting on it. Defaults to maximum reasoning effort. |
 
 Project- or user-defined agents can add new types or shadow these built-ins by name.
 
@@ -169,7 +168,7 @@ A capability mode is an optional, coarse filter on a subagent's tools:
 | `execute`    | Yes  | No    | Yes     | Read, plus run shell commands and background tasks. No file edits. |
 | `all`        | Yes  | Yes   | Yes     | Unrestricted tool access.                    |
 
-If you omit `capability_mode`, the subagent uses its agent type's toolset. The built-in `explore` and `plan` types read, search, and run shell commands but cannot edit files; `advisor` is narrower still — it cannot run shell commands either; `general-purpose` ships the full toolset.
+If you omit `capability_mode`, the subagent uses its agent type's toolset. The built-in `explore` and `plan` types read, search, and run shell commands but cannot edit files; `general-purpose` ships the full toolset.
 
 ---
 
@@ -242,21 +241,12 @@ Disable specific agent types, or route them to a different model:
 [subagents.toggle]
 explore = true                       # default -- omit to keep enabled
 plan = false                         # disable the plan subagent
-advisor = false                      # disable the advisor
 
 [subagents.models]
 explore = "chutes-build"               # route explore to a specific model
-
-[subagents.roles.advisor]
-model = "..."                        # pin the advisor to one model
 ```
 
 Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model.
-
-`/advisor` writes both of the advisor's keys for you: `/advisor on` / `off` sets the
-toggle, `/advisor <model>` sets the pin, and `/advisor default` clears it. Pinning
-the advisor to a higher-capability model than the session's is the usual reason to
-set it — review quality is worth more there than latency.
 
 ### Custom Roles and Personas
 

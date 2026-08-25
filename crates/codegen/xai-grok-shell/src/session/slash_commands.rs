@@ -456,7 +456,6 @@ pub(crate) fn build_tools_meta(tool_names: &[String]) -> acp::Meta {
 pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "agents",
     "agents-dashboard",
-    "advisor",
     "apikey",
     "always-approve",
     "announcements",

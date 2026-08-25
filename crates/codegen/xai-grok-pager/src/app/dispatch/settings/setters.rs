@@ -1851,40 +1851,6 @@ fn save_fork_secondary_model_toast(value: &str) -> String {
     format!("\u{2713} Fork secondary model: {value}")
 }
 
-// ---------------------------------------------------------------------------
-// `/advisor` — pins/unpins the model and enabled state of the built-in advisor
-// subagent. Unlike the settings above these write directly to
-// `[subagents.roles.advisor]` / `[subagents.toggle]` (not part of the typed
-// settings registry — see `Effect::SetAdvisorModel`) and have no live in-memory
-// mirror to keep in sync or roll back: the advisor is spawned on demand, so the
-// persisted config is the only state that matters.
-// ---------------------------------------------------------------------------
-
-/// Outer dispatcher for `Action::SetAdvisorModel`. An empty `model` clears the
-/// pin, and the advisor falls back to inheriting the session's model.
-pub(in crate::app::dispatch) fn set_advisor_model(app: &mut AppView, model: String) -> Vec<Effect> {
-    let toast = if model.is_empty() {
-        "\u{2713} Advisor model: inherit from session".to_string()
-    } else {
-        format!("\u{2713} Advisor model: {model}")
-    };
-    app.show_toast(&toast);
-    vec![Effect::SetAdvisorModel(model)]
-}
-
-/// Outer dispatcher for `Action::SetAdvisorEnabled`.
-pub(in crate::app::dispatch) fn set_advisor_enabled(
-    app: &mut AppView,
-    enabled: bool,
-) -> Vec<Effect> {
-    app.show_toast(if enabled {
-        "\u{2713} Advisor enabled"
-    } else {
-        "\u{2713} Advisor disabled"
-    });
-    vec![Effect::SetAdvisorEnabled(enabled)]
-}
-
 /// Outer dispatcher for `Action::SetForkSecondaryModel`.
 /// Mirror + persist + toast. Idempotent: same-id → no-op.
 pub(in crate::app::dispatch) fn set_fork_secondary_model(

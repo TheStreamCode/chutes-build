@@ -75,8 +75,8 @@ use super::session::load::{
 use super::session::modal::dispatch_rename_session;
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
-    preview_auto_light_theme, preview_theme, set_advisor_enabled, set_advisor_model,
-    set_ask_user_question_timeout_enabled, set_auto_dark_theme, set_auto_light_theme,
+    preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
+    set_auto_dark_theme, set_auto_light_theme,
     set_auto_update, set_collapsed_edit_blocks, set_combine_queued_prompts, set_compact_mode,
     set_confirm_before_rewind, set_contextual_hint_image_input, set_contextual_hint_plan_mode,
     set_contextual_hint_send_now, set_contextual_hint_small_screen, set_contextual_hint_ssh_wrap,
@@ -1082,8 +1082,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetDefaultModel(v) => set_default_model(app, v),
         Action::ClearDefaultModel => clear_default_model(app),
         Action::SetForkSecondaryModel(v) => set_fork_secondary_model(app, v),
-        Action::SetAdvisorModel(v) => set_advisor_model(app, v),
-        Action::SetAdvisorEnabled(v) => set_advisor_enabled(app, v),
         Action::ClearForkSecondaryModel => clear_fork_secondary_model(app),
         Action::SetMaxThoughtsWidth(v) => set_max_thoughts_width(app, v),
         Action::SetShowTips(v) => set_show_tips(app, v),

@@ -404,24 +404,6 @@ fn plan_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Read-only advisor toolset: repository inspection plus current public
-/// documentation and local memory. No shell, edit, media, or nested agents —
-/// the advisor reviews, it never implements.
-fn advisor_toolset() -> ToolServerConfig {
-    ToolServerConfig {
-        tools: vec![
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
-            (&grok_build::WebFetchTool).into(),
-            (&chutes::Context7SearchTool).into(),
-            (&chutes::Context7DocsTool).into(),
-            (&memory::MemorySearchImpl).into(),
-            (&memory::MemoryGetImpl).into(),
-        ],
-        behavior_preset: None,
-    }
-}
 /// Chutes Build + plan mode toolset.
 ///
 /// Extends the default `chutes-build` toolset with plan mode tools:
@@ -744,7 +726,6 @@ pub enum BuiltinAgentName {
     GeneralPurpose,
     Explore,
     Plan,
-    Advisor,
     BrowserUse,
     #[strum(serialize = "chutes-build-orchestrator")]
     GrokBuildOrchestrator,
@@ -774,19 +755,13 @@ impl BuiltinAgentName {
             Self::GeneralPurpose => AgentDefinition::general_purpose(),
             Self::Explore => AgentDefinition::explore(),
             Self::Plan => AgentDefinition::plan(),
-            Self::Advisor => AgentDefinition::advisor(),
             Self::BrowserUse => AgentDefinition::browser_use(),
             Self::GrokBuildOrchestrator => AgentDefinition::grok_build_orchestrator(),
         }
     }
     /// Built-in agents available as subagents via the Task tool.
     pub fn subagent_variants() -> &'static [Self] {
-        &[
-            Self::GeneralPurpose,
-            Self::Explore,
-            Self::Plan,
-            Self::Advisor,
-        ]
+        &[Self::GeneralPurpose, Self::Explore, Self::Plan]
     }
 }
 /// Portable agent identity — parsed from .chutes-build/agents/*.md.
@@ -1693,25 +1668,6 @@ impl AgentDefinition {
             ..Self::base(BuiltinAgentName::Plan, "")
         }
     }
-    /// Advisor subagent — on-demand senior review with read-only evidence.
-    ///
-    /// Defaults to maximum reasoning effort: it is invoked sparingly, for plans,
-    /// blockers and completion claims, where review quality matters more than
-    /// latency or cost. `[subagents.roles.advisor]` in config.toml (`model`,
-    /// `reasoning_effort`) overrides this — e.g. to pin it to a
-    /// higher-capability model than the session's.
-    pub fn advisor() -> Self {
-        use crate::prompt::subagent_prompts;
-        Self {
-            description: xai_tool_types::ADVISOR_SUBAGENT.description.to_string(),
-            tool_config: advisor_toolset(),
-            permission_mode: PermissionMode::Plan,
-            prompt_body: Some(subagent_prompts::ADVISOR_PROMPT.to_string()),
-            inherit_skills: false,
-            effort: Some(Effort::Max),
-            ..Self::base(BuiltinAgentName::Advisor, "")
-        }
-    }
     /// Browser Use agent definition.
     pub fn browser_use() -> Self {
         Self {
@@ -2000,7 +1956,6 @@ mod tests {
             | BuiltinAgentName::GeneralPurpose
             | BuiltinAgentName::Explore
             | BuiltinAgentName::Plan
-            | BuiltinAgentName::Advisor
             | BuiltinAgentName::Opencode
             | BuiltinAgentName::BrowserUse => false,
         }
@@ -2714,11 +2669,10 @@ description: Test default tool config
     #[test]
     fn test_builtin_agent_name_subagent_variants() {
         let variants = BuiltinAgentName::subagent_variants();
-        assert_eq!(variants.len(), 4);
+        assert_eq!(variants.len(), 3);
         assert!(variants.contains(&BuiltinAgentName::GeneralPurpose));
         assert!(variants.contains(&BuiltinAgentName::Explore));
         assert!(variants.contains(&BuiltinAgentName::Plan));
-        assert!(variants.contains(&BuiltinAgentName::Advisor));
     }
     #[test]
     fn test_all_builtins_have_inherit_model() {

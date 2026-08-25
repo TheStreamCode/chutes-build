@@ -33,7 +33,6 @@ may add more commands at runtime.
 | --- | --- |
 | `/model` | Switch the active model |
 | `/effort` | Select a reasoning option supported by that model |
-| `/advisor` | Enable, disable, or select the read-only advisor |
 | `/plan` | Enter plan mode |
 | `/view-plan` | View the current plan |
 | `/always-approve` | Toggle permission-prompt bypass |
