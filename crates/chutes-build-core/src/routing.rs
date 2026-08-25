@@ -277,6 +277,21 @@ pub fn auto_model_from_env() -> String {
     )
 }
 
+/// Serialize process-global environment mutation across the routing tests.
+///
+/// `auto_model_from_env` and `auto_live_strategy` read
+/// `CHUTES_ROUTING_STRATEGY`; the env-resolution test mutates it, and cargo
+/// runs unit tests on parallel threads. A test that observes the ambient
+/// strategy takes this lock so it cannot race the mutation.
+#[cfg(test)]
+pub(crate) mod test_support {
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +355,11 @@ mod tests {
 
     #[test]
     fn live_auto_pool_appends_only_behind_the_dashboard_alias() {
+        // `auto_live_strategy` falls back to the ambient
+        // `CHUTES_ROUTING_STRATEGY` for the bare alias, so hold the env lock
+        // shared with `env_resolution_reads_pool_and_strategy` — cargo runs
+        // this crate's unit tests on parallel threads.
+        let _env = crate::routing::test_support::env_lock();
         let live = ["a/One".to_owned(), "b/Two".to_owned()];
         let mut chain = vec!["picked".to_owned(), "default".to_owned()];
         append_live_auto_pool(&mut chain, &live, "default");
@@ -382,8 +402,10 @@ mod tests {
 
     #[test]
     fn env_resolution_reads_pool_and_strategy() {
-        // SAFETY: test-scoped env mutation, serialized by the suite runner
-        // (single-threaded harness for this crate's unit tests).
+        // Env mutation is process-global; the lock serializes it against the
+        // other tests that observe the ambient strategy.
+        let _env = crate::routing::test_support::env_lock();
+        // SAFETY: guarded by `env_lock`, test-scoped mutation only.
         unsafe {
             std::env::set_var(
                 "CHUTES_ROUTING_POOL",
