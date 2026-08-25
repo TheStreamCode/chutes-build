@@ -2563,6 +2563,31 @@ fn disabled_models_removed_from_catalog() {
     assert!(!catalog.contains_key("to-disable"));
 }
 #[test]
+fn plan_and_build_models_parse_and_default_to_unset() {
+    let raw: toml::Value = toml::from_str(
+        r#"
+            [models]
+            plan_model = "zai-org/GLM-5.2-TEE"
+            build_model = "Qwen/Qwen3.5-397B-A17B-TEE"
+            "#,
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+    assert_eq!(
+        cfg.models.plan_model.as_deref(),
+        Some("zai-org/GLM-5.2-TEE")
+    );
+    assert_eq!(
+        cfg.models.build_model.as_deref(),
+        Some("Qwen/Qwen3.5-397B-A17B-TEE")
+    );
+
+    let empty: toml::Value = toml::from_str("").unwrap();
+    let cfg = Config::new_from_toml_cfg(&empty).unwrap();
+    assert_eq!(cfg.models.plan_model, None);
+    assert_eq!(cfg.models.build_model, None);
+}
+#[test]
 fn hidden_models_kept_in_catalog_but_not_in_acp() {
     use crate::agent::models::{available_models, resolve_model_catalog};
     let raw: toml::Value = toml::from_str(

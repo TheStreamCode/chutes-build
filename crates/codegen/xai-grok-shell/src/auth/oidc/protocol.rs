@@ -781,6 +781,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "profile".into()],
             audience: Some("api://grok".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://example.okta.com/authorize".into(),
@@ -829,6 +830,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.x.ai".into(),
@@ -837,6 +839,7 @@ mod tests {
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
             referrer: Some("grok-build".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.x.ai/authorize".into(),
@@ -873,6 +876,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.x.ai".into(),
@@ -881,6 +885,7 @@ mod tests {
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-desktop".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.x.ai/authorize".into(),

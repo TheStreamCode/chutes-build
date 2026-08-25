@@ -1061,6 +1061,18 @@ pub struct ModelsConfig {
     /// default with the catalog guard; see `ModelOverrideConfig::resolve`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,
+    /// Model switched to automatically when plan mode is engaged. Opt-in:
+    /// unset means plan mode never touches the model. Typical use is a
+    /// stronger (often pricier) model for planning; pair it with
+    /// `build_model` to return to a cheaper one when the plan is done.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_model: Option<String>,
+    /// Model switched to automatically when plan mode is exited. Opt-in:
+    /// unset means leaving plan mode keeps whatever model is active.
+    /// Intended as the counterpart of `plan_model` — usually the cheaper,
+    /// faster model for implementation work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_model: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker,
     /// `/model`, `-m`). Non-matching models stay in the catalog but are never
     /// shown, defaulted to, or selectable. Special/internal models (web_search,

@@ -29,6 +29,8 @@ auto_update = true                     # check for updates on launch
 [models]
 default = "model-router"               # model used for new sessions ("Chutes Auto")
 web_search = "model-router"            # model used by the web_search tool
+plan_model = "zai-org/GLM-5.2-TEE"     # switched to while plan mode is on (opt-in)
+build_model = "Qwen/Qwen3.5-397B-A17B-TEE" # switched back to when plan mode exits (opt-in)
 
 # Defaults applied to every model; a per-model [model.<id>] value always wins.
 # See "Custom Models" for the per-model overrides and full details.
