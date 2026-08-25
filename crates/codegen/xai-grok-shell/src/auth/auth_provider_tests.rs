@@ -393,6 +393,9 @@ async fn provider_expiry_source_precedence() {
         jwt_with_exp(chrono::Utc::now().timestamp() + 7200)
     }
     fn jwt_with_exp(exp: i64) -> String {
+        // Process-global and order-dependent otherwise: install explicitly so
+        // this test does not rely on a sibling having done it first.
+        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
         jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &serde_json::json!({ "exp": exp }),
@@ -403,6 +406,7 @@ async fn provider_expiry_source_precedence() {
     async fn mints_after_first(
         name: &str,
         command: String,
+        args: Vec<String>,
         token_ttl_secs: Option<u64>,
         counter: &std::path::Path,
     ) -> usize {
@@ -410,7 +414,7 @@ async fn provider_expiry_source_precedence() {
             name.to_owned(),
             AuthProviderConfig {
                 command,
-                args: None,
+                args: Some(args),
                 token_ttl_secs,
                 timeout_secs: None,
                 cwd: None,
@@ -425,27 +429,48 @@ async fn provider_expiry_source_precedence() {
         std::fs::read_to_string(counter).unwrap().lines().count()
     }
 
+    // Direct-exec form (command + args): the payloads carry double quotes,
+    // and a shell would eat them — `sh -c` on Unix, differently but just as
+    // fatally under `cmd /C`. argv passes them through verbatim.
+    let fixture = crate::auth::provider_fixture_bin()
+        .to_string_lossy()
+        .into_owned();
     let dir = tempfile::tempdir().unwrap();
 
     // expires_in=10 (stale) wins over token_ttl_secs=3600 (fresh): re-mints.
     let c1 = dir.path().join("c1");
-    let cmd1 = crate::auth::provider_fixture_command(&[
-        "count-print",
-        &c1.to_string_lossy(),
-        r#"{"access_token":"t1","expires_in":10}"#,
-    ]);
     assert_eq!(
-        mints_after_first("test-exp-expires-in", cmd1, Some(3600), &c1).await,
+        mints_after_first(
+            "test-exp-expires-in",
+            fixture.clone(),
+            vec![
+                "count-print".to_owned(),
+                c1.to_string_lossy().into_owned(),
+                r#"{"access_token":"t1","expires_in":10}"#.to_owned(),
+            ],
+            Some(3600),
+            &c1,
+        )
+        .await,
         2,
         "expires_in must win over token_ttl_secs"
     );
 
     // token_ttl_secs=1 (stale) wins over a 2h JWT exp (fresh): re-mints.
     let c2 = dir.path().join("c2");
-    let cmd2 =
-        crate::auth::provider_fixture_command(&["count-print", &c2.to_string_lossy(), &long_jwt()]);
     assert_eq!(
-        mints_after_first("test-exp-ttl", cmd2, Some(1), &c2).await,
+        mints_after_first(
+            "test-exp-ttl",
+            fixture.clone(),
+            vec![
+                "count-print".to_owned(),
+                c2.to_string_lossy().into_owned(),
+                long_jwt(),
+            ],
+            Some(1),
+            &c2,
+        )
+        .await,
         2,
         "token_ttl_secs must win over the JWT exp claim"
     );
@@ -453,13 +478,19 @@ async fn provider_expiry_source_precedence() {
     // JWT exp alone: a near-expiry claim (inside the skew) re-mints,
     // proving the claim is consumed when nothing else is configured.
     let c3 = dir.path().join("c3");
-    let cmd3 = crate::auth::provider_fixture_command(&[
-        "count-print",
-        &c3.to_string_lossy(),
-        &short_jwt(),
-    ]);
     assert_eq!(
-        mints_after_first("test-exp-jwt", cmd3, None, &c3).await,
+        mints_after_first(
+            "test-exp-jwt",
+            fixture,
+            vec![
+                "count-print".to_owned(),
+                c3.to_string_lossy().into_owned(),
+                short_jwt(),
+            ],
+            None,
+            &c3,
+        )
+        .await,
         2,
         "the JWT exp claim must apply when expires_in and token_ttl_secs are absent"
     );
@@ -470,11 +501,11 @@ async fn provider_unusable_expiry_still_mints() {
     let provider = AuthProviderRef::new(
         "test-overflow".to_owned(),
         AuthProviderConfig {
-            command: crate::auth::provider_fixture_command(&[
-                "print",
-                &format!(r#"{{"access_token":"t","expires_in":{}}}"#, u64::MAX),
+            command: crate::auth::provider_fixture_bin().to_string_lossy().into_owned(),
+            args: Some(vec![
+                "print".to_owned(),
+                format!(r#"{{"access_token":"t","expires_in":{}}}"#, u64::MAX),
             ]),
-            args: None,
             token_ttl_secs: Some(u64::MAX),
             timeout_secs: None,
             cwd: None,
