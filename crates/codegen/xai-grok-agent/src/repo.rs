@@ -182,6 +182,10 @@ mod tests {
     }
 
     #[test]
+    // The fixture fakes home through `$HOME`; Windows resolves home from
+    // `%USERPROFILE%` and ignores that variable, so the guard cannot take
+    // effect there and the scenario cannot be staged.
+    #[cfg(unix)]
     #[serial(home_env)]
     fn resolve_treats_home_git_repo_as_no_repo() {
         // Home-is-a-git-repo (dotfiles in $HOME): discovery walks up to $HOME,

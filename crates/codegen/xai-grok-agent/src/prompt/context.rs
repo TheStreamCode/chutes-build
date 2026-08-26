@@ -338,19 +338,40 @@ mod tests {
         }
     }
     #[test]
-    fn standard_primary_template_renders_browser_verification_only_when_flagged() {
+    fn browser_verification_conditional_renders_only_when_flagged() {
+        // The Chutes standard prompt deliberately omits upstream's
+        // browser-verification conditional, so the gate is exercised against an
+        // inline template carrying the same conditional upstream ships.
         let renderer = TemplateRenderer::new(Default::default(), Default::default());
+        let template = "base${%- if include_browser_verification %}\n\n\
+<browser_verification>\nverify in the browser before finishing\n\
+</browser_verification>${%- endif %}";
         let mut ctx = test_context();
+        ctx.system_prompt = TemplateOverride::Custom(template.to_string());
         ctx.include_browser_verification = true;
         let on = ctx.render_with_renderer(&renderer).unwrap();
         ctx.include_browser_verification = false;
         let off = ctx.render_with_renderer(&renderer).unwrap();
         let block_start = on
             .find("\n\n<browser_verification>")
-            .expect("flagged standard template must render browser verification");
+            .expect("flagged template must render browser verification");
         assert_eq!(&on[..block_start], off);
         assert!(on.ends_with("</browser_verification>"));
         assert!(!off.contains("<browser_verification>"));
+    }
+    #[test]
+    fn chutes_standard_prompt_is_inert_to_the_browser_verification_flag() {
+        // Identity divergence: the Chutes system prompt carries no
+        // browser-verification conditional, so the flag must leave the
+        // rendered standard template unchanged.
+        let renderer = TemplateRenderer::new(Default::default(), Default::default());
+        let mut ctx = test_context();
+        ctx.include_browser_verification = true;
+        let on = ctx.render_with_renderer(&renderer).unwrap();
+        ctx.include_browser_verification = false;
+        let off = ctx.render_with_renderer(&renderer).unwrap();
+        assert_eq!(on, off);
+        assert!(!on.contains("<browser_verification>"));
     }
     #[test]
     fn full_mode_flag_does_not_append_browser_verification() {

@@ -504,7 +504,11 @@ mod tests {
         assert!(!installed.repo_path.join("agents/new.md").exists());
     }
 
+    // The fixture fakes home through `$HOME` (see `home_tempdir`); Windows
+    // resolves home from `%USERPROFILE%`, so "outside home" cannot be staged
+    // there and the skip path never triggers under the guard.
     #[test]
+    #[cfg(unix)]
     #[serial(home_env)]
     fn refresh_skips_untrusted_source_outside_home() {
         let (_home_tmp, home, _home_guard) = home_tempdir();
