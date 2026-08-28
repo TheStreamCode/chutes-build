@@ -8,3 +8,7 @@ pub mod subagent_prompts;
 pub mod template;
 pub mod user_message;
 pub mod workspace_user;
+
+#[cfg(test)]
+#[path = "prompt_contract_tests.rs"]
+mod prompt_contract_tests;

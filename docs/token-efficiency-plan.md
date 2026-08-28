@@ -16,6 +16,16 @@ The low-risk foundation is implemented:
 - repeated identical tool-call signatures now receive one corrective reminder
   and terminate at a bounded threshold; repeated `true` no-ops stop earlier.
 
+Workstream 1 progress (2026-08-26): a prompt-contract test now pins the
+duplicate-paragraph invariant — no normalized policy paragraph may repeat
+across the base prompt, subagent/apply-patch templates, and the
+project-instructions boilerplate (census found the curated sources already
+clean), and the standard primary render is pinned at 1297 estimated tokens
+(ceiling 1300) so fixed policy text cannot silently re-bloat. The
+named/hashed-section restructure and the ≥15% fixed-token reduction remain
+the next steps, followed by workstream 2 (capability-scoped tool disclosure)
+— the tool catalog, not the base prompt, dominates the per-turn fixed cost.
+
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
 schema loading, content-hash context reuse, structured conversation deltas, and
