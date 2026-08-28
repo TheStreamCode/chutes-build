@@ -890,6 +890,10 @@ fn parallel_chunk_count(size: u64) -> u64 {
 /// doesn't advertise a Content-Length, the file is too small to be worth
 /// splitting, the range request is rejected, or any chunk transfer fails.
 /// The caller is expected to fall back to a single-connection download on Err.
+// WHY-ALLOW: manual-only updater fetching release artifacts from GitHub/GCS,
+// not a Chutes API endpoint; honoring a corporate extra-CA bundle for
+// executable downloads is a separate product decision.
+#[allow(clippy::disallowed_methods)]
 async fn try_parallel_download(
     url: &str,
     dest: &std::path::Path,
@@ -979,6 +983,10 @@ async fn try_parallel_download(
 /// open + seek + write_all in `std::fs`. This avoids the per-write hop into
 /// tokio's blocking pool that `tokio::fs::File::write_all` performs on every
 /// ~8 KiB Bytes item from `bytes_stream()`.
+// WHY-ALLOW: manual-only updater fetching release artifacts from GitHub/GCS,
+// not a Chutes API endpoint; honoring a corporate extra-CA bundle for
+// executable downloads is a separate product decision.
+#[allow(clippy::disallowed_methods)]
 async fn download_range(
     client: &reqwest::Client,
     url: &str,
@@ -1023,6 +1031,10 @@ async fn download_range(
 /// with bytes downloaded, total size, and ETA. Otherwise a spinner with a byte
 /// counter is used as a fallback.
 #[doc(hidden)]
+// WHY-ALLOW: manual-only updater fetching release artifacts from GitHub/GCS,
+// not a Chutes API endpoint; honoring a corporate extra-CA bundle for
+// executable downloads is a separate product decision.
+#[allow(clippy::disallowed_methods)]
 pub async fn download_with_progress(url: &str, dest: &std::path::Path) -> Result<()> {
     // Try parallel byte-range first. Falls through to single-connection on any
     // failure (HEAD missing Content-Length, ranges rejected, partial-fetch error).
@@ -1085,6 +1097,8 @@ pub async fn download_with_progress(url: &str, dest: &std::path::Path) -> Result
 
 /// Download a file silently (no progress bar).
 #[doc(hidden)]
+// WHY-ALLOW: manual-only updater, as above.
+#[allow(clippy::disallowed_methods)]
 pub async fn download_silent(url: &str, dest: &std::path::Path) -> Result<()> {
     match try_parallel_download(url, dest, false).await {
         Ok(()) => return Ok(()),

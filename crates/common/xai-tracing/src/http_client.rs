@@ -74,6 +74,8 @@ impl Middleware for TracingMiddleware {
 
 #[cfg(test)]
 mod tests {
+    // Loopback/dead-end fixtures: no request crosses a TLS boundary, so the extra-CA policy has nothing to apply to.
+    #![allow(clippy::disallowed_methods)]
     use super::*;
     use crate::testing::{OtelTestEnv, otel_span_id_hex, otel_trace_id_hex, parse_traceparent};
     use tracing::Instrument;

@@ -21,6 +21,8 @@ impl Default for Context7Client {
 }
 
 impl Context7Client {
+    // WHY-ALLOW: product-policy client: the SSRF-safe resolver is the security boundary here; extra-CA support for these clients is tracked separately
+    #[allow(clippy::disallowed_methods)]
     pub fn new(base_url: String, api_key: Option<String>) -> Self {
         let base_url = base_url.trim_end_matches('/').to_owned();
         let send_api_key = is_official_context7_url(&base_url);

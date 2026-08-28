@@ -55,6 +55,10 @@ static REFRESH_GATE: std::sync::LazyLock<tokio::sync::Mutex<()>> =
 
 /// Shared client so every call reuses pooled connections instead of building
 /// a fresh `reqwest::Client` per request.
+// WHY-ALLOW: product-policy client with `redirect::none` and a live catalogue
+// base URL from the allowlisted endpoints; extra-CA support for these clients
+// is tracked separately.
+#[allow(clippy::disallowed_methods)]
 static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))

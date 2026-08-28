@@ -92,6 +92,9 @@ pub fn ensure_default_crypto_provider() {}
 /// [`with_extra_root_certificates`], then hands the builder to `configure`
 /// and builds. The fuller upstream rework (rustls backend pin, shared root
 /// store, process crypto provider) is intentionally not ported yet.
+// WHY-ALLOW: this function IS the TLS policy choke point - it applies
+// with_extra_root_certificates before building, so the ban ends here.
+#[allow(clippy::disallowed_methods)]
 pub fn build_reqwest_client(
     configure: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
 ) -> Result<reqwest::Client, reqwest::Error> {
@@ -99,6 +102,8 @@ pub fn build_reqwest_client(
 }
 
 /// Blocking twin of [`build_reqwest_client`].
+// WHY-ALLOW: policy choke point, as above.
+#[allow(clippy::disallowed_methods)]
 pub fn build_blocking_reqwest_client(
     configure: impl FnOnce(reqwest::blocking::ClientBuilder) -> reqwest::blocking::ClientBuilder,
 ) -> Result<reqwest::blocking::Client, reqwest::Error> {

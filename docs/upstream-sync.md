@@ -1298,4 +1298,15 @@ assumption. Known-failure baselines were re-recorded from a full local run:
 pager 4, tools 74, workspace 54.
 
 Deferred: `clippy.toml` workspace lint for `reqwest::Client::new`
-(call-site fixes land with the remaining unported crates).
+(call-site fixes land with the remaining unported crates). — **Done
+2026-08-26.** The root `clippy.toml` already carried upstream's
+canonicalize/process-spawn bans; the four `reqwest` method bans were
+added (the actual deferred item). Every workspace crate now passes
+`cargo clippy --workspace --all-targets`: production builders in the
+sampler and MCP were already wrapped with `with_extra_root_certificates`
+(allowed with that reason), loopback-only test fixtures and the
+deadened Mixpanel client carry scoped allows, the manual-only updater
+and the CHANGELOG fetch are allowed as non-Chutes endpoints, and the
+`chutes-build-core` policy clients are allowed because the SSRF-safe
+resolver is their security boundary — extending the extra-CA bundle to
+those clients is tracked as a follow-up product decision.

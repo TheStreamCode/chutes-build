@@ -424,6 +424,10 @@ mod static_grok_auth_tests {
 /// Default reqwest client used by `StorageClient::new`. Plain defaults --
 /// production callers should instead pass a tuned client (e.g. shell's
 /// `crate::http::shared_upload_client()`) to `with_provider`.
+// WHY-ALLOW: fallback for callers that do not pass a tuned client; those
+// callers (shell) build through the extra-CA policy, and this default is
+// documented as non-production.
+#[allow(clippy::disallowed_methods)]
 fn default_upload_client() -> Client {
     Client::new()
 }

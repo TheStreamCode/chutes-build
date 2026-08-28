@@ -1,3 +1,7 @@
+// These tests exercise the wrapping itself; the builder under test ends in
+// a .build() by design.
+#![allow(clippy::disallowed_methods)]
+
 //! Process-isolated: oversize CHUTES_EXTRA_CA_BUNDLE → ignored; client still builds.
 
 use std::io::Write;

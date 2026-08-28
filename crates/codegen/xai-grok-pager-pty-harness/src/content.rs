@@ -9,6 +9,10 @@
 //! The caller controls the response text via [`ContentController::set_response`].
 //! The mock server streams the set response to every inference request.
 
+// Test harness: every client here talks to the loopback mock server only,
+// so the extra-CA policy has nothing to apply to.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::Path;
 
 use anyhow::{Context, Result};

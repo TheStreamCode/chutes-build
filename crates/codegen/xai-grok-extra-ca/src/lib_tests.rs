@@ -1,3 +1,6 @@
+// Tests exercise the wrapping itself; ending in .build() is the point.
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 
 // Self-signed PEMs for unit tests only (CN=test-extra-ca-1 / -2).

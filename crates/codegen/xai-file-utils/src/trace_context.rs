@@ -119,6 +119,8 @@ fn extract_context(traceparent: &str) -> Option<opentelemetry::Context> {
 
 #[cfg(test)]
 mod tests {
+    // Loopback/dead-end fixtures: no request crosses a TLS boundary, so the extra-CA policy has nothing to apply to.
+    #![allow(clippy::disallowed_methods)]
     use super::*;
 
     #[test]

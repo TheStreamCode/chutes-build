@@ -1,3 +1,7 @@
+// These tests exercise the wrapping itself; the builder under test ends in
+// a .build() by design.
+#![allow(clippy::disallowed_methods)]
+
 //! Process-isolated: configured garbage file → zero roots; client still builds.
 
 #[test]

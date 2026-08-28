@@ -284,6 +284,10 @@ pub async fn fetch_gcs_version_from_base(channel: &str, base_url: &str) -> Resul
 
 async fn fetch_gcs_channel_pointer(channel: &str, base_url: &str) -> Result<String> {
     let url = format!("{}/{}", base_url, channel);
+    // WHY-ALLOW: manual-only updater reading the channel pointer from GCS,
+    // not a Chutes API endpoint; extra-CA handling for the updater is a
+    // separate product decision.
+    #[allow(clippy::disallowed_methods)]
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()?;

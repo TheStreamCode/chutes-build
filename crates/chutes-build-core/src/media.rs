@@ -26,6 +26,8 @@ pub struct ChutesMediaClient {
 }
 
 impl ChutesMediaClient {
+    // WHY-ALLOW: product-policy client: the SSRF-safe resolver is the security boundary here; extra-CA support for these clients is tracked separately
+    #[allow(clippy::disallowed_methods)]
     pub fn from_env() -> Result<Self, MediaError> {
         let endpoints = ChutesEndpoints::default();
         endpoints.validate()?;

@@ -231,6 +231,10 @@ pub fn bullets_from_entries(entries: &[ChangelogEntry], max: usize) -> Vec<Strin
 
 /// Blocking HTTP fetch. Callers (`std::thread::scope` threads) are already
 /// off the tokio runtime, so no extra thread spawn is needed.
+// WHY-ALLOW: fetches the packaged CHANGELOG from the public release host
+// (GitHub), not a Chutes API endpoint; shell-base is below the crate that
+// owns the extra-CA policy in the dependency graph.
+#[allow(clippy::disallowed_methods)]
 fn fetch_blocking(url: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)

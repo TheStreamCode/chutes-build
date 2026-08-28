@@ -71,6 +71,8 @@ pub(crate) fn client_http1() -> Result<reqwest::Client, reqwest::Error> {
 
 /// Build a `reqwest::Client` for sampling with HTTP/2 + connection pooling.
 /// Env knobs are read once, when the shared client is first built.
+// WHY-ALLOW: the builder is already wrapped with with_extra_root_certificates inside.
+#[allow(clippy::disallowed_methods)]
 fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
     let pool_max_idle: usize = std::env::var("CHUTES_BUILD_POOL_MAX_IDLE")
         .ok()
@@ -101,6 +103,8 @@ fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
 
 /// Build a `reqwest::Client` constrained to HTTP/1.1 with pooling disabled.
 /// Used as a fallback after HTTP/2 transport failures.
+// WHY-ALLOW: the builder is already wrapped with with_extra_root_certificates inside.
+#[allow(clippy::disallowed_methods)]
 fn build_http_client_http1() -> Result<reqwest::Client, reqwest::Error> {
     let connect_timeout_secs: u64 = std::env::var("CHUTES_BUILD_CONNECT_TIMEOUT_SECS")
         .ok()
@@ -120,6 +124,9 @@ fn build_http_client_http1() -> Result<reqwest::Client, reqwest::Error> {
 
 #[cfg(test)]
 mod tests {
+    // Test fixtures never cross a TLS boundary; the build may fail by design.
+    #![allow(clippy::disallowed_methods)]
+
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

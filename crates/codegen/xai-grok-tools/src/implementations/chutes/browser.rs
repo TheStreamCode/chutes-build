@@ -359,6 +359,10 @@ impl BrowserSession {
         let process_group = xai_tty_utils::global_process_scope()
             .enroll(&child)
             .map_err(|error| format!("Failed to enroll the browser process: {error}"))?;
+        // Loopback-only: this client talks to the local headless Chrome's
+        // debug port, never to a Chutes endpoint, so no extra-CA bundle
+        // applies.
+        #[allow(clippy::disallowed_methods)]
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(2))
             .build()

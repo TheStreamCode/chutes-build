@@ -1,3 +1,7 @@
+// These tests exercise the wrapping itself; the builder under test ends in
+// a .build() by design.
+#![allow(clippy::disallowed_methods)]
+
 //! Process-isolated: valid CHUTES_EXTRA_CA_BUNDLE loads one root via OnceLock.
 
 #[test]

@@ -26,6 +26,10 @@ pub enum Error {
 
 impl Mixpanel {
     /// Create a new Mixpanel client with the given project token.
+    // WHY-ALLOW: telemetry path, compile-time deadened on this fork; the
+    // client is only constructed where the (inert) analytics stream would
+    // have been, never for Chutes API traffic.
+    #[allow(clippy::disallowed_methods)]
     pub fn new(token: impl Into<String>) -> Self {
         Self {
             token: token.into(),

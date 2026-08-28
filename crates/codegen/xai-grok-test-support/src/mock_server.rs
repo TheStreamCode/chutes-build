@@ -4,6 +4,11 @@
 //! `/v1/responses`, `/v1/messages`) plus `/v1/models`, `/v1/settings`,
 //! `/v1/user`, `/v1/storage`, `/v1/privacy/coding-data-retention`, and
 //! session writeback (`POST /sessions/{id}/data`, `PUT /sessions/{id}`).
+
+// Everything in this crate targets the loopback mock server; no request
+// crosses a TLS boundary, so the extra-CA policy has nothing to apply to.
+#![allow(clippy::disallowed_methods)]
+
 //!
 //! The inference endpoints answer from the first source that matches: a named
 //! expectation, then the path's [`ScriptedResponse`] queue, then the active

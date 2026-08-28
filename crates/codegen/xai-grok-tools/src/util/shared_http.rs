@@ -82,6 +82,10 @@ fn headers_fingerprint(headers: &reqwest::header::HeaderMap) -> String {
 
 #[cfg(test)]
 mod tests {
+    // The build closures here never send a request - they exercise the cache
+    // alone - so the extra-CA policy has nothing to apply to.
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use reqwest::header::{HeaderMap, HeaderValue};
 
