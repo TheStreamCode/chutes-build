@@ -1381,6 +1381,93 @@ fn resolve_shell_for_prompt() -> String {
 mod tests {
     use super::*;
     use crate::config::AgentScope;
+
+    /// Token-efficiency workstream 2 census: finalize the default toolset and
+    /// rank every tool's per-turn definition cost. Run with:
+    /// `cargo test -p xai-grok-agent --lib builder::tests::tool_catalog_token_budget -- --nocapture`
+    ///
+    /// The total ceiling pins the catalog so descriptions cannot silently
+    /// re-bloat; raise it only with the budget in mind, and shrink it as
+    /// capability-scoped disclosure (workstream 2) lands.
+    #[tokio::test]
+    async fn tool_catalog_token_budget() {
+        use std::collections::HashMap;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = SessionContext {
+            backend: std::sync::Arc::new(
+                xai_grok_tools::computer::local::LocalTerminalBackend::new(),
+            ),
+            fs: std::sync::Arc::new(xai_grok_tools::computer::local::LocalFs),
+            cwd: tmp.path().to_path_buf(),
+            session_folder: tmp.path().join("session"),
+            session_env: std::sync::Arc::new(HashMap::new()),
+            notification_handle: xai_grok_tools::notification::ToolNotificationHandle::noop(),
+            owner_session_id: None,
+            subagent: None,
+            parent_scheduler_handle: None,
+            skills: vec![],
+            state_path: tmp.path().join("state.json"),
+            memory_backend: None,
+            web_search_config: Default::default(),
+            web_fetch_config: Default::default(),
+            lsp: None,
+            image_gen_config: Default::default(),
+            video_gen_config: Default::default(),
+            app_builder_deployer_config: Default::default(),
+            api_key_provider: None,
+            auth_provider: None,
+            attribution_callback: None,
+            system_reminder_tag: xai_grok_tools::reminders::DEFAULT_REMINDER_TAG,
+        };
+        let mut builder = ToolBridge::get_builder();
+        {
+            // Chutes-native tools: registered up front so curated agent
+            // toolsets listing `ChutesBuild:*` ids resolve at finalize time.
+            use xai_grok_tools::implementations::chutes;
+            use xai_grok_tools::implementations::grok_build;
+            builder.register::<chutes::Context7SearchTool>();
+            builder.register::<chutes::Context7DocsTool>();
+            builder.register::<chutes::GetChutesUsageTool>();
+            builder.register::<chutes::ListMediaModelsTool>();
+            builder.register::<chutes::DescribeMediaModelTool>();
+            builder.register::<chutes::GenerateMediaTool>();
+            builder.register::<chutes::BrowserTool>();
+            builder.register::<chutes::OcrPageTool>();
+            builder.register::<grok_build::SchedulerCreateTool>();
+            builder.register::<grok_build::SchedulerDeleteTool>();
+            builder.register::<grok_build::SchedulerListTool>();
+            builder.register::<grok_build::MonitorTool>();
+            builder.register::<grok_build::update_goal::UpdateGoalTool>();
+        }
+        let bridge =
+            ToolBridge::finalize_builder(builder, crate::config::default_grok_build_toolset(), ctx)
+                .await
+                .expect("default toolset finalizes");
+
+        let mut rows: Vec<(String, u64)> = bridge
+            .tool_definitions()
+            .await
+            .into_iter()
+            .map(|def| {
+                let definition = serde_json::to_string_pretty(&def).expect("serializable");
+                let tokens = xai_token_estimation::estimate_tokens(&definition);
+                (def.function.name.clone(), tokens as u64)
+            })
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let total: u64 = rows.iter().map(|(_, t)| t).sum();
+        for (name, tokens) in &rows {
+            println!("{tokens:>6}  {name}");
+        }
+        println!("total {total} estimated tokens across {} tools", rows.len());
+        assert!(
+            total <= 11_200,
+            "tool catalog grew to {total} estimated tokens (ceiling 11,200) - \
+             compress descriptions or update the budget deliberately"
+        );
+    }
+
     fn entry(name: &str, desc: &str, source: SubagentSource) -> SubagentEntry {
         SubagentEntry {
             name: name.to_string(),

@@ -26,6 +26,15 @@ named/hashed-section restructure and the ≥15% fixed-token reduction remain
 the next steps, followed by workstream 2 (capability-scoped tool disclosure)
 — the tool catalog, not the base prompt, dominates the per-turn fixed cost.
 
+Workstream 2 baseline (2026-08-26): finalizing the default toolset measures
+the full per-turn catalog at 11,170 estimated tokens across 24 tools
+(`builder::tests::tool_catalog_token_budget`, ceiling 11,200). The top three
+definitions — browser (1,318), spawn_subagent (1,200), workflow (1,112) —
+carry a third of the cost, and their weight is JSON schema plus parameter
+descriptions, not prose; trimming prose alone cannot reach the target, so
+the deferred-loading architecture (short stable summaries in the initial
+schema, full details on demand) is where the reduction lives.
+
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
 schema loading, content-hash context reuse, structured conversation deltas, and

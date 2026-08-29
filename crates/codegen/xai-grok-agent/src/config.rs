@@ -264,7 +264,7 @@ pub fn toolset_for_preset(preset: &str) -> Option<ToolServerConfig> {
         .map(|(_, toolset)| toolset)
         .or_else(|| registered_toolset_preset(&normalized))
 }
-fn default_grok_build_toolset() -> ToolServerConfig {
+pub(crate) fn default_grok_build_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
