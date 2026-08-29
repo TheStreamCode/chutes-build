@@ -337,15 +337,22 @@ crate's other tests are therefore unmeasured locally; run them per module
 fixture first (`cargo build -p xai-grok-shell --bin auth-provider-fixture`),
 then raise the test-thread stack (`$env:RUST_MIN_STACK = "16777216"` — several
 session tests recurse deeply in the debug profile and overflow the default).
-With both, the suite completes: 2819 passed / 23 failed as of 2026-08-26, and
-the 23 are recorded Windows-shape failures, not a reason to skip the suite —
-run it before and after a change and diff the failing names. Known clusters:
-six `storage::jsonl` durable/copy tests fail with an OS error 5 while the
-append has already committed — a Windows handle without FILE_SHARE_DELETE
-racing the atomic-rename bookkeeping (suspected real `replace_chat_history`
-bug, worth its own investigation); three `signals` RSS tests expect a
-non-zero RSS that the Windows sampler reports as 0; the rest are separator-
-or timing-shaped and shrink steadily as fixtures get ported.
+With both, the suite completes: 2831 passed / 9 failed as of 2026-08-26, and
+the 9 are recorded Windows-shape or harness-shape failures, not a reason to
+skip the suite — run it before and after a change and diff the failing names.
+Fixed this round: `sync_file_path_durable` used to open summary.json read-only
+and `FlushFileBuffers` fails with ERROR_ACCESS_DENIED on a write-less handle
+(every cwd-switch/rewind bookkeeping call reported a bogus failure on
+Windows); the fixture tracker paths moved from `/tmp` to `std::env::temp_dir()`;
+archive names now use `/` per the zip convention; the `unified_list` kind test
+was rewritten for this fork's hard-off chat mode; the RSS sampler tests are
+gated `cfg(unix)` like their twin. Remaining clusters: five
+`compaction::inline_auto_compact_flow_tests` e2e tests fail against their raw
+TCP mock server (request never lands - suspected LocalSet/accept interaction
+worth its own investigation), two `auto_wake_suppression` resource tests and
+one `prompt_queue` drain test assert actor behavior that differs here, and
+`laziness::debug_mode_bypasses_idle_wait` is a 2s ceiling that falls under
+heavy parallel load.
 
 `cargo check --workspace --all-targets` should be clean. If it is not, suspect a
 Unix-only test or example missing a `cfg` before suspecting your change.

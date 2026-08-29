@@ -35,13 +35,27 @@ async fn build_gate_actor() -> SessionActor {
     });
     actor
 }
-/// Flip the fixture's tracker to Active (plan file: `/tmp/test-session/plan.md`).
+/// Flip the fixture's tracker to Active (plan file lives under the process
+/// temp dir; see `plan_file_path`).
 fn activate_plan_mode(actor: &SessionActor) {
     let mut tracker = actor.plan_mode.lock();
     assert!(tracker.enter_pending());
     assert!(tracker.activate());
 }
+/// The fixture's plan file lives under the process temp dir; the gate names
+/// it in the rejection message and the allow test targets it, so both must
+/// agree with `support.rs`'s tracker path on every platform.
+fn plan_file_path() -> String {
+    std::env::temp_dir()
+        .join("test-session")
+        .join("plan.md")
+        .to_string_lossy()
+        .into_owned()
+}
 fn search_replace_call(id: &str, path: &str) -> ToolCallResponse {
+    // JSON-escape: Windows paths carry backslashes that would otherwise
+    // break the embedded JSON document.
+    let path = path.replace('\\', "\\\\");
     ToolCallResponse {
         id: id.to_string(),
         kind: "function".to_string(),
@@ -121,7 +135,7 @@ async fn plan_mode_rejects_grok_edit_outside_plan_file_despite_allow_all_permiss
                 "rejection text: {text}"
             );
             assert!(
-                text.contains("/tmp/test-session/plan.md"),
+                text.contains(&plan_file_path()),
                 "must name the plan file so the model knows the one editable path: {text}"
             );
             assert!(
@@ -142,7 +156,7 @@ async fn plan_mode_allows_plan_file_edit() {
             activate_plan_mode(&actor);
             let result = prepare(
                 &actor,
-                search_replace_call("call_plan_file", "/tmp/test-session/plan.md"),
+                search_replace_call("call_plan_file", &plan_file_path()),
             )
             .await;
             assert!(
@@ -194,7 +208,7 @@ async fn plan_gate_sees_hook_rewritten_path() {
             activate_plan_mode(&actor);
             let result = prepare(
                     &actor,
-                    search_replace_call("call_hook_gate", "/tmp/test-session/plan.md"),
+                    search_replace_call("call_hook_gate", &plan_file_path()),
                 )
                 .await;
             assert!(

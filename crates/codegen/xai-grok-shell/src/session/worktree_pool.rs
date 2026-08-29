@@ -1853,6 +1853,11 @@ pool_size = 3
             instance_dir
                 .to_string_lossy()
                 .contains("worktree_pool/test-instance-uuid")
+                || instance_dir
+                    .to_string_lossy()
+                    .contains("worktree_pool\\test-instance-uuid"),
+            "instance dir: {}",
+            instance_dir.display()
         );
     }
 

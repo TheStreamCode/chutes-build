@@ -280,7 +280,10 @@ impl JsonlStorageAdapter {
     /// lenient readers (e.g. [`Self::read_chat_history_sync`]) then skip.
     async fn sync_file_path_durable(path: PathBuf) -> io::Result<()> {
         tokio::task::spawn_blocking(move || {
-            let file = OpenOptions::new().read(true).open(&path)?;
+            // Windows `FlushFileBuffers` requires a handle with write access;
+            // a read-only handle fails with ERROR_ACCESS_DENIED even though
+            // fsync on a read-only fd is legal on POSIX. No bytes are written.
+            let file = OpenOptions::new().read(true).write(true).open(&path)?;
             Self::sync_file_durable(&file)
         })
         .await

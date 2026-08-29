@@ -1188,6 +1188,10 @@ async fn test_gcs_queue_snapshot() {
 }
 
 #[test]
+// `sample_rss_bytes` reads `task_info`/`/proc` and reports 0 by design
+// elsewhere; the non-zero assertions are POSIX-only, like the twin test in
+// `upload/trace.rs`.
+#[cfg(unix)]
 fn test_sample_rss_bytes_returns_nonzero() {
     let rss = sample_rss_bytes();
     // On macOS and Linux, RSS should be > 0 for any running process
@@ -1201,6 +1205,7 @@ fn test_sample_rss_bytes_returns_nonzero() {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_sample_rss_bytes_is_stable() {
     // Two consecutive calls should return similar values (no wild swings)
     let rss1 = sample_rss_bytes();
@@ -1223,12 +1228,16 @@ async fn test_peak_rss_recorded_at_turn_end() {
     handle.increment_turn();
     let snapshot = handle.take_turn_end_snapshot().await.unwrap();
 
-    // peak_rss_bytes should have been sampled during the turn-end snapshot
+    // peak_rss_bytes is sampled via `sample_rss_bytes`, which reports 0
+    // outside Unix by design.
+    #[cfg(unix)]
     assert!(
         snapshot.current.peak_rss_bytes > 0,
         "peak_rss_bytes should be > 0 after turn end, got {}",
         snapshot.current.peak_rss_bytes
     );
+    #[cfg(not(unix))]
+    assert_eq!(snapshot.current.peak_rss_bytes, 0);
 
     handle.shutdown();
     actor_handle.await.unwrap();
