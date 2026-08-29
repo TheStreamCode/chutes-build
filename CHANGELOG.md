@@ -4,6 +4,14 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Generated shell completions no longer leak the upstream binary name.** The zsh generator embeds subcommand doc comments, and an MCP argument comment still said `grok`; all four generators now produce scripts with zero upstream-name occurrences.
+- **The encrypted agent prompt matches the current prompt templates again.** The 1.0.8 session port reverted `prompt_encrypted.rs` to stale ciphertext; the fork's template encryption generator is restored, so the staleness gate is reproducible instead of hand-patched.
+- **Windows session bookkeeping no longer reports phantom flush failures.** The durable summary sync reopened `summary.json` read-only, and Windows refuses `FlushFileBuffers` on a write-less handle, so cwd-switch and rewind bookkeeping failed even after the append had committed.
+
 ## [1.3.0] - 2026-08-25
 
 ### Added

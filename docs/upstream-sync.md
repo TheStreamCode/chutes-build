@@ -991,7 +991,7 @@ into the `holder info unreadable` branch it already has, so staleness is decided
 mtime. It degrades safely — it waits the full threshold before breaking a lock —
 but the liveness probe does not run there.
 
-374 pass, 0 fail.
+385 pass, 0 fail.
 
 ## Review record: 2026-08-07
 
@@ -1310,3 +1310,27 @@ and the CHANGELOG fetch are allowed as non-Chutes endpoints, and the
 `chutes-build-core` policy clients are allowed because the SSRF-safe
 resolver is their security boundary — extending the extra-CA bundle to
 those clients is tracked as a follow-up product decision.
+
+### Post-release stabilization, 2026-08-29
+
+After 1.3.0, the remaining Windows fallout from the 1.0.8 session port got a
+second pass. The auth suite is now measured at 385 passing tests after the
+quoted-provider payloads were moved to direct `args` execution, and the
+`session::` suite is runnable on Windows once the provider fixture is built and
+the test-thread stack is raised: it went from aborting on a stack overflow to
+2831 passing and 9 recorded harness-shape or behavior-divergence failures.
+
+The important part of that pass was not test-only: `sync_file_path_durable`
+opened `summary.json` read-only and then called `FlushFileBuffers`, which Windows
+rejects with `ERROR_ACCESS_DENIED` on a write-less handle. Every cwd-switch and
+rewind bookkeeping call could therefore report a failed durable sync even though
+the append had already committed. The handle now opens read-write, while POSIX
+behavior is unchanged. The other fixes in the same commit make fixtures use
+platform temp paths, normalize zip archive names to `/`, accept native path
+separators in display assertions, gate RSS sampler tests to Unix, and pin this
+fork's hard-off chat-mode list behavior as pure passthrough.
+
+The remaining `session::` failures are documented in `AGENTS.md`: five compaction
+e2e tests with their raw mock server, two auto-wake resource tests, one
+prompt-queue drain test, and one laziness timing test with a deliberately tight
+2-second ceiling.

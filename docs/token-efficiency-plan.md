@@ -1,6 +1,6 @@
 # Token Efficiency Plan
 
-## Implementation status (reviewed 2026-07-26)
+## Implementation status (reviewed 2026-08-29)
 
 The low-risk foundation is implemented:
 
