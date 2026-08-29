@@ -222,7 +222,13 @@ mod tests {
             session_id: "sess_abc123".into(),
             summary: "Implement session list API".into(),
             updated_at: "2026-10-29T14:22:15Z".into(),
-            cwd: "/Users/me/xai".into(),
+            // Absolute on every platform: `/Users/...` is not absolute on
+            // Windows and the row conversion rejects a relative cwd.
+            cwd: if cfg!(windows) {
+                "C:\\Users\\me\\chutes".into()
+            } else {
+                "/Users/me/chutes".into()
+            },
             ..MergedSession::default()
         };
         let info = merged_session_to_row(merged, facet_registry()).into_session_info();

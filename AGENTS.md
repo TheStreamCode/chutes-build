@@ -333,6 +333,20 @@ the full run overflows a 1 MB thread stack in the debug profile on Windows. That
 crate's other tests are therefore unmeasured locally; run them per module
 (`agent::config`, `session::`) when working in that area.
 
+`session::` is now runnable on Windows with two prerequisites: build the
+fixture first (`cargo build -p xai-grok-shell --bin auth-provider-fixture`),
+then raise the test-thread stack (`$env:RUST_MIN_STACK = "16777216"` — several
+session tests recurse deeply in the debug profile and overflow the default).
+With both, the suite completes: 2819 passed / 23 failed as of 2026-08-26, and
+the 23 are recorded Windows-shape failures, not a reason to skip the suite —
+run it before and after a change and diff the failing names. Known clusters:
+six `storage::jsonl` durable/copy tests fail with an OS error 5 while the
+append has already committed — a Windows handle without FILE_SHARE_DELETE
+racing the atomic-rename bookkeeping (suspected real `replace_chat_history`
+bug, worth its own investigation); three `signals` RSS tests expect a
+non-zero RSS that the Windows sampler reports as 0; the rest are separator-
+or timing-shaped and shrink steadily as fixtures get ported.
+
 `cargo check --workspace --all-targets` should be clean. If it is not, suspect a
 Unix-only test or example missing a `cfg` before suspecting your change.
 

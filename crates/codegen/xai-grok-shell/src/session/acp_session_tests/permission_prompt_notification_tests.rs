@@ -28,7 +28,7 @@ fn install_notification_client_hook(actor: &SessionActor) {
 
 fn install_real_permissions(actor: &mut SessionActor, yolo: bool, gateway: AcpAgentGatewaySender) {
     let cwd = AbsPathBuf::new(std::path::PathBuf::from(actor.session_info.cwd.clone()))
-        .unwrap_or_else(|_| AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap());
+        .unwrap_or_else(|_| AbsPathBuf::new(std::env::temp_dir()).unwrap());
     let (handle, _ev) = spawn_permission_manager(
         actor.session_info.id.clone(),
         gateway,

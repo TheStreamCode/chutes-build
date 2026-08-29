@@ -19,7 +19,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
         .run_until(async {
             let tmp = tempfile::TempDir::new().unwrap();
             let session_dir = tmp.path().join("session");
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).unwrap();
             let fs = Arc::new(xai_grok_workspace::file_system::MockFs::new(
                 cwd.to_path_buf(),
             ));
@@ -857,7 +857,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
             let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel::<
                 PersistenceMsg,
             >();
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).unwrap();
             let fs = Arc::new(
                 xai_grok_workspace::file_system::MockFs::new(cwd.to_path_buf()),
             );
@@ -2399,7 +2399,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
             let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel::<
                 PersistenceMsg,
             >();
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).unwrap();
             let fs = Arc::new(
                 xai_grok_workspace::file_system::MockFs::new(cwd.to_path_buf()),
             );
