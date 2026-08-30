@@ -48,7 +48,7 @@ pub fn tool_config_from_entry(
             Some(params_name_overrides)
         },
         description_override,
-        compact_schema: None,
+        compact_schema: false,
         behavior_version,
         kind: None,
     })
@@ -59,6 +59,13 @@ pub fn tool_config_from_entry(
 ///
 /// `behavior_preset` is always `None` (the `"current"` default); per-tool
 /// `behavior_version` overrides on individual entries still apply.
+///
+/// Compact-schema disclosure is deliberately **not** threaded through the raw
+/// wire entries: the model-facing catalog policy lives in the named presets
+/// (`default_grok_build_toolset` and friends), which set `compact_schema`
+/// on the heavy built-ins. A config assembled from raw gRPC entries stays
+/// full-schema; if a future caller needs the same policy it should apply the
+/// named preset, not duplicate the tool-id list here.
 pub fn tool_server_config_from_entries(
     entries: Vec<xai_grok_tools_api::ToolConfigEntry>,
 ) -> Result<ToolServerConfig, ToolConfigEntryError> {

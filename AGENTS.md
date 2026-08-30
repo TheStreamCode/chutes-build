@@ -352,8 +352,9 @@ failing names. Fixed in this pass: `sync_file_path_durable` used to open
 summary.json read-only and `FlushFileBuffers` fails with ERROR_ACCESS_DENIED on
 a write-less handle (every cwd-switch/rewind bookkeeping call reported a bogus
 failure on Windows); the compaction raw mock now drains the request body before
-answering; the actor fixture gives each tool bridge its own resource state file
-so one test cannot inherit `ReportedTaskCompletions`; the laziness debug path
+answering; the actor fixture gives each tool bridge its own resource state
+directory (the registry writes to `state_path.parent()`); the laziness debug
+path
 uses a local 401 endpoint instead of relying on a Windows firewall-shaped
 loopback connect delay; the fixture tracker paths moved from `/tmp` to
 `std::env::temp_dir()`; archive names use `/` per the zip convention; the

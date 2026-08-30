@@ -179,7 +179,9 @@ fn kill_task_tool_config() -> ToolConfig {
 /// Extends `default_grok_build_toolset()` with tools that are dynamically
 /// injected by `AgentBuilder::build()` or only available in specific modes.
 /// In proxy mode, the workspace server executes ALL tools — the shell has
-/// zero local dispatch.
+/// zero local dispatch. The heavy built-ins already carry their compact
+/// schemas from `default_grok_build_toolset()`, so this layer only adds the
+/// workspace-only tools and must not re-push anything already present.
 pub fn workspace_grok_build_toolset() -> ToolServerConfig {
     let mut tools = default_grok_build_toolset().tools;
     tools.push((&opencode::OpenCodeWriteTool).into());
@@ -187,12 +189,6 @@ pub fn workspace_grok_build_toolset() -> ToolServerConfig {
     tools.push((&grok_build::ExitPlanModeTool).into());
     tools.push((&grok_build::AskUserQuestionTool).into());
     tools.push((&grok_build::WebSearchTool).into());
-    tools.push((&chutes::Context7SearchTool).into());
-    tools.push((&chutes::Context7DocsTool).into());
-    tools.push((&chutes::ListMediaModelsTool).into());
-    tools.push((&chutes::DescribeMediaModelTool).into());
-    tools.push((&chutes::GenerateMediaTool).into());
-    tools.push((&chutes::BrowserTool).into());
     tools.push((&grok_build::WebFetchTool).into());
     tools.push((&memory::search_tool::MemorySearchImpl).into());
     tools.push((&memory::get_tool::MemoryGetImpl).into());

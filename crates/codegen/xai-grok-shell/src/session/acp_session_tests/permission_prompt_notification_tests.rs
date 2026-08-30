@@ -157,7 +157,7 @@ fn edit_toolset() -> Vec<ToolConfig> {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
-            compact_schema: None,
+            compact_schema: false,
             behavior_version: None,
             kind: None,
         },
