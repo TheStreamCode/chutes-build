@@ -150,10 +150,16 @@ fn bash_tool_config() -> ToolConfig {
 }
 /// Task/subagent tool with clearer model-facing names:
 /// `task` → `spawn_subagent`, `run_in_background` → `background`.
+///
+/// Exports a compact schema: W2's capability-scoped disclosure leaves the
+/// field-by-field JSON-Schema prose out of every turn's fixed cost while
+/// dispatch keeps validating against the canonical schema. The tool's
+/// description still explains the three parameters by name.
 fn task_tool_config() -> ToolConfig {
     ToolConfig::from(&grok_build::TaskTool)
         .with_name("spawn_subagent")
         .with_param_rename("run_in_background", "background")
+        .with_compact_schema()
 }
 /// Task output tool renamed for clarity:
 /// `get_task_output` → `get_command_or_subagent_output`.
@@ -288,9 +294,9 @@ pub(crate) fn default_grok_build_toolset() -> ToolServerConfig {
             (&chutes::ListMediaModelsTool).into(),
             (&chutes::DescribeMediaModelTool).into(),
             (&chutes::GenerateMediaTool).into(),
-            (&chutes::BrowserTool).into(),
+            ToolConfig::from(&chutes::BrowserTool).with_compact_schema(),
             (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::WorkflowTool).into(),
+            ToolConfig::from(&grok_build::WorkflowTool).with_compact_schema(),
         ],
         behavior_preset: None,
     }

@@ -1461,10 +1461,15 @@ mod tests {
             println!("{tokens:>6}  {name}");
         }
         println!("total {total} estimated tokens across {} tools", rows.len());
+        // W2 capability-scoped disclosure, increment 1: `browser`,
+        // `spawn_subagent`, and `workflow` export compact schemas (structural
+        // fields preserved, prose field descriptions dropped). 11,170 → 9,877.
+        // Keep the ceiling at the measured total plus a deliberate margin so
+        // a new tool cannot silently re-bloat every turn's fixed cost.
         assert!(
-            total <= 11_200,
-            "tool catalog grew to {total} estimated tokens (ceiling 11,200) - \
-             compress descriptions or update the budget deliberately"
+            total <= 9_900,
+            "tool catalog grew to {total} estimated tokens (ceiling 9,900) - \
+             compact the schema further or update the budget deliberately"
         );
     }
 

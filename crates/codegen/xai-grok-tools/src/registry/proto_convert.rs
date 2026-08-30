@@ -48,6 +48,7 @@ pub fn tool_config_from_entry(
             Some(params_name_overrides)
         },
         description_override,
+        compact_schema: None,
         behavior_version,
         kind: None,
     })

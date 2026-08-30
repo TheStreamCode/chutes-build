@@ -65,6 +65,18 @@ pub struct ToolConfig {
     /// vs. the default host-shell description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description_override: Option<String>,
+    /// When true, the tool's **exported** schema loses its prose `description`
+    /// fields (recursively, including nested objects, array items, and
+    /// `$defs`). Structural fields — names, types, enum values, `required`,
+    /// and union members — are preserved, and dispatch keeps validating
+    /// against the canonical `input_schema`, so this only changes what the
+    /// model reads, never what a call validates against.
+    ///
+    /// This is capability-scoped disclosure, W2-style: heavy tools ship a
+    /// compact wire shape while full context lives at the call site via a
+    /// detail tool (added later) or in the tool's description layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_schema: Option<()>,
     /// Per-tool behavior version override. Wins over `ToolServerConfig::behavior_preset`.
     /// Only valid for version-managed tools (see `versions::MANAGED_TOOLS`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -137,6 +149,7 @@ impl ToolConfig {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind: None,
         }
@@ -160,6 +173,14 @@ impl ToolConfig {
         self.params
             .get_or_insert_with(serde_json::Map::new)
             .insert(key.into(), value.into());
+        self
+    }
+    /// Register this toolset entry to export a compact schema: the model sees
+    /// the parameter names, types, and enum values, but not the prose
+    /// field-by-field descriptions. Dispatch still validates against the
+    /// canonical (uncompacted) schema.
+    pub fn with_compact_schema(mut self) -> Self {
+        self.compact_schema = Some(());
         self
     }
     /// Add a single parameter name remapping (canonical -> client-facing).
@@ -194,6 +215,7 @@ impl<T: crate::types::tool_metadata::ToolMetadata + xai_tool_runtime::Tool> From
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind: Some(tool.kind()),
         }
@@ -1179,6 +1201,9 @@ impl ToolRegistryBuilder {
                 crate::DEFAULT_TOOL_OUTPUT_BYTES,
                 xai_tool_types::max_wait_block_ms(),
             );
+            if tool_config.compact_schema.is_some() {
+                compact_exported_schema(&mut definition.function.parameters);
+            }
             (entry.apply_params)(&effective_params, &mut resources);
             tools.push(FinalizedTool {
                 namespace: entry.namespace,
@@ -2156,6 +2181,32 @@ fn has_tool_with_bool_param(
             && tool.params.get(param).and_then(|value| value.as_bool()) == Some(expected)
     })
 }
+
+/// Remove every recursive `description` (and `examples`) from a JSON Schema
+/// value while keeping its structural shape: property names, `type`, enum
+/// values, `required`, union members, and `$ref` links all survive.
+///
+/// This is the export-side half of capability-scoped disclosure. The model
+/// reads the compact copy; the tool's canonical `input_schema` — untouched —
+/// remains the contract dispatch validates against.
+fn compact_exported_schema(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("description");
+            map.remove("examples");
+            for child in map.values_mut() {
+                compact_exported_schema(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                compact_exported_schema(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn compute_effective_params(
     entry: &ToolEntry,
     tool_config: &ToolConfig,
@@ -2191,6 +2242,132 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    #[test]
+    fn compact_exported_schema_strips_prose_keeps_structure() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "description": "tool-level prose",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "description": "which action to run",
+                    "enum": ["read", "write"]
+                },
+                "nested": {
+                    "type": "object",
+                    "description": "nested prose",
+                    "properties": {
+                        "flag": { "type": "boolean", "description": "flag prose" }
+                    }
+                },
+                "items": {
+                    "type": "array",
+                    "description": "item prose",
+                    "items": { "type": "string", "description": "element prose" }
+                },
+                "either": {
+                    "description": "union prose",
+                    "anyOf": [
+                        { "type": "string", "description": "a prose" },
+                        { "type": "number", "description": "b prose" }
+                    ]
+                }
+            },
+            "required": ["mode"],
+            "$defs": {
+                "ref_type": { "type": "string", "description": "def prose" }
+            },
+            "structured": {
+                "const": "fixed",
+                "default": "value",
+                "minimum": 3,
+                "examples": ["dropped"]
+            }
+        });
+
+        compact_exported_schema(&mut schema);
+
+        let text = serde_json::to_string(&schema).unwrap();
+        assert!(!text.contains("prose"), "decisions carried nowhere: {text}");
+        assert!(!text.contains("dropped"), "examples must also be dropped");
+
+        // Structure survives exactly.
+        assert!(schema["properties"]["mode"]["type"] == "string");
+        assert!(schema["properties"]["mode"]["enum"] == serde_json::json!(["read", "write"]));
+        assert!(schema["required"] == serde_json::json!(["mode"]));
+        assert!(
+            schema["properties"]["items"]["items"]["type"] == "string",
+            "array item types survive"
+        );
+        assert!(
+            schema["properties"]["either"]["anyOf"]
+                .as_array()
+                .unwrap()
+                .len()
+                == 2,
+            "union members survive"
+        );
+        assert!(
+            schema["properties"]["either"]["anyOf"][0]["type"] == "string",
+            "union member types survive"
+        );
+        assert!(
+            schema["$defs"]["ref_type"]["type"] == "string",
+            "$defs survive"
+        );
+    }
+
+    #[tokio::test]
+    async fn compact_schema_flag_compacts_only_the_named_tool() {
+        let mut registry = ToolRegistryBuilder::new();
+        registry.register::<crate::implementations::grok_build::ListDirTool>();
+        registry.register::<crate::implementations::grok_build::TodoWriteTool>();
+        let config = ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<crate::implementations::grok_build::ListDirTool>()
+                    .with_compact_schema(),
+                ToolConfig::for_tool::<crate::implementations::grok_build::TodoWriteTool>(),
+            ],
+            behavior_preset: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let ctx = test_session_context(&tmp);
+        let toolset = Arc::new(
+            registry
+                .finalize(config, ctx)
+                .expect("compact-scope finalize succeeds"),
+        );
+
+        let compact = toolset
+            .tool_definitions()
+            .into_iter()
+            .find(|d| d.function.name == "list_dir")
+            .expect("list_dir exports");
+        let compact_text = serde_json::to_string(&compact.function.parameters).unwrap();
+        assert!(
+            !compact_text.contains("description"),
+            "compact tool exports no prose schema descriptions: {compact_text}"
+        );
+
+        let full = toolset
+            .tool_definitions()
+            .into_iter()
+            .find(|d| d.function.name == "todo_write")
+            .expect("todo_write exports");
+        let full_text = serde_json::to_string(&full.function.parameters).unwrap();
+        assert!(
+            full_text.contains("description"),
+            "flag must not leak across the toolset: {full_text}"
+        );
+        // Structural field survives on the compacted tool.
+        let compact_value = serde_json::to_value(&compact.function.parameters).unwrap();
+        assert!(
+            compact_value["properties"]["target_directory"]["type"] == "string",
+            "parameter names and types survive compaction"
+        );
+    }
+
     /// Build a `SessionContext` for tests using a temp dir and real local
     /// filesystem/terminal backends.
     fn test_session_context(tmp: &TempDir) -> SessionContext {
@@ -2247,6 +2424,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2261,6 +2439,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2316,6 +2495,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2325,6 +2505,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2649,6 +2830,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2661,6 +2843,7 @@ mod tests {
                         "find".to_string(),
                     )])),
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2789,6 +2972,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2798,6 +2982,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2887,6 +3072,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2896,6 +3082,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2910,6 +3097,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -2922,6 +3110,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3027,6 +3216,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3036,6 +3226,7 @@ mod tests {
                     name_override: None, // both resolve to "read_file"
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3066,6 +3257,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -3097,6 +3289,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -3123,6 +3316,7 @@ mod tests {
                     name_override: None, // client_name = "read_file"
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3132,6 +3326,7 @@ mod tests {
                     name_override: Some("codex_read_file".to_string()), // disambiguated
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3162,6 +3357,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3171,6 +3367,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3685,6 +3882,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -3715,6 +3913,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3724,6 +3923,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3751,6 +3951,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3760,6 +3961,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3787,6 +3989,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3796,6 +3999,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3805,6 +4009,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3842,6 +4047,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -3893,6 +4099,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3902,6 +4109,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3911,6 +4119,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -3964,6 +4173,7 @@ mod tests {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind: None,
         };
@@ -4049,6 +4259,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4085,6 +4296,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: Some("custom bash description".to_string()),
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4130,6 +4342,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4151,6 +4364,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4190,6 +4404,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4217,6 +4432,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4244,6 +4460,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4276,6 +4493,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -4298,6 +4516,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4307,6 +4526,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4316,6 +4536,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4325,6 +4546,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4334,6 +4556,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4343,6 +4566,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4352,6 +4576,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4361,6 +4586,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4370,6 +4596,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4404,6 +4631,7 @@ mod tests {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind: None,
         }
@@ -4580,6 +4808,7 @@ mod tests {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
+                    compact_schema: None,
                     behavior_version: None,
                     kind: None,
                 },
@@ -4619,6 +4848,7 @@ mod tests {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind: None,
         }
@@ -4923,6 +5153,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],
@@ -5001,6 +5232,7 @@ mod tests {
                 name_override: None,
                 params_name_overrides: None,
                 description_override: None,
+                compact_schema: None,
                 behavior_version: None,
                 kind: None,
             }],

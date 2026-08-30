@@ -35,6 +35,16 @@ descriptions, not prose; trimming prose alone cannot reach the target, so
 the deferred-loading architecture (short stable summaries in the initial
 schema, full details on demand) is where the reduction lives.
 
+Workstream 2 increment 1 (2026-08-30): the default toolset configures
+`browser`, `spawn_subagent`, and `workflow` to export compact schemas — every
+recursive `description`/`examples` field is dropped from the exported copy,
+while parameter names, types, enum values, `required`, and union members
+survive, and dispatch keeps validating against the untouched canonical
+`input_schema`. The measured catalog drops 11,170 → 9,877 estimated tokens
+(−11.6%) and the budget test's ceiling drops to 9,900 so the fixed cost cannot
+silently re-bloat. Aggregate savings land on every turn; the "detail on
+demand" meta-tool and capability-based filtering remain the next steps.
+
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped
 schema loading, content-hash context reuse, structured conversation deltas, and

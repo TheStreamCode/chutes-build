@@ -640,6 +640,7 @@ pub mod test_support {
             name_override: None,
             params_name_overrides: None,
             description_override: None,
+            compact_schema: None,
             behavior_version: None,
             kind,
         }
