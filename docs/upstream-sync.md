@@ -1318,19 +1318,22 @@ second pass. The auth suite is now measured at 385 passing tests after the
 quoted-provider payloads were moved to direct `args` execution, and the
 `session::` suite is runnable on Windows once the provider fixture is built and
 the test-thread stack is raised: it went from aborting on a stack overflow to
-2831 passing and 9 recorded harness-shape or behavior-divergence failures.
+2840 passing and no failures.
 
 The important part of that pass was not test-only: `sync_file_path_durable`
 opened `summary.json` read-only and then called `FlushFileBuffers`, which Windows
 rejects with `ERROR_ACCESS_DENIED` on a write-less handle. Every cwd-switch and
 rewind bookkeeping call could therefore report a failed durable sync even though
 the append had already committed. The handle now opens read-write, while POSIX
-behavior is unchanged. The other fixes in the same commit make fixtures use
-platform temp paths, normalize zip archive names to `/`, accept native path
-separators in display assertions, gate RSS sampler tests to Unix, and pin this
-fork's hard-off chat-mode list behavior as pure passthrough.
+behavior is unchanged.
 
-The remaining `session::` failures are documented in `AGENTS.md`: five compaction
-e2e tests with their raw mock server, two auto-wake resource tests, one
-prompt-queue drain test, and one laziness timing test with a deliberately tight
-2-second ceiling.
+The last nine test failures were also platform-shaped, not intentional product
+divergences. The compaction raw mock now drains the full request body before
+answering, which fixes the five e2e connection errors; the tool-bridge fixture
+uses a unique per-actor resource state file, which stops one actor from
+inheriting `ReportedTaskCompletions` from another; and the laziness debug path
+now uses a local 401 endpoint instead of relying on a fast failure from a
+non-listening loopback URL. Those three changes made `session::` green on
+Windows without weakening any assertion: the suite still checks auth, compaction
+suppression, auto-wake accounting, prompt-queue holding, and idle-threshold
+bypass behavior.

@@ -51,6 +51,56 @@ fn detector_entry(
 /// a connect error — sufficient to exercise every abort/idle path.
 /// Returns the actor wrapped in `Arc` and the owned tempdir (so
 /// the file outlives the actor).
+async fn spawn_unauthorized_laziness_server() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("laziness test HTTP server must bind");
+    let addr = listener.local_addr().expect("laziness server addr");
+    tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stream);
+                let mut header_line = Vec::new();
+                let mut content_length = 0usize;
+                loop {
+                    header_line.clear();
+                    let read = reader
+                        .read_until(b'\n', &mut header_line)
+                        .await
+                        .unwrap_or(0);
+                    if read == 0 || header_line == b"\r\n" || header_line == b"\n" {
+                        break;
+                    }
+                    let header = String::from_utf8_lossy(&header_line).to_ascii_lowercase();
+                    if let Some(value) = header.strip_prefix("content-length:")
+                        && let Ok(value) = value.trim().parse::<usize>()
+                    {
+                        content_length = value;
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body).await;
+                }
+                let mut stream = reader.into_inner();
+                let response = "{\"error\":{\"type\":\"authentication_error\",\"message\":\"Unauthorized (401)\"}}";
+                let header = format!(
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    response.len()
+                );
+                let _ = stream.write_all(header.as_bytes()).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://{addr}")
+}
+
 async fn make_laziness_actor(
     detector: LazinessDetectorPerModelConfig,
 ) -> (Arc<SessionActor>, tempfile::TempDir) {
@@ -60,6 +110,18 @@ async fn make_laziness_actor(
     let (persistence_tx, _persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
     let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    // Windows can stall a connect attempt to a non-listening loopback endpoint
+    // behind the firewall. The path under test only needs a sampler failure;
+    // a local 401 endpoint exercises the classifier-error abort without that
+    // platform-shaped transport delay.
+    let base_url = spawn_unauthorized_laziness_server().await;
+    let mut cfg = actor
+        .chat_state_handle
+        .get_sampling_config()
+        .await
+        .expect("test actor must have sampling config");
+    cfg.base_url = base_url;
+    actor.chat_state_handle.update_sampling_config(cfg);
     actor.events = crate::session::events::EventTracker::new(tmp.path());
     // Install the test model into the catalog and point the
     // current id at it. `insert_test_entry` is gated on
@@ -549,6 +611,17 @@ async fn make_debug_actor(
     let (persistence_tx, _persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
     let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    // Same as `make_laziness_actor`: Windows stalls a non-listening loopback
+    // connect, but a local 401 endpoint gives the classifier abort a fast,
+    // deterministic sampler failure.
+    let base_url = spawn_unauthorized_laziness_server().await;
+    let mut cfg = actor
+        .chat_state_handle
+        .get_sampling_config()
+        .await
+        .expect("test actor must have sampling config");
+    cfg.base_url = base_url;
+    actor.chat_state_handle.update_sampling_config(cfg);
     actor.events = crate::session::events::EventTracker::new(tmp.path());
     let mut entry = detector_entry(false, 0, None);
     entry.info.laziness_detector = detector;
@@ -639,12 +712,11 @@ async fn debug_mode_bypasses_idle_wait() {
             drop(Arc::try_unwrap(actor).ok().unwrap());
             // 2s ceiling: the bypass path still does a chat-state
             // MPSC roundtrip, two tool-bridge reads,
-            // `prepare_chat_completion` + JWT refresh, a TCP
-            // connect attempt against localhost, and a JSONL
-            // append — all of which can run slowly on shared CI.
-            // 2s is still 30_000× faster than the configured
-            // 60_000ms idle threshold, so the bypass signal is
-            // unambiguous.
+            // `prepare_chat_completion` + JWT refresh, a local
+            // sampler call, and a JSONL append — all of which can
+            // run slowly on shared CI. 2s is still 30_000× faster
+            // than the configured 60_000ms idle threshold, so the
+            // bypass signal is unambiguous.
             assert!(
                 elapsed < std::time::Duration::from_millis(2000),
                 "idle threshold must be bypassed in debug mode (took {elapsed:?})",

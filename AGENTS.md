@@ -337,22 +337,19 @@ crate's other tests are therefore unmeasured locally; run them per module
 fixture first (`cargo build -p xai-grok-shell --bin auth-provider-fixture`),
 then raise the test-thread stack (`$env:RUST_MIN_STACK = "16777216"` — several
 session tests recurse deeply in the debug profile and overflow the default).
-With both, the suite completes: 2831 passed / 9 failed as of 2026-08-26, and
-the 9 are recorded Windows-shape or harness-shape failures, not a reason to
-skip the suite — run it before and after a change and diff the failing names.
-Fixed this round: `sync_file_path_durable` used to open summary.json read-only
-and `FlushFileBuffers` fails with ERROR_ACCESS_DENIED on a write-less handle
-(every cwd-switch/rewind bookkeeping call reported a bogus failure on
-Windows); the fixture tracker paths moved from `/tmp` to `std::env::temp_dir()`;
-archive names now use `/` per the zip convention; the `unified_list` kind test
-was rewritten for this fork's hard-off chat mode; the RSS sampler tests are
-gated `cfg(unix)` like their twin. Remaining clusters: five
-`compaction::inline_auto_compact_flow_tests` e2e tests fail against their raw
-TCP mock server (request never lands - suspected LocalSet/accept interaction
-worth its own investigation), two `auto_wake_suppression` resource tests and
-one `prompt_queue` drain test assert actor behavior that differs here, and
-`laziness::debug_mode_bypasses_idle_wait` is a 2s ceiling that falls under
-heavy parallel load.
+With both, the suite is green on Windows: 2840 passed / 0 failed / 4 ignored as
+of 2026-08-30. Keep running it before and after session changes and diff the
+failing names. Fixed in this pass: `sync_file_path_durable` used to open
+summary.json read-only and `FlushFileBuffers` fails with ERROR_ACCESS_DENIED on
+a write-less handle (every cwd-switch/rewind bookkeeping call reported a bogus
+failure on Windows); the compaction raw mock now drains the request body before
+answering; the actor fixture gives each tool bridge its own resource state file
+so one test cannot inherit `ReportedTaskCompletions`; the laziness debug path
+uses a local 401 endpoint instead of relying on a Windows firewall-shaped
+loopback connect delay; the fixture tracker paths moved from `/tmp` to
+`std::env::temp_dir()`; archive names use `/` per the zip convention; the
+`unified_list` kind test was rewritten for this fork's hard-off chat mode; and
+the RSS sampler tests are gated `cfg(unix)` like their twin.
 
 `cargo check --workspace --all-targets` should be clean. If it is not, suspect a
 Unix-only test or example missing a `cfg` before suspecting your change.

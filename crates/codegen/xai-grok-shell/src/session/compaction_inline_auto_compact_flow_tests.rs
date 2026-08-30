@@ -700,9 +700,35 @@ async fn spawn_status_body_server(status: u16, body: &'static str) -> String {
                 break;
             };
             tokio::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                let mut buf = [0u8; 4096];
-                let _ = stream.read(&mut buf).await;
+                use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+                let mut reader = BufReader::new(stream);
+                let mut header_line = Vec::new();
+                let mut content_length = 0usize;
+
+                loop {
+                    header_line.clear();
+                    let read = reader
+                        .read_until(b'\n', &mut header_line)
+                        .await
+                        .unwrap_or(0);
+                    if read == 0 || header_line == b"\r\n" || header_line == b"\n" {
+                        break;
+                    }
+                    let header = String::from_utf8_lossy(&header_line).to_ascii_lowercase();
+                    if let Some(value) = header.strip_prefix("content-length:")
+                        && let Ok(value) = value.trim().parse::<usize>()
+                    {
+                        content_length = value;
+                    }
+                }
+
+                let mut body_bytes = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body_bytes).await;
+                }
+                let mut stream = reader.into_inner();
+
                 let resp = format!(
                     "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len(),
