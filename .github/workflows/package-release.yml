@@ -91,6 +91,8 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
+      # Cache only dependency sources. `target` release-dist artifacts are too
+      # large to restore reliably on GitHub runners and are rebuilt per target.
       - name: Restore Cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -98,10 +100,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-${{ runner.arch }}-release-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-release-deps-v1-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-release-
+            ${{ runner.os }}-${{ runner.arch }}-release-deps-v1-
       - name: Build native binary
         run: cargo build -p chutes-build --profile release-dist --locked
       # `release-dist` sets `strip = false` on purpose — its comment says CI extracts

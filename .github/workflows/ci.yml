@@ -77,6 +77,10 @@ jobs:
     # ~45 minutes of tests plus ~11 of clippy — so a warm cache moves it very little
     # and the headroom here is real but modest, around a quarter. Anything that adds
     # a slow test suite to this job should re-measure rather than assume the margin.
+    #
+    # Cache policy: Cargo *dependencies* are cached, not `target`. The `target`
+    # cache for this workspace can exceed the Linux runner's disk and fails the job
+    # as `No space left on device` before any test runs.
     timeout-minutes: 90
     steps:
       - name: Check out repository
@@ -90,10 +94,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint GitHub Actions workflows
@@ -169,10 +172,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
       - name: Test CLI and pager on Windows
@@ -205,10 +207,9 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
+            ${{ runner.os }}-${{ runner.arch }}-cargo-deps-v1-
       - name: Check Chutes Build
         run: cargo check -p chutes-build --locked
       - name: Test pager on macOS
