@@ -81,16 +81,9 @@ xai-grok-tools	types::resources::tests::resolve_model_path_quoted_literal_backsl
 xai-grok-tools	types::resources::tests::resolve_model_path_root_itself
 xai-grok-tools	types::resources::tests::resolve_model_path_trailing_newline_with_display
 xai-grok-workspace	discovery::tests::discover_agents_md_receives_normalized_rule_content
-xai-grok-workspace	discovery::tests::discover_plugins_finds_manifest_plugin
-xai-grok-workspace	discovery::tests::discover_plugins_json_has_expected_fields
 xai-grok-workspace	envrc::tests::test_path_add
 xai-grok-workspace	envrc::tests::test_simple_export
 xai-grok-workspace	folder_trust::tests::decide_inputs_flags_home_key_unrecordable
-xai-grok-workspace	folder_trust::tests::repo_config_kinds_matches_gate_and_reports_all_kinds
-xai-grok-workspace	folder_trust::tests::repo_configs_present_detects_project_agents
-xai-grok-workspace	folder_trust::tests::repo_configs_present_detects_project_agents_from_subdir
-xai-grok-workspace	folder_trust::tests::repo_configs_present_detects_project_plugins
-xai-grok-workspace	folder_trust::tests::repo_configs_present_detects_project_plugins_in_subdir
 xai-grok-workspace	permission::exec_risk::tests::attached_and_chained_c_paths
 xai-grok-workspace	permission::resolution::tests::accept_edits_unaffected_by_policy_pin
 xai-grok-workspace	permission::resolution::tests::bypass_permissions_blocked_by_policy_pin

@@ -124,13 +124,13 @@ async fn test_agent_from_config(
         subagent: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        // Per-fixture state file: resource persistence stays on for the tools
-        // that exercise it, but no actor inherits reported task completions
-        // from a shared file or from another test process.
-        state_path: std::env::temp_dir().join(format!(
-            "chutes-build-test-tool-state-{}.json",
-            uuid::Uuid::new_v4()
-        )),
+        // Per-fixture state directory: `state_path.parent()` is where the tool
+        // registry writes `resources_state.json`, so a bare unique file name
+        // is NOT enough — every actor needs its own directory, or the next
+        // test inherits `ReportedTaskCompletions` from the previous one.
+        state_path: std::env::temp_dir()
+            .join(format!("chutes-build-test-state-{}", uuid::Uuid::new_v4()))
+            .join("tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
         web_fetch_config: Default::default(),
