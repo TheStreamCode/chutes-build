@@ -298,6 +298,15 @@ no real terminal and fails 50 tests in unrelated areas. The two configurations
 that exist are a VS Code terminal and a clean runner, and the suite reports 8275
 passed, 0 failed in both.
 
+**A non-VS-Code local shell needs `CHUTES_BUILD_FORCE_LEGACY_CONSOLE=0`.** A
+PowerShell host with a legacy console codepage (this workspace's default shell
+reported ibm850) is detected as a legacy console, and the glyph tests expect
+modern Unicode — the result is ~50 toast/render failures whose only cause is
+the host's code page. CI sets the same override for exactly this reason (see
+`ci.yml`'s `CHUTES_BUILD_FORCE_LEGACY_CONSOLE: "0"`). Set it locally before
+reading any pager failure as a regression; with it, the suite returns to the 4
+recorded hook failures.
+
 **`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
 fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,
 `${VAR:-0}`) while a provider command runs through `cmd /C` there — see

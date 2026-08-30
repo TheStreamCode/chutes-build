@@ -142,6 +142,13 @@ Finish with the behavioural checks the gate cannot do: `--version`, `--help`,
   coding-data row is locked with a reason instead of removed, and the banner
   never renders. The extension behind them already refuses the call — this is so
   the product never *offers* what it will then refuse.
+- **Heavy tools export compact schemas** (`ToolConfig::with_compact_schema` on
+  `browser`, `spawn_subagent`, and `workflow`): the exported definition loses
+  its recursive prose `description`/`examples` fields while names, types, enum
+  values, `required`, and union members survive. Dispatch validates against the
+  untouched canonical `input_schema`, so wire structure is unchanged; only what
+  the model reads per turn shrinks (catalog 11,170 → 9,877 estimated tokens,
+  pinned by `tool_catalog_token_budget`). Upstream ships full schemas.
 
 ## Landing this on `main`, and why it constrains branch protection
 
@@ -1337,3 +1344,36 @@ non-listening loopback URL. Those three changes made `session::` green on
 Windows without weakening any assertion: the suite still checks auth, compaction
 suppression, auto-wake accounting, prompt-queue holding, and idle-threshold
 bypass behavior.
+
+A late catch on the same pass: a unique `state_path` **file** was not enough —
+the registry persists to `state_path.parent()/resources_state.json`, so every
+fixture actor shares its parent directory with every other. The fixture now
+gives each actor its own state directory. Two run-green-then-red cycles traced
+to that file are the lesson: when a test reads resources through the tool
+bridge, isolate the *directory*, not the file name.
+
+The first W2 increment landed with the 1.3.1 release: `browser`,
+`spawn_subagent`, and `workflow` export compact schemas (see the deliberate
+divergence above), dropping the per-turn tool catalog from 11,170 to 9,877
+estimated tokens with `tool_catalog_token_budget` re-pinned at 9,900.
+
+A CI-side catch on the same pass: the Linux `Rust quality` job failed three
+runs in a row with `No space left on device` — the workspace `target` cache had
+grown to 19.7 GB, more than the runner's disk. The cargo caches now cover
+dependency sources only (registry index/cache, git db) with a `-deps-v1` key so
+the old `target`-bearing caches cannot be restored by prefix; `target` is
+rebuilt per run. The release workflow got the same treatment with
+`-release-deps-v1`. Deleting the oversized cache was what made the four reruns
+during triage readable — without it, every red job is that same disk error and
+says nothing about the commit.
+
+## Upstream delta observed, not ported: 1.0.8 → 1.0.12 (2026-08-30)
+
+The upstream watch on 2026-08-30 found four new squashed commits
+(`07b2f714` → `bc7f02ed`, 1.0.8 → 1.0.12, 2026-08-24 → 2026-08-28): 1,578
+files, +123,986/−78,379. This is a multi-release delta, not an incremental
+one; it is recorded in the `Upstream` issue (`#7`) with the recommended
+`port_assist.py --base 07b2f714` starting point and awaits a dedicated porting
+session. `.github/upstream.json` still says `07b2f714` / 1.0.8 — the field
+means "this is the upstream this tree is", and it does not move until the port
+lands.
