@@ -4,7 +4,11 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.1] - 2026-08-30
+
+### Changed
+
+- **The heavy tool schemas are compact by default.** `browser`, `spawn_subagent`, and `workflow` now export schemas without their parameter-by-parameter prose descriptions; names, types, enum values, and required fields are unchanged, and call validation still uses the canonical schema. This drops the per-turn tool-catalog fixed cost from ~11,170 to ~9,880 estimated tokens.
 
 ### Fixed
 
