@@ -18,14 +18,14 @@ large-error-threshold = 256
 # where a child is waited on or deliberately detached.
 #
 # HTTP clients must be built through xai-grok-extra-ca: a zero-config
-# `Client::new()` silently drops the optional CHUTES_BUILD_EXTRA_CA_BUNDLE
+# `Client::new()` silently drops the optional CHUTES_EXTRA_CA_BUNDLE
 # roots. Builder paths stay allowed where the endpoint policy wraps them.
 # Allow with a stated reason for generic helpers that receive a policy-built
 # client, common-layer crates that cannot reach the policy crate, and
 # loopback-only test fixtures where no custom CA applies.
 disallowed-methods = [
-    { path = "reqwest::Client::new", reason = "bypasses the extra-CA policy (CHUTES_BUILD_EXTRA_CA_BUNDLE); build through xai_grok_extra_ca; localhost-only clients allow with a reason" },
-    { path = "reqwest::blocking::Client::new", reason = "bypasses the extra-CA policy (CHUTES_BUILD_EXTRA_CA_BUNDLE); build through xai_grok_extra_ca; localhost-only clients allow with a reason" },
+    { path = "reqwest::Client::new", reason = "bypasses the extra-CA policy (CHUTES_EXTRA_CA_BUNDLE); build through xai_grok_extra_ca; localhost-only clients allow with a reason" },
+    { path = "reqwest::blocking::Client::new", reason = "bypasses the extra-CA policy (CHUTES_EXTRA_CA_BUNDLE); build through xai_grok_extra_ca; localhost-only clients allow with a reason" },
     { path = "reqwest::ClientBuilder::build", reason = "use xai_grok_extra_ca::build_reqwest_client: it applies the extra-CA policy and survives a broken OS store; localhost/test clients allow with a reason" },
     { path = "reqwest::blocking::ClientBuilder::build", reason = "use xai_grok_extra_ca::build_blocking_reqwest_client: it applies the extra-CA policy and survives a broken OS store; localhost/test clients allow with a reason" },
     { path = "std::fs::canonicalize", reason = "returns \\\\?\\ verbatim paths on Windows; use dunce::canonicalize" },

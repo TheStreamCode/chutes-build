@@ -57,8 +57,8 @@ impl CompiledPolicy {
         let invocations = shell_command_invocations(root, cmd);
 
         // We don't track cwd across `cd`/`pushd`/`env -C`; a relative operand after
-        // one is unpinnable → Ask. Managed denies are `**/` basename globs, so they
-        // still match — only exact-path rules are affected.
+        // one is unpinnable ÔåÆ Ask. Managed denies are `**/` basename globs, so they
+        // still match ÔÇö only exact-path rules are affected.
         let cwd_changes = cwd_poison_positions(root, cmd);
 
         for redirect in shell_redirect_targets(root, cmd) {
@@ -165,7 +165,7 @@ impl CompiledPolicy {
                 }
                 Some(ShellFileMode::Read) => &[ShellFileMode::Read],
                 Some(ShellFileMode::Write) => &[ShellFileMode::Write],
-                None => continue,
+                Some(ShellFileMode::Create) | None => continue,
             };
             for &token in &candidates {
                 if shell_arg_is_ambiguous(token) {
@@ -252,7 +252,7 @@ impl CompiledPolicy {
     }
 }
 
-/// Write paths from a SINGLE already-split command's words (no redirects — the
+/// Write paths from a SINGLE already-split command's words (no redirects ÔÇö the
 /// caller handles those at the tree level). Wrapper-aware. Reused both per parsed
 /// command and to re-check the inner command of a package-manager launcher
 /// (`uv run`, `npm exec`, ...) whose writes the outer program name would hide.
@@ -270,7 +270,7 @@ pub(crate) fn command_words_write_paths(words: &[String]) -> Vec<String> {
             out.push(path);
         }
     }
-    // Path-moving destinations (`cp`/`mv`/`ln`/`install` dest; `rm`/`touch`/…;
+    // Path-moving destinations (`cp`/`mv`/`ln`/`install` dest; `rm`/`touch`/ÔÇª;
     // `uniq` output operand).
     if let Some(operands) = shell_path_command_operands(&program, inner) {
         for (path, mode) in operands {
@@ -296,7 +296,7 @@ pub(crate) fn command_words_write_paths(words: &[String]) -> Vec<String> {
 /// that already parsed `src` shares the one parse): output redirects plus the
 /// per-command writers from [`command_words_write_paths`] (`dd of=`, `sort -o`,
 /// `git --output`, `cp`/`mv` dest, `tee`/`truncate`, in-place `sed`/`rustfmt`,
-/// `uniq` output, ...). No safe-sink filtering — the caller decides.
+/// `uniq` output, ...). No safe-sink filtering ÔÇö the caller decides.
 pub(crate) fn command_write_paths_in_tree(root: Node<'_>, src: &str) -> Vec<String> {
     let split = command_write_paths_split(root, src);
     let mut out = split.redirect_paths;
@@ -305,15 +305,17 @@ pub(crate) fn command_write_paths_in_tree(root: Node<'_>, src: &str) -> Vec<Stri
 }
 
 /// [`command_write_paths_in_tree`] split by provenance: redirect targets
-/// (`> f`, `>> f` — invisible to allow-rule word matching) vs command-word
-/// operands (`touch f`, `sed -i` — part of the words a rule matches). The
+/// (`> f`, `>> f` ÔÇö invisible to allow-rule word matching) vs command-word
+/// operands (`touch f`, `sed -i` ÔÇö part of the words a rule matches). The
 /// distinction decides whether a narrow allow rule can vouch for the write.
 pub(crate) struct WritePathsSplit {
     pub(crate) redirect_paths: Vec<String>,
-    /// A write redirect had no extractable target (`> $OUT`, `> "$(…)"`).
+    /// A write redirect had no extractable target (`> $OUT`, `> "$(ÔÇª)"`).
     /// Fail-closed signal: the write exists but nothing can vouch for it.
     pub(crate) unextracted_write_redirect: bool,
     pub(crate) word_paths: Vec<String>,
+    /// `mkdir`/`touch` operands (kept out of `word_paths`) for the protected-target floor.
+    pub(crate) creation_paths: Vec<String>,
 }
 
 pub(crate) fn command_write_paths_split(root: Node<'_>, src: &str) -> WritePathsSplit {
@@ -330,18 +332,40 @@ pub(crate) fn command_write_paths_split(root: Node<'_>, src: &str) -> WritePaths
     }
     // Per-command writers, after peeling env/timeout/... wrappers.
     let mut word_paths = Vec::new();
+    let mut creation_paths = Vec::new();
     for invocation in shell_command_invocations(root, src) {
         let words = InvocationSlice {
             words: &invocation.words,
         }
         .literal_words();
         word_paths.extend(command_words_write_paths(&words));
+        creation_paths.extend(command_words_creation_paths(&words));
     }
     WritePathsSplit {
         redirect_paths,
         unextracted_write_redirect,
         word_paths,
+        creation_paths,
     }
+}
+
+/// The creation set, shared by the write-path classifier and the auto-allow so they can't drift.
+pub(crate) fn is_creation_program(program: &str) -> bool {
+    matches!(program, "mkdir" | "touch")
+}
+
+/// The `Create`-mode operands that [`command_words_write_paths`] omits.
+pub(crate) fn command_words_creation_paths(words: &[String]) -> Vec<String> {
+    let inner = unwrap_wrappers(words);
+    let Some(program) = inner.first().map(|w| shell_program_name(w)) else {
+        return Vec::new();
+    };
+    shell_path_command_operands(&program.to_ascii_lowercase(), inner)
+        .into_iter()
+        .flatten()
+        .filter(|(_, mode)| matches!(mode, ShellFileMode::Create))
+        .map(|(path, _)| path.to_owned())
+        .collect()
 }
 
 /// Safe write sinks that do not touch a real file. Exact match.
@@ -519,7 +543,7 @@ fn protected_edit_reason(path: &Path) -> Option<ProtectedEditReason> {
 /// `managed_config.toml` defaults tier, the user `requirements.toml` layer) or
 /// sandbox restrictions (`sandbox.toml`) in the running and later sessions; a
 /// silent edit would let the agent loosen its own guardrails. Matched directly
-/// inside any `.chutes-build` dir (user-global default and workspace overlays) and
+/// inside any `.grok` dir (user-global default and workspace overlays) and
 /// directly under a custom `$CHUTES_BUILD_HOME`, which the component match cannot see.
 fn protected_grok_config_file(path: &Path, components: &[&str]) -> Option<ProtectedEditReason> {
     protected_grok_config_file_with_home(
@@ -540,7 +564,7 @@ fn protected_grok_config_file_with_home(
             | xai_grok_config::MANAGED_CONFIG_FILENAME
             | xai_grok_config::REQUIREMENTS_FILENAME,
         ) => ProtectedEditReason::GrokConfig,
-        Some("sandbox.toml") => ProtectedEditReason::GrokSandbox,
+        Some(xai_grok_config::SANDBOX_CONFIG_FILENAME) => ProtectedEditReason::GrokSandbox,
         _ => return None,
     };
     let in_dot_grok = components.len() >= 2 && components[components.len() - 2] == ".chutes-build";
@@ -566,9 +590,7 @@ fn path_is_under_user_grok_hook_root(path: &Path, grok_home: &Path) -> bool {
 }
 
 fn protected_grok_hook_root(path: &Path, components: &[&str]) -> bool {
-    components
-        .windows(2)
-        .any(|pair| pair == [".chutes-build", "hooks"])
+    components.windows(2).any(|pair| pair == [".chutes-build", "hooks"])
         || components.ends_with(&[".chutes-build", "hooks-paths"])
         || grok_home_matches(xai_grok_config::user_grok_home().as_deref(), |home| {
             path_is_under_user_grok_hook_root(path, home)
@@ -600,9 +622,11 @@ fn resolved_path_is_within_root(resolved_path: &Path, root: &Path) -> bool {
 pub(crate) enum ShellFileMode {
     Read,
     Write,
+    /// Empty dir/file creation (`mkdir`/`touch`): `Edit` for the inline-shell gate, not a content write.
+    Create,
 }
 
-/// Tools that read/write a file named as an argument. Not exhaustive — redirects
+/// Tools that read/write a file named as an argument. Not exhaustive ÔÇö redirects
 /// are the robust catch-all (caught via the AST for any program).
 fn shell_file_mode(program: &str) -> Option<ShellFileMode> {
     match program {
@@ -713,6 +737,11 @@ fn cwd_poison_positions(root: Node<'_>, src: &str) -> Vec<CwdPoison> {
         }
     }
     positions
+}
+
+/// Whether the script has an in-scope `cd`/`pushd`/`popd` (relative operands then unpinnable).
+pub(crate) fn script_has_cwd_change(root: Node<'_>, src: &str) -> bool {
+    !cwd_poison_positions(root, src).is_empty()
 }
 
 /// Whether an operand runs after a cwd change in its nearest execution scope.
@@ -830,7 +859,7 @@ fn is_windows_path_like(raw: &str) -> bool {
             && raw.as_bytes().get(1) == Some(&b':'))
 }
 
-/// Fold unquoted shell backslash escapes (`b\ash` → `bash`, `\-c` → `-c`).
+/// Fold unquoted shell backslash escapes (`b\ash` ÔåÆ `bash`, `\-c` ÔåÆ `-c`).
 fn decode_unquoted_word(raw: &str) -> Option<String> {
     if !raw.contains('\\') {
         return Some(raw.to_owned());
@@ -967,7 +996,7 @@ fn shell_command_invocations(root: Node<'_>, src: &str) -> Vec<ShellInvocation> 
 }
 
 /// Auto-mode opaque-shell floor: a (potential) `-c` string reinterpretation
-/// (`bash|sh|dash|zsh|ksh -c …`) or a literal `eval` head. The one classifier
+/// (`bash|sh|dash|zsh|ksh -c ÔÇª`) or a literal `eval` head. The one classifier
 /// shared by the decomposable segment loop and the undecomposable tree walk so
 /// the two can't drift.
 pub(crate) fn words_are_opaque_shell(words: &[ShellWord<'_>]) -> bool {
@@ -1054,7 +1083,7 @@ fn shell_sed_in_place(words: &[String]) -> bool {
     words.iter().skip(1).any(|word| {
         word == "--in-place"
             || word.starts_with("--in-place=")
-            // `i` is sed's only short flag with that letter → any `-…i…` is in-place.
+            // `i` is sed's only short flag with that letter ÔåÆ any `-ÔÇªiÔÇª` is in-place.
             || (word.starts_with('-') && !word.starts_with("--") && word.contains('i'))
     })
 }
@@ -1072,8 +1101,8 @@ fn shell_output_flag_values(words: &[String]) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Values of a value-taking flag written as `flag=v`, `flag v`, or — for short
-/// flags only — glued `flagv` (e.g. `-ov`). Long (`--`) flags match `--flag=v` /
+/// Values of a value-taking flag written as `flag=v`, `flag v`, or ÔÇö for short
+/// flags only ÔÇö glued `flagv` (e.g. `-ov`). Long (`--`) flags match `--flag=v` /
 /// `--flag v` only (no glued form).
 fn value_flag_values<'a>(words: &'a [String], flag: &str) -> Vec<&'a str> {
     let eq_prefix = format!("{flag}=");
@@ -1136,7 +1165,7 @@ fn special_file_operands(program: &str, words: &[String]) -> Vec<(String, ShellF
 fn shell_access(mode: ShellFileMode, path: String) -> AccessKind {
     match mode {
         ShellFileMode::Read => AccessKind::Read(Some(path)),
-        ShellFileMode::Write => AccessKind::Edit(path),
+        ShellFileMode::Write | ShellFileMode::Create => AccessKind::Edit(path),
     }
 }
 
@@ -1168,7 +1197,7 @@ fn shell_path_command_operands<'a>(
     match program {
         "cp" | "mv" | "ln" | "install" => {
             // Last positional is the destination (Write), the rest sources (Read).
-            // The rare `-t DIR` reorder isn't parsed — bounded since denies match
+            // The rare `-t DIR` reorder isn't parsed ÔÇö bounded since denies match
             // by basename.
             let operands = shell_file_candidates(words);
             let (dest, sources) = operands.split_last()?;
@@ -1180,10 +1209,16 @@ fn shell_path_command_operands<'a>(
                     .collect(),
             )
         }
-        "rm" | "rmdir" | "mkdir" | "touch" => Some(
+        "rm" | "rmdir" => Some(
             shell_file_candidates(words)
                 .into_iter()
                 .map(|c| (c, ShellFileMode::Write))
+                .collect(),
+        ),
+        p if is_creation_program(p) => Some(
+            shell_file_candidates(words)
+                .into_iter()
+                .map(|c| (c, ShellFileMode::Create))
                 .collect(),
         ),
         // `uniq [INPUT [OUTPUT]]`: a 2nd positional is the output file (Write);
@@ -1203,7 +1238,7 @@ fn shell_arg_is_ambiguous(token: &str) -> bool {
     token.contains('*') || token.contains('?') || token.contains('[')
 }
 
-/// A recursive directory search can't pin its operands → prompt. `rg`/`ag`/`ack`
+/// A recursive directory search can't pin its operands ÔåÆ prompt. `rg`/`ag`/`ack`
 /// recurse given no path or a directory operand (`candidates[0]` is the pattern);
 /// grep only with `-r`/`-R`.
 fn shell_reader_can_recurse(program: &str, words: &[String], candidates: &[&str]) -> bool {
@@ -1279,7 +1314,7 @@ fn lexical_normalize(path: &str) -> String {
     }
 }
 
-/// Whether *any* existing component of `absolute` is a symlink — used to fail
+/// Whether *any* existing component of `absolute` is a symlink ÔÇö used to fail
 /// closed (Ask) when a linky operand can't be fully resolved, including a
 /// mid-path link (not just the leaf).
 fn path_has_symlink(absolute: &str) -> bool {
@@ -1677,17 +1712,29 @@ mod tests {
         }
     }
 
-    /// A custom `$CHUTES_BUILD_HOME` has no `.chutes-build` path component, so the live
+    /// A custom `$CHUTES_BUILD_HOME` has no `.grok` path component, so the live
     /// `config.toml` / `sandbox.toml` must be caught by the home-prefix branch.
     #[test]
     fn grok_config_files_under_custom_grok_home_are_protected() {
         let home = tempfile::tempdir().unwrap();
         let home_path = home.path();
         for (file, reason) in [
-            ("config.toml", ProtectedEditReason::GrokConfig),
-            ("managed_config.toml", ProtectedEditReason::GrokConfig),
-            ("requirements.toml", ProtectedEditReason::GrokConfig),
-            ("sandbox.toml", ProtectedEditReason::GrokSandbox),
+            (
+                xai_grok_config::USER_CONFIG_FILENAME,
+                ProtectedEditReason::GrokConfig,
+            ),
+            (
+                xai_grok_config::MANAGED_CONFIG_FILENAME,
+                ProtectedEditReason::GrokConfig,
+            ),
+            (
+                xai_grok_config::REQUIREMENTS_FILENAME,
+                ProtectedEditReason::GrokConfig,
+            ),
+            (
+                xai_grok_config::SANDBOX_CONFIG_FILENAME,
+                ProtectedEditReason::GrokSandbox,
+            ),
         ] {
             let path = home_path.join(file);
             let components = [file];
@@ -1698,19 +1745,21 @@ mod tests {
             );
         }
         // Same file names elsewhere (or with no resolvable home) stay ordinary.
-        let elsewhere = home_path.join("sub").join("sandbox.toml");
+        let elsewhere = home_path
+            .join("sub")
+            .join(xai_grok_config::SANDBOX_CONFIG_FILENAME);
         assert_eq!(
             protected_grok_config_file_with_home(
                 &elsewhere,
-                &["sub", "sandbox.toml"],
+                &["sub", xai_grok_config::SANDBOX_CONFIG_FILENAME],
                 Some(home_path)
             ),
             None
         );
         assert_eq!(
             protected_grok_config_file_with_home(
-                &home_path.join("sandbox.toml"),
-                &["sandbox.toml"],
+                &home_path.join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
+                &[xai_grok_config::SANDBOX_CONFIG_FILENAME],
                 None
             ),
             None
@@ -1734,8 +1783,8 @@ mod tests {
         let physical_home = resolve_following_symlinks(&real_home, 0).unwrap();
         assert_eq!(
             protected_grok_config_file_with_home(
-                &physical_home.join("sandbox.toml"),
-                &["sandbox.toml"],
+                &physical_home.join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
+                &[xai_grok_config::SANDBOX_CONFIG_FILENAME],
                 Some(&link)
             ),
             Some(ProtectedEditReason::GrokSandbox)
@@ -2355,7 +2404,7 @@ mod tests {
     }
 
     /// A relative operand after any in-shell `cd`/`pushd`/`env -C` is unpinnable
-    /// → Ask. Only path-scoped rules are affected; basename denies still fire.
+    /// ÔåÆ Ask. Only path-scoped rules are affected; basename denies still fire.
     #[test]
     fn shell_cwd_change_escalates_path_scoped_operands() {
         let policy = compiled(vec![file_rule(
@@ -2486,7 +2535,7 @@ mod tests {
                 "cd must not scope across boundary: {cmd}"
             );
         }
-        // A deny scoped to the cd target must not fire — the reader never runs there.
+        // A deny scoped to the cd target must not fire ÔÇö the reader never runs there.
         let elsewhere = compiled(vec![file_rule(
             RuleAction::Deny,
             ToolFilter::Read,
@@ -2620,7 +2669,7 @@ mod tests {
     }
 
     /// An expansion nested in a quoted/concatenated operand (`.e"$X"`) is ambiguous
-    /// → prompt, not treated as a literal.
+    /// ÔåÆ prompt, not treated as a literal.
     #[test]
     fn shell_nested_expansion_operand_prompts() {
         let policy = compiled(vec![file_rule(
@@ -2691,10 +2740,10 @@ mod tests {
     }
 
     /// Representative enterprise deny/ask fixture for managed-policy tests
-    /// `[permission]` tier. Tool mapping: `Read`→Read, `Write`/`Edit`→Edit, `Bash`→Bash.
+    /// `[permission]` tier. Tool mapping: `Read`ÔåÆRead, `Write`/`Edit`ÔåÆEdit, `Bash`ÔåÆBash.
     fn enterprise_requirements_policy() -> CompiledPolicy {
         compiled(vec![
-            // ── ask = [...] ──
+            // ÔöÇÔöÇ ask = [...] ÔöÇÔöÇ
             bash_rule(RuleAction::Ask, "kubectl *"),
             bash_rule(RuleAction::Ask, "terraform apply *"),
             bash_rule(RuleAction::Ask, "aws *"),
@@ -2707,7 +2756,7 @@ mod tests {
             file_rule(RuleAction::Ask, ToolFilter::Edit, "**/secrets/**"), // Write(..)
             file_rule(RuleAction::Ask, ToolFilter::Edit, "**/secrets/**"), // Edit(..)
             file_rule(RuleAction::Ask, ToolFilter::Read, "**/Library/Mail/**"),
-            // ── deny = [...] ──
+            // ÔöÇÔöÇ deny = [...] ÔöÇÔöÇ
             bash_rule(RuleAction::Deny, "rm -rf *"),
             bash_rule(RuleAction::Deny, "sudo *"),
             bash_rule(RuleAction::Deny, "su *"),
@@ -2819,7 +2868,7 @@ mod tests {
     }
 
     /// An outer reader fed a substitution can't pin its operand (Ask); an inner
-    /// literal read (incl. inside `<(…)`) is a hard deny.
+    /// literal read (incl. inside `<(ÔÇª)`) is a hard deny.
     #[test]
     fn adversarial_substitution_readers_do_not_bypass() {
         let policy = enterprise_requirements_policy();
@@ -2881,7 +2930,7 @@ mod tests {
             // path normalization + `..` traversal
             "cat ./.env",
             "cat subdir/../.env",
-            // chaining / pipeline — checked per segment
+            // chaining / pipeline ÔÇö checked per segment
             "ls && cat .env",
             "cat README.md; cat .env",
             "cat .env | head -n1",
@@ -2913,7 +2962,7 @@ mod tests {
     /// bash rules, shell gate) on the real sentinel paths, no inference.
     #[test]
     fn live_enterprise_e2e_matrix_decision_parity() {
-        // What the model can do → the manager function that decides it.
+        // What the model can do ÔåÆ the manager function that decides it.
         #[derive(Clone, Copy)]
         enum Vector {
             /// File-read tool / list_dir: `evaluate(AccessKind::Read(..))`.
@@ -2927,11 +2976,11 @@ mod tests {
         }
         #[derive(Clone, Copy)]
         enum Expect {
-            /// Managed deny → `Reject(_)` (the live SENTINEL must never leak).
+            /// Managed deny ÔåÆ `Reject(_)` (the live SENTINEL must never leak).
             Deny,
-            /// Managed ask → `Ask` (the live model is prompted).
+            /// Managed ask ÔåÆ `Ask` (the live model is prompted).
             Ask,
-            /// Not denied/asked → `None` (the live file stays readable / command runs).
+            /// Not denied/asked ÔåÆ `None` (the live file stays readable / command runs).
             Allowed,
         }
         use Expect::{Allowed, Ask, Deny};
@@ -2939,7 +2988,7 @@ mod tests {
 
         let policy = enterprise_requirements_policy();
         let matrix: &[(&str, Vector, Expect)] = &[
-            // ── file-read tool: real sentinel files (setup.sh) ──
+            // ÔöÇÔöÇ file-read tool: real sentinel files (setup.sh) ÔöÇÔöÇ
             ("read .env", ReadTool(".env"), Deny),
             ("read .env.staging", ReadTool(".env.staging"), Deny), // **/.env.*
             ("read src/server.pem", ReadTool("src/server.pem"), Deny), // **/*.pem
@@ -2955,7 +3004,7 @@ mod tests {
             ), // **/secrets/**
             ("read README.md (neg)", ReadTool("README.md"), Allowed),
             ("read src/main.py (neg)", ReadTool("src/main.py"), Allowed),
-            // ── file-read tool: every remaining deny/ask glob in the policy ──
+            // ÔöÇÔöÇ file-read tool: every remaining deny/ask glob in the policy ÔöÇÔöÇ
             ("read *.key", ReadTool("config/id_rsa.key"), Deny),
             ("read *.p12", ReadTool("cert.p12"), Deny),
             ("read *.pfx", ReadTool("cert.pfx"), Deny),
@@ -2990,14 +3039,14 @@ mod tests {
                 ReadTool("Library/Mail/Inbox.mbox"),
                 Ask,
             ),
-            // ── file-read tool: lookalike negatives (must NOT match) ──
+            // ÔöÇÔöÇ file-read tool: lookalike negatives (must NOT match) ÔöÇÔöÇ
             ("read key.pem.txt (neg)", ReadTool("key.pem.txt"), Allowed),
             (
                 "read my.env.example (neg)",
                 ReadTool("my.env.example"),
                 Allowed,
             ),
-            // ── write/edit tool: Write(..)/Edit(..) denies + secrets ask ──
+            // ÔöÇÔöÇ write/edit tool: Write(..)/Edit(..) denies + secrets ask ÔöÇÔöÇ
             ("edit .env", EditTool(".env"), Deny),
             ("edit .env.local", EditTool(".env.local"), Deny), // **/.env* and **/.env.*
             ("edit src/server.pem", EditTool("src/server.pem"), Deny), // Write(**/*.pem)
@@ -3029,13 +3078,13 @@ mod tests {
             ("edit *.pfx (no write rule)", EditTool("cert.pfx"), Allowed),
             ("edit README.md (neg)", EditTool("README.md"), Allowed),
             ("edit src/main.py (neg)", EditTool("src/main.py"), Allowed),
-            // ── bash command rules: deny set ──
+            // ÔöÇÔöÇ bash command rules: deny set ÔöÇÔöÇ
             ("bash rm -rf", Bash("rm -rf /tmp/x"), Deny),
             ("bash sudo", Bash("sudo apt-get update"), Deny),
             ("bash su", Bash("su - root"), Deny),
             // ssh to *.corp.example is deny even though `ssh *` is ask (deny wins).
             ("bash ssh corp-example", Bash("ssh prod.corp.example"), Deny),
-            // ── bash command rules: ask set ──
+            // ÔöÇÔöÇ bash command rules: ask set ÔöÇÔöÇ
             ("bash kubectl", Bash("kubectl get pods -A"), Ask),
             (
                 "bash terraform apply",
@@ -3052,10 +3101,10 @@ mod tests {
                 Ask,
             ),
             ("bash op", Bash("op read op://vault/item"), Ask),
-            // ── bash command rules: negatives ──
+            // ÔöÇÔöÇ bash command rules: negatives ÔöÇÔöÇ
             ("bash ls (neg)", Bash("ls -la"), Allowed),
             ("bash git status (neg)", Bash("git status"), Allowed),
-            // ── shell file-access gate: readers / redirects / substitutions ──
+            // ÔöÇÔöÇ shell file-access gate: readers / redirects / substitutions ÔöÇÔöÇ
             ("sh cat .env", Shell("cat .env"), Deny),
             ("sh cat .env.staging", Shell("cat .env.staging"), Deny),
             ("sh cat src/server.pem", Shell("cat src/server.pem"), Deny),
@@ -3076,7 +3125,7 @@ mod tests {
             ), // process sub
             ("sh cat subdir/../.env", Shell("cat subdir/../.env"), Deny), // `..` traversal
             ("sh cat .ssh/id_rsa", Shell("cat .ssh/id_rsa"), Deny),
-            // ── shell file-access gate: writers (file must stay unchanged) ──
+            // ÔöÇÔöÇ shell file-access gate: writers (file must stay unchanged) ÔöÇÔöÇ
             ("sh echo > .env", Shell("echo HACKED > .env"), Deny), // write redirect
             (
                 "sh sed -ni .env",
@@ -3089,7 +3138,7 @@ mod tests {
                 Shell("echo x > terraform.tfstate"),
                 Deny,
             ),
-            // ── shell file-access gate: secrets ask + negatives ──
+            // ÔöÇÔöÇ shell file-access gate: secrets ask + negatives ÔöÇÔöÇ
             (
                 "sh cat secrets/api_key.txt",
                 Shell("cat secrets/api_key.txt"),
@@ -3196,7 +3245,7 @@ mod tests {
             .collect()
     }
 
-    /// Read/exfil vectors the shell gate classifies under a policy — reused to
+    /// Read/exfil vectors the shell gate classifies under a policy ÔÇö reused to
     /// prove a no-restriction policy gates none of them.
     const BYPASS_VECTORS: &[&str] = &[
         "cat .env",
@@ -3278,7 +3327,7 @@ mod tests {
                 "[cat {path}] legit look-alike must not be denied, got {shell:?}"
             );
         }
-        // Nuance: `**/.env.*` DOES catch a dotfile `.env.<suffix>` (both vectors)…
+        // Nuance: `**/.env.*` DOES catch a dotfile `.env.<suffix>` (both vectors)ÔÇª
         for path in [".env.example", ".env.staging"] {
             assert!(
                 matches!(
@@ -3295,7 +3344,7 @@ mod tests {
                 "[cat {path}] must be denied by **/.env.*"
             );
         }
-        // …but `my.env.example` (not a dotfile) is NOT caught.
+        // ÔÇªbut `my.env.example` (not a dotfile) is NOT caught.
         assert!(
             policy
                 .evaluate(&AccessKind::Read(Some("my.env.example".to_string())))

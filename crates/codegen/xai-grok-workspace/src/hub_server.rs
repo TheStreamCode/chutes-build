@@ -22,11 +22,7 @@ use xai_grok_tools::implementations::grok_build::scheduler::types::{
 use xai_grok_tools::registry::types::FinalizedToolset;
 use xai_grok_tools::types::resources::Terminal;
 use xai_grok_workspace_types::rpc::workspace::{
-    BackgroundTaskSnapshotWire, DeleteScheduledTaskReq, DeleteScheduledTaskResponse,
-    KillTaskOutcome, ScheduledTaskSnapshotWire, TasksSnapshotResponse,
-};
-use xai_grok_workspace_types::rpc::worktree::{
-    WorktreeCleanArtifactsReq, WorktreeDetachReq, WorktreeSalvageReq,
+    BackgroundTaskSnapshotWire, KillTaskOutcome, ScheduledTaskSnapshotWire, TasksSnapshotResponse,
 };
 use xai_tool_protocol::{HookEvent, HookFrame, SessionId, ToolId, ToolServerEvictParams};
 use xai_tool_runtime::{
@@ -34,8 +30,8 @@ use xai_tool_runtime::{
 };
 use xai_tool_types::ToolDescription;
 /// Deprecation monitor for the self-attested `caller_session_id` param:
-/// `kind="param_mismatch"` — the param disagreed with the server-bound envelope
-/// session (envelope trusted); `kind="envelope_absent"` — no envelope
+/// `kind="param_mismatch"` ÔÇö the param disagreed with the server-bound envelope
+/// session (envelope trusted); `kind="envelope_absent"` ÔÇö no envelope
 /// session, the param was used as a compat fallback. Enforcement
 /// (envelope-only identity) waits for this to be flat zero.
 static WORKSPACE_RPC_CALLER_MISMATCH_TOTAL: std::sync::LazyLock<IntCounterVec> =
@@ -66,7 +62,7 @@ static WORKSPACE_RPC_REQUESTS_TOTAL: std::sync::LazyLock<IntCounterVec> =
         register_int_counter_vec!(
             "grok_workspace_rpc_requests_total",
             "Workspace RPC dispatches, by method and result. Donated per-sandbox \
-             series inflate absolute volume — SLOs must use ratios \
+             series inflate absolute volume ÔÇö SLOs must use ratios \
              (error/total), not increase() counts.",
             &["method", "result"]
         )
@@ -79,7 +75,7 @@ static WORKSPACE_RPC_ERRORS_TOTAL: std::sync::LazyLock<IntCounterVec> =
         register_int_counter_vec!(
             "grok_workspace_rpc_errors_total",
             "Failed workspace RPC dispatches, by method and error kind. \
-             Donated per-sandbox series inflate absolute volume — compare \
+             Donated per-sandbox series inflate absolute volume ÔÇö compare \
              error_kind shares or error/total ratios, not raw counts.",
             &["method", "error_kind"]
         )
@@ -179,7 +175,7 @@ impl crate::worktree::WorktreeNotificationSender for NoOpNotifier {
 ///
 /// Default **on**; setting `WORKSPACE_CLIENT_FS_QUERIES=0` (or `false`)
 /// disables the ops with a graceful `HubError` that the remote caller
-/// maps to a fallback. Read per call — flipping the variable needs no
+/// maps to a fallback. Read per call ÔÇö flipping the variable needs no
 /// process restart and tests can toggle it under a lock.
 fn client_fs_queries_enabled() -> bool {
     !matches!(
@@ -1248,7 +1244,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
     }
     /// Hub-issued `tool_server.evict`. Always tears the evicted session down
     /// (MCP bridges + activity/writer state, like the `SessionEnded` hook), then
-    /// runs the global two-phase drain **only** when no other session survives —
+    /// runs the global two-phase drain **only** when no other session survives ÔÇö
     /// a global drain shuts down the *shared* upload queue, which must not happen
     /// while another session is live. Idempotent across fan-out and safe for an
     /// already-gone session id.
@@ -1262,9 +1258,10 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         let sid = params.session_id.as_str();
         self.workspace.teardown_session_mcp(sid).await;
         self.workspace.on_session_ended(sid);
-        let (became_empty, start_drain) = {
+        let (became_empty, start_drain, removed) = {
             let mut sessions = self.workspace.shared.sessions.write();
-            if let Some(session) = sessions.remove(sid) {
+            let removed = sessions.remove(sid);
+            if let Some(session) = &removed {
                 session.abort_system_notify_producers();
                 session.shutdown_terminal_backend();
                 session.shutdown_browser_service();
@@ -1276,20 +1273,23 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             if start {
                 self.workspace.activity_tracker().set_draining();
             }
-            (empty, start)
+            (empty, start, removed)
         };
+        if let Some(session) = removed {
+            self.workspace.invoke_unbind_hook(&session);
+        }
         if !start_drain {
             if became_empty {
                 tracing::info!(
                     session = %params.session_id,
                     reason = %params.reason,
-                    "workspace: hub evict — already draining/shutting down; dropped session only"
+                    "workspace: hub evict ÔÇö already draining/shutting down; dropped session only"
                 );
             } else {
                 tracing::info!(
                     session = %params.session_id,
                     reason = %params.reason,
-                    "workspace: hub evict — other sessions live; dropped session only"
+                    "workspace: hub evict ÔÇö other sessions live; dropped session only"
                 );
             }
             return;
@@ -1299,7 +1299,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             session = %params.session_id,
             reason = %params.reason,
             grace_period_ms = params.grace_period_ms,
-            "workspace: hub evict — last session; commencing two-phase drain"
+            "workspace: hub evict ÔÇö last session; commencing two-phase drain"
         );
         let unfinished = self
             .workspace

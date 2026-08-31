@@ -13,12 +13,12 @@ use indexmap::IndexMap;
 
 use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_config_for_model};
 use crate::auth::{AuthManager, GrokAuth, GrokComConfig};
-use crate::remote::{FetchModelsResult, fetch_models_blocking};
+use crate::remote::{FetchModelsResult, ModelSource, active_model_source};
 use crate::sampling::SamplerConfig as SamplingConfig;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 
-// ── Auth method for model fetching ──────────────────────────────────────────
+// ÔöÇÔöÇ Auth method for model fetching ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Credential for `/v1/models` fetching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,7 +124,7 @@ struct Inner {
     catalog: RwLock<CatalogState>,
     current_model_id: RwLock<acp::ModelId>,
     current_reasoning_effort: RwLock<Option<ReasoningEffort>>,
-    // ── Owned context for self-contained refresh ────────────────
+    // ÔöÇÔöÇ Owned context for self-contained refresh ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     auth_manager: Arc<AuthManager>,
     cfg: RwLock<config::Config>,
     fetch_auth: RwLock<ModelFetchAuth>,
@@ -330,7 +330,7 @@ impl ModelsManager {
             cache
                 .load_fresh(
                     &fetch_auth.cache_auth_method(),
-                    &crate::remote::models_list_url(&cfg.endpoints, fetch_auth),
+                    &active_model_source(&cfg.endpoints, fetch_auth).cache_origin(),
                 )
                 .map(|c| {
                     cached_etag = c.etag;
@@ -448,7 +448,7 @@ impl ModelsManager {
         self.notify_models_updated();
     }
 
-    // ── Accessors ───────────────────────────────────────────────────
+    // ÔöÇÔöÇ Accessors ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     pub fn models(&self) -> IndexMap<String, ModelEntry> {
         self.inner.catalog.read().models.clone()
@@ -623,7 +623,7 @@ impl ModelsManager {
         self.inner.cfg.read().prompt_suggest_model_pin.clone()
     }
 
-    /// Whether `model_id` resolves in the current catalog — as a config key
+    /// Whether `model_id` resolves in the current catalog ÔÇö as a config key
     pub(crate) fn model_in_catalog(&self, model_id: &str) -> bool {
         let cat = self.inner.catalog.read();
         let models = &cat.models;
@@ -676,7 +676,7 @@ impl ModelsManager {
         )
     }
 
-    // ── Mutations ───────────────────────────────────────────────────
+    // ÔöÇÔöÇ Mutations ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {
         self.inner.catalog.write().models = resolve_model_catalog(cfg, prefetched);
@@ -788,7 +788,7 @@ impl ModelsManager {
                 acp::SessionModelState::new(current, available.values().cloned().collect());
             if let Ok(params) = serde_json::value::to_raw_value(&model_state) {
                 gw.forward_fire_and_forget(acp::ExtNotification::new(
-                    "chutes.build/models/update",
+                    "x.ai/models/update",
                     params.into(),
                 ));
             }
@@ -1050,11 +1050,10 @@ impl ModelsManager {
         )
     }
 
-    /// Disk-cache origin key for this manager's current endpoints/auth shape
     fn cache_origin(&self) -> String {
         let endpoints = self.inner.cfg.read().endpoints.clone();
         let fetch_auth = *self.inner.fetch_auth.read();
-        crate::remote::models_list_url(&endpoints, fetch_auth)
+        active_model_source(&endpoints, fetch_auth).cache_origin()
     }
 
     /// A catalog-fetch session refresh bounded by `STARTUP_AUTH_REFRESH_TIMEOUT`.

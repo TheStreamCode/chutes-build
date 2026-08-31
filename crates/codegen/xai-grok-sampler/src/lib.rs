@@ -22,6 +22,7 @@ pub mod client;
 pub mod commands;
 pub mod config;
 pub mod doom_loop;
+mod doom_loop_recovery;
 pub mod events;
 pub mod handle;
 pub mod metrics;
@@ -31,8 +32,9 @@ mod shared_http;
 pub mod stream;
 pub mod types;
 
-// Public re-exports — the API surface consumers see.
+// Public re-exports ÔÇö the API surface consumers see.
 pub use actor::SamplerActor;
+pub use actor::request_task::CompletionResult;
 pub use attribution::{
     Auth401AttributionCallback, BEARER_SUFFIX_LEN, SamplingConsumer, SharedAttributionCallback,
 };
@@ -45,11 +47,11 @@ pub use doom_loop::DoomLoopSignalCollector;
 pub use events::{
     SamplingChannel, SamplingErrorInfo, SamplingErrorKind, SamplingEvent, StripReason,
 };
-pub use handle::SamplerHandle;
+pub use handle::{CollectedSamplingResult, DoomLoopRecoveryAttempt, SamplerHandle};
 pub use metrics::{InferenceLatencyStats, compute_percentiles};
 pub use retry::{
     DEFAULT_MAX_RETRIES, MAX_RETRY_BACKOFF, RATE_LIMIT_RETRY_DISABLED, RATE_LIMIT_RETRY_THRESHOLD,
-    RetryDecision, classify_error, format_sampling_error, resolve_max_retries,
+    RetryDecision, classify_error, format_sampling_error, jitter_backoff, resolve_max_retries,
     retry_after_or_backoff, retry_backoff_with_jitter,
 };
 pub use sampling_log::AuthInfo;

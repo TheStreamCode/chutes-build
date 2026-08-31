@@ -539,9 +539,8 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
     let cwd = cwd.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let repo = Repository::discover(&cwd).ok()?;
-        let display = |path: &Path| -> String {
-            collapse_home_path(path, std::env::var("HOME").ok().as_deref().map(Path::new))
-        };
+        let home = xai_dirs::home_dir();
+        let display = |path: &Path| -> String { collapse_home_path(path, home.as_deref()) };
         let mut marker_main = None;
         for ancestor in cwd.ancestors() {
             let git = ancestor.join(".git");
@@ -573,12 +572,7 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
             }
         }
         let linked_main = (repo.path() != repo.commondir())
-            .then(|| {
-                // git2 returns git-style (forward-slash) paths; re-assemble with
-                // native components so the display string matches local paths.
-                let commondir = repo.commondir().components().collect::<PathBuf>();
-                commondir.parent().map(display)
-            })
+            .then(|| repo.commondir().parent().map(display))
             .flatten();
         let main_repo = marker_main.or(db_main).or(linked_main);
         let is_worktree = main_repo.is_some() || db_label.is_some();

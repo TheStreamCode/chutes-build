@@ -22,11 +22,14 @@ pub use xai_grok_config_types::{
 pub struct SubagentsConfig {
     /// Whether subagent support is enabled.
     pub enabled: bool,
-    /// Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped ≥1 at resolve).
+    /// Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped ÔëÑ1 at resolve).
     #[serde(default)]
     pub max_depth: Option<i64>,
     #[serde(default)]
     pub max_concurrent: Option<i64>,
+    /// Concurrent subagent turn-sampling limit. See [`Self::resolve_sampling_limit`].
+    #[serde(default)]
+    pub sampling_limit: Option<i64>,
     /// `"queue"` or `"fail"`.
     #[serde(default)]
     pub limit_behavior: Option<String>,
@@ -291,9 +294,9 @@ impl SubagentsConfig {
         Self::DEFAULT_MAX_DEPTH
     }
     pub const ENV_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_MAX_CONCURRENT_SUBAGENTS";
+    pub const ENV_SAMPLING_LIMIT: &'static str = "CHUTES_BUILD_SUBAGENT_SAMPLING_LIMIT";
     pub const ENV_LIMIT_BEHAVIOR: &'static str = "CHUTES_BUILD_SUBAGENT_LIMIT_BEHAVIOR";
-    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str =
-        "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
     pub(crate) fn resolve_max_concurrent(
         env: Option<&str>,
         config: Option<i64>,
@@ -306,6 +309,30 @@ impl SubagentsConfig {
             remote,
             xai_grok_tools::implementations::grok_build::task::admission::DEFAULT_MAX_CONCURRENT,
         )
+    }
+    /// Resolve the subagent turn-sampling limit, clamped to
+    /// [`crate::agent::subagent::MAX_SUBAGENT_SAMPLING_LIMIT`]. `default` is the
+    /// resolved concurrent-subagent bound (`CHUTES_BUILD_MAX_CONCURRENT_SUBAGENTS`); a
+    /// lower `CHUTES_BUILD_SUBAGENT_SAMPLING_LIMIT`, `[subagents] sampling_limit`, or
+    /// remote value caps sampling further.
+    pub(crate) fn resolve_sampling_limit(
+        env: Option<&str>,
+        config: Option<i64>,
+        remote: Option<u32>,
+        default: usize,
+    ) -> usize {
+        let max = crate::agent::subagent::MAX_SUBAGENT_SAMPLING_LIMIT;
+        let resolved =
+            resolve_positive_count(Self::ENV_SAMPLING_LIMIT, env, config, remote, default);
+        if resolved > max {
+            tracing::warn!(
+                name = Self::ENV_SAMPLING_LIMIT,
+                resolved,
+                max,
+                "subagent sampling limit exceeds the ceiling; clamping"
+            );
+        }
+        resolved.min(max)
     }
     pub(crate) fn resolve_workflow_max_concurrent(
         env: Option<&str>,
@@ -343,12 +370,12 @@ impl SubagentsConfig {
         LimitBehavior::Queue
     }
     /// Resolve the final subagents config from all sources (in priority order):
-    /// 1. CLI flag `--subagents` (absolute highest — always enables)
+    /// 1. CLI flag `--subagents` (absolute highest ÔÇö always enables)
     /// 2. `CHUTES_BUILD_SUBAGENTS` env var: `1`/`true` enables, `0`/`false` force-disables
     /// 3. Config file `[subagents]` section
     /// 4. Default (enabled)
     ///
-    /// `enabled` is deliberately not remotely gated — only explicit local
+    /// `enabled` is deliberately not remotely gated ÔÇö only explicit local
     /// intent (CLI flag, `CHUTES_BUILD_SUBAGENTS`, `[subagents] enabled`) changes
     /// the default.
     ///
@@ -480,10 +507,10 @@ pub(crate) struct ModelOverrideConfig {
     pub web_search: String,
     /// `None` = current model.
     pub session_summary: Option<String>,
-    /// Compiled default (`grok-build`) when unset locally, remotely, and via env.
+    /// Compiled default (`grok-4.6`) when unset locally, remotely, and via env.
     pub image_description: Option<String>,
     /// Next-prompt suggestion model pin. Unlike the other overrides this does
-    /// NOT fill a compiled default — see [`PromptSuggestModelPin`].
+    /// NOT fill a compiled default ÔÇö see [`PromptSuggestModelPin`].
     #[serde(skip)]
     pub prompt_suggestion: PromptSuggestModelPin,
 }
@@ -498,27 +525,26 @@ impl Default for ModelOverrideConfig {
     }
 }
 /// Resolved model pin for the next-prompt suggestion call (tab-autocomplete
-/// ghost text), `env > config.toml > remote` — see
+/// ghost text), `env > config.toml > remote` ÔÇö see
 /// [`ModelOverrideConfig::resolve`].
 ///
 /// Unlike the other auxiliary overrides this does not collapse to a plain
 /// model string: the consumer (`handle_suggest_prompt`) must distinguish
 /// an explicit pin from "unpinned" (where the client hint and the built-in
-/// `grok-build-0.1` default apply), and whether the pin came from the env
-/// escape hatch. Every effective model except an env pin is catalog-guarded —
-/// when the model is not in the shell's catalog (e.g. `grok-build-0.1` for
-/// OAuth users, whose catalogs exclude it) the per-turn suggestion request is
-/// skipped entirely rather than fired doomed. The env pin is deliberately
-/// exempt so `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` keeps working for models a
-/// catalog does not list (mirrors the pager, which forwards the env value
-/// without checking its catalog).
+/// `grok-4.6` default apply), and whether the pin came from the env
+/// escape hatch. Every effective model except an env pin is catalog-guarded ÔÇö
+/// when the model is not in the shell's catalog the per-turn suggestion
+/// request is skipped entirely rather than fired doomed. The env pin is
+/// deliberately exempt so `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` keeps working for
+/// models a catalog does not list (mirrors the pager, which forwards the
+/// env value without checking its catalog).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PromptSuggestModelPin {
-    /// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` — used verbatim, bypasses the
+    /// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` ÔÇö used verbatim, bypasses the
     /// catalog guard.
     Env(String),
     /// `[models] prompt_suggestion` in config.toml, or the remote
-    /// `prompt_suggestion_model` (remote settings) — catalog-guarded.
+    /// `prompt_suggestion_model` (remote settings) ÔÇö catalog-guarded.
     Pinned(String),
     /// No explicit pin: the client hint, then the built-in default apply
     /// (both catalog-guarded).
@@ -539,7 +565,7 @@ fn non_empty_model_override(value: Option<&str>) -> Option<String> {
 impl ModelOverrideConfig {
     /// CLI flag > env var > config.toml > remote settings > compiled default.
     /// `image_description` and `session_summary` always resolve to `Some(_)`
-    /// (default `grok-build`), never the session model.
+    /// (default `grok-4.6`), never the session model.
     /// `prompt_suggestion` resolves to a [`PromptSuggestModelPin`] instead of
     /// a model string (no CLI flag; the default and the catalog guard live at
     /// the consumer, `handle_suggest_prompt`).
@@ -639,8 +665,8 @@ pub struct MediaGenToolsConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
-/// # [tools.media_gen] — see MediaGenToolsConfig
-/// # [tools.zdr_video_output_s3] — see ZdrVideoOutputS3Config
+/// # [tools.media_gen] ÔÇö see MediaGenToolsConfig
+/// # [tools.zdr_video_output_s3] ÔÇö see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -664,10 +690,8 @@ pub struct ToolsConfig {
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
-    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str =
-        "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
-    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str =
-        "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order:
     /// 1. Env vars `CHUTES_BUILD_RESPECT_GITIGNORE` and
     ///    `CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off,
@@ -955,7 +979,7 @@ fn walk_toml(
 pub(crate) use crate::config::reloader::parse_skills_config;
 /// Effective config: layers + campaign overlay (remote cache + `CHUTES_BUILD_CAMPAIGNS_OVERRIDE`).
 pub use crate::util::config::load_effective_config;
-/// Effective config with disk campaigns only — for one-shot entrypoints that
+/// Effective config with disk campaigns only ÔÇö for one-shot entrypoints that
 /// never fetch remote settings (avoids resolving against a never-seeded cache).
 pub use crate::util::config::load_effective_config_disk_only;
 /// Where a requirement or permission rule was loaded from.
@@ -1389,6 +1413,29 @@ fn apply_requirements_inner(
     }
     enforced
 }
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+enum BwrapStartup<T> {
+    ReexecRequired(T),
+    ReexecOptional(T),
+    Verify,
+    Refuse,
+    Continue,
+}
+#[cfg(target_os = "linux")]
+fn route_bwrap_startup<T>(
+    command: Option<T>,
+    is_inside_bwrap: bool,
+    requires_bwrap: bool,
+) -> BwrapStartup<T> {
+    match command {
+        Some(command) if requires_bwrap => BwrapStartup::ReexecRequired(command),
+        Some(command) => BwrapStartup::ReexecOptional(command),
+        None if requires_bwrap && is_inside_bwrap => BwrapStartup::Verify,
+        None if requires_bwrap => BwrapStartup::Refuse,
+        None => BwrapStartup::Continue,
+    }
+}
 /// Resolve sandbox profile and apply OS-level enforcement. Called once at startup.
 ///
 /// `cli_profile` is the resumed/forced base profile (a resumed session's saved
@@ -1431,7 +1478,10 @@ pub fn apply_sandbox(
     let requires_hook_write_deny =
         xai_grok_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
-    let requires_bwrap = requires_read_deny || requires_hook_write_deny;
+    let requires_data_write_deny =
+        xai_grok_sandbox::requires_data_write_deny(&sandbox_profile, &workspace);
+    #[cfg(target_os = "linux")]
+    let requires_bwrap = requires_read_deny || requires_hook_write_deny || requires_data_write_deny;
     #[cfg(target_os = "linux")]
     {
         let refuse_unprotected = |cause: &str| {
@@ -1440,24 +1490,27 @@ pub fn apply_sandbox(
                  {cause} Refusing to start with denied paths unprotected."
             );
         };
-        match xai_grok_sandbox::bwrap_reexec_for_profile(&sandbox_profile, &workspace) {
-            Some(mut cmd) => {
+        let command = xai_grok_sandbox::bwrap_reexec_for_profile(&sandbox_profile, &workspace);
+        match route_bwrap_startup(command, xai_grok_sandbox::is_inside_bwrap(), requires_bwrap) {
+            BwrapStartup::ReexecRequired(mut cmd) => {
                 use std::os::unix::process::CommandExt;
                 let err = cmd.exec();
-                if requires_bwrap {
-                    refuse_unprotected(&format!(
-                        "bwrap exec failed: {err}. Install bubblewrap with \
-                         `apt install -y bubblewrap`."
-                    ));
-                    std::process::exit(1);
-                }
+                refuse_unprotected(&format!(
+                    "bwrap exec failed: {err}. Install bubblewrap with \
+                     `apt install -y bubblewrap`."
+                ));
+                std::process::exit(1);
+            }
+            BwrapStartup::ReexecOptional(mut cmd) => {
+                use std::os::unix::process::CommandExt;
+                let err = cmd.exec();
                 eprintln!(
                     "WARNING: bwrap exec failed: {err}. \
                      Falling back to Landlock sandbox. \
                      Install bubblewrap: apt install -y bubblewrap"
                 );
             }
-            None if requires_bwrap && xai_grok_sandbox::is_inside_bwrap() => {
+            BwrapStartup::Verify => {
                 if requires_hook_write_deny
                     && let Err(e) = xai_grok_sandbox::verify_hook_write_deny_enforced()
                 {
@@ -1468,15 +1521,39 @@ pub fn apply_sandbox(
                     );
                     std::process::exit(1);
                 }
+                if requires_read_deny
+                    && let Err(e) =
+                        xai_grok_sandbox::verify_read_deny_enforced(&sandbox_profile, &workspace)
+                {
+                    eprintln!(
+                        "error: sandbox reports bwrap but required read-deny mounts \
+                         are not in effect ({e}); refusing to start \
+                         (possible __CHUTES_BUILD_INSIDE_BWRAP spoof)"
+                    );
+                    std::process::exit(1);
+                }
+                if requires_data_write_deny
+                    && let Err(e) = xai_grok_sandbox::verify_data_write_deny_enforced(
+                        &sandbox_profile,
+                        &workspace,
+                    )
+                {
+                    eprintln!(
+                        "error: sandbox reports bwrap but the required /data write-deny \
+                         mount is not in effect ({e}); refusing to start \
+                         (possible __CHUTES_BUILD_INSIDE_BWRAP spoof)"
+                    );
+                    std::process::exit(1);
+                }
             }
-            None if requires_bwrap => {
+            BwrapStartup::Refuse => {
                 refuse_unprotected(
-                    "the deny list could not be prepared; see the error above \
+                    "the required bwrap plan could not be prepared; see the error above \
                      for the specific cause.",
                 );
                 std::process::exit(1);
             }
-            None => {}
+            BwrapStartup::Continue => {}
         }
     }
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
@@ -1493,12 +1570,7 @@ pub fn apply_sandbox(
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            #[cfg(target_os = "macos")]
             let unappliable = requires_protection && !sandbox.is_applied();
-            #[cfg(target_os = "linux")]
-            let unappliable = requires_protection
-                && !sandbox.is_applied()
-                && !xai_grok_sandbox::is_inside_bwrap();
             if unappliable {
                 eprintln!(
                     "error: could not apply the '{}' sandbox profile; see the \
@@ -1935,11 +2007,26 @@ pub(crate) fn add_hooks_path_to_file(
     writeln!(file, "{}", path)?;
     Ok(())
 }
+/// The user-registered hook directories (`~/.chutes-build/hooks-paths` lines) ÔÇö
+/// exactly what `remove_hooks_path` can remove (same exact-string match).
+pub(crate) fn registered_hook_paths() -> std::collections::HashSet<String> {
+    let path = crate::util::grok_home::grok_home().join("hooks-paths");
+    match std::fs::read_to_string(&path) {
+        Ok(content) => content
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Err(_) => std::collections::HashSet::new(),
+    }
+}
 /// Remove a hook path from `~/.chutes-build/hooks-paths`.
 ///
-/// If the path is not found (exact string match), this is a no-op.
-/// Matches the same exact-string behavior as `add_hooks_path`.
-pub(crate) fn remove_hooks_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// Returns whether the path was present (exact string match, like
+/// `add_hooks_path`); on `false` nothing was removed and callers must not
+/// claim success.
+pub(crate) fn remove_hooks_path(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
     remove_hooks_path_from_file(
         path,
         &crate::util::grok_home::grok_home().join("hooks-paths"),
@@ -1949,10 +2036,10 @@ pub(crate) fn remove_hooks_path(path: &str) -> Result<(), Box<dyn std::error::Er
 pub(crate) fn remove_hooks_path_from_file(
     path: &str,
     paths_file: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     let content = match std::fs::read_to_string(paths_file) {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e.into()),
     };
     let mut found = false;
@@ -1968,7 +2055,7 @@ pub(crate) fn remove_hooks_path_from_file(
         })
         .collect();
     if !found {
-        return Ok(());
+        return Ok(false);
     }
     if let Some(parent) = paths_file.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1977,7 +2064,7 @@ pub(crate) fn remove_hooks_path_from_file(
         paths_file,
         new_lines.join("\n") + (if new_lines.is_empty() { "" } else { "\n" }),
     )?;
-    Ok(())
+    Ok(true)
 }
 #[cfg(test)]
 mod tests;

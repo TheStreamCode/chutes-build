@@ -34,8 +34,7 @@ impl WorktreeNotificationSender for GatewayWorktreeNotifier {
                 return;
             }
         };
-        let notification =
-            acp::ExtNotification::new("chutes.build/git/worktree/status", params.into());
+        let notification = acp::ExtNotification::new("chutes.ai/git/worktree/status", params.into());
         if let Err(e) = self.gateway.send(notification).await {
             tracing::warn!("Failed to send worktree progress notification: {}", e);
         }
@@ -57,7 +56,7 @@ fn extract_creating_path(resp: &anyhow::Result<CreateWorktreeResponse>) -> Optio
     }
 }
 
-// ── ACP request types for worktree management ──────────────────────────────────────────────────
+// ÔöÇÔöÇ ACP request types for worktree management ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,6 +146,7 @@ fn log_effective_worktree_type(
         "WORKTREE_REQUEST_SHELL: resolved effective worktree type"
     );
 }
+#[tracing::instrument(name = "ext.worktree", skip_all, fields(method = %args.method))]
 pub async fn handle(
     agent: &MvpAgent,
     ops: &xai_grok_workspace::WorkspaceOps,
@@ -156,7 +156,7 @@ pub async fn handle(
     let restore_code_default = agent.restore_code;
 
     match args.method.as_ref() {
-        "chutes.build/git/worktree/create" => {
+        "chutes.ai/git/worktree/create" => {
             let mut req = serde_json::from_str::<CreateWorktreeRequest>(args.params.get())?;
             // Pre-dispatch: apply worktree_type default
             let request_worktree_type = req.worktree_type;
@@ -165,7 +165,7 @@ pub async fn handle(
             }
             apply_grove_worktree_flag(agent, &mut req.grove_worktree);
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create",
+                "chutes.ai/git/worktree/create",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -189,7 +189,7 @@ pub async fn handle(
             }
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/remove" => {
+        "chutes.ai/git/worktree/remove" => {
             let req = serde_json::from_str::<RemoveWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -197,7 +197,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/apply" => {
+        "chutes.ai/git/worktree/apply" => {
             let req = serde_json::from_str::<ApplyWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -206,7 +206,7 @@ pub async fn handle(
             to_response(Ok(result))
         }
         // Create a worktree from an existing worktree (used during session fork)
-        "chutes.build/git/worktree/create_from_worktree" => {
+        "chutes.ai/git/worktree/create_from_worktree" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
             let request_worktree_type = req.worktree_type;
@@ -216,7 +216,7 @@ pub async fn handle(
             }
             apply_grove_worktree_flag(agent, &mut req.grove_worktree);
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create_from_worktree",
+                "chutes.ai/git/worktree/create_from_worktree",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -258,7 +258,7 @@ pub async fn handle(
             to_response(Ok(response))
         }
         // Synchronous variant - waits for worktree creation to complete
-        "chutes.build/git/worktree/create_from_worktree_sync" => {
+        "chutes.ai/git/worktree/create_from_worktree_sync" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
 
@@ -297,7 +297,7 @@ pub async fn handle(
             }
             apply_grove_worktree_flag(agent, &mut req.grove_worktree);
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create_from_worktree_sync",
+                "chutes.ai/git/worktree/create_from_worktree_sync",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -314,14 +314,16 @@ pub async fn handle(
             to_response(Ok(result))
         }
         // Resume a session in a fresh worktree.
-        "chutes.build/git/worktree/resume_session" => {
+        "chutes.ai/git/worktree/resume_session" => {
             let req = serde_json::from_str::<ResumeSessionInWorktreeRequest>(args.params.get())?;
             log_effective_worktree_type(
-                "chutes.build/git/worktree/resume_session",
+                "chutes.ai/git/worktree/resume_session",
                 req.worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
             );
+            let mut grove_worktree = None;
+            apply_grove_worktree_flag(agent, &mut grove_worktree);
             let registry_client = agent.session_registry_client();
             let agent_id = xai_grok_telemetry::id::agent_id();
 
@@ -334,12 +336,13 @@ pub async fn handle(
                     registry_client.as_ref(),
                     Some(agent.auth_manager.clone()),
                     &agent_id,
+                    grove_worktree,
                 )
                 .await,
             )
         }
-        // ── Repo-wide session resolution ─────────────────────────────────
-        "chutes.build/session/resolve_local_for_worktree_resume" => {
+        // ÔöÇÔöÇ Repo-wide session resolution ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        "chutes.ai/session/resolve_local_for_worktree_resume" => {
             let req =
                 serde_json::from_str::<ResolveLocalForWorktreeResumeRequest>(args.params.get())?;
             let result = resolve_session_repo_wide(&req.session_id, std::path::Path::new(&req.cwd));
@@ -362,15 +365,15 @@ pub async fn handle(
                 }
             }
         }
-        // ── Session rehydration (devbox recovery) ─────────────────────────
-        "chutes.build/session/rehydrate" => {
+        // ÔöÇÔöÇ Session rehydration (devbox recovery) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        "chutes.ai/session/rehydrate" => {
             let req = serde_json::from_str::<RehydrateSessionRequest>(args.params.get())?;
             let registry_client = agent.session_registry_client();
 
             to_response(rehydrate_session_in_worktree(&req, ops, registry_client.as_ref()).await)
         }
-        // ── Worktree management methods ──────────────────────────────────
-        "chutes.build/git/worktree/list" => {
+        // ÔöÇÔöÇ Worktree management methods ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        "chutes.ai/git/worktree/list" => {
             let req: xai_grok_workspace::workspace_ops::WorktreeListReq =
                 serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
@@ -380,7 +383,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/show" => {
+        "chutes.ai/git/worktree/show" => {
             let req = serde_json::from_str::<ShowWorktreeRequest>(args.params.get())?;
             let op = xai_grok_workspace::workspace_ops::WorktreeShowReq {
                 id_or_path: req.id_or_path,
@@ -391,7 +394,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/gc" => {
+        "chutes.ai/git/worktree/gc" => {
             let req = serde_json::from_str::<GcWorktreeRequest>(args.params.get())?;
             let max_age_secs = req.max_age.as_deref().map(parse_duration).transpose()?;
             let op = xai_grok_workspace::workspace_ops::WorktreeGcReq {
@@ -405,7 +408,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/stats" => {
+        "chutes.ai/git/worktree/db/stats" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbStatsReq {},
@@ -415,7 +418,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/rebuild" => {
+        "chutes.ai/git/worktree/db/rebuild" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbRebuildReq {},
@@ -425,7 +428,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/path" => {
+        "chutes.ai/git/worktree/db/path" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbPathReq {},
@@ -435,7 +438,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/detach" => {
+        "chutes.ai/git/worktree/detach" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct DetachReq {
@@ -456,7 +459,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/salvage" => {
+        "chutes.ai/git/worktree/salvage" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct SalvageReq {
@@ -476,7 +479,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/clean-artifacts" => {
+        "chutes.ai/git/worktree/clean-artifacts" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct CleanReq {
@@ -586,6 +589,58 @@ mod tests {
             slot,
             Some(false),
             "ACP wrapper must fail closed when remote settings are unavailable"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn apply_grove_worktree_gate_resume_parity_with_create() {
+        use crate::util::config::ENV_WORKTREE_TYPE;
+
+        unsafe { std::env::remove_var(ENV_WORKTREE_TYPE) };
+        let local_grove: toml::Value = toml::from_str("[cli]\ngrove_worktree = true").unwrap();
+        let empty: toml::Value = toml::from_str("[cli]\nauto_update = true").unwrap();
+        let remote_unset = crate::util::config::RemoteSettings {
+            grove_worktree: None,
+            ..Default::default()
+        };
+        let remote_kill = crate::util::config::RemoteSettings {
+            grove_worktree: Some(false),
+            ..Default::default()
+        };
+
+        let mut slot = None;
+        apply_grove_worktree_gate(&mut slot, &local_grove, Some(&remote_unset));
+        assert_eq!(
+            slot,
+            Some(true),
+            "remote Some(unset) + local grove must enable, same as create"
+        );
+
+        unsafe { std::env::set_var(ENV_WORKTREE_TYPE, "grove") };
+        let mut slot = None;
+        apply_grove_worktree_gate(&mut slot, &empty, Some(&remote_unset));
+        assert_eq!(
+            slot,
+            Some(true),
+            "remote Some(unset) + env grove must enable, same as create"
+        );
+
+        let mut slot = None;
+        apply_grove_worktree_gate(&mut slot, &empty, Some(&remote_kill));
+        assert_eq!(
+            slot,
+            Some(false),
+            "remote kill must disable even when env asked for grove"
+        );
+
+        let mut slot = None;
+        apply_grove_worktree_gate(&mut slot, &empty, None);
+        unsafe { std::env::remove_var(ENV_WORKTREE_TYPE) };
+        assert_eq!(
+            slot,
+            Some(false),
+            "true unavailability (remote = None) must fail-close even if env asked for grove"
         );
     }
 

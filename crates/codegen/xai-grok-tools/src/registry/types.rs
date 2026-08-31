@@ -1384,6 +1384,14 @@ impl FinalizedToolset {
     pub fn tool_name_for_kind(&self, kind: ToolKind) -> Option<String> {
         self.renderer.tool_for_kind(kind).map(str::to_owned)
     }
+    /// Client-facing name for a canonical registry ID, honoring name overrides.
+    pub fn tool_name_for_registry_id(&self, registry_id: &str) -> Option<String> {
+        self.tools
+            .read()
+            .iter()
+            .find(|tool| tool.registry_id == registry_id)
+            .map(|tool| tool.client_name.clone())
+    }
     /// Map of client-facing tool name → snake_case [`ToolKind`] key.
     pub fn tool_kinds(&self) -> HashMap<String, String> {
         self.tools

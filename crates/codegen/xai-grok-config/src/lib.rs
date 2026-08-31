@@ -38,7 +38,7 @@ pub use global_hook_sources::{
     GlobalHookSource, GlobalHookSourceError, GlobalHookSourceKind, ResolvedGlobalHookSources,
     ensure_grok_hook_slots, existing_ancestor_chain, is_direct_hook_json_name,
     list_direct_hook_json_files, missing_configured_sources, path_has_symlink_component,
-    resolve_global_hook_sources, unique_ancestors_rootward,
+    resolve_global_hook_sources, resolve_trust_boundary_sources, unique_ancestors_rootward,
 };
 
 pub use config_layers::{
@@ -55,7 +55,9 @@ pub use global_hook_sources::{
 };
 pub use loader::{
     HookConfigLayer, HookProvenance, MANAGED_CONFIG_FILENAME, ManagedConfigLayer,
-    REQUIREMENTS_FILENAME, USER_CONFIG_FILENAME, apply_version_overrides_with_registered,
+    REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME, TRUSTED_FOLDERS_FILENAME,
+    TRUSTED_HOOK_PROJECTS_FILENAME, TRUSTED_PLUGINS_FILENAME,
+    USER_CONFIG_FILENAME, apply_version_overrides_with_registered,
     deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml, hook_config_layers,
     hook_config_layers_at, load_config_file, load_from_disk, load_managed_config,
     load_system_managed_config, load_toml_file, managed_config_layers, managed_config_layers_at,

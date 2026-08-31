@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use std::io::{self, BufRead, BufReader, Seek};
+use std::io::{self, BufRead, BufReader, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use crate::extensions::notification::SessionNotification;
@@ -14,7 +14,6 @@ use xai_grok_sampling_types::ReasoningEffort;
 use xai_grok_workspace::session::file_state::RewindPoint;
 
 pub mod jsonl;
-#[allow(dead_code)] // Transaction APIs remain deferred until later protocol wiring.
 pub(crate) mod relocation;
 mod replay;
 #[cfg(test)]
@@ -24,7 +23,7 @@ mod search_content;
 pub(crate) mod summary_write;
 
 /// The session search index moved to its own crate; re-exported here so
-/// `session::storage::search_fts::…` keeps resolving for its consumers.
+/// `session::storage::search_fts::ÔÇª` keeps resolving for its consumers.
 pub use xai_grok_session_search::fts as search_fts;
 
 /// On-disk file names, relative to a session directory. Single source of truth for
@@ -42,9 +41,34 @@ pub(crate) const UPDATES_FILE: &str = "updates.jsonl";
 /// renaming it over the target, so a crash or a concurrent writer never leaves a
 /// torn file. The temp is removed on failure.
 pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_bytes_atomic_with(path, bytes, sync_file_durable, || {
+        sync_parent_dir_durable(path)
+    })
+}
+
+fn write_bytes_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    sync_file: impl Fn(&std::fs::File) -> io::Result<()>,
+    sync_parent: impl Fn() -> io::Result<()>,
+) -> io::Result<()> {
     let tmp = temp_sibling(path);
-    match std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path)) {
-        Ok(()) => Ok(()),
+    let write_synced = || -> io::Result<()> {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        // NTFS/ext4 journal a rename as old-file-or-new-file only when the new
+        // file's data is already flushed; without this fsync a power loss can
+        // surface the committed rename with zero-length content.
+        sync_file(&file)
+    };
+    // Old-or-new only covers replacing a file, whose direntry is already
+    // durable; a first-time create (a session's first summary.json) has no
+    // old file, so its new entry can vanish on power loss until the parent
+    // directory is synced. A retry after rename+failed parent-sync sees the
+    // file present and cannot tell create from replace, so every successful
+    // rename pays the parent sync.
+    match write_synced().and_then(|()| std::fs::rename(&tmp, path)) {
+        Ok(()) => sync_parent(),
         Err(e) => {
             let _ = std::fs::remove_file(&tmp);
             Err(e)
@@ -82,17 +106,138 @@ pub(crate) fn sync_file_durable(_file: &std::fs::File) -> io::Result<()> {
     ))
 }
 
+/// Fsync `dir` so entries just created or renamed into it survive power loss.
+#[cfg(target_os = "macos")]
+pub(crate) fn sync_dir_durable(dir: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let file = std::fs::File::open(dir)?;
+    file.sync_all()?;
+    // Match file durability: macOS fsync may stop at volatile drive caches.
+    fullfsync_raw(file.as_raw_fd())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) fn sync_dir_durable(dir: &Path) -> io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(windows)]
+pub(crate) fn sync_dir_durable(_dir: &Path) -> io::Result<()> {
+    // Windows has no supported directory-handle fsync; NTFS journals directory
+    // metadata, which can roll a very recent create back to absent but never
+    // to garbage.
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn sync_dir_durable(_dir: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "durable directory sync is unsupported on this platform",
+    ))
+}
+
+/// Fsync `<cwd_dir>/.cwd` if present so hash-encoded path recovery is not
+/// frozen to a torn marker when a later parent-dir sync durableizes the
+/// direntry. Open write-capable: Windows `FlushFileBuffers` on a read-only
+/// handle cannot persist the bytes (prior Bugbot, cwd retry).
+pub(crate) fn sync_cwd_marker_if_present(cwd_dir: &Path) -> io::Result<()> {
+    sync_cwd_marker_if_present_with(cwd_dir, sync_file_durable)
+}
+
+pub(crate) fn sync_cwd_marker_if_present_with(
+    cwd_dir: &Path,
+    sync_file: impl Fn(&std::fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let cwd_file = cwd_dir.join(".cwd");
+    match std::fs::OpenOptions::new().write(true).open(&cwd_file) {
+        Ok(file) => sync_file(&file),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// [`sync_dir_durable`] on the directory containing `path`.
+pub(crate) fn sync_parent_dir_durable(path: &Path) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
+    sync_dir_durable(parent)
+}
+
+/// Run `create` (a `create_dir_all`-style creation of `dir`), then
+/// [`sync_dir_durable`] every directory that gained a new entry, so the
+/// created chain itself survives power loss ÔÇö fsyncing a file only makes
+/// its own direntry durable, not the directories above it. The ancestors
+/// are snapshotted before `create` because afterwards the whole chain
+/// exists; an already-existing occupied chain pays no sync.
+pub(crate) fn create_dir_all_durable(
+    dir: &Path,
+    create: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    create_dir_all_durable_with(dir, create, sync_dir_durable)
+}
+
+pub(crate) fn create_dir_all_durable_with(
+    dir: &Path,
+    create: impl FnOnce(&Path) -> io::Result<()>,
+    sync_dir: impl Fn(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut gaining_an_entry = Vec::new();
+    let mut cursor = dir;
+    while !cursor.exists() {
+        let Some(parent) = cursor.parent() else { break };
+        gaining_an_entry.push(parent);
+        cursor = parent;
+    }
+    create(dir)?;
+    // A retry after create+failed parent-sync sees the whole chain present
+    // and would otherwise sync nothing. Re-sync a bounded ancestor list so
+    // the new direntry is durable ÔÇö but only when `dir` is still empty.
+    // `init_session` calls this on every open; a populated resume must not
+    // fsync ancestors (permissions / network home / macOS F_FULLFSYNC can
+    // fail a normal open). Never the filesystem root (fsync("/") can fail
+    // or stall).
+    let retry_ancestors;
+    let to_sync: &[&Path] = if !gaining_an_entry.is_empty() {
+        &gaining_an_entry
+    } else if std::fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
+    {
+        retry_ancestors = dir
+            .ancestors()
+            .skip(1)
+            .take(4)
+            .filter(|parent| !is_fs_root(parent))
+            .collect::<Vec<_>>();
+        &retry_ancestors
+    } else {
+        return Ok(());
+    };
+    // Fresh creates under a new top-level directory include `/` in
+    // `gaining_an_entry`; skip it here so both paths honor the root rule.
+    for parent in to_sync {
+        if is_fs_root(parent) {
+            continue;
+        }
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+fn is_fs_root(path: &Path) -> bool {
+    path.parent()
+        .is_none_or(|parent| parent.as_os_str().is_empty())
+}
+
 /// Async sibling of [`write_bytes_atomic`].
 pub(crate) async fn write_bytes_atomic_async(path: &Path, bytes: Vec<u8>) -> io::Result<()> {
-    let tmp = temp_sibling(path);
-    let result = match tokio::fs::write(&tmp, bytes).await {
-        Ok(()) => tokio::fs::rename(&tmp, path).await,
-        Err(e) => Err(e),
-    };
-    if result.is_err() {
-        let _ = tokio::fs::remove_file(&tmp).await;
-    }
-    result
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || write_bytes_atomic(&path, &bytes))
+        .await
+        .map_err(io::Error::other)?
 }
 
 /// Serialize `items` to newline-delimited JSON bytes.
@@ -198,7 +343,7 @@ pub(crate) mod chat_rebuild {
 
     /// Reduces ACP session updates into conversation items.
     ///
-    /// Turn boundaries: User→Agent flushes user, Agent→User flushes agent,
+    /// Turn boundaries: UserÔåÆAgent flushes user, AgentÔåÆUser flushes agent,
     /// tool completion flushes agent before emitting result.
     struct ChatReducer {
         user_parts: Vec<ContentPart>,
@@ -755,7 +900,7 @@ pub struct CopySessionOptions {
     /// summary so the prompt-facing cwd survives session restore/reload.
     pub prompt_display_cwd: Option<String>,
 
-    // ── Generic fork extensions (used by subagent + worktree forks) ──
+    // ÔöÇÔöÇ Generic fork extensions (used by subagent + worktree forks) ÔöÇÔöÇ
     /// Override `session_kind` in the forked summary. Defaults to `"fork"`.
     /// Subagent resume sets `"subagent_resume"`.
     pub session_kind: Option<String>,
@@ -775,7 +920,7 @@ pub struct CopySessionOptions {
     pub copy_announcement_state: bool,
     /// Whether to copy the `compaction/` segment archive (`segment_*.md` +
     /// `INDEX.md`, the verbose pre-compaction transcripts). Defaults to
-    /// `false` — these can be large and most copy paths don't need them. Forks
+    /// `false` ÔÇö these can be large and most copy paths don't need them. Forks
     /// enable it so the child retains the parent's pre-compaction history.
     pub copy_compaction_segments: bool,
     /// When true, apply fork-safety filtering to copied chat history:
@@ -871,7 +1016,7 @@ fn is_acp_user_message_chunk(update: &SessionUpdate) -> bool {
 ///
 /// Progressive: every user run counts until the first `promptIndex` appears;
 /// after that only marked runs count (mid-turn phantoms omit the marker).
-/// A change of `promptIndex` (including unmarked ↔ marked) opens a new run —
+/// A change of `promptIndex` (including unmarked Ôåö marked) opens a new run ÔÇö
 /// matching replay's split so back-to-back cancelled prompts stay distinct.
 struct UserRunTurnTracker {
     seen_marker: bool,
@@ -957,6 +1102,12 @@ pub enum AppendUpdateError {
 }
 
 #[derive(Debug)]
+pub enum AppendChatError {
+    NotCommitted(io::Error),
+    Committed(io::Error),
+}
+
+#[derive(Debug)]
 pub enum AppendCwdSwitchError {
     NotCommitted(io::Error),
     Committed {
@@ -978,6 +1129,48 @@ impl std::fmt::Display for AppendUpdateError {
         match self {
             Self::NotCommitted(error) | Self::Committed(error) => error.fmt(formatter),
         }
+    }
+}
+
+impl AppendChatError {
+    pub fn into_io_error(self) -> io::Error {
+        match self {
+            Self::NotCommitted(error) | Self::Committed(error) => error,
+        }
+    }
+}
+
+impl std::fmt::Display for AppendChatError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotCommitted(error) | Self::Committed(error) => error.fmt(formatter),
+        }
+    }
+}
+
+/// Session files a sync barrier flushes. The persistence actor marks the
+/// files that took buffered writes since the last successful barrier;
+/// atomic-rename writes are durable at write time and never enter the set.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionFileSet {
+    pub updates: bool,
+    pub chat: bool,
+    pub summary: bool,
+    pub plan: bool,
+    pub rewind_points: bool,
+}
+
+impl SessionFileSet {
+    pub(crate) const ALL: Self = Self {
+        updates: true,
+        chat: true,
+        summary: true,
+        plan: true,
+        rewind_points: true,
+    };
+
+    pub(crate) fn is_empty(self) -> bool {
+        self == Self::default()
     }
 }
 
@@ -1016,6 +1209,11 @@ pub trait StorageAdapter: Send + Sync {
         info: &Info,
         session_title: String,
     ) -> io::Result<bool>;
+
+    /// Stamp `session_kind` only if the session has none yet, atomically
+    /// under the summary lock. A kind already on disk (crash-recovered dir,
+    /// concurrent writer) is preserved.
+    async fn set_session_kind_if_absent(&self, info: &Info, kind: String) -> io::Result<()>;
 
     /// Clear a manual `/rename` pin (`/rename --auto`). Sets
     /// `title_is_manual = false` and, when a pin was present, blanks
@@ -1064,6 +1262,19 @@ pub trait StorageAdapter: Send + Sync {
 
     /// Append a chat message and increment counter.
     async fn append_chat_message(&self, info: &Info, message: &ConversationItem) -> io::Result<()>;
+
+    /// Append one chat message and report whether the JSONL record was
+    /// committed before an error. Bookkeeping (summary counters) can fail
+    /// after the append has already reached the page cache.
+    async fn append_chat_message_commit_aware(
+        &self,
+        info: &Info,
+        message: &ConversationItem,
+    ) -> Result<(), AppendChatError> {
+        self.append_chat_message(info, message)
+            .await
+            .map_err(AppendChatError::NotCommitted)
+    }
 
     /// Append one working-directory switch generation exactly once.
     async fn append_cwd_switch_commit_aware(
@@ -1180,8 +1391,15 @@ pub trait StorageAdapter: Send + Sync {
     /// Load all rewind points for a session
     async fn load_rewind_points(&self, info: &Info) -> io::Result<Vec<RewindPoint>>;
 
-    /// Sync all session files to disk. Called before CopyFile to ensure all writes are persisted.
-    async fn sync_session_files(&self, info: &Info) -> io::Result<()>;
+    /// Sync the selected session files, plus the session directory entry once,
+    /// to stable media. Backs the `FlushAndAck` barrier (dirty files only) and
+    /// the pre-`CopyFile` flush ([`SessionFileSet::ALL`]), so an error means
+    /// the barrier must not ack.
+    async fn sync_session_files_selected(
+        &self,
+        info: &Info,
+        files: SessionFileSet,
+    ) -> io::Result<()>;
 
     /// Truncate rewind points from a specific prompt index (inclusive)
     /// Used when rewinding to remove future history
@@ -1549,7 +1767,7 @@ pub enum PromptExtractEvent {
     /// Any in-progress user message should be flushed before truncating.
     RewindTo(usize),
 
-    /// Any other update type — signals that the current user message (if any)
+    /// Any other update type ÔÇö signals that the current user message (if any)
     /// has ended.
     NotUserMessage,
 }
@@ -1578,9 +1796,9 @@ impl PromptExtractEvent {
 /// discriminant field and only extracts the one or two fields actually needed
 /// for prompt reconstruction:
 ///
-/// - ACP `"user_message_chunk"` → `update.content.text`
-/// - xAI `"rewind_marker"`      → `update.target_prompt_index`
-/// - everything else             → [`PromptExtractEvent::NotUserMessage`]
+/// - ACP `"user_message_chunk"` ÔåÆ `update.content.text`
+/// - xAI `"rewind_marker"`      ÔåÆ `update.target_prompt_index`
+/// - everything else             ÔåÆ [`PromptExtractEvent::NotUserMessage`]
 ///
 /// Parse errors on individual lines are treated conservatively as
 /// `NotUserMessage` (matching the "skip malformed line" behavior of the
@@ -1632,8 +1850,8 @@ impl Iterator for PromptExtractIterator {
 /// Assemble accumulated user-prompt strings from a stream of [`PromptExtractEvent`]s.
 ///
 /// Encapsulates the accumulation, flush, and rewind-truncation rules in one
-/// place so that every caller — whether reading from disk or from an in-memory
-/// iterator — applies identical prompt-extraction semantics:
+/// place so that every caller ÔÇö whether reading from disk or from an in-memory
+/// iterator ÔÇö applies identical prompt-extraction semantics:
 ///
 /// - Consecutive `UserTextChunk` events are concatenated into one prompt until
 ///   a non-user event or a `promptIndex` change opens a new run.
@@ -1914,7 +2132,7 @@ pub fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate
 }
 
 // ---------------------------------------------------------------------------
-// Selective serde structs — only the fields we care about
+// Selective serde structs ÔÇö only the fields we care about
 // ---------------------------------------------------------------------------
 
 /// Peek inside ACP or xAI `params` to read the `update.sessionUpdate` tag and
@@ -1986,13 +2204,13 @@ pub(crate) fn parse_prompt_extract_event(line: &str) -> PromptExtractEvent {
         let xai = env.method == Some(XAI_SESSION_UPDATE_METHOD);
         (raw, xai)
     } else {
-        // Not a valid envelope → try legacy format: the line IS the params.
+        // Not a valid envelope ÔåÆ try legacy format: the line IS the params.
         (line, false)
     };
 
     // Step 2: parse the discriminant and relevant payload fields in one pass.
     let Ok(peek) = serde_json::from_str::<ParamsPeek<'_>>(raw_params) else {
-        // Cannot determine update type → treat conservatively.
+        // Cannot determine update type ÔåÆ treat conservatively.
         return PromptExtractEvent::NotUserMessage;
     };
 
@@ -2052,7 +2270,320 @@ pub(crate) fn parse_prompt_extract_event(line: &str) -> PromptExtractEvent {
 mod tests {
     use super::*;
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    #[test]
+    fn atomic_write_runs_file_sync_barrier_before_rename_replaces_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+        std::fs::write(&target, b"old").unwrap();
+
+        let target_bytes_at_sync = std::cell::RefCell::new(Vec::new());
+        write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| {
+                *target_bytes_at_sync.borrow_mut() = std::fs::read(&target).unwrap();
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            target_bytes_at_sync.borrow().as_slice(),
+            b"old",
+            "the sync barrier must run on the temp file before the rename commits"
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    #[test]
+    fn atomic_write_syncs_parent_directory_after_the_rename_commits_a_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+
+        let events = std::cell::RefCell::new(Vec::new());
+        write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| {
+                events.borrow_mut().push("sync_file");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push(
+                    if std::fs::read(&target).is_ok_and(|bytes| bytes == b"new") {
+                        "sync_parent_after_rename"
+                    } else {
+                        "sync_parent_before_rename"
+                    },
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            events.borrow().as_slice(),
+            ["sync_file", "sync_parent_after_rename"],
+            "the parent-directory sync must run after the rename commits the new entry"
+        );
+    }
+
+    #[test]
+    fn atomic_write_syncs_parent_directory_after_rename_even_when_replacing() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+        std::fs::write(&target, b"old").unwrap();
+
+        let parent_syncs = std::cell::Cell::new(0);
+        write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| Ok(()),
+            || {
+                parent_syncs.set(parent_syncs.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            parent_syncs.get(),
+            1,
+            "a retry after a failed create-barrier would otherwise skip the parent sync"
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    #[test]
+    fn atomic_write_retries_parent_sync_after_a_failed_create_barrier() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+
+        let first = write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| Ok(()),
+            || Err(io::Error::other("directory barrier failed")),
+        );
+        assert_eq!(first.unwrap_err().to_string(), "directory barrier failed");
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+
+        let parent_syncs = std::cell::Cell::new(0);
+        write_bytes_atomic_with(
+            &target,
+            b"newer",
+            |_| Ok(()),
+            || {
+                parent_syncs.set(parent_syncs.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(parent_syncs.get(), 1);
+        assert_eq!(std::fs::read(&target).unwrap(), b"newer");
+    }
+
+    #[test]
+    fn create_dir_all_durable_syncs_every_directory_gaining_an_entry_on_a_fresh_chain() {
+        let root = tempfile::tempdir().unwrap();
+        let group = root.path().join("sessions").join("cwd");
+        let session = group.join("session-id");
+
+        let synced = std::cell::RefCell::new(Vec::new());
+        create_dir_all_durable_with(
+            &session,
+            |dir| std::fs::create_dir_all(dir),
+            |dir| {
+                synced.borrow_mut().push(dir.to_path_buf());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(session.is_dir());
+        assert_eq!(
+            synced.borrow().as_slice(),
+            [
+                group.clone(),
+                root.path().join("sessions"),
+                root.path().to_path_buf()
+            ],
+            "each directory holding a newly created entry must be synced, up to the first pre-existing ancestor"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_dir_all_durable_fresh_create_skips_the_filesystem_root() {
+        let unique = format!("grok-durable-create-{}", uuid::Uuid::now_v7());
+        let top = Path::new("/").join(&unique);
+        let dir = top.join("sessions").join("id");
+        assert!(
+            !top.exists(),
+            "test unique top-level path must not already exist: {}",
+            top.display()
+        );
+
+        let synced = std::cell::RefCell::new(Vec::new());
+        create_dir_all_durable_with(
+            &dir,
+            |_dir| Ok(()),
+            |path| {
+                synced.borrow_mut().push(path.to_path_buf());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let synced = synced.borrow();
+        assert!(
+            !synced.iter().any(|path| is_fs_root(path)),
+            "a fresh create whose chain reaches a top-level directory must not fsync /, got {synced:?}"
+        );
+        assert!(
+            synced.iter().any(|path| path == &top),
+            "the new top-level directory itself must still be synced, got {synced:?}"
+        );
+        assert!(
+            synced.iter().any(|path| path == &top.join("sessions")),
+            "intermediate parents that gained an entry must still be synced, got {synced:?}"
+        );
+    }
+
+    #[test]
+    fn create_dir_all_durable_resyncs_ancestors_when_an_empty_chain_already_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let session = root.path().join("sessions").join("cwd").join("session-id");
+        std::fs::create_dir_all(&session).unwrap();
+
+        let synced = std::cell::RefCell::new(Vec::new());
+        create_dir_all_durable_with(
+            &session,
+            |dir| std::fs::create_dir_all(dir),
+            |dir| {
+                synced.borrow_mut().push(dir.to_path_buf());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let synced = synced.borrow();
+        assert!(
+            synced.iter().any(|path| path == session.parent().unwrap()),
+            "a retry must re-sync the parent that holds the session direntry, got {synced:?}"
+        );
+        assert!(
+            !synced.iter().any(|path| is_fs_root(path)),
+            "must not fsync the filesystem root, got {synced:?}"
+        );
+    }
+
+    #[test]
+    fn create_dir_all_durable_occupied_existing_chain_pays_no_sync() {
+        let root = tempfile::tempdir().unwrap();
+        let session = root.path().join("sessions").join("cwd").join("session-id");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("summary.json"), b"{}").unwrap();
+
+        let synced = std::cell::RefCell::new(Vec::new());
+        create_dir_all_durable_with(
+            &session,
+            |dir| std::fs::create_dir_all(dir),
+            |dir| {
+                synced.borrow_mut().push(dir.to_path_buf());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(
+            synced.borrow().is_empty(),
+            "resume of a populated session dir must not fsync ancestors, got {:?}",
+            synced.borrow()
+        );
+    }
+
+    #[test]
+    fn create_dir_all_durable_retries_ancestor_syncs_after_a_failed_create_barrier() {
+        let root = tempfile::tempdir().unwrap();
+        let session = root.path().join("sessions").join("cwd").join("session-id");
+
+        let first = create_dir_all_durable_with(
+            &session,
+            |dir| std::fs::create_dir_all(dir),
+            |_| Err(io::Error::other("directory barrier failed")),
+        );
+        assert_eq!(first.unwrap_err().to_string(), "directory barrier failed");
+        assert!(session.is_dir());
+
+        let synced = std::cell::RefCell::new(Vec::new());
+        create_dir_all_durable_with(
+            &session,
+            |dir| std::fs::create_dir_all(dir),
+            |dir| {
+                synced.borrow_mut().push(dir.to_path_buf());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(
+            synced
+                .borrow()
+                .iter()
+                .any(|path| path == session.parent().unwrap()),
+            "a retry after create+failed sync must still durableize the new direntry"
+        );
+    }
+
+    #[test]
+    fn atomic_write_parent_sync_error_propagates_and_keeps_the_committed_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+
+        let error = write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| Ok(()),
+            || Err(io::Error::other("directory barrier failed")),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "directory barrier failed");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"new",
+            "a failed directory barrier reports the error but never unwinds the committed rename"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_write_sync_barrier_error_propagates_keeps_target_and_leaves_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("summary.json");
+        std::fs::write(&target, b"old").unwrap();
+
+        let error = write_bytes_atomic_with(
+            &target,
+            b"new",
+            |_| Err(io::Error::other("file barrier failed")),
+            || Ok(()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "file barrier failed");
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "a failed sync must remove its temp file"
+        );
+    }
+
+    // ÔöÇÔöÇ helpers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     /// Wrap an ACP notification as the envelope stored in updates.jsonl.
     fn acp_envelope(session_update_json: &str) -> String {
@@ -2068,7 +2599,7 @@ mod tests {
         )
     }
 
-    // ── parse_prompt_extract_event unit tests ─────────────────────────────────
+    // ÔöÇÔöÇ parse_prompt_extract_event unit tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn acp_user_text_chunk_yields_user_text() {
@@ -2178,7 +2709,7 @@ mod tests {
         );
     }
 
-    /// Empty string — the iterator skips blanks, but a direct call must still
+    /// Empty string ÔÇö the iterator skips blanks, but a direct call must still
     /// classify conservatively (the parser always yields an event now).
     #[test]
     fn empty_string_yields_not_user() {
@@ -2188,7 +2719,7 @@ mod tests {
         );
     }
 
-    /// A valid JSON object that has no recognisable ACP/xAI shape — NotUserMessage.
+    /// A valid JSON object that has no recognisable ACP/xAI shape ÔÇö NotUserMessage.
     #[test]
     fn unknown_json_object_yields_not_user() {
         assert_eq!(
@@ -2220,9 +2751,7 @@ mod tests {
         );
     }
 
-    // ── PromptExtractIterator integration tests via tempfile ──────────────────
-
-    use std::io::Write as _;
+    // ÔöÇÔöÇ PromptExtractIterator integration tests via tempfile ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     fn write_updates_file(lines: &[&str]) -> tempfile::NamedTempFile {
         let mut f = tempfile::NamedTempFile::new().unwrap();
@@ -2313,7 +2842,7 @@ mod tests {
         let f = write_updates_file(&[bad, &good]);
 
         let events = collect_events(f.path());
-        // bad line → NotUserMessage; good line → UserTextChunk
+        // bad line ÔåÆ NotUserMessage; good line ÔåÆ UserTextChunk
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], PromptExtractEvent::NotUserMessage);
         assert_eq!(events[1], PromptExtractEvent::user_text("ok"));
@@ -2680,7 +3209,7 @@ mod tests {
         assert_eq!(texts, vec!["P0", "phantom", "P1", "after"]);
     }
 
-    // ── filter_rewind_lines tests ────────────────────────────────────────────
+    // ÔöÇÔöÇ filter_rewind_lines tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn filter_rewind_removes_dead_branch() {
@@ -2696,7 +3225,7 @@ mod tests {
         let a2 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"resp2"}}"#,
         );
-        // Rewind to prompt 1 — kills u2, a2
+        // Rewind to prompt 1 ÔÇö kills u2, a2
         let rw = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
         );
@@ -2804,7 +3333,7 @@ mod tests {
         let a3 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r3"}}"#,
         );
-        // Rewind to prompt 2 — kills p3/r3
+        // Rewind to prompt 2 ÔÇö kills p3/r3
         let rw1 = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":2,"created_at":"2024-01-01"}"#,
         );
@@ -2814,7 +3343,7 @@ mod tests {
         let a4 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r4"}}"#,
         );
-        // Rewind to prompt 1 — kills p2/r2/p4/r4
+        // Rewind to prompt 1 ÔÇö kills p2/r2/p4/r4
         let rw2 = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
         );
@@ -2931,7 +3460,7 @@ mod tests {
         assert!(result[2].contains("p2"));
     }
 
-    // ── collect_assistant_text / collect_tool_metadata tests ──────────────────
+    // ÔöÇÔöÇ collect_assistant_text / collect_tool_metadata tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn collect_assistant_text_extracts_chunks() {
@@ -2954,8 +3483,8 @@ mod tests {
     #[test]
     fn collect_assistant_text_caps_at_100k() {
         // Two 60k chunks with non-ASCII, separator, and truncation
-        let chunk1 = "x".repeat(60_000) + "café"; // 60k + 5 bytes (café is 5 UTF-8 bytes)
-        let chunk2 = "日本語".repeat(20_000); // 60k bytes (3 bytes per char)
+        let chunk1 = "x".repeat(60_000) + "caf├®"; // 60k + 5 bytes (caf├® is 5 UTF-8 bytes)
+        let chunk2 = "µùÑµ£¼Þ¬×".repeat(20_000); // 60k bytes (3 bytes per char)
         let lines = vec![
             acp_envelope(&format!(
                 r#"{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{chunk1}"}}}}"#
@@ -2973,7 +3502,7 @@ mod tests {
         assert!(total <= 100_000, "got {total} chars");
         // Verify non-ASCII content is present (not corrupted by truncation)
         assert!(
-            result.iter().any(|s| s.contains("café")),
+            result.iter().any(|s| s.contains("caf├®")),
             "non-ASCII should be preserved"
         );
     }
@@ -3010,7 +3539,7 @@ mod tests {
     #[test]
     fn from_str_unknown_xai_variant_deserializes_via_envelope() {
         // Simulates an updates.jsonl line containing a removed variant (e.g. git_branch_update).
-        // SessionUpdateEnvelope::from_str must not error — the Unknown catch-all absorbs it.
+        // SessionUpdateEnvelope::from_str must not error ÔÇö the Unknown catch-all absorbs it.
         let line = xai_envelope(r#"{"sessionUpdate":"git_branch_update","branch":"main"}"#);
         let update = SessionUpdateEnvelope::from_str(&line).unwrap();
         match update {

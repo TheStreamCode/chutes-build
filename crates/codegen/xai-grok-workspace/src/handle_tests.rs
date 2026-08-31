@@ -41,13 +41,38 @@ pub(crate) fn make_handle_with_status_config(
 ) -> WorkspaceHandle {
     make_handle_inner(false, false, status_config, false)
 }
+/// [`make_handle`], but with the empty `state_path` that real sessions get.
+#[allow(dead_code)]
+pub(crate) fn make_handle_without_tool_state() -> WorkspaceHandle {
+    make_handle_with_factory(
+        Arc::new(TestSessionContextFactory::without_tool_state()),
+        false,
+        false,
+        Default::default(),
+        false,
+    )
+}
 fn make_handle_inner(
     rewind_all_outcomes: bool,
     require_explicit_toolset: bool,
     status_config: crate::StatusConfig,
     confine_fs_to_workspace_root: bool,
 ) -> WorkspaceHandle {
-    let factory = Arc::new(TestSessionContextFactory::new());
+    make_handle_with_factory(
+        Arc::new(TestSessionContextFactory::new()),
+        rewind_all_outcomes,
+        require_explicit_toolset,
+        status_config,
+        confine_fs_to_workspace_root,
+    )
+}
+fn make_handle_with_factory(
+    factory: Arc<TestSessionContextFactory>,
+    rewind_all_outcomes: bool,
+    require_explicit_toolset: bool,
+    status_config: crate::StatusConfig,
+    confine_fs_to_workspace_root: bool,
+) -> WorkspaceHandle {
     let cwd = factory.temp.path().to_path_buf();
     let config = WorkspaceConfig {
         root_cwd: cwd,
@@ -143,7 +168,10 @@ impl xai_tool_runtime::Tool for BashCcoStub {
     }
 }
 pub(crate) fn register_bash_cco_stub(handle: &WorkspaceHandle) {
-    let session = handle.session("main").expect("main session present");
+    register_bash_cco_stub_on(handle, "main");
+}
+pub(crate) fn register_bash_cco_stub_on(handle: &WorkspaceHandle, session_id: &str) {
+    let session = handle.session(session_id).expect("session present");
     session
         .toolset()
         .register_tool(
@@ -198,7 +226,7 @@ async fn local_harness_preserves_bash_chat_completion_output() {
     let typed = drain_terminal_ok(stream).await;
     assert_bash_cco_terminal(&typed);
 }
-/// No connection ⇒ every export entry point returns `None`, so the
+/// No connection ÔçÆ every export entry point returns `None`, so the
 /// binary leaves the `DonatingLogLayer` inert and spawns no metric reporter.
 /// This is the flag-free "activate only on connection" contract that log
 /// and metric export share with the pre-existing `trace_donation_reporter`.
@@ -247,7 +275,7 @@ fn rewind_domain_and_result_labels_are_stable() {
     assert_eq!(rewind_result_label(true), "success");
     assert_eq!(rewind_result_label(false), "failure");
 }
-/// The per-bind handler builder maps the session's finalized toolset 1:1 —
+/// The per-bind handler builder maps the session's finalized toolset 1:1 ÔÇö
 /// one handler per `tool_definitions()` entry, keyed by client name, with no
 /// extra handlers and no RPC handler (that is appended by the resolver /
 /// `connect_hub`, not here). The resolver-level "no intersection, no silent
@@ -276,6 +304,37 @@ async fn build_session_routed_handlers_covers_finalized_toolset() {
     assert_eq!(
         got, expected,
         "advertised handlers must equal the finalized toolset (no intersection)"
+    );
+}
+#[tokio::test]
+async fn build_session_routed_handlers_preserves_renamed_active_message_kind() {
+    let handle = make_handle();
+    let mut renamed = xai_grok_tools::registry::types::ToolConfig::for_tool::<
+        xai_grok_tools::implementations::grok_build::SendSubagentMessageTool,
+    >();
+    renamed.name_override = Some("relay_to_subagent".to_owned());
+    let session = handle
+        .create_session_with_config(
+            "sess-renamed-message",
+            None,
+            Some(ToolServerConfig {
+                tools: vec![renamed],
+                behavior_preset: None,
+            }),
+            CapabilityMode::All,
+            None,
+            false,
+        )
+        .expect("create renamed message session");
+    let handlers = build_session_routed_handlers(&session.toolset(), &handle);
+    let handler = handlers
+        .iter()
+        .find(|handler| handler.tool_id().as_str() == "relay_to_subagent")
+        .expect("renamed handler");
+    let description = handler.description();
+    assert_eq!(
+        description.kind.as_deref(),
+        Some(ToolKind::ActiveAgentMessage.as_key())
     );
 }
 #[tokio::test]
@@ -311,12 +370,12 @@ async fn build_session_routed_handlers_skips_invalid_client_name_without_panic()
     );
 }
 /// Regression for the deleted catalog intersection. Reproduces the
-/// `session.bind` resolver tail's composition — `build_session_routed_handlers`
+/// `session.bind` resolver tail's composition ÔÇö `build_session_routed_handlers`
 /// for the session toolset, plus the single RPC handler filtered from the
-/// connect-time catalog — and proves a session tool whose client name is
+/// connect-time catalog ÔÇö and proves a session tool whose client name is
 /// ABSENT from that (grok-build) catalog is still advertised. The old
-/// `catalog ∩ session-names` filter silently dropped exactly such tools
-/// (grok-build renames → 6/11).
+/// `catalog Ôê® session-names` filter silently dropped exactly such tools
+/// (grok-build renames ÔåÆ 6/11).
 #[tokio::test]
 async fn resolver_advertises_tool_absent_from_connect_catalog() {
     let handle = make_handle();
@@ -396,7 +455,7 @@ fn session_tool_names(session: &Arc<crate::session::WorkspaceSession>) -> Vec<St
 /// The sandbox-resume regression (`workspace_tool_coverage_incomplete`): a
 /// session created by a metadata-less bind resolves the workspace default;
 /// a later rebind that carries the client's explicit toolset must
-/// re-resolve and swap it in — not silently reuse the default — so the
+/// re-resolve and swap it in ÔÇö not silently reuse the default ÔÇö so the
 /// bind response advertises the configured (renamed) tools. A repeat
 /// rebind with the identical config is a no-op reuse.
 #[tokio::test]
@@ -526,7 +585,7 @@ fn swap_rejected_count(reason: &str, trigger: &str) -> u64 {
 }
 /// The lazy-bind / resume-correction regression lock: a
 /// default-resolved session (stored fingerprint `None`) must accept the
-/// owner's explicit-config rebind even mid-turn with a call in flight —
+/// owner's explicit-config rebind even mid-turn with a call in flight ÔÇö
 /// the owner bind is designed to land mid-turn, and deferring it would
 /// serve a toolset that contradicts the config-built prompt.
 #[tokio::test]
@@ -548,14 +607,14 @@ async fn rebind_none_to_explicit_swaps_mid_turn() {
     assert_eq!(
         outcome,
         RebindOutcome::Reresolved,
-        "a None → explicit correction must swap even mid-turn with calls in flight"
+        "a None ÔåÆ explicit correction must swap even mid-turn with calls in flight"
     );
     assert_eq!(
         session_tool_names(&rebound),
         vec!["renamed_read".to_owned()]
     );
 }
-/// `explicit → different-explicit` under dispatch: the rebind keeps the
+/// `explicit ÔåÆ different-explicit` under dispatch: the rebind keeps the
 /// existing toolset (`ReresolveDeferredInFlight`, counted); once the
 /// call completes, a later rebind applies the correction.
 #[tokio::test]
@@ -714,7 +773,7 @@ async fn update_tool_config_rejects_mid_turn_then_succeeds_at_boundary() {
     );
 }
 /// TOCTOU lock: a turn that starts DURING the re-resolve (after the
-/// entry check passed) must still abort the install — the resolved
+/// entry check passed) must still abort the install ÔÇö the resolved
 /// toolset is discarded, the fingerprint stays unchanged, and the
 /// rejection is counted under `reason="turn_active_late"`. The retry at
 /// the turn boundary then succeeds.
@@ -928,7 +987,7 @@ pub(crate) async fn start_background_sleep(
         .expect("start background task")
 }
 /// A rebind that swaps in a different explicit toolset must rebuild the
-/// toolset AROUND the session-owned terminal backend, not a fresh one —
+/// toolset AROUND the session-owned terminal backend, not a fresh one ÔÇö
 /// that identity is what keeps background tasks alive across the swap.
 #[tokio::test]
 async fn rebind_swap_preserves_session_terminal_backend() {
@@ -974,7 +1033,7 @@ async fn rebind_swap_preserves_session_terminal_backend() {
     );
 }
 /// A snapshot-driven `re_resolve_all_sessions` rebuild (MCP snapshot
-/// change) must also rebuild around the session-owned backend — with a
+/// change) must also rebuild around the session-owned backend ÔÇö with a
 /// LIVE background task riding through the rebuild. This is the
 /// regression lock for snapshot-triggered swaps killing background
 /// tasks by minting a fresh backend per session.
@@ -1023,8 +1082,8 @@ async fn re_resolve_all_sessions_preserves_session_terminal_backend() {
 /// A local-bound session (external toolset installed via
 /// `bind_local_session`: the toolset keeps the shell's backend, the
 /// session-owned backend is an idle decoy) must be SKIPPED by
-/// snapshot-driven rebuilds — rebuilding around the decoy would detach
-/// tools from the shell's live task table — and must not fire the
+/// snapshot-driven rebuilds ÔÇö rebuilding around the decoy would detach
+/// tools from the shell's live task table ÔÇö and must not fire the
 /// orphan tripwire (the mismatch is the local-bind contract).
 #[tokio::test]
 async fn local_bound_session_skips_snapshot_rebuild() {
@@ -1140,8 +1199,8 @@ async fn local_bound_session_skips_snapshot_rebuild() {
     assert_eq!(orphaned_swap_count(), orphaned_before);
 }
 /// A background task started before a toolset swap must still be
-/// queryable through the NEW toolset's `Terminal` resource — the
-/// swap ⇒ empty task table + SIGKILL incident class.
+/// queryable through the NEW toolset's `Terminal` resource ÔÇö the
+/// swap ÔçÆ empty task table + SIGKILL incident class.
 #[tokio::test]
 async fn background_task_survives_toolset_swap() {
     let orphaned_before = orphaned_swap_count();
@@ -1185,7 +1244,7 @@ async fn background_task_survives_toolset_swap() {
 }
 /// Test factory whose sessions own a PERSISTENT-shell backend (the
 /// production factory shape). The plain [`TestSessionContextFactory`]
-/// builds a non-persistent backend, which tracks no shell cwd — hence
+/// builds a non-persistent backend, which tracks no shell cwd ÔÇö hence
 /// this wrapper for the shell-state-survival test.
 struct PersistentShellFactory {
     inner: TestSessionContextFactory,
@@ -1251,7 +1310,7 @@ fn make_persistent_shell_handle() -> WorkspaceHandle {
 }
 /// The persistent shell's state (a model-issued `cd`) survives a
 /// `Reresolved` toolset swap, because the shell lives inside the
-/// session-owned backend — the isolation-matrix #3 "persistent-shell
+/// session-owned backend ÔÇö the isolation-matrix #3 "persistent-shell
 /// cwd preserved" sub-assert, on the production backend shape
 /// (`with_persistent_shell`). Unix-only, like the persistent shell.
 #[cfg(unix)]
@@ -1341,7 +1400,7 @@ async fn fork_session_owns_distinct_terminal_backend() {
         "the fork's toolset must reference the fork-owned backend"
     );
 }
-/// Poll `backend` with a trivial command until its actor refuses it —
+/// Poll `backend` with a trivial command until its actor refuses it ÔÇö
 /// proving an explicit shutdown, since callers still hold live `Arc`s.
 /// Shared by the `drop_session` and hub-evict teardown tests.
 pub(crate) async fn assert_backend_stops(
@@ -1470,7 +1529,7 @@ async fn drop_session_leaves_externally_owned_hunk_tracker_alive() {
     assert_hunk_tracker_stops(&tracker).await;
 }
 /// Isolation matrix #5: a workspace process restart loses tasks (they are
-/// process state — physics), and what's pinned here is the recovery UX:
+/// process state ÔÇö physics), and what's pinned here is the recovery UX:
 /// the same session id recreates cleanly on the fresh process, the task
 /// table starts empty (loss is visible, not silent), and `get_task_output`
 /// for the lost id returns the informative not-found message.
@@ -1592,7 +1651,7 @@ fn rewind_metric_helpers_record_observable_effects() {
 async fn client_ext_sink_receives_emitted_notification() {
     let handle = make_handle();
     assert!(!handle.has_client_ext_sink());
-    handle.emit_client_ext("chutes.ai/noop".to_string(), serde_json::json!({}));
+    handle.emit_client_ext("x.ai/noop".to_string(), serde_json::json!({}));
     let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink_captured = captured.clone();
     handle.set_client_ext_sink(Arc::new(move |method, params| {
@@ -1600,17 +1659,17 @@ async fn client_ext_sink_receives_emitted_notification() {
     }));
     assert!(handle.has_client_ext_sink());
     handle.emit_client_ext(
-        "chutes.ai/search/fuzzy/status".to_string(),
+        "x.ai/search/fuzzy/status".to_string(),
         serde_json::json!({"a": 1}),
     );
     let got = captured.lock();
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].0, "chutes.ai/search/fuzzy/status");
+    assert_eq!(got[0].0, "x.ai/search/fuzzy/status");
     assert_eq!(got[0].1, serde_json::json!({"a": 1}));
 }
 /// End-to-end local streaming: open + change a fuzzy search over real files,
 /// run the notification driver, and assert a correctly-shaped
-/// `chutes.ai/search/fuzzy/status` is delivered through the sink with the match.
+/// `x.ai/search/fuzzy/status` is delivered through the sink with the match.
 #[tokio::test]
 async fn fuzzy_change_streams_status_through_sink() {
     use crate::file_system::TargetClientId;
@@ -1621,7 +1680,7 @@ async fn fuzzy_change_streams_status_through_sink() {
     let captured = Arc::new(parking_lot::Mutex::new(Vec::<serde_json::Value>::new()));
     let sink_captured = captured.clone();
     handle.set_client_ext_sink(Arc::new(move |method, params| {
-        if method == "chutes.ai/search/fuzzy/status" {
+        if method == "x.ai/search/fuzzy/status" {
             sink_captured.lock().push(params);
         }
     }));
@@ -1876,7 +1935,7 @@ async fn before_turn_yolo_transition_emits_yolo_toggled_event() {
     assert_eq!(
         toggles,
         vec![true, false],
-        "exactly one toggle per transition (turn 2 repeats true → no re-emit)"
+        "exactly one toggle per transition (turn 2 repeats true ÔåÆ no re-emit)"
     );
     let turn_yolo: Vec<bool> = text
         .trim()
@@ -1892,7 +1951,7 @@ async fn before_turn_yolo_transition_emits_yolo_toggled_event() {
     );
 }
 /// Flag-off preservation: `WorkspaceHandle::new` resolves `events_enabled`
-/// from the (unset) env var, so the whole emission path must stay a noop —
+/// from the (unset) env var, so the whole emission path must stay a noop ÔÇö
 /// no session writers cached, no `sessions/` dir created.
 #[tokio::test]
 async fn events_disabled_keeps_noop_and_writes_nothing() {
@@ -2080,7 +2139,7 @@ fn is_safe_object_segment_rejects_traversal() {
     assert!(!is_safe_object_segment("../etc"));
     assert!(!is_safe_object_segment("a\0b"));
 }
-/// The single `TurnHookOutcome → TurnOutcomeLabel` mapping used by
+/// The single `TurnHookOutcome ÔåÆ TurnOutcomeLabel` mapping used by
 /// `on_after_turn` must be exhaustive and stable.
 #[test]
 fn turn_outcome_label_maps_every_variant() {
@@ -2146,8 +2205,8 @@ fn spawn_test_queue(home: &std::path::Path) -> Arc<xai_file_utils::queue::Upload
     ))
 }
 /// `WorkspaceHandle::new` (the test/default path, not `connect_local_workspace`)
-/// must use an ephemeral temp `workspace_home` — never the real
-/// `$CHUTES_BUILD_WORKSPACE_HOME` — must NOT configure an upload queue, and must leave
+/// must use an ephemeral temp `workspace_home` ÔÇö never the real
+/// `$CHUTES_BUILD_WORKSPACE_HOME` ÔÇö must NOT configure an upload queue, and must leave
 /// the legacy inline-upload path inert (no storage config). This pins the
 /// flag-off defaults so uploads never start implicitly
 /// and `new` stays runtime-light (no queue worker spawned).
@@ -2171,7 +2230,7 @@ async fn new_defaults_to_ephemeral_home_and_inert_legacy_upload() {
         "default construction must not configure an upload queue"
     );
 }
-/// `persist_and_enqueue_tool_state` runs the real save→read→enqueue chain
+/// `persist_and_enqueue_tool_state` runs the real saveÔåÆreadÔåÆenqueue chain
 /// and the item enters the queue.
 #[tokio::test]
 async fn persist_and_enqueue_tool_state_enqueues_for_session() {
@@ -2195,7 +2254,7 @@ async fn persist_and_enqueue_tool_state_enqueues_for_session() {
         "the session's tool_state must be flushed, read, and enqueued"
     );
 }
-/// Flag OFF ⇒ `spawn_tool_state_upload` enqueues nothing, even with a live
+/// Flag OFF ÔçÆ `spawn_tool_state_upload` enqueues nothing, even with a live
 /// session and a configured upload queue.
 #[tokio::test]
 async fn tool_state_upload_is_noop_when_flag_off() {
@@ -2231,10 +2290,10 @@ async fn tool_state_upload_is_noop_when_flag_off() {
             .enqueued
             .load(std::sync::atomic::Ordering::Relaxed),
         before,
-        "flag off ⇒ spawn_tool_state_upload must enqueue nothing"
+        "flag off ÔçÆ spawn_tool_state_upload must enqueue nothing"
     );
 }
-/// Opt-out (`data_collection_disabled`) ⇒ no tool_state export even
+/// Opt-out (`data_collection_disabled`) ÔçÆ no tool_state export even
 /// with the feature flag on, a live session, and a configured queue.
 #[tokio::test]
 async fn tool_state_upload_is_noop_when_data_collection_disabled() {
@@ -2271,7 +2330,7 @@ async fn tool_state_upload_is_noop_when_data_collection_disabled() {
             .enqueued
             .load(std::sync::atomic::Ordering::Relaxed),
         before,
-        "opt-out ⇒ spawn_tool_state_upload must enqueue nothing"
+        "opt-out ÔçÆ spawn_tool_state_upload must enqueue nothing"
     );
 }
 /// Queue-backed handle with an explicit `identity` and a
@@ -2410,7 +2469,7 @@ async fn environment_artifact_noop_without_queue() {
     let outcome = handle
         .emit_environment_artifact("sess-env", std::path::Path::new("/work"), None)
         .await;
-    assert!(outcome.is_none(), "no queue ⇒ no enqueue");
+    assert!(outcome.is_none(), "no queue ÔçÆ no enqueue");
 }
 /// End-to-end with a real queue: emission is unconditional (no env flag),
 /// so a bound session enqueues exactly one environment artifact and
@@ -2582,6 +2641,44 @@ async fn fork_session_uses_main_session_when_parent_session_id_is_none() {
         .map(|t| t.id.clone())
         .collect();
     assert_eq!(baseline_ids, vec!["ChutesBuild:read_file".to_string()]);
+}
+#[tokio::test]
+async fn fork_session_all_child_drops_root_only_tools() {
+    let handle = make_handle();
+    let mut custom = tc("ChutesBuild:grep", None);
+    custom.name_override = Some("custom_kindless".to_owned());
+    let config = ToolServerConfig {
+        tools: vec![
+            tc("ChutesBuild:read_file", Some(ToolKind::Read)),
+            custom,
+            tc("ChutesBuild:list_dir", Some(ToolKind::ActiveAgentMessage)),
+            tc("ChutesBuild:send_subagent_message", None),
+        ],
+        behavior_preset: None,
+    };
+    let child = handle
+        .fork_session(fork_cfg_with(
+            "all-child",
+            CapabilityMode::All,
+            Some(config),
+            Some("main"),
+        ))
+        .await
+        .expect("All child fork should succeed");
+    let effective_config = child.effective_tool_config();
+    let ids: Vec<&str> = effective_config
+        .tools
+        .iter()
+        .map(|tool| tool.id.as_str())
+        .collect();
+    assert_eq!(ids, ["ChutesBuild:read_file", "ChutesBuild:grep"]);
+    assert_eq!(
+        (
+            effective_config.tools[1].name_override.as_deref(),
+            effective_config.tools[1].kind,
+        ),
+        (Some("custom_kindless"), None)
+    );
 }
 #[tokio::test]
 async fn fork_session_uses_named_parent_when_parent_session_id_is_set() {
@@ -3915,7 +4012,7 @@ fn handler_names(resolved: &xai_computer_hub_sdk::ResolvedSessionHandlers) -> Ve
         .map(|h| h.tool_id().as_str().to_owned())
         .collect()
 }
-/// Strict mode, preset-only bind: the full resolver path fails closed —
+/// Strict mode, preset-only bind: the full resolver path fails closed ÔÇö
 /// RPC-only advertise + a `missing_tool_config` reason in the bind report.
 #[tokio::test]
 async fn strict_bind_without_explicit_toolset_fails_closed_end_to_end() {
@@ -4010,7 +4107,7 @@ async fn lax_bind_without_metadata_uses_default_catalog_end_to_end() {
 }
 /// A rebind whose explicit config is REJECTED (invalid entry) keeps the
 /// fail-closed reason even though the healthy session's previous toolset
-/// is reused — the client must learn its new config did not take effect.
+/// is reused ÔÇö the client must learn its new config did not take effect.
 #[tokio::test]
 async fn rejected_rebind_config_keeps_resolve_error_end_to_end() {
     let handle = make_strict_handle();
@@ -4043,7 +4140,7 @@ async fn rejected_rebind_config_keeps_resolve_error_end_to_end() {
     assert!(reason.starts_with("invalid_tool_config:"), "{reason}");
 }
 /// An explicit EMPTY toolset (RPC-only clients, e.g. deploy binds) must
-/// reuse an existing session unchanged — never swap its tools away.
+/// reuse an existing session unchanged ÔÇö never swap its tools away.
 #[tokio::test]
 async fn explicit_empty_toolset_rebind_never_swaps_session_tools() {
     let handle = make_strict_handle();
@@ -4131,7 +4228,7 @@ fn assert_advertises_owner_tools(names: &[String], context: &str) {
     }
 }
 /// Consumer-shaped rebinds against a live owner session must `Reuse` it
-/// unchanged — never shrink its toolset or narrow its frozen capability.
+/// unchanged ÔÇö never shrink its toolset or narrow its frozen capability.
 #[tokio::test]
 async fn owner_toolset_survives_concurrent_consumer_shaped_rebinds() {
     let handle = make_strict_handle();
@@ -4214,7 +4311,7 @@ async fn restored_server_first_bind_ordering_decides_capability_and_toolset() {
     );
     assert!(
         !names.iter().any(|n| n == "search_replace"),
-        "frozen read_only capability keeps filtering Edit-class tools — \
+        "frozen read_only capability keeps filtering Edit-class tools ÔÇö \
          the incident's shrunken toolset: {names:?}"
     );
     let session = handle
@@ -4244,7 +4341,7 @@ async fn restored_server_first_bind_ordering_decides_capability_and_toolset() {
         session.capability_mode(),
         CapabilityMode::ReadWrite,
         "the agent's `all` must not take on a session a deploy/write-shaped \
-         bind created first — this narrower freeze is why deploy and fs \
+         bind created first ÔÇö this narrower freeze is why deploy and fs \
          writes are consumers now"
     );
     let handle = make_strict_handle();
@@ -4264,8 +4361,8 @@ async fn restored_server_first_bind_ordering_decides_capability_and_toolset() {
         "owner-first ordering yields the full capability the agent declared"
     );
 }
-/// Isolation matrix #1–#3 through the REAL `session.bind` resolver (the
-/// closure `connect_hub` installs — the exact path both a soft rebind and
+/// Isolation matrix #1ÔÇô#3 through the REAL `session.bind` resolver (the
+/// closure `connect_hub` installs ÔÇö the exact path both a soft rebind and
 /// an SDK dead-loop FULL rebind re-run): with a live background task,
 /// an identical rebind (`Reused`) and a changed-explicit-toolset rebind
 /// (`Reresolved`, driven with no in-flight tool calls) both keep the
@@ -4419,7 +4516,7 @@ fn skipped(reason: &str) -> EnqueueOutcome {
         reason: reason.to_owned(),
     }
 }
-/// Both archives durably enqueued → `Enqueued`, `artifact_count == 2`.
+/// Both archives durably enqueued ÔåÆ `Enqueued`, `artifact_count == 2`.
 #[test]
 fn reduce_outcomes_both_enqueued() {
     let (status, count, msg) = reduce_enqueue_outcomes(&enq(), &enq());
@@ -4473,7 +4570,7 @@ fn reduce_outcomes_inline_fallback_counts_as_success_not_durable() {
     assert_eq!(status, AfterTurnAckStatus::Enqueued);
     assert_eq!(count, 0);
 }
-/// No durable-queue handles at all (queue disabled / not proxy) → `Skipped`.
+/// No durable-queue handles at all (queue disabled / not proxy) ÔåÆ `Skipped`.
 #[tokio::test]
 async fn resolve_ack_skipped_when_no_handles() {
     let (status, count, msg) = resolve_after_turn_ack(
@@ -4670,7 +4767,7 @@ async fn compute_turn_injections_after_returns_skipped_ack_without_queue() {
     assert_eq!(ack.error_message.as_deref(), Some("no_upload_queue"));
 }
 /// A `Before` request answers with a no-op reply (no ack) while driving
-/// the same turn-start work as the fire-and-forget hook — the request
+/// the same turn-start work as the fire-and-forget hook ÔÇö the request
 /// channel is the only turn signal the server-side sampler sends.
 #[tokio::test]
 async fn compute_turn_injections_before_runs_turn_start_and_replies_noop() {
@@ -5228,7 +5325,7 @@ async fn two_phase_drain_no_queue_marks_draining_and_returns_zero() {
     let unfinished = handle
         .two_phase_drain(std::time::Duration::from_millis(300), DrainReason::Sigterm)
         .await;
-    assert_eq!(unfinished, 0, "no queue → nothing pending to lose");
+    assert_eq!(unfinished, 0, "no queue ÔåÆ nothing pending to lose");
     assert!(
         tracker.is_draining(),
         "drain must mark the tracker draining"
@@ -5472,4 +5569,435 @@ async fn two_phase_drain_producer_exceeding_budget_times_out() {
             > before,
         "the drain must classify as producers_timeout"
     );
+}
+#[tokio::test]
+async fn bind_session_root_sets_mapping_and_real_cwd() {
+    let handle = make_handle();
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("conv-abc").unwrap(),
+        Some(serde_json::json!({
+            "cwd": "/workspace",
+            "metadata": { "session_root": "/workspace/conv-abc" },
+        })),
+    )
+    .await
+    .expect("bind");
+    let session = handle.session("conv-abc").expect("session created");
+    let virt = session
+        .path_virtualization()
+        .expect("session_root must enable virtualization");
+    assert_eq!(virt.real_root(), "/workspace/conv-abc");
+    assert_eq!(virt.visible_root(), "/workspace");
+    assert_eq!(
+        session.cwd(),
+        std::path::Path::new("/workspace/conv-abc"),
+        "bind cwd /workspace must resolve to the real session root"
+    );
+}
+#[tokio::test]
+async fn rebind_session_root_rewrites_existing_cwd() {
+    let handle = make_handle();
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("rebind-virt").unwrap(),
+        Some(serde_json::json!({ "cwd": "/workspace" })),
+    )
+    .await
+    .expect("first bind without session_root");
+    let session = handle.session("rebind-virt").expect("session");
+    assert!(session.path_virtualization().is_none());
+    assert_eq!(session.cwd(), std::path::Path::new("/workspace"));
+    resolver(
+        xai_tool_protocol::SessionId::new("rebind-virt").unwrap(),
+        Some(serde_json::json!({
+            "cwd": "/workspace",
+            "metadata": { "session_root": "/workspace/conv-rebind" },
+        })),
+    )
+    .await
+    .expect("rebind with session_root");
+    let session = handle.session("rebind-virt").expect("session");
+    assert_eq!(
+        session
+            .path_virtualization()
+            .expect("rebind must enable virtualization")
+            .real_root(),
+        "/workspace/conv-rebind"
+    );
+    assert_eq!(
+        session.cwd(),
+        std::path::Path::new("/workspace/conv-rebind"),
+        "rebind must apply rewritten bind_cwd onto the existing session"
+    );
+    assert_eq!(
+        session.async_fs().root(),
+        std::path::Path::new("/workspace/conv-rebind"),
+        "rebind must remount LocalFs so relative reads follow the session tree"
+    );
+    let cwd_res = {
+        let toolset = session.toolset();
+        let res = toolset.resources.lock().await;
+        res.get::<xai_grok_tools::types::resources::Cwd>()
+            .expect("toolset Cwd")
+            .clone()
+    };
+    assert_eq!(
+        cwd_res.0.as_path(),
+        std::path::Path::new("/workspace/conv-rebind"),
+        "rebind must rewrite the reused toolset Cwd"
+    );
+}
+#[tokio::test]
+async fn bind_session_root_rewrites_artifacts_cwd() {
+    let handle = make_handle();
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("conv-art").unwrap(),
+        Some(serde_json::json!({
+            "cwd": "/workspace/artifacts",
+            "metadata": { "session_root": "/workspace/conv-art" },
+        })),
+    )
+    .await
+    .expect("bind");
+    let session = handle.session("conv-art").expect("session");
+    assert_eq!(session.cwd(), std::path::Path::new("/workspace/conv-art"));
+}
+#[tokio::test]
+async fn bind_without_session_root_does_not_virtualize() {
+    let handle = make_handle();
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("plain").unwrap(),
+        Some(serde_json::json!({ "cwd": "/tmp/plain" })),
+    )
+    .await
+    .expect("bind");
+    let session = handle.session("plain").expect("session");
+    assert!(
+        session.path_virtualization().is_none(),
+        "absent session_root must not enable virtualization"
+    );
+    assert_eq!(session.cwd(), std::path::Path::new("/tmp/plain"));
+}
+#[tokio::test]
+async fn malformed_session_root_does_not_virtualize() {
+    let handle = make_handle();
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("bad-root").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/../etc" },
+        })),
+    )
+    .await
+    .expect("bind must still succeed");
+    let session = handle.session("bad-root").expect("session");
+    assert!(
+        session.path_virtualization().is_none(),
+        "malformed session_root must be ignored"
+    );
+}
+#[tokio::test]
+async fn bind_invokes_mount_hook_unbind_does_not_unmount() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let handle = make_handle();
+    let binds = Arc::new(AtomicUsize::new(0));
+    let unbinds = Arc::new(AtomicUsize::new(0));
+    let binds_c = binds.clone();
+    let unbinds_c = unbinds.clone();
+    handle.set_bind_mount_hook(
+        crate::path_virtualization::BindMountHook::probe_then_mount(
+            |_| false,
+            move |root| {
+                assert_eq!(root, std::path::Path::new("/workspace/hook-conv"));
+                binds_c.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .with_on_unbind(move |sid, root| {
+            assert_eq!(sid, "hook-conv");
+            assert_eq!(root, std::path::Path::new("/workspace/hook-conv"));
+            unbinds_c.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("hook-conv").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/hook-conv" },
+        })),
+    )
+    .await
+    .expect("bind");
+    assert_eq!(binds.load(Ordering::SeqCst), 1, "on_bind must mount");
+    assert_eq!(unbinds.load(Ordering::SeqCst), 0, "bind must not unbind");
+    handle.drop_session("hook-conv", "hook-conv").expect("drop");
+    assert_eq!(
+        binds.load(Ordering::SeqCst),
+        1,
+        "unbind/drop must not remount"
+    );
+    assert_eq!(unbinds.load(Ordering::SeqCst), 1, "drop must notify unbind");
+}
+#[tokio::test]
+async fn bind_mount_error_fails_bind() {
+    let handle = make_handle();
+    handle.set_bind_mount_hook(crate::path_virtualization::BindMountHook::probe_then_mount(
+        |_| false,
+        |_| {
+            Err(crate::path_virtualization::BindMountError(
+                "fuse down".into(),
+            ))
+        },
+    ));
+    let resolver = bind_resolver_fixture(&handle);
+    let err = match resolver(
+        xai_tool_protocol::SessionId::new("fail-mount").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/fail-mount" },
+        })),
+    )
+    .await
+    {
+        Ok(_) => panic!("mount failure must fail the bind"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("bind mount hook failed"),
+        "got: {err}"
+    );
+    assert!(
+        handle.session("fail-mount").is_none(),
+        "failed bind must not leave a leftover session"
+    );
+}
+#[tokio::test]
+async fn rebind_mount_error_fails_bind_and_drops_leftover() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let handle = make_handle();
+    let mounts = Arc::new(AtomicUsize::new(0));
+    let mounts_c = mounts.clone();
+    handle.set_bind_mount_hook(crate::path_virtualization::BindMountHook::probe_then_mount(
+        |_| false,
+        move |_| {
+            mounts_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+    ));
+    let resolver = bind_resolver_fixture(&handle);
+    resolver(
+        xai_tool_protocol::SessionId::new("rebind-fail-mount").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/rebind-fail-mount" },
+        })),
+    )
+    .await
+    .expect("first bind");
+    assert!(
+        handle.session("rebind-fail-mount").is_some(),
+        "first bind must leave a live session"
+    );
+    assert_eq!(mounts.load(Ordering::SeqCst), 1);
+    let unbinds = Arc::new(AtomicUsize::new(0));
+    let unbinds_c = unbinds.clone();
+    handle.set_bind_mount_hook(
+        crate::path_virtualization::BindMountHook::probe_then_mount(
+            |_| false,
+            |_| {
+                Err(crate::path_virtualization::BindMountError(
+                    "fuse down".into(),
+                ))
+            },
+        )
+        .with_on_unbind(move |_, _| {
+            unbinds_c.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let err = match resolver(
+        xai_tool_protocol::SessionId::new("rebind-fail-mount").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/rebind-fail-mount" },
+        })),
+    )
+    .await
+    {
+        Ok(_) => panic!("mount failure on rebind must fail the bind"),
+        Err(e) => e,
+    };
+    assert!(
+        err.to_string().contains("bind mount hook failed"),
+        "got: {err}"
+    );
+    assert!(
+        handle.session("rebind-fail-mount").is_none(),
+        "failed rebind must not leave a leftover session"
+    );
+    assert_eq!(
+        unbinds.load(Ordering::SeqCst),
+        1,
+        "failed rebind must notify unbind while dropping the leftover"
+    );
+}
+#[tokio::test]
+async fn bind_probe_hit_skips_mount() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let handle = make_handle();
+    let mounts = Arc::new(AtomicUsize::new(0));
+    let mounts_c = mounts.clone();
+    handle.set_bind_mount_hook(crate::path_virtualization::BindMountHook::probe_then_mount(
+        |_| true,
+        move |_| {
+            mounts_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+    ));
+    bind_resolver_fixture(&handle)(
+        xai_tool_protocol::SessionId::new("probed").unwrap(),
+        Some(serde_json::json!({
+            "metadata": { "session_root": "/workspace/probed" },
+        })),
+    )
+    .await
+    .expect("bind");
+    assert_eq!(mounts.load(Ordering::SeqCst), 0);
+}
+#[tokio::test]
+async fn bind_without_session_root_skips_mount_hook() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let handle = make_handle();
+    let mounts = Arc::new(AtomicUsize::new(0));
+    let mounts_c = mounts.clone();
+    handle.set_bind_mount_hook(crate::path_virtualization::BindMountHook::probe_then_mount(
+        |_| false,
+        move |_| {
+            mounts_c.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        },
+    ));
+    bind_resolver_fixture(&handle)(
+        xai_tool_protocol::SessionId::new("no-root").unwrap(),
+        Some(serde_json::json!({ "cwd": "/tmp/plain" })),
+    )
+    .await
+    .expect("bind");
+    assert_eq!(
+        mounts.load(Ordering::SeqCst),
+        0,
+        "mount hook must not run without a session_root mapping"
+    );
+}
+#[tokio::test]
+async fn local_harness_virtualizes_inbound_and_outbound() {
+    use xai_tool_runtime::ToolCallContext;
+    let handle = make_handle();
+    let session = handle
+        .create_session_with_cwd("virt-local", None)
+        .expect("create");
+    session.set_path_virtualization(
+        crate::path_virtualization::PathVirtualization::try_from_session_root(
+            "/workspace/conv-abc",
+        )
+        .expect("valid"),
+    );
+    let received = Arc::new(std::sync::Mutex::new(None));
+    let received_c = received.clone();
+    #[derive(Debug)]
+    struct LocalPathEcho(Arc<std::sync::Mutex<Option<serde_json::Value>>>);
+    impl xai_grok_tools::types::tool_metadata::ToolMetadata for LocalPathEcho {
+        fn kind(&self) -> ToolKind {
+            ToolKind::Other
+        }
+        fn tool_namespace(&self) -> xai_grok_tools::types::tool::ToolNamespace {
+            xai_grok_tools::types::tool::ToolNamespace::MCP
+        }
+        fn description_template(&self) -> &str {
+            "local path echo"
+        }
+    }
+    impl xai_tool_runtime::Tool for LocalPathEcho {
+        type Args = serde_json::Value;
+        type Output = serde_json::Value;
+        fn id(&self) -> xai_tool_protocol::ToolId {
+            xai_tool_protocol::ToolId::new("local_path_echo").expect("valid")
+        }
+        fn description(
+            &self,
+            _ctx: &::xai_tool_runtime::ListToolsContext,
+        ) -> xai_tool_types::ToolDescription {
+            xai_tool_types::ToolDescription::new("local_path_echo", "local path echo")
+        }
+        async fn run(
+            &self,
+            _ctx: xai_tool_runtime::ToolCallContext,
+            input: serde_json::Value,
+        ) -> Result<serde_json::Value, xai_tool_runtime::ToolError> {
+            *self.0.lock().expect("lock") = Some(input.clone());
+            Ok(serde_json::json!({
+                "guest": "/workspace/conv-abc/out.txt",
+            }))
+        }
+    }
+    session
+        .toolset()
+        .register_tool(
+            "local_path_echo".to_owned(),
+            LocalPathEcho(received_c),
+            Some(serde_json::json!({"type": "object", "properties": {"path": {"type": "string"}}})),
+        )
+        .expect("register");
+    let harness = handle
+        .create_local_harness("virt-local")
+        .expect("local harness");
+    let stream = harness
+        .call(
+            xai_tool_protocol::ToolId::new("local_path_echo").expect("valid"),
+            serde_json::json!({ "path": "/workspace/foo.txt" }),
+            ToolCallContext::default(),
+        )
+        .await;
+    let typed = drain_terminal_ok(stream).await;
+    assert_eq!(
+        received
+            .lock()
+            .expect("lock")
+            .as_ref()
+            .and_then(|v| v.get("path")),
+        Some(&serde_json::json!("/workspace/conv-abc/foo.txt")),
+        "local harness must rewrite inbound /workspace"
+    );
+    let dumped = typed.value.to_string();
+    assert!(
+        dumped.contains("/workspace/out.txt"),
+        "local harness must rewrite outbound: {dumped}"
+    );
+    assert!(
+        !dumped.contains("/workspace/conv-abc/"),
+        "local harness must not leak the real root: {dumped}"
+    );
+}
+#[tokio::test]
+async fn fork_inherits_path_virtualization() {
+    let handle = make_handle();
+    handle
+        .session("main")
+        .expect("main")
+        .set_path_virtualization(
+            crate::path_virtualization::PathVirtualization::try_from_session_root(
+                "/workspace/conv-abc",
+            )
+            .expect("valid"),
+        );
+    let child = handle
+        .fork_session(crate::config::AgentSessionConfig {
+            parent_session_id: Some("main".into()),
+            ..crate::config::AgentSessionConfig::new("child-virt")
+        })
+        .await
+        .expect("fork");
+    let virt = child
+        .path_virtualization()
+        .expect("fork must inherit mapping");
+    assert_eq!(virt.real_root(), "/workspace/conv-abc");
 }

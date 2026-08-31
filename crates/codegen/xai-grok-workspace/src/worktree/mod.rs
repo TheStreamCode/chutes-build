@@ -26,6 +26,9 @@ use crate::session::git::{
     find_main_repo_root_from_path, git_cli,
 };
 
+mod identity;
+pub use identity::{WorktreeIdentity, worktree_identity_for_cwd, worktree_identity_in};
+
 // Canonical in xai-grok-workspace-types; re-exported for existing paths.
 pub use xai_grok_workspace_types::rpc::worktree::{
     ApplyMode, ApplyWorktreeRequest, ApplyWorktreeResponse, CopiedChangesSummary,
@@ -188,6 +191,102 @@ mod grove_fuse_tests {
         )));
         assert!(!is_grove_fuse_mount(Path::new("/tmp/not-a-grove-path")));
     }
+
+    #[test]
+    fn grove_fuse_without_linked_status_forces_git() {
+        let t = resolve_grove_fuse_creation_type(
+            Path::new("/var/lib/grove/repos/app/worktree"),
+            WorktreeType::Linked,
+            false,
+            &WorkingTreeMode::CleanAll,
+            "s",
+        );
+        assert_eq!(t, WorktreeType::Git);
+        let t = resolve_grove_fuse_creation_type(
+            Path::new("/tmp/not-a-grove-path"),
+            WorktreeType::Linked,
+            true,
+            &WorkingTreeMode::CleanAll,
+            "s",
+        );
+        assert_eq!(t, WorktreeType::Linked);
+    }
+
+    #[test]
+    fn grove_fuse_linked_preserve_keeps_linked_not_git() {
+        let src = Path::new("/var/lib/grove/repos/app/worktree");
+        assert_eq!(
+            resolve_grove_fuse_creation_type_for(
+                WorktreeType::Linked,
+                true,
+                &WorkingTreeMode::PreserveWorkingTree,
+                src,
+                "s",
+            ),
+            WorktreeType::Linked
+        );
+        assert_eq!(
+            resolve_grove_fuse_creation_type_for(
+                WorktreeType::Linked,
+                false,
+                &WorkingTreeMode::PreserveWorkingTree,
+                src,
+                "s",
+            ),
+            WorktreeType::Git
+        );
+    }
+}
+
+fn enabled_grove_opts() -> xai_fast_worktree::NfsWorktreeOpts {
+    xai_fast_worktree::NfsWorktreeOpts {
+        enabled: true,
+        ..xai_fast_worktree::NfsWorktreeOpts::default()
+    }
+}
+
+/// Keep GitCheckout for ordinary grove FUSE sources. Linked local-codebase
+/// views (status-confirmed) stay Linked so CreateWorktree runs. Preserve on
+/// a confirmed linked view must not become Git (clean checkout); later
+/// layers decline it.
+fn resolve_grove_fuse_creation_type(
+    source: &Path,
+    requested: WorktreeType,
+    grove_enabled: bool,
+    working_tree: &WorkingTreeMode,
+    session_id: &str,
+) -> WorktreeType {
+    if !is_grove_fuse_mount(source) {
+        return requested;
+    }
+    let linked = grove_enabled
+        && xai_fast_worktree::source_is_linked_local_view(&enabled_grove_opts(), source);
+    resolve_grove_fuse_creation_type_for(requested, linked, working_tree, source, session_id)
+}
+
+fn resolve_grove_fuse_creation_type_for(
+    requested: WorktreeType,
+    linked_confirmed: bool,
+    _working_tree: &WorkingTreeMode,
+    source: &Path,
+    session_id: &str,
+) -> WorktreeType {
+    if linked_confirmed {
+        tracing::info!(
+            target: WORKTREE_LOG,
+            session_id,
+            source = %source.display(),
+            "grove linked local-codebase view: using CreateWorktree"
+        );
+        return requested;
+    }
+    tracing::info!(
+        target: WORKTREE_LOG,
+        session_id,
+        source = %source.display(),
+        "grove FUSE source: disabling fast-worktree CoW, using git checkout"
+    );
+    WorktreeType::Git
 }
 
 /// Map a [`WorktreeType`] to the fast-worktree crate's `CreationMode`.
@@ -732,17 +831,12 @@ pub fn resolve_label_collision(base_dir: &Path, label: &str) -> String {
 // Worktree Base Directory Resolution
 // ============================================================================
 
-/// Resolve the Chutes Build home for worktree paths via the **same** resolver used for
-/// `worktrees.db` (`xai_fast_worktree::resolve_grok_home`), so checkout dirs and
-/// the metadata DB always live under the same `.chutes-build` tree. That resolver
-/// canonicalizes its `$HOME` fallback to match `xai_grok_config::grok_home()`,
-/// so worktree paths also agree with trust/hooks and other grok-home paths.
+/// Chutes Build home for worktree paths ÔÇö the same resolver as `worktrees.db`, with a
+/// `temp_dir()/.grok` last resort (not grok-config's cwd-relative `.grok`:
+/// worktree paths need an absolute, always-writable anchor that does not move
+/// with the process cwd).
 fn grok_home() -> std::path::PathBuf {
-    xai_fast_worktree::resolve_grok_home().unwrap_or_else(|_| {
-        dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-            .join(".chutes-build")
-    })
+    xai_fast_worktree::resolve_grok_home().unwrap_or_else(|_| std::env::temp_dir().join(".chutes-build"))
 }
 
 /// Returns `~/.chutes-build/worktrees/<repo_slug>` for the given git root.
@@ -1040,18 +1134,15 @@ pub async fn create_worktree_streaming<N: WorktreeNotificationSender>(
     let git_ref = req.git_ref.clone();
     // Determine worktree type, preserving the .git.is_dir() guard for Standalone mode.
     // A linked worktree has a `.git` *file* pointing to the main repo; a real repo has a `.git` *directory*.
+    let grove_enabled = req.grove_worktree.unwrap_or(false);
     let requested_type = req.worktree_type.unwrap_or(WorktreeType::Linked);
-    let requested_type = if is_grove_fuse_mount(Path::new(&req.source_path)) {
-        tracing::info!(
-            target: WORKTREE_LOG,
-            session_id = %session_id,
-            source = %req.source_path,
-            "grove FUSE source: disabling fast-worktree CoW, using git checkout"
-        );
-        WorktreeType::Git
-    } else {
-        requested_type
-    };
+    let requested_type = resolve_grove_fuse_creation_type(
+        Path::new(&req.source_path),
+        requested_type,
+        grove_enabled,
+        &working_tree_mode,
+        session_id.as_str(),
+    );
     let git_dir_is_directory = std::path::Path::new(&req.source_path).join(".git").is_dir();
     let creation_mode = if requested_type == WorktreeType::Standalone {
         if git_dir_is_directory {
@@ -1086,7 +1177,6 @@ pub async fn create_worktree_streaming<N: WorktreeNotificationSender>(
     );
     let session_id_for_builder = session_id.clone();
     let btrfs_delegate = btrfs_delegate_from_env();
-    let grove_enabled = req.grove_worktree.unwrap_or(false);
     let user_provided_label = req.worktree_path.is_none()
         && req
             .label
@@ -1112,7 +1202,7 @@ pub async fn create_worktree_streaming<N: WorktreeNotificationSender>(
             builder = builder.btrfs_delegate(delegate);
         }
         if grove_enabled {
-            builder = builder.grove_worktree(xai_fast_worktree::NfsWorktreeOpts::default());
+            builder = builder.grove_worktree(enabled_grove_opts());
         }
 
         builder.create()
@@ -1800,7 +1890,7 @@ pub async fn create_worktree_from_worktree_streaming<N: WorktreeNotificationSend
                 builder = builder.btrfs_delegate(delegate);
             }
             if grove_enabled {
-                builder = builder.grove_worktree(xai_fast_worktree::NfsWorktreeOpts::default());
+                builder = builder.grove_worktree(enabled_grove_opts());
             }
 
             builder.create()
@@ -2027,7 +2117,7 @@ pub async fn create_worktree_from_worktree_sync(
             builder = builder.btrfs_delegate(delegate);
         }
         if grove_enabled {
-            builder = builder.grove_worktree(xai_fast_worktree::NfsWorktreeOpts::default());
+            builder = builder.grove_worktree(enabled_grove_opts());
         }
 
         builder.create()
@@ -2582,7 +2672,7 @@ pub fn clean_artifacts_mgmt(id_or_path: &str) -> Result<xai_fast_worktree::Clean
     }
 }
 
-/// Map settings → resolve layer (shared by shell + workspace).
+/// Map settings ÔåÆ resolve layer (shared by shell + workspace).
 pub fn worktree_auto_gc_layer_from_settings(
     s: &xai_grok_config_types::WorktreeAutoGcSettings,
 ) -> WorktreeAutoGcLayer {
@@ -2669,7 +2759,7 @@ fn resolve_worktree_auto_gc_local() -> Option<xai_fast_worktree::ResolvedWorktre
 fn local_auto_gc_policy(
     local: Option<&xai_grok_config_types::WorktreeAutoGcSettings>,
 ) -> Option<xai_fast_worktree::ResolvedWorktreeAutoGc> {
-    // No explicit local opt-in ⇒ let the remote-aware shell pass own GC.
+    // No explicit local opt-in ÔçÆ let the remote-aware shell pass own GC.
     if !local.and_then(|s| s.enabled).unwrap_or(false) {
         return None;
     }
@@ -2829,10 +2919,10 @@ mod tests {
     fn local_auto_gc_policy_opts_in_only_when_enabled() {
         use xai_grok_config_types::WorktreeAutoGcSettings;
 
-        assert!(local_auto_gc_policy(None).is_none(), "no config ⇒ skip");
+        assert!(local_auto_gc_policy(None).is_none(), "no config ÔçÆ skip");
         assert!(
             local_auto_gc_policy(Some(&WorktreeAutoGcSettings::default())).is_none(),
-            "enabled unset ⇒ skip"
+            "enabled unset ÔçÆ skip"
         );
         assert!(
             local_auto_gc_policy(Some(&WorktreeAutoGcSettings {
@@ -2840,13 +2930,13 @@ mod tests {
                 ..Default::default()
             }))
             .is_none(),
-            "enabled=false ⇒ skip"
+            "enabled=false ÔçÆ skip"
         );
         let policy = local_auto_gc_policy(Some(&WorktreeAutoGcSettings {
             enabled: Some(true),
             ..Default::default()
         }))
-        .expect("enabled=true ⇒ run");
+        .expect("enabled=true ÔçÆ run");
         assert!(
             !policy.dry_run,
             "an explicit local opt-in runs a real pass, not a forced dry-run"
@@ -3142,7 +3232,7 @@ mod tests {
         std::fs::write(repo.join("tracked.txt"), "original").unwrap();
         git_commit_all(&repo, "initial");
 
-        // Unique basename → unique DB id, so a concurrent open_default writer
+        // Unique basename ÔåÆ unique DB id, so a concurrent open_default writer
         // can't clobber this row (GrokHomeFixture is not visible across crates).
         let wt = temp.path().join("fork-cancel-wt");
         WorktreeBuilder::new(&repo, &wt).create().unwrap();
@@ -3190,7 +3280,7 @@ mod tests {
         // Unique session id so this test's marker can't collide with others
         // sharing the process under `cargo test`.
         let session_id = format!("no-strand-{}", std::process::id());
-        // dest does not exist yet → prepare reaches the spawn_task=true branch.
+        // dest does not exist yet ÔåÆ prepare reaches the spawn_task=true branch.
         let dest = temp.path().join("new-wt");
         let req = CreateWorktreeRequest {
             session_id: session_id.clone(),

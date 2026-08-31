@@ -37,7 +37,7 @@ pub struct WorkflowAgentInfo {
 
 /// `_meta` key on rename fan-out (`SessionSummaryGenerated` + ACP
 /// `SessionInfoUpdate`). Old clients ignore unknown meta.
-pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.build/titleIsManual";
+pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.ai/titleIsManual";
 
 /// `_meta` object carried on a manual-rename fan-out.
 pub fn title_is_manual_meta() -> serde_json::Value {
@@ -45,7 +45,7 @@ pub fn title_is_manual_meta() -> serde_json::Value {
 }
 
 /// `_meta` object carried on `/rename --auto` fan-out. Distinct from
-/// *absent* meta (auto title — must not clobber `display_name`).
+/// *absent* meta (auto title ÔÇö must not clobber `display_name`).
 pub fn title_is_unpinned_meta() -> serde_json::Value {
     serde_json::json!({ TITLE_IS_MANUAL_META_KEY: false })
 }
@@ -71,11 +71,11 @@ pub struct SessionNotification {
 /// | Surface | `input_tokens` / `inputTokens` | Cost |
 /// |---------|--------------------------------|------|
 /// | **ACP** (`PromptUsage`) | **Full** prompt sum (includes cache reads) | `costUsdTicks` (1e10 ticks = $1), scrubbed when partial/incomplete |
-/// | **Headless** ([`project_result_usage`]) | **Uncached only** (`full − cache_read`) | Float `total_cost_usd` + exact `total_cost_usd_ticks`, only when complete |
-/// | ACP `_meta` sibling fields | **Last model call only** (not whole-prompt) | — |
+/// | **Headless** ([`project_result_usage`]) | **Uncached only** (`full ÔêÆ cache_read`) | Float `total_cost_usd` + exact `total_cost_usd_ticks`, only when complete |
+/// | ACP `_meta` sibling fields | **Last model call only** (not whole-prompt) | ÔÇö |
 ///
 /// Trust cost only when present **and** not `usageIsIncomplete` **and** not
-/// `costIsPartial`. Absence of cost means untrustworthy or unknown — not free.
+/// `costIsPartial`. Absence of cost means untrustworthy or unknown ÔÇö not free.
 ///
 /// Mixed headless shape is frozen for external-tool compatibility: snake_case
 /// on totals (`usage.input_tokens`, `total_cost_usd`) and camelCase under
@@ -105,7 +105,7 @@ pub struct PromptUsage {
 
 impl PromptUsage {
     /// Project a ledger snapshot for the wire. Returns `Some` whenever
-    /// `incomplete` is set — even if `ledger` is `None` — so the flag is never
+    /// `incomplete` is set ÔÇö even if `ledger` is `None` ÔÇö so the flag is never
     /// dropped by omission. Always scrubs untrustworthy costs.
     pub(crate) fn project_from_ledger(
         ledger: Option<&xai_chat_state::UsageLedger>,
@@ -168,8 +168,6 @@ impl PromptUsage {
             cache_creation_tokens, // subset of input_tokens on the wire
             reasoning_tokens: _,   // subset of output_tokens
             model_calls,
-            cache_hit_calls: _,
-            cache_miss_calls: _,
             api_duration_ms: _, // timing, not tokens
             cost_usd_ticks: _,  // cost without usage cannot occur
             cost_is_partial: _,
@@ -188,7 +186,7 @@ impl PromptUsage {
 #[serde(rename_all = "camelCase")]
 pub struct PromptUsageModel {
     /// Full prompt input tokens including cache reads (ACP identity).
-    /// Headless projects uncached only — see [`project_result_usage`].
+    /// Headless projects uncached only ÔÇö see [`project_result_usage`].
     #[serde(default)]
     pub input_tokens: u64,
     #[serde(default)]
@@ -205,12 +203,6 @@ pub struct PromptUsageModel {
     pub reasoning_tokens: u64,
     #[serde(default)]
     pub model_calls: u64,
-    /// Calls whose prompt read from the server-side prefix cache.
-    #[serde(default)]
-    pub cache_hit_calls: u64,
-    /// Calls with no cached prompt read (`cached_prompt_tokens == 0`).
-    #[serde(default)]
-    pub cache_miss_calls: u64,
     #[serde(default)]
     pub api_duration_ms: u64,
     /// Server cost in USD ticks (`USD_TICKS_PER_USD` = 1e10 ticks per $1).
@@ -226,20 +218,9 @@ pub struct PromptUsageModel {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cost_is_partial: bool,
     /// How many calls reported usage but no cost. Internal accounting for
-    /// `cost_is_partial` only — never on the public ACP wire.
+    /// `cost_is_partial` only ÔÇö never on the public ACP wire.
     #[serde(default, skip_serializing)]
     pub cost_missing_calls: u64,
-}
-
-impl PromptUsageModel {
-    /// Fraction of input tokens served from the server-side prefix cache (0.0..1.0).
-    pub fn cache_read_ratio(&self) -> f64 {
-        if self.input_tokens == 0 {
-            return 0.0;
-        }
-        let ratio = self.cached_read_tokens as f64 / self.input_tokens as f64;
-        ratio.clamp(0.0, 1.0)
-    }
 }
 
 /// One model call's token usage: the four Messages API `message.usage` fields
@@ -270,13 +251,10 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
-            cache_hit_calls,
-            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_missing_calls,
         } = *t;
-        let _ = (cache_hit_calls, cache_miss_calls);
         Self {
             input_tokens,
             output_tokens,
@@ -285,8 +263,6 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
-            cache_hit_calls,
-            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_is_partial: t.cost_is_partial(),
@@ -320,17 +296,17 @@ pub fn ticks_to_usd(ticks: i64) -> f64 {
     ticks as f64 / USD_TICKS_PER_USD
 }
 
-/// Full ACP input → headless uncached input (`full − cache_read`).
+/// Full ACP input ÔåÆ headless uncached input (`full ÔêÆ cache_read`).
 pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
     full_input.saturating_sub(cached_read)
 }
 
 /// Project usage onto a headless result object.
 ///
-/// - `usage.input_tokens` = uncached (`full − cache_read − cache_creation`), so
+/// - `usage.input_tokens` = uncached (`full ÔêÆ cache_read ÔêÆ cache_creation`), so
 ///   the three prompt buckets are disjoint; identity
 ///   `input_tokens + cache_read + cache_creation + output = total_tokens`.
-/// - Omits all cost floats when partial or incomplete (absence ≠ free).
+/// - Omits all cost floats when partial or incomplete (absence Ôëá free).
 /// - Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object).
 /// - `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
 pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
@@ -343,8 +319,6 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
     // either projected or named as deliberately dropped from the headless shape.
     let PromptUsageModel {
         input_tokens,
-        cache_hit_calls: _,
-        cache_miss_calls: _,
         output_tokens,
         total_tokens,
         cached_read_tokens,
@@ -385,8 +359,6 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
         for (name, m) in &usage.model_usage {
             let PromptUsageModel {
                 input_tokens,
-                cache_hit_calls: _,
-                cache_miss_calls: _,
                 output_tokens,
                 total_tokens: _, // derivable per row
                 cached_read_tokens,
@@ -419,7 +391,7 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
 }
 
 /// Fail-closed attach for headless results: parse failure becomes
-/// `usage_is_incomplete` (never omit silently — absence must not look free).
+/// `usage_is_incomplete` (never omit silently ÔÇö absence must not look free).
 pub fn attach_result_usage_fail_closed(result: &mut serde_json::Value, usage: &serde_json::Value) {
     match serde_json::from_value::<PromptUsage>(usage.clone()) {
         Ok(parsed) => project_result_usage(result, &parsed),
@@ -578,7 +550,7 @@ pub enum SessionUpdate {
     /// A hook annotation message for the TUI scrollback.
     /// Rendered inline with the preceding tool call block.
     HookAnnotation {
-        /// The hook message to display (e.g., "🪝 Running post_tool_use hooks for `Edit`...")
+        /// The hook message to display (e.g., "­ƒ¬Ø Running post_tool_use hooks for `Edit`...")
         message: String,
     },
     /// Structured hook execution data attached to tool call blocks.
@@ -628,7 +600,7 @@ pub enum SessionUpdate {
     /// renders it as an informational scrollback line; it is never added to
     /// the model conversation.
     SessionRecap {
-        /// The one-line recap text (~25–40 words; capped at a generous safety
+        /// The one-line recap text (~25ÔÇô40 words; capped at a generous safety
         /// limit, so a normal recap is shown in full).
         summary: String,
         /// `true` when generated automatically on return-from-away,
@@ -636,7 +608,7 @@ pub enum SessionUpdate {
         #[serde(default)]
         auto: bool,
     },
-    /// A manual `/recap` produced no recap — no assistant turns yet, a failed
+    /// A manual `/recap` produced no recap ÔÇö no assistant turns yet, a failed
     /// prepare/model call, or an empty summary. The pager shows a loading
     /// spinner for `/recap`, so without this signal that spinner would animate
     /// forever; on receipt the pager clears it. Never emitted for an automatic
@@ -648,11 +620,11 @@ pub enum SessionUpdate {
     ///
     /// Transient (never persisted to `updates.jsonl`): the durable copy lives
     /// in `summary.json` and reaches non-attached clients via the roster.
-    /// Clients may apply deliveries directly — generation is serialized
+    /// Clients may apply deliveries directly ÔÇö generation is serialized
     /// shell-side (one in-flight call, aborted by newer turns) and gateway
     /// delivery is ordered, so the latest delivery is the latest summary.
     LastTurnSummary {
-        /// One-line fragment (~5–12 words, capped at a safety limit).
+        /// One-line fragment (~5ÔÇô12 words, capped at a safety limit).
         summary: String,
         /// Prompt id of the turn this summary describes (provenance; also
         /// persisted as `Summary::last_turn_summary_prompt_id`).
@@ -661,7 +633,7 @@ pub enum SessionUpdate {
     },
     /// A compaction checkpoint marker written to `updates.jsonl`.
     ///
-    /// This is **persist-only** — it is never sent to the gateway/UI. It records
+    /// This is **persist-only** ÔÇö it is never sent to the gateway/UI. It records
     /// that a compaction occurred so the replay pipeline can reconstruct the
     /// model's conversation view when rewinding across the compaction boundary.
     ///
@@ -670,7 +642,7 @@ pub enum SessionUpdate {
     CompactionCheckpoint(Box<CompactionCheckpointInfo>),
     /// A rewind marker written to `updates.jsonl` when a rewind occurs.
     ///
-    /// This is **persist-only** — it is never sent to the gateway/UI. Because
+    /// This is **persist-only** ÔÇö it is never sent to the gateway/UI. Because
     /// `updates.jsonl` is append-only, rewinding creates a timeline branch.
     /// The marker tells the replay algorithm to discard accumulated state
     /// beyond `target_prompt_index` and continue from that point.
@@ -797,8 +769,8 @@ pub enum SessionUpdate {
         #[serde(default)]
         will_wake: bool,
     },
-    /// Task backgrounded notification — a bash command transitioned to background execution.
-    /// Sent for both direct `is_background=true` tasks and foreground→background transitions.
+    /// Task backgrounded notification ÔÇö a bash command transitioned to background execution.
+    /// Sent for both direct `is_background=true` tasks and foregroundÔåÆbackground transitions.
     TaskBackgrounded {
         /// The tool_call_id of the bash tool invocation.
         tool_call_id: String,
@@ -864,7 +836,7 @@ pub enum SessionUpdate {
     ///
     /// Broadcast to every client subscribed to the session in leader mode so
     /// follower clients (TUI / IDE / web) mirror the change in their local
-    /// state — status bar, `/model` dropdown, prompt header, etc. The
+    /// state ÔÇö status bar, `/model` dropdown, prompt header, etc. The
     /// originating client also receives this (the leader broadcasts to all
     /// subscribers of the session) but skips applying it because its in-flight
     /// `SetSessionModel` response is the authority for its local state and
@@ -955,7 +927,7 @@ pub enum SessionUpdate {
     ///
     /// Sent on the parent session's notification channel at phase transitions
     /// and rate-limited from the progress handler (max 1/s). Fire-and-forget
-    /// to pager — not actionable.
+    /// to pager ÔÇö not actionable.
     GoalUpdated {
         goal_id: String,
         objective: String,
@@ -994,9 +966,9 @@ pub enum SessionUpdate {
         live_subagent_tokens: Option<u64>,
         /// Per-model marginal-token breakdown `(model_id, tokens)`, sorted
         /// by tokens descending. The producer (`build_goal_updated`) only
-        /// populates this when ≥2 distinct models appear; a single-model
+        /// populates this when ÔëÑ2 distinct models appear; a single-model
         /// goal collapses to the single tokens line, so the field is empty
-        /// (and omitted on the wire). The pager re-checks ≥2 as defence in
+        /// (and omitted on the wire). The pager re-checks ÔëÑ2 as defence in
         /// depth.
         ///
         /// This is a live, active-subagent-window field (it mirrors
@@ -1049,12 +1021,12 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_classifier_details_path: Option<String>,
         /// `Some(true)` while a classifier run is in flight. Set only by
-        /// the dedicated "verifying" notification path — `build_goal_updated`
+        /// the dedicated "verifying" notification path ÔÇö `build_goal_updated`
         /// always emits `None` because this flag is not persisted state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         verifying_completion: Option<bool>,
         /// `Some(true)` while the goal planner subagent is running. Set
-        /// only by the dedicated "planning" notification path —
+        /// only by the dedicated "planning" notification path ÔÇö
         /// `build_goal_updated` always emits `None` because this flag is
         /// not persisted state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1062,21 +1034,21 @@ pub enum SessionUpdate {
     },
     /// A blocking reverse-request (permission / `ask_user_question` /
     /// plan-approval) is now **pending** on the agent, keyed by `tool_call_id`
-    /// Fire-and-forget, **never persisted** — it is a request,
-    /// not a notification. Subscribers show ⏳ NeedsInput for this session.
+    /// Fire-and-forget, **never persisted** ÔÇö it is a request,
+    /// not a notification. Subscribers show ÔÅ│ NeedsInput for this session.
     PendingInteraction {
         tool_call_id: String,
         kind: crate::session::pending_interaction::PendingKind,
     },
     /// A previously-pending reverse-request **resolved** (answered, cancelled,
     /// or errored). Fire-and-forget, **never persisted**. Subscribers clear the
-    /// pending ⏳ for this `tool_call_id`.
+    /// pending ÔÅ│ for this `tool_call_id`.
     InteractionResolved { tool_call_id: String },
     /// The durable, replayable signal that a turn reached its terminal
     /// outcome. Rides the persisted `_chutes.build/session/update` rail (unlike the
     /// fire-and-forget `chutes.ai/session/prompt_complete` notification), so a
     /// viewer that re-attaches mid-turn can finalize the turn from replay
-    /// instead of staying stuck on "Waiting…".
+    /// instead of staying stuck on "WaitingÔÇª".
     TurnCompleted {
         /// Correlation key the re-attaching viewer finalizes the turn on:
         /// the prompt/turn whose terminal outcome this carries.
@@ -1086,8 +1058,16 @@ pub enum SessionUpdate {
         /// Final agent result text, when the turn produced one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_result: Option<String>,
+        /// Typed kind of a failed stop (`SamplingErrorKind::as_str()`, e.g.
+        /// `"max_tokens_truncation"`) for error-specific client copy. `None`
+        /// for successes, unkinded errors, and files from older shells.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<PromptUsage>,
+        /// Wall-clock turn duration in milliseconds. `None` on old files.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        elapsed_ms: Option<u64>,
     },
     /// One model response opened (Messages `message_start`), carrying the real
     /// message id, model, and input-side token counts. Rides the buffered chunk
@@ -1128,7 +1108,7 @@ pub enum SessionUpdate {
         /// Provider message id (Messages `message.id`), when reported.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_id: Option<String>,
-        /// Verbatim wire stop reason (`end_turn`, `tool_use`, …), when reported.
+        /// Verbatim wire stop reason (`end_turn`, `tool_use`, ÔÇª), when reported.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1190,6 +1170,12 @@ impl From<&crate::session::image_normalize::ImageCompressionInfo> for ImageCompr
 pub const DISK_FULL_ERROR_TYPE: &str = "disk_full";
 pub const DISK_FULL_USER_MESSAGE: &str = "Out of disk space. Free some space and try again.";
 
+/// `chutes.ai/session/prompt_complete` payload key of a failed stop's typed error
+/// kind, camelCase like its payload siblings (`stopReason`, `cancelTrigger`).
+/// Value: `SamplingErrorKind::as_str()`. The durable twin carries the same
+/// value in [`SessionUpdate::TurnCompleted`]'s typed `error_kind` field.
+pub const PROMPT_COMPLETE_ERROR_KIND_KEY: &str = "errorKind";
+
 /// State of a retry operation or error for visual feedback in the TUI
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
@@ -1234,13 +1220,21 @@ pub enum RetryState {
 ///
 /// `auth_transient` is excluded for the opposite reason: the shell emits it
 /// only when the failure self-heals (see `AuthManager::requires_manual_reauth`)
-/// and the message already says it recovers on its own — no `/login` banner.
+/// and the message already says it recovers on its own ÔÇö no `/login` banner.
 pub fn is_reauthable_failure(error_type: Option<&str>, message: &str) -> bool {
     if matches!(error_type, Some("legacy_auth") | Some("auth_transient")) {
         return false;
     }
-    error_type == Some("auth") || message.contains("Unauthorized (401)")
+    error_type == Some("auth") || message.contains(UNAUTHORIZED_NEEDLE)
 }
+
+/// Text fallback for 401s that arrive without a typed `error_type`; messages
+/// lacking this exact literal rely on the typed `error_type == "auth"` alone.
+pub const UNAUTHORIZED_NEEDLE: &str = "Unauthorized (401)";
+
+/// Broader sub-needle of [`UNAUTHORIZED_NEEDLE`]; with a known-401 status the
+/// pager also matches banner-formatted text.
+pub const HTTP_401_NEEDLE: &str = "(401)";
 
 /// Status updates for relay sync (session sharing) feature.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -1309,7 +1303,7 @@ impl From<FeedbackRequestData> for FeedbackRequestNotification {
     }
 }
 
-// ── Compaction checkpoint types ────────────────────────────────────────
+// ÔöÇÔöÇ Compaction checkpoint types ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Metadata stored in `updates.jsonl` as a `CompactionCheckpoint` session update.
 ///
@@ -1370,7 +1364,7 @@ pub struct CompactionCheckpointFile {
     #[serde(default)]
     pub original_user_info: Option<String>,
     /// File paths that were re-read and injected after compaction.
-    /// Informational — for debugging and replay understanding.
+    /// Informational ÔÇö for debugging and replay understanding.
     #[serde(default)]
     pub reread_file_paths: Vec<String>,
 }
@@ -1393,7 +1387,7 @@ pub struct CompactionSegmentFile {
 ///
 /// Stored at `{session_dir}/compaction_requests/{request_id}.json`. Rides on
 /// the post-turn session archive to cloud storage, where it can be downloaded for prompt
-/// iteration — you get the exact `chat_history` that was sent, the prompt
+/// iteration ÔÇö you get the exact `chat_history` that was sent, the prompt
 /// variant, any `/compact <text>` user context, the model used, and the
 /// resulting summary (or error). Replay the request locally to A/B test
 /// alternate prompt wordings against the same input.
@@ -1432,14 +1426,14 @@ pub struct CompactionRequestFile {
     /// Most recent error message captured during the retry loop, if any.
     ///
     /// `None` on a first-attempt success. May co-occur with `summary` when a
-    /// transient failure was eventually retried successfully — the field then
+    /// transient failure was eventually retried successfully ÔÇö the field then
     /// documents the recovered flake and `summary` carries the final result.
     /// On total failure (all retries exhausted, or a deterministic error)
     /// `summary` is `None` and this field carries the final error.
     pub error: Option<String>,
     /// Number of attempts the retry loop made before settling on the final outcome.
     pub attempts: u32,
-    /// Per-attempt diagnostics (one per retry-loop iteration), in order —
+    /// Per-attempt diagnostics (one per retry-loop iteration), in order ÔÇö
     /// records each rejected/degraded attempt so retries aren't bumped
     /// invisibly. Empty on artifacts written before schema v2.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1499,6 +1493,12 @@ pub struct RecapRequestFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_401_needle_is_contained_in_unauthorized_needle() {
+        // Pins the sub-needle doc claim.
+        assert!(UNAUTHORIZED_NEEDLE.contains(HTTP_401_NEEDLE));
+    }
 
     #[test]
     fn recap_request_file_roundtrips() {
@@ -1579,7 +1579,7 @@ mod tests {
 
     #[test]
     fn compaction_request_file_v1_without_attempt_details_defaults_empty() {
-        // A pre-schema-v2 artifact carries no `attempt_details` key — it must
+        // A pre-schema-v2 artifact carries no `attempt_details` key ÔÇö it must
         // still deserialize, defaulting the new field to empty.
         let json = serde_json::json!({
             "schema_version": 1,
@@ -1616,7 +1616,7 @@ mod tests {
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "subagent_progress");
-        // Fields serialize as snake_case (Rust field names) — enum
+        // Fields serialize as snake_case (Rust field names) ÔÇö enum
         // `rename_all` only applies to the tag, not struct fields.
         assert_eq!(json["subagent_id"], "sub-1");
         assert_eq!(json["parent_session_id"], "parent-1");
@@ -1859,8 +1859,7 @@ mod tests {
     #[test]
     fn memory_session_saved_roundtrips() {
         let update = SessionUpdate::MemorySessionSaved {
-            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md"
-                .into(),
+            path: "/home/user/.chutes-build/memory/ws/sessions/2026-01-15-fix-auth-abc12345.md".into(),
         };
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
@@ -2200,7 +2199,7 @@ mod tests {
     #[test]
     fn goal_updated_payload_with_new_fields_round_trips() {
         // Wire round-trip: a payload that carries every classifier
-        // field round-trips through serialize → deserialize without
+        // field round-trips through serialize ÔåÆ deserialize without
         // mutation.
         let update = make_goal_updated_full();
         let json_str = serde_json::to_string(&update).unwrap();
@@ -2269,14 +2268,14 @@ mod tests {
         }
     }
 
-    // ── ModelChanged (leader-mode multi-client model switch fan-out) ──
+    // ÔöÇÔöÇ ModelChanged (leader-mode multi-client model switch fan-out) ÔöÇÔöÇ
 
-    /// Wire format for `ModelChanged` — sanity-check the JSON exactly,
+    /// Wire format for `ModelChanged` ÔÇö sanity-check the JSON exactly,
     /// since the pager and any third-party clients consume this on the wire.
     /// Specifically:
     /// - `sessionUpdate` tag is the snake_case variant name.
     /// - Field names use Rust snake_case (struct fields are not subject to
-    ///   `rename_all` — that only renames the tag).
+    ///   `rename_all` ÔÇö that only renames the tag).
     /// - `reasoning_effort` is omitted entirely when `None` (smaller wire +
     ///   distinguishable from explicitly-cleared-by-user, if that ever
     ///   becomes a real distinction).
@@ -2327,7 +2326,7 @@ mod tests {
     /// `rename_all`) + nested `update.sessionUpdate == "model_changed"`.
     /// Without the top-level `sessionId`, the leader's `extract_session_id`
     /// returns `None` and the notification falls through to the
-    /// last-active-client fallback instead of broadcasting — that would
+    /// last-active-client fallback instead of broadcasting ÔÇö that would
     /// silently break the entire multi-client sync.
     #[test]
     fn model_changed_envelope_carries_session_id_at_top_level() {
@@ -2345,7 +2344,7 @@ mod tests {
         assert_eq!(json["update"]["model_id"], "grok-4");
     }
 
-    // ── TurnCompleted (durable, replayable turn-end signal) ──
+    // ÔöÇÔöÇ TurnCompleted (durable, replayable turn-end signal) ÔöÇÔöÇ
 
     #[test]
     fn turn_completed_serializes_snake_case_tag_and_fields() {
@@ -2356,13 +2355,16 @@ mod tests {
             prompt_id: "p-1".into(),
             stop_reason: "end_turn".into(),
             agent_result: Some("done".into()),
+            error_kind: Some("max_tokens_truncation".into()),
             usage: None,
+            elapsed_ms: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "turn_completed");
         assert_eq!(json["prompt_id"], "p-1");
         assert_eq!(json["stop_reason"], "end_turn");
         assert_eq!(json["agent_result"], "done");
+        assert_eq!(json["error_kind"], "max_tokens_truncation");
     }
 
     #[test]
@@ -2371,11 +2373,15 @@ mod tests {
             prompt_id: "p-2".into(),
             stop_reason: "cancelled".into(),
             agent_result: None,
+            error_kind: None,
             usage: None,
+            elapsed_ms: None,
         };
         let json = serde_json::to_value(&update).unwrap();
         assert_eq!(json["sessionUpdate"], "turn_completed");
         assert!(json.get("agent_result").is_none());
+        assert!(json.get("error_kind").is_none());
+        assert!(json.get("elapsed_ms").is_none());
     }
 
     #[test]
@@ -2385,19 +2391,57 @@ mod tests {
                 prompt_id: "p-rt".into(),
                 stop_reason: "end_turn".into(),
                 agent_result: Some("result text".into()),
+                error_kind: Some("max_tokens_truncation".into()),
                 usage: None,
+                elapsed_ms: Some(1234),
             },
             SessionUpdate::TurnCompleted {
                 prompt_id: "p-min".into(),
                 stop_reason: "error".into(),
                 agent_result: None,
+                error_kind: None,
                 usage: None,
+                elapsed_ms: None,
             },
         ] {
             let json_str = serde_json::to_string(&update).unwrap();
             let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
             assert_eq!(update, parsed);
         }
+    }
+
+    #[test]
+    fn turn_completed_old_json_without_elapsed_ms_deserializes_none() {
+        let json =
+            r#"{"sessionUpdate":"turn_completed","prompt_id":"p-old","stop_reason":"end_turn"}"#;
+        let parsed: SessionUpdate = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            parsed,
+            SessionUpdate::TurnCompleted {
+                prompt_id: "p-old".into(),
+                stop_reason: "end_turn".into(),
+                agent_result: None,
+                error_kind: None,
+                usage: None,
+                elapsed_ms: None,
+            }
+        );
+    }
+
+    #[test]
+    fn turn_completed_elapsed_ms_some_roundtrips() {
+        let update = SessionUpdate::TurnCompleted {
+            prompt_id: "p-ms".into(),
+            stop_reason: "end_turn".into(),
+            agent_result: None,
+            error_kind: None,
+            usage: None,
+            elapsed_ms: Some(1234),
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["elapsed_ms"], 1234);
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(update, parsed);
     }
 
     #[test]

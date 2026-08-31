@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 dirs = "6"
 dunce = { workspace = true }
+xai-dirs = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
 parking_lot = { workspace = true }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }

@@ -20,20 +20,16 @@ use reqwest::header::{
     ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, USER_AGENT,
 };
 use serde::Serialize;
-use std::time::Duration;
 
-use chutes_build_core::reasoning::{
-    ReasoningProfile, RequestedReasoning, WireReasoningEffort, reasoning_profile,
-    reasoning_wire_plan,
-};
 use xai_grok_sampling_types::error::{
     parse_error_code, try_parse_stream_error, user_facing_api_error_message,
 };
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
-    ConversationResponse, CreateResponseWrapper, DOOM_LOOP_CHECK_HEADER, MessagesRequestWrapper,
-    ReasoningEffort, ResponseModelMetadata, Result, SamplingError, SentCredential,
-    build_messages_request, is_check_event, messages, rs,
+    ConversationResponse, CreateResponseWrapper, DEFAULT_EXACT_REPETITION_MIN_TOKENS,
+    DOOM_LOOP_CHECK_HEADER, EXACT_REPETITION_CHECK_HEADER, MessagesRequestWrapper,
+    ResponseModelMetadata, Result, SamplingError, SentCredential, build_messages_request,
+    is_check_event, messages, rs,
 };
 
 use crate::config::{AuthScheme, OriginClientInfo, SamplerConfig};
@@ -47,7 +43,7 @@ pub use xai_grok_sampling_types::ApiBackend;
 const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
 /// Product identifier baked into User-Agent strings.
-const AGENT_PRODUCT: &str = "chutes-build";
+const AGENT_PRODUCT: &str = "grok-shell";
 const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
 /// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
@@ -57,6 +53,8 @@ struct GrokRequestHeaders<'a> {
     model_id: &'a str,
     session_id: &'a str,
     turn_idx: Option<&'a str>,
+    /// Turn-level resubmit attempt; the proxy counts retry traffic by it.
+    transient_retry: Option<&'a str>,
     agent_id: &'a str,
     deployment_id: Option<&'a str>,
     user_id: Option<&'a str>,
@@ -72,6 +70,9 @@ impl GrokRequestHeaders<'_> {
             .header("x-grok-agent-id", self.agent_id);
         if let Some(idx) = self.turn_idx {
             b = b.header("x-grok-turn-idx", idx);
+        }
+        if let Some(attempt) = self.transient_retry {
+            b = b.header("x-grok-transient-retry", attempt);
         }
         if let Some(id) = self.deployment_id.filter(|s| !s.is_empty()) {
             b = b.header("x-grok-deployment-id", id);
@@ -114,7 +115,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
                 // Strip tools that async_openai's rs::Tool can't deserialize
                 // (e.g., xAI-specific "x_search"). Instead of maintaining a
-                // hardcoded allowlist, try deserializing each tool entry —
+                // hardcoded allowlist, try deserializing each tool entry ÔÇö
                 // if it fails, drop it.
                 if let Some(tools) = value
                     .pointer_mut("/response/tools")
@@ -148,7 +149,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
 /// threshold, and `meta.totalTokens` on persisted sessions. Under
 /// server-side multi-turn loops (e.g. `web_search`, `x_search`) the
 /// wire's cumulative total inflates as the loop runs; `context_details`
-/// reports the final turn's prompt + output tokens — the real live
+/// reports the final turn's prompt + output tokens ÔÇö the real live
 /// context the model is sitting in. Billing fields
 /// (`input_tokens`, `output_tokens`, `input_tokens_details.cached_tokens`,
 /// `output_tokens_details.reasoning_tokens`) stay on the cumulative
@@ -159,7 +160,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
 /// - `response.usage` is `None`,
 /// - `context_details` is absent (older backends / non-loop responses),
 /// - or either of `context_details.{input_tokens, output_tokens}` is
-///   missing — we don't guess the missing half.
+///   missing ÔÇö we don't guess the missing half.
 fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &str) {
     let response = match event {
         rs::ResponseStreamEvent::ResponseCompleted(e) => &mut e.response,
@@ -251,7 +252,7 @@ fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
             } else if s.eq_ignore_ascii_case("false") {
                 Some(false)
             } else {
-                None // unknown value — treat as absent
+                None // unknown value ÔÇö treat as absent
             }
         })
 }
@@ -289,248 +290,17 @@ fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<Respon
 /// Uses `#[serde(flatten)]` to inline all fields from the inner request,
 /// allowing single-pass serialization instead of the previous two-pass
 /// approach (serialize to `Value`, mutate, serialize to bytes).
-/// Per-family chat-template controls Chutes expects alongside the request.
-/// Serialized only when the resolved plan actually sets one, so a non-Chutes
-/// backend never sees the field.
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct ChutesChatTemplateKwargs {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_thinking: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<bool>,
-}
-
 #[derive(Serialize)]
 struct StreamingChatRequest<'a> {
     #[serde(flatten)]
     inner: &'a ChatCompletionRequest,
     stream: bool,
     stream_options: StreamOptions,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
-}
-
-/// Non-streaming body wrapper: carries the Chutes chat-template controls next
-/// to the flattened request, mirroring [`StreamingChatRequest`] so compaction
-/// and title generation apply the same reasoning plan instead of
-/// silently dropping it.
-#[derive(Serialize)]
-struct NonStreamingChatRequest<'a> {
-    #[serde(flatten)]
-    inner: &'a ChatCompletionRequest,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    chat_template_kwargs: Option<&'a ChutesChatTemplateKwargs>,
 }
 
 #[derive(Serialize)]
 struct StreamOptions {
     include_usage: bool,
-}
-
-/// Leading `max_chars` of an SSE payload, for error context.
-///
-/// A serde message alone ("expected value at line 1 column 1") says nothing
-/// about which chute produced what. The full payload is already in the local
-/// error log; this puts enough of it in the error the user actually sees.
-fn chunk_excerpt(data: &str, max_chars: usize) -> String {
-    let mut excerpt: String = data.chars().take(max_chars).collect();
-    if excerpt.len() < data.len() {
-        excerpt.push('…');
-    }
-    excerpt
-}
-
-fn is_chutes_backend(base_url: &str) -> bool {
-    base_url.to_ascii_lowercase().contains("chutes.ai")
-}
-
-fn env_flag(name: &str) -> bool {
-    std::env::var(name).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn chutes_fallback_models(base_url: &str, selected: &str) -> Vec<String> {
-    let auto = chutes_build_core::routing::auto_model_from_env();
-    chutes_fallback_chain(
-        is_chutes_backend(base_url),
-        env_flag("CHUTES_STRICT_MODEL"),
-        std::env::var("CHUTES_FALLBACK_MODELS").ok().as_deref(),
-        selected,
-        &auto,
-    )
-}
-
-/// The chain itself, with the environment already read. Split out so the
-/// ordering can be tested without mutating process-wide env vars, which no
-/// test can do safely while the rest of the suite runs in parallel.
-fn chutes_fallback_chain(
-    is_chutes: bool,
-    strict_model: bool,
-    configured: Option<&str>,
-    selected: &str,
-    auto_fallback: &str,
-) -> Vec<String> {
-    let mut models = vec![selected.to_owned()];
-    if !is_chutes || strict_model {
-        return models;
-    }
-
-    if let Some(configured) = configured {
-        models.extend(
-            configured
-                .split(',')
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-                .map(str::to_owned),
-        );
-    }
-    // The native routing alias resolves server-side against the account's
-    // saved pool (or an inline `CHUTES_ROUTING_POOL`), so it is the final
-    // named fallback when a pinned model is explicitly cold or unavailable
-    // before streaming. A live catalogue pool is appended later, once the
-    // async catalog fetch has run.
-    models.push(auto_fallback.to_owned());
-    let mut seen = std::collections::HashSet::new();
-    models.retain(|model| seen.insert(model.clone()));
-    models
-}
-
-async fn chutes_fallback_models_with_live_catalog(base_url: &str, selected: &str) -> Vec<String> {
-    let mut candidates = chutes_fallback_models(base_url, selected);
-    if !is_chutes_backend(base_url) {
-        return candidates;
-    }
-    let Some(alias) = candidates
-        .iter()
-        .find(|candidate| chutes_build_core::routing::is_dashboard_alias(candidate))
-        .cloned()
-    else {
-        return candidates;
-    };
-    match chutes_build_core::catalog::live_chat_model_ids().await {
-        Ok(ids) => {
-            chutes_build_core::routing::append_live_auto_pool(&mut candidates, &ids, &alias);
-        }
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                "could not refresh the live catalog for Auto fallback"
-            );
-        }
-    }
-    candidates
-}
-
-/// Append setup guidance when the whole chain failed because the routing
-/// string did not resolve server-side — the signature failure of an account
-/// with no saved dashboard pool behind the alias. Everything else passes
-/// through untouched, including mid-loop rejections that must stay raw.
-fn with_routing_setup_hint(mut error: SamplingError) -> SamplingError {
-    let needs_hint =
-        matches!(&error, SamplingError::Api { message, .. } if message.contains("model not found"));
-    if !needs_hint {
-        return error;
-    }
-    if let SamplingError::Api { message, .. } = &mut error {
-        message.push_str(
-            "\n\nHint: save a failover pool at chutes.ai/app (Model Routing), \
-             or set CHUTES_ROUTING_POOL to route without one.",
-        );
-    }
-    error
-}
-
-/// How long the Chutes chain will wait on a `Retry-After` before giving up on
-/// the selected model.
-///
-/// A capacity 429 on a chute is often a burst: the server says "two seconds"
-/// and means it, and waiting beats handing the user a different model than the
-/// one they chose. A long `Retry-After` means the opposite — the chute is busy
-/// for a while, and the next candidate is the better answer *now*. So this is
-/// the line between the two readings, not a timeout.
-const CHUTES_MAX_SAME_MODEL_WAIT: Duration = Duration::from_secs(5);
-
-/// Whether `error` says "this model is busy, come back" rather than "this model
-/// cannot serve you", and if so how long the server asked us to wait.
-///
-/// `None` means do not wait: either it is not a capacity signal, or the server
-/// asked for longer than [`CHUTES_MAX_SAME_MODEL_WAIT`].
-fn chutes_capacity_wait(error: &SamplingError) -> Option<Duration> {
-    let SamplingError::Api {
-        status,
-        retry_after_secs,
-        should_retry,
-        ..
-    } = error
-    else {
-        return None;
-    };
-    if !matches!(status.as_u16(), 429 | 503) {
-        return None;
-    }
-    // `x-should-retry: false` is the server saying not to, and the rest of the
-    // stack already obeys it — `retry.rs` classifies such errors Fatal. Waiting
-    // and re-sending anyway would burn the delay to produce a request that is
-    // discarded, and on a rate limiter it can deepen the penalty.
-    if matches!(should_retry, Some(false)) {
-        return None;
-    }
-    let wait = Duration::from_secs((*retry_after_secs)?);
-    (wait <= CHUTES_MAX_SAME_MODEL_WAIT).then_some(wait)
-}
-
-fn requested_reasoning(effort: Option<ReasoningEffort>) -> RequestedReasoning {
-    match effort {
-        None => RequestedReasoning::Unspecified,
-        Some(ReasoningEffort::None) => RequestedReasoning::None,
-        Some(ReasoningEffort::Minimal) => RequestedReasoning::Minimal,
-        Some(ReasoningEffort::Low) => RequestedReasoning::Low,
-        Some(ReasoningEffort::Medium) => RequestedReasoning::Medium,
-        Some(ReasoningEffort::High) => RequestedReasoning::High,
-        // Upstream grew a `Max` above `Xhigh`; Chutes' scale tops out at
-        // Maximum, so both map there rather than silently downgrading.
-        Some(ReasoningEffort::Xhigh) | Some(ReasoningEffort::Max) => RequestedReasoning::Maximum,
-    }
-}
-
-/// Apply the centralized Chutes reasoning compatibility plan without changing
-/// non-Chutes BYOK requests. Unknown future models retain explicit catalog
-/// values; verified fixed-reasoning models drop incompatible overrides.
-fn chutes_chat_template_kwargs(
-    base_url: &str,
-    request: &mut ChatCompletionRequest,
-) -> Option<ChutesChatTemplateKwargs> {
-    if !is_chutes_backend(base_url) {
-        return None;
-    }
-
-    let model = request.model.as_deref().unwrap_or_default();
-    let profile = reasoning_profile(model);
-    if profile == ReasoningProfile::Unknown {
-        // A future catalog may publish an explicit server-side effort menu
-        // before this client knows the model's template. Trust that menu.
-        return None;
-    }
-
-    let plan = reasoning_wire_plan(model, requested_reasoning(request.reasoning_effort));
-    if !plan.preserve_reasoning_effort {
-        request.reasoning_effort = match plan.reasoning_effort {
-            Some(WireReasoningEffort::Medium) => Some(ReasoningEffort::Medium),
-            Some(WireReasoningEffort::High) => Some(ReasoningEffort::High),
-            None => None,
-        };
-    }
-
-    (plan.enable_thinking.is_some() || plan.thinking.is_some()).then_some(
-        ChutesChatTemplateKwargs {
-            enable_thinking: plan.enable_thinking,
-            thinking: plan.thinking,
-        },
-    )
 }
 
 fn append_response_includes(body: &mut serde_json::Value, extra_includes: &[String]) {
@@ -775,8 +545,8 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
 /// A request builder coupled to the credential state it was built with, so
 /// a 401 arm cannot classify from anything but the build-time capture. The
 /// wire default (`SentCredential::Unknown`, which charges the retry budget)
-/// stays the fail-closed one; only an explicit `sent_bearer: None` — a send
-/// the builder provably stamped no credential onto — reaches the uncharged
+/// stays the fail-closed one; only an explicit `sent_bearer: None` ÔÇö a send
+/// the builder provably stamped no credential onto ÔÇö reaches the uncharged
 /// lane via [`auth_rejected`].
 struct SentRequest {
     builder: reqwest::RequestBuilder,
@@ -965,7 +735,7 @@ impl SamplingClient {
 
     /// POST with default headers, returning the builder coupled to the tail
     /// fragment of the credential actually placed in its headers (`None` =
-    /// no credential) — captured at build time because a record-time
+    /// no credential) ÔÇö captured at build time because a record-time
     /// re-read races with the recovery a 401 triggers.
     ///
     /// A wired bearer_resolver is the sole auth source: a missing live
@@ -1024,8 +794,8 @@ impl SamplingClient {
         }
     }
 
-    /// Tail fragment of the credential in `headers` — `x-api-key`
-    /// (Messages-API scheme) or `Authorization` — per
+    /// Tail fragment of the credential in `headers` ÔÇö `x-api-key`
+    /// (Messages-API scheme) or `Authorization` ÔÇö per
     /// [`crate::attribution::BEARER_SUFFIX_LEN`].
     fn sent_fragment_from_headers(headers: &HeaderMap, scheme: &AuthScheme) -> Option<String> {
         let raw = match scheme {
@@ -1042,7 +812,7 @@ impl SamplingClient {
 
     /// Best-effort *build-time* view of what the next request would carry
     /// (resolver-authoritative). For request-start diagnostics
-    /// ([`Self::auth_info`]) only — 401 attribution must use the fragment
+    /// ([`Self::auth_info`]) only ÔÇö 401 attribution must use the fragment
     /// captured by [`Self::post`] instead, which cannot race a recovery.
     fn current_sent_bearer_suffix(&self) -> Option<String> {
         if self.bearer_resolver.is_some() {
@@ -1124,25 +894,7 @@ impl SamplingClient {
         self.endpoint.url_for_path(path)
     }
 
-    /// Chat-completions URL for `model`.
-    ///
-    /// Routing is server-side: the auto string (`default`, a strategy alias,
-    /// or an inline pool) goes to the normal inference host like any model
-    /// id, so there is no separate router endpoint to reach.
-    fn chat_completions_endpoint(&self, _model: &str) -> Result<String> {
-        Ok(self.endpoint("chat/completions"))
-    }
-
     fn apply_defaults(&self, mut request: ChatCompletionRequest) -> Result<ChatCompletionRequest> {
-        // Legacy configs still name the retired virtual router id; map it to
-        // the native server-side routing string so old setups keep routing.
-        if is_chutes_backend(&self.base_url)
-            && let Some(model) = &request.model
-            && model.eq_ignore_ascii_case(chutes_build_core::routing::LEGACY_AUTO_MODEL_ID)
-        {
-            request.model = Some(chutes_build_core::routing::auto_model_from_env());
-        }
-
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
         }
@@ -1214,72 +966,11 @@ impl SamplingClient {
     // Chat Completions API
     // =========================================================================
 
-    /// Send a non-streaming chat completion, falling back across Chutes model
-    /// candidates on the same policy as the streaming path.
-    ///
-    /// The two paths diverged for no reason anyone chose: the streaming one
-    /// grew the chain and this one did not, so compaction and title generation
-    /// surfaced a bare `429 Infrastructure is at maximum capacity`
-    /// while an interactive turn quietly recovered. Nothing here can be
-    /// mid-stream, so `stream_started` is always false.
     pub async fn chat_completion(
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
         let payload = self.apply_defaults(request)?;
-        let selected = payload.model.clone().unwrap_or_default();
-        let candidates = chutes_fallback_models_with_live_catalog(&self.base_url, &selected).await;
-        let policy = chutes_build_core::routing::FallbackPolicy::default();
-
-        let mut last_error = None;
-        for (index, candidate) in candidates.iter().enumerate() {
-            let has_fallback = index + 1 < candidates.len();
-            let mut attempt = payload.clone();
-            attempt.model = Some(candidate.clone());
-            match self.chat_completion_once(attempt).await {
-                Ok(response) => return Ok(response),
-                Err(error) => {
-                    let status = match &error {
-                        SamplingError::Api { status, .. } => Some(status.as_u16()),
-                        _ => None,
-                    };
-                    if has_fallback
-                        && policy.permits_model_fallback(status, &error.to_string(), false)
-                    {
-                        tracing::warn!(
-                            model_id = %candidate,
-                            fallback_model = %candidates[index + 1],
-                            %error,
-                            "Chutes model unavailable; trying the next candidate"
-                        );
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(error);
-                }
-            }
-        }
-        Err(last_error
-            .map(with_routing_setup_hint)
-            .unwrap_or(SamplingError::InvalidConfiguration(
-                "no model candidates to try",
-            )))
-    }
-
-    /// One non-streaming attempt against one model. Takes an already
-    /// defaulted payload so the chain does not re-apply defaults per candidate.
-    async fn chat_completion_once(
-        &self,
-        payload: ChatCompletionRequest,
-    ) -> Result<ChatCompletionResponse> {
-        // Mirror the streaming path: apply the Chutes reasoning plan and map
-        // the legacy `model-router` id to the native routing string. This
-        // path used to send the bare payload to the configured inference
-        // base, so compaction and title generation dropped the
-        // thinking switches and never routed under `model-router`.
-        let mut payload = payload;
-        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
-
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -1296,6 +987,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: payload.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: payload.x_grok_turn_idx.as_deref(),
+            transient_retry: payload.x_grok_transient_retry.as_deref(),
             agent_id: payload.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: payload.x_grok_deployment_id.as_deref(),
             user_id: payload.x_grok_user_id.as_deref(),
@@ -1303,12 +995,8 @@ impl SamplingClient {
         let SentRequest {
             builder,
             sent_bearer,
-        } = self.post(self.chat_completions_endpoint(&model_id)?);
-        let request = NonStreamingChatRequest {
-            inner: &payload,
-            chat_template_kwargs: chat_template_kwargs.as_ref(),
-        };
-        let http_request = grok_headers.apply(builder).json(&request);
+        } = self.post(self.endpoint("chat/completions"));
+        let http_request = grok_headers.apply(builder).json(&payload);
 
         let response = http_request.send().await.map_err(|e| {
             // Log at debug level; errors are surfaced to the caller.
@@ -1331,94 +1019,7 @@ impl SamplingClient {
             error = tracing::field::Empty,
         )
     )]
-    /// Stream a chat completion, falling back across Chutes model candidates
-    /// while nothing has been streamed yet.
-    ///
-    /// The chain is: the selected model, then `CHUTES_FALLBACK_MODELS`, then
-    /// the native auto-routing alias (`default` / `CHUTES_ROUTING_POOL`).
-    /// `CHUTES_STRICT_MODEL=1` disables it, and a
-    /// non-Chutes backend yields a single candidate, so this is a plain
-    /// pass-through there — including the capacity wait below, which is why
-    /// that is gated on the backend and not merely on the candidate count.
     pub async fn chat_completion_stream(
-        &self,
-        request: ChatCompletionRequest,
-    ) -> Result<(
-        BoxStream<'static, Result<ChatCompletionChunk>>,
-        Option<ResponseModelMetadata>,
-    )> {
-        let payload = self.apply_defaults(request)?;
-        let selected = payload.model.clone().unwrap_or_default();
-        let candidates = chutes_fallback_models_with_live_catalog(&self.base_url, &selected).await;
-        let policy = chutes_build_core::routing::FallbackPolicy::default();
-
-        let mut last_error = None;
-        for (index, candidate) in candidates.iter().enumerate() {
-            let has_fallback = index + 1 < candidates.len();
-            let mut attempt = payload.clone();
-            attempt.model = Some(candidate.clone());
-            let mut outcome = self.chat_completion_stream_once(attempt.clone()).await;
-
-            // One retry, on the model the *user picked* and nowhere else. A
-            // burst 429 with a short `Retry-After` is the server saying "wait",
-            // not "use something else", and that model is worth the wait. A
-            // long delay, no header, or a candidate we already fell back to is
-            // not: move on.
-            //
-            // Gated on the backend too, so a non-Chutes endpoint stays the
-            // pass-through this method documents rather than gaining a stall.
-            // Bounded to one wait per call by construction — it can only fire
-            // at `index == 0`.
-            //
-            // Safe to sleep here only because `run_one_attempt` selects this
-            // future against the cancel token, so Esc drops it mid-wait.
-            if index == 0
-                && is_chutes_backend(&self.base_url)
-                && let Err(error) = &outcome
-                && let Some(wait) = chutes_capacity_wait(error)
-            {
-                tracing::debug!(
-                    model_id = %candidate,
-                    wait_ms = wait.as_millis() as u64,
-                    "Chutes model at capacity; honouring Retry-After before trying another"
-                );
-                tokio::time::sleep(wait).await;
-                outcome = self.chat_completion_stream_once(attempt).await;
-            }
-
-            match outcome {
-                Ok(result) => return Ok(result),
-                Err(error) => {
-                    let status = match &error {
-                        SamplingError::Api { status, .. } => Some(status.as_u16()),
-                        _ => None,
-                    };
-                    if has_fallback
-                        && policy.permits_model_fallback(status, &error.to_string(), false)
-                    {
-                        tracing::warn!(
-                            model_id = %candidate,
-                            fallback_model = %candidates[index + 1],
-                            %error,
-                            "Chutes model unavailable before streaming; trying the next candidate"
-                        );
-                        last_error = Some(error);
-                        continue;
-                    }
-                    return Err(error);
-                }
-            }
-        }
-        Err(last_error
-            .map(with_routing_setup_hint)
-            .unwrap_or(SamplingError::InvalidConfiguration(
-                "no model candidates to try",
-            )))
-    }
-
-    /// One attempt against one model. Returns only once the SSE response has
-    /// started, so any error it yields happened before streaming.
-    async fn chat_completion_stream_once(
         &self,
         request: ChatCompletionRequest,
     ) -> Result<(
@@ -1433,15 +1034,12 @@ impl SamplingClient {
         // Wrap the request with streaming fields and serialize once.
         // Previously this path serialized twice: first to serde_json::Value
         // (to inject `stream` and `stream_options`), then to HTTP body bytes.
-        let mut payload = payload;
-        let chat_template_kwargs = chutes_chat_template_kwargs(&self.base_url, &mut payload);
         let streaming_request = StreamingChatRequest {
             inner: &payload,
             stream: true,
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            chat_template_kwargs: chat_template_kwargs.as_ref(),
         };
 
         let grok_headers = GrokRequestHeaders {
@@ -1450,6 +1048,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: payload.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: payload.x_grok_turn_idx.as_deref(),
+            transient_retry: payload.x_grok_transient_retry.as_deref(),
             agent_id: payload.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: payload.x_grok_deployment_id.as_deref(),
             user_id: payload.x_grok_user_id.as_deref(),
@@ -1457,7 +1056,7 @@ impl SamplingClient {
         let SentRequest {
             builder,
             sent_bearer,
-        } = self.post(self.chat_completions_endpoint(&model_id)?);
+        } = self.post(self.endpoint("chat/completions"));
         let http_request = grok_headers
             .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
@@ -1576,14 +1175,7 @@ impl SamplingClient {
                                         raw_data = %data,
                                         "Failed to deserialize ChatCompletionChunk from stream"
                                     );
-                                    // Stays a `Serialization` error, which is
-                                    // non-retryable by design — this only adds
-                                    // the context needed to tell which chute
-                                    // sent what.
-                                    SamplingError::serialization_message(format!(
-                                        "{e} (chunk: {})",
-                                        chunk_excerpt(data, 200)
-                                    ))
+                                    SamplingError::Serialization(e)
                                 }),
                             )
                         }
@@ -1668,6 +1260,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: request.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: request.x_grok_turn_idx.as_deref(),
+            transient_retry: request.x_grok_transient_retry.as_deref(),
             agent_id: request.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
@@ -1754,7 +1347,7 @@ impl SamplingClient {
     /// - `response.completed` - Final response with all output
     ///
     /// The third tuple element is a per-request doom-loop signal collector,
-    /// `Some` only when `SamplerConfig::doom_loop_recovery` is set — the same
+    /// `Some` only when `SamplerConfig::doom_loop_recovery` is set ÔÇö the same
     /// gate that adds the opt-in `x-grok-doom-loop-check` request header, so
     /// header and parse protection cannot drift apart. It is filled by the
     /// SSE decoder as the server reports triggers and is meant to be handed
@@ -1804,6 +1397,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: request.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: request.x_grok_turn_idx.as_deref(),
+            transient_retry: request.x_grok_transient_retry.as_deref(),
             agent_id: request.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
@@ -1834,8 +1428,12 @@ impl SamplingClient {
             .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
         if let Some(policy) = self.defaults.doom_loop_recovery {
-            http_request =
-                http_request.header(DOOM_LOOP_CHECK_HEADER, policy.window_tokens.to_string());
+            http_request = http_request
+                .header(DOOM_LOOP_CHECK_HEADER, policy.window_tokens.to_string())
+                .header(
+                    EXACT_REPETITION_CHECK_HEADER,
+                    DEFAULT_EXACT_REPETITION_MIN_TOKENS.to_string(),
+                );
         }
         let http_request = http_request.json(&request_body);
 
@@ -2028,6 +1626,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: request.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: request.x_grok_turn_idx.as_deref(),
+            transient_retry: request.x_grok_transient_retry.as_deref(),
             agent_id: request.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
@@ -2142,6 +1741,7 @@ impl SamplingClient {
             model_id: &model_id,
             session_id: request.x_grok_session_id.as_deref().unwrap_or_default(),
             turn_idx: request.x_grok_turn_idx.as_deref(),
+            transient_retry: request.x_grok_transient_retry.as_deref(),
             agent_id: request.x_grok_agent_id.as_deref().unwrap_or_default(),
             deployment_id: request.x_grok_deployment_id.as_deref(),
             user_id: request.x_grok_user_id.as_deref(),
@@ -2373,6 +1973,7 @@ impl SamplingClient {
         let x_grok_req_id = request.x_grok_req_id.clone();
         let x_grok_session_id = request.x_grok_session_id.clone();
         let x_grok_turn_idx = request.x_grok_turn_idx.clone();
+        let x_grok_transient_retry = request.x_grok_transient_retry.clone();
         let x_grok_agent_id = request.x_grok_agent_id.clone();
 
         // The hosted tools travel as raw JSON, spliced in after serialization by
@@ -2386,6 +1987,7 @@ impl SamplingClient {
         wrapper.x_grok_req_id = x_grok_req_id;
         wrapper.x_grok_session_id = x_grok_session_id;
         wrapper.x_grok_turn_idx = x_grok_turn_idx;
+        wrapper.x_grok_transient_retry = x_grok_transient_retry;
         wrapper.x_grok_agent_id = x_grok_agent_id;
         wrapper.extra_tool_entries = extra_tools;
 
@@ -2410,6 +2012,7 @@ impl SamplingClient {
         let x_grok_req_id = request.x_grok_req_id.clone();
         let x_grok_session_id = request.x_grok_session_id.clone();
         let x_grok_turn_idx = request.x_grok_turn_idx.clone();
+        let x_grok_transient_retry = request.x_grok_transient_retry.clone();
         let x_grok_agent_id = request.x_grok_agent_id.clone();
 
         // The hosted tools travel as raw JSON, spliced in by `create_response` through
@@ -2423,6 +2026,7 @@ impl SamplingClient {
         wrapper.x_grok_req_id = x_grok_req_id;
         wrapper.x_grok_session_id = x_grok_session_id;
         wrapper.x_grok_turn_idx = x_grok_turn_idx;
+        wrapper.x_grok_transient_retry = x_grok_transient_retry;
         wrapper.x_grok_agent_id = x_grok_agent_id;
         wrapper.extra_tool_entries = extra_tools;
 
@@ -2450,6 +2054,7 @@ impl SamplingClient {
         let x_grok_req_id = request.x_grok_req_id.clone();
         let x_grok_session_id = request.x_grok_session_id.clone();
         let x_grok_turn_idx = request.x_grok_turn_idx.clone();
+        let x_grok_transient_retry = request.x_grok_transient_retry.clone();
         let x_grok_agent_id = request.x_grok_agent_id.clone();
 
         let messages_request = build_messages_request(&request);
@@ -2459,6 +2064,7 @@ impl SamplingClient {
         wrapper.x_grok_req_id = x_grok_req_id;
         wrapper.x_grok_session_id = x_grok_session_id;
         wrapper.x_grok_turn_idx = x_grok_turn_idx;
+        wrapper.x_grok_transient_retry = x_grok_transient_retry;
         wrapper.x_grok_agent_id = x_grok_agent_id;
 
         if let Some(trace) = trace {
@@ -2482,6 +2088,7 @@ impl SamplingClient {
         let x_grok_req_id = request.x_grok_req_id.clone();
         let x_grok_session_id = request.x_grok_session_id.clone();
         let x_grok_turn_idx = request.x_grok_turn_idx.clone();
+        let x_grok_transient_retry = request.x_grok_transient_retry.clone();
         let x_grok_agent_id = request.x_grok_agent_id.clone();
 
         let messages_request = build_messages_request(&request);
@@ -2491,6 +2098,7 @@ impl SamplingClient {
         wrapper.x_grok_req_id = x_grok_req_id;
         wrapper.x_grok_session_id = x_grok_session_id;
         wrapper.x_grok_turn_idx = x_grok_turn_idx;
+        wrapper.x_grok_transient_retry = x_grok_transient_retry;
         wrapper.x_grok_agent_id = x_grok_agent_id;
 
         if let Some(trace) = trace {
@@ -2501,12 +2109,27 @@ impl SamplingClient {
     }
 
     /// Backend-aware streaming call that collects the full response.
+    ///
+    /// Honors the request's [`LengthPolicy`](xai_grok_sampling_types::LengthPolicy)
+    /// like the actor path: the default still fails text-only or empty
+    /// `Length`, so side callers never persist a silently truncated result.
     pub async fn conversation_collect(
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse> {
+        self.conversation_collect_with_idle_timeout(request, std::time::Duration::from_secs(300))
+            .await
+    }
+
+    /// [`Self::conversation_collect`] with a caller-chosen idle timeout, for
+    /// short side calls (autocomplete, memory notes) that must give up fast.
+    pub async fn conversation_collect_with_idle_timeout(
+        &self,
+        request: ConversationRequest,
+        idle_timeout: std::time::Duration,
+    ) -> Result<ConversationResponse> {
         let request_id = crate::types::RequestId::random();
-        let idle_timeout = std::time::Duration::from_secs(300);
+        let length_policy = request.length_policy;
         let result = match self.api_backend() {
             ApiBackend::ChatCompletions => {
                 let (raw, meta) = self.conversation_stream(request).await?;
@@ -2526,9 +2149,44 @@ impl SamplingClient {
                 crate::stream::collect_response(events).await
             }
         };
-        result
+        let response = result
             .map(|(response, _metrics)| response)
-            .map_err(stream_collect_error)
+            .map_err(stream_collect_error)?;
+        apply_length_policy(length_policy, response)
+    }
+}
+
+/// Applies the request's [`xai_grok_sampling_types::LengthPolicy`] to a
+/// collected response: fails a `Length` stop the policy rejects, logs the
+/// salvage breadcrumb otherwise. The single gate shared by `drive_l2` and
+/// the direct-collect path so the two cannot drift.
+pub(crate) fn apply_length_policy(
+    policy: xai_grok_sampling_types::LengthPolicy,
+    response: xai_grok_sampling_types::ConversationResponse,
+) -> Result<xai_grok_sampling_types::ConversationResponse> {
+    use xai_grok_sampling_types::LengthVerdict;
+    match policy.verdict(&response) {
+        LengthVerdict::Pass => Ok(response),
+        LengthVerdict::Fail => Err(SamplingError::MaxTokensTruncation),
+        LengthVerdict::Salvage => {
+            // Breadcrumb for "why did the user get half an answer".
+            tracing::info!(
+                content_len = response.assistant().map_or(0, |a| a.content.len()),
+                completion_tokens = response.usage.as_ref().map(|u| u.completion_tokens),
+                "salvaging Length-truncated response per LengthPolicy::CompletePartial"
+            );
+            Ok(response)
+        }
+        LengthVerdict::SalvageToolCalls => {
+            // Breadcrumb for counting turns rescued from max_tokens_truncation.
+            tracing::info!(
+                tool_calls = response.tool_calls().len(),
+                content_len = response.assistant().map_or(0, |a| a.content.len()),
+                completion_tokens = response.usage.as_ref().map(|u| u.completion_tokens),
+                "completing Length-truncated response with completed tool calls"
+            );
+            Ok(response)
+        }
     }
 }
 
@@ -2689,6 +2347,7 @@ mod tests {
             x_grok_req_id: None,
             x_grok_session_id: None,
             x_grok_turn_idx: None,
+            x_grok_transient_retry: None,
             x_grok_agent_id: None,
             x_grok_deployment_id: None,
             x_grok_user_id: None,
@@ -2701,7 +2360,6 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
-            chat_template_kwargs: None,
         };
 
         let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
@@ -2713,6 +2371,11 @@ mod tests {
                 .and_then(|v| v.get("include_usage"))
                 .and_then(|v| v.as_bool()),
             Some(true)
+        );
+        assert!(
+            !obj.keys().any(|k| k.starts_with("x_grok_")),
+            "x_grok_* are header fields and must never serialize into the body: {:?}",
+            obj.keys().collect::<Vec<_>>()
         );
 
         assert!(
@@ -2849,215 +2512,6 @@ mod tests {
             append_response_includes(&mut body, &["no_inline_citations".to_owned()]);
             assert_eq!(serde_json::json!(["no_inline_citations"]), body["include"]);
         }
-    }
-
-    #[test]
-    fn non_streaming_chat_request_flattens_inner_and_mirrors_kwargs() {
-        let req = ChatCompletionRequest {
-            model: Some("deepseek-ai/DeepSeek-R1".into()),
-            messages: vec![ChatRequestMessage::user("hello")],
-            temperature: None,
-            max_tokens: None,
-            top_p: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            user: None,
-            tools: None,
-            tool_choice: None,
-            search_parameters: None,
-            response_format: None,
-            reasoning_effort: None,
-            x_grok_conv_id: None,
-            x_grok_req_id: None,
-            x_grok_session_id: None,
-            x_grok_turn_idx: None,
-            x_grok_agent_id: None,
-            x_grok_deployment_id: None,
-            x_grok_user_id: None,
-            trace: None,
-        };
-
-        let kwargs = ChutesChatTemplateKwargs {
-            enable_thinking: Some(true),
-            thinking: None,
-        };
-
-        let wrapper = NonStreamingChatRequest {
-            inner: &req,
-            chat_template_kwargs: Some(&kwargs),
-        };
-
-        let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
-        assert_eq!(
-            json.get("model").and_then(|v| v.as_str()),
-            Some("deepseek-ai/DeepSeek-R1")
-        );
-        let kwargs_obj = json.get("chat_template_kwargs").unwrap();
-        assert_eq!(
-            kwargs_obj.get("enable_thinking").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert!(kwargs_obj.get("thinking").is_none());
-        assert!(json.get("stream").is_none());
-
-        // Without kwargs, the field must be absent from json.
-        let bare = NonStreamingChatRequest {
-            inner: &req,
-            chat_template_kwargs: None,
-        };
-        let bare_json: serde_json::Value = serde_json::to_value(&bare).unwrap();
-        assert!(bare_json.get("chat_template_kwargs").is_none());
-    }
-
-    #[test]
-    fn fallback_chain_ends_at_the_auto_alias_and_never_repeats_a_model() {
-        let chain = chutes_fallback_chain(true, false, Some("a, ,b ,a"), "a", "default");
-        assert_eq!(chain, ["a", "b", "default"]);
-    }
-
-    #[test]
-    fn fallback_chain_is_a_single_candidate_off_chutes_or_when_pinned() {
-        // A custom or self-hosted endpoint has no sibling models to try, and
-        // `CHUTES_STRICT_MODEL` is the user saying so explicitly. Both must
-        // collapse to a pass-through, or a pinned model is silently replaced.
-        assert_eq!(
-            chutes_fallback_chain(false, false, Some("b"), "a", "default"),
-            ["a"]
-        );
-        assert_eq!(
-            chutes_fallback_chain(true, true, Some("b"), "a", "default"),
-            ["a"]
-        );
-    }
-
-    #[test]
-    fn fallback_chain_keeps_the_auto_alias_last_when_it_is_the_selection() {
-        // Selecting the auto alias itself must not queue it twice. The live
-        // catalogue pool is appended later by the async catalog fetch.
-        assert_eq!(
-            chutes_fallback_chain(true, false, None, "default", "default"),
-            ["default"]
-        );
-    }
-
-    #[test]
-    fn fallback_chain_needs_no_safety_net_for_an_inline_pool_selection() {
-        let pool = "Qwen/Qwen3.5-397B-A17B-TEE,zai-org/GLM-5.2-TEE:latency";
-        assert_eq!(chutes_fallback_chain(true, false, None, pool, pool), [pool]);
-    }
-
-    #[test]
-    fn routing_setup_hint_lands_only_on_unresolved_model_errors() {
-        let missing = SamplingError::Api {
-            status: reqwest::StatusCode::NOT_FOUND,
-            message: "model not found: default".into(),
-            model_metadata: None,
-            retry_after_secs: None,
-            should_retry: None,
-            error_code: None,
-        };
-        assert!(
-            with_routing_setup_hint(missing)
-                .to_string()
-                .contains("chutes.ai/app")
-        );
-        let capacity = api_error(429, Some(1));
-        assert_eq!(
-            with_routing_setup_hint(api_error(429, Some(1))).to_string(),
-            capacity.to_string()
-        );
-    }
-
-    fn api_error(status: u16, retry_after_secs: Option<u64>) -> SamplingError {
-        SamplingError::Api {
-            status: reqwest::StatusCode::from_u16(status).unwrap(),
-            message: "Infrastructure is at maximum capacity".into(),
-            model_metadata: None,
-            retry_after_secs,
-            should_retry: None,
-            error_code: None,
-        }
-    }
-
-    #[test]
-    fn a_short_retry_after_is_waited_out_on_the_selected_model() {
-        // What the user actually hit. The server named a delay it means; the
-        // model they chose is worth that much waiting.
-        assert_eq!(
-            chutes_capacity_wait(&api_error(429, Some(2))),
-            Some(Duration::from_secs(2))
-        );
-        assert_eq!(
-            chutes_capacity_wait(&api_error(503, Some(5))),
-            Some(Duration::from_secs(5))
-        );
-    }
-
-    #[test]
-    fn a_long_retry_after_switches_model_instead_of_waiting() {
-        // Past the line, waiting is the wrong answer: the chute is busy for a
-        // while and another candidate can serve now.
-        assert_eq!(chutes_capacity_wait(&api_error(429, Some(6))), None);
-        assert_eq!(chutes_capacity_wait(&api_error(429, Some(120))), None);
-    }
-
-    #[test]
-    fn a_server_that_says_do_not_retry_is_obeyed() {
-        // `x-should-retry: false` outranks `Retry-After`. `retry.rs` classifies
-        // such errors Fatal, so waiting would buy a request that is thrown
-        // away — and on a rate limiter it can extend the penalty.
-        let mut refused = api_error(429, Some(2));
-        if let SamplingError::Api { should_retry, .. } = &mut refused {
-            *should_retry = Some(false);
-        }
-        assert_eq!(chutes_capacity_wait(&refused), None);
-
-        // `Some(true)` and an absent header both still wait.
-        let mut affirmed = api_error(429, Some(2));
-        if let SamplingError::Api { should_retry, .. } = &mut affirmed {
-            *should_retry = Some(true);
-        }
-        assert_eq!(
-            chutes_capacity_wait(&affirmed),
-            Some(Duration::from_secs(2))
-        );
-    }
-
-    #[test]
-    fn only_capacity_errors_are_worth_waiting_for() {
-        // No header: nothing to honour, so do not invent a delay.
-        assert_eq!(chutes_capacity_wait(&api_error(429, None)), None);
-        // Not capacity: a cold or missing model does not get better in 2s, and
-        // an auth or request error never does.
-        assert_eq!(chutes_capacity_wait(&api_error(404, Some(2))), None);
-        assert_eq!(chutes_capacity_wait(&api_error(400, Some(2))), None);
-        assert_eq!(chutes_capacity_wait(&api_error(401, Some(2))), None);
-        assert_eq!(
-            chutes_capacity_wait(&SamplingError::InvalidConfiguration("no")),
-            None
-        );
-    }
-
-    #[test]
-    fn the_wait_cannot_outlast_a_user_s_patience() {
-        // The cap is a policy line, not a timeout, and it is what bounds how
-        // long Esc can appear unresponsive if the select is ever removed.
-        assert!(CHUTES_MAX_SAME_MODEL_WAIT <= Duration::from_secs(5));
-    }
-
-    #[test]
-    fn rate_limits_and_cold_models_fall_back_but_bad_requests_do_not() {
-        let policy = chutes_build_core::routing::FallbackPolicy::default();
-        // What the user actually hit on DeepSeek-V4-Flash and GLM-5.2.
-        assert!(policy.permits_model_fallback(
-            Some(429),
-            "Infrastructure is at maximum capacity",
-            false
-        ));
-        // A malformed prompt or tool schema is our bug, not the model's:
-        // re-sending it elsewhere would just fail again, more slowly.
-        assert!(!policy.permits_model_fallback(Some(400), "invalid tool schema", false));
-        assert!(!policy.permits_model_fallback(Some(401), "unauthorized", false));
     }
 
     #[test]
@@ -3283,8 +2737,8 @@ mod tests {
             version: None,
         };
         let ua = user_agent_string_for(&origin);
-        // No slash between the origin product and the agent product.
-        assert!(ua.starts_with(&format!("my-client {AGENT_PRODUCT}/")));
+        // No slash between product and the grok-shell agent product.
+        assert!(ua.starts_with("my-client grok-shell/"));
     }
 
     #[test]
@@ -3504,7 +2958,7 @@ mod tests {
         assert!(request.headers().get(AUTHORIZATION).is_none());
     }
 
-    /// The callback receives the `post()`-captured fragment only — the
+    /// The callback receives the `post()`-captured fragment only ÔÇö the
     /// full bearer never crosses the crate boundary.
     #[test]
     fn record_401_attribution_invokes_callback_with_captured_bearer() {
@@ -3694,7 +3148,7 @@ mod tests {
             panic!("expected ResponseCompleted");
         };
         let usage = e.response.usage.expect("usage present");
-        // Billing fields stay cumulative — unchanged by context_details.
+        // Billing fields stay cumulative ÔÇö unchanged by context_details.
         assert_eq!(usage.input_tokens, 6003);
         assert_eq!(usage.output_tokens, 711);
         assert_eq!(usage.input_tokens_details.cached_tokens, 1984);

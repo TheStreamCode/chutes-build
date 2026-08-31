@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use url::Url;
 use xai_grok_diag_server::{self as diag_server, DiagHandle, ErrorClass};
-use xai_grok_workspace::config::WorkspaceServerMetadata;
+use xai_grok_workspace::config::merge_session_metadata;
 use xai_grok_workspace::error::WorkspaceError;
 use xai_grok_workspace_daemon::daemonize;
 use xai_grok_workspace_daemon::preview_supervisor::{
@@ -28,8 +28,8 @@ fn server_id_startup_error(id: &str) -> Option<String> {
         .map(|e| format!("{INVALID_SERVER_ID_MARKER} {id:?}: {e}"))
 }
 /// Classify hub-connect Display strings for `/ready` error_class.
-/// Auth needles → `hub_auth`; other hub-connect path failures → `hub_connect`;
-/// pre-hub workspace setup messages → `unknown` (still retryable alongside hub_connect).
+/// Auth needles ÔåÆ `hub_auth`; other hub-connect path failures ÔåÆ `hub_connect`;
+/// pre-hub workspace setup messages ÔåÆ `unknown` (still retryable alongside hub_connect).
 fn classify_hub_connect_failure(err_msg: &str) -> ErrorClass {
     if err_msg.contains("handshake auth failed") || err_msg.contains("auth error:") {
         ErrorClass::HubAuth
@@ -69,7 +69,7 @@ struct Args {
     /// launcher a definitive feature probe.
     #[arg(long)]
     capabilities: bool,
-    #[arg(long, default_value = "wss://computer-hub.chutes-build.com/v1/tools")]
+    #[arg(long, default_value = "wss://computer-hub.chutes.ai/v1/tools")]
     hub_url: String,
     #[arg(long)]
     auth_config: Option<PathBuf>,
@@ -145,7 +145,7 @@ struct Args {
     /// and process group (escaping the launcher's process-group reap),
     /// redirect stdio to a log file, and hold a single-instance pidfile lock.
     ///
-    /// Off by default — opt-in, passed by the launcher in the supervised
+    /// Off by default ÔÇö opt-in, passed by the launcher in the supervised
     /// deployment mode. With the flag absent, startup is unchanged.
     #[arg(long)]
     daemonize: bool,
@@ -168,7 +168,7 @@ struct Args {
 }
 /// Preview-proxy supervision flags. Forwarded 1:1 to the
 /// `/usr/local/bin/xai-grok-preview-proxy` child (see `cli.rs` for the proxy's
-/// flag names). Off by default — when `--preview-enabled` is absent the
+/// flag names). Off by default ÔÇö when `--preview-enabled` is absent the
 /// supervisor is never started and startup is byte-for-byte the non-preview
 /// path.
 #[derive(clap::Args, Debug)]
@@ -177,13 +177,13 @@ struct PreviewCliArgs {
     /// this only when the proxy binary was mounted into this container.
     #[arg(long)]
     preview_enabled: bool,
-    /// Proxy `--preview-port` (externally exposed listener). Absent ⇒ proxy default.
+    /// Proxy `--preview-port` (externally exposed listener). Absent ÔçÆ proxy default.
     #[arg(long)]
     preview_port: Option<u16>,
-    /// Proxy `--control-port` (loopback control). Absent ⇒ proxy default.
+    /// Proxy `--control-port` (loopback control). Absent ÔçÆ proxy default.
     #[arg(long)]
     preview_control_port: Option<u16>,
-    /// Proxy `--visibility` (`owner` | `public`). Absent ⇒ proxy default.
+    /// Proxy `--visibility` (`owner` | `public`). Absent ÔçÆ proxy default.
     /// Validated here so a bad value fails fast instead of crash-looping the proxy.
     #[arg(long, value_enum)]
     preview_visibility: Option<PreviewVisibility>,
@@ -301,12 +301,10 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(run(args, cwd, oom_protection, oom_protect_applied))
 }
 /// Whether to arm `CHUTES_BUILD_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
+///
 /// Always-on success must arm so children do not inherit -900. `--oom-protect`
 /// forces the env even when the early write failed (pre-unshare may still have
 /// left the score at -900).
-// The only caller sits in the unix-only OOM-protection path; on Windows the
-// truth-table test below is what keeps it alive.
-#[cfg_attr(not(unix), allow(dead_code))]
 fn should_set_reset_child_oom(early_protect_ok: bool, oom_protect_flag: bool) -> bool {
     early_protect_ok || oom_protect_flag
 }
@@ -401,7 +399,13 @@ async fn run(
             );
         }
     }
-    let auth_provider = xai_grok_workspace::hub_auth::provider(&url, args.auth_config.as_deref())?;
+    let mut status_config = xai_grok_workspace::StatusConfig::from_env();
+    status_config.preview_control_port = args.preview.preview_control_port;
+    let auth_provider = xai_grok_workspace::hub_auth::provider(
+        &url,
+        args.auth_config.as_deref(),
+        &status_config.oidc_refresh,
+    )?;
     tracing::info!(
         hub_url = %url,
         cwd = %cwd.display(),
@@ -416,7 +420,7 @@ async fn run(
         ),
         None => None,
     };
-    let metadata = WorkspaceServerMetadata::merge_session_metadata(parsed_metadata, session_id);
+    let metadata = merge_session_metadata(parsed_metadata, session_id);
     let launch_id = metadata
         .as_ref()
         .and_then(|v| v.get("launch_id"))
@@ -450,11 +454,9 @@ async fn run(
     };
     tracing::info!(
         cwd = %cwd_display,
-        "Workspace server starting — sessions created dynamically via server bind"
+        "Workspace server starting ÔÇö sessions created dynamically via server bind"
     );
     let server_id = args.server_id.clone();
-    let mut status_config = xai_grok_workspace::StatusConfig::from_env();
-    status_config.preview_control_port = args.preview.preview_control_port;
     let preview_shutdown = if args.preview.preview_enabled {
         let control_port = args.preview.preview_control_port;
         let cfg = args

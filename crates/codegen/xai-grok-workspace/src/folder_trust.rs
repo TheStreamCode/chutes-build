@@ -7,25 +7,29 @@
 //! consume/gating half (the `DECISIONS` cache, `resolve_and_record`,
 //! `project_scope_allowed`, the loader filters) lives in `xai-grok-shell`.
 //!
-//! ## Precedence (canonical — see [`decide`])
-//! 1. Feature flag OFF  → trusted (no gating; preserves prior behavior).
-//! 2. Store (self/ancestor recorded trusted) → trusted. An explicit `--trust`
+//! ## Precedence (canonical ÔÇö see [`decide`])
+//! 1. Feature flag OFF  ÔåÆ trusted (no gating; preserves prior behavior).
+//! 2. Store (this workspace recorded trusted) ÔåÆ trusted. An explicit `--trust`
 //!    grant is persisted to the store up front (see [`grant_folder_trust`]), so
 //!    it is honored here.
-//! 3. Key unrecordable (an over-broad root — the user's own `$HOME` / filesystem
-//!    root / non-absolute — that the store refuses to persist) → trusted: it
+//! 3. Key unrecordable (an over-broad root ÔÇö the user's own `$HOME` / filesystem
+//!    root / non-absolute ÔÇö that the store refuses to persist) ÔåÆ trusted: it
 //!    can't be durably gated, so gating would re-prompt forever on a key that can
 //!    never persist. See [`crate::trust::is_unsafe_trust_root`].
-//! 4. No repo-local code-exec configs present → trusted (nothing to gate).
-//! 5. Interactive TTY   → prompt the user (y/N).
-//! 6. Otherwise (headless) → untrusted.
+//! 4. No repo-local code-exec configs present ÔåÆ trusted (nothing to gate).
+//! 5. Interactive TTY   ÔåÆ prompt the user (y/N).
+//! 6. Otherwise (headless) ÔåÆ untrusted.
 //!
-//! (How the consume side caches this verdict — e.g. that the rule-4 allow is
-//! provisional and re-checked rather than cached — is a `xai-grok-shell`
+//! (How the consume side caches this verdict ÔÇö e.g. that the rule-4 allow is
+//! provisional and re-checked rather than cached ÔÇö is a `xai-grok-shell`
 //! concern, documented there.)
 
+use std::collections::HashMap;
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+use parking_lot::Mutex;
 
 use toml::Value as TomlValue;
 use xai_grok_config_types::{BoolFlag, RemoteSettings};
@@ -50,7 +54,7 @@ pub struct DecideInputs {
     pub repo_configs_present: bool,
     pub is_interactive: bool,
     /// False when the workspace key is an over-broad root the store refuses to
-    /// record — home / filesystem root / non-absolute; see
+    /// record ÔÇö home / filesystem root / non-absolute; see
     /// [`crate::trust::is_unsafe_trust_root`].
     pub key_recordable: bool,
 }
@@ -66,7 +70,7 @@ pub fn decide(feature_enabled: bool, i: &DecideInputs) -> TrustOutcome {
         return TrustOutcome::Trusted;
     }
     // An over-broad root the store can't record (the user's own $HOME / fs-root,
-    // never a fetched repo) can't be durably gated — trust it instead of
+    // never a fetched repo) can't be durably gated ÔÇö trust it instead of
     // prompting on a key that can never persist (mirrors the feature-off default).
     if !i.key_recordable {
         return TrustOutcome::Trusted;
@@ -100,11 +104,11 @@ pub fn decide_inputs_with_interactive(
     is_interactive: bool,
 ) -> DecideInputs {
     DecideInputs {
-        store_trusted: TrustStore::load().is_trusted(key),
+        store_trusted: is_trusted_this_process(key),
         // Deliberate second discover: the caller's `key` came from `workspace_key`
-        // (its own git2 discover), and `repo_configs_present` → `RepoDirChain::resolve`
+        // (its own git2 discover), and `repo_configs_present` ÔåÆ `RepoDirChain::resolve`
         // discovers the same repo again. Collapsing the two would mean threading the
-        // resolved root into key derivation (rippling `workspace_key` repo-wide) — out
+        // resolved root into key derivation (rippling `workspace_key` repo-wide) ÔÇö out
         // of scope; NOT the redundant discovers this change already removed.
         repo_configs_present: repo_configs_present(cwd),
         is_interactive,
@@ -116,7 +120,7 @@ pub fn decide_inputs_with_interactive(
 }
 
 /// Whether the whole folder-trust system is inert (auto-trusts everything) for
-/// this binary — true on a local/dev build (no `CHUTES_BUILD_VERSION` release stamp).
+/// this binary ÔÇö true on a local/dev build (no `CHUTES_BUILD_VERSION` release stamp).
 ///
 /// THE single security short-circuit: every explicit trust auto-grant site calls
 /// this (greppable via `folder_trust_inert`). When true a self-built grok never
@@ -127,7 +131,7 @@ pub fn folder_trust_inert() -> bool {
 }
 
 /// Whether this binary was built without a release version stamp
-/// (`CHUTES_BUILD_VERSION` unset at compile time) — i.e. a local/dev build.
+/// (`CHUTES_BUILD_VERSION` unset at compile time) ÔÇö i.e. a local/dev build.
 ///
 /// Kept local (not in `xai-grok-version`) on purpose: adding a symbol to that
 /// near-universal crate widens the rebuild/test fan-out for unrelated targets.
@@ -145,7 +149,7 @@ fn is_local_build() -> bool {
 /// Resolve whether the folder-trust gate is enabled.
 ///
 /// On a local/dev build (no `CHUTES_BUILD_VERSION` release stamp) the feature is OFF
-/// regardless of env/config/remote — a self-built grok auto-trusts (never
+/// regardless of env/config/remote ÔÇö a self-built grok auto-trusts (never
 /// prompts, never gates repo-local MCP/LSP). Folder-trust applies only to
 /// shipped, release-stamped binaries.
 ///
@@ -180,28 +184,48 @@ fn feature_enabled_for_build(remote: Option<&RemoteSettings>, is_local_build: bo
         .value
 }
 
-/// Persist an explicit `--trust` grant for `cwd`'s workspace so repo-local
-/// servers are honored on the next resolve. Done client-side because trust is
-/// durable: even when the agent runs in a separate leader process it reads the
-/// same `~/.chutes-build/trusted_folders.toml`. Best-effort; a write failure is logged,
-/// not fatal.
+/// Process-local explicit grant/deny. Separate from [`TrustStore`] durability:
+/// a sandbox-denied persist still honors the latest user decision in this
+/// process. Consume side reads this via [`is_trusted_this_process`].
+static PROCESS_DECISIONS: LazyLock<Mutex<HashMap<PathBuf, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn record_process_decision(key: &Path, trusted: bool) {
+    PROCESS_DECISIONS.lock().insert(key.to_path_buf(), trusted);
+}
+
+/// Latest process-local decision, else the durable store.
+pub fn is_trusted_this_process(key: &Path) -> bool {
+    if let Some(&trusted) = PROCESS_DECISIONS.lock().get(key) {
+        return trusted;
+    }
+    TrustStore::load().is_trusted(key)
+}
+
+/// Persist an explicit `--trust` grant. Best-effort on disk; a process-local
+/// grant is always recorded so this session honors the user decision.
 pub fn grant_folder_trust(cwd: &Path) {
     // Local/dev builds never gate, so there is nothing to grant: `--trust` is a
     // no-op and the store is left untouched (the whole feature is inert).
     if folder_trust_inert() {
         return;
     }
-    persist_trust(&mut TrustStore::load(), &workspace_key(cwd));
+    let key = workspace_key(cwd);
+    if crate::trust::is_unsafe_trust_root(&key) {
+        return;
+    }
+    let mut store = TrustStore::load();
+    if store.has_decision(&key) && store.is_trusted(&key) {
+        record_process_decision(&key, true);
+        return;
+    }
+    persist_trust(&mut store, &key);
 }
 
-/// Store-only half of revoking trust for `cwd`'s workspace: persist an explicit
-/// `set_untrusted` ONLY when the folder was actually trusted, and report whether
-/// it had been trusted. The in-process `DECISIONS` cache downgrade is the shell
-/// wrapper's job (the cache lives there).
+/// Revoke trust for `cwd`'s workspace in the durable store and this process.
 ///
-/// Writing a store deny for a never-trusted folder would record a most-specific
-/// child DENY that poisons a future ancestor `set_trusted` cascade — so that
-/// write stays gated. Symmetric with [`grant_folder_trust`].
+/// A never-trusted folder stays undecided: do not persist a decision the user
+/// did not make. Symmetric with [`grant_folder_trust`].
 pub fn revoke_folder_trust_store(cwd: &Path) -> bool {
     // Local/dev builds never wrote the store, so there is nothing to revoke.
     if folder_trust_inert() {
@@ -209,16 +233,17 @@ pub fn revoke_folder_trust_store(cwd: &Path) -> bool {
     }
     let key = workspace_key(cwd);
     let mut store = TrustStore::load();
-    let was_trusted = store.is_trusted(&key);
-    // Persist an explicit deny ONLY for an actually-trusted folder: writing one
-    // for a never-trusted folder would record a most-specific child DENY that
-    // overrides a future ancestor `set_trusted` grant (cascade poisoning).
-    if was_trusted && let Err(e) = store.set_untrusted(&key) {
-        tracing::warn!(
-            path = %key.display(),
-            error = %e,
-            "folder trust: failed to persist untrust decision"
-        );
+    let was_trusted =
+        store.is_trusted(&key) || PROCESS_DECISIONS.lock().get(&key).copied() == Some(true);
+    if was_trusted {
+        if let Err(e) = store.set_untrusted(&key) {
+            tracing::warn!(
+                path = %key.display(),
+                error = %e,
+                "folder trust: failed to persist untrust decision"
+            );
+        }
+        record_process_decision(&key, false);
     }
     was_trusted
 }
@@ -231,6 +256,7 @@ pub fn persist_trust(store: &mut TrustStore, key: &Path) {
             "folder trust: failed to persist trust decision"
         );
     }
+    record_process_decision(key, true);
 }
 
 /// Whether any repo-local trust-sensitive config is present for `cwd`. When none
@@ -246,10 +272,10 @@ pub fn repo_configs_present(cwd: &Path) -> bool {
 
 /// Display-only: which repo-local trust-sensitive config KINDS are present for
 /// `cwd` (`mcp`, `plugins`, `permission`, `lsp`, `envrc`, `claude`, `hooks`,
-/// `agents`, `roles`, `personas`, `workflows`), deduped in cheap→expensive
+/// `agents`, `roles`, `personas`, `workflows`), deduped in cheapÔåÆexpensive
 /// marker order. Single source with [`repo_configs_present`] (which is
 /// `!repo_config_kinds(cwd).is_empty()`), so a folder that the gate fired on
-/// always has a non-empty, accurate kind list — no `[plugins].paths` /
+/// always has a non-empty, accurate kind list ÔÇö no `[plugins].paths` /
 /// `[permission]` / `.claude` / `.chutes-build/agents` / subdir-launch gaps. NOT itself
 /// the trust gate.
 pub fn repo_config_kinds(cwd: &Path) -> Vec<&'static str> {
@@ -303,13 +329,13 @@ fn directory_present_or_uncertain(path: &Path) -> bool {
 /// `first_only` it returns immediately after the first marker (the gate's
 /// historical short-circuit); otherwise it collects every distinct kind.
 fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> {
-    // Resolve the git root + cwd→root dir chain ONCE and reuse it across the
+    // Resolve the git root + cwdÔåÆroot dir chain ONCE and reuse it across the
     // git2-based marker checks below: this gate does 1 git2 discover + 1 git2
-    // walk (+ the settings-compat path's own cheap `.git`-existence walk, intentionally separate —
+    // walk (+ the settings-compat path's own cheap `.git`-existence walk, intentionally separate ÔÇö
     // see its check). Each walker used to run its own git2 discover + walk (~5
     // discovers), and on a non-git dir each discover walks to the filesystem root
-    // — wasteful anywhere, and Windows taxes every such syscall 10-100x.
-    // Cheap→expensive, short-circuiting on first hit when `first_only`.
+    // ÔÇö wasteful anywhere, and Windows taxes every such syscall 10-100x.
+    // CheapÔåÆexpensive, short-circuiting on first hit when `first_only`.
     let chain = xai_grok_agent::repo::RepoDirChain::resolve(cwd);
     let mut kinds: Vec<&'static str> = Vec::new();
     // Record a distinct kind; when `first_only`, return as soon as one is found
@@ -334,7 +360,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // permission policy: a non-empty `[mcp_servers]` table, a non-empty
     // `[plugins].paths` array, OR a contributing `[permission]` section.
     // `[plugins].paths` loads as auto-trusted ConfigPath plugins; `[permission]`
-    // allow/deny/ask rules auto-approve or block tools — a clone whose ONLY
+    // allow/deny/ask rules auto-approve or block tools ÔÇö a clone whose ONLY
     // repo-local config is either must still be gated (else it resolves Trusted
     // and the loader runs ungated).
     for path in crate::project_config::find_project_configs_in(&chain.dirs) {
@@ -367,13 +393,13 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     if cwd.join(".chutes-build").join("lsp.json").is_file() {
         hit!("lsp");
     }
-    // Project `.cursor/mcp.json` — vendor MCP loading is default-on and tagged
+    // Project `.cursor/mcp.json` ÔÇö vendor MCP loading is default-on and tagged
     // `Project`, so a repo shipping ONLY this file must still be gated (file
     // presence is enough).
     if cwd.join(".cursor").join("mcp.json").is_file() {
         hit!("mcp");
     }
-    // Project `.envrc` — auto-sourced in a bash subshell when `direnv` isn't
+    // Project `.envrc` ÔÇö auto-sourced in a bash subshell when `direnv` isn't
     // installed (direct code-exec), so an `.envrc`-only clone must still be
     // gated. The loader reads `<cwd>/.envrc` directly (NOT a git-root walk), so
     // probe at cwd to match exactly what gets executed.
@@ -382,8 +408,8 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     }
     // Project `.claude/settings.json` / `settings.local.json`: the hooks surface
     // reads these at the git root, but the ENV/permission loaders walk EVERY dir
-    // cwd→repo-root (`collect_project_claude_paths`), so detect along the SAME
-    // walk via the shared reader — else a `.claude` `env` in a SUBDIR (injected
+    // cwdÔåÆrepo-root (`collect_project_claude_paths`), so detect along the SAME
+    // walk via the shared reader ÔÇö else a `.claude` `env` in a SUBDIR (injected
     // into every spawned subprocess) loads ungated. Subsumes the git-root probe.
     // Keeps its own `.git`-existence walk (NOT the git2 chain) so detection stays
     // identical to the loader, which bounds on a bare/empty `.git` too.
@@ -394,7 +420,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // (the chain's `git_root`, the same root hook discovery resolves from via
     // `workspace_key`), NOT cwd, so root-level hooks are gated even when launched
     // from a subdir. A repo-local hook file/dir is repo-controlled code-exec that
-    // must be gated — else a hooks-only clone (e.g. `.chutes-build/hooks/evil.json`) would
+    // must be gated ÔÇö else a hooks-only clone (e.g. `.chutes-build/hooks/evil.json`) would
     // resolve trusted and run ungated. Presence mirrors discovery's "something to
     // gate" check.
     let hook_root = chain.git_root.as_deref().unwrap_or(cwd);
@@ -405,9 +431,9 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     }
     // Project PLUGIN dirs: project-scoped plugins are unified under folder-trust
     // too, so a repo-local plugin dir is repo-controlled code-exec (hooks/MCP)
-    // that must be gated — else a plugin clone (e.g. `.chutes-build/plugins/evil/`, even
+    // that must be gated ÔÇö else a plugin clone (e.g. `.chutes-build/plugins/evil/`, even
     // one in a subdir launched via `cd sub && grok`) would resolve trusted and
-    // run ungated. Uses the shared SSOT walk (cwd→git root) so detection matches
+    // run ungated. Uses the shared SSOT walk (cwdÔåÆgit root) so detection matches
     // exactly what `discover_plugins` scans for Project scope (errs secure).
     if !xai_grok_agent::plugins::project_plugin_dirs_in(&chain.dirs).is_empty() {
         hit!("plugins");
@@ -415,8 +441,8 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // Project AGENT dirs (`.chutes-build/agents` / `.claude/agents`): a project agent
     // definition can carry an inline `hooks:` block (repo-controlled code-exec)
     // AND can SHADOW a built-in subagent by name, so an agents-only clone must
-    // still be gated. Uses the shared SSOT walk (cwd→git root) so detection
-    // can't drift from agent discovery — same pattern as the plugin line above.
+    // still be gated. Uses the shared SSOT walk (cwdÔåÆgit root) so detection
+    // can't drift from agent discovery ÔÇö same pattern as the plugin line above.
     if !xai_grok_agent::discovery::project_agent_dirs_in(&chain.dirs).is_empty() {
         hit!("agents");
     }
@@ -443,7 +469,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
 /// [`claude_project_mcp_present`] (existence) and the shell's
 /// `project_scoped_mcp_names` (the names) derive from, so the two never drift.
 pub fn claude_project_mcp_names(cwd: &Path) -> Option<Vec<String>> {
-    let home = dirs::home_dir()?;
+    let home = xai_dirs::home_dir()?;
     let content = std::fs::read_to_string(home.join(".claude.json")).ok()?;
     let value = serde_json::from_str::<serde_json::Value>(&content).ok()?;
     let cwd_key = cwd.to_string_lossy();
@@ -551,7 +577,7 @@ mod tests {
     #[test]
     fn unrecordable_key_is_trusted_even_with_configs_and_interactive() {
         // Case 2: cwd == $HOME (or fs-root / non-absolute). The store can't record
-        // such a key, so gating would re-prompt forever — decide() trusts it,
+        // such a key, so gating would re-prompt forever ÔÇö decide() trusts it,
         // ahead of the repo-configs and interactive rules.
         let i = DecideInputs {
             store_trusted: false,
@@ -641,7 +667,7 @@ mod tests {
     #[test]
     fn repo_configs_present_detects_project_agents_from_subdir() {
         // Agents live at the git root but the session is launched from a subdir;
-        // detection walks cwd→git root exactly like agent discovery, so it must
+        // detection walks cwdÔåÆgit root exactly like agent discovery, so it must
         // still fire (a cwd-only probe would miss it).
         let tmp = repo_tmp();
         std::fs::create_dir_all(tmp.path().join(".chutes-build").join("agents")).unwrap();
@@ -722,7 +748,7 @@ mod tests {
     fn repo_configs_present_detects_claude_settings_from_subdir() {
         // A `.claude/settings.json` `env` in a SUBDIR (no other repo config),
         // launched from that subdir, must be detected: the env loader walks
-        // cwd→repo-root, so detection walks the same path (a git-root-only probe
+        // cwdÔåÆrepo-root, so detection walks the same path (a git-root-only probe
         // would miss it and leave the env injectable ungated).
         let tmp = repo_tmp();
         let subdir = tmp.path().join("crates").join("inner");
@@ -781,15 +807,14 @@ mod tests {
         // A plugin-only repo (no MCP/LSP/hooks configs) must still be gated, so a
         // project plugin's hooks/MCP don't run ungated when the folder is untrusted.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("plugins").join("x"))
-            .unwrap();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("plugins").join("x")).unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
     #[test]
     fn repo_configs_present_detects_project_plugins_in_subdir() {
         // A plugin under a subdir (root otherwise clean), launched from that
-        // subdir, must still be gated: detection walks cwd→git root exactly like
+        // subdir, must still be gated: detection walks cwdÔåÆgit root exactly like
         // discover_plugins, so a subdir-only plugin is not a fail-open hole.
         let tmp = repo_tmp();
         let subdir = tmp.path().join("packages").join("foo");
@@ -836,7 +861,7 @@ mod tests {
         // A repo whose ONLY repo-local config is a contributing `[permission]`
         // section (no MCP/plugins/hooks) must still be gated: those allow rules
         // auto-approve tool calls, so an ungated clone loads the attacker's
-        // policy. Also covers subdir launch (cwd→git-root walk).
+        // policy. Also covers subdir launch (cwdÔåÆgit-root walk).
         let tmp = repo_tmp();
         let grok = tmp.path().join(".chutes-build");
         std::fs::create_dir_all(&grok).unwrap();
@@ -877,9 +902,9 @@ mod tests {
     fn repo_config_kinds_matches_gate_and_reports_all_kinds() {
         // SSOT guard: `repo_config_kinds` (full scan) must agree with the gate
         // (`repo_configs_present == !repo_config_kinds(..).is_empty()`) AND report
-        // the kinds the single-source refactor added — `plugins` via
+        // the kinds the single-source refactor added ÔÇö `plugins` via
         // `[plugins].paths`, `claude` via `.claude/settings.json`, `agents` via
-        // `.chutes-build/agents` — even when launched from a SUBDIR (the cwd→git-root walk
+        // `.chutes-build/agents` ÔÇö even when launched from a SUBDIR (the cwdÔåÆgit-root walk
         // that `first_only` shares). Guards against silent drift between the two.
         let tmp = repo_tmp();
         let grok = tmp.path().join(".chutes-build");
@@ -899,7 +924,7 @@ mod tests {
                 "repo_config_kinds missing {expected:?} (subdir launch); got {kinds:?}"
             );
         }
-        // Gate ↔ kinds equivalence: a configured repo and an empty one.
+        // Gate Ôåö kinds equivalence: a configured repo and an empty one.
         assert_eq!(
             repo_configs_present(&subdir),
             !repo_config_kinds(&subdir).is_empty(),
@@ -1103,34 +1128,115 @@ mod tests {
 
     #[test]
     fn revoke_folder_trust_store_writes_no_deny_for_never_trusted_folder() {
-        // The cascade-poisoning guard: revoking a NEVER-trusted child returns
-        // false and writes NO explicit child deny, so a later ancestor grant still
-        // cascades to the child (a spurious child `set_untrusted` would win
-        // most-specific and break the cascade). This store half does NOT touch the
-        // `DECISIONS` cache — that downgrade is the shell wrapper's job.
-        // CHUTES_BUILD_HOME-isolated so the grant writes to a temp store.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _env = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
         let _sim = simulate_release_build();
-        // Distinct git roots so `workspace_key` keeps parent/child as separate
-        // keys (the child's own `.git` stops discovery at the child).
-        let parent = repo_tmp();
-        let child = parent.path().join("child");
-        std::fs::create_dir_all(&child).unwrap();
-        git2::Repository::init(&child).unwrap();
+        let tmp = repo_tmp();
 
         assert!(
-            !revoke_folder_trust_store(&child),
+            !revoke_folder_trust_store(tmp.path()),
             "revoking a never-trusted folder must return false"
         );
 
-        // No child deny was written, so an ancestor grant still cascades down.
-        let mut store = TrustStore::load();
-        store.set_trusted(&workspace_key(parent.path())).unwrap();
+        let store = TrustStore::load();
         assert!(
-            TrustStore::load().is_trusted(&workspace_key(&child)),
-            "ancestor grant must cascade to a child revoked-while-untrusted (no poisoning deny)"
+            !store.has_decision(&workspace_key(tmp.path())),
+            "revoking a never-trusted folder must not record a child deny"
+        );
+    }
+
+    #[test]
+    fn grant_folder_trust_skips_rewrite_when_already_trusted_but_flips_untrust() {
+        // Already-trusted grant must not rewrite the store; an explicit untrust
+        // record must still persist `--trust`. CHUTES_BUILD_HOME-isolated so the seed
+        // hits a temp store, not the real file.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        let _env = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
+        let _sim = simulate_release_build();
+        let tmp = repo_tmp();
+        let key = workspace_key(tmp.path());
+
+        grant_folder_trust(tmp.path());
+        assert!(
+            TrustStore::load().is_trusted(&key),
+            "first grant must persist trust"
+        );
+
+        let store_path = TrustStore::default_path().expect("isolated CHUTES_BUILD_HOME");
+        let after_grant = std::fs::read(&store_path).unwrap();
+        // Marker a rewrite would drop.
+        let mut marked = after_grant.clone();
+        marked.extend_from_slice(b"\n# keep-me\n");
+        std::fs::write(&store_path, &marked).unwrap();
+
+        grant_folder_trust(tmp.path());
+        let after_skip = std::fs::read(&store_path).unwrap();
+        assert!(
+            after_skip
+                .windows(b"# keep-me".len())
+                .any(|w| w == b"# keep-me"),
+            "already-trusted grant must not rewrite the store"
+        );
+        assert!(TrustStore::load().is_trusted(&key));
+
+        let mut store = TrustStore::load();
+        store.set_untrusted(&key).unwrap();
+        assert!(store.has_decision(&key));
+        assert!(!store.is_trusted(&key));
+
+        grant_folder_trust(tmp.path());
+        assert!(
+            TrustStore::load().is_trusted(&key),
+            "explicit untrust record must still persist --trust"
+        );
+    }
+
+    #[test]
+    fn grant_folder_trust_records_process_local_grant_when_persist_denied() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _sim = simulate_release_build();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("CHUTES_BUILD_HOME", home.path());
+        // TrustStore writes through user_grok_home() -> grok_home() OnceLock.
+        // Bazel rust_test is one process, so deny persist at the cached home.
+        let store_home = xai_grok_config::user_grok_home().expect("CHUTES_BUILD_HOME is set");
+        let deny_path = store_home.join(xai_grok_config::TRUSTED_FOLDERS_FILENAME);
+        if deny_path.is_file() {
+            std::fs::remove_file(&deny_path).unwrap();
+        }
+        std::fs::create_dir_all(&deny_path).unwrap();
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _restore = Restore(deny_path);
+        let tmp = repo_tmp();
+        grant_folder_trust(tmp.path());
+        let key = workspace_key(tmp.path());
+        assert!(
+            !TrustStore::load().is_trusted(&key),
+            "durable store must stay ungranted when persist is denied"
+        );
+        assert!(
+            is_trusted_this_process(&key),
+            "explicit grant must be visible in-process after persist failure"
+        );
+
+        assert!(
+            revoke_folder_trust_store(tmp.path()),
+            "untrust must see the process-local grant"
+        );
+        assert!(
+            !is_trusted_this_process(&key),
+            "untrust must override the process-local grant even when persist is denied"
+        );
+        assert!(
+            !decide_inputs(tmp.path(), &key).store_trusted,
+            "reload/consume must not re-allow the revoked process-local grant"
         );
     }
 
@@ -1138,11 +1244,12 @@ mod tests {
     fn decide_inputs_flags_home_key_unrecordable() {
         // Case-2 wiring: with cwd == $HOME (git-init'd so workspace_key discovers
         // it as the home git root), the gather flags key_recordable=false and
-        // decide() trusts it despite configs + interactive. $HOME is overridden so
-        // dirs::home_dir()/workspace_key see the tempdir as home.
+        // decide() trusts it despite configs + interactive. Pin HOME and
+        // USERPROFILE so xai_dirs::home_dir() sees the tempdir on Windows.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("HOME", home.path());
+        let _userprofile = EnvVarGuard::set("USERPROFILE", home.path());
         git2::Repository::init(home.path()).unwrap();
 
         let home_key = crate::trust::workspace_key(home.path());
@@ -1157,7 +1264,7 @@ mod tests {
             "an unrecordable home key resolves Trusted (no prompt, no gate)"
         );
 
-        // A non-home repo subdir key is recordable — the Case-2 rule can't
+        // A non-home repo subdir key is recordable ÔÇö the Case-2 rule can't
         // over-trigger for a real fetched repo.
         let repo = repo_tmp();
         let subdir = repo.path().join("pkg");

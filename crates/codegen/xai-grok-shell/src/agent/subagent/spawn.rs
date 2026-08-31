@@ -1,16 +1,16 @@
-//! Parent↔subagent seam: every parent-side lifecycle call site, in order.
+//! ParentÔåösubagent seam: every parent-side lifecycle call site, in order.
 //!
 //! 1. `MvpAgent::start_subagent_coordinator` (parent thread, in `mvp_agent`):
 //!    hands the event receiver + concurrency limit to `spawn_subagent_coordinator`
 //!    here, which drives the coordinator (living in `xai-grok-tools`).
 //! 2. `ShellChildRunner::run` (parent thread): gathers what a child needs from
 //!    the parent via `MvpAgent::try_build_subagent_spawn_context` (the
-//!    parent→child snapshot, built by the owner in `mvp_agent`), then runs the
+//!    parentÔåÆchild snapshot, built by the owner in `mvp_agent`), then runs the
 //!    spawn work on the worker pool (`worker_runtime()`, built on first use).
 //! 3. `run_shell_child` (worker pool, in `handle_request.rs`): prepares the
 //!    child (toolset, optional worktree, context) and starts it on its own
 //!    thread via `spawn_session_on_thread`.
-//! 4. `on_completed` → `present_child_completion` (worker pool): reports the
+//! 4. `on_completed` ÔåÆ `present_child_completion` (worker pool): reports the
 //!    child finished, persists the result, and optionally wakes the parent.
 //!
 //! Stage timings are recorded in `subagent_spawn::SubagentSpawnPhase`.
@@ -22,8 +22,7 @@ use agent_client_protocol as acp;
 use tokio::sync::mpsc;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 pub(crate) use xai_grok_tools::implementations::grok_build::task::coordinator::{
-    self, ChildCompletion, ChildControl, ChildRunOutput, LocalBoxFuture, StartedChild,
-    SubagentProgress,
+    self, ChildCompletion, ChildRunOutput, StartedChild,
 };
 use xai_grok_tools::implementations::grok_build::task::types::{SubagentRequest, SubagentResult};
 /// Floor keeps the pool responsive when `available_parallelism` is tiny.
@@ -70,6 +69,12 @@ struct ShellChildRunner {
     agent_ref: LocalRef<MvpAgent>,
     /// Owned: panics are logged, coordinator teardown aborts stragglers.
     presentations: std::cell::RefCell<Vec<tokio_util::task::AbortOnDropHandle<()>>>,
+}
+pub(crate) fn subagent_coordinator_channel() -> (
+    xai_grok_tools::implementations::grok_build::task::backend::SubagentCoordinatorSender,
+    coordinator::SubagentCoordinatorReceiver,
+) {
+    coordinator::SubagentCoordinator::<ShellChildRunner>::channel()
 }
 /// Resumes worker panics into the coordinator's `catch_unwind`
 /// (`finish_panicked_child`); the handle aborts on drop.
@@ -130,6 +135,7 @@ impl coordinator::ChildRunner for ShellChildRunner {
                 ctx.parent_mcp_pool = pool;
                 ctx.client_hooks = hooks;
                 super::strip_ask_user_question_tool(&mut definitions);
+                super::strip_workflow_tool(&mut definitions);
                 ctx.parent_tool_definitions = (!definitions.is_empty()).then_some(definitions);
             }
             let gateway = this.gateway.clone();
@@ -285,9 +291,7 @@ fn log_limit_notice(notice: coordinator::SubagentLimitNotice) {
 /// state (the event receiver + concurrency limits) it feeds in.
 pub(crate) fn spawn_subagent_coordinator(
     agent_ref: LocalRef<MvpAgent>,
-    rx: mpsc::UnboundedReceiver<
-        xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
-    >,
+    rx: coordinator::SubagentCoordinatorReceiver,
     limits: xai_grok_tools::implementations::grok_build::task::admission::SubagentLimits,
 ) {
     let runner = ShellChildRunner {
@@ -306,7 +310,9 @@ pub(crate) fn spawn_subagent_coordinator(
         buffer_completions: true,
         buffered_completion_output_cap: None,
     };
-    tokio::task::spawn_local(coordinator::SubagentCoordinator::new(rx, runner, config).run());
+    tokio::task::spawn_local(
+        coordinator::SubagentCoordinator::from_channel(rx, runner, config).run(),
+    );
 }
 /// Whether this completion will inject an auto-wake prompt; decided (and
 /// the reservation taken) on the coordinator thread in `on_completed`.
@@ -352,6 +358,7 @@ pub(crate) fn present_child_completion(
             task_completion_reservations: &completion_data.task_completion_reservations,
             parent_cmd_tx: completion_data.parent_cmd_tx.as_ref(),
             task_output_tool_name: &completion_data.task_output_tool_name,
+            scheduler_delete_tool_name: completion_data.scheduler_delete_tool_name.as_deref(),
             synthetic_trace_tx: &completion_data.synthetic_trace_tx,
             goal_loop_active: &completion_data.goal_loop_active,
         });
@@ -412,6 +419,7 @@ pub(crate) struct InjectParams<'a> {
         &'a Option<xai_grok_tools::reminders::task_completion::TaskCompletionReservations>,
     pub parent_cmd_tx: Option<&'a mpsc::UnboundedSender<SessionCommand>>,
     pub task_output_tool_name: &'a str,
+    pub scheduler_delete_tool_name: Option<&'a str>,
     pub synthetic_trace_tx:
         &'a Option<mpsc::UnboundedSender<crate::upload::turn::SyntheticTurnTraceRequest>>,
     pub goal_loop_active: &'a std::sync::atomic::AtomicBool,
@@ -425,6 +433,7 @@ pub(crate) fn inject_subagent_completed_prompt(params: InjectParams) {
         task_completion_reservations,
         parent_cmd_tx,
         task_output_tool_name,
+        scheduler_delete_tool_name,
         synthetic_trace_tx,
         goal_loop_active,
     } = params;
@@ -445,6 +454,7 @@ pub(crate) fn inject_subagent_completed_prompt(params: InjectParams) {
     let message = xai_grok_tools::reminders::task_completion::format_subagent_completion(
         &summary,
         Some(task_output_tool_name),
+        scheduler_delete_tool_name,
     );
     let wrapped = xai_grok_tools::reminders::wrap_reminder(&message);
     let prompt_id = format!("subagent-completed-{subagent_id}");
@@ -474,6 +484,7 @@ pub(crate) fn inject_subagent_completed_prompt(params: InjectParams) {
             admission: None,
             tool_overrides_update: None,
             respond_to,
+            prompt_admitted: None,
             persist_ack: None,
             parsed_prompt_tx: None,
         })
@@ -517,7 +528,7 @@ pub(crate) fn emit_subagent_notification(
         .ok();
     if let Some(params) = params {
         let ext_notification =
-            acp::ExtNotification::new("chutes.build/session_notification", params.into());
+            acp::ExtNotification::new("x.ai/session_notification", params.into());
         gateway.forward_fire_and_forget(ext_notification);
     }
 }

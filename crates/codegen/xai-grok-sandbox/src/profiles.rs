@@ -410,7 +410,7 @@ impl ProfileName {
             }),
 
             Self::Strict => {
-                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/root"));
+                let home = xai_dirs::home_dir().unwrap_or_else(|| PathBuf::from("/root"));
                 let system_read: Vec<PathBuf> = [
                     "/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/dev", "/proc", "/sys",
                     "/tmp",

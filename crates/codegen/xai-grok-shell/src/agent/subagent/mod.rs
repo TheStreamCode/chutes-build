@@ -16,9 +16,8 @@ use crate::agent::config::{resolve_credentials, sampling_config_for_model};
 use crate::agent::models::resolve_catalog_key;
 use crate::extensions::notification::{SessionNotification, SessionUpdate};
 use crate::session::{
-    self, SessionCommand, SessionHandle, SessionThread,
-    commands::PromptTurnResult as SubagentPromptTurnResult, fs_watch::FsWatchCapabilities,
-    info::Info as SessionInfo,
+    self, SessionCommand, SessionHandle, commands::PromptTurnResult as SubagentPromptTurnResult,
+    fs_watch::FsWatchCapabilities, info::Info as SessionInfo,
 };
 use crate::terminal::AsyncTerminalRunner;
 use crate::tools::ToolContext;
@@ -46,16 +45,29 @@ use xai_hunk_tracker::HunkTrackerHandle;
 mod attempt_runner;
 mod spawn;
 pub(crate) use spawn::{
-    ChildControl, ChildRunOutput, LocalBoxFuture, StartedChild, SubagentProgress,
-    emit_subagent_notification, spawn_subagent_coordinator, worker_runtime,
+    ChildRunOutput, StartedChild, emit_subagent_notification, spawn_subagent_coordinator,
+    subagent_coordinator_channel, worker_runtime,
 };
 mod attempt_store;
+mod child_runtime;
 mod handle_request;
+mod prompt_turn_receipt;
+mod prompt_turn_result;
+pub(crate) use child_runtime::{
+    ShellChildRuntime, UNPROMOTED_SESSION_THREAD_EXIT_TIMEOUT, UnpromotedResourceFate,
+    await_session_thread_exit,
+};
 pub(crate) use handle_request::run_shell_child;
+pub(crate) use prompt_turn_receipt::PromptTurnReceipt;
+/// Clamp for a resolved sampling-limit override; `Semaphore::new` panics past
+/// `Semaphore::MAX_PERMITS`. See [`SubagentsConfig::resolve_sampling_limit`].
+///
+/// [`SubagentsConfig::resolve_sampling_limit`]: crate::config::SubagentsConfig::resolve_sampling_limit
+pub(crate) const MAX_SUBAGENT_SAMPLING_LIMIT: usize = 512;
 /// How the child session's initial context was bootstrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InitialContextSource {
-    /// Fresh session — no inherited history.
+    /// Fresh session ÔÇö no inherited history.
     New,
     /// Parent history as `<background_context>` (harness-only chat-prefix fork).
     Forked,
@@ -106,7 +118,7 @@ impl AutoCompactThresholdTiers {
 /// Avoids passing `&MvpAgent` (which would require the coordinator to know
 /// about the full agent struct). Built by `MvpAgent::build_subagent_spawn_context()`.
 pub(crate) struct SubagentSpawnContext {
-    /// Parent's LSP runtime — inherited via ToolContext, same as fs/terminal.
+    /// Parent's LSP runtime ÔÇö inherited via ToolContext, same as fs/terminal.
     pub lsp: Option<std::sync::Arc<dyn xai_grok_tools::implementations::lsp::LspBackend>>,
     /// Root session's process scope, inherited so the subagent's own child
     /// processes are reaped when the parent session closes. It is the root's
@@ -130,6 +142,8 @@ pub(crate) struct SubagentSpawnContext {
     pub auth: Option<crate::auth::GrokAuth>,
     pub parent_cwd: PathBuf,
     pub parent_session_id: String,
+    /// Shell-owned source used only to freeze active-message parent attribution synchronously.
+    pub active_message_parent_prompt_index: Arc<std::sync::atomic::AtomicUsize>,
     /// The parent's cutoff at spawn, applied to the child's first turn. `None` if unset.
     pub inherited_tool_overrides: Option<xai_grok_sampling_types::ToolOverrides>,
     pub yolo_mode: bool,
@@ -140,8 +154,9 @@ pub(crate) struct SubagentSpawnContext {
     pub media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits,
     /// Inference idle timeout (secs), resolved from the parent's model config at spawn-context creation time.
     pub inference_idle_timeout_secs: u64,
+    pub parent_compaction: crate::session::CompactionPins,
     /// Tier inputs for resolving `auto_compact_threshold_percent` at
-    /// spawn time — once the subagent's actual model id is known.
+    /// spawn time ÔÇö once the subagent's actual model id is known.
     /// Lazy because the subagent may be assigned a different model from
     /// the parent (via `[subagents.models]` or `AgentDefinition.model`);
     /// we want the resolver's per-model
@@ -149,7 +164,7 @@ pub(crate) struct SubagentSpawnContext {
     /// parent's. Call [`Self::resolve_auto_compact_threshold_percent`]
     /// once the subagent's `effective_sampling_config.model` is known.
     pub auto_compact_threshold_tiers: AutoCompactThresholdTiers,
-    /// Parent's hunk tracker handle — cheap Clone, backed by an mpsc channel
+    /// Parent's hunk tracker handle ÔÇö cheap Clone, backed by an mpsc channel
     /// to the parent's HunkTrackerActor. Subagent edits are attributed to
     /// the same hunk tracker so the parent sees all file changes.
     pub hunk_tracker_handle: HunkTrackerHandle,
@@ -159,10 +174,10 @@ pub(crate) struct SubagentSpawnContext {
     /// Parent's filesystem implementation (LocalFs or AcpSessionFs).
     /// Shared so the child reads/writes the same working tree.
     pub fs: Arc<dyn AsyncFileSystem>,
-    /// Parent's terminal runner — shared so bash commands run in the
+    /// Parent's terminal runner ÔÇö shared so bash commands run in the
     /// same terminal environment (env vars, cwd, color settings).
     pub terminal: Arc<dyn AsyncTerminalRunner>,
-    /// Parent's terminal backend — shared so background tasks, monitors, and
+    /// Parent's terminal backend ÔÇö shared so background tasks, monitors, and
     /// scheduled tasks survive subagent exit. When `Some`, the subagent session
     /// reuses this backend instead of creating a new `LocalTerminalBackend`.
     pub parent_terminal_backend: Option<Arc<dyn xai_grok_tools::computer::types::TerminalBackend>>,
@@ -179,7 +194,7 @@ pub(crate) struct SubagentSpawnContext {
     /// Parent's session environment variables (.envrc + color settings).
     /// Shared so the child inherits the same env without re-loading.
     pub session_env: Arc<HashMap<String, String>>,
-    /// Parent's memory config — shared so the child can access the same
+    /// Parent's memory config ÔÇö shared so the child can access the same
     /// cross-session memory store.
     pub memory_config: Option<crate::config::MemoryConfig>,
     /// Resolved sampling config for web_search.
@@ -206,11 +221,11 @@ pub(crate) struct SubagentSpawnContext {
     /// guidance.
     pub parent_non_interactive: bool,
     /// Parent session command channel. Carries lifecycle notifications the
-    /// parent persists (`SubagentSpawned` / `SubagentFinished`) and — when
-    /// goal mode is on — transient `SubagentProgress` ticks the parent
+    /// parent persists (`SubagentSpawned` / `SubagentFinished`) and ÔÇö when
+    /// goal mode is on ÔÇö transient `SubagentProgress` ticks the parent
     /// consumes for token accounting without persisting.
     pub parent_cmd_tx: Option<mpsc::UnboundedSender<SessionCommand>>,
-    /// Parent session info — used to locate parent session directory.
+    /// Parent session info ÔÇö used to locate parent session directory.
     pub parent_session_info: Option<SessionInfo>,
     /// Subagent roles config for role-based config layering.
     pub subagent_roles:
@@ -218,7 +233,7 @@ pub(crate) struct SubagentSpawnContext {
     /// Subagent personas config for persona/SOUL layering.
     pub subagent_personas:
         std::collections::HashMap<String, xai_grok_subagent_resolution::config::SubagentPersona>,
-    /// Parent session's ChatStateHandle — used to read the actual live
+    /// Parent session's ChatStateHandle ÔÇö used to read the actual live
     /// sampling config and credentials from the parent session actor (async).
     /// Cheap Clone (mpsc sender). `None` when parent SessionHandle not found.
     pub parent_chat_state: Option<xai_chat_state::ChatStateHandle>,
@@ -261,7 +276,7 @@ pub(crate) struct SubagentSpawnContext {
     /// Parent session's agent config snapshot.
     pub agent_config: Option<crate::agent::config::Config>,
     /// GCS bucket URL for trace uploads.
-    /// For proxy upload mode this is a placeholder — the actual bucket
+    /// For proxy upload mode this is a placeholder ÔÇö the actual bucket
     /// is determined by the proxy from user ACLs.
     pub gcs_bucket_url: Option<String>,
     /// GCS upload method (direct or proxy).
@@ -288,7 +303,7 @@ pub(crate) struct SubagentSpawnContext {
     pub attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback>,
     /// Parent session's agent name (e.g. "grok-build").
     pub parent_agent_name: Option<String>,
-    /// `agent_type` of the parent's current model — the harness-flavor fallback
+    /// `agent_type` of the parent's current model ÔÇö the harness-flavor fallback
     /// when `parent_agent_name` is not a recognized harness, e.g. a custom
     /// client profile keeps its own name but runs a strict-harness model.
     /// `None` when the model is not in the catalog.
@@ -321,6 +336,8 @@ pub(crate) struct SubagentSpawnContext {
         Option<tokio::sync::mpsc::UnboundedSender<crate::upload::turn::SyntheticTurnTraceRequest>>,
     /// Resolved name of the `BackgroundTaskAction` tool in the parent's toolset.
     pub task_output_tool_name: String,
+    /// Resolved name of the scheduled-task deletion tool in the parent's toolset.
+    pub scheduler_delete_tool_name: Option<String>,
     /// Whether auto-wake is enabled. When `false`, subagent completions
     /// are not injected as synthetic prompts.
     pub auto_wake_enabled: bool,
@@ -328,6 +345,9 @@ pub(crate) struct SubagentSpawnContext {
     /// auto-wake synthetic prompt is suppressed so an async completion wake
     /// doesn't derail the parent mid-`/goal`; surfaces 2/3 still drain it.
     pub goal_loop_active: Arc<std::sync::atomic::AtomicBool>,
+    /// The process tree's shared subagent turn-sampling semaphore. See
+    /// [`crate::config::SubagentsConfig::resolve_sampling_limit`].
+    pub subagent_sampling_semaphore: Arc<tokio::sync::Semaphore>,
 }
 const _: () = {
     const fn assert_send<T: Send>() {}
@@ -336,12 +356,17 @@ const _: () = {
 pub(crate) fn strip_ask_user_question_tool(tools: &mut Vec<xai_grok_sampling_types::ToolSpec>) {
     tools.retain(|tool| tool.name != "ask_user_question");
 }
+pub(crate) fn strip_workflow_tool(tools: &mut Vec<xai_grok_sampling_types::ToolSpec>) {
+    tools.retain(|tool| {
+        !xai_grok_tools::implementations::grok_build::is_workflow_tool_id(&tool.name)
+    });
+}
 impl SubagentSpawnContext {
     /// Would installing a live bearer resolver strip this subagent's only
     /// credential? A wired resolver is the sampler's sole auth source, so
     /// with no session key at spawn it must not displace a real fallback
     /// key (env `CHUTES_API_KEY`). Keyed on the resolved config key, not the
-    /// session cache alone — the cache is empty in exactly the post-wake /
+    /// session cache alone ÔÇö the cache is empty in exactly the post-wake /
     /// mid-refresh states the resolver targets, and gating on it would
     /// freeze the subagent for life. Shared by all three resolver-wiring
     /// paths so they cannot drift.
@@ -396,7 +421,7 @@ impl SubagentSpawnContext {
     }
     /// Not `Config::feature`: the parent's tiers resolve against the
     /// subagent's own remote settings snapshot.
-    fn resolve_feature(&self, feature: crate::agent::config::Feature) -> bool {
+    pub(crate) fn resolve_feature(&self, feature: crate::agent::config::Feature) -> bool {
         use crate::agent::config::FeatureSources;
         let mut sources = self.agent_config.as_ref().map_or_else(
             || FeatureSources::from_process_env(feature),
@@ -422,47 +447,64 @@ impl SubagentSpawnContext {
                 .and_then(|r| r.compaction_tool_choice.as_deref()),
         )
     }
+    pub(crate) fn snapshot_parent_compaction_pins(
+        resolved_mode: xai_chat_state::CompactionMode,
+        resolved_two_pass: bool,
+        parent_agent_name: Option<&str>,
+        parent_model_agent_type: Option<&str>,
+        parent_cwd: &Path,
+    ) -> crate::session::CompactionPins {
+        let current = parent_agent_name
+            .and_then(|name| xai_grok_agent::discovery::by_name_in_cwd(name, parent_cwd))
+            .map(|d| d.user_message_template)
+            .unwrap_or_default();
+        let template = crate::agent::mvp_agent::inherited_harness_template(
+            &current,
+            parent_model_agent_type,
+            parent_cwd,
+        )
+        .unwrap_or(current);
+        crate::session::cursor_compaction_pins(
+            resolved_mode,
+            resolved_two_pass,
+            crate::session::is_cursor_user_template(&template),
+        )
+    }
+    pub(crate) fn compaction_pins_for_child(
+        &self,
+        child_template: &xai_grok_agent::prompt::user_message::UserMessageTemplate,
+    ) -> crate::session::CompactionPins {
+        crate::session::cursor_compaction_pins(
+            self.parent_compaction.mode,
+            self.parent_compaction.two_pass,
+            crate::session::is_cursor_user_template(child_template),
+        )
+    }
+    /// Env > parent config features > this context's remote settings > default.
+    pub(crate) fn resolve_compaction_mode(&self) -> xai_chat_state::CompactionMode {
+        crate::agent::config::resolve_compaction_mode_from(
+            crate::agent::config::env_string("CHUTES_BUILD_COMPACTION_MODE").as_deref(),
+            self.agent_config
+                .as_ref()
+                .and_then(|c| c.features.compaction_mode.as_deref()),
+            self.remote_settings
+                .as_ref()
+                .and_then(|r| r.compaction_mode.as_deref()),
+        )
+        .with_segment_detail(crate::agent::config::resolve_compaction_detail_from(
+            crate::agent::config::env_string("CHUTES_BUILD_COMPACTION_DETAIL").as_deref(),
+            self.agent_config
+                .as_ref()
+                .and_then(|c| c.features.compaction_detail.as_deref()),
+            self.remote_settings
+                .as_ref()
+                .and_then(|r| r.compaction_detail.as_deref()),
+        ))
+    }
     /// Whether a completed subagent's working copy is saved into the repo as a
     /// git ref and its directory deleted.
     pub(crate) fn resolve_subagent_worktree_snapshot_enabled(&self) -> bool {
         self.resolve_feature(crate::agent::config::Feature::SubagentWorktreeSnapshot)
-    }
-}
-/// Shell runtime handle retained while a child is active.
-pub(crate) struct ShellChildRuntime {
-    pub child_handle: SessionHandle,
-    pub _child_thread: SessionThread,
-}
-impl ChildControl for ShellChildRuntime {
-    type ProgressFuture = LocalBoxFuture<SubagentProgress>;
-    fn progress(&self) -> Self::ProgressFuture {
-        let signals = self.child_handle.signals_handle.clone();
-        Box::pin(async move {
-            let snapshot = signals.snapshot().await.unwrap_or_default();
-            SubagentProgress {
-                turn_count: snapshot.turn_count,
-                tool_call_count: snapshot.tool_call_count,
-                tokens_used: snapshot.context_tokens_used,
-                context_window_tokens: snapshot.context_window_tokens,
-                context_usage_pct: snapshot.context_window_usage,
-                tools_used: snapshot.tools_used,
-                error_count: snapshot.error_count,
-            }
-        })
-    }
-    fn cancel(&self) {
-        let _ =
-            self.child_handle
-                .cmd_tx
-                .send(SessionCommand::Cancel(crate::session::CancelOptions {
-                    cancel_subagents: true,
-                    kill_background_tasks: true,
-                    trigger: Some(crate::session::CancelTrigger::Shutdown),
-                    ..Default::default()
-                }));
-        let _ = self.child_handle.cmd_tx.send(SessionCommand::Shutdown(
-            crate::session::ShutdownKind::Graceful,
-        ));
     }
 }
 #[derive(Default)]
@@ -472,6 +514,7 @@ pub(crate) struct ShellCompletionData {
         Option<xai_grok_tools::reminders::task_completion::TaskCompletionReservations>,
     parent_cmd_tx: Option<mpsc::UnboundedSender<SessionCommand>>,
     task_output_tool_name: String,
+    scheduler_delete_tool_name: Option<String>,
     synthetic_trace_tx:
         Option<mpsc::UnboundedSender<crate::upload::turn::SyntheticTurnTraceRequest>>,
     goal_loop_active: Arc<std::sync::atomic::AtomicBool>,
@@ -486,6 +529,7 @@ impl ShellCompletionData {
             task_completion_reservations: ctx.task_completion_reservations.clone(),
             parent_cmd_tx: ctx.parent_cmd_tx.clone(),
             task_output_tool_name: ctx.task_output_tool_name.clone(),
+            scheduler_delete_tool_name: ctx.scheduler_delete_tool_name.clone(),
             synthetic_trace_tx: ctx.synthetic_trace_tx.clone(),
             goal_loop_active: Arc::clone(&ctx.goal_loop_active),
             telemetry_tokens: 0,
@@ -518,31 +562,11 @@ impl SubagentPresentation {
 }
 /// Resolve the sampling config and model ID for a subagent.
 ///
-/// Subagents inherit the parent session's model by default. Only an
-/// EXPLICIT per-agent pin can override that inheritance; there is no global
-/// default model and no parent-model gate. Precedence (highest to lowest):
-///
-///   1. `config.toml [subagents.models].{agent_name}` override, if it
-///      resolves to a known model. Applies unconditionally.
-///
-///   2. `AgentDefinition.model = Override(id)`, if it resolves to a known
-///      model. Applies unconditionally.
-///
-///   3. Inherit the parent session's actual live sampling config (from
-///      `ChatStateHandle`).
-///
-/// Both explicit pins apply regardless of which model the parent is on. If a
-/// pin references an unknown model it is ignored (with a `tracing::warn!`)
-/// and resolution falls through to the next priority.
-///
-/// NOTE: the persona/role/runtime override (`effective_runtime.model`) is
-/// applied by the caller (`run_shell_child`) BEFORE this function
-/// runs, so it is not handled here.
-///
-/// NOTE: `agent_type` and `use_concise` on the resolved model are
-/// intentionally ignored. Subagent prompt/toolset is always determined by
-/// the `AgentDefinition`, not the model. See design spec
-/// "Behavioral Rules section 3".
+/// Precedence: (1) the `[subagents.models].{agent_name}` config override,
+/// (2) an explicit `AgentDefinition` model, (3) the parent session's live
+/// sampling config. Unknown pins warn and fall through. The caller applies
+/// runtime model overrides before this runs.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_subagent_sampling_config(
     agent_name: &str,
     agent_model: &xai_grok_agent::config::ModelOverride,
@@ -597,8 +621,8 @@ async fn resolve_subagent_sampling_config(
 /// Resolve a subagent's effective sampling config + model id, honoring the
 /// model-resolution precedence (Key Decision #16).
 ///
-/// An explicit `runtime_override_model` — the goal role model or a persona
-/// override carried on `effective_runtime.model` — is resolved HERE, BEFORE
+/// An explicit `runtime_override_model` ÔÇö the goal role model or a persona
+/// override carried on `effective_runtime.model` ÔÇö is resolved HERE, BEFORE
 /// [`resolve_subagent_sampling_config`] (where the user `[subagents.models]`
 /// pin and `AgentDefinition.model` apply). So a goal/persona override WINS
 /// over a user per-agent pin. An override that does not resolve to a known
@@ -607,6 +631,7 @@ async fn resolve_subagent_sampling_config(
 ///
 /// Extracted from `run_shell_child` so the precedence is unit-testable
 /// without spawning a child session.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_effective_model_config(
     runtime_override_model: Option<&str>,
     subagent_type: &str,
@@ -706,6 +731,7 @@ fn parent_catalog_model_id(ctx: &SubagentSpawnContext, routing_model: &str) -> a
 /// to the baseline on `SubagentSpawnContext` if the actor is unavailable.
 /// The returned [`acp::ModelId`] is the parent session catalog id (`ctx.model_id`),
 /// not the process-global default or chat-state routing slug.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn read_parent_sampling_config(
     ctx: &SubagentSpawnContext,
 ) -> (xai_grok_sampler::SamplerConfig, acp::ModelId) {
@@ -827,8 +853,8 @@ async fn read_parent_sampling_config(
         .model_compaction_at_tokens(catalog_model_id.0.as_ref());
     (fallback, ctx.model_id.clone())
 }
-/// `AuthType` for a subagent: BYOK ⇒ `ApiKey` (don't overwrite the BYOK
-/// key); session-based ACP method ⇒ `SessionToken` (keep refresh wired);
+/// `AuthType` for a subagent: BYOK ÔçÆ `ApiKey` (don't overwrite the BYOK
+/// key); session-based ACP method ÔçÆ `SessionToken` (keep refresh wired);
 /// otherwise `ApiKey`.
 fn subagent_auth_type(
     model: Option<&crate::agent::config::ModelEntry>,
@@ -984,7 +1010,7 @@ fn conversation_tail_is_complete(
 ///
 /// Verbatim mirror (the cache-preserving path): when the parent fits the child
 /// window (same 80% guard as resume) AND ends at a clean turn boundary, keep the
-/// items BYTE-FOR-BYTE. We deliberately do NOT run `fork_filter_chat` here — its
+/// items BYTE-FOR-BYTE. We deliberately do NOT run `fork_filter_chat` here ÔÇö its
 /// step 1 strips synthetic-reason user items (`<system-reminder>`s, drained
 /// monitor events, doom-loop warnings) that the parent actually sent and cached;
 /// stripping them would diverge the child prefix at the first removed item and
@@ -997,7 +1023,7 @@ fn conversation_tail_is_complete(
 /// `normalize_forked_context` summarizes. (This is the ONLY path that filters;
 /// the verbatim path never does.)
 ///
-/// Input that is empty or only `System` item(s) — before OR after filtering —
+/// Input that is empty or only `System` item(s) ÔÇö before OR after filtering ÔÇö
 /// inherited nothing, so it fails open to `New` rather than a hollow fork.
 fn verbatim_or_normalize_fork(
     items: Vec<xai_grok_sampling_types::conversation::ConversationItem>,
@@ -1085,6 +1111,7 @@ fn stamp_live_fork_session_metadata(
         return;
     };
     summary.session_kind = Some("subagent_fork".to_string());
+    summary.source_workspace_dir = None;
     summary.fork_context_source = Some(fork_context_source.to_string());
     summary.parent_session_id = Some(parent_session_id.to_string());
     summary.fork_parent_prompt_id = parent_prompt_id;
@@ -1098,11 +1125,12 @@ fn stamp_live_fork_session_metadata(
 }
 enum BootstrapInitialContext {
     Ready(InitialContext),
-    /// Explicit resume_from failed — abort spawn (fail closed).
+    /// Explicit resume_from failed ÔÇö abort spawn (fail closed).
     ResumeAbort(String),
 }
 /// Phase 3: resume (fail-closed on copy error) > fork (live then disk, fail-open) > New.
 /// Unresolved non-empty resume is aborted by the caller before this runs.
+#[tracing::instrument(skip_all)]
 async fn bootstrap_initial_context(
     request: &SubagentRequest,
     resume_source: Option<&ResumeSourceData>,
@@ -1325,7 +1353,7 @@ fn resolve_child_cwd(
 /// The cwd a resumed child inherits from its source subagent, or `None` when
 /// there is nothing to inherit (the caller then falls back to the parent cwd).
 ///
-/// Only non-worktree sources inherit here — worktree-backed sources are reused
+/// Only non-worktree sources inherit here ÔÇö worktree-backed sources are reused
 /// by the worktree path. The cwd is existence-checked because a source can be
 /// pinned into a sibling's worktree that the snapshot stack later disposes;
 /// resume otherwise skips cwd validation.
@@ -1404,7 +1432,7 @@ fn resolve_inherited_mcp_pool(
 }
 /// Apply `McpInheritance` filtering to a parent MCP pool snapshot.
 ///
-/// Returns `None` for `McpInheritance::None` (no pool at all — avoids
+/// Returns `None` for `McpInheritance::None` (no pool at all ÔÇö avoids
 /// an empty import call downstream). For `Named`/`Except`, retains or
 /// removes the matching server names in-place.
 fn filter_pool_by_inheritance(
@@ -1437,14 +1465,6 @@ fn filter_pool_by_inheritance(
             Some(pool)
         }
     }
-}
-/// Whether a subagent may declare its own agent-owned `mcpServers`.
-///
-/// Plugin agents cannot: untrusted packages must not spawn MCP processes or
-/// open network MCP endpoints. Parent-pool inheritance is independent and
-/// always available subject to [`McpInheritance`].
-fn agent_owned_mcp_servers_allowed(is_plugin_agent: bool) -> bool {
-    !is_plugin_agent
 }
 /// Resolve a subagent type name to its `AgentDefinition`, with the parent
 /// session's CLI tool/permission overrides already applied (so the spawn path
@@ -1580,14 +1600,14 @@ pub(crate) fn subagent_harness_flavor_is_representable(agent_type: &str) -> bool
 /// inherit the file-tool override (hashline vs standard). A `/goal` role may
 /// pass `harness_agent_type` to OVERRIDE that flavor regardless of the parent
 /// (so a grok-build session can run an alternate-harness verifier and vice-versa);
-/// `None` for every non-goal spawn ⇒ the parent decides (unchanged). The base
-/// toolset stays role-dependent on `subagent_type` (general-purpose →
+/// `None` for every non-goal spawn ÔçÆ the parent decides (unchanged). The base
+/// toolset stays role-dependent on `subagent_type` (general-purpose ÔåÆ
 /// implementer, else explorer), so the role keeps a capable toolset on the
 /// chosen harness.
 ///
 /// Extracted so both [`run_shell_child`] (real spawn) and
 /// [`describe_subagent_type`] (read-only probe) build the SAME `tool_config`
-/// for a given `(subagent_type, harness_agent_type, parent_name)` — no
+/// for a given `(subagent_type, harness_agent_type, parent_name)` ÔÇö no
 /// duplication.
 fn resolve_subagent_toolset(
     subagent_type: &str,
@@ -1610,7 +1630,7 @@ fn resolve_subagent_toolset(
 /// Map a resolved `ToolServerConfig` into a [`SubagentTypeSummary`].
 ///
 /// Keys on each entry's `ToolConfig.kind` (first tool per kind wins).
-/// Entries with `kind: None` — `from_id`/MCP/custom tools — are SKIPPED, so
+/// Entries with `kind: None` ÔÇö `from_id`/MCP/custom tools ÔÇö are SKIPPED, so
 /// this is NOT a byte-for-byte equivalent of the finalize-time `kind_to_name`
 /// map (which keys on the registry `entry.kind`); the two agree for the
 /// builtin goal toolsets, where every tool's kind is populated by
@@ -1639,16 +1659,16 @@ fn summarize_tool_config(
 }
 /// Describe a subagent type's resolved toolset WITHOUT spawning it.
 ///
-/// Runs the same resolution path as [`run_shell_child`] —
+/// Runs the same resolution path as [`run_shell_child`] ÔÇö
 /// [`resolve_agent_definition`] + [`gate_subagent_type`] +
-/// [`resolve_subagent_toolset`] — then summarizes the resulting
+/// [`resolve_subagent_toolset`] ÔÇö then summarizes the resulting
 /// `tool_config`. Backs the `SubagentEvent::DescribeType` drain arm; the
 /// parent uses the summary for the per-role capability gate and prompt
 /// rendering before committing a configured `/goal` `{model, agent_type}` pair.
 ///
 /// `harness_agent_type` is the `/goal`-only harness override: when set it must
 /// resolve to an `AgentDefinition` via this module's [`resolve_agent_definition`]
-/// (name-based project/plugin/builtin lookup — `by_name_in_cwd_with_plugins` +
+/// (name-based project/plugin/builtin lookup ÔÇö `by_name_in_cwd_with_plugins` +
 /// `BuiltinAgentName`). That is equivalent to the main session for builtin
 /// harness names but does NOT apply the main session's env / ACP-profile /
 /// strict-harness precedence. An unresolvable harness returns `Unknown` so the
@@ -1701,11 +1721,11 @@ fn resolve_subagent_max_turns(
 /// What to do with a resumed subagent's isolated worktree directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ResumeWorktreeAction {
-    /// Directory on disk and no snapshot ref — reuse it as-is.
+    /// Directory on disk and no snapshot ref ÔÇö reuse it as-is.
     Reuse,
-    /// Directory gone but a snapshot ref exists — rehydrate from it.
+    /// Directory gone but a snapshot ref exists ÔÇö rehydrate from it.
     Rehydrate,
-    /// Directory gone and no snapshot — fall back to the shared workspace.
+    /// Directory gone and no snapshot ÔÇö fall back to the shared workspace.
     Shared,
 }
 /// Decide how to recover a resumed subagent's worktree from its on-disk state
@@ -1720,7 +1740,7 @@ fn resume_worktree_action(dir_exists: bool, snapshot_ref: Option<&str>) -> Resum
         ResumeWorktreeAction::Shared
     }
 }
-/// The parent session's working directory — the source path for a subagent
+/// The parent session's working directory ÔÇö the source path for a subagent
 /// worktree. Prefers the reconstructed `SessionInfo` cwd, falling back to
 /// `parent_cwd`.
 fn parent_source_cwd(ctx: &SubagentSpawnContext) -> std::path::PathBuf {
@@ -1745,7 +1765,7 @@ fn resolve_subagent_permission_mode(
     }
     requested
 }
-/// Main repo root for a subagent's source: the durable repo a completion snapshot is transferred into and the repo a resume rehydrates from — both arms MUST resolve this identically.
+/// Main repo root for a subagent's source: the durable repo a completion snapshot is transferred into and the repo a resume rehydrates from ÔÇö both arms MUST resolve this identically.
 fn resolve_subagent_source_repo(ctx: &SubagentSpawnContext) -> std::path::PathBuf {
     let source_cwd = parent_source_cwd(ctx);
     xai_grok_workspace::session::git::find_main_repo_root_from_path(&source_cwd)
@@ -1755,6 +1775,7 @@ enum SubagentWaitOutcome {
     Cancelled,
     TurnResult(Box<Result<SubagentPromptTurnResult, oneshot::error::RecvError>>),
 }
+#[tracing::instrument(skip_all)]
 async fn await_subagent_turn_or_cancellation(
     prompt_rx: oneshot::Receiver<SubagentPromptTurnResult>,
     cancel_token: CancellationToken,
@@ -1764,6 +1785,7 @@ async fn await_subagent_turn_or_cancellation(
         turn_result = prompt_rx => SubagentWaitOutcome::TurnResult(Box::new(turn_result)),
     }
 }
+#[tracing::instrument(level = "debug", skip_all)]
 async fn signals_snapshot_counts(child_handle: &SessionHandle) -> (u32, u32) {
     child_handle
         .signals_handle
@@ -1789,7 +1811,7 @@ fn cancellation_error_message(
     });
     match (category, &detail) {
         (Some(CancellationCategory::PermissionRejected), Some(d)) => {
-            format!("Subagent turn was cancelled: user rejected permission — {d}")
+            format!("Subagent turn was cancelled: user rejected permission ÔÇö {d}")
         }
         (Some(CancellationCategory::PermissionRejected), None) => {
             "Subagent turn was cancelled: user rejected a permission prompt".to_string()
@@ -1798,7 +1820,7 @@ fn cancellation_error_message(
             "Subagent turn was cancelled: user cancelled a permission prompt".to_string()
         }
         (Some(CancellationCategory::HookDenied), Some(d)) => {
-            format!("Subagent turn was cancelled: hook denied — {d}")
+            format!("Subagent turn was cancelled: hook denied ÔÇö {d}")
         }
         (Some(CancellationCategory::HookDenied), None) => {
             "Subagent turn was cancelled: blocked by a hook".to_string()
@@ -1870,10 +1892,46 @@ fn fail_subagent(
     persist_subagent_completion(subagent_meta_dir, &result, gcs_ctx);
     result
 }
-/// Tear down a child whose pending-to-active promotion lost to cancellation.
+/// Why an unpromoted child is being torn down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnpromotedChildDisposition {
+    Cancelled,
+    AdmissionTimedOut,
+}
+impl UnpromotedChildDisposition {
+    fn result(self, subagent_id: &str, child_session_id: &str, duration_ms: u64) -> SubagentResult {
+        match self {
+            Self::Cancelled => SubagentResult {
+                success: false,
+                cancelled: true,
+                error: Some("Subagent was cancelled".to_string()),
+                subagent_id: subagent_id.to_string(),
+                child_session_id: child_session_id.to_string(),
+                duration_ms,
+                ..Default::default()
+            },
+            Self::AdmissionTimedOut => SubagentResult {
+                success: false,
+                cancelled: false,
+                error: Some(
+                    "Subagent initial prompt was not admitted before the deadline".to_string(),
+                ),
+                subagent_id: subagent_id.to_string(),
+                child_session_id: child_session_id.to_string(),
+                duration_ms,
+                ..Default::default()
+            },
+        }
+    }
+}
+/// Tear down a child whose pending-to-active promotion lost to cancellation
+/// or whose initial prompt was not admitted before the readiness deadline.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(level = "debug", skip_all)]
 async fn cancel_pending_shell_child(
     child_cmd_tx: &mpsc::UnboundedSender<SessionCommand>,
+    child_thread: crate::session::SessionThread,
+    workspace_ops: &xai_grok_workspace::WorkspaceOps,
     subagent_id: &str,
     child_session_id: &acp::SessionId,
     subagent_meta_dir: &Path,
@@ -1881,10 +1939,26 @@ async fn cancel_pending_shell_child(
     worktree_freshly_created: bool,
     duration_ms: u64,
     gcs_ctx: &GcsUploadContext,
+    thread_exit_timeout: std::time::Duration,
+    disposition: UnpromotedChildDisposition,
 ) -> SubagentResult {
+    prompt_turn_receipt::cancel_shell_child_turn(child_cmd_tx);
     let _ = child_cmd_tx.send(SessionCommand::Shutdown(
         crate::session::ShutdownKind::Graceful,
     ));
+    let thread_exited = await_session_thread_exit(&child_thread, thread_exit_timeout).await;
+    let fate = UnpromotedResourceFate::from_thread_exit(thread_exited);
+    let result = disposition.result(subagent_id, child_session_id.0.as_ref(), duration_ms);
+    persist_subagent_completion(subagent_meta_dir, &result, gcs_ctx);
+    if !fate.should_release() {
+        tracing::warn!(
+            subagent_id,
+            child_session_id = %child_session_id.0,
+            "unpromoted child actor did not exit before the teardown bound; preserving worktree and workspace binding"
+        );
+        return result;
+    }
+    workspace_ops.end_local_session(child_session_id.0.as_ref());
     if worktree_freshly_created
         && let Some(wt_path) = worktree_path
         && let Err(e) = crate::session::worktree::remove_subagent_worktree(wt_path).await
@@ -1896,16 +1970,6 @@ async fn cancel_pending_shell_child(
             "failed to remove pristine worktree for killed-while-pending subagent"
         );
     }
-    let result = SubagentResult {
-        success: false,
-        cancelled: true,
-        error: Some("Subagent was cancelled".to_string()),
-        subagent_id: subagent_id.to_string(),
-        child_session_id: child_session_id.0.to_string(),
-        duration_ms,
-        ..Default::default()
-    };
-    persist_subagent_completion(subagent_meta_dir, &result, gcs_ctx);
     result
 }
 /// Progress notification emission interval.
@@ -1956,7 +2020,7 @@ fn goal_tick_cmd_tx(
 /// token accounting; the actor's `SubagentProgress` arm never persists
 /// these ticks.
 ///
-/// Notifications are **not** persisted to JSONL — they are transient UI
+/// Notifications are **not** persisted to JSONL ÔÇö they are transient UI
 /// hints, not authoritative lifecycle events. The TUI can resync via
 /// `chutes.ai/subagent/list_running` on reconnect.
 #[allow(clippy::too_many_arguments)]
@@ -2025,7 +2089,7 @@ fn spawn_progress_publisher(
             }
             if let Some(params) = params {
                 let ext_notification =
-                    acp::ExtNotification::new("chutes.build/session_notification", params.into());
+                    acp::ExtNotification::new("chutes.ai/session_notification", params.into());
                 gateway.forward_fire_and_forget(ext_notification);
             }
         }
@@ -2457,7 +2521,7 @@ fn is_on_disk_meta_running(subagent_meta_dir: &Path) -> bool {
     serde_json::from_str::<SubagentMeta>(&data).is_ok_and(|meta| meta.status == "running")
 }
 /// Parse `meta_path` and return it only when it is a stale `running` orphan
-/// owned by `parent_session_id` and not tracked live. Malformed metas → `None`.
+/// owned by `parent_session_id` and not tracked live. Malformed metas ÔåÆ `None`.
 fn running_orphan_meta(meta_path: &Path, parent_session_id: &str) -> Option<SubagentMeta> {
     let data = std::fs::read_to_string(meta_path).ok()?;
     let meta: SubagentMeta = serde_json::from_str(&data).ok()?;
@@ -2492,13 +2556,14 @@ fn completed_finish_from_inspection(inspection: &SubagentInspection) -> Option<S
 }
 /// Heal subagents stuck "Running" after a dead process: emit exactly one
 /// `SubagentFinished` per id, unioning two id-keyed sources (so a crash orphan
-/// in both heals once) — `unfinished` replayed spawns whose finish a rewind
+/// in both heals once) ÔÇö `unfinished` replayed spawns whose finish a rewind
 /// dropped (or a forked-in subagent with no meta), and on-disk `running` metas.
-/// Skipping ids still active or pending: a `running` meta → `cancelled` (unless
+/// Skipping ids still active or pending: a `running` meta ÔåÆ `cancelled` (unless
 /// the coordinator still holds its terminal result, then re-emit that); a terminal
 /// meta that survived a rewound finish re-emits its real outcome; a no-meta
-/// replayed spawn → `cancelled`. Runs after replay so the finish orders after the spawn.
+/// replayed spawn ÔåÆ `cancelled`. Runs after replay so the finish orders after the spawn.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all)]
 pub(crate) async fn reconcile_orphaned_subagents_with_backend(
     unfinished: &[(String, String)],
     backend: &xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend,
@@ -2625,6 +2690,7 @@ pub(crate) async fn reconcile_orphaned_subagents_with_backend(
 /// empty so only on-disk `running` metas are candidates. Persist-first plus
 /// the per-parent lock make a second tick, sequential or overlapping, a
 /// no-op.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn reconcile_live_orphaned_subagents(
     backend: &xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend,
     session_dir: &Path,

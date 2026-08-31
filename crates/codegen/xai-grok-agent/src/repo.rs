@@ -85,7 +85,7 @@ impl RepoDirChain {
 /// from `xai-grok-workspace`, which depends on THIS crate) to keep the dep edge
 /// one-way; backs the home-is-dotfiles guard in [`RepoDirChain::resolve`].
 fn is_home_dir(path: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = xai_dirs::home_dir() else {
         return false;
     };
     let canon = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());

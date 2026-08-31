@@ -72,33 +72,81 @@ impl PromptTraceContext {
         }
     }
 }
+enum UploadSpanAttach {
+    Child,
+    Link {
+        prompt_id: String,
+        session_id: String,
+    },
+}
 /// Spawn a fire-and-forget upload task that logs panics.
 pub(crate) fn spawn_upload_task<F>(task_name: &'static str, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    use tracing::Instrument;
-    let parent_span = tracing::Span::current();
-    tokio::spawn(
-        async move {
-            let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
-            if let Err(panic_payload) = result {
-                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
-                tracing::error!(
-                    task = task_name,
-                    panic = %panic_msg,
-                    "Upload task panicked"
-                );
-            }
-        }
-        .instrument(parent_span),
+    spawn_upload_task_attached(task_name, UploadSpanAttach::Child, fut);
+}
+/// New root so the turn span does not stay open for the upload.
+pub(crate) fn spawn_linked_upload_task<F>(
+    task_name: &'static str,
+    prompt_id: impl std::fmt::Display,
+    session_id: impl std::fmt::Display,
+    fut: F,
+) where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawn_upload_task_attached(
+        task_name,
+        UploadSpanAttach::Link {
+            prompt_id: prompt_id.to_string(),
+            session_id: session_id.to_string(),
+        },
+        fut,
     );
+}
+fn spawn_upload_task_attached<F>(task_name: &'static str, attach: UploadSpanAttach, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    use tracing::Instrument;
+    let span = match attach {
+        UploadSpanAttach::Child => tracing::Span::current(),
+        UploadSpanAttach::Link {
+            prompt_id,
+            session_id,
+        } => {
+            let root = tracing::info_span!(
+                parent: None,
+                "upload.task",
+                task = task_name,
+                prompt_id = %prompt_id,
+                session_id = %session_id,
+            );
+            xai_file_utils::trace_context::link_span_to_current(&root);
+            root
+        }
+    };
+    tokio::spawn(wrap_upload_task(task_name, fut).instrument(span));
+}
+async fn wrap_upload_task<F>(task_name: &'static str, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let result = std::panic::AssertUnwindSafe(fut).catch_unwind().await;
+    if let Err(panic_payload) = result {
+        let panic_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic".to_string()
+        };
+        tracing::error!(
+            task = task_name,
+            panic = %panic_msg,
+            "Upload task panicked"
+        );
+    }
 }
 #[cfg(test)]
 pub(crate) async fn join_required_restore_artifacts<Fs, Fp, Fm>(
@@ -161,8 +209,8 @@ pub(crate) async fn take_streaming_partial(
 /// Complete the prompt trace. Returns `Ok(true)` when session state is
 /// durably confirmed and `restorable_turn_number` can advance.
 ///
-/// With [`UploadWait::Defer`] the whole turn-end set — artifact accepts, the
-/// bounded queue flush, terminal telemetry, and the manifest write — runs in
+/// With [`UploadWait::Defer`] the whole turn-end set ÔÇö artifact accepts, the
+/// bounded queue flush, terminal telemetry, and the manifest write ÔÇö runs in
 /// here, deadline-bounded; callers make a plain call in either mode.
 #[tracing::instrument(
     name = "upload.complete_prompt_trace",
@@ -323,7 +371,7 @@ pub(crate) fn parse_agent_profile_from_meta(
 /// `Some(false)` means the pager set `--no-ask-user`; the shell propagates
 /// it to `AgentBuilder::with_ask_user_question_enabled(false)` so the tool
 /// is stripped from the model's advertised tool list. `Some(true)` explicitly
-/// enables the tool for this session. `None` means the field is absent — the
+/// enables the tool for this session. `None` means the field is absent ÔÇö the
 /// caller falls back to the `ask_user_question` feature (default ON).
 pub(crate) fn parse_ask_user_question_from_meta(
     meta: Option<&agent_client_protocol::Meta>,

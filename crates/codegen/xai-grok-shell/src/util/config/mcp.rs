@@ -1382,7 +1382,7 @@ pub(crate) fn load_claude_json_mcp_servers(
         return vec![];
     }
 
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = xai_dirs::home_dir() else {
         return vec![];
     };
     let claude_json_path = home.join(".claude.json");
@@ -1397,7 +1397,7 @@ pub(crate) fn load_claude_json_mcp_servers(
 pub(crate) fn load_claude_json_mcp_servers_for_attribution(
     cwd: &std::path::Path,
 ) -> Vec<acp::McpServer> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = xai_dirs::home_dir() else {
         return vec![];
     };
     load_claude_json_mcp_servers_from(&home.join(".claude.json"), cwd)
@@ -1428,7 +1428,7 @@ pub(crate) fn load_claude_json_mcp_servers_as_configs(
 pub(crate) fn load_claude_json_mcp_servers_as_configs_unfiltered(
     cwd: &std::path::Path,
 ) -> IndexMap<String, McpServerConfig> {
-    let Some(home) = dirs::home_dir() else {
+    let Some(home) = xai_dirs::home_dir() else {
         return IndexMap::new();
     };
     let claude_json_path = home.join(".claude.json");
@@ -1523,7 +1523,7 @@ pub(crate) fn load_cursor_mcp_servers(
     }
 
     // Global (lower priority)
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = xai_dirs::home_dir() {
         let global_path = home.join(".cursor").join("mcp.json");
         for server in load_mcp_json_file(&global_path) {
             let name = match &server {
@@ -1566,7 +1566,7 @@ pub(crate) fn load_cursor_mcp_servers_as_configs(
     }
 
     // Global (lower priority — or_insert so project wins)
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = xai_dirs::home_dir() {
         let global_path = home.join(".cursor").join("mcp.json");
         if global_path.is_file()
             && let Some(config) = read_mcp_json(&global_path)

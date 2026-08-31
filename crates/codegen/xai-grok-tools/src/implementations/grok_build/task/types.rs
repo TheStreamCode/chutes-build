@@ -27,6 +27,12 @@ use xai_tool_types::{SubagentCapabilityMode, SubagentIsolationMode, WaitMode};
 
 use crate::register_resource;
 
+pub use super::active_message::{
+    ActiveAgentMessage, ActiveAgentMessageDelivery, ActiveAgentMessageOperation,
+    ActiveAgentMessageOutcome, ActiveAgentMessageRequest, MAX_ACTIVE_AGENT_MESSAGE_BYTES,
+    SubagentActiveMessageRequest,
+};
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SubagentOwner {
     #[default]
@@ -600,6 +606,8 @@ pub struct SubagentCompletionSummary {
     pub subagent_id: String,
     pub subagent_type: String,
     pub description: String,
+    /// Scheduled task that launched this child, when applicable.
+    pub loop_task_id: Option<String>,
     pub success: bool,
     pub duration_ms: u64,
     pub tool_calls: u32,
@@ -861,6 +869,7 @@ pub struct SubagentDescribeRequest {
 pub enum SubagentEvent {
     Spawn(SubagentSpawnRequest),
     Query(SubagentQueryRequest),
+    SendActiveMessage(SubagentActiveMessageRequest),
     Cancel(SubagentCancelRequest),
     ListActive(SubagentListActiveRequest),
     ListRunning(SubagentListRunningRequest),
@@ -895,6 +904,18 @@ pub enum SubagentEvent {
 #[derive(Clone, Educe)]
 #[educe(Debug)]
 pub struct SubagentEventSender(#[educe(Debug(ignore))] pub mpsc::UnboundedSender<SubagentEvent>);
+
+impl SubagentEventSender {
+    pub fn send(&self, event: SubagentEvent) -> Result<(), mpsc::error::SendError<SubagentEvent>> {
+        self.0.send(event)
+    }
+}
+
+impl From<mpsc::UnboundedSender<SubagentEvent>> for SubagentEventSender {
+    fn from(tx: mpsc::UnboundedSender<SubagentEvent>) -> Self {
+        Self(tx)
+    }
+}
 
 register_resource!("grok_build", "SubagentEventSender", SubagentEventSender);
 
@@ -1457,6 +1478,7 @@ mod tests {
             subagent_id: "sub-1".into(),
             subagent_type: "general-purpose".into(),
             description: "test task".into(),
+            loop_task_id: None,
             success: true,
             duration_ms: 1500,
             tool_calls: 7,

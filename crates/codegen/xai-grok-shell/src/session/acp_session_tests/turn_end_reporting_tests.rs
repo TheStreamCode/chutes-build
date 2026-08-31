@@ -190,7 +190,7 @@ impl Harness {
         });
     }
 
-    async fn cancel(&self, trigger: CancelTrigger) -> super::tasks_cancel::CancelOutcome {
+    async fn cancel(&self, trigger: CancelTrigger) -> super::cancel::CancelOutcome {
         self.cancel_with(trigger, true).await
     }
 
@@ -198,7 +198,7 @@ impl Harness {
         &self,
         trigger: CancelTrigger,
         cancel_subagents: bool,
-    ) -> super::tasks_cancel::CancelOutcome {
+    ) -> super::cancel::CancelOutcome {
         self.actor
             .cancel_running_task(crate::session::CancelOptions {
                 cancel_subagents,
