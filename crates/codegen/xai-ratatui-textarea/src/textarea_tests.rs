@@ -17,7 +17,9 @@ fn rand_grapheme(rng: &mut rand::rngs::StdRng) -> String {
         }
         66..=75 => {
             // CJK wide characters
-            let choices = ["µ╝ó", "Õ¡ù", "µ©¼", "Þ®ª", "õ¢á", "ÕÑ¢", "þòî", "þ╝û", "þáü"];
+            let choices = [
+                "µ╝ó", "Õ¡ù", "µ©¼", "Þ®ª", "õ¢á", "ÕÑ¢", "þòî", "þ╝û", "þáü",
+            ];
             choices[rng.random_range(0..choices.len())].to_string()
         }
         76..=85 => {
@@ -34,8 +36,8 @@ fn rand_grapheme(rng: &mut rand::rngs::StdRng) -> String {
         _ => {
             // ZWJ sequences (single graphemes but multi-codepoint)
             let choices = [
-                "­ƒæ®\u{200D}­ƒÆ╗", // woman technologist
-                "­ƒæ¿\u{200D}­ƒÆ╗", // man technologist
+                "­ƒæ®\u{200D}­ƒÆ╗",    // woman technologist
+                "­ƒæ¿\u{200D}­ƒÆ╗",    // man technologist
                 "­ƒÅ│´©Å\u{200D}­ƒîê", // rainbow flag
             ];
             choices[rng.random_range(0..choices.len())].to_string()
@@ -832,8 +834,8 @@ fn truncate_line_display_with_bracket_preservation() {
     let result = truncate_line_display(&line, 12);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.ends_with(']'), "should preserve ]: got {text:?}");
-    assert!(text.contains('ÔÇª'), "should contain ellipsis: got {text:?}");
-    assert_eq!(text, "[Pasted ~1ÔÇª]");
+    assert!(text.contains('…'), "should contain ellipsis: got {text:?}");
+    assert_eq!(text, "[Pasted ~1…]");
 }
 
 #[test]
@@ -841,10 +843,10 @@ fn truncate_line_display_without_bracket() {
     let line: Line<'static> = Line::from("very long display text");
     let result = truncate_line_display(&line, 10);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert!(text.contains('ÔÇª'));
+    assert!(text.contains('…'));
     assert!(!text.ends_with(']'));
     // 9 chars content + 1 ellipsis = 10
-    assert_eq!(text, "very longÔÇª");
+    assert_eq!(text, "very long…");
 }
 
 #[test]
@@ -859,8 +861,8 @@ fn truncate_line_display_width_1() {
     let line: Line<'static> = Line::from("[Pasted]");
     let result = truncate_line_display(&line, 1);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
-    // Only room for "ÔÇª" (the bracket can't fit with content)
-    assert_eq!(text, "ÔÇª");
+    // Only room for "…" (the bracket can't fit with content)
+    assert_eq!(text, "…");
 }
 
 #[test]
@@ -875,10 +877,10 @@ fn truncate_preserves_multi_span_styles() {
     let result = truncate_line_display(&line, 10);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.ends_with(']'));
-    assert!(text.contains('ÔÇª'));
-    // "[" (1) + content budget (10-2=8) + "ÔÇª" (1) + "]" (1) = 11? No...
+    assert!(text.contains('…'));
+    // "[" (1) + content budget (10-2=8) + "…" (1) + "]" (1) = 11? No...
     // Budget: 10 - 2 = 8 for content. "[" is 1, so 7 more chars of "Pasted ~"
-    // Result: "[Pasted ÔÇª]" which is 10 wide
+    // Result: "[Pasted …]" which is 10 wide
     assert!(
         result.width() <= 10,
         "width should be <= 10, got {}",
@@ -1286,7 +1288,7 @@ fn truncate_display_with_wide_unicode() {
     let result = truncate_line_display(&line, 5);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     // Budget = 5 - 1 (ellipsis) = 4 content cols ÔåÆ "­ƒôÄpa" (2+1+1=4)
-    assert!(text.contains('ÔÇª'));
+    assert!(text.contains('…'));
     assert!(
         result.width() <= 5,
         "width should be <= 5, got {}",
@@ -1310,30 +1312,30 @@ fn truncate_display_preserves_zwj_graphemes() {
     let result = truncate_line_display(&line, 3);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
 
-    assert_eq!(text, "­ƒæ®\u{200D}­ƒÆ╗ÔÇª");
+    assert_eq!(text, "­ƒæ®\u{200D}­ƒÆ╗…");
     assert_eq!(result.width(), 3);
 }
 
 #[test]
 fn truncate_display_wide_char_at_boundary() {
     // Display: "ab­ƒÜÇcd" = 2+2+2 = 6 cols, truncate to 4
-    // Budget = 4 - 1 = 3 content cols. "ab" = 2, "­ƒÜÇ" = 2 ÔåÆ doesn't fit ÔåÆ "abÔÇª"
+    // Budget = 4 - 1 = 3 content cols. "ab" = 2, "­ƒÜÇ" = 2 ÔåÆ doesn't fit ÔåÆ "ab…"
     let line: Line<'static> = Line::from("ab­ƒÜÇcd");
     let result = truncate_line_display(&line, 4);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(text, "abÔÇª");
+    assert_eq!(text, "ab…");
     assert!(result.width() <= 4);
 }
 
 #[test]
 fn truncate_display_bracket_with_wide_chars() {
     // "[­ƒôÄ pasted]" = 1+2+1+6+1 = 11 cols, truncate to 7
-    // Budget = 7 - 2 (ellipsis + bracket) = 5 content cols ÔåÆ "[­ƒôÄ pÔÇª]"
+    // Budget = 7 - 2 (ellipsis + bracket) = 5 content cols ÔåÆ "[­ƒôÄ p…]"
     let line: Line<'static> = Line::from("[­ƒôÄ pasted]");
     let result = truncate_line_display(&line, 7);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.ends_with(']'), "should preserve ]: got {text:?}");
-    assert!(text.contains('ÔÇª'));
+    assert!(text.contains('…'));
     assert!(result.width() <= 7, "got {}", result.width());
 }
 

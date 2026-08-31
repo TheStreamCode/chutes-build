@@ -480,11 +480,11 @@ mod tests {
 
     #[test]
     fn wide_unicode_wraps_by_display_width() {
-        let line = Line::from("­ƒÿÇ­ƒÿÇ­ƒÿÇ");
+        let line = Line::from("😀😀😀");
         let out = word_wrap_line(&line, 4);
         assert_eq!(out.len(), 2);
-        assert_eq!(concat_line(&out[0]), "­ƒÿÇ­ƒÿÇ");
-        assert_eq!(concat_line(&out[1]), "­ƒÿÇ");
+        assert_eq!(concat_line(&out[0]), "😀😀");
+        assert_eq!(concat_line(&out[1]), "😀");
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn line_height_counts_double_width_emoji() {
-        let line = "­ƒÿÇ­ƒÿÇ­ƒÿÇ".into(); // each emoji ~ width 2
+        let line = "😀😀😀".into(); // each emoji ~ width 2
         assert_eq!(word_wrap_line(&line, 4).len(), 2);
         assert_eq!(word_wrap_line(&line, 2).len(), 3);
         assert_eq!(word_wrap_line(&line, 6).len(), 1);
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn word_wrap_does_not_split_words_simple_english() {
-        let sample = "Years passed, and Willowmere thrived in peace and friendship. MiraÔÇÖs herb garden flourished with both ordinary and enchanted plants, and travelers spoke of the kindness of the woman who tended them.";
+        let sample = "Years passed, and Willowmere thrived in peace and friendship. Mira’s herb garden flourished with both ordinary and enchanted plants, and travelers spoke of the kindness of the woman who tended them.";
         let line = Line::from(sample);
         let lines = [line];
         // Force small width to exercise wrapping at spaces.
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(
             joined,
             r#"Years passed, and Willowmere thrived
-in peace and friendship. MiraÔÇÖs herb
+in peace and friendship. Mira’s herb
 garden flourished with both ordinary and
 enchanted plants, and travelers spoke
 of the kindness of the woman who tended
