@@ -10,7 +10,7 @@ pub use xai_prompt_queue::{
 };
 
 // Outbound method for broadcast_queue_changed. An ACP routing concern, not a queue concern.
-pub const QUEUE_CHANGED_METHOD: &str = "chutes.build/queue/changed";
+pub const QUEUE_CHANGED_METHOD: &str = "chutes.ai/queue/changed";
 
 #[cfg(test)]
 mod tests {

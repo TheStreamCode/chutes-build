@@ -23,8 +23,6 @@ pub use xai_grok_config_types::{
 };
 // Relay-sync + MCP-config value types extracted; re-exported to keep paths stable.
 pub use xai_grok_config_types::{McpConfig, RelaySyncConfig};
-// Worktree-pool config value type extracted; re-exported to keep paths stable.
-pub use xai_grok_config_types::PoolConfig;
 
 /// TUI/CLI settings. Composed from typed section configs defined in `agent::config`.
 #[derive(Debug, Clone, Default)]
@@ -206,22 +204,6 @@ pub(crate) fn load_mcp_servers_with_oauth(
     }
 
     (acp_servers, oauth_configs)
-}
-
-/// Load the worktree pool configuration from config.toml.
-/// Returns the default config if the section is missing.
-pub fn worktree_pool_from_toml(root: &TomlValue) -> PoolConfig {
-    if let TomlValue::Table(table) = root
-        && let Some(pool_val) = table.get("worktree_pool")
-    {
-        // Try to deserialize the section; fall back to defaults on error
-        pool_val
-            .clone()
-            .try_into::<PoolConfig>()
-            .unwrap_or_default()
-    } else {
-        PoolConfig::default()
-    }
 }
 
 /// Load MCP servers with project-scoped overrides from `.chutes-build/config.toml`.
@@ -804,35 +786,22 @@ async fn write_toml_table_if_changed(
             return Err(anyhow::anyhow!("failed to read {}: {e}", path.display()));
         }
     };
-    let mut root: TomlValue = if original.is_empty() {
-        TomlValue::Table(TomlMap::new())
-    } else {
-        match toml::from_str(&original) {
-            Ok(v) => v,
-            Err(parse_err) => {
-                return Err(anyhow::anyhow!(
-                    "refusing to overwrite unparseable {}: {}; fix the syntax before retrying",
-                    path.display(),
-                    parse_err
-                ));
-            }
+    let mut root = match super::persist::parse_existing_config_toml(&original) {
+        Ok(v) => v,
+        Err(parse_err) => {
+            return Err(anyhow::anyhow!(
+                "refusing to overwrite unparseable {}: {}; fix the syntax before retrying",
+                path.display(),
+                parse_err
+            ));
         }
     };
+    let before = toml::to_string_pretty(&root)?;
     let table = root
         .as_table_mut()
         .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
     f(table);
     let toml_str = toml::to_string_pretty(&root)?;
-    // Normalize empty original so first enable/disable still writes when needed.
-    let before = if original.is_empty() {
-        toml::to_string_pretty(&TomlValue::Table(TomlMap::new()))?
-    } else {
-        // Re-serialize original for stable comparison (ignore formatting noise).
-        match toml::from_str::<TomlValue>(&original) {
-            Ok(v) => toml::to_string_pretty(&v).unwrap_or(original),
-            Err(_) => original,
-        }
-    };
     if before == toml_str {
         return Ok(false);
     }
@@ -2559,9 +2528,9 @@ expose_image_base64 = true
 
     #[test]
     fn load_cursor_mcp_servers_as_configs_parses_cursor_mcp_json() {
-        // NOTE: This test cannot override HOME (dirs::home_dir is not
-        // controlled by an env var on all platforms), so we test the
-        // underlying read_mcp_json + McpConfig round-trip instead.
+        // Overriding HOME/USERPROFILE mutates process-global env and races
+        // parallel tests, so this tests the underlying read_mcp_json +
+        // McpConfig round-trip instead of the home-anchored global path.
         let dir = tempfile::tempdir().unwrap();
         let mcp_json_path = dir.path().join("mcp.json");
         std::fs::write(

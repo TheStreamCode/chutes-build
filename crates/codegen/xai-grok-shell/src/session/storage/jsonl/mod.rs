@@ -313,7 +313,7 @@ impl JsonlStorageAdapter {
     /// List the N most recently modified session summaries across all
     /// workspaces.
     ///
-    /// Instead of reading every `summary.json` (expensive at scale ÔÇö ~12K
+    /// Instead of reading every `summary.json` (expensive at scale — ~12K
     /// files), this stats each file to get its mtime, sorts by mtime, and
     /// reads newest-first only until `limit` rows are kept. On a machine with
     /// ~12K sessions this reduces cold-boot `workspace_list` from ~3s to ~200ms.
@@ -412,8 +412,8 @@ impl JsonlStorageAdapter {
     /// trailing newline. Because append failures are logged-and-continued by
     /// the persistence actor, a plain `O_APPEND` write of the next record
     /// would concatenate it onto that partial line, producing a merged line
-    /// that fails to parse (``expected `,` or `}` at line 1 column N``) and ÔÇö
-    /// before the readers became corruption-tolerant ÔÇö bricked session resume.
+    /// that fails to parse (``expected `,` or `}` at line 1 column N``) and —
+    /// before the readers became corruption-tolerant — bricked session resume.
     ///
     /// Before writing, check the last byte: if it isn't `\n`, prepend one so
     /// the torn record is terminated as its own (single) corrupt line. This
@@ -987,13 +987,13 @@ impl JsonlStorageAdapter {
     /// Appends to `chat_history.jsonl` are not crash-atomic: a process kill
     /// mid-append (auto-update leader relaunch), `ENOSPC`, or two writers
     /// racing (a second persistence actor on reconnect) can leave a torn or
-    /// merged line ÔÇö the classic symptom is a serde error like
+    /// merged line — the classic symptom is a serde error like
     /// ``expected `,` or `}` at line 1 column 571``. Failing the whole load on
     /// one bad line bricks the session forever ("Couldn't load session:
     /// FS_OTHER"), which is strictly worse than resuming without the damaged
     /// record. Unparseable / undecodable lines are therefore *skipped* with a
     /// warning, and the first time corruption is detected the raw file is
-    /// preserved as `chat_history.jsonl.corrupt` next to the original ÔÇö the
+    /// preserved as `chat_history.jsonl.corrupt` next to the original — the
     /// post-load snapshot rewrite (`persist_chat_history_jsonl_sync`) scrubs
     /// the bad lines from the live file, so the quarantine copy is the only
     /// surviving evidence for debugging / manual recovery.
@@ -1011,7 +1011,7 @@ impl JsonlStorageAdapter {
     /// would silently drop them. We pre-extract them via
     /// [`xai_grok_sampling_types::upgrade_legacy_reasoning`] and emit
     /// sibling `Reasoning` / `BackendToolCall` items *before* the
-    /// corresponding assistant ÔÇö matching the order
+    /// corresponding assistant — matching the order
     /// `response_to_conversation_items` would produce. The file on disk
     /// is not rewritten; this is a load-time-only transform so resumed
     /// sessions get sibling-shape replay without any disk-write risk.
@@ -1110,7 +1110,7 @@ impl JsonlStorageAdapter {
                 first_error = %first_error,
                 path = %path.display(),
                 "skipped unparseable chat history lines (torn or interleaved \
-                 append ÔÇö crashed mid-write or concurrent writer?); loading \
+                 append — crashed mid-write or concurrent writer?); loading \
                  the session without them, original preserved as *.corrupt"
             );
         }
@@ -1178,7 +1178,7 @@ fn transform_session_id_in_update(
     }
 }
 /// Next `segment_NNN` index in `compaction_dir`: one past the highest existing
-/// segment, or 0 when none exist. Resume-safe ÔÇö derived from disk, not memory.
+/// segment, or 0 when none exist. Resume-safe — derived from disk, not memory.
 async fn next_compaction_segment_index(compaction_dir: &std::path::Path) -> u64 {
     let Ok(mut entries) = tokio::fs::read_dir(compaction_dir).await else {
         return 0;
@@ -1594,7 +1594,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     }
     /// Resume path: loads everything except updates and rewind points. Rewind
     /// points can be huge (full file-content snapshots) and are needed only on an
-    /// actual rewind, so they're deferred ÔÇö loaded lazily by `FileStateTracker`.
+    /// actual rewind, so they're deferred — loaded lazily by `FileStateTracker`.
     async fn load_session_without_updates(
         &self,
         info: &Info,
@@ -1939,7 +1939,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     }
 }
 /// Max decoded size for a data-URI image loaded from persisted history.
-/// Generous (20 MB) ÔÇö fresh images use 5 MB, but loaded ones just need sanity-checking.
+/// Generous (20 MB) — fresh images use 5 MB, but loaded ones just need sanity-checking.
 const MAX_LOADED_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// Strip data-URI images the API would reject (see
 /// [`persisted_image_reject_reason`](crate::session::image_normalize::persisted_image_reject_reason):

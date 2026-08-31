@@ -23,7 +23,7 @@ mod search_content;
 pub(crate) mod summary_write;
 
 /// The session search index moved to its own crate; re-exported here so
-/// `session::storage::search_fts::ÔÇª` keeps resolving for its consumers.
+/// `session::storage::search_fts::…` keeps resolving for its consumers.
 pub use xai_grok_session_search::fts as search_fts;
 
 /// On-disk file names, relative to a session directory. Single source of truth for
@@ -168,7 +168,7 @@ pub(crate) fn sync_parent_dir_durable(path: &Path) -> io::Result<()> {
 
 /// Run `create` (a `create_dir_all`-style creation of `dir`), then
 /// [`sync_dir_durable`] every directory that gained a new entry, so the
-/// created chain itself survives power loss ÔÇö fsyncing a file only makes
+/// created chain itself survives power loss — fsyncing a file only makes
 /// its own direntry durable, not the directories above it. The ancestors
 /// are snapshotted before `create` because afterwards the whole chain
 /// exists; an already-existing occupied chain pays no sync.
@@ -194,7 +194,7 @@ pub(crate) fn create_dir_all_durable_with(
     create(dir)?;
     // A retry after create+failed parent-sync sees the whole chain present
     // and would otherwise sync nothing. Re-sync a bounded ancestor list so
-    // the new direntry is durable ÔÇö but only when `dir` is still empty.
+    // the new direntry is durable — but only when `dir` is still empty.
     // `init_session` calls this on every open; a populated resume must not
     // fsync ancestors (permissions / network home / macOS F_FULLFSYNC can
     // fail a normal open). Never the filesystem root (fsync("/") can fail
@@ -343,7 +343,7 @@ pub(crate) mod chat_rebuild {
 
     /// Reduces ACP session updates into conversation items.
     ///
-    /// Turn boundaries: UserÔåÆAgent flushes user, AgentÔåÆUser flushes agent,
+    /// Turn boundaries: User→Agent flushes user, Agent→User flushes agent,
     /// tool completion flushes agent before emitting result.
     struct ChatReducer {
         user_parts: Vec<ContentPart>,
@@ -900,7 +900,7 @@ pub struct CopySessionOptions {
     /// summary so the prompt-facing cwd survives session restore/reload.
     pub prompt_display_cwd: Option<String>,
 
-    // ÔöÇÔöÇ Generic fork extensions (used by subagent + worktree forks) ÔöÇÔöÇ
+    // ── Generic fork extensions (used by subagent + worktree forks) ──
     /// Override `session_kind` in the forked summary. Defaults to `"fork"`.
     /// Subagent resume sets `"subagent_resume"`.
     pub session_kind: Option<String>,
@@ -920,7 +920,7 @@ pub struct CopySessionOptions {
     pub copy_announcement_state: bool,
     /// Whether to copy the `compaction/` segment archive (`segment_*.md` +
     /// `INDEX.md`, the verbose pre-compaction transcripts). Defaults to
-    /// `false` ÔÇö these can be large and most copy paths don't need them. Forks
+    /// `false` — these can be large and most copy paths don't need them. Forks
     /// enable it so the child retains the parent's pre-compaction history.
     pub copy_compaction_segments: bool,
     /// When true, apply fork-safety filtering to copied chat history:
@@ -1016,7 +1016,7 @@ fn is_acp_user_message_chunk(update: &SessionUpdate) -> bool {
 ///
 /// Progressive: every user run counts until the first `promptIndex` appears;
 /// after that only marked runs count (mid-turn phantoms omit the marker).
-/// A change of `promptIndex` (including unmarked Ôåö marked) opens a new run ÔÇö
+/// A change of `promptIndex` (including unmarked ↔ marked) opens a new run —
 /// matching replay's split so back-to-back cancelled prompts stay distinct.
 struct UserRunTurnTracker {
     seen_marker: bool,
@@ -1767,7 +1767,7 @@ pub enum PromptExtractEvent {
     /// Any in-progress user message should be flushed before truncating.
     RewindTo(usize),
 
-    /// Any other update type ÔÇö signals that the current user message (if any)
+    /// Any other update type — signals that the current user message (if any)
     /// has ended.
     NotUserMessage,
 }
@@ -1796,9 +1796,9 @@ impl PromptExtractEvent {
 /// discriminant field and only extracts the one or two fields actually needed
 /// for prompt reconstruction:
 ///
-/// - ACP `"user_message_chunk"` ÔåÆ `update.content.text`
-/// - xAI `"rewind_marker"`      ÔåÆ `update.target_prompt_index`
-/// - everything else             ÔåÆ [`PromptExtractEvent::NotUserMessage`]
+/// - ACP `"user_message_chunk"` → `update.content.text`
+/// - xAI `"rewind_marker"`      → `update.target_prompt_index`
+/// - everything else             → [`PromptExtractEvent::NotUserMessage`]
 ///
 /// Parse errors on individual lines are treated conservatively as
 /// `NotUserMessage` (matching the "skip malformed line" behavior of the
@@ -1850,8 +1850,8 @@ impl Iterator for PromptExtractIterator {
 /// Assemble accumulated user-prompt strings from a stream of [`PromptExtractEvent`]s.
 ///
 /// Encapsulates the accumulation, flush, and rewind-truncation rules in one
-/// place so that every caller ÔÇö whether reading from disk or from an in-memory
-/// iterator ÔÇö applies identical prompt-extraction semantics:
+/// place so that every caller — whether reading from disk or from an in-memory
+/// iterator — applies identical prompt-extraction semantics:
 ///
 /// - Consecutive `UserTextChunk` events are concatenated into one prompt until
 ///   a non-user event or a `promptIndex` change opens a new run.
@@ -2132,7 +2132,7 @@ pub fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate
 }
 
 // ---------------------------------------------------------------------------
-// Selective serde structs ÔÇö only the fields we care about
+// Selective serde structs — only the fields we care about
 // ---------------------------------------------------------------------------
 
 /// Peek inside ACP or xAI `params` to read the `update.sessionUpdate` tag and
@@ -2204,13 +2204,13 @@ pub(crate) fn parse_prompt_extract_event(line: &str) -> PromptExtractEvent {
         let xai = env.method == Some(XAI_SESSION_UPDATE_METHOD);
         (raw, xai)
     } else {
-        // Not a valid envelope ÔåÆ try legacy format: the line IS the params.
+        // Not a valid envelope → try legacy format: the line IS the params.
         (line, false)
     };
 
     // Step 2: parse the discriminant and relevant payload fields in one pass.
     let Ok(peek) = serde_json::from_str::<ParamsPeek<'_>>(raw_params) else {
-        // Cannot determine update type ÔåÆ treat conservatively.
+        // Cannot determine update type → treat conservatively.
         return PromptExtractEvent::NotUserMessage;
     };
 
@@ -2583,7 +2583,7 @@ mod tests {
         );
     }
 
-    // ÔöÇÔöÇ helpers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     /// Wrap an ACP notification as the envelope stored in updates.jsonl.
     fn acp_envelope(session_update_json: &str) -> String {
@@ -2599,7 +2599,7 @@ mod tests {
         )
     }
 
-    // ÔöÇÔöÇ parse_prompt_extract_event unit tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── parse_prompt_extract_event unit tests ─────────────────────────────────
 
     #[test]
     fn acp_user_text_chunk_yields_user_text() {
@@ -2709,7 +2709,7 @@ mod tests {
         );
     }
 
-    /// Empty string ÔÇö the iterator skips blanks, but a direct call must still
+    /// Empty string — the iterator skips blanks, but a direct call must still
     /// classify conservatively (the parser always yields an event now).
     #[test]
     fn empty_string_yields_not_user() {
@@ -2719,7 +2719,7 @@ mod tests {
         );
     }
 
-    /// A valid JSON object that has no recognisable ACP/xAI shape ÔÇö NotUserMessage.
+    /// A valid JSON object that has no recognisable ACP/xAI shape — NotUserMessage.
     #[test]
     fn unknown_json_object_yields_not_user() {
         assert_eq!(
@@ -2751,7 +2751,7 @@ mod tests {
         );
     }
 
-    // ÔöÇÔöÇ PromptExtractIterator integration tests via tempfile ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── PromptExtractIterator integration tests via tempfile ──────────────────
 
     fn write_updates_file(lines: &[&str]) -> tempfile::NamedTempFile {
         let mut f = tempfile::NamedTempFile::new().unwrap();
@@ -2842,7 +2842,7 @@ mod tests {
         let f = write_updates_file(&[bad, &good]);
 
         let events = collect_events(f.path());
-        // bad line ÔåÆ NotUserMessage; good line ÔåÆ UserTextChunk
+        // bad line → NotUserMessage; good line → UserTextChunk
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], PromptExtractEvent::NotUserMessage);
         assert_eq!(events[1], PromptExtractEvent::user_text("ok"));
@@ -3209,7 +3209,7 @@ mod tests {
         assert_eq!(texts, vec!["P0", "phantom", "P1", "after"]);
     }
 
-    // ÔöÇÔöÇ filter_rewind_lines tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── filter_rewind_lines tests ────────────────────────────────────────────
 
     #[test]
     fn filter_rewind_removes_dead_branch() {
@@ -3225,7 +3225,7 @@ mod tests {
         let a2 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"resp2"}}"#,
         );
-        // Rewind to prompt 1 ÔÇö kills u2, a2
+        // Rewind to prompt 1 — kills u2, a2
         let rw = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
         );
@@ -3333,7 +3333,7 @@ mod tests {
         let a3 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r3"}}"#,
         );
-        // Rewind to prompt 2 ÔÇö kills p3/r3
+        // Rewind to prompt 2 — kills p3/r3
         let rw1 = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":2,"created_at":"2024-01-01"}"#,
         );
@@ -3343,7 +3343,7 @@ mod tests {
         let a4 = acp_envelope(
             r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"r4"}}"#,
         );
-        // Rewind to prompt 1 ÔÇö kills p2/r2/p4/r4
+        // Rewind to prompt 1 — kills p2/r2/p4/r4
         let rw2 = xai_envelope(
             r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
         );
@@ -3460,7 +3460,7 @@ mod tests {
         assert!(result[2].contains("p2"));
     }
 
-    // ÔöÇÔöÇ collect_assistant_text / collect_tool_metadata tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── collect_assistant_text / collect_tool_metadata tests ──────────────────
 
     #[test]
     fn collect_assistant_text_extracts_chunks() {
@@ -3483,8 +3483,8 @@ mod tests {
     #[test]
     fn collect_assistant_text_caps_at_100k() {
         // Two 60k chunks with non-ASCII, separator, and truncation
-        let chunk1 = "x".repeat(60_000) + "caf├®"; // 60k + 5 bytes (caf├® is 5 UTF-8 bytes)
-        let chunk2 = "µùÑµ£¼Þ¬×".repeat(20_000); // 60k bytes (3 bytes per char)
+        let chunk1 = "x".repeat(60_000) + "café"; // 60k + 5 bytes (café is 5 UTF-8 bytes)
+        let chunk2 = "日本語".repeat(20_000); // 60k bytes (3 bytes per char)
         let lines = vec![
             acp_envelope(&format!(
                 r#"{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"{chunk1}"}}}}"#
@@ -3502,7 +3502,7 @@ mod tests {
         assert!(total <= 100_000, "got {total} chars");
         // Verify non-ASCII content is present (not corrupted by truncation)
         assert!(
-            result.iter().any(|s| s.contains("caf├®")),
+            result.iter().any(|s| s.contains("café")),
             "non-ASCII should be preserved"
         );
     }
@@ -3539,7 +3539,7 @@ mod tests {
     #[test]
     fn from_str_unknown_xai_variant_deserializes_via_envelope() {
         // Simulates an updates.jsonl line containing a removed variant (e.g. git_branch_update).
-        // SessionUpdateEnvelope::from_str must not error ÔÇö the Unknown catch-all absorbs it.
+        // SessionUpdateEnvelope::from_str must not error — the Unknown catch-all absorbs it.
         let line = xai_envelope(r#"{"sessionUpdate":"git_branch_update","branch":"main"}"#);
         let update = SessionUpdateEnvelope::from_str(&line).unwrap();
         match update {

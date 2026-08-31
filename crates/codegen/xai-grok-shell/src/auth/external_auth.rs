@@ -102,27 +102,38 @@ mod tests {
 
     #[test]
     fn parse_output_nonzero_exit_is_err() {
-        assert!(parse_output(&crate::auth::fake_output(false, "token")).is_err());
+        let output = std::process::Output {
+            status: std::process::Command::new("false").status().unwrap(),
+            stdout: b"token".to_vec(),
+            stderr: vec![],
+        };
+        assert!(parse_output(&output).is_err());
     }
 
     #[test]
     fn parse_output_empty_stdout_is_err() {
-        assert!(parse_output(&crate::auth::fake_output(true, "  \n")).is_err());
+        let output = std::process::Output {
+            status: std::process::Command::new("true").status().unwrap(),
+            stdout: b"  \n".to_vec(),
+            stderr: vec![],
+        };
+        assert!(parse_output(&output).is_err());
     }
 
     #[test]
     fn parse_output_issuer_claim_enables_xai_auth() {
-        let ok = |stdout: &str| crate::auth::fake_output(true, stdout);
+        let ok = |stdout: &str| std::process::Output {
+            status: std::process::Command::new("true").status().unwrap(),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: vec![],
+        };
 
-        // A first-party issuer claim → first-party session (relay-eligible).
-        // The issuer is the configured OAuth2 issuer (api.chutes.ai), not the
-        // upstream literal this test once carried.
-        let issuer = crate::auth::config::XAI_OAUTH2_ISSUER;
-        let auth = parse_output(&ok(&format!(
-            r#"{{"access_token":"t","expires_in":900,"issuer":"{issuer}"}}"#
-        )))
+        // chutes.ai issuer claim → first-party session (relay-eligible).
+        let auth = parse_output(&ok(
+            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.chutes.ai"}"#,
+        ))
         .unwrap();
-        assert_eq!(auth.oidc_issuer.as_deref(), Some(issuer));
+        assert_eq!(auth.oidc_issuer.as_deref(), Some("https://auth.chutes.ai"));
         assert!(auth.is_xai_auth());
 
         // Non-chutes.ai issuer is stored but stays third-party.
@@ -151,7 +162,12 @@ mod tests {
 
     #[test]
     fn parse_output_json_shaped_but_invalid_is_err() {
-        assert!(parse_output(&crate::auth::fake_output(true, "{not valid json}")).is_err());
+        let output = std::process::Output {
+            status: std::process::Command::new("true").status().unwrap(),
+            stdout: b"{not valid json}".to_vec(),
+            stderr: vec![],
+        };
+        assert!(parse_output(&output).is_err());
     }
 
     #[tokio::test]
@@ -161,13 +177,9 @@ mod tests {
 
     #[tokio::test]
     async fn sets_grok_auth_expired_env_on_refresh() {
-        let cmd = crate::auth::provider_fixture_command(&[
-            "env",
-            "",
-            "CHUTES_BUILD_AUTH_EXPIRED",
-            "unset",
-        ]);
-        let auth = run_external_refresh(&cmd).await.unwrap();
+        let auth = run_external_refresh("echo $CHUTES_BUILD_AUTH_EXPIRED")
+            .await
+            .unwrap();
         assert_eq!(auth.key, "1");
     }
 
@@ -180,12 +192,9 @@ mod tests {
             organization_id: Some("org-1".into()),
             ..GrokAuth::test_default()
         };
-        let auth = refresh_with_command(
-            &crate::auth::provider_fixture_command(&["print", "fresh-token"]),
-            &prev,
-        )
-        .await
-        .unwrap();
+        let auth = refresh_with_command("echo fresh-token", &prev)
+            .await
+            .unwrap();
         assert_eq!(auth.key, "fresh-token");
         assert!(auth.is_zdr_team(), "ZDR flag must survive refresh");
         assert!(auth.coding_data_retention_opt_out);
@@ -199,10 +208,10 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_interactive_times_out() {
-        // The helper blocks past the 5s refresh timeout, which kills it.
-        let cmd = crate::auth::provider_fixture_command(&["sleep", "20000"]);
+        // Binary writes a link to stderr then blocks; the 5s refresh timeout kills it.
+        let cmd = r#"echo 'Visit http://example.com/auth' >&2; sleep 20; echo token"#;
         let start = std::time::Instant::now();
-        let result = run_external_refresh(&cmd).await;
+        let result = run_external_refresh(cmd).await;
         let elapsed = start.elapsed();
         assert!(result.is_none(), "should timeout and return None");
         assert!(

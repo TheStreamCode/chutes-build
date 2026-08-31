@@ -106,9 +106,6 @@ pub struct BillingConfig {
     pub billing_period_end: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<BillingPeriodUsage>,
-    /// Usage windows from the external OTLP config (our fork).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub usage_windows: Vec<serde_json::Value>,
 }
 
 /// Top-level response (primarily from `GET /rest/grok/credits` + auto-topup-rule).
@@ -151,11 +148,11 @@ pub struct GetAutoTopupRuleResponse {
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/billing" => {
+        "chutes.ai/billing" => {
             tracing::info!("handling billing config request");
             handle_get_billing(agent).await
         }
-        "chutes.build/auto-topup-rule" => {
+        "chutes.ai/auto-topup-rule" => {
             tracing::info!("handling auto top-up rule request");
             handle_get_auto_topup_rule(agent).await
         }
@@ -423,7 +420,6 @@ mod tests {
                 is_unified_billing_user: Some(true),
                 billing_period_start: None,
                 billing_period_end: None,
-                usage_windows: vec![],
                 history: vec![
                     BillingPeriodUsage {
                         billing_cycle: Some(BillingCycle {
@@ -478,7 +474,6 @@ mod tests {
             is_unified_billing_user: None,
             billing_period_start: Some("2025-04-01T00:00:00Z".to_string()),
             billing_period_end: Some("2025-05-01T00:00:00Z".to_string()),
-            usage_windows: Vec::new(),
             history: vec![BillingPeriodUsage {
                 billing_cycle: Some(BillingCycle {
                     year: 2025,
@@ -537,7 +532,6 @@ mod tests {
             is_unified_billing_user: None,
             billing_period_start: None,
             billing_period_end: None,
-            usage_windows: vec![],
             history: vec![],
         };
         let json = serde_json::to_value(&config).unwrap();

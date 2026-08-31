@@ -2,7 +2,7 @@
 //!
 //! The official `grok-agent-sdk` lets a host define in-process tools (`@tool` /
 //! `create_sdk_mcp_server`). When `transport="acp"`, the SDK registers them in
-//! `session/new` `_meta["chutes.build/mcp/servers"] = [{ "name", "serverId" }]` and the agent
+//! `session/new` `_meta["chutes.ai/mcp/servers"] = [{ "name", "serverId" }]` and the agent
 //! invokes their tools by sending each MCP JSON-RPC message back to the client as a
 //! reverse `chutes.ai/mcp/sdk_call` request — handled here by [`GatewayAcpInvoker`].
 //!
@@ -20,7 +20,7 @@ use xai_grok_mcp::acp_transport::AcpReverseInvoker;
 use xai_grok_mcp::servers::AcpServerEntry;
 use xai_grok_mcp::wire;
 
-/// Parse `_meta["chutes.build/mcp/servers"]` into [`AcpServerEntry`] registrations. Each entry
+/// Parse `_meta["chutes.ai/mcp/servers"]` into [`AcpServerEntry`] registrations. Each entry
 /// is deserialized directly into the canonical type (so the `serverId` wire field is
 /// serde-checked, not hand-read); entries missing `name`/`serverId` are skipped with a
 /// warning. A name seen twice keeps the first (server names are the tool namespace, so a
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn parses_valid_entries_and_skips_malformed() {
         let meta = serde_json::json!({
-            "chutes.build/mcp/servers": [
+            "chutes.ai/mcp/servers": [
                 { "name": "harness-tools", "serverId": "srv_0" },
                 { "name": "missing-id" },
                 { "serverId": "no_name" },
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn duplicate_names_keep_the_first() {
         let meta = serde_json::json!({
-            "chutes.build/mcp/servers": [
+            "chutes.ai/mcp/servers": [
                 { "name": "tools", "serverId": "srv_0" },
                 { "name": "tools", "serverId": "srv_1" },
             ]

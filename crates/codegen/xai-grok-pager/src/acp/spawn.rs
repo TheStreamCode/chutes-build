@@ -6,7 +6,7 @@
 use std::io::IsTerminal;
 use std::rc::Rc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
@@ -99,19 +99,13 @@ impl Drop for AgentShutdownGuard {
     }
 }
 
-/// Why the join ended, so each case is explicit at the call site (and callers
-/// can tell a completed flush from an abandoned one).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 enum JoinOutcome {
-    /// Worker returned cleanly: session actors flushed within the grace.
     Joined,
-    /// Worker returned an error; the flush may be incomplete.
     Failed(String),
-    /// Worker panicked, with the payload rendered as text.
     Panicked(String),
-    /// Worker was still running when the budget elapsed.
     TimedOut,
-    /// The join helper vanished without reporting (helper thread itself died).
     HelperLost,
 }
 
@@ -125,29 +119,44 @@ enum JoinOutcome {
 fn join_agent_thread(handle: thread::JoinHandle<Result<()>>, timeout: Duration) -> JoinOutcome {
     use std::sync::mpsc::RecvTimeoutError;
 
+    let span = xai_grok_telemetry::session_end::join_span();
+    let start = Instant::now();
+
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(handle.join());
     });
 
-    // Two-phase wait: silent for a short join (overwhelmingly the common case),
-    // then a one-line notice so a slow SessionEnd pipeline does not look like a
-    // frozen exit. Only for a terminal — piped/JSON consumers stay clean.
     let quiet = timeout.min(JOIN_NOTICE_AFTER);
-    match rx.recv_timeout(quiet) {
-        Ok(result) => return classify_join(result),
+    let mut notice_shown = false;
+    let outcome = match rx.recv_timeout(quiet) {
+        Ok(result) => classify_join(result),
+        Err(RecvTimeoutError::Disconnected) => JoinOutcome::HelperLost,
         Err(RecvTimeoutError::Timeout) => {
             if std::io::stderr().is_terminal() {
                 eprintln!("{JOIN_NOTICE}");
+                notice_shown = true;
+            }
+            match rx.recv_timeout(timeout.saturating_sub(quiet)) {
+                Ok(result) => classify_join(result),
+                Err(RecvTimeoutError::Timeout) => JoinOutcome::TimedOut,
+                Err(RecvTimeoutError::Disconnected) => JoinOutcome::HelperLost,
             }
         }
-        Err(RecvTimeoutError::Disconnected) => return JoinOutcome::HelperLost,
-    }
-    match rx.recv_timeout(timeout.saturating_sub(quiet)) {
-        Ok(result) => classify_join(result),
-        Err(RecvTimeoutError::Timeout) => JoinOutcome::TimedOut,
-        Err(RecvTimeoutError::Disconnected) => JoinOutcome::HelperLost,
-    }
+    };
+
+    let outcome_label: &'static str = (&outcome).into();
+    let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    xai_grok_telemetry::session_end::record_join(&span, outcome_label, elapsed_ms, notice_shown);
+    crate::unified_log::write_direct_info(
+        "session_end.worker_join",
+        Some(serde_json::json!({
+            "elapsed_ms": elapsed_ms,
+            "outcome": outcome_label,
+            "notice_shown": notice_shown,
+        })),
+    );
+    outcome
 }
 
 fn classify_join(result: thread::Result<Result<()>>) -> JoinOutcome {
@@ -205,8 +214,6 @@ pub async fn spawn_grok_shell(
     let (agent_config, models_manager) =
         xai_grok_shell::agent::init::bootstrap(&agent_config, &auth_manager, None)
             .map_err(|e| anyhow::anyhow!(e))?;
-    // Self-heal a cold-cache/failed boot fetch once the backend recovers,
-    // matching the leader and stdio paths.
     models_manager.spawn_background_refresh();
 
     let agent_cancel = cancel.child_token();
@@ -232,9 +239,9 @@ pub async fn spawn_grok_shell(
     };
 
     // Spawn the agent thread with direct dispatch
-    startup::enter(StartupPhase::SpawnWorker);
+    startup::enter(StartupPhase::WorkerSpawn);
     let handle =
-        spawn_agent_thread_direct(spawn_fn, acp_agent, agent_cancel.clone(), skills_paths)?;
+        spawn_agent_thread_direct(spawn_fn, acp_agent, agent_cancel.clone(), skills_paths).await?;
 
     Ok(SpawnedAgent {
         thread_handle: handle,
@@ -248,18 +255,26 @@ pub async fn spawn_grok_shell(
 ///
 /// The agent runs on a single-threaded tokio LocalSet runtime.
 /// RPC requests go directly to the agent via Rc, bypassing simplex pipes.
-fn spawn_agent_thread_direct(
+async fn spawn_agent_thread_direct(
     spawn_agent: Box<dyn FnOnce(AcpClientTx) -> Result<Rc<MvpAgent>> + Send + 'static>,
     channel: AcpAgentChannel,
     cancel: CancellationToken,
     skills_paths: Vec<String>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
+    // Off the UI worker: failure must fail spawn, not start ACP.
+    let rt = tokio::task::spawn_blocking(|| {
+        let mut builder = tokio::runtime::Builder::new_current_thread();
+        xai_tty_utils::runtime::build_with_blocking_pool(builder.enable_all())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("agent runtime worker join: {e}"))?
+    .map_err(|e| {
+        tracing::error!(error = %e, "failed to start agent runtime");
+        anyhow::anyhow!("failed to start agent runtime: {e}")
+    })?;
     Ok(thread::Builder::new()
         .name("acp-agent-worker".into())
         .spawn(move || -> Result<()> {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async move {
                 let client_tx = channel.tx.clone();
@@ -315,6 +330,7 @@ fn spawn_agent_thread_direct(
                 // SessionEnd. Mirrors leader auto-update / relaunch.
                 cancel.cancelled().await;
                 agent_rc.flush_all_sessions(SESSION_FLUSH_GRACE).await;
+                xai_grok_telemetry::session_ctx::drain_at_process_exit().await;
                 anyhow::Result::Ok(())
             })
         })?)

@@ -1,19 +1,17 @@
 //! Read-only system-block text for `/queue`, `/tasks`, and `/usage`.
 //!
-//! Plain text committed into scrollback — the primary inspection surface in
-//! minimal mode (no interactive panes). Kept out of `dispatch` for easy
-//! unit tests.
+//! Plain text committed into scrollback; minimal mode has no interactive panes, so these blocks are its main way to inspect that state.
+//! The formatting lives outside `dispatch` so it is easy to unit test.
 
 use crate::app::agent::BgTaskStatus;
 use crate::app::agent_view::AgentView;
 use crate::app::subagent::format_subagent_label;
 use crate::util::{format_duration, group_thousands};
 
-/// `/queue` body — a read-only list of the queued prompts.
+/// `/queue` body: a read-only list of the queued prompts.
 ///
-/// Server-authoritative shared-queue rows (the in-flight prompt excluded) come
-/// first in broadcast order, then the local drip-feed queue — matching
-/// [`crate::views::queue_pane::QueuePane::sync_from_merged`]'s ordering.
+/// Rows from the server's shared queue (minus the prompt already running) come first in broadcast order, then the local queue (`pending_prompts`).
+/// This matches [`crate::views::queue_pane::QueuePane::sync_from_merged`]'s ordering.
 pub(crate) fn queue_block_text(agent: &AgentView) -> String {
     let running_id = agent.session.current_prompt_id.as_deref();
 
@@ -43,8 +41,7 @@ pub(crate) fn queue_block_text(agent: &AgentView) -> String {
     }
 }
 
-///
-/// [`crate::views::tasks_pane::TasksPane`] without its styled rows.
+/// `/tasks` body: [`crate::views::tasks_pane::TasksPane`] without its styled rows.
 pub(crate) fn tasks_block_text(agent: &AgentView) -> String {
     let mut rows: Vec<String> = Vec::new();
 
@@ -177,8 +174,7 @@ pub(crate) fn tasks_block_text(agent: &AgentView) -> String {
     }
 }
 
-/// `/usage` body — per-session token and cost totals, scoped to the ledger's
-/// lifetime: since session start, or since the last `/resume`.
+/// `/usage` body: per-session token and cost totals, covering the ledger's lifetime (since session start, or since the last `/resume`).
 pub(crate) fn session_usage_block_text(
     usage: &xai_grok_shell::extensions::notification::PromptUsage,
 ) -> String {
@@ -194,16 +190,9 @@ pub(crate) fn session_usage_block_text(
 
     let mut rows = Vec::new();
     rows.push(format!(
-        "  Input tokens:   {} ({} cached, {:.1}%)",
+        "  Input tokens:   {} ({} cached)",
         group_thousands(t.input_tokens),
         group_thousands(t.cached_read_tokens),
-        t.cache_read_ratio() * 100.0,
-    ));
-    rows.push(format!(
-        "  Cache:          {} hit / {} call{}",
-        group_thousands(t.cache_hit_calls),
-        group_thousands(t.model_calls),
-        if t.model_calls == 1 { "" } else { "s" },
     ));
     rows.push(format!(
         "  Output tokens:  {} ({} reasoning)",
@@ -225,7 +214,7 @@ pub(crate) fn session_usage_block_text(
         rows.push("  By model:".to_string());
         for (model, m) in &usage.model_usage {
             rows.push(format!(
-                "    {model} — {} in / {} out · {}",
+                "    {model}: {} in / {} out · {}",
                 group_thousands(m.input_tokens),
                 group_thousands(m.output_tokens),
                 format_cost(m),
@@ -243,7 +232,7 @@ pub(crate) fn session_usage_block_text(
     )
 }
 
-/// Cost cell. Ticks are 1e10 per USD; partial sums are scrubbed to absent.
+/// Formats the cost cell. Ticks are 1e10 per USD; a partial sum is reported as absent.
 fn format_cost(m: &xai_grok_shell::extensions::notification::PromptUsageModel) -> String {
     use xai_grok_shell::extensions::notification::ticks_to_usd;
     match m.cost_usd_ticks {
@@ -253,17 +242,15 @@ fn format_cost(m: &xai_grok_shell::extensions::notification::PromptUsageModel) -
     }
 }
 
-/// First non-empty, trimmed line of `text` (empty string if none). Collapses a
-/// multi-line prompt/command to a single display line.
-fn first_nonempty_line(text: &str) -> &str {
+/// First non-empty, trimmed line of `text` (empty string if none). Collapses a multi-line prompt/command to a single display line.
+pub(crate) fn first_nonempty_line(text: &str) -> &str {
     text.lines()
         .map(str::trim)
         .find(|l| !l.is_empty())
         .unwrap_or("")
 }
 
-/// Format one `/queue` row as `  #N  <first non-empty line>` with a
-/// `(+K more lines)` suffix for multi-line prompts.
+/// Format one `/queue` row as `  #N  <first non-empty line>` with a `(+K more lines)` suffix for multi-line prompts.
 fn format_queue_row(pos: usize, text: &str) -> String {
     let first_line = first_nonempty_line(text);
     let extra = text.lines().count().saturating_sub(1);
@@ -277,7 +264,6 @@ fn format_queue_row(pos: usize, text: &str) -> String {
     }
 }
 
-/// Join a header line above its rows into a single block string.
 fn join_header_rows(header: String, rows: Vec<String>) -> String {
     std::iter::once(header)
         .chain(rows)
@@ -299,8 +285,6 @@ mod tests {
             cache_creation_tokens: 0,
             reasoning_tokens: 0,
             model_calls: 1,
-            cache_hit_calls: 0,
-            cache_miss_calls: 0,
             api_duration_ms: 1_000,
             cost_usd_ticks: ticks,
             cost_is_partial: false,
@@ -330,16 +314,13 @@ mod tests {
         totals.cached_read_tokens = 1_000_000;
         totals.reasoning_tokens = 12_000;
         totals.model_calls = 42;
-        totals.cache_hit_calls = 39;
-        totals.cache_miss_calls = 3;
         totals.api_duration_ms = 192_000;
         let usage = PromptUsage {
             totals,
             ..Default::default()
         };
         let text = session_usage_block_text(&usage);
-        // Snapshot pins content and column alignment together; single-model
-        // sessions must skip the redundant by-model breakdown.
+        // Snapshot pins content and column alignment together; single-model sessions must skip the redundant by-model breakdown
         insta::assert_snapshot!("session_usage_block_full", text);
     }
 
@@ -357,8 +338,8 @@ mod tests {
             .insert("grok-4".into(), model_row(50, 5, None));
         let text = session_usage_block_text(&usage);
         assert!(text.contains("By model:"), "{text}");
-        assert!(text.contains("chutes-build — 100 in / 10 out"), "{text}");
-        assert!(text.contains("grok-4 — 50 in / 5 out"), "{text}");
+        assert!(text.contains("chutes-build: 100 in / 10 out"), "{text}");
+        assert!(text.contains("grok-4: 50 in / 5 out"), "{text}");
     }
 
     #[test]
@@ -385,21 +366,6 @@ mod tests {
         let text = session_usage_block_text(&usage);
         assert!(text.contains("not reported for some calls"), "{text}");
         assert!(text.contains("usage is incomplete"), "{text}");
-    }
-
-    #[test]
-    fn session_usage_block_cache_ratio_zero_input_does_not_divide_by_zero() {
-        let mut totals = model_row(0, 10, None);
-        totals.cached_read_tokens = 0;
-        let usage = PromptUsage {
-            totals,
-            ..Default::default()
-        };
-        let text = session_usage_block_text(&usage);
-        assert!(
-            text.contains("Input tokens:   0 (0 cached, 0.0%)"),
-            "{text}"
-        );
     }
 
     #[test]

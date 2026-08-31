@@ -1,5 +1,3 @@
-//! Tests for session forking.
-
 use super::*;
 
 // ── Worktree session tests ───────────────────────────────────────
@@ -65,6 +63,77 @@ fn worktree_forked_sets_session_id_eagerly_and_emits_load() {
 }
 
 #[test]
+fn startup_fork_parent_is_worktree_for_standalone_clone() {
+    let mut app = test_app();
+    let main = crate::test_util::TempGitRepo::init("main-only");
+    let clone = main.standalone_clone("wt-branch");
+    let effects = dispatch(
+        Action::StartupForkSession {
+            parent_session_id: "parent-sid".into(),
+            parent_cwd: Some(clone.path.clone()),
+            new_session_id: None,
+        },
+        &mut app,
+    );
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::ForkSession {
+                parent_is_worktree: true,
+                ..
+            }
+        )),
+        "startup fork from a standalone clone must pass parent_is_worktree, got {effects:?}"
+    );
+}
+
+#[test]
+fn worktree_forked_clears_sticky_branch_from_main_repo() {
+    let mut app = test_app_git();
+    dispatch(
+        Action::NewWorktreeSession {
+            load_session_id: Some("orig-sess".into()),
+            label: None,
+            git_ref: None,
+        },
+        &mut app,
+    );
+    let id = AgentId(0);
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.current_branch = Some("main-random".into());
+        agent.main_repo = Some("~/old-main".into());
+        agent.is_worktree = false;
+    }
+
+    let worktree_path = PathBuf::from("/tmp/grok-worktrees/pager-fork-sticky");
+    let session_cwd = worktree_path.join("sub");
+    dispatch(
+        Action::TaskComplete(TaskResult::WorktreeForked {
+            agent_id: id,
+            session_id: acp::SessionId::new("forked-sess-sticky"),
+            worktree_path,
+            session_cwd: session_cwd.clone(),
+            code_restored: false,
+            restore_summary: None,
+            restore_degree: None,
+            resume_session_id: Some("orig-sess".into()),
+        }),
+        &mut app,
+    );
+
+    let agent = &app.agents[&id];
+    assert!(
+        agent.current_branch.is_none(),
+        "sticky main-repo branch must not survive the worktree cwd switch"
+    );
+    assert!(agent.main_repo.is_none());
+    assert!(agent.is_worktree);
+    assert!(agent.session.is_worktree);
+    assert_eq!(agent.session.cwd, session_cwd);
+}
+
+#[test]
 fn worktree_forked_with_restore_shows_summary_in_scrollback() {
     let mut app = test_app_git();
     dispatch(
@@ -95,13 +164,13 @@ fn worktree_forked_with_restore_shows_summary_in_scrollback() {
         &mut app,
     );
 
-    // Should emit LoadSession.
+    // Emits LoadSession
     assert_eq!(effects.len(), 1);
     assert!(matches!(
         &effects[0],
         Effect::LoadSession { session_id, .. } if session_id == "forked-sess-2"
     ));
-    // Scrollback should contain the restore summary.
+    // The scrollback contains the restore summary
     let has_restore_msg = app.agents[&id]
         .scrollback
         .entries_in_range(0..app.agents[&id].scrollback.len())
@@ -115,10 +184,8 @@ fn worktree_forked_with_restore_shows_summary_in_scrollback() {
     );
 }
 
-/// When the server emits `code_restored: false` with a non-empty
-/// summary (e.g. "restore aborted (checkout failed)…"), the pager
-/// MUST surface a warning banner; a success-only gate would silently
-/// drop it.
+/// The server can emit `code_restored: false` with a non-empty summary (e.g. "restore aborted (checkout failed)…").
+/// The pager MUST surface a warning banner; a success-only gate would silently drop it.
 #[test]
 fn worktree_forked_with_restore_failure_shows_warning_banner() {
     let mut app = test_app_git();
@@ -174,9 +241,8 @@ fn worktree_forked_with_restore_failure_shows_warning_banner() {
     );
 }
 
-/// A load INITIATION taking over a windowed agent supersedes the window
-/// (finalized as failed) so the new load owns the batch/replay state and
-/// its own `SessionLoaded` is NOT deferred.
+/// A load INITIATION taking over a windowed agent supersedes the window (finalized as failed).
+/// The new load owns the batch/replay state and its own `SessionLoaded` is NOT deferred.
 #[test]
 fn fork_initiation_supersedes_open_reload_window() {
     let mut app = test_app();
@@ -223,7 +289,7 @@ fn fork_initiation_supersedes_open_reload_window() {
         );
     }
 
-    // The fork's own SessionLoaded is not deferred — it settles the batch.
+    // The fork's own SessionLoaded is not deferred; it settles the batch
     dispatch(
         Action::TaskComplete(TaskResult::SessionLoaded {
             agent_id: id,
@@ -259,7 +325,7 @@ fn slash_new_uses_worktree_cwd() {
         Effect::CreateSession { cwd, .. } => assert_eq!(cwd, &worktree_path),
         _ => unreachable!(),
     }
-    // The new agent (id=1) should inherit is_worktree from the source agent.
+    // The new agent (id=1) inherits is_worktree from the source agent
     let new_id = AgentId(1);
     assert!(app.agents[&new_id].session.is_worktree);
 }
@@ -318,7 +384,7 @@ fn auth_complete_resume_plus_worktree_creates_worktree_with_session() {
         &mut app,
     );
 
-    // --resume + --worktree: CreateWorktreeSession with the session ID.
+    // --resume and --worktree together: CreateWorktreeSession with the session ID
     assert!(effects.iter().any(|e| matches!(
         e,
         Effect::CreateWorktreeSession {
@@ -339,16 +405,14 @@ fn dispatch_fork_from_welcome_toasts_and_returns_no_effect() {
     app.active_view = ActiveView::Welcome;
     let effects = dispatch(Action::Fork(fork_args(None, None)), &mut app);
     assert!(effects.is_empty());
-    // No active agent on Welcome, so no toast lands -- but the
-    // important property is that no effect / agent was created.
+    // No active agent on Welcome, so no toast lands; the point is that no effect / agent was created
     assert_eq!(app.agents.len(), 1);
 }
 
 #[test]
 fn dispatch_fork_without_session_id_toasts_and_returns_no_effect() {
     let mut app = fork_test_app();
-    // Strip the placeholder session_id so the "still being created"
-    // guard fires.
+    // Strip the placeholder session_id so the "still being created" guard fires
     app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
     let effects = dispatch(Action::Fork(fork_args(None, None)), &mut app);
     assert!(effects.is_empty());
@@ -388,8 +452,7 @@ fn dispatch_fork_no_worktree_flag_skips_modal() {
 
 #[test]
 fn dispatch_fork_worktree_flag_non_git_toasts_and_returns_no_effect() {
-    // --worktree in a non-git directory must be rejected synchronously
-    // rather than waiting for an async WorktreeSessionFailed.
+    // --worktree in a non-git directory must be rejected synchronously rather than waiting for an async WorktreeSessionFailed
     let mut app = test_app_with_agent();
     // current_branch stays None (no git repo).
     let effects = dispatch(Action::Fork(fork_args(Some(true), None)), &mut app);
@@ -408,10 +471,9 @@ fn dispatch_fork_worktree_flag_non_git_toasts_and_returns_no_effect() {
 
 #[test]
 fn dispatch_fork_no_flag_non_git_skips_modal_and_forks_without_worktree() {
-    // When current_branch is None (not in a git repo), the worktree
-    // question is meaningless — skip it and fork with worktree=false.
+    // When current_branch is None (not in a git repo), the worktree question is meaningless: skip it and fork with worktree=false
     let mut app = test_app_with_agent();
-    // Do NOT set current_branch — the default None simulates a non-git cwd.
+    // Do NOT set current_branch; the default None simulates a non-git cwd
     assert!(app.agents[&AgentId(0)].current_branch.is_none());
     let effects = dispatch(
         Action::Fork(fork_args(None, Some("explore offline"))),
@@ -556,7 +618,7 @@ fn dispatch_fork_sets_forked_from_on_new_agent() {
     assert_eq!(new_agent.session.forked_from, Some(AgentId(0)));
 }
 
-/// GBT-4789 — dashboard attach follows the forked child.
+/// Dashboard attach follows the forked child.
 #[test]
 fn dispatch_fork_repoints_dashboard_attached_agent_to_child() {
     let mut app = fork_test_app();
@@ -725,9 +787,8 @@ fn build_child_fork_marker_no_worktree_format() {
     );
 }
 
-/// With the dashboard feature flag off, the banner must not advertise
-/// `/dashboard` (the command is refused when disabled) but still carry
-/// the session ids and the shared-cwd caveat.
+/// With the dashboard feature flag off, the banner must not advertise `/dashboard` (the command is refused when disabled).
+/// It still carries the session ids and the shared-cwd caveat.
 #[test]
 fn build_child_fork_marker_omits_dashboard_tip_when_disabled() {
     let banner = build_child_fork_marker("child-sid", "parent-sid", false, None);
@@ -749,9 +810,8 @@ fn build_child_fork_marker_omits_dashboard_tip_when_disabled() {
     );
 }
 
-/// In minimal mode the caller passes `/resume` (the dashboard is refused
-/// there but the session picker works) — the banner must advertise it and
-/// never mention `/dashboard`.
+/// In minimal mode the caller passes `/resume` (the dashboard is refused there but the session picker works).
+/// The banner must advertise it and never mention `/dashboard`.
 #[test]
 fn build_child_fork_marker_minimal_mode_advertises_resume() {
     let banner = build_child_fork_marker("child-sid", "parent-sid", false, Some("/resume"));
@@ -795,8 +855,7 @@ fn dispatch_fork_inherits_appearance_sharing_and_plugin_visibility() {
     app.sharing_enabled = false;
     app.usage_visible = false;
     app.appearance.disable_plugins = true;
-    // Cached billing state must be inherited so the credits warning is
-    // correct from the first frame (not just after a billing fetch).
+    // Cached billing state must be inherited so the credits warning is correct from the first frame (not just after a billing fetch)
     app.credit_balance = Some(crate::views::credit_bar::CreditBalance {
         prepaid_balance_cents: Some(1500),
         ..test_bal(50.0)
@@ -847,8 +906,7 @@ fn dispatch_fork_answered_re_dispatches_to_dispatch_fork_resolved() {
     );
 }
 
-/// `Action::ForkAnswered { worktree: true, .. }` produces the
-/// `CreateWorktreeSession` effect (the "Yes" submit path).
+/// `Action::ForkAnswered { worktree: true, .. }` produces the `CreateWorktreeSession` effect (the "Yes" submit path).
 #[test]
 fn dispatch_fork_answered_worktree_true_emits_create_worktree_session() {
     let mut app = fork_test_app();
@@ -866,8 +924,7 @@ fn dispatch_fork_answered_worktree_true_emits_create_worktree_session() {
     ));
 }
 
-/// `Action::ForkAnswered { worktree: false, .. }` produces the
-/// `ForkSession` effect (the "No" submit path).
+/// `Action::ForkAnswered { worktree: false, .. }` produces the `ForkSession` effect (the "No" submit path).
 #[test]
 fn dispatch_fork_answered_worktree_false_emits_fork_session() {
     let mut app = fork_test_app();
@@ -991,7 +1048,6 @@ fn dispatch_new_session_answered_worktree_does_not_cancel_old_turn() {
             .any(|e| matches!(e, Effect::CreateWorktreeSession { .. })),
         "expected CreateWorktreeSession, got {effects:?}"
     );
-    // Old agent's turn must still be running.
     assert!(
         app.agents[&id].session.state.is_turn_running(),
         "old agent's turn must remain running"
@@ -1140,8 +1196,7 @@ fn worktree_forked_does_not_retarget_unrelated_suppress() {
 #[test]
 fn fork_session_ready_emits_load_session_with_new_id() {
     let mut app = fork_test_app();
-    // Plant a placeholder fork agent (mirroring what dispatch_fork
-    // would do).
+    // Plant a placeholder fork agent (mirroring what dispatch_fork would do)
     insert_placeholder_agent(&mut app, AgentId(1));
     app.agents.get_mut(&AgentId(1)).unwrap().session.session_id = None;
     let effects = dispatch(
@@ -1189,8 +1244,46 @@ fn fork_session_ready_emits_load_session_with_new_id() {
     assert!(app.agents[&AgentId(1)].session.loading_replay);
 }
 
-/// No-worktree fork under sticky `--chat` must refuse a local Build row
-/// (same gate as WorktreeForked / dispatch_load_session_ungated).
+/// Successful no-worktree fork under sticky `--chat` (child not a local Build row under cwd) must stamp `conversation_entry`.
+/// `rename_kind()` then matches the `kind=chat` stamp on the load effect.
+#[test]
+fn fork_session_ready_sticky_chat_sets_rename_kind_chat() {
+    let mut app = fork_test_app();
+    insert_placeholder_agent(&mut app, AgentId(1));
+    app.agents.get_mut(&AgentId(1)).unwrap().session.session_id = None;
+    app.agents.get_mut(&AgentId(1)).unwrap().conversation_entry = false;
+    app.chat_mode = true;
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::ForkSessionReady {
+            agent_id: AgentId(1),
+            new_session_id: "new-sid-chat".into(),
+            cwd: PathBuf::from("/tmp/forked"),
+            parent_session_id: acp::SessionId::new("test-session"),
+        }),
+        &mut app,
+    );
+    match effects.as_slice() {
+        [Effect::LoadSession { chat_kind, .. }] => {
+            assert!(
+                !*chat_kind,
+                "LoadSession chat_kind stays the raw conversation-entry bit"
+            );
+        }
+        other => panic!("expected LoadSession, got {other:?}"),
+    }
+    let agent = app.agents.get(&AgentId(1)).expect("fork agent kept");
+    assert!(agent.chat_kind, "UI bit comes from sticky --chat");
+    assert!(
+        agent.conversation_entry,
+        "sticky --chat fork with no local disk opens as chat (rename kind)"
+    );
+    assert_eq!(
+        agent.rename_kind(),
+        xai_grok_shell::session::unified_list::SessionKind::Chat
+    );
+}
+
+/// No-worktree fork under sticky `--chat` must refuse a local Build row (same gate as WorktreeForked / dispatch_load_session_ungated).
 #[test]
 fn fork_session_ready_refuses_local_build_under_chat_mode() {
     let mut app = fork_test_app();
@@ -1308,7 +1401,7 @@ fn translate_local_submit_no_returns_worktree_false_action() {
         crate::views::prompt_widget::StashedPrompt::default(),
     )
     .with_local_kind(LocalQuestionKind::Fork { directive: None });
-    // Option 1 = "No" -> worktree=false.
+    // Option 1 is "No", so worktree=false
     state.selections[0] = crate::views::question_view::QuestionSelection::Single(Some(1));
     let kind = state.local_kind.take().unwrap();
     let outcome = crate::app::agent_view::translate_local_submit_for_test(&state, kind, false);

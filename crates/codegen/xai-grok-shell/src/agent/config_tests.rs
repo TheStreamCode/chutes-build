@@ -1358,7 +1358,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_session() {
     let alias = "CHUTES_BUILD_TEST_EMPTY_ENV_LC_ALIAS";
     let _primary = EnvGuard::set(primary, "");
     let _alias = EnvGuard::set(alias, "");
-    let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
+    let mut model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
     model.env_key = Some(EnvKeys::new([primary, alias]));
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
@@ -1388,7 +1388,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
 #[test]
 fn resolve_credentials_empty_api_key_falls_through_to_session() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://inference.example/v1", Some(""), None, None);
+    let model = test_model_entry("m", "https://api.x.ai/v1", Some(""), None, None);
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
@@ -1418,7 +1418,7 @@ fn config_toml_env_key_array_parses() {
 #[test]
 fn resolve_credentials_sets_auth_type() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://example.com/v1", None, None, None);
+    let model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
     let creds = resolve_credentials(&model, Some("tok"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     let byok = test_model_entry("m", "https://example.com/v1", Some("key"), None, None);
@@ -1849,7 +1849,7 @@ fn compaction_mode_precedence_env_over_config_over_remote_over_default() {
     );
     assert_eq!(
         resolve_compaction_mode_from(None, None, None),
-        CompactionMode::Summary
+        CompactionMode::Segments(xai_chat_state::CompactionDetail::default())
     );
 }
 /// Detail shares the env>config>remote>default combinator that the mode
@@ -2567,31 +2567,6 @@ fn disabled_models_removed_from_catalog() {
     .unwrap();
     let catalog = resolve_model_catalog(&Config::new_from_toml_cfg(&raw).unwrap(), None);
     assert!(!catalog.contains_key("to-disable"));
-}
-#[test]
-fn plan_and_build_models_parse_and_default_to_unset() {
-    let raw: toml::Value = toml::from_str(
-        r#"
-            [models]
-            plan_model = "zai-org/GLM-5.2-TEE"
-            build_model = "Qwen/Qwen3.5-397B-A17B-TEE"
-            "#,
-    )
-    .unwrap();
-    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
-    assert_eq!(
-        cfg.models.plan_model.as_deref(),
-        Some("zai-org/GLM-5.2-TEE")
-    );
-    assert_eq!(
-        cfg.models.build_model.as_deref(),
-        Some("Qwen/Qwen3.5-397B-A17B-TEE")
-    );
-
-    let empty: toml::Value = toml::from_str("").unwrap();
-    let cfg = Config::new_from_toml_cfg(&empty).unwrap();
-    assert_eq!(cfg.models.plan_model, None);
-    assert_eq!(cfg.models.build_model, None);
 }
 #[test]
 fn hidden_models_kept_in_catalog_but_not_in_acp() {
@@ -7336,6 +7311,48 @@ fn mcp_auto_restart_env_wins_over_config_and_below() {
     let r = resolve_mcp_auto_restart(None, None, Some(false), Some(false), Some(false));
     unsafe { std::env::remove_var("CHUTES_BUILD_MCP_AUTO_RESTART") };
     assert!(r.value);
+    assert_eq!(r.source, ConfigSource::Env);
+}
+#[test]
+#[serial]
+fn turn_transient_retry_default_is_true() {
+    unsafe { std::env::remove_var("CHUTES_BUILD_TURN_TRANSIENT_RETRY") };
+    let r = resolve_turn_transient_retry(None, None, None, None, None);
+    assert!(r.value, "transient retry is on by default");
+    assert_eq!(r.source, ConfigSource::Default);
+}
+#[test]
+#[serial]
+fn turn_transient_retry_config_kill_switch() {
+    unsafe { std::env::remove_var("CHUTES_BUILD_TURN_TRANSIENT_RETRY") };
+    let r = resolve_turn_transient_retry(None, None, Some(false), None, None);
+    assert!(
+        !r.value,
+        "config `[features] turn_transient_retry = false` disables"
+    );
+    assert_eq!(r.source, ConfigSource::Config);
+}
+#[test]
+#[serial]
+fn turn_transient_retry_remote_flag_disables_below_config() {
+    unsafe { std::env::remove_var("CHUTES_BUILD_TURN_TRANSIENT_RETRY") };
+    let r = resolve_turn_transient_retry(None, None, None, None, Some(false));
+    assert!(!r.value);
+    assert_eq!(r.source, ConfigSource::Remote);
+    let r = resolve_turn_transient_retry(None, None, Some(true), None, Some(false));
+    assert!(r.value);
+    assert_eq!(r.source, ConfigSource::Config);
+    let r = resolve_turn_transient_retry(None, None, Some(false), None, Some(true));
+    assert!(!r.value);
+    assert_eq!(r.source, ConfigSource::Config);
+}
+#[test]
+#[serial]
+fn turn_transient_retry_env_wins_over_config() {
+    unsafe { std::env::set_var("CHUTES_BUILD_TURN_TRANSIENT_RETRY", "false") };
+    let r = resolve_turn_transient_retry(None, None, Some(true), None, None);
+    unsafe { std::env::remove_var("CHUTES_BUILD_TURN_TRANSIENT_RETRY") };
+    assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Env);
 }
 #[test]

@@ -116,7 +116,7 @@ impl Harness {
             while let Some(msg) = gateway.recv().await {
                 match msg {
                     xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
-                        if args.request.method.as_ref() == "chutes.build/hooks/event" {
+                        if args.request.method.as_ref() == "x.ai/hooks/event" {
                             sink.borrow_mut()
                                 .push(serde_json::from_str(args.request.params.get()).unwrap());
                         }
@@ -184,10 +184,7 @@ impl Harness {
             .current_prompt_id
             .lock()
             .expect("current_prompt_id mutex poisoned") = Some(prompt_id.to_string());
-        self.actor.state.lock().await.running_task = Some(AgentTask {
-            prompt_id: prompt_id.into(),
-            handle,
-        });
+        self.actor.state.lock().await.running_task = Some(AgentTask::new(prompt_id, handle));
     }
 
     async fn cancel(&self, trigger: CancelTrigger) -> super::cancel::CancelOutcome {
@@ -224,7 +221,7 @@ impl Harness {
         let mut events = Vec::new();
         while let Ok(msg) = gateway.try_recv() {
             if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                && args.request.method.as_ref() == "chutes.build/hooks/event"
+                && args.request.method.as_ref() == "x.ai/hooks/event"
             {
                 events.push(serde_json::from_str(args.request.params.get()).unwrap());
             }
@@ -441,12 +438,14 @@ async fn a_subagent_session_end_names_the_child() {
 
         let mut parent = Harness::new().await;
         parent.listen(&events);
-        super::run_loop::fire_session_end_hooks(&parent.actor, "shutdown").await;
+        let timer = xai_grok_telemetry::session_end::SessionEndTimer::new_shared();
+        super::run_loop::fire_session_end_hooks(&parent.actor, "shutdown", &timer).await;
         assert_eq!(parent.fired(), vec!["session_end", "stop"]);
 
         let mut child = Harness::subagent().await;
         child.listen(&events);
-        super::run_loop::fire_session_end_hooks(&child.actor, "shutdown").await;
+        let child_timer = xai_grok_telemetry::session_end::SessionEndTimer::new_shared();
+        super::run_loop::fire_session_end_hooks(&child.actor, "shutdown", &child_timer).await;
         let fired = child.fired_payloads();
         assert_eq!(
             fired.len(),
@@ -806,6 +805,7 @@ async fn a_completion_arriving_after_its_cancel_reports_nothing() {
                     usage: None,
                     tool_overrides: None,
                 }),
+                Some(0),
             )
             .await;
         h.drain_turn_ends().await;
@@ -837,6 +837,7 @@ async fn a_completion_reports_its_own_cancel_reason() {
             .handle_completion(
                 "p1".into(),
                 ok(PromptCompletionKind::MaxTurnsReached { limit: 1 }),
+                Some(0),
             )
             .await;
 
@@ -856,6 +857,7 @@ async fn a_completion_reports_its_own_cancel_reason() {
                         trigger: Some(format!("ctrl_c{}", "y".repeat(2000))),
                     }),
                 }),
+                Some(0),
             )
             .await;
         h.drain_turn_ends().await;

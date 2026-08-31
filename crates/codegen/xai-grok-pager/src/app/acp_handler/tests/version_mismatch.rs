@@ -3,14 +3,14 @@
 
     fn toast_157_150() -> String {
         crate::glyphs::sanitize_toast_message(
-            "⚠ Version mismatch: client 0.1.157, leader 0.1.150 — restart grok to match",
+            "⚠ Version mismatch: client 0.1.157, leader 0.1.150. Restart grok to match",
         )
         .into_owned()
     }
 
     fn version_mismatch_notif(params: &serde_json::Value) -> acp::ExtNotification {
         acp::ExtNotification::new(
-            "chutes.build/leader/version_mismatch",
+            "x.ai/leader/version_mismatch",
             std::sync::Arc::from(serde_json::value::to_raw_value(params).unwrap()),
         )
     }
@@ -51,7 +51,7 @@
             &mut app,
         ));
         let expected = crate::glyphs::sanitize_toast_message(
-            "⚠ Version mismatch: client 0.2.1, leader 0.2.0 — restart grok to match",
+            "⚠ Version mismatch: client 0.2.1, leader 0.2.0. Restart grok to match",
         )
         .into_owned();
         assert_eq!(agent_toast(&app, AgentId(0)), Some(expected.as_str()));
@@ -120,7 +120,7 @@
     fn unknown_ext_method_returns_false_and_shows_no_toast() {
         let mut app = make_app_with_agent("sess-1");
         let notif = acp::ExtNotification::new(
-            "chutes.build/leader/not_a_method",
+            "x.ai/leader/not_a_method",
             std::sync::Arc::from(
                 serde_json::value::to_raw_value(&serde_json::json!({
                     "clientVersion": "0.1.157",
@@ -168,7 +168,7 @@
         ));
         let text = agent_toast(&app, AgentId(0)).expect("toast");
         let expected = crate::glyphs::sanitize_toast_message(
-            "⚠ Version mismatch: client 0.1.157  x, leader 0.1.150   — restart grok to match",
+            "⚠ Version mismatch: client 0.1.157  x, leader 0.1.150  . Restart grok to match",
         )
         .into_owned();
         assert_eq!(text, expected);

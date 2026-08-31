@@ -66,7 +66,6 @@ async fn seeded_active_plan_actor_with_edit_tools() -> (
             name_override: None,
             params_name_overrides: None,
             description_override: None,
-            compact_schema: false,
             behavior_version: None,
             kind: None,
         },
@@ -119,7 +118,7 @@ fn spawn_exit_capture(
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                    if args.request.method.as_ref() == "chutes.build/exit_plan_mode" {
+                    if args.request.method.as_ref() == "x.ai/exit_plan_mode" {
                         let req: ExitPlanModeExtRequest =
                             serde_json::from_str(args.request.params.get()).unwrap();
                         *captured_for_task.lock().unwrap() = req.plan_content;
@@ -189,7 +188,9 @@ fn bash_call(id: &str) -> ToolCallResponse {
         kind: "function".to_string(),
         function: crate::sampling::types::ToolCallFunction::new(
             "run_terminal_cmd",
-            r#"{"command":"echo mixed-batch-reject","description":"probe mixed-batch permission cancel"}"#,
+            // Must be a command the manager still prompts for (`echo` is
+            // safe-listed and auto-allows).
+            r#"{"command":"./probe-mixed-batch-reject.sh","description":"probe mixed-batch permission cancel"}"#,
         ),
     }
 }
@@ -225,7 +226,6 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                     name_override: None,
                     params_name_overrides: None,
                     description_override: None,
-                    compact_schema: false,
                     behavior_version: None,
                     kind: None,
                 },
@@ -251,7 +251,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                 .await;
 
             let cwd = AbsPathBuf::new(std::path::PathBuf::from(actor.session_info.cwd.clone()))
-                .unwrap_or_else(|_| AbsPathBuf::new(std::env::temp_dir()).unwrap());
+                .unwrap_or_else(|_| AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap());
             let (perms, _ev) = spawn_permission_manager(
                 actor.session_info.id.clone(),
                 xai_acp_lib::AcpAgentGatewaySender::new(gateway_tx),
@@ -278,7 +278,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                                 )));
                         }
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "chutes.build/exit_plan_mode" {
+                            if args.request.method.as_ref() == "x.ai/exit_plan_mode" {
                                 exit_fired_task.store(true, std::sync::atomic::Ordering::SeqCst);
                                 let _ = args
                                     .response_tx

@@ -4,9 +4,9 @@
 //!
 //! Features demonstrated:
 //! - Type `@` to trigger fuzzy file search (real files from current directory)
-//! - Tab or Enter confirms selection → creates an atomic text element
+//! - Tab or Enter confirms selection ÔåÆ creates an atomic text element
 //! - Up/Down to navigate results, Esc to dismiss
-//! - Bracketed paste → creates paste elements
+//! - Bracketed paste ÔåÆ creates paste elements
 //! - Elements render as styled chips, cursor skips over them atomically
 //! - Display projection: cursor column accounts for display width, not buffer width
 
@@ -37,7 +37,7 @@ use xai_ratatui_textarea::{
     TextElementEventKind,
 };
 
-// ── Element kinds ──
+// ÔöÇÔöÇ Element kinds ÔöÇÔöÇ
 
 const KIND_PASTE: ElementKind = ElementKind(1);
 const KIND_FILE_REF: ElementKind = ElementKind(2);
@@ -45,9 +45,9 @@ const KIND_FILE_REF: ElementKind = ElementKind(2);
 /// Maximum number of file search results shown in the dropdown.
 const MAX_RESULTS: usize = 8;
 
-// ── System clipboard provider ──
+// ÔöÇÔöÇ System clipboard provider ÔöÇÔöÇ
 
-/// Clipboard backed by `arboard` — copies/pastes to/from system clipboard.
+/// Clipboard backed by `arboard` ÔÇö copies/pastes to/from system clipboard.
 #[derive(Debug)]
 struct ArboardClipboard;
 
@@ -63,9 +63,9 @@ impl ClipboardProvider for ArboardClipboard {
     }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 // File search
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 
 /// A single fuzzy-matched file result.
 struct SearchResult {
@@ -241,9 +241,9 @@ fn compute_file_search_context(
     })
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 // Line select mode (file preview + line range picking)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 
 #[derive(Clone, Copy, PartialEq)]
 enum SelectionState {
@@ -377,7 +377,7 @@ fn sorted(a: usize, b: usize) -> (usize, usize) {
     if a <= b { (a, b) } else { (b, a) }
 }
 
-// ── File-ref helpers ──
+// ÔöÇÔöÇ File-ref helpers ÔöÇÔöÇ
 
 /// Parse element text like `@foo.rs:123-456` into (path, optional range).
 fn parse_file_ref(element_text: &str) -> (&str, Option<RangeInclusive<usize>>) {
@@ -420,7 +420,7 @@ fn build_file_ref_display(path: &str, range: Option<&RangeInclusive<usize>>) -> 
         let range_text = if r.start() == r.end() {
             format!(":{}", r.start())
         } else {
-            format!(":{}‑{}", r.start(), r.end())
+            format!(":{}ÔÇæ{}", r.start(), r.end())
         };
         spans.push(Span::styled(
             range_text,
@@ -430,15 +430,15 @@ fn build_file_ref_display(path: &str, range: Option<&RangeInclusive<usize>>) -> 
     Line::from(spans)
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 // App
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü
 
 /// Result of processing an input event.
 enum EventResult {
     /// Continue running, redraw the UI.
     Redraw,
-    /// Continue running, nothing changed — skip redraw (lets cursor blink).
+    /// Continue running, nothing changed ÔÇö skip redraw (lets cursor blink).
     Unchanged,
     /// Exit the application.
     Quit,
@@ -459,7 +459,7 @@ struct DemoApp {
     fs_active: bool,
     /// Modal line-select / file-preview mode.
     line_select: Option<LineSelectMode>,
-    /// Last render area for the textarea (needed for mouse→buffer mapping).
+    /// Last render area for the textarea (needed for mouseÔåÆbuffer mapping).
     textarea_area: Rect,
 }
 
@@ -483,7 +483,7 @@ impl DemoApp {
         }
     }
 
-    // ── Event handling ──
+    // ÔöÇÔöÇ Event handling ÔöÇÔöÇ
 
     fn handle_event(&mut self, event: Event) -> EventResult {
         match event {
@@ -503,14 +503,14 @@ impl DemoApp {
         let has_newline = text.contains('\n');
 
         if !has_newline {
-            // Single-line paste → insert inline as plain text (single undo step).
+            // Single-line paste ÔåÆ insert inline as plain text (single undo step).
             self.textarea.insert_str(text);
             let char_count = text.chars().count();
             self.status = format!("Pasted {char_count} chars inline");
             return;
         }
 
-        // Multi-line paste → create an element with summary display.
+        // Multi-line paste ÔåÆ create an element with summary display.
         let line_count = text.lines().count();
 
         let bg = Color::Rgb(40, 40, 50);
@@ -572,7 +572,7 @@ impl DemoApp {
             return EventResult::Unchanged;
         }
 
-        // If the click lands on the "❯ " prompt char (2 cols left of textarea),
+        // If the click lands on the "ÔØ» " prompt char (2 cols left of textarea),
         // remap it to column 0 of the textarea so it places the cursor at the
         // start of that visual line.
         let mut mouse = mouse;
@@ -621,19 +621,19 @@ impl DemoApp {
         match action {
             MouseAction::CursorPlaced if !had_element_event => {
                 let pos = self.textarea.cursor();
-                self.status = format!("Click → cursor at byte {pos}");
+                self.status = format!("Click ÔåÆ cursor at byte {pos}");
                 self.recompute_file_search();
                 EventResult::Redraw
             }
             MouseAction::CursorPlaced => {
-                // Element click already set the status — don't overwrite.
+                // Element click already set the status ÔÇö don't overwrite.
                 self.recompute_file_search();
                 EventResult::Redraw
             }
             MouseAction::SelectionUpdated => {
                 if let Some(text) = self.textarea.selected_text() {
                     let chars = text.chars().count();
-                    self.status = format!("Selecting… ({chars} chars)");
+                    self.status = format!("SelectingÔÇª ({chars} chars)");
                 }
                 EventResult::Redraw
             }
@@ -728,12 +728,12 @@ impl DemoApp {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> EventResult {
-        // ── Line select mode takes ALL keys ──
+        // ÔöÇÔöÇ Line select mode takes ALL keys ÔöÇÔöÇ
         if self.line_select.is_some() {
             return self.handle_line_select_key(key);
         }
 
-        // ── Global quit / clear ──
+        // ÔöÇÔöÇ Global quit / clear ÔöÇÔöÇ
         match key {
             KeyEvent {
                 code: KeyCode::Esc, ..
@@ -769,10 +769,10 @@ impl DemoApp {
             _ => {}
         }
 
-        // ── File search key interception (when dropdown is visible) ──
+        // ÔöÇÔöÇ File search key interception (when dropdown is visible) ÔöÇÔöÇ
         if self.fs_active && self.file_search.is_visible() {
             match key {
-                // ':' during file search → confirm file + open line select
+                // ':' during file search ÔåÆ confirm file + open line select
                 KeyEvent {
                     code: KeyCode::Char(':'),
                     modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
@@ -818,7 +818,7 @@ impl DemoApp {
             }
         }
 
-        // ── ':' / Tab / Enter when cursor is on a file-ref element → open line select ──
+        // ÔöÇÔöÇ ':' / Tab / Enter when cursor is on a file-ref element ÔåÆ open line select ÔöÇÔöÇ
         if matches!(
             key,
             KeyEvent {
@@ -836,7 +836,7 @@ impl DemoApp {
             return EventResult::Redraw;
         }
 
-        // ── 'i' on any element → inline it; Tab/Enter on paste element → inline ──
+        // ÔöÇÔöÇ 'i' on any element ÔåÆ inline it; Tab/Enter on paste element ÔåÆ inline ÔöÇÔöÇ
         if let Some(elem) = self.textarea.element_at_cursor() {
             let is_i = matches!(
                 key,
@@ -867,9 +867,9 @@ impl DemoApp {
             }
         }
 
-        // ── Pass key to textarea, then recompute file search ──
+        // ÔöÇÔöÇ Pass key to textarea, then recompute file search ÔöÇÔöÇ
 
-        // Undo / Redo — intercept before passing to textarea.input().
+        // Undo / Redo ÔÇö intercept before passing to textarea.input().
         match key {
             KeyEvent {
                 code: KeyCode::Char('z'),
@@ -957,7 +957,7 @@ impl DemoApp {
         EventResult::Redraw
     }
 
-    // ── Line select entry / handling / confirm ──
+    // ÔöÇÔöÇ Line select entry / handling / confirm ÔöÇÔöÇ
 
     fn enter_line_select_from_search(&mut self) {
         // First, confirm the file search (create element).
@@ -976,7 +976,7 @@ impl DemoApp {
         let element_text = build_file_ref_text(&path, None);
         let display = build_file_ref_display(&path, None);
 
-        // Begin undo group — stays open until confirm/cancel line select.
+        // Begin undo group ÔÇö stays open until confirm/cancel line select.
         self.textarea.begin_undo_group();
 
         let id = self.textarea.replace_range_with_element(
@@ -999,10 +999,10 @@ impl DemoApp {
         // Now open line select.
         if let Some(mode) = LineSelectMode::open(path.clone(), id) {
             self.status =
-                format!("{path} | j/k ↕ | C-u/C-d ½pg | f/b pg | v sel | Enter ok | Esc cancel");
+                format!("{path} | j/k Ôåò | C-u/C-d ┬¢pg | f/b pg | v sel | Enter ok | Esc cancel");
             self.line_select = Some(mode);
         } else {
-            // File unreadable — close the group immediately.
+            // File unreadable ÔÇö close the group immediately.
             self.textarea.end_undo_group();
             self.status = format!("Could not read: {path}");
         }
@@ -1025,7 +1025,7 @@ impl DemoApp {
             return;
         };
 
-        // Begin undo group — stays open until confirm/cancel.
+        // Begin undo group ÔÇö stays open until confirm/cancel.
         self.textarea.begin_undo_group();
 
         // If there's an existing line range, scroll to it and show as locked.
@@ -1039,7 +1039,7 @@ impl DemoApp {
         }
 
         self.status =
-            format!("{path} | j/k ↕ | C-u/C-d ½pg | f/b pg | v sel | Enter ok | Esc cancel");
+            format!("{path} | j/k Ôåò | C-u/C-d ┬¢pg | f/b pg | v sel | Enter ok | Esc cancel");
         self.line_select = Some(mode);
     }
 
@@ -1241,7 +1241,7 @@ impl DemoApp {
             return;
         };
 
-        // Cancel the undo group — restores textarea to pre-line-select state.
+        // Cancel the undo group ÔÇö restores textarea to pre-line-select state.
         // No manual element revert needed.
         self.textarea.cancel_undo_group();
 
@@ -1297,7 +1297,7 @@ impl DemoApp {
             self.status = format!("Confirmed: {desc}");
         }
 
-        // Close the undo group — all line-select mutations become 1 undo step.
+        // Close the undo group ÔÇö all line-select mutations become 1 undo step.
         self.textarea.end_undo_group();
     }
 
@@ -1349,9 +1349,9 @@ impl DemoApp {
                 SelectionState::None => String::new(),
                 SelectionState::Selecting(anchor) => {
                     let (s, e) = sorted(anchor, mode.cursor_line);
-                    format!(" | selecting {}‑{}", s + 1, e + 1)
+                    format!(" | selecting {}ÔÇæ{}", s + 1, e + 1)
                 }
-                SelectionState::Locked(s, e) => format!(" | locked {}‑{}", s + 1, e + 1),
+                SelectionState::Locked(s, e) => format!(" | locked {}ÔÇæ{}", s + 1, e + 1),
             };
             let goto_info = if mode.goto_buf.is_empty() {
                 String::new()
@@ -1362,14 +1362,14 @@ impl DemoApp {
         }
     }
 
-    // ── Rendering ──
+    // ÔöÇÔöÇ Rendering ÔöÇÔöÇ
 
     fn render(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
         terminal.draw(|f| {
             let area = f.area();
 
             if self.line_select.is_some() {
-                // ── Line select layout: preview + hints + prompt + status ──
+                // ÔöÇÔöÇ Line select layout: preview + hints + prompt + status ÔöÇÔöÇ
                 let [preview_area, hints_area, prompt_outer, status_area] = Layout::vertical([
                     Constraint::Min(5),
                     Constraint::Length(1),
@@ -1394,7 +1394,7 @@ impl DemoApp {
                 ]));
                 status.render(status_area, f.buffer_mut());
             } else {
-                // ── Normal layout ──
+                // ÔöÇÔöÇ Normal layout ÔöÇÔöÇ
                 let info_rows: u16 = 16;
                 let fs_rows = if self.fs_active {
                     self.file_search.dropdown_height()
@@ -1440,12 +1440,12 @@ impl DemoApp {
                 status.render(status_area, f.buffer_mut());
             }
 
-            // ── Cursor management (inside draw) ──
+            // ÔöÇÔöÇ Cursor management (inside draw) ÔöÇÔöÇ
             //
             // By calling set_cursor_position inside the draw closure,
             // ratatui emits show_cursor + set_cursor_position WITHOUT
             // the hide_cursor that happens when no cursor is set.  This
-            // avoids the hide→show cycle that resets the terminal's
+            // avoids the hideÔåÆshow cycle that resets the terminal's
             // blink timer every frame.
             let want_cursor = if self.line_select.is_none() {
                 self.textarea
@@ -1478,7 +1478,7 @@ impl DemoApp {
             let [char_area, textarea_area] =
                 Layout::horizontal([Constraint::Length(2), Constraint::Min(1)]).areas(prompt_inner);
 
-            let prompt_char = Span::styled("❯ ", Style::default().fg(Color::Magenta).bold());
+            let prompt_char = Span::styled("ÔØ» ", Style::default().fg(Color::Magenta).bold());
             f.buffer_mut().set_string(
                 char_area.x,
                 char_area.y,
@@ -1537,7 +1537,7 @@ impl DemoApp {
         let cursor_bg = Style::default().fg(Color::White).bg(Color::Rgb(50, 50, 60));
         let selecting_bg = Style::default().fg(Color::White).bg(Color::Rgb(30, 60, 30));
         let locked_bg = Style::default().fg(Color::White).bg(Color::Rgb(70, 35, 35));
-        let sep = "│";
+        let sep = "Ôöé";
 
         for row in 0..inner.height as usize {
             let line_idx = mode.scroll_top + row;
@@ -1603,26 +1603,26 @@ impl DemoApp {
 
         let hints = Line::from(vec![
             Span::styled(" j/k", k),
-            Span::styled(" ↕  ", d),
-            Span::styled("│", s),
+            Span::styled(" Ôåò  ", d),
+            Span::styled("Ôöé", s),
             Span::styled(" C-u/d", k),
-            Span::styled(" ½pg  ", d),
-            Span::styled("│", s),
+            Span::styled(" ┬¢pg  ", d),
+            Span::styled("Ôöé", s),
             Span::styled(" f/b", k),
             Span::styled(" pg  ", d),
-            Span::styled("│", s),
+            Span::styled("Ôöé", s),
             Span::styled(" v/V", k),
             Span::styled(" select  ", d),
-            Span::styled("│", s),
-            Span::styled(" 0‑9", k),
+            Span::styled("Ôöé", s),
+            Span::styled(" 0ÔÇæ9", k),
             Span::styled(" goto  ", d),
-            Span::styled("│", s),
+            Span::styled("Ôöé", s),
             Span::styled(" g/G", k),
             Span::styled(" top/bot  ", d),
-            Span::styled("│", s),
+            Span::styled("Ôöé", s),
             Span::styled(" Enter", k),
             Span::styled(" confirm  ", d),
-            Span::styled("│", s),
+            Span::styled("Ôöé", s),
             Span::styled(" Esc/q", k),
             Span::styled(" cancel", d),
         ]);
@@ -1662,7 +1662,7 @@ impl DemoApp {
             let y = inner.y + i as u16;
 
             // Selection marker
-            let marker = if is_selected { "▸ " } else { "  " };
+            let marker = if is_selected { "Ôû© " } else { "  " };
             buf.set_string(inner.x, y, marker, marker_style);
 
             // Path with fuzzy-match highlighting
@@ -1706,9 +1706,13 @@ impl DemoApp {
         )];
         if let Some(clip) = self.textarea.clipboard() {
             let preview: String = clip.chars().take(40).collect();
-            let suffix = if clip.chars().count() > 40 { "…" } else { "" };
+            let suffix = if clip.chars().count() > 40 {
+                "ÔÇª"
+            } else {
+                ""
+            };
             title_spans.push(Span::styled(
-                format!("│ clipboard: {preview}{suffix} "),
+                format!("Ôöé clipboard: {preview}{suffix} "),
                 Style::default().fg(Color::Rgb(80, 140, 80)),
             ));
         }
@@ -1769,7 +1773,7 @@ impl DemoApp {
             Line::from(vec![
                 Span::styled("TextArea Demo", Style::default().fg(Color::White).bold()),
                 Span::styled(
-                    " — @-File-Search + Atomic Elements",
+                    " ÔÇö @-File-Search + Atomic Elements",
                     Style::default().fg(Color::DarkGray),
                 ),
             ]),
@@ -1779,13 +1783,13 @@ impl DemoApp {
         let bindings = vec![
             ("@query", "trigger file search"),
             ("Tab / Enter", "confirm file selection"),
-            ("↑/↓ / C-p/C-n", "navigate results"),
+            ("Ôåæ/Ôåô / C-p/C-n", "navigate results"),
             ("Esc", "dismiss search / quit"),
             ("Paste (Cmd+V)", "create paste element"),
             ("i", "inline element at cursor"),
-            ("←/→", "navigate (jumps over elements)"),
+            ("ÔåÉ/ÔåÆ", "navigate (jumps over elements)"),
             ("Backspace/Del", "delete (atomic for elements)"),
-            ("Alt+←/→", "word navigation"),
+            ("Alt+ÔåÉ/ÔåÆ", "word navigation"),
             ("Ctrl+A/E", "beginning/end of line"),
             ("Ctrl+K/U", "kill to end/beginning of line"),
             ("Ctrl+Z", "undo"),
@@ -1879,13 +1883,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         // Whether we processed an event or timed out, check if the
         // textarea has pending timer work (e.g. continuous drag-scroll).
         // The textarea's internal throttle prevents this from firing
-        // too fast — it'll return Nothing if not enough time has passed.
+        // too fast ÔÇö it'll return Nothing if not enough time has passed.
         if app.textarea.poll_timeout_ms().is_some() {
             let action = app.textarea.tick(app.textarea_area, app.textarea_state);
             if matches!(action, MouseAction::SelectionUpdated) {
                 if let Some(text) = app.textarea.selected_text() {
                     let chars = text.chars().count();
-                    app.status = format!("Selecting… ({chars} chars)");
+                    app.status = format!("SelectingÔÇª ({chars} chars)");
                 }
                 app.render(terminal)?;
             }

@@ -12,7 +12,7 @@ use xai_grok_telemetry::events::{LoginFailed, LoginFailureKind};
 pub(crate) type StderrCallback = Box<dyn Fn(&str)>;
 /// Reject a cached credential for reuse if it lacks `oidc_issuer`, has a
 /// mismatched issuer, or its team principal violates the `force_login_team_uuid`
-/// pin ÔÇö so interactive login starts fresh instead of reusing a stale/wrong-team
+/// pin — so interactive login starts fresh instead of reusing a stale/wrong-team
 /// session.
 fn is_cached_credential_compatible(auth: &GrokAuth, grok_com_config: &GrokComConfig) -> bool {
     let expected_issuer = grok_com_config
@@ -42,7 +42,7 @@ fn is_cached_credential_compatible(auth: &GrokAuth, grok_com_config: &GrokComCon
 /// device flow. `None` falls through to env / config / default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoginTransportOverride {
-    /// No CLI override ÔÇö resolve from env / config / default.
+    /// No CLI override — resolve from env / config / default.
     #[default]
     None,
     /// `--oauth`: force the loopback-callback flow.
@@ -147,11 +147,11 @@ async fn should_use_device_flow(login_override: LoginTransportOverride) -> bool 
 /// How login presents itself; surfaced to the TUI via `x.ai/auth/get_url`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthUrlMode {
-    /// Loopback-callback flow ÔÇö TUI shows a copyable URL + paste box.
+    /// Loopback-callback flow — TUI shows a copyable URL + paste box.
     Loopback,
-    /// External auth provider opened its own browser ÔÇö TUI shows a waiting status.
+    /// External auth provider opened its own browser — TUI shows a waiting status.
     Command,
-    /// RFC 8628 device flow ÔÇö TUI shows the device code + copyable URL, no paste box.
+    /// RFC 8628 device flow — TUI shows the device code + copyable URL, no paste box.
     Device,
 }
 impl AuthUrlMode {
@@ -344,7 +344,7 @@ pub(crate) async fn run_auth_flow_with_stderr_bridge(
         }
     }
 }
-/// Full auth chain: cache ÔåÆ refresh ÔåÆ external provider ÔåÆ interactive (OIDC/OAuth2/legacy).
+/// Full auth chain: cache → refresh → external provider → interactive (OIDC/OAuth2/legacy).
 /// When `url_tx` and `code_rx` are `None`, falls back to stderr/stdin (CLI mode).
 pub(crate) async fn run_auth_flow(
     auth_manager: &Arc<AuthManager>,
@@ -391,7 +391,7 @@ pub(crate) async fn run_auth_flow_interactive(
     .await
 }
 /// Every interactive login returns through here, so reporting the failure here
-/// costs one event per attempt ÔÇö a retried request, or the discovery cache
+/// costs one event per attempt — a retried request, or the discovery cache
 /// background token refresh shares, can't inflate it. Never changes the result.
 async fn run_auth_flow_inner(
     auth_manager: &Arc<AuthManager>,
@@ -437,7 +437,7 @@ fn login_failure_event(err: &anyhow::Error) -> Option<LoginFailed> {
         os_error: crate::http::find_os_error_code(source),
     })
 }
-/// A body that won't parse is a decode failure, not a transport one ÔÇö even
+/// A body that won't parse is a decode failure, not a transport one — even
 /// though `reqwest` also reports it as a body-phase error.
 fn failure_kind(transport: TransportFailureKind, is_decode: bool) -> LoginFailureKind {
     if is_decode {
@@ -765,8 +765,8 @@ async fn persist_or_use_minted(auth_manager: &AuthManager, new_auth: GrokAuth) -
 pub(crate) fn report_signed_in(auth: &GrokAuth) {
     eprint!("\r\x1b[K");
     match auth.email {
-        Some(ref email) => eprintln!("Ô£ô Signed in as {email}"),
-        None => eprintln!("Ô£ô Signed in"),
+        Some(ref email) => eprintln!("✓ Signed in as {email}"),
+        None => eprintln!("✓ Signed in"),
     }
 }
 /// CLI auth entrypoint. For GUI, use `run_auth_flow_with_stderr_bridge`.
@@ -875,7 +875,9 @@ async fn run_cli_login_steps(
     let login_override = LoginTransportOverride::from_flags(oauth, device_auth);
     let authenticated = if cli_should_use_device(&config.grok_com_config, login_override).await {
         if config.grok_com_config.oauth2.is_none() {
-            anyhow::bail!("Sign-in is not available for this deployment. Set CHUTES_API_KEY instead.");
+            anyhow::bail!(
+                "Sign-in is not available for this deployment. Set CHUTES_API_KEY instead."
+            );
         }
         let (auth, did_auth) = run_auth_flow_interactive(
             auth_manager,
@@ -914,7 +916,7 @@ async fn run_cli_login_steps(
     apply_post_login_config(authenticated).await
 }
 /// Sync this principal's config now rather than waiting for the background
-/// tick. Stay quiet about absence/failure during login ÔÇö confirm only when
+/// tick. Stay quiet about absence/failure during login — confirm only when
 /// config was actually applied; `chutes-build setup` reports the no-config case.
 pub(crate) async fn apply_post_login_config(authenticated: GrokAuth) -> anyhow::Result<()> {
     let outcome = crate::managed_config::post_login_sync(Some(authenticated)).await;
@@ -1173,8 +1175,7 @@ mod tests {
     /// The script is the one published in `README.md`, which operators copy.
     #[tokio::test]
     async fn a_provider_written_to_the_published_contract_can_sign_in_after_an_expiry() {
-        let conforming =
-            r#"if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
+        let conforming = r#"if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then exit 1; else printf '%s' sso-token; fi"#;
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1607,7 +1608,7 @@ mod tests {
         }
     }
     /// Under a team pin, a cached session for a different team is not reused by
-    /// interactive login ÔÇö it falls through to a fresh, compliant login.
+    /// interactive login — it falls through to a fresh, compliant login.
     #[test]
     fn cached_cred_with_wrong_team_is_incompatible() {
         let auth = GrokAuth {

@@ -1,16 +1,16 @@
-//! ParentÔåösubagent seam: every parent-side lifecycle call site, in order.
+//! Parent↔subagent seam: every parent-side lifecycle call site, in order.
 //!
 //! 1. `MvpAgent::start_subagent_coordinator` (parent thread, in `mvp_agent`):
 //!    hands the event receiver + concurrency limit to `spawn_subagent_coordinator`
 //!    here, which drives the coordinator (living in `xai-grok-tools`).
 //! 2. `ShellChildRunner::run` (parent thread): gathers what a child needs from
 //!    the parent via `MvpAgent::try_build_subagent_spawn_context` (the
-//!    parentÔåÆchild snapshot, built by the owner in `mvp_agent`), then runs the
+//!    parent→child snapshot, built by the owner in `mvp_agent`), then runs the
 //!    spawn work on the worker pool (`worker_runtime()`, built on first use).
 //! 3. `run_shell_child` (worker pool, in `handle_request.rs`): prepares the
 //!    child (toolset, optional worktree, context) and starts it on its own
 //!    thread via `spawn_session_on_thread`.
-//! 4. `on_completed` ÔåÆ `present_child_completion` (worker pool): reports the
+//! 4. `on_completed` → `present_child_completion` (worker pool): reports the
 //!    child finished, persists the result, and optionally wakes the parent.
 //!
 //! Stage timings are recorded in `subagent_spawn::SubagentSpawnPhase`.

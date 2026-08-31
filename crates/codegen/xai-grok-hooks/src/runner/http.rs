@@ -153,10 +153,16 @@ pub async fn run_http_hook(
 
     let mut url_env = spec.extra_env.clone();
     for (k, v) in [
-        ("CHUTES_BUILD_HOOK_EVENT", envelope.hook_event_name.to_string()),
+        (
+            "CHUTES_BUILD_HOOK_EVENT",
+            envelope.hook_event_name.to_string(),
+        ),
         ("CHUTES_BUILD_HOOK_NAME", spec.name.clone()),
         ("CHUTES_BUILD_SESSION_ID", ctx.session_id.to_string()),
-        ("CHUTES_BUILD_WORKSPACE_ROOT", ctx.workspace_root.to_string()),
+        (
+            "CHUTES_BUILD_WORKSPACE_ROOT",
+            ctx.workspace_root.to_string(),
+        ),
         ("CLAUDE_PROJECT_DIR", ctx.workspace_root.to_string()),
     ] {
         url_env.insert(k.to_string(), v);

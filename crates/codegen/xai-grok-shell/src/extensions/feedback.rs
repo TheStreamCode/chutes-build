@@ -23,16 +23,16 @@ use xai_grok_telemetry::id::agent_id;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/btw" => {
+        "chutes.ai/btw" => {
             tracing::info!("handling /btw side question");
             handle_btw(agent, args).await
         }
-        "chutes.build/feedback" | "chutes.build/feedback/dismiss" => {
+        "chutes.ai/feedback" | "chutes.ai/feedback/dismiss" => {
             tracing::info!("handling user feedback");
             handle_feedback(agent, args).await
         }
-        "chutes.build/feedback/upload-trace" => handle_upload_trace(agent, args).await,
-        m if m.starts_with("chutes.build/review") => {
+        "chutes.ai/feedback/upload-trace" => handle_upload_trace(agent, args).await,
+        m if m.starts_with("chutes.ai/review") => {
             tracing::info!("handling review comment");
             handle_review(agent, args).await
         }
@@ -84,7 +84,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
         ));
     }
     match args.method.as_ref() {
-        "chutes.build/feedback" => {
+        "chutes.ai/feedback" => {
             let mut feedback_input: ClientFeedbackInput =
                 match serde_json::from_str::<ClientFeedbackInput>(args.params.get()) {
                     Ok(input) => input,
@@ -232,7 +232,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                 .expect("to work");
             Ok(acp::ExtResponse::new(value))
         }
-        "chutes.build/feedback/dismiss" => {
+        "chutes.ai/feedback/dismiss" => {
             let dismiss_input: FeedbackRequestDismiss = parse_params(args)?;
             tracing::info!(
                 session_id = %dismiss_input.session_id,
@@ -385,7 +385,7 @@ async fn handle_upload_trace(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRes
 /// - `chutes.ai/review/comment/delete`: record a tombstone event for a deleted comment
 async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/review/comment" => {
+        "chutes.ai/review/comment" => {
             let request: CommentRequest = parse_params(args)?;
             let comment_id = uuid::Uuid::now_v7().to_string();
             tracing::info!(
@@ -446,7 +446,7 @@ async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             .expect("to work");
             Ok(acp::ExtResponse::new(value))
         }
-        "chutes.build/review/comment/delete" => {
+        "chutes.ai/review/comment/delete" => {
             let request: CommentDeleteRequest = parse_params(args)?;
             tracing::info!(
                 comment_id = %request.comment_id,

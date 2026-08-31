@@ -3,7 +3,7 @@
 //!
 //! Serves a real executable artifact and can truncate the body, close the
 //! connection early, serve a right-length-but-garbage body, or hang
-//! mid-transfer — for both the parallel byte-range path and the
+//! mid-transfer ÔÇö for both the parallel byte-range path and the
 //! single-connection path. It also counts body-serving GETs (HEAD probes are
 //! excluded) so tests can assert how many downloads actually happened, and
 //! supports a "slow" mode that widens the race window so concurrent
@@ -96,7 +96,7 @@ impl ArtifactServer {
 
     /// Number of body-serving GET requests handled so far (HEAD probes from
     /// the parallel-download path are excluded). Tests use this to assert
-    /// how many downloads actually happened — e.g. that a sequential updater
+    /// how many downloads actually happened ÔÇö e.g. that a sequential updater
     /// converged onto an already-installed binary without re-downloading.
     /// One download may span multiple GETs when the parallel byte-range path
     /// splits it, so tests asserting exact counts use a small artifact
@@ -108,7 +108,7 @@ impl ArtifactServer {
     /// When enabled, hold each Full/Garbage response open ~500ms before
     /// sending the body. This keeps an installer in flight long enough for
     /// concurrent installers to genuinely overlap even on a heavily loaded
-    /// CI host — a too-short hold would let race tests run the installers
+    /// CI host ÔÇö a too-short hold would let race tests run the installers
     /// back-to-back and never exercise the concurrent window.
     pub fn set_slow(&self, slow: bool) {
         self.slow.store(slow, Ordering::Relaxed);
@@ -246,7 +246,7 @@ fn handle_connection(
         }
         Mode::Truncate(_) => {
             // Send the (possibly short) payload then drop the connection without
-            // meeting Content-Length — the client sees a premature EOF.
+            // meeting Content-Length ÔÇö the client sees a premature EOF.
             let _ = stream.write_all(&payload);
         }
         Mode::Hang(_) => {

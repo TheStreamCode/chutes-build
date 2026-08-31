@@ -84,8 +84,9 @@ struct AuthEntry {
 }
 
 pub fn default_auth_path() -> anyhow::Result<PathBuf> {
-    let grok = xai_grok_config::user_grok_home()
-        .ok_or_else(|| anyhow::anyhow!("no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)"))?;
+    let grok = xai_grok_config::user_grok_home().ok_or_else(|| {
+        anyhow::anyhow!("no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)")
+    })?;
     Ok(grok.join("auth.json"))
 }
 

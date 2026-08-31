@@ -836,7 +836,8 @@ pub fn resolve_label_collision(base_dir: &Path, label: &str) -> String {
 /// worktree paths need an absolute, always-writable anchor that does not move
 /// with the process cwd).
 fn grok_home() -> std::path::PathBuf {
-    xai_fast_worktree::resolve_grok_home().unwrap_or_else(|_| std::env::temp_dir().join(".chutes-build"))
+    xai_fast_worktree::resolve_grok_home()
+        .unwrap_or_else(|_| std::env::temp_dir().join(".chutes-build"))
 }
 
 /// Returns `~/.chutes-build/worktrees/<repo_slug>` for the given git root.

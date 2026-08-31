@@ -143,6 +143,11 @@ impl SentCredential {
 /// can never drift from what Display actually emits.
 const SERIALIZATION_DISPLAY_PREFIX: &str = "serialization error: ";
 
+/// Display text of [`SamplingError::MaxTokensTruncation`]. Public: the pager
+/// sniffs it to recover the kind from rails predating the typed `errorKind`
+/// field; sharing the const with the `#[error(...)]` template prevents drift.
+pub const MAX_TOKENS_TRUNCATION_MESSAGE: &str = "response truncated by max_tokens";
+
 #[derive(Debug, Error)]
 pub enum SamplingError {
     #[error("{message}")]
@@ -193,7 +198,7 @@ pub enum SamplingError {
     IdleTimeout { elapsed_secs: u64 },
     #[error("empty response from model ({})", context.reason)]
     EmptyResponse { context: EmptyResponseContext },
-    #[error("response truncated by max_tokens")]
+    #[error("{text}", text = MAX_TOKENS_TRUNCATION_MESSAGE)]
     MaxTokensTruncation,
     /// A confident server-reported doom loop on the attempt (mid-stream or
     /// on the completed response). Retryable on the recovery loop's own

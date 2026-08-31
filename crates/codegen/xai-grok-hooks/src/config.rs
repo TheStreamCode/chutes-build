@@ -1114,8 +1114,14 @@ mod tests {
     fn source_dir_from_file_path() {
         let json =
             r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"x.sh"}]}]}}"#;
-        let (specs, _) = parse_hook_file(json, Path::new("/home/user/.chutes-build/hooks/safety.json"));
-        assert_eq!(specs[0].source_dir, PathBuf::from("/home/user/.chutes-build/hooks"));
+        let (specs, _) = parse_hook_file(
+            json,
+            Path::new("/home/user/.chutes-build/hooks/safety.json"),
+        );
+        assert_eq!(
+            specs[0].source_dir,
+            PathBuf::from("/home/user/.chutes-build/hooks")
+        );
     }
 
     #[test]

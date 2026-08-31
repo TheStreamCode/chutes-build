@@ -209,8 +209,8 @@ pub(crate) async fn take_streaming_partial(
 /// Complete the prompt trace. Returns `Ok(true)` when session state is
 /// durably confirmed and `restorable_turn_number` can advance.
 ///
-/// With [`UploadWait::Defer`] the whole turn-end set ÔÇö artifact accepts, the
-/// bounded queue flush, terminal telemetry, and the manifest write ÔÇö runs in
+/// With [`UploadWait::Defer`] the whole turn-end set — artifact accepts, the
+/// bounded queue flush, terminal telemetry, and the manifest write — runs in
 /// here, deadline-bounded; callers make a plain call in either mode.
 #[tracing::instrument(
     name = "upload.complete_prompt_trace",
@@ -371,7 +371,7 @@ pub(crate) fn parse_agent_profile_from_meta(
 /// `Some(false)` means the pager set `--no-ask-user`; the shell propagates
 /// it to `AgentBuilder::with_ask_user_question_enabled(false)` so the tool
 /// is stripped from the model's advertised tool list. `Some(true)` explicitly
-/// enables the tool for this session. `None` means the field is absent ÔÇö the
+/// enables the tool for this session. `None` means the field is absent — the
 /// caller falls back to the `ask_user_question` feature (default ON).
 pub(crate) fn parse_ask_user_question_from_meta(
     meta: Option<&agent_client_protocol::Meta>,

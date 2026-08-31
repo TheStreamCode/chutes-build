@@ -1,92 +1,6 @@
-//! Shared test utilities for the pager crate.
-//!
 //! Compiled only in `#[cfg(test)]` builds. Import via `crate::test_util`.
-
-/// A temporary directory whose path has no 8.3 short components — use it wherever
-/// a test hands a sandbox root to code that treats it as a real `HOME` or cwd.
-///
-/// `tempfile::tempdir()` builds under `std::env::temp_dir()`, and on the GitHub
-/// Windows runner that is `C:\Users\RUNNER~1\AppData\Local\Temp`: `RUNNER~1` is the
-/// 8.3 short name for `runneradmin`. `SafeAbsoluteDirectory::parse` rejects any
-/// path containing a `~`, and is right to — the path it guards gets written into a
-/// shell rc file, where a literal `~` would be re-expanded against the home
-/// directory instead of naming the file meant. So thirty-two tests failed on CI and
-/// nowhere else, over a property of the runner's `%TEMP%` rather than anything they
-/// were testing. A real Windows home arrives from `dirs::home_dir()` in long form,
-/// which is what this reproduces.
-///
-/// Canonicalising resolves every short component. `dunce` is used rather than
-/// `std::fs::canonicalize` so the result keeps the plain `C:\…` form: the `\\?\`
-/// prefix would pass the guard but not string comparisons against paths the test
-/// built by hand.
-pub struct SandboxDir {
-    // Held only for its `Drop`: the directory lives as long as this value.
-    _dir: tempfile::TempDir,
-    path: std::path::PathBuf,
-}
-
-impl SandboxDir {
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
-    }
-}
-
-/// A temporary directory safe to use as a sandbox root. See [`SandboxDir`].
-pub fn sandbox_dir() -> SandboxDir {
-    let dir = tempfile::tempdir().unwrap();
-    // A path that will not canonicalise is still worth returning: the directory was
-    // just created, so this is some transient condition, and the raw path is what
-    // the test would have got before.
-    let path = dunce::canonicalize(dir.path()).unwrap_or_else(|_| dir.path().to_path_buf());
-    SandboxDir { _dir: dir, path }
-}
-
-/// A POSIX-shaped fixture path, made absolute for the platform under test.
-///
-/// `/Users/me/project/src/main.rs` is **not** an absolute path on Windows:
-/// `Path::is_absolute` wants a prefix such as `C:`, and a rooted-but-prefixless path
-/// is drive-relative. So a fixture written that way exercises a shape the product
-/// never meets on Windows — the link layer declines to build a `file:` target from
-/// it, and the header relativiser finds no root to strip — and the tests that use
-/// one failed there over their fixture rather than over anything they assert.
-///
-/// Unix returns the string unchanged. Windows prefixes `C:` and switches the
-/// separators, so the example above becomes `C:\Users\me\project\src\main.rs`.
-pub fn abs_path(posix: &str) -> String {
-    if cfg!(windows) {
-        format!("C:{}", posix.replace('/', "\\"))
-    } else {
-        posix.to_owned()
-    }
-}
-
-/// A POSIX-shaped **relative** path as this platform renders it, for assertions
-/// against text the product produced.
-///
-/// The pager rebuilds a relative path from its components, so it comes back joined
-/// with the native separator: `src/main.rs` under a Windows cwd renders as
-/// `src\main.rs`. That is the right thing to show a Windows user; it is only the
-/// expectations that were POSIX-only. See [`abs_path`].
-pub fn rel_path(posix: &str) -> String {
-    if cfg!(windows) {
-        posix.replace('/', "\\")
-    } else {
-        posix.to_owned()
-    }
-}
-
-/// The `file:` URL this platform produces for [`abs_path`] of the same input — on Windows
-/// the drive letter joins the path, giving `file:///C:/…`.
-pub fn file_url(posix: &str) -> String {
-    if cfg!(windows) {
-        format!("file:///C:{posix}")
-    } else {
-        format!("file://{posix}")
-    }
-}
-
-/// Minimal `AgentView` for unit tests outside the dispatch/handler modules
-/// (which keep their own richer factories).
+use std::path::{Path, PathBuf};
+/// Minimal `AgentView` for unit tests outside the dispatch/handler modules (which keep their own richer factories).
 pub fn make_agent_view(session_id: Option<&str>, cwd: &str) -> crate::app::agent_view::AgentView {
     use crate::app::agent::{AgentId, AgentSession, AgentState};
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -116,6 +30,8 @@ pub fn make_agent_view(session_id: Option<&str>, cwd: &str) -> crate::app::agent
         available_commands_generation: 0,
         available_tools: None,
         model_switch_pending: false,
+        hook_block_hold: false,
+        blocked_prompt: None,
         user_model_preference: None,
         deferred_model_switch: None,
         bg_tasks: std::collections::BTreeMap::new(),
@@ -154,8 +70,7 @@ pub fn make_worktree_record(
         metadata: Some(serde_json::json!({ "label": label })),
     }
 }
-/// Every row containing `row_marker` starts its PATH cell at the header's
-/// PATH column, measured in display width so CJK regressions fail.
+/// Every row containing `row_marker` starts its PATH cell at the header's PATH column, measured in display width so CJK regressions fail.
 pub fn assert_path_column_aligned(text: &str, row_marker: &str) {
     use unicode_width::UnicodeWidthStr;
     let lines: Vec<&str> = text.lines().collect();
@@ -178,18 +93,14 @@ pub fn assert_path_column_aligned(text: &str, row_marker: &str) {
     }
     assert!(rows > 0, "no table rows matched {row_marker:?} in: {text}");
 }
-/// RAII guard for temporarily overriding an environment variable.
-///
-/// Captures the original value on construction and restores it on drop.
-/// Used by theme and persist tests to redirect `HOME`/`USERPROFILE` to
-/// temp directories without affecting the real user config.
+/// RAII guard for temporarily overriding an environment variable: captures the original value on construction and restores it on drop.
+/// Used by theme and persist tests to redirect `HOME`/`USERPROFILE` to temp directories without affecting the real user config.
 pub struct EnvVarGuard {
     key: &'static str,
     original: Option<std::ffi::OsString>,
 }
 impl EnvVarGuard {
-    /// Override `key` to `value` (paths, URLs, flags — anything OsStr-able),
-    /// returning a guard that restores the original on drop.
+    /// Override `key` to `value` (paths, URLs, flags, anything that converts to `OsStr`), returning a guard that restores the original on drop.
     pub fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
         let original = std::env::var_os(key);
         unsafe {
@@ -209,14 +120,13 @@ impl Drop for EnvVarGuard {
         }
     }
 }
-/// Shared CHUTES_BUILD_HOME boundary fixture for the resume-by-title startup and
-/// pre-sandbox tests.
+/// Shared CHUTES_BUILD_HOME boundary fixture for the resume-by-title startup and pre-sandbox tests.
 ///
 /// `grok_home()` is OnceLock-cached process-wide, so summaries land under the
 /// *resolved* home (possibly the real `~/.chutes-build` when another test pinned the
 /// cache first); cwd-encoded dirnames are tempdir-unique, and cleanup runs on
-/// drop so it survives assertion panics. Callers must hold
-/// `#[serial_test::serial(CHUTES_BUILD_HOME)]`.
+/// drop so it survives assertion panics.
+/// Callers must hold `#[serial_test::serial(CHUTES_BUILD_HOME)]`.
 pub struct GrokHomeFixture {
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
@@ -245,18 +155,15 @@ impl GrokHomeFixture {
             cleanup: Vec::new(),
         }
     }
-    /// Canonicalized so the summary cwd encoding matches what production
-    /// path resolution sees (macOS tempdirs are symlinked). Tests pass this
-    /// through the explicit `*_for_cwd` seams; the process cwd is never
-    /// mutated.
+    /// Canonicalized so the summary cwd encoding matches what production path resolution sees (macOS tempdirs are symlinked).
+    /// Tests pass this through the explicit `*_for_cwd` parameters; the process cwd is never mutated.
     pub fn cwd_str(&self) -> String {
         dunce::canonicalize(self.cwd.path())
             .expect("canonicalize cwd")
             .to_string_lossy()
             .to_string()
     }
-    /// Write a minimal valid summary.json (every non-defaulted `Summary`
-    /// field) for `id` under `cwd`, merging `extra` fields on top.
+    /// Write a minimal valid summary.json (every non-defaulted `Summary` field) for `id` under `cwd`, merging `extra` fields on top.
     pub fn write_summary(&mut self, cwd: &str, id: &str, extra: serde_json::Value) {
         let sessions_cwd_dir = Self::sessions_cwd_dir(cwd);
         if !self.cleanup.contains(&sessions_cwd_dir) {
@@ -279,7 +186,7 @@ impl GrokHomeFixture {
         }
         std::fs::write(dir.join("summary.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     }
-    /// Delete a previously written session dir (concurrent-delete simulation).
+    /// Delete a previously written session dir, so a test can simulate a concurrent delete.
     pub fn remove_session(&self, cwd: &str, id: &str) {
         let _ = std::fs::remove_dir_all(Self::sessions_cwd_dir(cwd).join(id));
     }
@@ -288,5 +195,118 @@ impl GrokHomeFixture {
         xai_grok_shell::util::grok_home::grok_home()
             .join("sessions")
             .join(&encoded)
+    }
+}
+/// On-disk git checkout living under a tempdir. Dropping the fixture deletes it.
+pub struct TempGitRepo {
+    _dir: tempfile::TempDir,
+    pub path: PathBuf,
+}
+impl TempGitRepo {
+    pub fn init(branch: &str) -> Self {
+        let dir = tempfile::tempdir().expect("temp git root");
+        let path = dir.path().join("repo");
+        init_git_repo_on_branch(&path, branch);
+        Self { _dir: dir, path }
+    }
+    /// CoW-style standalone clone: `.git` is a directory plus `grok-worktree-source`.
+    pub fn standalone_clone(&self, branch: &str) -> Self {
+        let dir = tempfile::tempdir().expect("temp clone root");
+        let path = dir.path().join("clone");
+        copy_dir_all(&self.path, &path);
+        checkout_named_branch(&path, branch);
+        std::fs::write(
+            path.join(".git").join("grok-worktree-source"),
+            self.path.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        Self { _dir: dir, path }
+    }
+    /// Linked `git worktree` of `branch` as a sibling of this checkout.
+    /// `.git` at the returned path is a file. Keep `self` alive while using it.
+    pub fn add_linked_worktree(&self, name: &str, branch: &str) -> PathBuf {
+        let repo = git2::Repository::open(&self.path).unwrap();
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        if repo.find_branch(branch, git2::BranchType::Local).is_err() {
+            repo.branch(branch, &commit, false).unwrap();
+        }
+        let wt_path = self
+            .path
+            .parent()
+            .expect("repo lives in a temp parent")
+            .join(name);
+        let reference = repo
+            .find_branch(branch, git2::BranchType::Local)
+            .unwrap()
+            .into_reference();
+        repo.worktree(
+            name,
+            &wt_path,
+            Some(git2::WorktreeAddOptions::new().reference(Some(&reference))),
+        )
+        .unwrap();
+        wt_path
+    }
+}
+/// Match [`crate::git_info`] tilde-collapse of a filesystem path.
+pub fn collapsed_path_display(path: &Path) -> String {
+    let home = std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::PathBuf::from(h.trim_end_matches(['/', '\\'])));
+    match home {
+        Some(h) => path
+            .strip_prefix(&h)
+            .map(|rest| format!("~/{}", rest.display()))
+            .unwrap_or_else(|_| path.display().to_string()),
+        None => path.display().to_string(),
+    }
+}
+pub fn init_git_repo_on_branch(path: &Path, branch: &str) {
+    std::fs::create_dir_all(path).unwrap();
+    let repo = git2::Repository::init(path).unwrap();
+    std::fs::write(path.join("README"), "test\n").unwrap();
+    let sig = git2::Signature::now("test", "test@test.com").unwrap();
+    let tree_id = {
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("README")).unwrap();
+        index.write().unwrap();
+        index.write_tree().unwrap()
+    };
+    let tree = repo.find_tree(tree_id).unwrap();
+    let oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+        .unwrap();
+    let commit = repo.find_commit(oid).unwrap();
+    let current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(str::to_string));
+    if current.as_deref() != Some(branch) {
+        repo.branch(branch, &commit, true).unwrap();
+        repo.set_head(&format!("refs/heads/{branch}")).unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+    }
+}
+fn checkout_named_branch(repo_path: &Path, branch: &str) {
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let commit = repo.head().unwrap().peel_to_commit().unwrap();
+    if repo.find_branch(branch, git2::BranchType::Local).is_err() {
+        repo.branch(branch, &commit, false).unwrap();
+    }
+    repo.set_head(&format!("refs/heads/{branch}")).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+}
+fn copy_dir_all(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_all(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), to).unwrap();
+        }
     }
 }

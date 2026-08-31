@@ -9,7 +9,7 @@
 //! - Anything a caller awaits an ack for (`FlushAndAck`,
 //!   `AppendUpdateDurablyAndAck`, `AppendCwdSwitchAndAck`) is on stable media
 //!   when the ack fires. A barrier syncs only the files dirtied since the
-//!   last one. A failed buffered write (chat append, streamed update, ÔÇª)
+//!   last one. A failed buffered write (chat append, streamed update, …)
 //!   latches until the next barrier, which then returns that error instead
 //!   of acking a sync of stale or missing bytes.
 //! - Atomic-rename writes fsync the temp file before the rename, so
@@ -311,7 +311,7 @@ pub enum PersistenceMsg {
     CompactionCheckpoint(crate::extensions::notification::CompactionCheckpointFile),
     /// Persist a compaction request+response artifact to
     /// `compaction_requests/{request_id}.json`. Used for offline prompt
-    /// iteration ÔÇö captures the exact ConversationItem list sent to the
+    /// iteration — captures the exact ConversationItem list sent to the
     /// compaction model plus the summary it returned (or the final error).
     /// The file rides on the post-turn session archive to cloud storage automatically;
     /// no separate upload path is needed.
@@ -382,7 +382,7 @@ fn storage_view(sessions_root: &Path) -> RelocationResult<RelocationView> {
 ///
 /// This is the correct check for the `-r` resume path: a session is only
 /// "already local" if it lives under the **same** cwd as the current invocation.
-/// A session stored under a different cwd does NOT satisfy this check ÔÇö the
+/// A session stored under a different cwd does NOT satisfy this check — the
 /// caller must still run the remote restore into the requested cwd.
 pub fn session_exists_for_cwd(session_id: &str, cwd: &str) -> bool {
     let sessions_root = crate::util::grok_home::grok_home().join("sessions");
@@ -429,9 +429,9 @@ pub fn find_local_child_for_remote(remote_session_id: &str, cwd: &str) -> Option
 /// Resolve a session ID to one that is available locally under `cwd`.
 ///
 /// Checks in order:
-///   1. `session_id` exists directly under `cwd` ÔåÆ returns it as-is.
-///   2. A previously restored child of `session_id` exists ÔåÆ returns the child ID.
-///   3. Neither found ÔåÆ returns `None` (caller should restore from remote).
+///   1. `session_id` exists directly under `cwd` → returns it as-is.
+///   2. A previously restored child of `session_id` exists → returns the child ID.
+///   3. Neither found → returns `None` (caller should restore from remote).
 pub fn resolve_local_session(session_id: &str, cwd: &str) -> Option<String> {
     if session_exists_for_cwd(session_id, cwd) {
         return Some(session_id.to_string());
@@ -521,7 +521,7 @@ fn find_local_child_for_remote_in_root(
 
     // Collect all matching children.  Multiple can exist when a user ran
     // `chutes-build -r <remote_id>` before this fix was deployed.
-    // Tuple: (updated_at, dir_mtime_nanos, session_id) ÔÇö all sorted descending.
+    // Tuple: (updated_at, dir_mtime_nanos, session_id) — all sorted descending.
     let mut candidates: Vec<(String, u128, String)> = Vec::new();
 
     let entries = std::fs::read_dir(&cwd_dir).ok()?;
@@ -805,14 +805,14 @@ fn local_summaries_for_cwd_sync_in_root(
 /// the (irreversible) OS sandbox is applied.
 ///
 /// - `session_id`: the explicit id from `--resume <id>` / `--load <id>` /
-///   `-s <id>`. Resolved directly across all cwds, then ÔÇö for a remote id that
-///   was restored into a local child ÔÇö via that child's `parent_session_id`.
+///   `-s <id>`. Resolved directly across all cwds, then — for a remote id that
+///   was restored into a local child — via that child's `parent_session_id`.
 /// - `cwd`: the current working directory. Used to resolve a remote id to its
 ///   local child, and as the lookup key for `-c` / `--continue` and bare
 ///   `--resume` (most-recent-for-cwd).
 ///
 /// Returns `None` when not resuming, the session isn't found locally, or it has
-/// no persisted profile (sessions created before this was tracked) ÔÇö callers
+/// no persisted profile (sessions created before this was tracked) — callers
 /// then fall back to the normal config/CLI resolution.
 pub fn resumed_session_sandbox_profile(
     session_id: Option<&str>,
@@ -1049,14 +1049,14 @@ pub struct Summary {
     pub worktree_label: Option<String>,
     /// The agent definition name that was active when the session was last saved.
     /// Used during session resume to avoid re-deriving from the (mutable) model
-    /// catalog ÔÇö if the model is removed or its `agent_type` changes between
+    /// catalog — if the model is removed or its `agent_type` changes between
     /// sessions, this persisted value ensures the correct harness is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     /// The OS sandbox profile this session ran under (e.g. "workspace",
     /// "strict", "off", or a custom name). Persisted so a resumed session is
     /// restored to the same profile instead of silently falling back to the
-    /// config default ÔÇö which would otherwise break commands that worked before
+    /// config default — which would otherwise break commands that worked before
     /// (a stricter profile denies filesystem/network the session relied on).
     /// `None` for sessions created before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1195,8 +1195,8 @@ impl Summary {
     }
 
     /// The manually-`/rename`d title (trimmed), `None` for auto-generated or
-    /// blank titles. Binds to `generated_title` ÔÇö the field `title_is_manual`
-    /// describes ÔÇö never the `session_summary` display fallback, so a stale
+    /// blank titles. Binds to `generated_title` — the field `title_is_manual`
+    /// describes — never the `session_summary` display fallback, so a stale
     /// flag over a blank manual title can't relabel an auto summary as
     /// manual. When `Some`, it equals [`Self::display_title_opt`] (a
     /// non-blank `generated_title` wins the display chain).
@@ -1396,7 +1396,7 @@ struct SessionPersistence {
     dirty_files: crate::session::storage::SessionFileSet,
     /// First buffered-write failure since the last barrier. `FlushAndAck`
     /// must not return `Ok` after a chat/update append that never reached
-    /// disk ÔÇö fsyncing the previous bytes is not durability for that write.
+    /// disk — fsyncing the previous bytes is not durability for that write.
     pending_write_error: Option<io::Error>,
 }
 
@@ -1744,7 +1744,7 @@ impl SessionPersistence {
             Ok(()) => {}
             // `write_all` reached the page cache (file barrier or
             // bookkeeping failed). A later idle FlushAndAck must retry
-            // the fsync ÔÇö TurnCompleted drops the ack after the turn's
+            // the fsync — TurnCompleted drops the ack after the turn's
             // pre-flush, so this is the only retry path.
             Err(crate::session::storage::AppendUpdateError::Committed(_)) => {
                 self.dirty_files.updates = true;
@@ -1775,7 +1775,7 @@ impl SessionPersistence {
             // JSONL reached the page cache; `write_update` already dirtied
             // updates so the barrier sync retries fsync. Returning Err here
             // would withhold persist_ack after a successful prompt-byte
-            // sync ÔÇö the same contract as chat Committed misses.
+            // sync — the same contract as chat Committed misses.
             Err(crate::session::storage::AppendUpdateError::Committed(error)) => {
                 tracing::warn!(%error, "failed to write pending update");
                 Ok(())
@@ -1840,7 +1840,7 @@ impl SessionPersistence {
 
     /// [`Self::flush_and_sync`] over the full barrier file set: `CopyFile`
     /// snapshots the whole session directory regardless of dirtiness.
-    /// Does not consume `pending_write_error` ÔÇö CopyFile is not the
+    /// Does not consume `pending_write_error` — CopyFile is not the
     /// durability barrier; stealing the latch would let a later
     /// FlushAndAck ack after a buffered write never reached disk.
     async fn flush_and_sync_all(&mut self) -> io::Result<()> {
@@ -2028,7 +2028,7 @@ impl SessionPersistence {
                 PersistenceMsg::PlanState(state) => {
                     // Atomic-rename: durable at write time, never on the dirty
                     // set. A failed plan write must not latch into
-                    // `pending_write_error` ÔÇö that latch is for buffered
+                    // `pending_write_error` — that latch is for buffered
                     // chat/update/rewind misses, and would make the next
                     // FlushAndAck fail after it has already synced those bytes.
                     let result = self.storage.write_plan_state(&self.info, &state).await;
@@ -2522,7 +2522,7 @@ mod io_error_to_acp_tests;
 
 /// Best-effort worktree liveness touch: stamp `last_accessed_at` on the
 /// worktree containing this session's cwd so `chutes-build worktree gc` expires by
-/// last use, not creation time. Lives here ÔÇö not in a `StorageAdapter` ÔÇö
+/// last use, not creation time. Lives here — not in a `StorageAdapter` —
 /// so every session create/load path shares it regardless of backend.
 fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
     let cwd = info.cwd.clone();
@@ -2531,7 +2531,7 @@ fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
     })
 }
 
-/// Bound on how long session open waits for the liveness touch to commit ÔÇö
+/// Bound on how long session open waits for the liveness touch to commit —
 /// generous vs the DB's 5s busy_timeout without letting a pathologically
 /// locked worktrees.db stall init.
 const WORKTREE_TOUCH_INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
@@ -2730,7 +2730,7 @@ pub(crate) async fn new_with_explicit_dir(
     Ok(handle)
 }
 
-/// Restore payload without updates in memory ÔÇö for streaming replay.
+/// Restore payload without updates in memory — for streaming replay.
 pub struct PersistedInfo {
     pub summary: Summary,
     pub chat_history: Vec<ConversationItem>,
@@ -2750,11 +2750,6 @@ pub struct PersistedInfo {
     pub goal_mode_state: Option<crate::session::goal_tracker::GoalOrchestration>,
     pub workflow_runs: Vec<crate::session::workflow::store::RestoredWorkflowRun>,
 }
-
-/// Historical fork name for [`PersistedInfo`]: the streaming-replay variant
-/// that used to skip `updates` in memory. Upstream 1.0.12 merged the two, so
-/// the type is now the single restore payload.
-pub use PersistedInfo as PersistedInfoLight;
 
 /// On NotFound, try pulling from backend. Returns pulled info or the original error.
 async fn pull_on_miss(
@@ -2919,7 +2914,7 @@ impl SessionDeletion {
 /// Idempotent: a session that is missing locally (e.g. remote-only)
 /// still succeeds, and a remote `404` (copy already gone) is treated as
 /// success rather than an error. When `needs_remote` is set the remote
-/// delete runs *first* and is authoritative ÔÇö only on its success (or a
+/// delete runs *first* and is authoritative — only on its success (or a
 /// `404`) are the local bits removed. This ordering prevents a partial
 /// delete where the local copy is nuked but the remote copy lingers and
 /// re-appears on the next session list.
@@ -2937,7 +2932,7 @@ pub async fn delete_session_history(
     let sid = acp::SessionId::new(Arc::from(session_id));
 
     // Resolve the local session info, scoping to cwd if provided. A
-    // remote-only session won't be found here ÔÇö that's fine, the remote
+    // remote-only session won't be found here — that's fine, the remote
     // delete (if applicable) still runs.
     let summaries = list_summaries(cwd)
         .await

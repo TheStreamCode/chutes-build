@@ -2,7 +2,7 @@
 //!
 //! The terminal owns committed history, so minimal must use only the built-in
 //! `autoresize` / `set_viewport_height` and must NEVER call the inline crate's
-//! RIS-rerender helpers or `emit_to_scrollback` — those re-emit history the
+//! RIS-rerender helpers or `emit_to_scrollback` ÔÇö those re-emit history the
 //! terminal already has, double-printing (or, with ED3, wiping) committed
 //! scrollback. This test fails loudly if such a call ever sneaks into the
 //! minimal module.
@@ -18,7 +18,7 @@ fn minimal_never_uses_ris_rerender_or_emit_to_scrollback() {
         "resize_viewport_height",
     ];
     // EVERY module of this crate except this guard file (which names the
-    // forbidden identifiers). Keep in sync with `lib.rs`'s module list — a
+    // forbidden identifiers). Keep in sync with `lib.rs`'s module list ÔÇö a
     // module missing here is a hole in the K6 guard.
     let sources = [
         ("lib.rs", include_str!("lib.rs")),
@@ -36,7 +36,7 @@ fn minimal_never_uses_ris_rerender_or_emit_to_scrollback() {
         for needle in FORBIDDEN {
             assert!(
                 !src.contains(needle),
-                "minimal/{name} references forbidden resize helper `{needle}` — it would \
+                "minimal/{name} references forbidden resize helper `{needle}` ÔÇö it would \
                  double-print committed scrollback (design K6 / risk #2); use the built-in \
                  autoresize / set_viewport_height instead"
             );

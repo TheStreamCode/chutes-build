@@ -68,7 +68,8 @@ pub use server::{
 };
 pub use trace_donate::{HubDonatingReporter, TraceDonationPump};
 pub use xai_computer_hub_core::{
-    CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS, grok_bot_tool_description, is_grok_bot_tool,
+    CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS, grok_bot_tool_description,
+    is_grok_bot_tool,
 };
 // Re-exported so consumers that depend only on the SDK can recognize the
 // server's `workspace_unavailable` error without also pulling in the core crate.

@@ -1,21 +1,17 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
-//! Async effect execution.
-//!
-//! This module takes [`Effect`] values produced by [`super::dispatch`] and
-//! spawns them as async tasks on a [`JoinSet`].  When tasks complete,
-//! the event loop converts their output into [`TaskResult`] and feeds it
-//! back through dispatch.
+//! This module takes [`Effect`] values produced by [`super::dispatch`] and spawns them as async tasks on a [`JoinSet`].
+//! When tasks complete, the event loop converts their output into [`TaskResult`] and feeds it back through dispatch.
 mod helpers;
 use super::actions;
 use super::session_title_resolve::worktree_resume_failure_message;
 #[allow(unused_imports)]
 use super::{agent, dispatch};
-pub use helpers::ConversationsPartial;
+pub use helpers::{CompactError, ConversationsPartial};
 pub(super) use helpers::{
     parse_session_load_running_prompt_id, parse_session_scheduler_background_loops,
 };
 pub(crate) use helpers::{
-    EffectMeta, RestoreProgressMsg, SessionFlags, is_disk_full_error,
+    EffectMeta, RestoreProgressMsg, SessionFlags, compact_error, is_disk_full_error,
     persist_permission_mode_and_notify, persist_setting, sanitize_user_error,
 };
 #[cfg(feature = "local-workspace")]
@@ -25,11 +21,13 @@ use std::path::{Path, PathBuf};
 use agent_client_protocol as acp;
 use tokio::task::JoinSet;
 use xai_acp_lib::{AcpAgentTx, acp_send};
-use xai_grok_telemetry::startup::{self, StartupOutcome, StartupPhase};
+use xai_grok_telemetry::startup::{self, StartupPhase};
 use actions::{
     ClipboardPasteTarget, Effect, ProbedAttachment, SubagentKillOutcome,
-    SwitchModelError, TaskResult,
+    SwitchModelError, TaskResult, WorkspaceMemberUpsertFailure,
 };
+use actions::PermissionModeKind;
+use crate::views::usage_modal::SessionInfoField;
 #[cfg(test)]
 use actions::PermissionModePersist;
 #[cfg(test)]
@@ -37,6 +35,17 @@ use agent::AgentId;
 use crate::unified_log as ulog;
 use xai_grok_shell::sampling::error::http_status_from_error;
 use xai_grok_shell::session::{ExtMethodResult, SessionInfoResponse};
+fn apply_permission_mode_override(
+    meta: &mut Option<acp::Meta>,
+    permission_mode_override: Option<PermissionModeKind>,
+) {
+    let Some(mode) = permission_mode_override else {
+        return;
+    };
+    let meta = meta.get_or_insert_with(acp::Meta::new);
+    meta.insert("yoloMode".into(), serde_json::Value::Bool(mode.is_always_approve()));
+    meta.insert("autoMode".into(), serde_json::Value::Bool(mode.is_auto()));
+}
 pub(crate) fn execute(
     effect: Effect,
     tasks: &mut JoinSet<TaskResult>,
@@ -71,6 +80,16 @@ pub(crate) fn execute(
             if let Err(e) = std::env::set_current_dir(&path) {
                 tracing::warn!(error = %e, "change location: failed to set_current_dir");
             }
+        }
+        Effect::RunStatusLineCommand(run) => {
+            tasks
+                .spawn(async move {
+                    let (id, outcome) = run.execute().await;
+                    TaskResult::StatusLineCommandFinished {
+                        id,
+                        outcome,
+                    }
+                });
         }
         Effect::ScheduleClearAuthCopyFeedback { generation } => {
             tasks
@@ -132,6 +151,7 @@ pub(crate) fn execute(
             agent_id,
             cwd: session_cwd,
             model_id,
+            permission_mode_override,
             preferred_session_id,
             chat_kind,
         } => {
@@ -144,6 +164,7 @@ pub(crate) fn execute(
             let mcp_count = mcp_servers.len();
             #[allow(unused_mut)]
             let mut meta = session_flags.to_meta();
+            apply_permission_mode_override(&mut meta, permission_mode_override);
             let is_chat_path = chat_kind || session_flags.chat_mode;
             finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
             if let Some(ref mid) = model_id {
@@ -179,17 +200,17 @@ pub(crate) fn execute(
                         Some(serde_json::json!({"mcp_server_count": mcp_count})),
                     );
                     let create_start = std::time::Instant::now();
-                    let result = acp_send(
+                    let result = helpers::acp_send_bounded(
                             acp::NewSessionRequest::new(session_cwd.clone())
                                 .mcp_servers(mcp_servers)
                                 .meta(meta),
                             &tx,
+                            "Session creation",
                         )
                         .await;
                     let create_elapsed_ms = create_start.elapsed().as_millis() as u64;
                     match result {
                         Ok(resp) => {
-                            startup::report_total(StartupOutcome::Ok);
                             ulog::info(
                                 "session.create.done",
                                 Some(&resp.session_id.0),
@@ -235,12 +256,14 @@ pub(crate) fn execute(
             label,
             git_ref,
             model_id,
+            permission_mode_override,
             preferred_session_id,
             chat_kind,
         } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             let mut meta = session_flags.to_meta();
+            apply_permission_mode_override(&mut meta, permission_mode_override);
             finalize_chat_session_meta(
                 &mut meta,
                 chat_kind || session_flags.chat_mode,
@@ -288,13 +311,19 @@ pub(crate) fn execute(
                             payload["gitRef"] = serde_json::Value::String(r.clone());
                         }
                         let ext_req = acp::ExtRequest::new(
-                            "chutes.build/git/worktree/resume_session",
+                            "chutes.ai/git/worktree/resume_session",
                             serde_json::value::to_raw_value(&payload)
                                 .expect("serialize resume params")
                                 .into(),
                         );
                         let _phase = startup::phase_scope(StartupPhase::SessionCreate);
-                        let ext_resp = match acp_send(ext_req, &tx).await {
+                        let ext_resp = match helpers::acp_send_bounded(
+                                ext_req,
+                                &tx,
+                                "Worktree session resume",
+                            )
+                            .await
+                        {
                             Ok(resp) => {
                                 tracing::info!(
                                 session_id = %sid,
@@ -367,7 +396,6 @@ pub(crate) fn execute(
                         let (code_restored, restore_summary, restore_degree) = parse_worktree_restore_payload(
                             result_obj,
                         );
-                        startup::report_total(StartupOutcome::Ok);
                         return TaskResult::WorktreeForked {
                             agent_id,
                             session_id: acp::SessionId::new(new_session_id),
@@ -397,7 +425,7 @@ pub(crate) fn execute(
                         params["gitRef"] = serde_json::Value::String(r.clone());
                     }
                     let ext_req = acp::ExtRequest::new(
-                        "chutes.build/git/worktree/create_from_worktree_sync",
+                        "chutes.ai/git/worktree/create_from_worktree_sync",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize worktree params")
                             .into(),
@@ -488,16 +516,16 @@ pub(crate) fn execute(
                         &xai_grok_tools::types::compat::CompatConfig::default(),
                     );
                     let _phase = startup::phase_scope(StartupPhase::SessionCreate);
-                    let result = acp_send(
+                    let result = helpers::acp_send_bounded(
                             acp::NewSessionRequest::new(session_cwd.clone())
                                 .mcp_servers(mcp_servers)
                                 .meta(meta),
                             &tx,
+                            "Worktree session creation",
                         )
                         .await;
                     match result {
                         Ok(resp) => {
-                            startup::report_total(StartupOutcome::Ok);
                             TaskResult::WorktreeSessionCreated {
                                 agent_id,
                                 session_id: resp.session_id,
@@ -529,7 +557,7 @@ pub(crate) fn execute(
             finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
             if let Some(rc) = session_flags.restore_code {
                 meta.get_or_insert_with(acp::Meta::new)
-                    .insert("chutes.build/restore_code".into(), serde_json::Value::Bool(rc));
+                    .insert("chutes.ai/restore_code".into(), serde_json::Value::Bool(rc));
             }
             let cwd = session_cwd.unwrap_or_else(|| cwd.to_path_buf());
             let mcp_started = std::time::Instant::now();
@@ -548,7 +576,7 @@ pub(crate) fn execute(
                     let _phase = startup::phase_scope(StartupPhase::SessionCreate);
                     ulog::info("session.load.start", Some(&acp_session_id.0), None);
                     let load_started = std::time::Instant::now();
-                    let result = acp_send(
+                    let result = helpers::acp_send_bounded(
                             acp::LoadSessionRequest::new(
                                     acp_session_id.clone(),
                                     cwd.clone(),
@@ -556,6 +584,7 @@ pub(crate) fn execute(
                                 .mcp_servers(mcp_servers.clone())
                                 .meta(meta.clone()),
                             &tx,
+                            "Session loading",
                         )
                         .await;
                     let load_elapsed_ms = load_started.elapsed().as_millis() as u64;
@@ -572,7 +601,6 @@ pub(crate) fn execute(
                                 Some(&acp_session_id.0),
                                 Some(serde_json::json!({"elapsed_ms": load_elapsed_ms})),
                             );
-                            startup::report_total(StartupOutcome::Ok);
                             let (code_restored, restore_summary, restore_degree) = parse_session_load_restore_meta(
                                 resp.meta.as_ref(),
                             );
@@ -719,7 +747,14 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::FetchSessionList { query, seq, kind_filter } => {
+        Effect::FetchSessionList {
+            host,
+            generation,
+            query,
+            seq,
+            kind_filter,
+            headless_policy,
+        } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             tasks
@@ -727,6 +762,7 @@ pub(crate) fn execute(
                     let mut params = serde_json::json!({
                     "cwd": cwd.to_string_lossy(),
                     "limit": 30,
+                    "headless": headless_policy.as_wire_str(),
                 });
                     if let Some(q) = &query {
                         params["query"] = serde_json::Value::String(q.clone());
@@ -735,19 +771,21 @@ pub(crate) fn execute(
                     }
                     if let Some(kinds) = &kind_filter {
                         params["_meta"] = serde_json::json!({
-                        "chutes.build/facetFilters": { "kind": kinds },
+                        "chutes.ai/facetFilters": { "kind": kinds },
                     });
                         tracing::info!(
                         target: "grok.pager.workspace_mode",
                         event = "session_list_fetch",
                         kind_filter = ?kinds,
                         query = ?query,
+                        ?host,
+                        generation,
                         seq,
                         "FetchSessionList with kind facet filter"
                     );
                     }
                     let request = acp::ExtRequest::new(
-                        "chutes.build/session/list",
+                        "chutes.ai/session/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize session list params")
                             .into(),
@@ -761,6 +799,8 @@ pub(crate) fn execute(
                                 .unwrap_or_default();
                             if let Some(err) = wrapper.get("error") {
                                 return TaskResult::SessionListFailed {
+                                    host,
+                                    generation,
                                     error: err.as_str().unwrap_or("unknown error").to_string(),
                                     seq,
                                     query,
@@ -771,6 +811,8 @@ pub(crate) fn execute(
                             let partial = parse_session_list_partial(payload);
                             let scope = parse_session_list_scope(payload);
                             TaskResult::SessionListLoaded {
+                                host,
+                                generation,
                                 sessions,
                                 partial,
                                 scope,
@@ -780,6 +822,8 @@ pub(crate) fn execute(
                         }
                         Err(e) => {
                             TaskResult::SessionListFailed {
+                                host,
+                                generation,
                                 error: sanitize_user_error(&format!("{e}")),
                                 seq,
                                 query,
@@ -788,7 +832,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::DebounceSessionSearch { query, seq } => {
+        Effect::DebounceSessionSearch { host, generation, query, seq } => {
             tasks
                 .spawn(async move {
                     tokio::time::sleep(
@@ -796,6 +840,8 @@ pub(crate) fn execute(
                         )
                         .await;
                     TaskResult::SessionSearchDebounceExpired {
+                        host,
+                        generation,
                         query,
                         seq,
                     }
@@ -806,7 +852,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/sessions/list",
+                        "chutes.ai/sessions/list",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize roster list params")
                             .into(),
@@ -846,9 +892,11 @@ pub(crate) fn execute(
                     let params = serde_json::json!({
                     "cwd": cwd.to_string_lossy(),
                     "limit": 30,
+                    "headless": xai_grok_shell::session::unified_list::HeadlessPolicy::Exclude
+                        .as_wire_str(),
                 });
                     let request = acp::ExtRequest::new(
-                        "chutes.build/session/list",
+                        "chutes.ai/session/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize session list params")
                             .into(),
@@ -876,6 +924,86 @@ pub(crate) fn execute(
                         Err(_) => {
                             TaskResult::DashboardSessionsLoaded {
                                 sessions: vec![],
+                            }
+                        }
+                    }
+                });
+        }
+        Effect::LoadWorkspaceSnapshot { db_path } => {
+            tasks
+                .spawn(async move {
+                    match tokio::task::spawn_blocking(move || {
+                            let store = xai_grok_dashboard_store::WorkspaceStore::open(
+                                &db_path,
+                            )?;
+                            let snapshot = store.snapshot()?;
+                            Ok::<
+                                _,
+                                xai_grok_dashboard_store::StoreError,
+                            >((store, snapshot))
+                        })
+                        .await
+                    {
+                        Ok(Ok((store, snapshot))) => {
+                            TaskResult::WorkspaceSnapshotLoaded {
+                                store,
+                                snapshot,
+                            }
+                        }
+                        Ok(Err(error)) => {
+                            TaskResult::WorkspaceSnapshotFailed {
+                                error: error.to_string(),
+                            }
+                        }
+                        Err(error) => {
+                            TaskResult::WorkspaceSnapshotFailed {
+                                error: format!("workspace loader task failed: {error}"),
+                            }
+                        }
+                    }
+                });
+        }
+        Effect::UpsertWorkspaceMembers { store, members } => {
+            let db_path = store.path().to_path_buf();
+            tasks
+                .spawn(async move {
+                    match tokio::task::spawn_blocking(move || {
+                            let mut store = store;
+                            let mut failures = Vec::new();
+                            for member in members.iter().cloned() {
+                                let session_id = member.key.session_id.to_string();
+                                if let Err(error) = store.insert_member(member) {
+                                    let retryable = matches!(
+                                &error,
+                                xai_grok_dashboard_store::StoreError::Busy { .. }
+                            );
+                                    failures
+                                        .push(WorkspaceMemberUpsertFailure {
+                                            session_id,
+                                            error: error.to_string(),
+                                            retryable,
+                                        });
+                                }
+                            }
+                            let snapshot = store
+                                .snapshot()
+                                .map_err(|error| error.to_string());
+                            (store, snapshot, failures, members)
+                        })
+                        .await
+                    {
+                        Ok((store, snapshot, failures, attempted)) => {
+                            TaskResult::WorkspaceMembersUpserted {
+                                store,
+                                snapshot,
+                                failures,
+                                attempted,
+                            }
+                        }
+                        Err(error) => {
+                            TaskResult::WorkspaceMembersUpsertTaskFailed {
+                                db_path,
+                                error: format!("workspace writer task failed: {error}"),
                             }
                         }
                     }
@@ -1036,7 +1164,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::LoadCardDetail { source, session_id, cwd, generation } => {
+        Effect::LoadCardDetail { host, generation, source, session_id, cwd, seq } => {
             tasks
                 .spawn(async move {
                     use crate::app::app_view::CardDetail;
@@ -1068,9 +1196,11 @@ pub(crate) fn execute(
                             first_prompt_preview: String::new(),
                         });
                     TaskResult::CardDetailLoaded {
+                        host,
+                        generation,
                         source,
                         session_id: result_session_id,
-                        generation,
+                        seq,
                         detail,
                     }
                 });
@@ -1264,7 +1394,7 @@ pub(crate) fn execute(
             session_id,
             cancel_subagents,
             trigger,
-            rewind_if_no_output,
+            rewind_prompt_id,
         } => {
             let tx = acp_tx.clone();
             let trigger_str = trigger.map(|t| t.as_wire_str());
@@ -1277,18 +1407,20 @@ pub(crate) fn execute(
                             serde_json::json!({
                         "cancel_subagents": cancel_subagents,
                         "trigger": trigger_str,
-                        "rewind_if_no_output": rewind_if_no_output,
+                        "rewind_if_no_output": rewind_prompt_id.is_some(),
+                        "rewind_prompt_id": rewind_prompt_id.as_deref(),
                     }),
                         ),
                     );
                     let send_start = std::time::Instant::now();
                     let mut meta = serde_json::json!({ "cancelSubagents": cancel_subagents });
                     if let Some(t) = trigger_str {
-                        meta["cancelTrigger"] = t.into();
+                        meta[crate::app::turn_completion::CANCEL_TRIGGER_KEY] = t.into();
                     }
-                    if rewind_if_no_output {
+                    if let Some(pid) = rewind_prompt_id {
                         meta["rewindIfNoOutput"] = true.into();
                         meta["rewindIfPristine"] = true.into();
+                        meta["promptId"] = pid.into();
                     }
                     let req = acp::CancelNotification::new(session_id.clone())
                         .meta(meta.as_object().cloned());
@@ -1317,7 +1449,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/toggle_plan_mode",
+                        "chutes.ai/toggle_plan_mode",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize toggle_plan_mode params")
                             .into(),
@@ -1338,7 +1470,7 @@ pub(crate) fn execute(
                     "expectedVersion": expected_version,
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/remove",
+                        "chutes.ai/queue/remove",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/remove params")
                             .into(),
@@ -1358,7 +1490,7 @@ pub(crate) fn execute(
                     "orderedIds": ordered_ids,
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/reorder",
+                        "chutes.ai/queue/reorder",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/reorder params")
                             .into(),
@@ -1377,7 +1509,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/clear",
+                        "chutes.ai/queue/clear",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/clear params")
                             .into(),
@@ -1398,7 +1530,7 @@ pub(crate) fn execute(
                     "newText": new_text,
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/edit",
+                        "chutes.ai/queue/edit",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/edit params")
                             .into(),
@@ -1418,7 +1550,7 @@ pub(crate) fn execute(
                     "id": id,
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/hold_edit",
+                        "chutes.ai/queue/hold_edit",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/hold_edit params")
                             .into(),
@@ -1438,7 +1570,7 @@ pub(crate) fn execute(
                     "id": id,
                 });
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/release_edit",
+                        "chutes.ai/queue/release_edit",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/release_edit params")
                             .into(),
@@ -1462,7 +1594,7 @@ pub(crate) fn execute(
                         params["newText"] = serde_json::Value::String(new_text);
                     }
                     let notification = acp::ExtNotification::new(
-                        "chutes.build/queue/interject",
+                        "chutes.ai/queue/interject",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize queue/interject params")
                             .into(),
@@ -1539,7 +1671,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/compact_conversation",
+                        "chutes.ai/compact_conversation",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize compact params")
                             .into(),
@@ -1547,9 +1679,7 @@ pub(crate) fn execute(
                     let result = acp_send(req, &tx).await;
                     TaskResult::CompactComplete {
                         agent_id,
-                        result: result
-                            .map(|_| ())
-                            .map_err(|e| sanitize_user_error(&e.to_string())),
+                        result: result.map(|_| ()).map_err(|e| compact_error(&e)),
                     }
                 });
         }
@@ -1562,7 +1692,7 @@ pub(crate) fn execute(
                     "filter_session_id": session_id,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/prompt_history",
+                        "chutes.ai/prompt_history",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize prompt_history params")
                             .into(),
@@ -1600,7 +1730,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::KillBgTask { session_id, task_id } => {
+        Effect::KillBgTask { session_id, task_id, source } => {
             let tx = acp_tx.clone();
             let sid = session_id.0.to_string();
             tasks
@@ -1608,10 +1738,10 @@ pub(crate) fn execute(
                     let params = xai_grok_shell::extensions::task::KillTaskRequest {
                         session_id: sid.clone(),
                         task_id: task_id.clone(),
-                        source: Default::default(),
+                        source,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/task/kill",
+                        "chutes.ai/task/kill",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize kill params")
                             .into(),
@@ -1644,7 +1774,7 @@ pub(crate) fn execute(
                     "subagentId": &subagent_id,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/subagent/cancel",
+                        "chutes.ai/subagent/cancel",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize cancel params")
                             .into(),
@@ -1672,7 +1802,7 @@ pub(crate) fn execute(
                     "taskId": task_id,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/scheduler/delete",
+                        "chutes.ai/scheduler/delete",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize scheduler delete params")
                             .into(),
@@ -1692,7 +1822,7 @@ pub(crate) fn execute(
                     "terminalId": tool_call_id,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/terminal/background",
+                        "chutes.ai/terminal/background",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize background params")
                             .into(),
@@ -1961,6 +2091,59 @@ pub(crate) fn execute(
                     TaskResult::CancelComplete
                 });
         }
+        Effect::PersistConsentAnswer { account, notice_id, version, acked } => {
+            tasks
+                .spawn(async move {
+                    match xai_grok_shell::util::config::set_consent_answer(
+                            account,
+                            notice_id,
+                            version,
+                            acked,
+                        )
+                        .await
+                    {
+                        Ok(()) => TaskResult::CancelComplete,
+                        Err(e) if !acked => {
+                            TaskResult::ConsentPersistFailed {
+                                error: e.to_string(),
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "consent ack not persisted");
+                            TaskResult::CancelComplete
+                        }
+                    }
+                });
+        }
+        Effect::RecordConsentUpstream { notice_id, version } => {
+            let tx = acp_tx.clone();
+            tasks
+                .spawn(async move {
+                    let request = acp::ExtRequest::new(
+                        "chutes.ai/consent/record",
+                        serde_json::value::to_raw_value(
+                                &serde_json::json!({
+                        "noticeId": notice_id,
+                        "version": version,
+                    }),
+                            )
+                            .expect("serialize params")
+                            .into(),
+                    );
+                    match acp_send(request, &tx).await {
+                        Ok(_) => {
+                            TaskResult::ConsentRecorded {
+                                notice_id,
+                                version,
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, %notice_id, "consent record not filed");
+                            TaskResult::CancelComplete
+                        }
+                    }
+                });
+        }
         Effect::PersistMemoryFullscreen { fullscreen } => {
             persist_hint(
                 tasks,
@@ -1989,7 +2172,7 @@ pub(crate) fn execute(
         Effect::PersistWorktreeMode { mode, config_key } => {
             debug_assert!(
                 config_key == "fork_worktree_mode" || config_key == "new_session_worktree_mode",
-                "unexpected worktree config_key: {config_key}"
+                "unexpected worktree config_key"
             );
             persist_hint(tasks, config_key, mode.as_config_str(), "worktree mode");
         }
@@ -2077,7 +2260,7 @@ pub(crate) fn execute(
                         }
                         let params = serde_json::json!({});
                         let req = acp::ExtRequest::new(
-                            "chutes.build/auth/get_url",
+                            "chutes.ai/auth/get_url",
                             serde_json::value::to_raw_value(&params)
                                 .expect("serialize auth_url params")
                                 .into(),
@@ -2111,47 +2294,13 @@ pub(crate) fn execute(
                 });
             meta.auth_url_poll_handle = Some((request_seq, abort_handle));
         }
-        Effect::SubmitApiKey {
-            request_seq,
-            api_key,
-        } => {
-            let tx = acp_tx.clone();
-            tasks.spawn(async move {
-                let params = serde_json::json!({ "key": api_key });
-                let req = acp::ExtRequest::new(
-                    "chutes.build/setApiKey",
-                    serde_json::value::to_raw_value(&params)
-                        .expect("serialize api key params")
-                        .into(),
-                );
-                if let Err(e) = acp_send(req, &tx).await {
-                    let error = sanitize_user_error(&e.to_string());
-                    ulog::error(
-                        "auth failed",
-                        None,
-                        Some(serde_json::json!({ "error": &error })),
-                    );
-                    return TaskResult::AuthFailed { request_seq, error };
-                }
-                send_authenticate(
-                    &tx,
-                    request_seq,
-                    acp::AuthMethodId::new(
-                        xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID,
-                    ),
-                    false,
-                    true,
-                )
-                .await
-            });
-        }
         Effect::SubmitAuthCode { request_seq, code } => {
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
                     let params = serde_json::json!({ "code": code });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/auth/submit_code",
+                        "chutes.ai/auth/submit_code",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize auth code params")
                             .into(),
@@ -2186,7 +2335,7 @@ pub(crate) fn execute(
                     "cache": cache,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/list",
+                        "chutes.ai/mcp/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/list params")
                             .into(),
@@ -2229,7 +2378,7 @@ pub(crate) fn execute(
                     "server_name": server_name,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/auth_trigger",
+                        "chutes.ai/mcp/auth_trigger",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/auth_trigger params")
                             .into(),
@@ -2296,7 +2445,7 @@ pub(crate) fn execute(
                     "values": values,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/setup",
+                        "chutes.ai/mcp/setup",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/setup params")
                             .into(),
@@ -2340,7 +2489,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/hooks/list",
+                        "chutes.ai/hooks/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize hooks/list params")
                             .into(),
@@ -2377,7 +2526,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/plugins/list",
+                        "chutes.ai/plugins/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize plugins/list params")
                             .into(),
@@ -2415,7 +2564,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/hooks/action",
+                        "chutes.ai/hooks/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize hooks/action params")
                             .into(),
@@ -2457,7 +2606,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/plugins/action",
+                        "chutes.ai/plugins/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize plugins/action params")
                             .into(),
@@ -2498,7 +2647,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/marketplace/list",
+                        "chutes.ai/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2539,7 +2688,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/marketplace/list",
+                        "chutes.ai/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2580,7 +2729,7 @@ pub(crate) fn execute(
                     "cwd": "."
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/skills/list",
+                        "chutes.ai/skills/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/list params")
                             .into(),
@@ -2619,7 +2768,7 @@ pub(crate) fn execute(
                     "sessionId": session_id
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/workflows/list",
+                        "chutes.ai/workflows/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize workflows/list params")
                             .into(),
@@ -2663,7 +2812,7 @@ pub(crate) fn execute(
                     "cwd": ".",
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/skills/toggle",
+                        "chutes.ai/skills/toggle",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize skills/toggle params")
                             .into(),
@@ -2683,7 +2832,7 @@ pub(crate) fn execute(
                                 .map_err(|_| "couldn't toggle skill".to_string());
                             if parsed.is_ok() {
                                 let refresh = acp::ExtRequest::new(
-                                    "chutes.build/skills/refresh-baseline",
+                                    "chutes.ai/skills/refresh-baseline",
                                     serde_json::value::to_raw_value(&serde_json::json!({}))
                                         .expect("serialize empty params")
                                         .into(),
@@ -2712,7 +2861,7 @@ pub(crate) fn execute(
                     "sessionId": session_id.0.to_string(),
                 });
                     let list_req = acp::ExtRequest::new(
-                        "chutes.build/marketplace/list",
+                        "chutes.ai/marketplace/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize marketplace/list params")
                             .into(),
@@ -2773,7 +2922,7 @@ pub(crate) fn execute(
                             action,
                         };
                         let update_req = acp::ExtRequest::new(
-                            "chutes.build/marketplace/action",
+                            "chutes.ai/marketplace/action",
                             serde_json::value::to_raw_value(&req_body)
                                 .expect("serialize marketplace/action params")
                                 .into(),
@@ -2804,7 +2953,7 @@ pub(crate) fn execute(
                         "updates": succeeded,
                     });
                         let notify_req = acp::ExtRequest::new(
-                            "chutes.build/plugins/notify-updates",
+                            "chutes.ai/plugins/notify-updates",
                             serde_json::value::to_raw_value(&notify_params)
                                 .expect("serialize notify-updates params")
                                 .into(),
@@ -2826,7 +2975,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/marketplace/action",
+                        "chutes.ai/marketplace/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize marketplace/action params")
                             .into(),
@@ -2885,7 +3034,7 @@ pub(crate) fn execute(
                         action,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/marketplace/action",
+                        "chutes.ai/marketplace/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize marketplace/action params")
                             .into(),
@@ -2931,7 +3080,7 @@ pub(crate) fn execute(
                         action: xai_hooks_plugins_types::PluginsAction::Reload,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/plugins/action",
+                        "chutes.ai/plugins/action",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize plugins/action params")
                             .into(),
@@ -3010,7 +3159,7 @@ pub(crate) fn execute(
                         config: *config,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/upsert",
+                        "chutes.ai/mcp/upsert",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize mcp/upsert params")
                             .into(),
@@ -3047,7 +3196,7 @@ pub(crate) fn execute(
                         server_name,
                     };
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/delete",
+                        "chutes.ai/mcp/delete",
                         serde_json::value::to_raw_value(&req_body)
                             .expect("serialize mcp/delete params")
                             .into(),
@@ -3077,7 +3226,7 @@ pub(crate) fn execute(
                     "enabled": enabled,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/toggle",
+                        "chutes.ai/mcp/toggle",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/toggle params")
                             .into(),
@@ -3109,7 +3258,7 @@ pub(crate) fn execute(
                     "enabled": enabled,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/mcp/toggle_tool",
+                        "chutes.ai/mcp/toggle_tool",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize mcp/toggle_tool params")
                             .into(),
@@ -3134,7 +3283,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/share_session",
+                        "chutes.ai/share_session",
                         serde_json::value::to_raw_value(
                                 &ShareSessionRequest {
                                     session_id: session_id.0.to_string(),
@@ -3217,7 +3366,8 @@ pub(crate) fn execute(
                 .spawn(async move {
                     match fetch_session_info(&session_id, &tx).await {
                         Ok(info) => {
-                            let title = lookup_session_title(&session_id).await;
+                            let title = lookup_session_title(&session_id, &info.cwd)
+                                .await;
                             let text = format_session_info(
                                 &info,
                                 title.as_deref(),
@@ -3225,11 +3375,17 @@ pub(crate) fn execute(
                                 is_api_key_auth,
                                 api_key_env_set,
                             );
+                            let fields = session_info_fields(
+                                &info,
+                                title.as_deref(),
+                                show_resolved_model,
+                            );
                             TaskResult::SessionInfoComplete {
                                 agent_id,
                                 session_id,
                                 info: Box::new(info),
                                 text,
+                                fields,
                                 nonce,
                             }
                         }
@@ -3244,59 +3400,68 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::RenameSession { agent_id, session_id, title, cwd } => {
+        Effect::RenameSession { agent_id, session_id, title, cwd, kind } => {
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
-                    #[derive(serde::Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct RenameRequest {
-                        session_id: String,
-                        title: String,
-                        cwd: String,
-                    }
-                    let request = acp::ExtRequest::new(
-                        "chutes.build/session/rename",
-                        serde_json::value::to_raw_value(
-                                &RenameRequest {
-                                    session_id: session_id.0.to_string(),
-                                    title: title.clone(),
-                                    cwd: cwd.to_string_lossy().to_string(),
-                                },
-                            )
-                            .expect("serialize rename params")
-                            .into(),
-                    );
-                    match acp_send(request, &tx).await {
-                        Ok(resp) => {
-                            let wrapper: serde_json::Value = serde_json::from_str(
-                                    resp.0.get(),
-                                )
-                                .unwrap_or_default();
-                            if let Some(err) = wrapper
-                                .get("error")
-                                .filter(|v| !v.is_null())
-                            {
-                                let msg = err
-                                    .as_str()
-                                    .map(String::from)
-                                    .unwrap_or_else(|| err.to_string());
-                                return TaskResult::RenameSessionFailed {
-                                    agent_id,
-                                    error: msg,
-                                };
-                            }
+                    match session_rename_rpc(
+                            &tx,
+                            actions::RenameSessionRequest::for_rename(
+                                session_id.0.to_string(),
+                                title.clone(),
+                                cwd.to_string_lossy().to_string(),
+                                kind,
+                            ),
+                        )
+                        .await
+                    {
+                        Ok(()) => {
                             TaskResult::RenameSessionComplete {
                                 agent_id,
                                 title,
                             }
                         }
-                        Err(e) => {
+                        Err(error) => {
                             TaskResult::RenameSessionFailed {
                                 agent_id,
-                                error: sanitize_user_error(
-                                    &format!("couldn't rename session: {e}"),
-                                ),
+                                error,
+                            }
+                        }
+                    }
+                });
+        }
+        Effect::ResetSessionTitle {
+            agent_id,
+            session_id,
+            cwd,
+            kind,
+            previous_display_name,
+            previous_generated_title,
+        } => {
+            let tx = acp_tx.clone();
+            tasks
+                .spawn(async move {
+                    match session_rename_rpc(
+                            &tx,
+                            actions::RenameSessionRequest::for_reset(
+                                session_id.0.to_string(),
+                                cwd.to_string_lossy().to_string(),
+                                kind,
+                            ),
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            TaskResult::ResetSessionTitleComplete {
+                                agent_id,
+                            }
+                        }
+                        Err(error) => {
+                            TaskResult::ResetSessionTitleFailed {
+                                agent_id,
+                                error,
+                                previous_display_name,
+                                previous_generated_title,
                             }
                         }
                     }
@@ -3313,7 +3478,7 @@ pub(crate) fn execute(
                         cwd: String,
                     }
                     let request = acp::ExtRequest::new(
-                        "chutes.build/session/delete",
+                        "chutes.ai/session/delete",
                         serde_json::value::to_raw_value(
                                 &DeleteRequest {
                                     session_id: session_id.clone(),
@@ -3371,7 +3536,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/privacy/setCodingDataRetention",
+                        "chutes.ai/privacy/setCodingDataRetention",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!({ "codingDataRetentionOptOut": !opted_in }),
                             )
@@ -3478,7 +3643,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::SendFeedback { agent_id, session_id, feedback_text } => {
+        Effect::SendFeedback { agent_id, session_id, feedback_text, images } => {
             use xai_grok_shell::session::ClientType;
             use xai_grok_shell::session::acp_types::ClientFeedbackInput;
             let terminal_info = Some(
@@ -3492,8 +3657,8 @@ pub(crate) fn execute(
                         client_type: ClientType::Tui,
                         rating_type: None,
                         rating_value: None,
-                        images: Vec::new(),
                         feedback_text: Some(feedback_text.clone()),
+                        images,
                         feedback_categories: vec![],
                         context_type: None,
                         turn_number: None,
@@ -3516,7 +3681,7 @@ pub(crate) fn execute(
                         }
                     };
                     let request = acp::ExtRequest::new(
-                        "chutes.build/feedback",
+                        "chutes.ai/feedback",
                         raw_params.into(),
                     );
                     match acp_send(request, &tx).await {
@@ -3536,6 +3701,62 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::UploadFeedbackTrace { agent_id, session_id } => {
+            let tx = acp_tx.clone();
+            tasks
+                .spawn(async move {
+                    let raw_params = match serde_json::value::to_raw_value(
+                        &serde_json::json!({
+                    "sessionId": session_id.0.to_string(),
+                }),
+                    ) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return TaskResult::FeedbackTraceUploaded {
+                                agent_id,
+                                error: Some(
+                                    sanitize_user_error(
+                                        &format!(
+                                "couldn't serialize trace upload: {e}"
+                            ),
+                                    ),
+                                ),
+                            };
+                        }
+                    };
+                    let request = acp::ExtRequest::new(
+                        "chutes.ai/feedback/upload-trace",
+                        raw_params.into(),
+                    );
+                    match tokio::time::timeout(
+                            std::time::Duration::from_millis(
+                                crate::app::dispatch::FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS,
+                            ),
+                            acp_send(request, &tx),
+                        )
+                        .await
+                    {
+                        Ok(Ok(_)) => {
+                            TaskResult::FeedbackTraceUploaded {
+                                agent_id,
+                                error: None,
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            TaskResult::FeedbackTraceUploaded {
+                                agent_id,
+                                error: Some(sanitize_user_error(&format!("{e}"))),
+                            }
+                        }
+                        Err(_) => {
+                            TaskResult::FeedbackTraceUploaded {
+                                agent_id,
+                                error: Some("trace upload timed out".to_string()),
+                            }
+                        }
+                    }
+                });
+        }
         Effect::RewriteMemoryNote {
             agent_id,
             session_id,
@@ -3547,7 +3768,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/memory/rewrite",
+                        "chutes.ai/memory/rewrite",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!({
                         "sessionId": session_id.0.to_string(),
@@ -3616,7 +3837,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/btw",
+                        "chutes.ai/btw",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!({
                         "sessionId": session_id.0.to_string(),
@@ -3659,7 +3880,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/recap",
+                        "chutes.ai/recap",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!({
                         "sessionId": session_id.0.to_string(),
@@ -3704,7 +3925,7 @@ pub(crate) fn execute(
                         blocks.as_deref(),
                     );
                     let request = acp::ExtRequest::new(
-                        "chutes.build/interject",
+                        "chutes.ai/interject",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize interject params")
                             .into(),
@@ -3734,7 +3955,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "kind": kind, "name": name });
                     let request = acp::ExtRequest::new(
-                        "chutes.build/bundle/entry/get",
+                        "chutes.ai/bundle/entry/get",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize bundle/entry/get params")
                             .into(),
@@ -3788,7 +4009,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/bundle/status",
+                        "chutes.ai/bundle/status",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize bundle/status params")
                             .into(),
@@ -3847,7 +4068,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     let params = serde_json::json!({ "sessionId": session_id });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/commands/list",
+                        "chutes.ai/commands/list",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize commands/list params")
                             .into(),
@@ -3883,7 +4104,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/rewind/points",
+                        "chutes.ai/rewind/points",
                         serde_json::value::to_raw_value(
                                 &serde_json::json!({
                         "sessionId": session_id.0.to_string()
@@ -3942,7 +4163,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
-                        "chutes.build/rewind/execute",
+                        "chutes.ai/rewind/execute",
                         serde_json::value::to_raw_value(
                                 &rewind_execute_params(
                                     session_id.0.as_ref(),
@@ -3988,7 +4209,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::DeepSearchSessions { query, seq } => {
+        Effect::DeepSearchSessions { host, generation, query, seq, headless_policy } => {
             let tx = acp_tx.clone();
             tasks
                 .spawn(async move {
@@ -4001,9 +4222,10 @@ pub(crate) fn execute(
                         "query": query,
                         "limit": 20,
                         "includeContent": true,
+                        "headless": headless_policy.as_wire_str(),
                     });
                         let request = acp::ExtRequest::new(
-                            "chutes.build/session/search",
+                            "chutes.ai/session/search",
                             serde_json::value::to_raw_value(&params)
                                 .expect("serialize deep search params")
                                 .into(),
@@ -4053,6 +4275,8 @@ pub(crate) fn execute(
                         tokio::time::sleep(retry_interval).await;
                     }
                     TaskResult::DeepSearchResults {
+                        host,
+                        generation,
                         results,
                         seq,
                     }
@@ -4088,7 +4312,7 @@ pub(crate) fn execute(
                         parent_is_worktree,
                     );
                     let req = acp::ExtRequest::new(
-                        "chutes.build/session/fork",
+                        "chutes.ai/session/fork",
                         serde_json::value::to_raw_value(&payload)
                             .expect("serialize fork params")
                             .into(),
@@ -4180,7 +4404,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     use xai_grok_shell::extensions::billing::BillingConfigResponse;
                     let req = acp::ExtRequest::new(
-                        "chutes.build/billing",
+                        "chutes.ai/billing",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize billing params")
                             .into(),
@@ -4279,7 +4503,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     use xai_grok_shell::extensions::billing::BillingConfigResponse;
                     let req = acp::ExtRequest::new(
-                        "chutes.build/billing",
+                        "chutes.ai/billing",
                         serde_json::value::to_raw_value(&serde_json::json!({}))
                             .expect("serialize billing params")
                             .into(),
@@ -4376,7 +4600,7 @@ pub(crate) fn execute(
                     "tokenOnly": token_only,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/suggest",
+                        "chutes.ai/suggest",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize suggest params")
                             .into(),
@@ -4416,7 +4640,7 @@ pub(crate) fn execute(
                     "sessionId": session_id,
                 });
                     let req = acp::ExtRequest::new(
-                        "chutes.build/suggestPrompt",
+                        "chutes.ai/suggestPrompt",
                         serde_json::value::to_raw_value(&params)
                             .expect("serialize suggestPrompt params")
                             .into(),
@@ -4449,7 +4673,7 @@ async fn fetch_session_info(
     tx: &AcpAgentTx,
 ) -> Result<SessionInfoResponse, String> {
     let request = acp::ExtRequest::new(
-        "chutes.build/session/info",
+        "chutes.ai/session/info",
         serde_json::value::to_raw_value(
                 &serde_json::json!({
             "sessionId": session_id.0.to_string()
@@ -4474,13 +4698,13 @@ async fn fetch_session_info(
     }
     envelope.result.ok_or_else(|| "session info response missing result".to_string())
 }
-/// `chutes.ai/session/usage` → [`PromptUsage`] (bare response, no envelope).
+/// Fetch [`PromptUsage`] via `chutes.ai/session/usage` (bare response, no envelope).
 async fn fetch_session_usage(
     session_id: &acp::SessionId,
     tx: &AcpAgentTx,
 ) -> Result<xai_grok_shell::extensions::notification::PromptUsage, String> {
     let request = acp::ExtRequest::new(
-        "chutes.build/session/usage",
+        "chutes.ai/session/usage",
         serde_json::value::to_raw_value(
                 &serde_json::json!({
             "sessionId": session_id.0.to_string()
@@ -4507,28 +4731,99 @@ async fn fetch_session_usage(
         })?;
     Ok(parsed.usage)
 }
-/// Look up the session title/summary from local persistence.
-async fn lookup_session_title(session_id: &acp::SessionId) -> Option<String> {
-    let summaries = xai_grok_shell::session::persistence::list_summaries(None)
+/// Shared `chutes.ai/session/rename` RPC for rename and `/rename --auto`.
+async fn session_rename_rpc(
+    tx: &AcpAgentTx,
+    request: actions::RenameSessionRequest,
+) -> Result<(), String> {
+    let verb = if request.reset_to_auto {
+        "reset session title"
+    } else {
+        "rename session"
+    };
+    let ext = acp::ExtRequest::new(
+        "chutes.ai/session/rename",
+        serde_json::value::to_raw_value(&request)
+            .expect("serialize rename params")
+            .into(),
+    );
+    match acp_send(ext, tx).await {
+        Ok(resp) => {
+            let wrapper: serde_json::Value = serde_json::from_str(resp.0.get())
+                .unwrap_or_default();
+            if let Some(err) = wrapper.get("error").filter(|v| !v.is_null()) {
+                let msg = err
+                    .as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| err.to_string());
+                return Err(msg);
+            }
+            Ok(())
+        }
+        Err(e) => Err(sanitize_user_error(&format!("couldn't {verb}: {e}"))),
+    }
+}
+/// Session title from local persistence: loads only this session's summary, never the all-sessions list.
+/// `cwd` comes from the `chutes.ai/session/info` response.
+async fn lookup_session_title(session_id: &acp::SessionId, cwd: &str) -> Option<String> {
+    lookup_session_title_in(
+            xai_grok_shell::util::grok_home::grok_home(),
+            session_id,
+            cwd,
+        )
         .await
-        .ok()?;
-    summaries
-        .into_iter()
-        .find(|s| s.info.id == *session_id)
+}
+/// [`lookup_session_title`] against an explicit root, for tests.
+async fn lookup_session_title_in(
+    root: std::path::PathBuf,
+    session_id: &acp::SessionId,
+    cwd: &str,
+) -> Option<String> {
+    use xai_grok_shell::session::storage::{JsonlStorageAdapter, StorageAdapter};
+    let info = xai_grok_shell::session::info::Info {
+        id: session_id.clone(),
+        cwd: cwd.to_string(),
+    };
+    JsonlStorageAdapter::with_root(root)
+        .load_summary(&info)
+        .await
+        .ok()
         .and_then(|s| s.display_title_opt())
 }
 /// Format session info into a human-readable string.
 ///
 /// Mirrors the TUI's `render_session_info` for pager display.
-fn format_session_info(
+/// Structured `/session-info` rows: the single source of truth for both the formatted string ([`format_session_info`]) and the modal.
+/// Neither has to re-parse the other.
+/// Auth is not a field here; it is prose the string appends on its own.
+/// `compact` marks the dense model/runtime group the modal renders as `Label: value` on one line.
+fn session_info_fields(
     info: &SessionInfoResponse,
     title: Option<&str>,
     show_resolved_model: bool,
-    is_api_key_auth: bool,
-    api_key_env_set: bool,
-) -> String {
-    let session_id = &info.session_id;
-    let cwd = &info.cwd;
+) -> Vec<SessionInfoField> {
+    let mut fields = Vec::new();
+    let mut push = |label: &'static str, value: String, compact: bool| {
+        fields
+            .push(SessionInfoField {
+                label,
+                value,
+                compact,
+            });
+    };
+    if let Some(t) = title {
+        push("Title", t.to_string(), false);
+    }
+    push(
+        "Shell version",
+        xai_grok_version::display_version(xai_grok_update::channel_label()),
+        false,
+    );
+    push("Session ID", info.session_id.to_string(), false);
+    if let Some(id) = info.data.conversation_id.as_deref().filter(|id| !id.is_empty()) {
+        push("Conversation ID", id.to_string(), false);
+    }
+    push("Working directory", info.cwd.to_string(), false);
     let model = info.data.model.as_deref().unwrap_or("unknown");
     let model_display = xai_grok_shell::session::model_display_name(
         info.data.model_display_name.as_deref(),
@@ -4536,55 +4831,55 @@ fn format_session_info(
         info.data.resolved_model_id.as_deref(),
         show_resolved_model,
     );
+    push("Model", model_display.to_string(), true);
+    if info.data.show_model_fingerprint
+        && let Some(fp) = info.data.model_fingerprint.as_deref()
+    {
+        push("Model Hash", fp.to_string(), true);
+    }
+    if let Some(b) = info.data.api_backend.as_deref() {
+        push("API Backend", b.to_string(), true);
+    }
+    if let Some(profile) = xai_grok_sandbox::profile_name() {
+        push("Sandbox", profile.to_string(), true);
+    }
+    push("Turn", info.data.turn_index.to_string(), true);
     let ctx = &info.data.context;
-    let used = ctx.used;
-    let total = ctx.total;
-    let pct = ctx.usage_pct;
-    let title_line = match title {
-        Some(t) => format!("  Title: {t}\n"),
-        None => String::new(),
-    };
-    let model_hash_line = if xai_grok_shell::session::should_show_model_fingerprint(
-        info.data.show_model_fingerprint,
-        model,
-    ) {
-        info.data
-            .model_fingerprint
-            .as_deref()
-            .map(|fp| format!("\n  Model Hash: {fp}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let backend_line = info
-        .data
-        .api_backend
-        .as_deref()
-        .map(|b| format!("\n  API Backend: {b}"))
-        .unwrap_or_default();
-    let sandbox_line = xai_grok_sandbox::profile_name()
-        .map(|profile| format!("\n  Sandbox: {profile}"))
-        .unwrap_or_default();
-    let turn_line = format!("\n  Turn: {}", info.data.turn_index);
-    let conversation_line = info
-        .data
-        .conversation_id
-        .as_deref()
-        .filter(|id| !id.is_empty())
-        .map(|id| format!("\n  Conversation ID: {id}"))
-        .unwrap_or_default();
-    let version_display = xai_grok_version::display_version(
-        xai_grok_update::channel_label(),
+    push(
+        "Context",
+        format!("{} / {} tokens ({}%)", ctx.used, ctx.total, ctx.usage_pct),
+        true,
     );
-    let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
-    format!(
-        "{title_line}  Shell version: {version_display}\n{auth_lines}  Session ID: {session_id}{conversation_line}\n  Working directory: {cwd}\n  Model: {model_display}{model_hash_line}{backend_line}{sandbox_line}{turn_line}\n  Context: {used} / {total} tokens ({pct}%)"
-    )
+    fields
 }
-/// Auth section for `/session-info` — active login method.
+/// The `/session-info` block as a plain string for minimal-mode scrollback.
+/// Built from [`session_info_fields`] (one `  Label: value` line each) with the auth prose spliced in after the shell version.
+/// That keeps it a single source of truth with the modal.
+fn format_session_info(
+    info: &SessionInfoResponse,
+    title: Option<&str>,
+    show_resolved_model: bool,
+    is_api_key_auth: bool,
+    api_key_env_set: bool,
+) -> String {
+    let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
+    let mut out = String::new();
+    for field in session_info_fields(info, title, show_resolved_model) {
+        out.push_str("  ");
+        out.push_str(field.label);
+        out.push_str(": ");
+        out.push_str(&field.value);
+        out.push('\n');
+        if field.label == "Shell version" {
+            out.push_str(&auth_lines);
+        }
+    }
+    out.truncate(out.trim_end_matches('\n').len());
+    out
+}
+/// Auth section for `/session-info`: active login method.
 ///
-/// This reflects the process login / ACP auth method, not per-model sampling
-/// credentials (a model `api_key`/`env_key` can still own the turn).
+/// This reflects the process login / ACP auth method, not per-model sampling credentials (a model `api_key`/`env_key` can still own the turn).
 fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
     if is_api_key_auth {
         let method = if api_key_env_set {
@@ -4600,14 +4895,12 @@ fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
 }
 /// Build the single text content block for a plain `Effect::SendPrompt`.
 ///
-/// Non-empty `skill_token_ranges` are stamped into the block `_meta` as
-/// `skillTokenRanges: [[start, end], …]` so session replay restyles the echo
-/// exactly like the composer highlighted it at submit time. Contract: the
-/// offsets index this block's `text`, which is displayed verbatim — this
-/// producer never combines them with a `displayText` override, and the
-/// tracker ignores them when one is present. Empty ranges keep `meta: None`
-/// — the legacy wire shape stays byte-identical. Extracted from the spawn
-/// for testability.
+/// Non-empty `skill_token_ranges` are stamped into the block `_meta` as `skillTokenRanges: [[start, end], …]`.
+/// Session replay then restyles the echo exactly like the composer highlighted it at submit time.
+/// Contract: the offsets index this block's `text`, which is displayed verbatim.
+/// This producer never combines them with a `displayText` override, and the tracker ignores them when one is present.
+/// Empty ranges keep `meta: None`, so the legacy wire shape stays byte-identical.
+/// Extracted from the spawn for testability.
 fn plain_prompt_content_block(
     text: String,
     skill_token_ranges: &[std::ops::Range<usize>],
@@ -4628,12 +4921,10 @@ fn plain_prompt_content_block(
     };
     acp::ContentBlock::Text(acp::TextContent::new(text).meta(meta))
 }
-/// Build the `PromptRequest._meta` payload: `promptId` for notification /
-/// response correlation, plus `screenMode` (`fullscreen` | `inline` |
-/// `minimal`; headless stamps `"headless"` in its own path) so the shell can
-/// attribute `prompt_submitted` telemetry to minimal vs. regular usage.
-/// `screen_mode` is `None` only under `SessionFlags::default()` (tests); the
-/// key is omitted then, keeping the legacy wire shape byte-identical.
+/// Build the `PromptRequest._meta` payload: `promptId` for notification / response correlation, plus `screenMode`.
+/// `screenMode` is `fullscreen` | `inline` | `minimal` (headless stamps `"headless"` in its own path).
+/// The shell uses it to attribute `prompt_submitted` telemetry to minimal vs. regular usage.
+/// `screen_mode` is `None` only under `SessionFlags::default()` (tests); the key is omitted then, keeping the legacy wire shape byte-identical.
 /// Extracted from the spawns for testability.
 fn prompt_request_meta(
     prompt_id: &str,
@@ -4658,9 +4949,9 @@ pub(crate) fn rewind_execute_params(
         "mode": REWIND_MODE_WIRE,
     })
 }
-/// Build the `chutes.ai/interject` params. The optional structured `content`
-/// (text + images) is omitted ENTIRELY when `None` so the legacy wire
-/// shape stays byte-identical. Extracted from the spawn for testability.
+/// Build the `chutes.ai/interject` params.
+/// The optional structured `content` (text and images) is omitted ENTIRELY when `None` so the legacy wire shape stays byte-identical.
+/// Extracted from the spawn for testability.
 fn build_interject_params(
     session_id: &acp::SessionId,
     text: &str,

@@ -164,7 +164,10 @@ pub async fn run_command_hook(
         .current_dir(ctx.workspace_root)
         // SECURITY: extra_env is applied before the GROK_* identity vars so a hook cannot spoof them.
         .envs(&spec.extra_env)
-        .env("CHUTES_BUILD_HOOK_EVENT", envelope.hook_event_name.to_string())
+        .env(
+            "CHUTES_BUILD_HOOK_EVENT",
+            envelope.hook_event_name.to_string(),
+        )
         .env("CHUTES_BUILD_HOOK_NAME", &spec.name)
         .env("CHUTES_BUILD_SESSION_ID", ctx.session_id)
         .env("CHUTES_BUILD_WORKSPACE_ROOT", env_root.as_ref())

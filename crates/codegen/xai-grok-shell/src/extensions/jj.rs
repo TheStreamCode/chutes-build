@@ -15,22 +15,20 @@ pub(crate) async fn try_handle(
     raw_params: &serde_json::value::RawValue,
 ) -> Option<ExtResult> {
     match method {
-        "chutes.build/git/status" => Some(to_ext_response(jj::status(git_root).await)),
-        "chutes.build/git/info" => Some(to_ext_response(jj::info(git_root).await)),
+        "chutes.ai/git/status" => Some(to_ext_response(jj::status(git_root).await)),
+        "chutes.ai/git/info" => Some(to_ext_response(jj::info(git_root).await)),
         // git HEAD points at `@-` in a colocated repo; route to jj so we report
         // the working-copy commit (`@`), consistent with `status`/`info`.
-        "chutes.build/git/current_commit" => {
-            Some(to_ext_response(jj::current_commit(git_root).await))
-        }
-        "chutes.build/git/branches" => Some(to_ext_response(jj::list_bookmarks(git_root).await)),
+        "chutes.ai/git/current_commit" => Some(to_ext_response(jj::current_commit(git_root).await)),
+        "chutes.ai/git/branches" => Some(to_ext_response(jj::list_bookmarks(git_root).await)),
 
         // jj has no staging area — stage/unstage are no-ops
-        "chutes.build/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
-        "chutes.build/git/stage/content" | "chutes.build/git/unstage" => {
+        "chutes.ai/git/stage" => Some(to_ext_response(Ok(StageData { paths: Vec::new() }))),
+        "chutes.ai/git/stage/content" | "chutes.ai/git/unstage" => {
             Some(to_ext_response(Ok(Empty {})))
         }
 
-        "chutes.build/git/discard" => {
+        "chutes.ai/git/discard" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct Req {
@@ -43,7 +41,7 @@ pub(crate) async fn try_handle(
             ))
         }
 
-        "chutes.build/git/commit" => {
+        "chutes.ai/git/commit" => {
             #[derive(serde::Deserialize)]
             struct Req {
                 message: String,
@@ -57,9 +55,9 @@ pub(crate) async fn try_handle(
         }
 
         // Operations that don't apply to jj
-        "chutes.build/git/checkout" => Some(Err(acp::Error::invalid_params()
+        "chutes.ai/git/checkout" => Some(Err(acp::Error::invalid_params()
             .data("checkout is not supported in jj repos; use `jj new` or `jj edit`"))),
-        "chutes.build/git/stash" => Some(Err(acp::Error::invalid_params()
+        "chutes.ai/git/stash" => Some(Err(acp::Error::invalid_params()
             .data("stash is not supported in jj repos; changes are always committed"))),
 
         // Everything else (diffs, files, serialize_changes) falls through to git

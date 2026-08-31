@@ -1,6 +1,6 @@
 use super::*;
 
-// ÔöÇÔöÇ Disk cache ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── Disk cache ──────────────────────────────────────────────────────────────
 
 pub(crate) const MODELS_CACHE_FILE: &str = "models_cache.json";
 pub(crate) const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
@@ -141,7 +141,7 @@ impl ModelsCacheManager {
             .with_extension(format!("json.tmp.{}.{n}", std::process::id()))
     }
 
-    /// Best-effort removal of temp files a crash left in the writeÔåÆrename window; only sweeps entries older than the TTL.
+    /// Best-effort removal of temp files a crash left in the write→rename window; only sweeps entries older than the TTL.
     fn sweep_stale_tmp(&self) {
         let (Some(parent), Some(stem)) = (
             self.path.parent(),

@@ -226,14 +226,14 @@ async fn bash_task_completed_suppresses_auto_wake_during_goal_loop() {
     let mut found_ext = false;
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-            && args.request.method.as_ref() == "chutes.build/task_completed"
+            && args.request.method.as_ref() == "x.ai/task_completed"
         {
             found_ext = true;
         }
     }
     assert!(
         found_ext,
-        "chutes.build/task_completed ExtNotification must still be sent for UI"
+        "x.ai/task_completed ExtNotification must still be sent for UI"
     );
 }
 
@@ -279,7 +279,7 @@ fn task_completed_will_wake(
 ) -> Option<bool> {
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-            && args.request.method.as_ref() == "chutes.build/task_completed"
+            && args.request.method.as_ref() == "x.ai/task_completed"
         {
             let v: serde_json::Value = serde_json::from_str(args.request.params.get()).ok()?;
             return v["update"]["will_wake"].as_bool();
@@ -842,8 +842,8 @@ async fn scheduled_task_created_is_persisted() {
                 crate::extensions::notification::SessionUpdate::ScheduledTaskCreated { .. }
             ));
             let meta = notif.meta.as_ref().expect("scheduler metadata");
-            assert_eq!(meta["chutes.build/schedulerGeneration"], "generation-a");
-            assert_eq!(meta["chutes.build/schedulerRevision"], 1);
+            assert_eq!(meta["x.ai/schedulerGeneration"], "generation-a");
+            assert_eq!(meta["x.ai/schedulerRevision"], 1);
             assert!(
                 notif
                     .meta
@@ -1007,8 +1007,8 @@ async fn scheduled_task_removed_is_persisted() {
                 "the persisted deletion line must be stamped"
             );
             let meta = notif.meta.as_ref().expect("scheduler metadata");
-            assert_eq!(meta["chutes.build/schedulerGeneration"], "generation-a");
-            assert_eq!(meta["chutes.build/schedulerRevision"], 2);
+            assert_eq!(meta["x.ai/schedulerGeneration"], "generation-a");
+            assert_eq!(meta["x.ai/schedulerRevision"], 2);
         }
         _ => panic!("expected PersistenceMsg::Update(Xai(ScheduledTaskDeleted))"),
     }
@@ -1032,10 +1032,7 @@ async fn acknowledged_scheduler_removal_appends_before_ack_and_broadcast() {
         else {
             panic!("expected durable scheduler tombstone");
         };
-        assert_eq!(
-            notification.meta.unwrap()["chutes.build/schedulerRevision"],
-            17
-        );
+        assert_eq!(notification.meta.unwrap()["x.ai/schedulerRevision"], 17);
         assert!(gateway_rx.try_recv().is_err());
         assert!(matches!(
             receipt.try_recv(),
@@ -1199,11 +1196,8 @@ async fn scheduled_task_fired_is_not_persisted() {
         panic!("expected scheduler fire notification");
     };
     let value: serde_json::Value = serde_json::from_str(fired.request.params.get()).unwrap();
-    assert_eq!(
-        value["_meta"]["chutes.build/schedulerGeneration"],
-        "generation-a"
-    );
-    assert_eq!(value["_meta"]["chutes.build/schedulerRevision"], 3);
+    assert_eq!(value["_meta"]["x.ai/schedulerGeneration"], "generation-a");
+    assert_eq!(value["_meta"]["x.ai/schedulerRevision"], 3);
 }
 
 fn make_monitor_event_notification(task_id: &str, owner: Option<&str>) -> ToolNotification {
@@ -1238,7 +1232,7 @@ async fn cross_session_monitor_event_is_dropped() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg {
             assert_ne!(
                 args.request.method.as_ref(),
-                "chutes.build/monitor_event",
+                "x.ai/monitor_event",
                 "cross-session monitor event must not be forwarded to the pager"
             );
         }
@@ -1320,14 +1314,14 @@ async fn block_waited_task_skips_auto_wake_prompt() {
     let mut found_ext = false;
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-            && args.request.method.as_ref() == "chutes.build/task_completed"
+            && args.request.method.as_ref() == "x.ai/task_completed"
         {
             found_ext = true;
         }
     }
     assert!(
         found_ext,
-        "chutes.build/task_completed ExtNotification must still be sent for UI"
+        "x.ai/task_completed ExtNotification must still be sent for UI"
     );
 }
 
@@ -1899,7 +1893,7 @@ async fn task_completed_notification_is_frame_bounded() {
     let mut params = None;
     while let Ok(msg) = gateway_rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-            && args.request.method.as_ref() == "chutes.build/task_completed"
+            && args.request.method.as_ref() == "x.ai/task_completed"
         {
             params = Some(args.request.params.get().to_string());
         }

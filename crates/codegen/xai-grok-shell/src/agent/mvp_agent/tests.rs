@@ -1210,7 +1210,7 @@ fn make_test_handle(
         upload_queue: Arc::new(OnceLock::new()),
         upload_failures_since_success: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         tool_context: crate::tools::ToolContext::new_local_context(
-            xai_grok_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap(),
+            xai_grok_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap(),
             std::sync::Arc::new(xai_grok_workspace::file_system::LocalFs::new(
                 std::path::PathBuf::from("/tmp"),
             )),
@@ -1740,7 +1740,7 @@ async fn drain_respects_deadline() {
 fn parse_code_nav_capability_present_and_true() {
     let mut meta = serde_json::Map::new();
     meta.insert(
-        "chutes.build/codeNavigation".to_string(),
+        "chutes.ai/codeNavigation".to_string(),
         serde_json::json!({ "enabled": true }),
     );
     let init = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(
@@ -1764,7 +1764,7 @@ fn parse_code_nav_capability_absent_returns_false() {
 fn parse_code_nav_capability_false_returns_false() {
     let mut meta = serde_json::Map::new();
     meta.insert(
-        "chutes.build/codeNavigation".to_string(),
+        "chutes.ai/codeNavigation".to_string(),
         serde_json::json!({ "enabled": false }),
     );
     let init = acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(
@@ -1861,7 +1861,7 @@ async fn ext_method_routes_auth_cleared_and_refreshes_resident_sessions() {
             let params = serde_json::json!({});
             agent
                 .ext_method(acp::ExtRequest::new(
-                    "chutes.build/internal/auth_cleared",
+                    "chutes.ai/internal/auth_cleared",
                     std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
                 ))
                 .await
@@ -2092,7 +2092,7 @@ fn build_minimal_agent_for_tests() -> MvpAgent {
 }
 fn session_usage_request(session_id: &str) -> acp::ExtRequest {
     acp::ExtRequest::new(
-        "chutes.build/session/usage",
+        "chutes.ai/session/usage",
         serde_json::value::to_raw_value(&serde_json::json!({ "sessionId": session_id }))
             .unwrap()
             .into(),
@@ -2450,6 +2450,27 @@ fn drain_roster_changed(
 /// override matters because at turn-start the actor has not yet published
 /// `current_prompt_id`, so a natural `resident_activity` read would emit
 /// `Idle` for a session that is in fact starting a turn.
+#[tokio::test]
+async fn headless_residents_are_excluded_from_snapshots_and_deltas() {
+    use crate::agent::config::Config as AgentConfig;
+    use crate::agent::roster::RosterActivity;
+    use crate::auth::{AuthManager, GrokComConfig};
+    let temp_dir = tempfile::tempdir().unwrap();
+    let auth_manager =
+        std::sync::Arc::new(AuthManager::new(temp_dir.path(), GrokComConfig::default()));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let gateway = GatewaySender::new(tx);
+    let agent = MvpAgent::new(gateway, &AgentConfig::default(), auth_manager, None)
+        .expect("valid test config");
+    let sid = acp::SessionId::new("sess-headless");
+    agent.insert_resident(&sid, make_test_handle("grok-3", false, None));
+    agent.session_registry.mark_headless(&sid);
+    assert!(agent.resident_roster_entry(&sid).is_none());
+    assert!(agent.resident_roster_entries().is_empty());
+    agent.push_roster_delta_upserted(&sid);
+    agent.push_roster_activity_delta(&sid, RosterActivity::Working);
+    assert!(drain_roster_changed(&mut rx).is_none());
+}
 #[tokio::test]
 async fn push_roster_activity_delta_broadcasts_overridden_activity() {
     use crate::agent::config::Config as AgentConfig;
@@ -3209,7 +3230,7 @@ async fn auth_info_returns_profile_when_token_expired() {
     let resp = crate::extensions::auth::handle(
         &agent,
         &acp::ExtRequest::new(
-            "chutes.build/auth/info",
+            "chutes.ai/auth/info",
             std::sync::Arc::from(serde_json::value::to_raw_value(&serde_json::json!({})).unwrap()),
         ),
     )
@@ -3681,22 +3702,22 @@ fn parse_session_kind_matrix() {
     let cases: &[(&str, serde_json::Value, SessionKind)] = &[
         (
             "chat",
-            json!({"chutes.build/session": {"kind": "chat"}}),
+            json!({"chutes.ai/session": {"kind": "chat"}}),
             SessionKind::Chat,
         ),
         (
             "build",
-            json!({"chutes.build/session": {"kind": "build"}}),
+            json!({"chutes.ai/session": {"kind": "build"}}),
             SessionKind::Build,
         ),
         (
             "chat_malformed_sibling",
-            json!({"chutes.build/session": {"kind": "chat", "facets": "not-a-map"}}),
+            json!({"chutes.ai/session": {"kind": "chat", "facets": "not-a-map"}}),
             SessionKind::Chat,
         ),
         (
             "unknown_kind",
-            json!({"chutes.build/session": {"kind": "frob"}}),
+            json!({"chutes.ai/session": {"kind": "frob"}}),
             SessionKind::Build,
         ),
         ("absent", json!({}), SessionKind::Build),
@@ -3710,13 +3731,13 @@ fn parse_session_kind_matrix() {
 fn reject_chat_kind_without_feature_errors_without_chat_feature() {
     use serde_json::json;
     assert!(
-        reject_chat_kind_without_feature(json!({"chutes.build/session": {"kind": "chat"}}).as_object())
+        reject_chat_kind_without_feature(json!({"chutes.ai/session": {"kind": "chat"}}).as_object())
             .is_err()
     );
     assert!(reject_chat_kind_without_feature(None).is_ok());
     assert!(
         reject_chat_kind_without_feature(
-            json!({ "chutes.build/session" : { "kind" : "build" } }).as_object()
+            json!({ "chutes.ai/session" : { "kind" : "build" } }).as_object()
         )
         .is_ok()
     );
@@ -3803,7 +3824,7 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "attach_server_id_on_local",
             json!({
-                "chutes.build/local_workspace": {
+                "chutes.ai/local_workspace": {
                     "mode": "attach",
                     "server_id": "lw-attach-1",
                     "cwd": "/repo",
@@ -3815,11 +3836,11 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "attach_server_id_from_cloud_existing",
             json!({
-                "chutes.build/local_workspace": {
+                "chutes.ai/local_workspace": {
                     "mode": "attach",
                     "cwd": "/repo",
                 },
-                "chutes.build/cloud_existing_workspace": {
+                "chutes.ai/cloud_existing_workspace": {
                     "server_id": "lw-attach-2",
                     "cwd": "/repo-existing",
                 },
@@ -3830,7 +3851,7 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "own_with_server_id_ignores_envid",
             json!({
-                "chutes.build/local_workspace": {
+                "chutes.ai/local_workspace": {
                     "mode": "own",
                     "server_id": "lw-own-1",
                     "cwd": "/Users/me/src",
@@ -3842,7 +3863,7 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "own_without_server_id_no_sandbox_fallback",
             json!({
-                "chutes.build/local_workspace": {
+                "chutes.ai/local_workspace": {
                     "mode": "own",
                     "cwd": "/Users/me/src",
                 },
@@ -3853,7 +3874,7 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "invalid_mode_falls_through_to_envid",
             json!({
-                "chutes.build/local_workspace": {
+                "chutes.ai/local_workspace": {
                     "mode": "bogus",
                     "server_id": "lw-x",
                 },
@@ -3866,7 +3887,7 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
         (
             "non_object_local_falls_through_to_envid",
             json!({
-                "chutes.build/local_workspace": "not-an-object",
+                "chutes.ai/local_workspace": "not-an-object",
                 "envId": "env-prod",
             }),
             Some(vec![ComputerSession::SandboxEnvironment {
@@ -3889,8 +3910,8 @@ fn parse_session_computer_sessions_local_workspace_matrix() {
 fn resolve_local_workspace_missing_server_id_fails_closed() {
     use serde_json::json;
     let meta = json!({
-        "chutes.build/session": { "kind": "chat" },
-        "chutes.build/local_workspace": {
+        "chutes.ai/session": { "kind": "chat" },
+        "chutes.ai/local_workspace": {
             "mode": "own",
             "cwd": "/repo",
         }
@@ -3975,12 +3996,12 @@ fn start_own_registers_and_stamps_server_id() {
         let server_id = handle.server_id.clone();
         let mut meta = acp::Meta::new();
         meta.insert(
-            "chutes.build/local_workspace".into(),
+            "chutes.ai/local_workspace".into(),
             serde_json::json!({"mode": "own", "cwd": "/tmp/repo"}),
         );
         stamp_server_id_into_meta(&mut meta, &server_id);
         assert_eq!(
-            meta.get("chutes.build/local_workspace")
+            meta.get("chutes.ai/local_workspace")
                 .and_then(|v| v.get("server_id"))
                 .and_then(|v| v.as_str()),
             Some(server_id.as_str())
@@ -4174,7 +4195,7 @@ fn ext_method_rewind_uses_local_dispatch_without_bridge() {
         let params = serde_json::json!({ "sessionId": "sess-local" });
         let err = agent
             .ext_method(acp::ExtRequest::new(
-                "chutes.build/rewind/points",
+                "chutes.ai/rewind/points",
                 std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
             ))
             .await
@@ -4259,6 +4280,88 @@ fn cancel_never_overtakes_in_flight_prompt_intake() {
         );
     });
 }
+#[test]
+fn prompt_routes_only_non_send_now_through_human_delivery_handle() {
+    use acp::Agent as _;
+    run_local_for_bridge_test(|| async {
+        for (send_now, expected_handle_sends) in [(false, 1), (true, 0)] {
+            let agent = build_minimal_agent_for_tests();
+            let sid = acp::SessionId::new(format!("human-route-{send_now}"));
+            let (handle, _tx, mut cmd_rx) = make_live_session_handle(&sid, None);
+            agent.insert_resident(&sid, handle);
+            tokio::task::spawn_local(async move {
+                while let Some(command) = cmd_rx.recv().await {
+                    match command {
+                        SessionCommand::GetCurrentPromptMode { responds_to } => {
+                            let _ = responds_to.send(Default::default());
+                        }
+                        SessionCommand::GetCurrentModel { responds_to } => {
+                            let _ = responds_to.send("test-model".to_owned());
+                        }
+                        SessionCommand::Prompt {
+                            prompt_blocks,
+                            client_identifier,
+                            screen_mode,
+                            verbatim,
+                            json_schema,
+                            send_now: actual,
+                            tool_overrides_update,
+                            respond_to,
+                            ..
+                        } => {
+                            assert_eq!(actual, send_now);
+                            assert_eq!(prompt_blocks.len(), 2);
+                            assert!(matches!(prompt_blocks[1], acp::ContentBlock::Image(_)));
+                            assert_eq!(client_identifier.as_deref(), Some("client"));
+                            assert_eq!(screen_mode.as_deref(), Some("minimal"));
+                            assert!(verbatim);
+                            assert_eq!(json_schema, Some(serde_json::json!({"type": "object"})));
+                            assert!(tool_overrides_update.is_some());
+                            let _ = respond_to
+                                .send(
+                                    Ok(crate::session::commands::PromptTurnOk {
+                                        stop_reason: acp::StopReason::Cancelled,
+                                        total_tokens: 0,
+                                        turn_snapshot: None,
+                                        completion_kind: crate::session::commands::PromptCompletionKind::RemovedFromQueue,
+                                        structured_output: None,
+                                        usage: None,
+                                        tool_overrides: None,
+                                    }),
+                                );
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            let _ = crate::session::message_delivery::take_human_send_count();
+            let request = acp::PromptRequest::new(
+                sid,
+                vec![
+                    acp::ContentBlock::Text(acp::TextContent::new("hello")),
+                    acp::ContentBlock::Image(acp::ImageContent::new("data", "image/png")),
+                ],
+            )
+            .meta(
+                serde_json::json!({
+                    "sendNow": send_now,
+                    "clientIdentifier": "client",
+                    "screenMode": "minimal",
+                    "verbatim": true,
+                    "outputSchema": {"type": "object"},
+                    "toolOverrides": {"webSearch": {}},
+                })
+                .as_object()
+                .cloned(),
+            );
+            assert!(agent.prompt(request).await.is_ok());
+            assert_eq!(
+                crate::session::message_delivery::take_human_send_count(),
+                expected_handle_sends
+            );
+        }
+    });
+}
 use crate::session::SessionCommand as TestSessionCommand;
 /// Build a session handle wired to a *live* command channel. Returns the
 /// handle (move into `sessions`) plus a probe `cmd_tx`/`cmd_rx` so a test
@@ -4323,7 +4426,7 @@ async fn drive_disconnect_many(agent: &MvpAgent, sids: &[&acp::SessionId]) {
     let params_json = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_notification(acp::ExtNotification::new(
-            "chutes.build/internal/evict_sessions",
+            "chutes.ai/internal/evict_sessions",
             params_json.into(),
         ))
         .await
@@ -4338,7 +4441,7 @@ async fn drive_close(agent: &MvpAgent, session_id: &str) -> Result<acp::ExtRespo
     let params_json = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_method(acp::ExtRequest::new(
-            "chutes.build/session/close",
+            "chutes.ai/session/close",
             std::sync::Arc::from(params_json),
         ))
         .await
@@ -4356,7 +4459,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
     let session_id = sid.0.as_ref();
     let cases: [(&str, serde_json::Value); 7] = [
         (
-            "chutes.build/queue/remove",
+            "chutes.ai/queue/remove",
             serde_json::json!({
                 "sessionId": session_id,
                 "id": "p-remove",
@@ -4365,21 +4468,21 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
             }),
         ),
         (
-            "chutes.build/queue/reorder",
+            "chutes.ai/queue/reorder",
             serde_json::json!({
                 "sessionId": session_id,
                 "orderedIds": ["a", "b"],
             }),
         ),
         (
-            "chutes.build/queue/clear",
+            "chutes.ai/queue/clear",
             serde_json::json!({
                 "sessionId": session_id,
                 "clientIdentifier": "grok-desktop",
             }),
         ),
         (
-            "chutes.build/queue/edit",
+            "chutes.ai/queue/edit",
             serde_json::json!({
                 "sessionId": session_id,
                 "id": "p-edit",
@@ -4388,7 +4491,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
             }),
         ),
         (
-            "chutes.build/queue/interject",
+            "chutes.ai/queue/interject",
             serde_json::json!({
                 "sessionId": session_id,
                 "id": "p-interject",
@@ -4398,14 +4501,14 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
             }),
         ),
         (
-            "chutes.build/queue/hold_edit",
+            "chutes.ai/queue/hold_edit",
             serde_json::json!({
                 "sessionId": session_id,
                 "id": "p-hold",
             }),
         ),
         (
-            "chutes.build/queue/release_edit",
+            "chutes.ai/queue/release_edit",
             serde_json::json!({
                 "sessionId": session_id,
                 "id": "p-release",
@@ -4423,7 +4526,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
         });
         match (method, cmd) {
             (
-                "chutes.build/queue/remove",
+                "chutes.ai/queue/remove",
                 SessionCommand::RemoveQueuedPrompt {
                     id,
                     expected_version,
@@ -4434,14 +4537,14 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 assert_eq!(expected_version, 3);
                 assert_eq!(owner.as_deref(), Some("grok-tui"));
             }
-            ("chutes.build/queue/reorder", SessionCommand::ReorderQueue { ordered_ids }) => {
+            ("chutes.ai/queue/reorder", SessionCommand::ReorderQueue { ordered_ids }) => {
                 assert_eq!(ordered_ids, vec!["a", "b"]);
             }
-            ("chutes.build/queue/clear", SessionCommand::ClearQueue { owner }) => {
+            ("chutes.ai/queue/clear", SessionCommand::ClearQueue { owner }) => {
                 assert_eq!(owner.as_deref(), Some("grok-desktop"));
             }
             (
-                "chutes.build/queue/edit",
+                "chutes.ai/queue/edit",
                 SessionCommand::EditQueuedPrompt {
                     id,
                     new_text,
@@ -4453,7 +4556,7 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 assert_eq!(editor.as_deref(), Some("grok-vscode"));
             }
             (
-                "chutes.build/queue/interject",
+                "chutes.ai/queue/interject",
                 SessionCommand::InterjectQueuedPrompt {
                     id,
                     expected_version,
@@ -4466,10 +4569,10 @@ async fn ext_notification_forwards_each_queue_method_to_session_actor() {
                 assert_eq!(owner.as_deref(), Some("grok-tui"));
                 assert_eq!(new_text.as_deref(), Some("now"));
             }
-            ("chutes.build/queue/hold_edit", SessionCommand::HoldEdit { id }) => {
+            ("chutes.ai/queue/hold_edit", SessionCommand::HoldEdit { id }) => {
                 assert_eq!(id, "p-hold");
             }
-            ("chutes.build/queue/release_edit", SessionCommand::ReleaseEdit { id }) => {
+            ("chutes.ai/queue/release_edit", SessionCommand::ReleaseEdit { id }) => {
                 assert_eq!(id, "p-release");
             }
             (method, _) => {
@@ -4497,11 +4600,11 @@ async fn ext_notification_queue_rejects_unknown_method_missing_id_and_unknown_se
     let session_id = sid.0.as_ref();
     let negatives: [(&str, serde_json::Value); 9] = [
         (
-            "chutes.build/queue/bogus",
+            "chutes.ai/queue/bogus",
             serde_json::json!({ "sessionId": session_id, "id": "p1" }),
         ),
         (
-            "chutes.build/queue/changed",
+            "chutes.ai/queue/changed",
             serde_json::json!({
                 "sessionId": session_id,
                 "entries": [{
@@ -4514,31 +4617,31 @@ async fn ext_notification_queue_rejects_unknown_method_missing_id_and_unknown_se
             }),
         ),
         (
-            "chutes.build/queue/hold_edit",
+            "chutes.ai/queue/hold_edit",
             serde_json::json!({ "sessionId": session_id }),
         ),
         (
-            "chutes.build/queue/release_edit",
+            "chutes.ai/queue/release_edit",
             serde_json::json!({ "sessionId": session_id }),
         ),
         (
-            "chutes.build/queue/remove",
+            "chutes.ai/queue/remove",
             serde_json::json!({ "sessionId": session_id }),
         ),
         (
-            "chutes.build/queue/edit",
+            "chutes.ai/queue/edit",
             serde_json::json!({ "sessionId": session_id, "newText": "x" }),
         ),
         (
-            "chutes.build/queue/edit",
+            "chutes.ai/queue/edit",
             serde_json::json!({ "sessionId": session_id, "id": "p-edit" }),
         ),
         (
-            "chutes.build/queue/interject",
+            "chutes.ai/queue/interject",
             serde_json::json!({ "sessionId": session_id }),
         ),
         (
-            "chutes.build/queue/hold_edit",
+            "chutes.ai/queue/hold_edit",
             serde_json::json!({ "sessionId": "no-such-session", "id": "p1" }),
         ),
     ];
@@ -4564,7 +4667,7 @@ async fn ext_notification_queue_rejects_unknown_method_missing_id_and_unknown_se
     .expect("serialize");
     agent_empty
         .ext_notification(acp::ExtNotification::new(
-            "chutes.build/queue/release_edit",
+            "chutes.ai/queue/release_edit",
             params_json.into(),
         ))
         .await
@@ -4587,7 +4690,7 @@ async fn ext_notification_queue_edit_survives_dropped_actor_mailbox() {
     let params_json = serde_json::value::to_raw_value(&params).expect("serialize queue params");
     agent
         .ext_notification(acp::ExtNotification::new(
-            "chutes.build/queue/hold_edit",
+            "chutes.ai/queue/hold_edit",
             params_json.into(),
         ))
         .await
@@ -5397,7 +5500,7 @@ fn drained_settings_update(
     let mut found = false;
     while let Ok(msg) = rx.try_recv() {
         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg {
-            if &*args.request.method == "chutes.build/settings/update" {
+            if &*args.request.method == "chutes.ai/settings/update" {
                 found = true;
             }
             let _ = args.response_tx.send(Ok(()));
@@ -5870,7 +5973,7 @@ fn project_roles_personas_gated_via_resolve_and_record_chain() {
             !untrusted.subagent_personas.contains_key("probe"),
             "untrusted: project persona must stay out of spawn context"
         );
-        crate::agent::folder_trust::grant_folder_trust(repo.path());
+        xai_grok_workspace::folder_trust::grant_folder_trust(repo.path());
         let allowed = crate::agent::folder_trust::resolve_and_record(
             repo.path(),
             Some(&folder_trust_on()),
@@ -5904,7 +6007,7 @@ async fn answer_folder_trust_request(
     let xai_acp_lib::AcpClientMessage::ExtMethod(args) = msg else {
         panic!("expected an ext_method reverse-request, got a different message");
     };
-    assert_eq!(args.request.method.as_ref(), "chutes.build/folder_trust/request");
+    assert_eq!(args.request.method.as_ref(), "chutes.ai/folder_trust/request");
     let params: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
     let resp: acp::ExtResponse = acp::ExtResponse::new(std::sync::Arc::from(
         serde_json::value::to_raw_value(&serde_json::json!({ "outcome": outcome })).unwrap(),
@@ -6600,7 +6703,7 @@ async fn emit_announcements_gate_emits_updates_baseline_and_bumps_gen() {
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                 panic!("expected ExtNotification, got another message kind");
             };
-            assert_eq!(args.request.method.as_ref(), "chutes.build/announcements/update");
+            assert_eq!(args.request.method.as_ref(), "chutes.ai/announcements/update");
             let parsed: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).expect("valid JSON payload");
             parsed
@@ -6656,7 +6759,7 @@ async fn emit_announcements_gate_keeps_baseline_on_failed_send_and_retries() {
     let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
         panic!("expected ExtNotification, got another message kind");
     };
-    assert_eq!(args.request.method.as_ref(), "chutes.build/announcements/update");
+    assert_eq!(args.request.method.as_ref(), "chutes.ai/announcements/update");
     assert_eq!(
         *agent.last_emitted_announcements.borrow(),
         vec![ann("a")],
@@ -6684,22 +6787,22 @@ mod direct_hub_cloud_removed {
     }
     #[test]
     fn cloud_server_id_meta_is_hard_error() {
-        let meta = serde_json::json!({ "chutes.build/cloud_server_id": "srv-123" });
+        let meta = serde_json::json!({ "chutes.ai/cloud_server_id": "srv-123" });
         let err = reject_direct_hub_cloud_meta(meta.as_object()).expect_err("must reject");
         assert_direct_hub_error(err);
     }
     #[test]
     fn cloud_server_id_null_still_present_is_hard_error() {
-        let meta = serde_json::json!({ "chutes.build/cloud_server_id": null });
+        let meta = serde_json::json!({ "chutes.ai/cloud_server_id": null });
         let err = reject_direct_hub_cloud_meta(meta.as_object()).expect_err("must reject");
         assert_direct_hub_error(err);
     }
     #[test]
     fn cloud_server_id_with_gateway_meta_still_hard_error() {
         let meta = serde_json::json!({
-            "chutes.build/cloud_server_id": "srv-legacy",
+            "chutes.ai/cloud_server_id": "srv-legacy",
             "envId": "env-1",
-            "chutes.build/cloud_existing_workspace": {
+            "chutes.ai/cloud_existing_workspace": {
                 "server_id": "ws-1",
                 "cwd": "/workspace"
             }
@@ -6723,7 +6826,7 @@ mod direct_hub_cloud_removed {
         assert!(
             reject_direct_hub_cloud_meta(
                 serde_json::json!({
-                    "chutes.build/cloud_existing_workspace": {
+                    "chutes.ai/cloud_existing_workspace": {
                         "server_id": "ws-1",
                         "cwd": "/workspace"
                     }
@@ -6803,7 +6906,7 @@ mod soft_default_settings_emit {
                 let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                     panic!("expected ExtNotification, got {msg:?}");
                 };
-                assert_eq!(args.request.method.as_ref(), "chutes.build/settings/update");
+                assert_eq!(args.request.method.as_ref(), "chutes.ai/settings/update");
                 let params: serde_json::Value =
                     serde_json::from_str(args.request.params.get()).expect("parse params");
                 assert_eq!(

@@ -1,14 +1,13 @@
 //! Agent view layout and rendering helpers.
 //!
 //! This module provides:
-//! - [`AgentViewLayout`] — pure layout computation (screen area → pane rects)
-//! - [`ActivePane`] / [`PaneAreas`] — pane identity and hit-testing
-//! - Overlay helpers — small focused functions for selection/hover chrome
-//! - [`build_hints`] — shortcuts bar hint generation
+//! - [`AgentViewLayout`]: pure layout computation (screen area to pane rects)
+//! - [`ActivePane`] / [`PaneAreas`]: pane identity and hit-testing
+//! - Overlay helpers: small focused functions for selection/hover chrome
+//! - [`build_hints`]: shortcuts bar hint generation
 //!
-//! The actual rendering orchestration lives in [`AgentView::draw()`](crate::app::agent_view::AgentView::draw),
-//! which calls shared widgets (StatusBar, ScrollbackPane, PromptWidget,
-//! ShortcutsBar) and uses these helpers for the agent-specific glue.
+//! The drawing itself happens in [`AgentView::draw()`](crate::app::agent_view::AgentView::draw).
+//! It renders the shared widgets (StatusBar, ScrollbackPane, PromptWidget, ShortcutsBar) and uses these helpers for the agent-specific glue.
 use crate::actions::{ActionId, ActionRegistry, When};
 use crate::appearance::{LayoutConfig, ScrollbarConfig};
 use crate::render::SafeBuf;
@@ -77,39 +76,70 @@ impl PaneAreas {
         None
     }
 }
-/// Terminals at or below this height suppress the optional rows above the
-/// prompt (plugin CTA, follow-ups, banner/tip) so the prompt and scrollback
-/// are never starved.
+/// Terminals at or below this height suppress the optional rows above the prompt (plugin CTA, follow-ups, banner/tip).
+/// This keeps the prompt and the scrollback from being starved.
 pub const SHORT_TERMINAL_ROWS: u16 = 16;
-/// Auto-compact threshold: at or below this height the render-value compact
-/// flag is forced on. Deliberately above [`SHORT_TERMINAL_ROWS`], which stays
-/// the hard-degradation gate (tip-row renderability, CTA/follow-up trims).
+/// The scrollback's floor, pushed as the layout's only `Min`.
+/// The solver ranks it above every `Length`, so an over-committed layout shrinks another row.
+pub const SCROLLBACK_MIN_ROWS: u16 = 5;
+/// Auto-compact threshold: at or below this height the compact flag handed to rendering is forced on.
+/// Deliberately above [`SHORT_TERMINAL_ROWS`], which still gates the harder cuts (tip-row rendering, dropping the CTA and follow-up rows).
 pub const AUTO_COMPACT_MAX_ROWS: u16 = 20;
 const _: () = assert!(SHORT_TERMINAL_ROWS < AUTO_COMPACT_MAX_ROWS);
-/// Render-value derivation for compact mode: the user setting, force-enabled
-/// while the terminal is [`AUTO_COMPACT_MAX_ROWS`] or shorter (auto-compact).
+/// The compact flag rendering uses: the user setting, force-enabled while the terminal is [`AUTO_COMPACT_MAX_ROWS`] or shorter (auto-compact).
 ///
-/// Derived only — never persisted and never written back to the user setting
-/// (`current_ui.compact_mode` / the render cache / disk), so growing the
-/// window restores the user's choice. `terminal_rows == 0` means "not yet
-/// measured" and never forces compact.
+/// The result is never written back to `current_ui.compact_mode`, the render cache, or disk.
+/// Growing the window therefore restores the user's choice.
+/// `terminal_rows == 0` means "not yet measured" and never forces compact.
 pub fn effective_compact(user_compact: bool, terminal_rows: u16) -> bool {
     user_compact || (terminal_rows > 0 && terminal_rows <= AUTO_COMPACT_MAX_ROWS)
 }
+/// Every input [`AgentViewLayout::compute`] reads: the screen area, the appearance config, and the requested height of each row it stacks.
+///
+/// An optional pane at height 0 is omitted along with the gap above it.
+/// The prompt, the shortcuts bar and their gaps follow their own rules.
+/// On a frame with bottom padding a `status_line_height` of 0 adds the gap above the shortcuts bar.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentViewLayoutParams {
+    pub area: Rect,
+    pub layout_cfg: LayoutConfig,
+    pub scrollbar_cfg: ScrollbarConfig,
+    /// Rail columns taken in place of the scrollbar (0 means hidden).
+    /// The rail needs the scrollbar's gutter geometry, so a disabled scrollbar forces this to 0.
+    pub timeline_width: u16,
+    pub prompt_height: u16,
+    pub tasks_height: u16,
+    pub catalog_height: u16,
+    pub todo_height: u16,
+    pub queue_height: u16,
+    pub btw_height: u16,
+    pub turn_status_height: u16,
+    pub banner_height: u16,
+    /// Forced to 0 on short terminals (`area.height <= SHORT_TERMINAL_ROWS`) so the prompt and scrollback are never starved.
+    pub cta_height: u16,
+    /// Force-suppressed on short terminals on the same rule as `cta_height`.
+    pub follow_ups_height: u16,
+    /// 0 or 1: the gap row between turn status (or scrollback) and the prompt.
+    pub prompt_gap: u16,
+    pub voice_recording_height: u16,
+    pub shortcuts_height: u16,
+    /// Clamped to the rows left over once every other row and the scrollback minimum are counted.
+    /// A tall script loses its own rows rather than the prompt or the shortcuts bar losing theirs.
+    pub status_line_height: u16,
+    pub compact: bool,
+}
 /// Computed screen layout for the agent view.
 ///
-/// Pure data — no rendering. Computed from screen area + appearance config +
-/// prompt height + todo height. Shared widgets use these rects to render into.
+/// Pure data, no rendering. Computed from [`AgentViewLayoutParams`].
+/// Shared widgets use these rects to render into.
 pub struct AgentViewLayout {
     pub status_bar: Rect,
-    /// Startup terminal-warning banner (between status bar and bg tasks/scrollback).
-    pub startup_warnings: Rect,
     pub tasks: Rect,
     pub catalog: Rect,
     pub scrollback: Rect,
     pub todo: Rect,
     pub queue: Rect,
-    /// Inline /btw side question panel (above queue / turn status / prompt).
+    /// Inline panel for /btw side questions (above the queue, turn status, and prompt rows).
     pub btw: Rect,
     pub turn_status: Rect,
     /// Banner rect above the prompt (mode-switch banner, ephemeral tips).
@@ -118,64 +148,49 @@ pub struct AgentViewLayout {
     pub plugin_cta: Rect,
     /// Follow-up suggestion chips row (below the plugin CTA, above the prompt).
     pub follow_ups: Rect,
-    /// Single-row record indicator ("◉ Recording") directly above the prompt,
-    /// shown only while voice capture is active.
+    /// Single-row record indicator ("◉ Recording") directly above the prompt, shown only while voice capture is active.
     pub voice_recording: Rect,
     pub prompt: Rect,
     pub shortcuts: Rect,
+    /// Bottom status_line row; zero-area when disabled.
+    pub status_line: Rect,
     /// Scrollback area narrowed for scrollbar (content rendering uses this).
     pub scrollback_content: Rect,
     /// Scrollbar track position (x coordinate).
     pub scrollbar_x: u16,
-    /// Timeline rail left edge (only meaningful when `timeline_width > 0`;
-    /// the rail's right edge lands on the scrollbar column, which the rail
-    /// replaces).
+    /// Timeline rail left edge, only meaningful when `timeline_width > 0`.
+    /// The rail's right edge lands on the scrollbar column, which the rail replaces.
     pub timeline_x: u16,
-    /// Columns reserved for the timeline rail (0 = rail hidden). Non-zero
-    /// also means the scrollbar does not render this frame.
+    /// Columns reserved for the timeline rail (0 means the rail is hidden).
+    /// Non-zero also means the scrollbar does not render this frame.
     pub timeline_width: u16,
 }
 impl AgentViewLayout {
-    /// Compute layout from screen area, appearance config, prompt height,
-    /// todo pane height, turn status height, and prompt gap.
+    /// Stack the rows described by `params` into the screen area.
     ///
-    /// When `todo_height` is 0, the todo pane and its gap are omitted.
-    /// When `turn_status_height` is 0, the turn status line is omitted.
-    /// When `banner_height` is 0, the reserved banner row is omitted.
-    /// When `cta_height` is 0, the plugin-CTA row is omitted. It is also
-    /// forced to 0 on short terminals (`area.height <= SHORT_TERMINAL_ROWS`)
-    /// so the prompt and scrollback are never starved.
-    /// When `follow_ups_height` is 0, the follow-up chips row is omitted; it
-    /// is force-suppressed on short terminals on the same `SHORT_TERMINAL_ROWS`
-    /// rule as the CTA row.
-    /// When `startup_warning_height` is 0, the startup warning area is omitted.
-    /// `prompt_gap` is 0 or 1 — controls the gap row between turn status
-    /// (or scrollback) and the prompt widget.
-    /// `timeline_width` reserves rail columns for the timeline sidebar in
-    /// place of the scrollbar (0 = hidden); it requires the scrollbar's
-    /// gutter geometry, so a disabled scrollbar forces it to 0.
-    #[allow(clippy::too_many_arguments)]
-    pub fn compute(
-        area: Rect,
-        layout_cfg: &LayoutConfig,
-        scrollbar_cfg: &ScrollbarConfig,
-        timeline_width: u16,
-        prompt_height: u16,
-        tasks_height: u16,
-        catalog_height: u16,
-        todo_height: u16,
-        queue_height: u16,
-        btw_height: u16,
-        turn_status_height: u16,
-        banner_height: u16,
-        cta_height: u16,
-        follow_ups_height: u16,
-        startup_warning_height: u16,
-        prompt_gap: u16,
-        voice_recording_height: u16,
-        shortcuts_height: u16,
-        compact: bool,
-    ) -> Self {
+    /// Each row's rules are documented on [`AgentViewLayoutParams`].
+    pub fn compute(params: AgentViewLayoutParams) -> Self {
+        let AgentViewLayoutParams {
+            area,
+            layout_cfg,
+            scrollbar_cfg,
+            timeline_width,
+            prompt_height,
+            tasks_height,
+            catalog_height,
+            todo_height,
+            queue_height,
+            btw_height,
+            turn_status_height,
+            banner_height,
+            cta_height,
+            follow_ups_height,
+            prompt_gap,
+            voice_recording_height,
+            shortcuts_height,
+            status_line_height,
+            compact,
+        } = params;
         let outer_vpad = layout_cfg.eff_outer_vpad(compact);
         let bottom_vpad = if area.height <= SHORT_TERMINAL_ROWS {
             0
@@ -203,9 +218,6 @@ impl AgentViewLayout {
         let mut constraints = vec![
             Constraint::Length(1), // StatusBar
         ];
-        if startup_warning_height > 0 {
-            constraints.push(Constraint::Length(startup_warning_height));
-        }
         let pane_gap = if top_vpad == 0 { 0u16 } else { 1 };
         if tasks_height > 0 {
             constraints.push(Constraint::Length(pane_gap));
@@ -221,7 +233,7 @@ impl AgentViewLayout {
         }
         let status_gap = if top_vpad == 0 { 0u16 } else { 1 };
         constraints.push(Constraint::Length(status_gap));
-        constraints.push(Constraint::Min(5));
+        constraints.push(Constraint::Min(SCROLLBACK_MIN_ROWS));
         if btw_height > 0 {
             constraints.push(Constraint::Length(1));
             constraints.push(Constraint::Length(btw_height));
@@ -253,22 +265,27 @@ impl AgentViewLayout {
             constraints.push(Constraint::Length(voice_recording_height));
         }
         constraints.push(Constraint::Length(prompt_height));
-        let shortcuts_gap = if bottom_vpad == 0 { 0u16 } else { 1 };
+        let pushed = constraints
+            .iter()
+            .map(|c| match c {
+                Constraint::Length(n) | Constraint::Min(n) | Constraint::Max(n) => *n,
+                Constraint::Percentage(_) | Constraint::Ratio(_, _) | Constraint::Fill(_) => 0,
+            })
+            .fold(0u16, u16::saturating_add);
+        let reserved = pushed.saturating_add(shortcuts_height);
+        let status_line_height = status_line_height.min(inner_area.height.saturating_sub(reserved));
+        let shortcuts_gap = u16::from(bottom_vpad > 0 && status_line_height == 0);
         if shortcuts_gap > 0 {
             constraints.push(Constraint::Length(shortcuts_gap));
+        }
+        if status_line_height > 0 {
+            constraints.push(Constraint::Length(status_line_height));
         }
         constraints.push(Constraint::Length(shortcuts_height));
         let chunks = Layout::vertical(constraints).split(inner_area);
         let mut i = 0;
         let status_bar = chunks[i];
         i += 1;
-        let startup_warnings = if startup_warning_height > 0 {
-            let r = chunks[i];
-            i += 1;
-            r
-        } else {
-            Rect::default()
-        };
         let tasks = if tasks_height > 0 {
             i += 1;
             let r = chunks[i];
@@ -359,6 +376,13 @@ impl AgentViewLayout {
         if shortcuts_gap > 0 {
             i += 1;
         }
+        let status_line = if status_line_height > 0 {
+            let r = chunks[i];
+            i += 1;
+            r
+        } else {
+            Rect::default()
+        };
         let shortcuts = chunks[i];
         let scrollbar_x = area.right().saturating_sub(scrollbar_cfg.gap_right + 1);
         let timeline_width = if scrollbar_cfg.enabled {
@@ -383,7 +407,6 @@ impl AgentViewLayout {
         };
         Self {
             status_bar,
-            startup_warnings,
             tasks,
             catalog,
             scrollback,
@@ -397,16 +420,28 @@ impl AgentViewLayout {
             voice_recording,
             prompt,
             shortcuts,
+            status_line,
             scrollback_content,
             scrollbar_x,
             timeline_x,
             timeline_width,
         }
     }
+    /// Rows a prompt may take before it starts pushing other rows off their requested height, given every other row in `params`.
+    ///
+    /// Measured through [`Self::compute`] rather than re-summed: a probe with a zero-row prompt hands the scrollback every row nothing else claimed.
+    /// The scrollback's surplus over [`SCROLLBACK_MIN_ROWS`] is then the most a prompt can take.
+    /// `params.prompt_height` is ignored.
+    pub fn rows_available_for_prompt(params: AgentViewLayoutParams) -> u16 {
+        let probe = Self::compute(AgentViewLayoutParams {
+            prompt_height: 0,
+            ..params
+        });
+        probe.scrollback.height.saturating_sub(SCROLLBACK_MIN_ROWS)
+    }
     /// Inner area width (for prompt height computation before full layout).
     ///
-    /// This computes just the inner width without the full layout split,
-    /// since prompt height is needed as input to `compute()`.
+    /// This computes just the inner width without the full layout split, since prompt height is needed as input to `compute()`.
     pub fn inner_width(area: Rect, layout_cfg: &LayoutConfig, compact: bool) -> u16 {
         let vpad = layout_cfg.eff_outer_vpad(compact);
         let outer_block = Block::default().padding(Padding::new(
@@ -449,19 +484,15 @@ pub fn fill_background(
         .style(Style::default().bg(theme.bg_base));
     outer_styled.render(area, buf);
 }
-/// Render follow-up suggestion chips into a single row, returning the
-/// clickable rect of each rendered chip.
+/// Render follow-up suggestion chips into a single row, returning the clickable rect of each rendered chip.
 ///
-/// Chips render left-to-right and rendering STOPS at the first chip that does
-/// not fit the row width — the result is a rendered prefix of `suggestions`
-/// (index-aligned), not a filtered subset. A transient, mouse-clickable
-/// affordance above the prompt — the same row slot family as the plugin CTA.
-/// Suggestion text is server-controlled and already sanitized at ingestion;
-/// here it is additionally length-clamped per chip and written through
-/// `set_span_safe`, so a label can neither overflow the row nor inject
-/// terminal escape sequences.
+/// Chips render left-to-right and rendering stops at the first chip that does not fit the row width.
+/// The result is therefore an index-aligned prefix of `suggestions`, not a filtered subset.
+/// The row is a transient, mouse-clickable strip above the prompt, in the same slot as the plugin CTA.
+/// Suggestion text is server-controlled and already sanitized at ingestion.
+/// Each label is also length-clamped and written through `set_span_safe`, so it can neither overflow the row nor inject terminal escape sequences.
 ///
-/// `hovered` highlights the chip under the mouse (`theme.bg_hover` + primary text).
+/// `hovered` highlights the chip under the mouse (`theme.bg_hover` and primary text).
 pub(crate) fn render_follow_ups(
     area: Rect,
     buf: &mut Buffer,
@@ -554,8 +585,7 @@ pub fn render_entry_hover(
         }
     }
 }
-/// Render a floating popup showing hook details when hovering over
-/// a collapsed tool call entry that has hooks.
+/// Render a floating popup showing hook details when hovering over a collapsed tool call entry that has hooks.
 pub fn render_hook_hover_popup(
     buf: &mut Buffer,
     scrollback_area: Rect,
@@ -570,6 +600,16 @@ pub fn render_hook_hover_popup(
     let Some(entry) = scrollback.get(hover_idx) else {
         return;
     };
+    let layout_info = scrollback
+        .get_cached_entry_layouts()
+        .and_then(|layouts| layouts.get(hover_idx));
+    if layout_info.is_some_and(|info| {
+        info.verb_group_header && !info.is_expanded_verb_header() && info.group_header_count > 1
+    }) {
+        return;
+    }
+    let is_expanded_verb_header =
+        layout_info.is_some_and(crate::scrollback::EntryLayoutInfo::is_expanded_verb_header);
     if entry.display_mode != crate::scrollback::types::DisplayMode::Collapsed {
         return;
     }
@@ -592,14 +632,19 @@ pub fn render_hook_hover_popup(
     if lines.is_empty() {
         return;
     }
-    let Some((entry_area, _, _)) = scrollback.entry_screen_area(hover_idx, scrollback_area) else {
+    let Some((entry_area, top_clipped, _)) =
+        scrollback.entry_screen_area(hover_idx, scrollback_area)
+    else {
         return;
     };
     let (mouse_col, mouse_row) = mouse_pos;
     if mouse_row < entry_area.y || mouse_row >= entry_area.y + entry_area.height {
         return;
     }
-    let badge_row = entry_area.y;
+    let badge_row = entry_area.y + u16::from(is_expanded_verb_header && !top_clipped);
+    if badge_row >= entry_area.y + entry_area.height {
+        return;
+    }
     let row_start = scrollback_area.x;
     let row_end = scrollback_area.x + scrollback_area.width;
     let row_text: String = (row_start..row_end)
@@ -665,10 +710,10 @@ pub fn render_hook_hover_popup(
         if y >= inner.y + inner.height {
             break;
         }
-        buf.set_line_safe(inner.x, y, &line.content, inner.width);
+        buf.set_line_safe_bidi(inner.x, y, &line.content, inner.width);
     }
 }
-/// Selection/hover chrome for a side pane (todo / queue / tasks). Focused panes get a dismiss control.
+/// Selection/hover chrome for a side pane (todo, queue, tasks). Focused panes get a dismiss control.
 pub fn render_todo_chrome(
     buf: &mut Buffer,
     todo_area: Rect,
@@ -722,9 +767,8 @@ pub fn render_todo_chrome_with_close_label(
 }
 /// Render the scrollbar track and thumb.
 ///
-/// When `is_following` is true, the scrollbar thumb is dimmed to indicate
-/// the viewport is locked to the bottom. This makes G / follow state
-/// immediately visible in the scrollbar.
+/// When `is_following` is true, the scrollbar thumb is dimmed to show the viewport is locked to the bottom.
+/// That makes follow mode (G) visible in the scrollbar itself.
 pub fn render_scrollbar(
     buf: &mut Buffer,
     scrollback_area: Rect,
@@ -771,123 +815,8 @@ pub fn render_scrollbar(
         );
     }
 }
-use crate::appearance::TodoBadgeFormat;
-/// Build the todo badge as styled spans (without rendering).
-///
-/// Returns `None` if there are no items to display.
-pub fn render_todo_badge_spans(
-    counts: &super::todo_pane::TodoCounts,
-    hovered: bool,
-    flash: bool,
-    format: TodoBadgeFormat,
-    theme: &Theme,
-) -> Option<Vec<Span<'static>>> {
-    use ratatui::style::Modifier;
-    if counts.total() == 0 {
-        return None;
-    }
-    let highlighted = hovered || flash;
-    let count_style = if highlighted {
-        Style::default()
-            .fg(theme.text_primary)
-            .bg(theme.bg_base)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.text_secondary).bg(theme.bg_base)
-    };
-    let dim_style = if highlighted {
-        Style::default().fg(theme.text_secondary).bg(theme.bg_base)
-    } else {
-        Style::default().fg(theme.gray_dim).bg(theme.bg_base)
-    };
-    if matches!(format, TodoBadgeFormat::Default) {
-        let total = counts.total_excluding_cancelled();
-        if total == 0 {
-            return None;
-        }
-        return Some(vec![
-            Span::styled(counts.completed.to_string(), count_style),
-            Span::styled("/", dim_style),
-            Span::styled(total.to_string(), count_style),
-            Span::styled(
-                format!(" {}", crate::glyphs::check_mark()),
-                Style::default().fg(theme.text_secondary).bg(theme.bg_base),
-            ),
-        ]);
-    }
-    let icon_mod = if highlighted {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-    let statuses: [(usize, &str, ratatui::style::Color); 4] = [
-        (counts.in_progress, "▶", theme.warning),
-        (counts.pending, "□", theme.text_secondary),
-        (
-            counts.completed,
-            crate::glyphs::check_mark(),
-            theme.accent_success,
-        ),
-        (
-            counts.cancelled,
-            crate::glyphs::ballot_x(),
-            theme.accent_error,
-        ),
-    ];
-    let parts: Vec<(usize, &str, ratatui::style::Color)> =
-        statuses.into_iter().filter(|(n, _, _)| *n > 0).collect();
-    if parts.is_empty() {
-        return None;
-    }
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(parts.len() * 4);
-    for (i, (count, icon, color)) in parts.iter().enumerate() {
-        let icon_style = Style::default()
-            .fg(*color)
-            .bg(theme.bg_base)
-            .add_modifier(icon_mod);
-        let num_style = match format {
-            TodoBadgeFormat::Default => {
-                let mut s = Style::default().fg(*color).bg(theme.bg_base);
-                if highlighted {
-                    s = s.add_modifier(Modifier::BOLD);
-                }
-                s
-            }
-            _ => count_style,
-        };
-        match format {
-            TodoBadgeFormat::Default => {
-                if i > 0 {
-                    spans.push(Span::styled(" ", dim_style));
-                }
-                spans.push(Span::styled(format!("{count}"), num_style));
-            }
-            TodoBadgeFormat::Colon => {
-                if i > 0 {
-                    spans.push(Span::styled(" ", dim_style));
-                }
-                spans.push(Span::styled(*icon, icon_style));
-                spans.push(Span::styled(":", dim_style));
-                spans.push(Span::styled(format!("{count}"), num_style));
-            }
-            TodoBadgeFormat::Comma => {
-                if i > 0 {
-                    spans.push(Span::styled(", ", dim_style));
-                }
-                spans.push(Span::styled(format!("{count}"), num_style));
-                spans.push(Span::styled(" ", dim_style));
-                spans.push(Span::styled(*icon, icon_style));
-            }
-        }
-    }
-    spans.push(Span::styled(
-        format!(" {}", crate::glyphs::check_mark()),
-        Style::default().fg(theme.text_secondary).bg(theme.bg_base),
-    ));
-    Some(spans)
-}
-/// The scrollback's default focus hint: `Space` leaves for the prompt. A
-/// parked blocking card replaces it with its own (pinned) route back.
+/// The scrollback's default focus hint: `Space` leaves for the prompt.
+/// A parked blocking card replaces it with its own (pinned) route back.
 pub fn prompt_focus_hint() -> HintItem {
     use crate::input::key::KeyShortcut;
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -901,19 +830,15 @@ pub fn prompt_focus_hint() -> HintItem {
 }
 /// Build the hints list for the shortcuts bar based on current state.
 ///
-/// Each pane contributes its own hints dynamically. The registry provides
-/// the key bindings; the view decides which ones are visible.
+/// Each pane contributes its own hints dynamically.
+/// The registry provides the key bindings; the view decides which ones are visible.
 ///
-/// `fold_label` is the dynamic label for the fold action based on selected
-/// entry state: "expand", "collapse", or "fold" (no foldable entry selected).
+/// `fold_label` is the dynamic label for the fold action based on selected entry state: "expand", "collapse", or "fold" (no foldable entry selected).
 ///
-/// `group_header_label` ("expand"/"collapse") marks a selected group header;
-/// it replaces the fold and Enter:open hints with a single Enter toggle hint.
+/// `group_header_label` ("expand"/"collapse") marks a selected group header; it replaces the fold and Enter:open hints with a single Enter toggle hint.
 ///
-/// `focus_hint` is how the scrollback says the keyboard can leave it —
-/// [`prompt_focus_hint`], or a caller-supplied replacement. A pinned one
-/// leads the bar and is offered once; an unpinned one is offered only in the
-/// selection states where moving on is the useful next step.
+/// `focus_hint` is how the scrollback says the keyboard can leave it: [`prompt_focus_hint`], or a caller-supplied replacement.
+/// A pinned one leads the bar and is offered once; an unpinned one is offered only in the selection states where moving on is the useful next step.
 #[allow(clippy::too_many_arguments)]
 pub fn build_hints(
     active_pane: ActivePane,
@@ -1290,6 +1215,113 @@ mod tests {
     }
     fn first_two_labels(hints: &[HintItem]) -> Vec<&str> {
         hints.iter().take(2).map(|h| h.label.as_ref()).collect()
+    }
+    fn hooked_read_state(member_count: usize, viewport: Rect) -> ScrollbackState {
+        use crate::scrollback::RenderBlock;
+        use crate::scrollback::blocks::tool::{HookPhase, HookRunEntry, HookRunStatus};
+        crate::appearance::cache::set_group_tool_verbs(true);
+        crate::appearance::cache::set_show_thinking_blocks(false);
+        let mut state = ScrollbackState::new();
+        let first = state.push_block(RenderBlock::read("first.rs", None));
+        for i in 1..member_count {
+            state.push_block(RenderBlock::read(format!("member-{i}.rs"), None));
+        }
+        state.attach_hooks(
+            first,
+            HookPhase::Post,
+            vec![HookRunEntry {
+                name: "hover-hook".to_owned(),
+                status: HookRunStatus::Success {
+                    elapsed: std::time::Duration::from_millis(1),
+                },
+                output: None,
+            }],
+        );
+        state.prepare_layout(viewport.width, viewport.height);
+        state
+    }
+    fn render_hook_frame(state: &ScrollbackState, viewport: Rect) -> Buffer {
+        let layouts = state.get_cached_entry_layouts().expect("layout cache");
+        let entries = state.entries_in_range(0..state.len());
+        let mut buf = Buffer::empty(viewport);
+        crate::scrollback::render::render_scrolled_entries_with_scratch(
+            &mut buf,
+            viewport,
+            &entries,
+            0,
+            None,
+            &Theme::current(),
+            state.appearance(),
+            layouts,
+            0,
+            None,
+            None,
+            None,
+            0,
+            0,
+            &[],
+            Some((state.group_spans(), 0)),
+            state.cwd(),
+        );
+        buf
+    }
+    fn hover_hook_badge(buf: &mut Buffer, state: &ScrollbackState, viewport: Rect, row: u16) {
+        let row_text: String = (viewport.left()..viewport.right())
+            .map(|x| buf[(x, row)].symbol())
+            .collect();
+        let badge_col = viewport.x + row_text.find("[hooks:").expect("rendered hook badge") as u16;
+        render_hook_hover_popup(
+            buf,
+            viewport,
+            state,
+            Some(0),
+            (badge_col, row),
+            &Theme::current(),
+        );
+    }
+    fn frame_text(buf: &Buffer) -> String {
+        (buf.area.top()..buf.area.bottom())
+            .flat_map(|y| (buf.area.left()..buf.area.right()).map(move |x| buf[(x, y)].symbol()))
+            .collect()
+    }
+    #[test]
+    fn hook_hover_popup_allows_singleton_verb_header() {
+        let viewport = Rect::new(0, 0, 100, 12);
+        let state = hooked_read_state(1, viewport);
+        let layout = state.get_cached_entry_layouts().expect("layout cache")[0];
+        assert!(layout.verb_group_header);
+        assert_eq!(layout.group_header_count, 1);
+        assert!(!layout.is_expanded_verb_header());
+        let mut buf = render_hook_frame(&state, viewport);
+        hover_hook_badge(&mut buf, &state, viewport, 0);
+        assert!(frame_text(&buf).contains("hover-hook"));
+    }
+    #[test]
+    fn hook_hover_popup_allows_expanded_verb_member_zero() {
+        let viewport = Rect::new(0, 0, 100, 12);
+        let mut state = hooked_read_state(2, viewport);
+        state.set_selected(Some(0));
+        assert!(state.toggle_group_expansion());
+        state.set_selected(None);
+        state.prepare_layout(viewport.width, viewport.height);
+        assert!(
+            state.get_cached_entry_layouts().expect("layout cache")[0].is_expanded_verb_header()
+        );
+        let mut buf = render_hook_frame(&state, viewport);
+        hover_hook_badge(&mut buf, &state, viewport, 1);
+        assert!(frame_text(&buf).contains("hover-hook"));
+    }
+    #[test]
+    fn hook_hover_popup_skips_collapsed_multi_member_verb_header() {
+        let viewport = Rect::new(0, 0, 100, 12);
+        let state = hooked_read_state(2, viewport);
+        let layout = state.get_cached_entry_layouts().expect("layout cache")[0];
+        assert!(layout.verb_group_header);
+        assert_eq!(layout.group_header_count, 2);
+        assert!(!layout.is_expanded_verb_header());
+        let mut buf = render_hook_frame(&state, viewport);
+        hover_hook_badge(&mut buf, &state, viewport, 0);
+        assert!(!frame_text(&buf).contains("hover-hook"));
     }
     #[test]
     fn demotion_hint_uses_registered_ctrl_b_binding() {
@@ -1701,8 +1733,8 @@ mod tests {
             "mid-turn with composer text must advertise the send-now (interject) chord; got {labels:?}"
         );
     }
-    /// Empty composer + mid-turn queue: bare Enter is send-now in both normal
-    /// and multiline modes (multiline only inserts newline when there is text).
+    /// Empty composer with a mid-turn queue: bare Enter is send-now in both normal and multiline modes.
+    /// Multiline only inserts a newline when there is text.
     #[test]
     fn prompt_empty_mid_turn_queue_advertises_send_now_including_multiline() {
         for multiline in [false, true] {
@@ -1743,12 +1775,9 @@ mod tests {
             );
         }
     }
-    /// Running-turn cancel hint key tracks `esc_would_cancel_turn` — the
-    /// input-routing predicate computed by the caller: Esc when a bare press
-    /// would reach the policy's mid-turn cancel, the registry Ctrl+C binding
-    /// otherwise. (The predicate itself — gate, panes, and higher-priority
-    /// Esc consumers — is pinned by `esc_would_cancel_turn_tests` in
-    /// `agent_view::input`.)
+    /// The running-turn cancel hint key tracks `esc_would_cancel_turn`, the input-routing predicate computed by the caller.
+    /// The key is Esc when a bare press would reach the policy's mid-turn cancel, the registry Ctrl+C binding otherwise.
+    /// (The predicate itself, its gate, panes, and higher-priority Esc consumers, is pinned by `esc_would_cancel_turn_tests` in `agent_view::input`.)
     #[test]
     fn running_turn_cancel_hint_key_tracks_esc_predicate() {
         let prompt = PromptWidget::default();
@@ -1794,10 +1823,9 @@ mod tests {
             );
         }
     }
-    /// Running turn + open scrollback search: the search's own `Esc cancel`
-    /// hint stays the ONLY Esc hint — the CancelTurn hint keeps Ctrl+C (the
-    /// caller's predicate is false while the search would steal Esc), so the
-    /// bar never shows two different `Esc cancel` meanings at once.
+    /// Running turn with an open scrollback search: the search's own `Esc cancel` hint stays the only Esc hint.
+    /// The CancelTurn hint keeps Ctrl+C (the caller's predicate is false while the search would steal Esc).
+    /// The bar therefore never shows two different `Esc cancel` meanings at once.
     #[test]
     fn running_turn_with_scrollback_search_keeps_ctrl_c_cancel_hint() {
         let registry = ActionRegistry::defaults();
@@ -1845,10 +1873,9 @@ mod tests {
             "CancelTurn hint must stay on Ctrl+C while the search owns Esc"
         );
     }
-    /// Running turn + editing a queued prompt: the edit's own `Esc cancel`
-    /// (discard) hint is the ONLY Esc-keyed row — the CancelTurn hint keeps
-    /// Ctrl+C (the caller's predicate is false while the edit owns Esc), so
-    /// the bar never shows two contradictory `Esc cancel` rows.
+    /// Running turn while editing a queued prompt: the edit's own `Esc cancel` (discard) hint is the only Esc-keyed row.
+    /// The CancelTurn hint keeps Ctrl+C (the caller's predicate is false while the edit owns Esc).
+    /// The bar therefore never shows two contradictory `Esc cancel` rows.
     #[test]
     fn running_turn_editing_queued_keeps_ctrl_c_cancel_hint() {
         let registry = ActionRegistry::defaults();
@@ -1973,68 +2000,193 @@ mod tests {
             key.modifiers
         );
     }
+    fn base_params(area: Rect) -> AgentViewLayoutParams {
+        AgentViewLayoutParams {
+            area,
+            prompt_height: 2,
+            shortcuts_height: 1,
+            ..Default::default()
+        }
+    }
     fn layout_with_rows(
         area: Rect,
         banner_height: u16,
         cta_height: u16,
         follow_ups_height: u16,
     ) -> AgentViewLayout {
-        let layout_cfg = LayoutConfig::default();
-        let scrollbar_cfg = ScrollbarConfig::default();
-        AgentViewLayout::compute(
-            area,
-            &layout_cfg,
-            &scrollbar_cfg,
-            0,
-            2,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
+        AgentViewLayout::compute(AgentViewLayoutParams {
             banner_height,
             cta_height,
             follow_ups_height,
-            0,
-            0,
-            0,
-            1,
-            false,
-        )
+            ..base_params(area)
+        })
     }
     fn layout_with_cta(area: Rect, cta_height: u16) -> AgentViewLayout {
         layout_with_rows(area, 0, cta_height, 0)
     }
-    /// Minimal layout with a timeline rail request — hides the cfg-dependent
-    /// arity of `compute` like `layout_with_rows` does.
+    fn layout_with_status_line(
+        area: Rect,
+        prompt_height: u16,
+        status_line_height: u16,
+    ) -> AgentViewLayout {
+        AgentViewLayout::compute(AgentViewLayoutParams {
+            prompt_height,
+            status_line_height,
+            ..base_params(area)
+        })
+    }
+    #[test]
+    fn status_line_row_sits_between_prompt_and_shortcuts_bar() {
+        let layout = layout_with_status_line(Rect::new(0, 0, 80, 40), 2, 2);
+        assert_eq!(
+            layout.status_line.height, 2,
+            "a 2-row status row has room at height 40"
+        );
+        assert_eq!(
+            layout.status_line.y,
+            layout.prompt.bottom(),
+            "the row starts where the prompt ends, got {:?} under prompt {:?}",
+            layout.status_line,
+            layout.prompt,
+        );
+        assert_eq!(
+            layout.status_line.bottom(),
+            layout.shortcuts.y,
+            "the shortcuts bar starts where the row ends, got {:?} under row {:?}",
+            layout.shortcuts,
+            layout.status_line,
+        );
+    }
+    #[test]
+    fn status_line_row_yields_to_a_prompt_at_its_cap() {
+        let area = Rect::new(0, 0, 80, 20);
+        let layout = layout_with_status_line(area, area.height / 2, 3);
+        assert_eq!(
+            layout.status_line.height, 0,
+            "no rows are left over for the status row, got {:?}",
+            layout.status_line,
+        );
+        assert!(
+            layout.scrollback.height >= 5,
+            "the scrollback keeps its Min(5), got {:?}",
+            layout.scrollback,
+        );
+        assert!(
+            layout.shortcuts.height == 1 && layout.shortcuts.bottom() <= area.bottom(),
+            "the shortcuts bar keeps its row on screen, got {:?}",
+            layout.shortcuts,
+        );
+    }
+    #[test]
+    fn the_status_row_takes_the_one_row_left_over() {
+        let area = Rect::new(0, 0, 80, 21);
+        let layout = layout_with_status_line(area, area.height / 2, 1);
+        assert_eq!(
+            layout.status_line.height, 1,
+            "the one row left over goes to the status row, got {:?}",
+            layout.status_line,
+        );
+        assert_eq!(
+            layout.status_line.bottom(),
+            layout.shortcuts.y,
+            "the shortcuts bar starts where the row ends, got {:?} under row {:?}",
+            layout.shortcuts,
+            layout.status_line,
+        );
+        assert!(
+            layout.shortcuts.height == 1 && layout.shortcuts.bottom() < area.bottom(),
+            "the shortcuts bar keeps its row inside the padded inner area, got {:?}",
+            layout.shortcuts,
+        );
+        assert!(
+            layout.scrollback.height >= SCROLLBACK_MIN_ROWS,
+            "the row does not come out of the scrollback minimum, got {:?}",
+            layout.scrollback,
+        );
+    }
+    #[test]
+    fn prompt_budget_counts_the_rows_above_the_prompt() {
+        let area = Rect::new(0, 0, 80, 25);
+        let plain = base_params(area);
+        assert_eq!(
+            AgentViewLayout::rows_available_for_prompt(plain),
+            25 - 11,
+            "a frame with no optional row gives everything else to the prompt"
+        );
+        let with_rows = AgentViewLayoutParams {
+            banner_height: 1,
+            turn_status_height: 1,
+            ..plain
+        };
+        assert_eq!(
+            AgentViewLayout::rows_available_for_prompt(with_rows),
+            25 - 11 - 4,
+            "each row above the prompt takes its own height plus the gap above it"
+        );
+    }
+    #[test]
+    fn prompt_budget_excludes_the_prompts_own_requested_height() {
+        let params = AgentViewLayoutParams {
+            todo_height: 3,
+            queue_height: 2,
+            turn_status_height: 1,
+            banner_height: 1,
+            prompt_gap: 1,
+            voice_recording_height: 1,
+            status_line_height: 2,
+            ..base_params(Rect::new(0, 0, 80, 40))
+        };
+        let budget = AgentViewLayout::rows_available_for_prompt(params);
+        assert_eq!(
+            AgentViewLayout::rows_available_for_prompt(AgentViewLayoutParams {
+                prompt_height: 99,
+                ..params
+            }),
+            budget,
+            "the requested prompt height is not part of its own budget"
+        );
+        let at_budget = AgentViewLayout::compute(AgentViewLayoutParams {
+            prompt_height: budget,
+            ..params
+        });
+        assert_eq!(at_budget.prompt.height, budget);
+        assert_eq!(at_budget.todo.height, 3);
+        assert_eq!(at_budget.queue.height, 2);
+        assert_eq!(at_budget.turn_status.height, 1);
+        assert_eq!(at_budget.banner.height, 1);
+        assert_eq!(at_budget.voice_recording.height, 1);
+        assert_eq!(
+            at_budget.status_line.height, 2,
+            "a prompt at its budget leaves the status row whole, got {:?}",
+            at_budget.status_line,
+        );
+        assert_eq!(at_budget.shortcuts.height, 1);
+        assert_eq!(
+            at_budget.scrollback.height, SCROLLBACK_MIN_ROWS,
+            "the budget is the surplus over the scrollback minimum, got {:?}",
+            at_budget.scrollback,
+        );
+        let over_budget = AgentViewLayout::compute(AgentViewLayoutParams {
+            prompt_height: budget + 1,
+            ..params
+        });
+        assert_eq!(
+            over_budget.status_line.height, 1,
+            "the row past the budget comes out of the status row, got {:?}",
+            over_budget.status_line,
+        );
+        assert_eq!(over_budget.scrollback.height, SCROLLBACK_MIN_ROWS);
+    }
     fn layout_with_rail(
         area: Rect,
         timeline_width: u16,
         scrollbar_cfg: &ScrollbarConfig,
     ) -> AgentViewLayout {
-        let layout_cfg = LayoutConfig::default();
-        AgentViewLayout::compute(
-            area,
-            &layout_cfg,
-            scrollbar_cfg,
+        AgentViewLayout::compute(AgentViewLayoutParams {
             timeline_width,
-            2,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            1,
-            false,
-        )
+            scrollbar_cfg: *scrollbar_cfg,
+            ..base_params(area)
+        })
     }
     #[test]
     fn timeline_rail_replaces_the_scrollbar_column() {
@@ -2088,8 +2240,7 @@ mod tests {
         assert_eq!(layout.plugin_cta, Rect::default());
         assert!(layout.scrollback.height >= 5);
     }
-    /// Banner row (mode banner / ephemeral tip slot): height 1 reserves a
-    /// one-row rect directly above the prompt (gap row in between).
+    /// Banner row (mode banner / ephemeral tip slot): height 1 reserves a one-row rect directly above the prompt (gap row in between).
     #[test]
     fn banner_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);
@@ -2209,75 +2360,5 @@ mod tests {
         let layout = layout_with_rows(area, 0, 0, 1);
         assert_eq!(layout.follow_ups, Rect::default());
         assert!(layout.scrollback.height >= 5);
-    }
-    /// Default todo badge is a `done/total` fraction: numerator = completed,
-    /// denominator = all tasks except cancelled.
-    #[test]
-    fn todo_badge_default_renders_done_over_total_fraction() {
-        let theme = Theme::current();
-        let counts = super::super::todo_pane::TodoCounts {
-            in_progress: 1,
-            pending: 2,
-            completed: 2,
-            cancelled: 0,
-        };
-        let spans =
-            render_todo_badge_spans(&counts, false, false, TodoBadgeFormat::Default, &theme)
-                .expect("badge renders when there are todos");
-        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(
-            text.starts_with("2/5"),
-            "expected a 2/5 done/total fraction, got {text:?}"
-        );
-        let with_cancelled = super::super::todo_pane::TodoCounts {
-            in_progress: 0,
-            pending: 1,
-            completed: 2,
-            cancelled: 1,
-        };
-        let spans = render_todo_badge_spans(
-            &with_cancelled,
-            false,
-            false,
-            TodoBadgeFormat::Default,
-            &theme,
-        )
-        .expect("badge renders");
-        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(
-            text.starts_with("2/3"),
-            "cancelled tasks are excluded from the total, got {text:?}"
-        );
-    }
-    /// No todos → no badge.
-    #[test]
-    fn todo_badge_absent_when_no_todos() {
-        let theme = Theme::current();
-        let empty = super::super::todo_pane::TodoCounts::default();
-        assert!(
-            render_todo_badge_spans(&empty, false, false, TodoBadgeFormat::Default, &theme)
-                .is_none()
-        );
-    }
-    /// All-cancelled list → no badge (denominator would be 0; nothing to track).
-    #[test]
-    fn todo_badge_absent_when_all_cancelled() {
-        let theme = Theme::current();
-        let all_cancelled = super::super::todo_pane::TodoCounts {
-            in_progress: 0,
-            pending: 0,
-            completed: 0,
-            cancelled: 3,
-        };
-        assert!(
-            render_todo_badge_spans(
-                &all_cancelled,
-                false,
-                false,
-                TodoBadgeFormat::Default,
-                &theme
-            )
-            .is_none()
-        );
     }
 }

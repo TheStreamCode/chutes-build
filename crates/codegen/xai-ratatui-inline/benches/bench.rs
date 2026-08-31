@@ -140,7 +140,7 @@ fn dirty_terminal(
     let _ = t.flush_with_links();
     t.swap_buffers();
 
-    // Current frame: mostly unchanged ('a'), a few changed rows ('b') — a
+    // Current frame: mostly unchanged ('a'), a few changed rows ('b') ÔÇö a
     // realistic partial redraw. The diff still visits every cell, which is where
     // the per-cell link resolution cost lives.
     fill_rows(&mut t, 'a', 0..height, width);

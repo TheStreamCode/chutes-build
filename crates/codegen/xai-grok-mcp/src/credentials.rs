@@ -117,14 +117,18 @@ impl McpCredentialStore {
     /// Save the credential store to the default path.
     pub fn save_default(&self) -> Result<()> {
         let path = Self::default_path().ok_or_else(|| {
-            McpCredentialError::Other("no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)".into())
+            McpCredentialError::Other(
+                "no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)".into(),
+            )
         })?;
         self.save_to(&path)
     }
 
     fn locked_mutate_and_save(&mut self, mutate: &dyn Fn(&mut Self)) -> Result<()> {
         let path = Self::default_path().ok_or_else(|| {
-            McpCredentialError::Other("no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)".into())
+            McpCredentialError::Other(
+                "no user Chutes Build home (set $CHUTES_BUILD_HOME or $HOME)".into(),
+            )
         })?;
         match acquire_store_lock(&path) {
             Some(_lock) => {

@@ -26,9 +26,9 @@ use xai_grok_update::version::{
     fetch_gh_release_version, fetch_npm_tag_for_test, fetch_npm_version_for_test,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// fetch_npm_tag — reads a single dist-tag from `npm view`.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// fetch_npm_tag ÔÇö reads a single dist-tag from `npm view`.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
@@ -142,7 +142,7 @@ async fn fetch_npm_tag_invalid_json_returns_err() {
 #[serial]
 async fn fetch_npm_tag_unexpected_json_shape_returns_err() {
     // npm view can return null, an object, etc. The function expects string
-    // or array of strings — anything else is an error.
+    // or array of strings ÔÇö anything else is an error.
     let g = FakeBinGuard::install_npm();
     g.set_stdout("42");
 
@@ -162,9 +162,9 @@ async fn fetch_npm_tag_empty_array_returns_err() {
     assert!(msg.contains("empty"), "msg: {msg}");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// fetch_npm_version — alpha channel calls both tags and returns the max.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// fetch_npm_version ÔÇö alpha channel calls both tags and returns the max.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
@@ -181,7 +181,7 @@ async fn fetch_npm_version_stable_calls_only_latest() {
 #[serial]
 async fn fetch_npm_version_alpha_returns_max_of_alpha_and_latest_when_alpha_higher() {
     let g = FakeBinGuard::install_npm();
-    g.set_stdout("\"0.1.181\""); // latest tag → stable
+    g.set_stdout("\"0.1.181\""); // latest tag ÔåÆ stable
     g.set_alpha_stdout("\"0.1.182-alpha.1\""); // alpha tag
 
     let v = fetch_npm_version_for_test("alpha", None).await.unwrap();
@@ -192,7 +192,7 @@ async fn fetch_npm_version_alpha_returns_max_of_alpha_and_latest_when_alpha_high
 #[tokio::test]
 #[serial]
 async fn fetch_npm_version_alpha_returns_stable_when_higher() {
-    // Common case: stable shipped after a stale alpha tag — must not strand
+    // Common case: stable shipped after a stale alpha tag ÔÇö must not strand
     // alpha users on the older alpha.
     let g = FakeBinGuard::install_npm();
     g.set_stdout("\"0.1.182\"");
@@ -202,15 +202,15 @@ async fn fetch_npm_version_alpha_returns_stable_when_higher() {
     assert_eq!(v, "0.1.182");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// install_npm — spawns `npm i -g @pkg@version`.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// install_npm ÔÇö spawns `npm i -g @pkg@version`.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
 async fn install_npm_calls_npm_with_version_arg() {
     let g = FakeBinGuard::install_npm();
-    // No stdout/exit setup → succeeds with empty stdout.
+    // No stdout/exit setup ÔåÆ succeeds with empty stdout.
 
     install_npm_for_test(Some("0.1.181"), "stable", None).unwrap();
     let log = g.args_log();
@@ -321,9 +321,9 @@ async fn install_npm_no_token_no_userconfig() {
     assert!(!log[0].contains("--userconfig"), "args: {}", log[0]);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// fetch_gh_release_version — exercises the `gh release list` shell-out.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// fetch_gh_release_version ÔÇö exercises the `gh release list` shell-out.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
@@ -422,7 +422,7 @@ async fn fetch_gh_release_passes_repo_flag() {
 #[serial]
 async fn fetch_gh_release_uses_jq_to_extract_tag() {
     // The function constructs `gh release list --json tagName --jq '.[0].tagName'`
-    // — we verify the args include the jq filter so a refactor doesn't accidentally
+    // ÔÇö we verify the args include the jq filter so a refactor doesn't accidentally
     // drop it.
     let g = FakeBinGuard::install_gh();
     g.set_stable_only_stdout("v0.1.181");

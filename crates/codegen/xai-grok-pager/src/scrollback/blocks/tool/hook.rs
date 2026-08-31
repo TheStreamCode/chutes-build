@@ -1,8 +1,5 @@
-//! Hook data types and rendering helpers for tool call blocks.
-//!
-//! Hook runs are displayed as part of tool call blocks rather than
-//! as standalone scrollback entries. The tool header comes first,
-//! then pre_tool_use hooks, then post_tool_use hooks.
+//! Hook runs are displayed as part of tool call blocks rather than as standalone scrollback entries.
+//! The tool header comes first, then pre_tool_use hooks, then post_tool_use hooks.
 
 use std::time::Duration;
 
@@ -20,7 +17,7 @@ pub enum HookRunStatus {
         elapsed: Duration,
     },
     Skipped,
-    /// The hook ran and blocked (a stop-gate decision, not a failure).
+    /// The hook ran and chose to block the tool (a decision, not a failure).
     Blocked {
         detail: String,
         elapsed: Duration,
@@ -47,12 +44,11 @@ pub enum HookPhase {
     Post,
 }
 
-/// Hook data attached to a tool call block.
 #[derive(Debug, Clone, Default)]
 pub struct ToolCallHookData {
     pub pre_hooks: Vec<HookRunEntry>,
     pub post_hooks: Vec<HookRunEntry>,
-    /// Lifecycle hooks (session_start, session_end, stop) — rendered with their own event name.
+    /// Lifecycle hooks (session_start, session_end, stop), rendered with their own event name.
     pub lifecycle: Vec<(String, Vec<HookRunEntry>)>,
 }
 
@@ -62,14 +58,7 @@ impl ToolCallHookData {
     }
 
     pub fn has_content(&self) -> bool {
-        self.pre_hooks
-            .iter()
-            .chain(self.post_hooks.iter())
-            .any(|r| !matches!(r.status, HookRunStatus::Skipped))
-            || self.lifecycle.iter().any(|(_, runs)| {
-                runs.iter()
-                    .any(|r| !matches!(r.status, HookRunStatus::Skipped))
-            })
+        HookRunCounts::from_data(self).total() > 0
     }
 }
 
@@ -77,79 +66,155 @@ impl ToolCallHookData {
 
 const INDENT: &str = "    ";
 
-/// Count successes and failures across all hook entries.
-fn count_hooks(entries: &[&[HookRunEntry]]) -> (usize, usize) {
-    let mut success = 0usize;
-    let mut failed = 0usize;
-    for runs in entries {
-        for r in *runs {
-            match r.status {
-                HookRunStatus::Success { .. } | HookRunStatus::Blocked { .. } => success += 1,
-                HookRunStatus::Failed { .. } => failed += 1,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct HookRunCounts {
+    pub(crate) success: usize,
+    pub(crate) blocked: usize,
+    pub(crate) failed: usize,
+}
+
+impl HookRunCounts {
+    pub(crate) fn from_data(data: &ToolCallHookData) -> Self {
+        let mut counts = Self::default();
+        counts.add_data(data);
+        counts
+    }
+
+    fn from_runs(runs: &[HookRunEntry]) -> Self {
+        let mut counts = Self::default();
+        counts.add_runs(runs);
+        counts
+    }
+
+    pub(crate) fn add_data(&mut self, data: &ToolCallHookData) {
+        self.add_runs(&data.pre_hooks);
+        self.add_runs(&data.post_hooks);
+        for (_, runs) in &data.lifecycle {
+            self.add_runs(runs);
+        }
+    }
+
+    pub(crate) fn has_failures(self) -> bool {
+        self.failed > 0
+    }
+
+    fn compact_completed(self) -> usize {
+        self.success + self.blocked
+    }
+
+    fn add_runs(&mut self, runs: &[HookRunEntry]) {
+        for run in runs {
+            match run.status {
+                HookRunStatus::Success { .. } => self.success += 1,
+                HookRunStatus::Blocked { .. } => self.blocked += 1,
+                HookRunStatus::Failed { .. } => self.failed += 1,
                 HookRunStatus::Skipped => {}
             }
         }
     }
-    (success, failed)
+
+    fn total(self) -> usize {
+        self.success + self.blocked + self.failed
+    }
 }
 
-/// `[hooks: N/M]` spans (green successes, red failures) with a leading
-/// two-space gap. Returns `None` when nothing ran.
-fn hooks_count_spans(success: usize, failed: usize) -> Option<Vec<Span<'static>>> {
-    if success == 0 && failed == 0 {
+#[derive(Debug, Clone, Copy)]
+enum HookCountShape {
+    /// Individual rows keep the completed/failed pair: blocked hooks completed normally, so they count in the green completed number.
+    Compact,
+    /// Aggregate rows name every outcome because no member detail is visible.
+    Labeled,
+}
+
+fn render_hook_counts_inline_suffix(
+    counts: HookRunCounts,
+    shape: HookCountShape,
+    theme: &Theme,
+) -> Option<Vec<Span<'static>>> {
+    if counts.total() == 0 {
         return None;
     }
-    let theme = Theme::current();
+    let dimmed = ratatui::style::Modifier::DIM;
     let mut spans = vec![Span::styled("  [hooks: ", theme.muted())];
-    if success > 0 {
-        spans.push(Span::styled(
-            format!("{}", success),
-            theme
-                .fg(theme.accent_success)
-                .add_modifier(ratatui::style::Modifier::DIM),
-        ));
-    }
-    if success > 0 && failed > 0 {
-        spans.push(Span::styled("/", theme.muted()));
-    }
-    if failed > 0 {
-        spans.push(Span::styled(
-            format!("{}", failed),
-            theme
-                .fg(theme.accent_error)
-                .add_modifier(ratatui::style::Modifier::DIM),
-        ));
+    match shape {
+        HookCountShape::Compact => {
+            let completed = counts.compact_completed();
+            if completed > 0 {
+                spans.push(Span::styled(
+                    completed.to_string(),
+                    theme.fg(theme.accent_success).add_modifier(dimmed),
+                ));
+            }
+            if completed > 0 && counts.failed > 0 {
+                spans.push(Span::styled("/", theme.muted()));
+            }
+            if counts.failed > 0 {
+                spans.push(Span::styled(
+                    counts.failed.to_string(),
+                    theme.fg(theme.accent_error).add_modifier(dimmed),
+                ));
+            }
+        }
+        HookCountShape::Labeled if counts.blocked == 0 && counts.failed == 0 => {
+            spans.push(Span::styled(
+                counts.success.to_string(),
+                theme.fg(theme.accent_success).add_modifier(dimmed),
+            ));
+        }
+        HookCountShape::Labeled => {
+            let mut is_first = true;
+            for (count, label, color) in [
+                (counts.success, "ok", theme.accent_success),
+                (counts.blocked, "blocked", theme.accent_running),
+                (counts.failed, "failed", theme.accent_error),
+            ] {
+                if count == 0 {
+                    continue;
+                }
+                if !is_first {
+                    spans.push(Span::styled(", ", theme.muted()));
+                }
+                is_first = false;
+                spans.push(Span::styled(
+                    format!("{count} {label}"),
+                    theme.fg(color).add_modifier(dimmed),
+                ));
+            }
+        }
     }
     spans.push(Span::styled("]", theme.muted()));
     Some(spans)
 }
 
-/// Render an inline `[hooks: N/M]` suffix to append to the tool header line.
-///
-/// - Green number for successes, red for failures
-/// - If no errors, only show success count
-/// - If no successes, only show error count
-/// - Returns None if no hooks ran
-pub fn render_hooks_inline_suffix(data: &ToolCallHookData) -> Option<Vec<Span<'static>>> {
-    let all_runs: Vec<&[HookRunEntry]> = [data.pre_hooks.as_slice(), data.post_hooks.as_slice()]
-        .into_iter()
-        .chain(data.lifecycle.iter().map(|(_, runs)| runs.as_slice()))
-        .collect();
-    let (success, failed) = count_hooks(&all_runs);
-    hooks_count_spans(success, failed)
+pub(crate) fn render_group_hook_counts_inline_suffix(
+    counts: HookRunCounts,
+    theme: &Theme,
+) -> Option<Vec<Span<'static>>> {
+    render_hook_counts_inline_suffix(counts, HookCountShape::Labeled, theme)
 }
 
-/// Right-side summary for stop hooks merged onto a turn-terminal marker line:
-/// `stop  [hooks: 2]` per group (bold muted event name + colored counts),
-/// groups joined by two spaces. Returns `None` when nothing ran.
+pub fn render_hooks_inline_suffix(data: &ToolCallHookData) -> Option<Vec<Span<'static>>> {
+    render_hook_counts_inline_suffix(
+        HookRunCounts::from_data(data),
+        HookCountShape::Compact,
+        &Theme::current(),
+    )
+}
+
+/// Right-side summary for stop hooks merged onto the marker line that ends a turn.
+/// Each group renders as `stop  [hooks: 2]` (bold muted event name and colored counts); groups are joined by two spaces.
+/// Returns `None` when nothing ran.
 pub fn render_stop_hooks_summary(
     groups: &[(String, Vec<HookRunEntry>)],
 ) -> Option<Vec<Span<'static>>> {
     let theme = Theme::current();
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (event_name, runs) in groups {
-        let (success, failed) = count_hooks(&[runs.as_slice()]);
-        let Some(count_spans) = hooks_count_spans(success, failed) else {
+        let Some(count_spans) = render_hook_counts_inline_suffix(
+            HookRunCounts::from_runs(runs),
+            HookCountShape::Compact,
+            &theme,
+        ) else {
             continue;
         };
         if !spans.is_empty() {
@@ -174,8 +239,6 @@ fn render_separator() -> BlockLine {
     .into()
 }
 
-/// Render hook details as expanded lines.
-///
 /// Format:
 ///   **pre_tool_use**
 ///     \u2713 hook-name (12ms)
@@ -203,7 +266,6 @@ fn render_hooks_expanded(event: &str, runs: &[HookRunEntry]) -> Vec<BlockLine> {
         .into(),
     );
 
-    // Per-hook detail lines
     lines.extend(render_hooks_expanded_inner(runs));
 
     lines
@@ -275,7 +337,7 @@ fn render_hooks_expanded_inner(runs: &[HookRunEntry]) -> Vec<BlockLine> {
                     ])
                     .into(),
                 );
-                // Error text — strip redundant hook name prefix if present
+                // Strip the redundant hook name prefix from the error text if present
                 let cleaned = error
                     .strip_prefix(&format!("hook '{}' ", run.name))
                     .unwrap_or(error);
@@ -310,7 +372,6 @@ fn render_hooks_expanded_inner(runs: &[HookRunEntry]) -> Vec<BlockLine> {
     lines
 }
 
-/// Render hook lines for a given display mode.
 pub fn render_hooks_for_mode(
     event: &str,
     runs: &[HookRunEntry],
@@ -326,9 +387,7 @@ pub fn render_hooks_for_mode(
 }
 
 /// Render hook detail lines (no section header) for expanded/truncated modes.
-///
-/// Used by lifecycle blocks where the block header already shows the event name,
-/// so repeating it as a section header would be redundant.
+/// Used by lifecycle blocks where the block header already shows the event name, so repeating it as a section header would be redundant.
 pub fn render_hooks_detail(runs: &[HookRunEntry], mode: DisplayMode) -> Vec<BlockLine> {
     if runs.is_empty() {
         return Vec::new();
@@ -343,3 +402,7 @@ pub fn render_hooks_detail(runs: &[HookRunEntry], mode: DisplayMode) -> Vec<Bloc
 pub fn render_hook_separator() -> BlockLine {
     render_separator()
 }
+
+#[cfg(test)]
+#[path = "hook_tests.rs"]
+mod tests;

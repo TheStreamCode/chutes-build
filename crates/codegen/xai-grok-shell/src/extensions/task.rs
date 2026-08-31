@@ -369,7 +369,7 @@ fn respond<T: Serialize>(result: Result<T, impl std::fmt::Display>) -> ExtResult
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/task/kill" => {
+        "chutes.ai/task/kill" => {
             let req: KillTaskRequest = parse(args)?;
             let result = agent
                 .kill_background_task(&req.session_id, &req.task_id, req.source.into())
@@ -380,7 +380,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 });
             respond(result)
         }
-        "chutes.build/task/list" => {
+        "chutes.ai/task/list" => {
             let req: ListTasksRequest = parse(args)?;
             let result = agent
                 .list_tasks(&req.session_id)
@@ -412,7 +412,7 @@ struct DeleteScheduledTaskResponse {
 /// Handle `chutes.ai/scheduler/*` extension methods.
 pub(crate) async fn handle_scheduler(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/scheduler/delete" => {
+        "chutes.ai/scheduler/delete" => {
             let req: DeleteScheduledTaskRequest = parse(args)?;
             let result = agent
                 .delete_scheduled_task(&req.session_id, &req.task_id)
@@ -430,7 +430,7 @@ pub(crate) async fn handle_scheduler(agent: &MvpAgent, args: &acp::ExtRequest) -
 /// Handle `chutes.ai/subagent/*` extension methods.
 pub(crate) async fn handle_subagent(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/subagent/cancel" => {
+        "chutes.ai/subagent/cancel" => {
             let req: CancelSubagentRequest = parse(args)?;
             tracing::info!(subagent_id = %req.subagent_id, "Cancelling subagent via ext method");
             let outcome =
@@ -441,7 +441,7 @@ pub(crate) async fn handle_subagent(agent: &MvpAgent, args: &acp::ExtRequest) ->
                 outcome: Some(outcome),
             }))
         }
-        "chutes.build/subagent/get" => {
+        "chutes.ai/subagent/get" => {
             let req: GetSubagentRequest = parse(args)?;
             let block = req.block.unwrap_or(false);
             let timeout_ms = req.timeout_ms.unwrap_or(30_000);
@@ -473,7 +473,7 @@ pub(crate) async fn handle_subagent(agent: &MvpAgent, args: &acp::ExtRequest) ->
                 }),
             }))
         }
-        "chutes.build/subagent/list_running" => {
+        "chutes.ai/subagent/list_running" => {
             let req: ListRunningSubagentsRequest = parse(args)?;
             let subagents = agent
                 .list_running_subagents(&req.session_id)

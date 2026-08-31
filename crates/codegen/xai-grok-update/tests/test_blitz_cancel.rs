@@ -7,11 +7,11 @@
 //! > and a `.tmp` never masquerades as the active binary.
 //!
 //! The invariant is checked by RE-RESOLVING the symlink and RE-RUNNING the
-//! binary from disk every time — never by re-reading a value the harness set.
+//! binary from disk every time ÔÇö never by re-reading a value the harness set.
 //!
 //! A controllable raw HTTP/1.1 server serves a real executable ("good")
 //! artifact and can truncate the body, close the connection early, serve a
-//! right-length-but-garbage body, or hang mid-transfer — for both the parallel
+//! right-length-but-garbage body, or hang mid-transfer ÔÇö for both the parallel
 //! byte-range path and the single-connection path.
 
 #![cfg(unix)]
@@ -31,9 +31,9 @@ use common::{
 };
 use xai_grok_update::auto_update::install_internal_from_base;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Artifacts + fixtures
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// A real executable larger than the 16 MiB parallel threshold (at least 2
 /// chunks), so the parallel byte-range path is exercised. The shell exits on
@@ -45,7 +45,7 @@ fn large_good_artifact() -> Vec<u8> {
 }
 
 /// Seed a previous-good versioned binary + both managed symlinks
-/// (`grok` and `agent` — see `swap_managed_bin_links`). Returns the
+/// (`grok` and `agent` ÔÇö see `swap_managed_bin_links`). Returns the
 /// absolute path of the seeded binary.
 fn seed_previous_good(home: &Path, version: &str, platform: &str) -> PathBuf {
     let downloads = home.join("downloads");
@@ -78,7 +78,7 @@ enum Expect {
 /// THE invariant. Re-resolves the on-disk symlink and RE-EXECUTES the resolved
 /// binary; never inspects a harness-held value. Guarantees the active managed
 /// link is always runnable and is never a `.tmp` or a partial file. Applied
-/// to both `grok` and `agent` — `swap_managed_bin_links` moves them together.
+/// to both `grok` and `agent` ÔÇö `swap_managed_bin_links` moves them together.
 fn assert_invariant(home: &Path, prev_good: &Path, new_binary: &Path, expect: Expect) {
     for name in ["grok", "agent"] {
         assert_link_invariant(home, name, prev_good, new_binary, expect);
@@ -95,7 +95,7 @@ fn assert_link_invariant(
     let link = home.join("bin").join(name);
     assert!(link.is_symlink(), "{name} must remain a symlink");
 
-    // Resolve from disk. canonicalize fails on a dangling link — that alone
+    // Resolve from disk. canonicalize fails on a dangling link ÔÇö that alone
     // would be a brick.
     let resolved = dunce::canonicalize(&link)
         .unwrap_or_else(|e| panic!("active {name} symlink does not resolve: {e}"));
@@ -179,9 +179,9 @@ async fn run_one(
     assert_invariant(home, &prev_good, &new_binary, expect);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Deterministic matrix — single-connection path (small artifact)
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// Deterministic matrix ÔÇö single-connection path (small artifact)
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -196,10 +196,10 @@ async fn blitz_single_connection_matrix() {
     // Happy path first so we know the symlink CAN move to the new binary.
     run_one(&server, Mode::Full, "0.1.181", None).await;
 
-    // Right-length garbage — caught by the smoke-test (Layer 2).
+    // Right-length garbage ÔÇö caught by the smoke-test (Layer 2).
     run_one(&server, Mode::Garbage, "0.1.181", None).await;
 
-    // Premature EOF at several offsets — caught by the length/transport checks.
+    // Premature EOF at several offsets ÔÇö caught by the length/transport checks.
     for k in [0usize, 1, len / 2, len.saturating_sub(1)] {
         run_one(&server, Mode::Truncate(k), "0.1.181", None).await;
     }
@@ -218,15 +218,15 @@ async fn blitz_single_connection_matrix() {
 
     // A clean serve still succeeds after the failure matrix. NOTE: run_one
     // calls reset_home() at the start of every case, so this checks the happy
-    // path stays reachable — not recovery over a dirty dir. The genuine
+    // path stays reachable ÔÇö not recovery over a dirty dir. The genuine
     // recovery-without-reset assertion lives in
     // integrity_failure_is_clean_keeps_previous_good_and_emits_telemetry.
     run_one(&server, Mode::Full, "0.1.182", None).await;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Deterministic matrix — parallel byte-range path (>= 16 MiB artifact)
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// Deterministic matrix ÔÇö parallel byte-range path (>= 16 MiB artifact)
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -242,7 +242,7 @@ async fn blitz_parallel_path_matrix() {
     // Happy path through the parallel reassembly.
     run_one(&server, Mode::Full, "0.1.181", None).await;
 
-    // Right-length garbage reassembled from range chunks — smoke-test catches.
+    // Right-length garbage reassembled from range chunks ÔÇö smoke-test catches.
     run_one(&server, Mode::Garbage, "0.1.181", None).await;
 
     // Short chunk inside the range / set_len zero region. With Content-Length
@@ -268,9 +268,9 @@ async fn blitz_parallel_path_matrix() {
     run_one(&server, Mode::Full, "0.1.182", None).await;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Smoke-test rejects garbage and keeps previous-good
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -310,9 +310,9 @@ async fn smoke_test_rejects_garbage_and_keeps_previous_good() {
     assert_invariant(home, &prev_good, &new_binary, Expect::NewBinary);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Bounded randomized fuzz (CI) + ignored stress (1e5+ iterations).
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Cheap deterministic PRNG so the fuzz needs no extra dependency.
 struct Rng(u64);
@@ -357,7 +357,7 @@ async fn fuzz_loop(iterations: usize, seed: u64) {
                 // k in [0, len): Hang holds the socket after k bytes without
                 // ever meeting Content-Length, so the client always cancels
                 // mid-flight. k == len would transmit the whole body, letting
-                // the install complete and the swap land before the deadline —
+                // the install complete and the swap land before the deadline ÔÇö
                 // contradicting run_one's PreviousGood expectation (the same
                 // reason the Truncate branch above uses rng.below(len)).
                 let k = rng.below(len);

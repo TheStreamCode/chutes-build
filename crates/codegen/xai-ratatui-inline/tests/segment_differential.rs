@@ -14,7 +14,7 @@
 
 use xai_ratatui_inline::split_into_line_segments;
 
-// ─── Reference: the previous termwiz-based implementation, verbatim ────────
+// ÔöÇÔöÇÔöÇ Reference: the previous termwiz-based implementation, verbatim ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 struct RefSegment<'a> {
     content: &'a str,
@@ -114,7 +114,7 @@ fn reference_split<'a>(input: &'a str, term_width: usize) -> Vec<RefSegment<'a>>
     segments
 }
 
-// ─── Comparison harness ─────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇ Comparison harness ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[track_caller]
 fn assert_same(input: &str, widths: &[usize]) {
@@ -148,8 +148,8 @@ fn corpus_matches_reference() {
         "line1\r\nline2\r\n",
         "12345\r67",
         "\r\r\n\n\r",
-        "😊😊😊 emoji wall 😊😊😊",
-        "hello 你好 混合 width",
+        "­ƒÿè­ƒÿè­ƒÿè emoji wall ­ƒÿè­ƒÿè­ƒÿè",
+        "hello õ¢áÕÑ¢ µÀÀÕÉê width",
         "\x1b[31mred\x1b[0m plain \x1b[1;32;44mstyled\x1b[m",
         "\x1b[31m\x1b[1m\x1b[4mnested styles no text\x1b[0m",
         "12345678\x1b[0m90",
@@ -191,9 +191,9 @@ fn randomized_ansi_soup_matches_reference() {
         "\n",
         "\r",
         "\r\n",
-        "😊",
-        "你好",
-        "é",
+        "­ƒÿè",
+        "õ¢áÕÑ¢",
+        "├®",
         "\u{200b}",
         "\x1b[31m",
         "\x1b[0m",

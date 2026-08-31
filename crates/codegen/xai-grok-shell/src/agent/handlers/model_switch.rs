@@ -271,7 +271,7 @@ fn broadcast_model_changed(
         agent
             .gateway
             .forward_fire_and_forget(acp::ExtNotification::new(
-                "chutes.build/session_notification",
+                "chutes.ai/session_notification",
                 params.into(),
             ));
     }

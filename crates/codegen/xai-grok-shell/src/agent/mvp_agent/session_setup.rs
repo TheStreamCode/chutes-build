@@ -1130,7 +1130,7 @@ impl MvpAgent {
                 supplied_cwd = %cwd.as_str(),
                 persisted_cwd = %summary.info.cwd,
                 target_sha = %target_sha,
-                "restore_code: skipping session HEAD checkout ÔÇö supplied cwd is neither a chutes-build worktree nor the session's persisted cwd (refusing to detach the source repo)"
+                "restore_code: skipping session HEAD checkout — supplied cwd is neither a chutes-build worktree nor the session's persisted cwd (refusing to detach the source repo)"
             );
             xai_grok_telemetry::unified_log::warn(
                 "restore_code: skipped session HEAD checkout (unsafe cwd)",
@@ -1413,7 +1413,7 @@ impl MvpAgent {
                 fallback = %fallback.0,
                 available_count = available.len(),
                 available_keys = ?available.keys().take(10).collect::<Vec<_>>(),
-                "Persisted model no longer available, no same-family fallback ÔÇö blocking prompts for this session"
+                "Persisted model no longer available, no same-family fallback — blocking prompts for this session"
             );
             xai_grok_telemetry::unified_log::warn(
                 "load_session: persisted model unavailable, no same-family fallback",

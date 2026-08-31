@@ -579,7 +579,6 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "email".into()],
             audience: None,
-            client_secret: None,
         };
         let discovery = discover(&oidc_cfg.issuer).await.unwrap();
         let pkce = generate_pkce();

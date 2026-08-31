@@ -1,44 +1,24 @@
 use agent_client_protocol as acp;
-use xai_grok_tools::implementations::chutes::GENERATE_MEDIA_TOOL_NAME;
 use xai_grok_tools::implementations::grok_build::{
-    IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction, imagine_video_usage_message,
+    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, imagine_video_instruction,
+    imagine_video_usage_message,
 };
 
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-// One tool for every medium on Chutes; whether the chosen model needs a starting
-// frame is a property of its schema, which the instruction has the model read.
-const REQUIRED_TOOLS: &[&str] = &[GENERATE_MEDIA_TOOL_NAME];
+const REQUIRED_TOOLS: &[&str] = &[IMAGE_TO_VIDEO_TOOL_NAME];
 
 pub struct ImagineVideoCommand;
 
 impl SlashCommand for ImagineVideoCommand {
-    fn name(&self) -> &str {
-        IMAGINE_VIDEO_COMMAND_NAME
-    }
-
-    fn description(&self) -> &str {
-        "Generate a video from a text description"
-    }
-
-    fn usage(&self) -> &str {
-        "/imagine-video <description>"
-    }
-
-    fn takes_args(&self) -> bool {
-        true
-    }
-
-    fn args_required(&self) -> bool {
-        true
-    }
-
-    fn arg_placeholder(&self) -> Option<&str> {
-        Some("description of the video to generate")
-    }
-
-    fn required_tools(&self) -> &[&str] {
-        REQUIRED_TOOLS
+    slash_meta! {
+        name: IMAGINE_VIDEO_COMMAND_NAME,
+        description: "Generate a video from a text description",
+        usage: "/imagine-video <description>",
+        takes_args: true,
+        args_required: true,
+        arg_placeholder: "description of the video to generate",
+        required_tools: REQUIRED_TOOLS,
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -63,8 +43,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requires_the_chutes_media_tool() {
-        assert_eq!(ImagineVideoCommand.required_tools(), &["generate_media"]);
+    fn requires_image_to_video_tool() {
+        assert_eq!(ImagineVideoCommand.required_tools(), &["image_to_video"]);
     }
 
     #[test]
@@ -103,16 +83,12 @@ mod tests {
                     _ => panic!("expected Text block"),
                 };
                 assert!(
-                    text.contains("generate_media"),
-                    "skill should reference generate_media"
+                    text.contains("image_to_video"),
+                    "skill should reference image_to_video"
                 );
                 assert!(
-                    text.contains("describe_media_model"),
-                    "the skill must teach describe-before-generate: whether a model                      needs a starting frame is a property of its schema"
-                );
-                assert!(
-                    text.contains("list_media_models"),
-                    "and it must start from the catalog, since no model name is fixed"
+                    text.contains("reference_to_video"),
+                    "skill should reference reference_to_video"
                 );
                 assert!(text.contains("a cat playing piano"));
             }

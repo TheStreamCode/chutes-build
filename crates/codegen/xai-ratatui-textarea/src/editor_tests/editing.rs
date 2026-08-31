@@ -12,11 +12,11 @@ fn edit_outcome_is_closed_over_cursor_and_text_changes() {
     );
 
     assert_eq!(
-        buffer.apply(EditCommand::Insert('é')),
-        EditOutcome::TextAndCursor(delta(0..0, 0.."é".len()))
+        buffer.apply(EditCommand::Insert('├®')),
+        EditOutcome::TextAndCursor(delta(0..0, 0.."├®".len()))
     );
-    assert_eq!(buffer.text(), "é");
-    assert_eq!(buffer.cursor_byte(), "é".len());
+    assert_eq!(buffer.text(), "├®");
+    assert_eq!(buffer.cursor_byte(), "├®".len());
 
     assert_eq!(
         buffer.apply(EditCommand::MoveGraphemeLeft),
@@ -26,14 +26,14 @@ fn edit_outcome_is_closed_over_cursor_and_text_changes() {
 
     assert_eq!(
         buffer.apply(EditCommand::DeleteGraphemeForward),
-        EditOutcome::TextOnly(delta(0.."é".len(), 0..0))
+        EditOutcome::TextOnly(delta(0.."├®".len(), 0..0))
     );
     assert_eq!(buffer.text(), "");
 }
 
 #[test]
 fn grapheme_motion_treats_combining_zwj_flags_and_cjk_atomically() {
-    let graphemes = ["e\u{301}", "👩🏽\u{200d}💻", "🇺🇸", "界"];
+    let graphemes = ["e\u{301}", "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗", "­ƒç║­ƒç©", "þòî"];
     let text = graphemes.concat();
     let mut boundaries = vec![0];
     for grapheme in graphemes {
@@ -54,8 +54,8 @@ fn grapheme_motion_treats_combining_zwj_flags_and_cjk_atomically() {
 #[test]
 fn grapheme_deletion_and_replacement_never_split_clusters() {
     let combining = "e\u{301}";
-    let zwj = "👩🏽\u{200d}💻";
-    let flag = "🇺🇸";
+    let zwj = "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗";
+    let flag = "­ƒç║­ƒç©";
     let text = format!("{combining}{zwj}{flag}");
     let mut buffer = EditBuffer::from_parts(text.as_str(), combining.len() + zwj.len());
 
@@ -84,8 +84,8 @@ fn grapheme_deletion_and_replacement_never_split_clusters() {
     let _ = combining_insert.apply(EditCommand::DeleteGraphemeBackward);
     assert_eq!(combining_insert.text(), "");
 
-    let base = "👩🏽";
-    let laptop = "💻";
+    let base = "­ƒæ®­ƒÅ¢";
+    let laptop = "­ƒÆ╗";
     let text = format!("{base}{laptop}");
     let mut zwj_insert = EditBuffer::from_parts(text, base.len());
     let _ = zwj_insert.insert_str("\u{200d}");
@@ -95,8 +95,8 @@ fn grapheme_deletion_and_replacement_never_split_clusters() {
 
 #[test]
 fn edit_created_grapheme_merges_keep_right_cursor_affinity() {
-    let woman = "👩";
-    let tail = "👩🏽\u{200d}💻";
+    let woman = "­ƒæ®";
+    let tail = "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗";
     let text = format!("{woman}{tail}");
     let mut zwj_insert = EditBuffer::from_parts(text, woman.len());
     let outcome = zwj_insert.insert_str("\u{200d}");
@@ -108,28 +108,28 @@ fn edit_created_grapheme_merges_keep_right_cursor_affinity() {
         EditOutcome::TextAndCursor(delta(woman.len()..woman.len(), woman.len()..inserted_end,))
     );
 
-    let mut flag_insert = EditBuffer::from_parts("🇺", 0);
-    let outcome = flag_insert.insert_str("🇨");
-    assert_eq!(flag_insert.text(), "🇨🇺");
+    let mut flag_insert = EditBuffer::from_parts("­ƒç║", 0);
+    let outcome = flag_insert.insert_str("­ƒç¿");
+    assert_eq!(flag_insert.text(), "­ƒç¿­ƒç║");
     assert_eq!(flag_insert.cursor_byte(), flag_insert.text().len());
     assert_eq!(
         outcome,
-        EditOutcome::TextAndCursor(delta(0..0, 0.."🇨".len()))
+        EditOutcome::TextAndCursor(delta(0..0, 0.."­ƒç¿".len()))
     );
 
-    let mut flag_replace = EditBuffer::from_parts("x🇺", 0);
-    let outcome = flag_replace.replace_byte_range(0..1, "🇨");
-    assert_eq!(flag_replace.text(), "🇨🇺");
+    let mut flag_replace = EditBuffer::from_parts("x­ƒç║", 0);
+    let outcome = flag_replace.replace_byte_range(0..1, "­ƒç¿");
+    assert_eq!(flag_replace.text(), "­ƒç¿­ƒç║");
     assert_eq!(flag_replace.cursor_byte(), flag_replace.text().len());
     assert_eq!(
         outcome,
-        EditOutcome::TextAndCursor(delta(0..1, 0.."🇨".len()))
+        EditOutcome::TextAndCursor(delta(0..1, 0.."­ƒç¿".len()))
     );
 
-    let regional_indicator_len = "🇨".len();
-    let mut flag_delete = EditBuffer::from_parts("🇨x🇺", regional_indicator_len + "x".len());
+    let regional_indicator_len = "­ƒç¿".len();
+    let mut flag_delete = EditBuffer::from_parts("­ƒç¿x­ƒç║", regional_indicator_len + "x".len());
     let outcome = flag_delete.apply(EditCommand::DeleteGraphemeBackward);
-    assert_eq!(flag_delete.text(), "🇨🇺");
+    assert_eq!(flag_delete.text(), "­ƒç¿­ƒç║");
     assert_eq!(flag_delete.cursor_byte(), flag_delete.text().len());
     assert_eq!(
         outcome,
@@ -156,7 +156,7 @@ fn invalid_cursor_bytes_normalize_to_the_nearest_grapheme_boundary() {
         buffer.cursor_byte()
     ));
 
-    let tied = EditBuffer::from_parts("🇨🇺", "🇨".len());
+    let tied = EditBuffer::from_parts("­ƒç¿­ƒç║", "­ƒç¿".len());
     assert_eq!(tied.cursor_byte(), 0);
 }
 

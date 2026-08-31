@@ -126,7 +126,7 @@ impl MvpAgent {
                     return Some(
                         self.gateway
                             .forward_with_completion(acp::ExtNotification::new(
-                                "chutes.build/session/update",
+                                "x.ai/session/update",
                                 std::sync::Arc::from(owned),
                             )),
                     );
@@ -146,10 +146,10 @@ impl MvpAgent {
                         m.insert("isReplay".to_string(), serde_json::json!(true));
                     }
                     if let Some(pd) = persist_data {
-                        m.insert("chutes.build/persist".to_string(), pd.clone());
+                        m.insert("x.ai/persist".to_string(), pd.clone());
                     }
                     if let Some(tid) = target_client_id {
-                        m.insert("chutes.build/leaderClientId".to_string(), tid.clone());
+                        m.insert("x.ai/leaderClientId".to_string(), tid.clone());
                     }
                 }
             }
@@ -159,7 +159,7 @@ impl MvpAgent {
                 return Some(
                     self.gateway
                         .forward_with_completion(acp::ExtNotification::new(
-                            "chutes.build/session/update",
+                            "x.ai/session/update",
                             std::sync::Arc::from(raw_val),
                         )),
                 );
@@ -188,7 +188,7 @@ impl MvpAgent {
         // leader routes both historical and post-cursor live deltas only to
         // the loading client.
         if let Some(tid) = target_client_id {
-            stamp_meta_value(&mut notification.meta, "chutes.build/leaderClientId", tid);
+            stamp_meta_value(&mut notification.meta, "x.ai/leaderClientId", tid);
         }
         Some(self.gateway.forward_with_completion(notification))
     }
@@ -207,6 +207,7 @@ impl MvpAgent {
         let mut replay_timer = crate::instrumentation_timer!("session.load_session_replay");
         replay_timer.with_field("session_id", session_id.0.as_ref());
         replay_timer.with_field("cwd", cwd.as_str());
+        replay_timer.with_subphase(xai_grok_telemetry::startup::Subphase::SessionReplay);
 
         let Some(updates_path) = updates_file_path.as_ref() else {
             tracing::warn!(session_id = %session_id.0, "replay: no updates file path");

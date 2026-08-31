@@ -31,9 +31,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // CHUTES_BUILD_HOME isolation
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Returns a process-wide test `CHUTES_BUILD_HOME`, initialized exactly once per test
 /// binary. Once initialized, `xai_grok_config::grok_home()` will resolve to
@@ -86,9 +86,9 @@ pub fn set_test_version(v: &str) {
     unsafe { std::env::set_var("CHUTES_BUILD_TEST_VERSION", v) };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Install-test fixtures (shared by the blitz + convergence suites)
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// Host `{os}-{arch}` string matching the versioned binary naming scheme
 /// (`grok-{version}-{platform}`).
@@ -167,9 +167,9 @@ pub fn backdate_downloads() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // PATH-override fake binary
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 /// RAII guard that places a sh-script with name `name` at the head of `PATH`.
 /// Restores `PATH` on drop.
@@ -231,7 +231,7 @@ impl FakeBinGuard {
         self.tmp.path().to_path_buf()
     }
 
-    /// Argv lines logged by the fake script — one line per invocation.
+    /// Argv lines logged by the fake script ÔÇö one line per invocation.
     pub fn args_log(&self) -> Vec<String> {
         std::fs::read_to_string(self.dir().join(format!("{}-args.log", self.name)))
             .unwrap_or_default()
@@ -291,7 +291,7 @@ impl Drop for FakeBinGuard {
 /// Single-quote a path for safe substitution into a sh script.
 fn single_quote_for_sh(p: &Path) -> String {
     let s = p.to_string_lossy();
-    // Escape any embedded single quotes (paranoid — tempdir paths shouldn't
+    // Escape any embedded single quotes (paranoid ÔÇö tempdir paths shouldn't
     // contain them, but defensively quote).
     let escaped = s.replace('\'', "'\\''");
     format!("'{escaped}'")
@@ -300,8 +300,8 @@ fn single_quote_for_sh(p: &Path) -> String {
 /// sh script body for a fake `npm`. Logs argv to `<dir>/npm-args.log` and
 /// dispatches stdout based on the first matching argv pattern:
 ///
-/// - argv contains `@alpha`     → cat `<dir>/npm-alpha-stdout`
-/// - else                       → cat `<dir>/npm-stdout`
+/// - argv contains `@alpha`     ÔåÆ cat `<dir>/npm-alpha-stdout`
+/// - else                       ÔåÆ cat `<dir>/npm-stdout`
 ///
 /// Always cats `<dir>/npm-stderr` to stderr (if exists). Exits with the integer
 /// in `<dir>/npm-exit` (default 0).
@@ -326,9 +326,9 @@ exit "$exit_code"
 /// sh script body for a fake `gh`. Logs argv to `<dir>/gh-args.log` and
 /// dispatches stdout based on `release list` argv:
 ///
-/// - argv contains `release list --exclude-pre-releases` → `<dir>/gh-stable-only-stdout`
-/// - argv contains `release list` (no exclude flag)      → `<dir>/gh-with-pre-stdout`
-/// - else                                                 → `<dir>/gh-stdout`
+/// - argv contains `release list --exclude-pre-releases` ÔåÆ `<dir>/gh-stable-only-stdout`
+/// - argv contains `release list` (no exclude flag)      ÔåÆ `<dir>/gh-with-pre-stdout`
+/// - else                                                 ÔåÆ `<dir>/gh-stdout`
 ///
 /// Exits with `<dir>/gh-exit` (default 0).
 pub fn fake_gh_script(dir: &Path) -> String {

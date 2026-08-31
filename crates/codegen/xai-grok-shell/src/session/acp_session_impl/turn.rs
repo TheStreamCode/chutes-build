@@ -18,7 +18,7 @@ const STRUCTURED_OUTPUT_MAX_RETRIES: u32 = 3;
 enum StructuredOutputStep {
     /// Accepted, or retries exhausted: the carried result is the final output.
     Complete(Result<serde_json::Value, String>),
-    /// Non-conforming args; a corrective tool_result was pushed ÔÇö re-sample.
+    /// Non-conforming args; a corrective tool_result was pushed — re-sample.
     Retry,
     /// No sole StructuredOutput call (absent, or co-emitted with real tools that
     /// should run this round).
@@ -53,17 +53,17 @@ pub(super) struct UsageDrainOutcome {
     /// incomplete; its spend reaches the session ledger at completion.
     pub(super) background_live: bool,
     /// Pin-scoped sticky (session-only attribution or apply-miss report).
-    /// Report incomplete only ÔÇö does not stain ledgers by itself.
+    /// Report incomplete only — does not stain ledgers by itself.
     pub(super) sticky_report: bool,
 }
 impl UsageDrainOutcome {
-    /// Wire / attach incomplete: fail-closed Ôê¬ background Ôê¬ sticky.
+    /// Wire / attach incomplete: fail-closed ∪ background ∪ sticky.
     pub(super) fn report_incomplete(&self) -> bool {
         self.fail_closed || self.background_live || self.sticky_report
     }
     /// Map an outstanding reply without a multi-second drain (cancel path).
-    /// Same policy as freeze's terminal outcome: FG live ÔåÆ fail-closed;
-    /// sticky and background ÔåÆ report only.
+    /// Same policy as freeze's terminal outcome: FG live → fail-closed;
+    /// sticky and background → report only.
     pub(super) fn from_outstanding_reply(
         reply: Option<
             &xai_grok_tools::implementations::grok_build::task::types::SubagentOutstandingReply,
@@ -94,8 +94,8 @@ struct TurnSpanTotals {
     has_tool_call: bool,
 }
 impl TurnSpanTotals {
-    /// Fold one model response into the totals (tokens sum ÔÇö each call is billed
-    /// its full prompt; has_tool_call OR-s ÔÇö the final call has none) and update
+    /// Fold one model response into the totals (tokens sum — each call is billed
+    /// its full prompt; has_tool_call OR-s — the final call has none) and update
     /// the span. `stop_reason` is last-wins (the terminal reason), not summed.
     fn record(&mut self, span: &tracing::Span, response: &ConversationResponse) {
         if let Some(u) = response.usage.as_ref() {
@@ -144,7 +144,7 @@ fn record_last_sample(
 const LAST_SAMPLE_STOP_REASON_UNREPORTED: &str = "unreported";
 /// `last_sample.stop_reason` for a failed call with no reported stop reason.
 const LAST_SAMPLE_STOP_REASON_ERROR: &str = "error";
-/// Record `last_sample.*` for a failed call `TurnSpanTotals::record` never sees ÔÇö
+/// Record `last_sample.*` for a failed call `TurnSpanTotals::record` never sees —
 /// otherwise the span keeps describing the previous sample; a resubmit's next response overwrites.
 pub(super) fn record_failed_sample_on_turn_span(
     span: &tracing::Span,
@@ -163,7 +163,7 @@ pub(super) fn record_failed_sample_on_turn_span(
 ///
 /// Every turn consumes a `prompt_index`, and rewind / fork truncation
 /// (`replay_to_prompt`, `truncate_for_prompt_by`) recover turn
-/// boundaries by counting persisted `UserMessageChunk` runs ÔÇö so every mode
+/// boundaries by counting persisted `UserMessageChunk` runs — so every mode
 /// persists the echo. Turns whose content must not render as a user prompt
 /// (notification drain) are hidden by the *pager* via the
 /// `hideFromScrollback` chunk meta, not by omitting the persisted line.
@@ -206,7 +206,7 @@ impl SessionActor {
     }
     /// Run the image-normalization pipeline (re-encode caps, min-side and
     /// integrity checks) and surface its outcomes: compression / re-encode
-    /// fallback / dropped notices are appended to `text_out` (TEXT only ÔÇö
+    /// fallback / dropped notices are appended to `text_out` (TEXT only —
     /// image data never enters a string) and mirrored as
     /// `ImageCompressed`/`ImageDropped` notifications. Returns the surviving
     /// images. Single owner of the notice/notify wiring, shared by the
@@ -1712,12 +1712,12 @@ impl SessionActor {
         ack.await.is_ok()
     }
     /// Drain this session's buffered mid-turn monitor events
-    /// (`drain_owned` ÔÇö leader mode shares the buffer) into ONE hidden
+    /// (`drain_owned` — leader mode shares the buffer) into ONE hidden
     /// synthetic user message, tagged `SyntheticReason::SystemReminder` so
     /// compaction/fork/pruning skip it. Deliberately a bare
     /// `push_user_message`, NOT `inject_synthetic_user_message`: the latter
     /// persists a `UserMessageChunk` to `updates.jsonl`, which resume
-    /// replays ÔÇö the raw XML would render as a user prompt. Clients see
+    /// replays — the raw XML would render as a user prompt. Clients see
     /// monitor events only via the structured `chutes.ai/monitor_event` channel.
     pub(crate) async fn inject_pending_monitor_events(&self) {
         let Some(buffer) = &self.tool_context.monitor_event_buffer else {
@@ -1764,7 +1764,7 @@ impl SessionActor {
     ///    turn-final message, and stop-detection lives on the success
     ///    path inside `maybe_queue_goal_continuation`.
     ///
-    /// When the goal is not `Active` (`goal_active_now == false` ÔÇö
+    /// When the goal is not `Active` (`goal_active_now == false` —
     /// the doom-loop / infra-error branches in the event loop ran
     /// before this method and already transitioned the goal out of
     /// Active), both branches are skipped: neither streak moves and the
@@ -1970,7 +1970,7 @@ impl SessionActor {
     /// Compute the first-turn memory reminder, if one should be injected.
     ///
     /// A block persisted by an earlier session segment (a prior `--resume`
-    /// process, or a turn before a compaction) is reused verbatim ÔÇö see
+    /// process, or a turn before a compaction) is reused verbatim — see
     /// [`conversation_has_memory_context`] for why re-searching is harmful.
     ///
     /// [`conversation_has_memory_context`]: crate::session::helpers::memory_context::conversation_has_memory_context
@@ -2597,7 +2597,7 @@ impl SessionActor {
                 })),
             );
             let model_timer = std::time::Instant::now();
-            let (mut response, latency) = match self
+            let (response, latency) = match self
                 .run_turn_via_sampler(
                     request.clone(),
                     &mut rate_limit_waits,
@@ -2795,11 +2795,6 @@ impl SessionActor {
             auth_retry_schedule.reset_on_success();
             transient_retry_attempts = 0;
             self.transient_episode_start.set(None);
-            // Before anything reads `tool_calls`, `stop_reason` or the assistant
-            // text: a chute with no server-side tool-call parser delivers the
-            // call as text, and everything downstream would treat the turn as a
-            // plain answer.
-            self.recover_text_tool_calls(&mut response).await;
             let model_elapsed_ms = model_timer.elapsed().as_millis() as u64;
             let usage = response.usage.as_ref();
             let prompt_tokens = usage.map(|u| u.prompt_tokens);
@@ -2919,7 +2914,7 @@ impl SessionActor {
                 tracing::warn!(
                     session_id = %self.session_info.id,
                     resample = media_gen_resamples,
-                    "media_gen 2x over-cap ÔÇö discarding generation and resampling"
+                    "media_gen 2x over-cap — discarding generation and resampling"
                 );
                 xai_grok_telemetry::unified_log::info(
                     "shell.media_gen.batch_resampled",
@@ -2967,7 +2962,7 @@ impl SessionActor {
                     tracing::error!(
                         session_id = %self.session_info.id,
                         max = MAX_OUTPUT_TOKEN_LIMIT_RETRIES,
-                        "consecutive Length-salvaged tool-call samples hit the cap ÔÇö failing the turn"
+                        "consecutive Length-salvaged tool-call samples hit the cap — failing the turn"
                     );
                     self.tool_context.fail_task_output_usage_closed();
                     return Err(self.fail_turn_length_salvage_exhausted().await);
@@ -2985,7 +2980,7 @@ impl SessionActor {
             if let Some(text) = fallback_text {
                 tracing::warn!(
                     text_len = text.len(),
-                    "emitting fallback AgentMessageChunk ÔÇö no text chunks were streamed"
+                    "emitting fallback AgentMessageChunk — no text chunks were streamed"
                 );
                 self.send_update(
                     acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
@@ -3005,7 +3000,7 @@ impl SessionActor {
                 }
                 tracing::warn!(
                     has_explanation = refusal_explanation.is_some(),
-                    "model response was a provider refusal ÔÇö emitting notice chunk"
+                    "model response was a provider refusal — emitting notice chunk"
                 );
                 self.send_update(
                     acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
@@ -3250,12 +3245,12 @@ impl SessionActor {
         }
     }
 }
-/// Discard an egregious (2├ù cap) media-gen generation and re-sample this
+/// Discard an egregious (2× cap) media-gen generation and re-sample this
 /// many times; later over-caps in the same turn use first-K.
 const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
 /// Tool kinds whose identical repeats are almost never productive, so they get tighter
 /// thresholds than everything else. A production turn repeated one `ToolKind::Plan` call
-/// (`todo_write`) with byte-identical arguments 12 times ÔÇö 224 in the turn ÔÇö and replaying
+/// (`todo_write`) with byte-identical arguments 12 times — 224 in the turn — and replaying
 /// it showed the model answers the user as soon as it is interrupted. `ToolKind::Read`
 /// behaves the same way: re-reading the same path with the same range returns the same
 /// bytes.
@@ -3263,7 +3258,7 @@ const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
 /// Matched by kind, not by wire name, because names are client-renameable and vary by
 /// toolset (`read_file`, `hashline_read`, `Read`; `todo_write`, `todowrite`) while the
 /// registered kind does not. Unregistered names (MCP tools) resolve to `None` and fall
-/// through to the looser tier, as does any kind added later ÔÇö an identical repeat there
+/// through to the looser tier, as does any kind added later — an identical repeat there
 /// can be legitimate, such as polling a job or re-running a command after an external
 /// change.
 fn is_problematically_repeating_kind(kind: Option<ToolKind>) -> bool {
@@ -3272,7 +3267,7 @@ fn is_problematically_repeating_kind(kind: Option<ToolKind>) -> bool {
 /// Whether a whole sampling step belongs in the tight tier: every call in it must be a
 /// problematically repeating kind.
 ///
-/// Order-insensitive, like [`step_signature`] ÔÇö a reordered step is the same step, so it
+/// Order-insensitive, like [`step_signature`] — a reordered step is the same step, so it
 /// must not flip tiers. Requiring *every* call, rather than any, keeps a mixed step in the
 /// looser tier: one call that can legitimately repeat (polling a job) makes repeating the
 /// whole step legitimate.
@@ -3292,11 +3287,11 @@ const _: () = assert!(
 );
 const _: () = assert!(NUDGE_AFTER_IDENTICAL_TOOL_CALLS < MAX_CONSECUTIVE_IDENTICAL_TOOL_CALLS);
 const ACTION_STATIONARITY_NUDGE_TEMPLATE: &str = "You have called the same tool \
-     (`${{ tool_name }}`) with the exact same arguments ${{ run_len }} times in a row ÔÇö \
+     (`${{ tool_name }}`) with the exact same arguments ${{ run_len }} times in a row — \
      you appear to be stuck in a polling loop. Stop repeating this call. If you are \
      waiting on a long-running job or command, use a background task${%- if tools.by_kind.monitor %} \
      or the `${{ tools.by_kind.monitor }}` tool${%- endif %}, or run a single `sleep` and \
-     then check once ÔÇö do not poll in a tight loop. If you cannot make progress, stop and \
+     then check once — do not poll in a tight loop. If you cannot make progress, stop and \
      tell the user what you are waiting for. This turn will be halted automatically if the \
      identical call keeps repeating.";
 fn hash_step_signature(signature: &str) -> u64 {
@@ -3309,7 +3304,7 @@ fn command_is_true(cmd: &str) -> bool {
     cmd.trim().eq_ignore_ascii_case("true")
 }
 /// Recursively sort object keys so the same arguments compare equal however the model
-/// happened to serialize them ÔÇö `{"path":"x","limit":10}` and `{"limit":10,"path":"x"}`
+/// happened to serialize them — `{"path":"x","limit":10}` and `{"limit":10,"path":"x"}`
 /// are the same call. Array order is left alone: it is semantic (a todo list, a batch of
 /// edits), so reordering one is a real change.
 ///
@@ -3455,7 +3450,7 @@ mod identical_tool_call_run_tests {
         assert!(!run.is_true_noop_run);
     }
     /// Reordering argument keys, or reordering the calls within one step, is the same
-    /// step ÔÇö otherwise a loop could evade the counter by shuffling either one.
+    /// step — otherwise a loop could evade the counter by shuffling either one.
     #[test]
     fn step_signature_ignores_key_order_and_call_order() {
         let call = |name: &str, args: &str| xai_grok_sampling_types::conversation::ToolCall {
@@ -3702,7 +3697,7 @@ mod last_sample_span_tests {
     use xai_grok_sampling_types::conversation::{
         ConversationItem, ConversationResponse, StopReason, TokenUsage, ToolCall,
     };
-    /// Last-write value per field ÔÇö the view the OTel bridge exports.
+    /// Last-write value per field — the view the OTel bridge exports.
     #[derive(Default)]
     struct Fields {
         strs: BTreeMap<String, String>,
@@ -3846,7 +3841,7 @@ mod last_sample_span_tests {
         assert_eq!(f.bools.get("last_sample.has_tool_call"), Some(&false));
         assert_eq!(f.i64s.get("last_sample.output_tokens"), Some(&0));
     }
-    /// `error` / `unreported` sentinels overwrite ÔÇö no stale previous-sample value survives.
+    /// `error` / `unreported` sentinels overwrite — no stale previous-sample value survives.
     #[test]
     fn non_length_failure_and_unreported_stop_reason_overwrite_last_sample() {
         let (fields, _guard) = capture();

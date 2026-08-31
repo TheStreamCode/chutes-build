@@ -14,15 +14,15 @@ use crate::session::ExtMethodResult;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/auth/getBearerToken" => handle_get_bearer_token(agent).await,
-        "chutes.build/getApiKey" => handle_get_api_key(),
-        "chutes.build/setApiKey" => handle_set_api_key(args),
-        "chutes.build/auth/submit_code" => handle_submit_code(agent, args),
-        "chutes.build/auth/get_url" => handle_get_url(agent).await,
-        "chutes.build/auth/cancel" => handle_cancel(agent, args),
-        "chutes.build/auth/logout" => handle_logout(agent, args).await,
-        "chutes.build/auth/info" => handle_info(agent),
-        "chutes.build/auth/check_subscription" => handle_check_subscription(agent).await,
+        "chutes.ai/auth/getBearerToken" => handle_get_bearer_token(agent).await,
+        "chutes.ai/getApiKey" => handle_get_api_key(),
+        "chutes.ai/setApiKey" => handle_set_api_key(args),
+        "chutes.ai/auth/submit_code" => handle_submit_code(agent, args),
+        "chutes.ai/auth/get_url" => handle_get_url(agent).await,
+        "chutes.ai/auth/cancel" => handle_cancel(agent, args),
+        "chutes.ai/auth/logout" => handle_logout(agent, args).await,
+        "chutes.ai/auth/info" => handle_info(agent),
+        "chutes.ai/auth/check_subscription" => handle_check_subscription(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

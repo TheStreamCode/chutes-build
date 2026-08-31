@@ -414,7 +414,10 @@ mod tests {
         );
         assert_eq!(
             display_user_grok_path_for(&custom, xai_grok_config::SANDBOX_CONFIG_FILENAME),
-            format!("$CHUTES_BUILD_HOME/{}", xai_grok_config::SANDBOX_CONFIG_FILENAME)
+            format!(
+                "$CHUTES_BUILD_HOME/{}",
+                xai_grok_config::SANDBOX_CONFIG_FILENAME
+            )
         );
     }
 

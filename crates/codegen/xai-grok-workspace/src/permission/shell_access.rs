@@ -590,7 +590,9 @@ fn path_is_under_user_grok_hook_root(path: &Path, grok_home: &Path) -> bool {
 }
 
 fn protected_grok_hook_root(path: &Path, components: &[&str]) -> bool {
-    components.windows(2).any(|pair| pair == [".chutes-build", "hooks"])
+    components
+        .windows(2)
+        .any(|pair| pair == [".chutes-build", "hooks"])
         || components.ends_with(&[".chutes-build", "hooks-paths"])
         || grok_home_matches(xai_grok_config::user_grok_home().as_deref(), |home| {
             path_is_under_user_grok_hook_root(path, home)

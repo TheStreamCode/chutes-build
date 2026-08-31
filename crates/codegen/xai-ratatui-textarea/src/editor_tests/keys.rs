@@ -294,7 +294,7 @@ fn altgr_insertion_and_ctrl_alt_h_precedence_follow_platform_encoding() {
 
     for (character, modifiers) in [
         ('q', ctrl_alt),
-        ('€', ctrl_alt | KeyModifiers::SHIFT),
+        ('Ôé¼', ctrl_alt | KeyModifiers::SHIFT),
         ('h', ctrl_alt | KeyModifiers::SHIFT),
     ] {
         let expected = if cfg!(target_os = "windows") {
@@ -310,9 +310,9 @@ fn altgr_insertion_and_ctrl_alt_h_precedence_follow_platform_encoding() {
 
     if cfg!(target_os = "windows") {
         let mut buffer = EditBuffer::new();
-        let command = classify_key_event(&key(KeyCode::Char('€'), ctrl_alt | KeyModifiers::SHIFT))
+        let command = classify_key_event(&key(KeyCode::Char('Ôé¼'), ctrl_alt | KeyModifiers::SHIFT))
             .expect("shifted AltGr must classify on Windows");
         let _ = buffer.apply(command);
-        assert_eq!(buffer.text(), "€");
+        assert_eq!(buffer.text(), "Ôé¼");
     }
 }

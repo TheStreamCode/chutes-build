@@ -22,7 +22,7 @@ pub use xai_grok_config_types::{
 pub struct SubagentsConfig {
     /// Whether subagent support is enabled.
     pub enabled: bool,
-    /// Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped ÔëÑ1 at resolve).
+    /// Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped ≥1 at resolve).
     #[serde(default)]
     pub max_depth: Option<i64>,
     #[serde(default)]
@@ -296,7 +296,8 @@ impl SubagentsConfig {
     pub const ENV_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_MAX_CONCURRENT_SUBAGENTS";
     pub const ENV_SAMPLING_LIMIT: &'static str = "CHUTES_BUILD_SUBAGENT_SAMPLING_LIMIT";
     pub const ENV_LIMIT_BEHAVIOR: &'static str = "CHUTES_BUILD_SUBAGENT_LIMIT_BEHAVIOR";
-    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str = "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
+    pub const ENV_WORKFLOW_MAX_CONCURRENT: &'static str =
+        "CHUTES_BUILD_WORKFLOW_MAX_CONCURRENT_AGENTS";
     pub(crate) fn resolve_max_concurrent(
         env: Option<&str>,
         config: Option<i64>,
@@ -370,12 +371,12 @@ impl SubagentsConfig {
         LimitBehavior::Queue
     }
     /// Resolve the final subagents config from all sources (in priority order):
-    /// 1. CLI flag `--subagents` (absolute highest ÔÇö always enables)
+    /// 1. CLI flag `--subagents` (absolute highest — always enables)
     /// 2. `CHUTES_BUILD_SUBAGENTS` env var: `1`/`true` enables, `0`/`false` force-disables
     /// 3. Config file `[subagents]` section
     /// 4. Default (enabled)
     ///
-    /// `enabled` is deliberately not remotely gated ÔÇö only explicit local
+    /// `enabled` is deliberately not remotely gated — only explicit local
     /// intent (CLI flag, `CHUTES_BUILD_SUBAGENTS`, `[subagents] enabled`) changes
     /// the default.
     ///
@@ -510,7 +511,7 @@ pub(crate) struct ModelOverrideConfig {
     /// Compiled default (`grok-4.6`) when unset locally, remotely, and via env.
     pub image_description: Option<String>,
     /// Next-prompt suggestion model pin. Unlike the other overrides this does
-    /// NOT fill a compiled default ÔÇö see [`PromptSuggestModelPin`].
+    /// NOT fill a compiled default — see [`PromptSuggestModelPin`].
     #[serde(skip)]
     pub prompt_suggestion: PromptSuggestModelPin,
 }
@@ -525,14 +526,14 @@ impl Default for ModelOverrideConfig {
     }
 }
 /// Resolved model pin for the next-prompt suggestion call (tab-autocomplete
-/// ghost text), `env > config.toml > remote` ÔÇö see
+/// ghost text), `env > config.toml > remote` — see
 /// [`ModelOverrideConfig::resolve`].
 ///
 /// Unlike the other auxiliary overrides this does not collapse to a plain
 /// model string: the consumer (`handle_suggest_prompt`) must distinguish
 /// an explicit pin from "unpinned" (where the client hint and the built-in
 /// `grok-4.6` default apply), and whether the pin came from the env
-/// escape hatch. Every effective model except an env pin is catalog-guarded ÔÇö
+/// escape hatch. Every effective model except an env pin is catalog-guarded —
 /// when the model is not in the shell's catalog the per-turn suggestion
 /// request is skipped entirely rather than fired doomed. The env pin is
 /// deliberately exempt so `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` keeps working for
@@ -540,11 +541,11 @@ impl Default for ModelOverrideConfig {
 /// env value without checking its catalog).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PromptSuggestModelPin {
-    /// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` ÔÇö used verbatim, bypasses the
+    /// `CHUTES_BUILD_PROMPT_SUGGESTIONS_MODEL` — used verbatim, bypasses the
     /// catalog guard.
     Env(String),
     /// `[models] prompt_suggestion` in config.toml, or the remote
-    /// `prompt_suggestion_model` (remote settings) ÔÇö catalog-guarded.
+    /// `prompt_suggestion_model` (remote settings) — catalog-guarded.
     Pinned(String),
     /// No explicit pin: the client hint, then the built-in default apply
     /// (both catalog-guarded).
@@ -665,8 +666,8 @@ pub struct MediaGenToolsConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
-/// # [tools.media_gen] ÔÇö see MediaGenToolsConfig
-/// # [tools.zdr_video_output_s3] ÔÇö see ZdrVideoOutputS3Config
+/// # [tools.media_gen] — see MediaGenToolsConfig
+/// # [tools.zdr_video_output_s3] — see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -690,8 +691,10 @@ pub struct ToolsConfig {
     pub media_gen: MediaGenToolsConfig,
 }
 impl ToolsConfig {
-    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
-    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str = "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_IMAGE_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS";
+    pub const ENV_MAX_PARALLEL_VIDEO_GEN_CALLS: &'static str =
+        "CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS";
     /// Resolve the final tools config, in priority order:
     /// 1. Env vars `CHUTES_BUILD_RESPECT_GITIGNORE` and
     ///    `CHUTES_BUILD_DISABLE_ZDR_INCOMPATIBLE_TOOLS` (`0`/`false` off,
@@ -979,7 +982,7 @@ fn walk_toml(
 pub(crate) use crate::config::reloader::parse_skills_config;
 /// Effective config: layers + campaign overlay (remote cache + `CHUTES_BUILD_CAMPAIGNS_OVERRIDE`).
 pub use crate::util::config::load_effective_config;
-/// Effective config with disk campaigns only ÔÇö for one-shot entrypoints that
+/// Effective config with disk campaigns only — for one-shot entrypoints that
 /// never fetch remote settings (avoids resolving against a never-seeded cache).
 pub use crate::util::config::load_effective_config_disk_only;
 /// Where a requirement or permission rule was loaded from.
@@ -2007,7 +2010,7 @@ pub(crate) fn add_hooks_path_to_file(
     writeln!(file, "{}", path)?;
     Ok(())
 }
-/// The user-registered hook directories (`~/.chutes-build/hooks-paths` lines) ÔÇö
+/// The user-registered hook directories (`~/.chutes-build/hooks-paths` lines) —
 /// exactly what `remove_hooks_path` can remove (same exact-string match).
 pub(crate) fn registered_hook_paths() -> std::collections::HashSet<String> {
     let path = crate::util::grok_home::grok_home().join("hooks-paths");

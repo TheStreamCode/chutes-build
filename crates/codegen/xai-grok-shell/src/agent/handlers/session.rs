@@ -34,11 +34,11 @@ pub(crate) async fn handle(
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "chutes.build/session/info" => handle_session_info(agent, args).await,
-        "chutes.build/session/close" => handle_session_close(agent, args).await,
-        "chutes.build/session/list" => handle_session_list(agent, args).await,
-        "chutes.build/sessions/list" => handle_roster_list(agent, args).await,
-        m if m.starts_with("chutes.build/session_summaries/") => {
+        "chutes.ai/session/info" => handle_session_info(agent, args).await,
+        "chutes.ai/session/close" => handle_session_close(agent, args).await,
+        "chutes.ai/session/list" => handle_session_list(agent, args).await,
+        "chutes.ai/sessions/list" => handle_roster_list(agent, args).await,
+        m if m.starts_with("chutes.ai/session_summaries/") => {
             handle_session_summaries(agent, args).await
         }
         _ => Err(acp::Error::method_not_found()),
@@ -161,7 +161,7 @@ async fn handle_session_close(
     tracing::info!(
         session_id = %sid.0,
         ?outcome,
-        "chutes.build/session/close"
+        "chutes.ai/session/close"
     );
 
     // `success` stays for existing callers; `outcome` says what the close
@@ -179,7 +179,7 @@ async fn handle_session_summaries(
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "chutes.build/session_summaries/session_list" => {
+        "chutes.ai/session_summaries/session_list" => {
             let req = serde_json::from_str::<SessionListRequest>(args.params.get())?;
             let cwd = req.workspace_directory.to_string_lossy().to_string();
 
@@ -201,7 +201,7 @@ async fn handle_session_summaries(
 
             Ok(acp::ExtResponse::new(value))
         }
-        "chutes.build/session_summaries/workspace_list" => {
+        "chutes.ai/session_summaries/workspace_list" => {
             tracing::debug!("xai/session_summaries/workspace_list is working");
             let _req = serde_json::from_str::<AllSessionOverviewRequest>(args.params.get())?;
 
@@ -213,7 +213,7 @@ async fn handle_session_summaries(
 
             summaries_to_overview_response(summaries)
         }
-        "chutes.build/session_summaries/workspace_list_recent" => {
+        "chutes.ai/session_summaries/workspace_list_recent" => {
             let req = serde_json::from_str::<RecentSessionsRequest>(args.params.get())?;
 
             let _timer = crate::instrumentation_timer!("session.list_sessions_recent");

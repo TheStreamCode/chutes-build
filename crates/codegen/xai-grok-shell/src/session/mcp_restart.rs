@@ -1506,7 +1506,7 @@ mod tests {
     fn forward_status_uses_dispatcher_method() {
         assert_eq!(
             crate::session::mcp_dispatcher::SERVER_STATUS_METHOD,
-            "chutes.build/mcp/server_status",
+            "chutes.ai/mcp/server_status",
             "wire method name pinned",
         );
         // The `forward_status` function uses

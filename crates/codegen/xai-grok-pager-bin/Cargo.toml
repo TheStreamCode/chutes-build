@@ -1,18 +1,18 @@
 [package]
-name = "chutes-build"
+name = "xai-grok-pager-bin"
 version = "1.3.1"
 edition.workspace = true
 license = "Apache-2.0"
-authors = ["Michael Gasperini (Mikesoft)"]
-default-run = "chutes-build"
-description = "Privacy-first coding agent optimized for the Chutes ecosystem"
+authors = ["xAI"]
+default-run = "xai-grok-pager"
 
-# Composition-root binary for the Chutes Build TUI. This package exists so the binary can link both the pager
+# Composition-root binary for the Chutes Build TUI. The artifact is still named
+# `xai-grok-pager`. This package exists so the binary can link both the pager
 # library and the optional `xai-grok-pager-minimal` render mode: `minimal`
 # depends on `xai-grok-pager`, so the pager library cannot depend back on it
 # (cargo cycle). The binary installs the minimal-mode IoC hooks at startup.
 [[bin]]
-name = "chutes-build"
+name = "xai-grok-pager"
 path = "src/main.rs"
 
 [dependencies]
@@ -23,10 +23,6 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-shell = { workspace = true }
-xai-grok-active-sessions = { workspace = true }
-# The compile-time product kill switches. This binary owns the decision to check
-# for updates at all, so it is where `AUTOMATIC_SELF_UPDATE` has to be read.
-chutes-build-core = { path = "../../chutes-build-core" }
 xai-grok-update = { path = "../xai-grok-update" }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
@@ -52,18 +48,17 @@ serde_json = { workspace = true }
 dunce = { workspace = true }
 semver = { workspace = true }
 xai-tty-utils = { workspace = true }
+# `collect_crashed()` for the startup crash notice.
+xai-grok-active-sessions = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
-rustls = { version = "0.23", default-features = false, features = [
-    "ring",
-    "logging",
-    "std",
-    "tls12",
-] }
+xai-grok-extra-ca = { workspace = true }
 
 # Binary hardening: compile-time string + control-flow obfuscation.
 obfstr = { workspace = true }
 cryptify = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
@@ -85,6 +80,7 @@ serial_test = { workspace = true }
 # `PagerArgs::try_parse_from` in the CLI-parsing unit tests (needs the
 # `clap::Parser` trait in scope).
 clap = { workspace = true, features = ["derive"] }
+tempfile = { workspace = true }
 
 [features]
 default = [
@@ -97,6 +93,9 @@ default-bazel = [
     "local-workspace",
     ]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
-sandbox-enforce = ["xai-grok-pager/sandbox-enforce"]
+# xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
+sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]
-release-dist = ["xai-grok-pager/release-dist"]
+release-dist = [
+    "xai-grok-pager/release-dist",
+    ]

@@ -34,7 +34,8 @@ impl WorktreeNotificationSender for GatewayWorktreeNotifier {
                 return;
             }
         };
-        let notification = acp::ExtNotification::new("chutes.ai/git/worktree/status", params.into());
+        let notification =
+            acp::ExtNotification::new("chutes.ai/git/worktree/status", params.into());
         if let Err(e) = self.gateway.send(notification).await {
             tracing::warn!("Failed to send worktree progress notification: {}", e);
         }
@@ -56,7 +57,7 @@ fn extract_creating_path(resp: &anyhow::Result<CreateWorktreeResponse>) -> Optio
     }
 }
 
-// ÔöÇÔöÇ ACP request types for worktree management ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── ACP request types for worktree management ──────────────────────────────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -341,7 +342,7 @@ pub async fn handle(
                 .await,
             )
         }
-        // ÔöÇÔöÇ Repo-wide session resolution ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        // ── Repo-wide session resolution ─────────────────────────────────
         "chutes.ai/session/resolve_local_for_worktree_resume" => {
             let req =
                 serde_json::from_str::<ResolveLocalForWorktreeResumeRequest>(args.params.get())?;
@@ -365,14 +366,14 @@ pub async fn handle(
                 }
             }
         }
-        // ÔöÇÔöÇ Session rehydration (devbox recovery) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        // ── Session rehydration (devbox recovery) ─────────────────────────
         "chutes.ai/session/rehydrate" => {
             let req = serde_json::from_str::<RehydrateSessionRequest>(args.params.get())?;
             let registry_client = agent.session_registry_client();
 
             to_response(rehydrate_session_in_worktree(&req, ops, registry_client.as_ref()).await)
         }
-        // ÔöÇÔöÇ Worktree management methods ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        // ── Worktree management methods ──────────────────────────────────
         "chutes.ai/git/worktree/list" => {
             let req: xai_grok_workspace::workspace_ops::WorktreeListReq =
                 serde_json::from_str(args.params.get())

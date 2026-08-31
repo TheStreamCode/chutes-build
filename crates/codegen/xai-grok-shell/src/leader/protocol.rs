@@ -417,14 +417,14 @@ pub(crate) enum InternalMethod {
 impl InternalMethod {
     pub(crate) const fn name(self) -> &'static str {
         match self {
-            Self::AuthCleared => "chutes.build/internal/auth_cleared",
-            Self::EvictSessions => "chutes.build/internal/evict_sessions",
-            Self::ReloadAllMcpServers => "chutes.build/internal/reload_all_mcp_servers",
-            Self::ReloadModels => "chutes.build/internal/reload_models",
-            Self::ReloadModelsCache => "chutes.build/internal/reload_models_cache",
-            Self::ReloadProjectMcpServers => "chutes.build/internal/reload_project_mcp_servers",
-            Self::ReloadSkills => "chutes.build/internal/reload_skills",
-            Self::ReloadWorkflows => "chutes.build/internal/reload_workflows",
+            Self::AuthCleared => "chutes.ai/internal/auth_cleared",
+            Self::EvictSessions => "chutes.ai/internal/evict_sessions",
+            Self::ReloadAllMcpServers => "chutes.ai/internal/reload_all_mcp_servers",
+            Self::ReloadModels => "chutes.ai/internal/reload_models",
+            Self::ReloadModelsCache => "chutes.ai/internal/reload_models_cache",
+            Self::ReloadProjectMcpServers => "chutes.ai/internal/reload_project_mcp_servers",
+            Self::ReloadSkills => "chutes.ai/internal/reload_skills",
+            Self::ReloadWorkflows => "chutes.ai/internal/reload_workflows",
         }
     }
 

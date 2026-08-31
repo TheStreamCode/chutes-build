@@ -5,8 +5,8 @@
 //! Each session runs as an actor with its own chat history and tool context.
 //! The agent owns the client connection and routes commands and events via
 //! channels:
-//! - Agent ÔåÆ Session: `SessionCommand` (prompt, cancel, shutdown)
-//! - Session ÔåÆ Client: `session_notification` via a shared gateway handle
+//! - Agent → Session: `SessionCommand` (prompt, cancel, shutdown)
+//! - Session → Client: `session_notification` via a shared gateway handle
 //!
 use super::commands::{
     ParsedPromptInfo, PromptCompletionKind, PromptTurnOk, PromptTurnResult, SessionCommand,
@@ -311,7 +311,7 @@ const GOAL_PLAN_BLOCK_TEMPLATE: &str = include_str!("templates/goal_plan_block.m
 /// because it embeds verbatim user prose that may contain `{...}`).
 ///
 /// This template prints only `Tokens: N` (not a used/budget/remaining
-/// breakdown). A `/goal ÔÇª --budget N` cap IS enforced at the turn-end
+/// breakdown). A `/goal … --budget N` cap IS enforced at the turn-end
 /// continuation gate (terminal `BudgetLimited`), but the remaining-budget
 /// line is not rendered into this nudge.
 pub(super) const GOAL_CONTINUATION_DIRECTIVE_TEMPLATE: &str =
@@ -349,7 +349,7 @@ fn backdate_edit_hold(
         *since = std::time::Instant::now() - age;
     }
 }
-/// Task scheduling state ÔÇö the only fields that remain behind `TokioMutex`.
+/// Task scheduling state — the only fields that remain behind `TokioMutex`.
 ///
 /// All chat state (conversation, tokens, timing, prompt_index, prompt_texts,
 /// agent_edited_paths, last_compaction_prompt_index, sampling_config) has been
@@ -384,7 +384,7 @@ pub(crate) struct State {
     /// Layer-3 LazinessDetector: number of `<system-reminder>` nudges
     /// injected so far in this (session, model) pair. Reset to 0 by
     /// the actor's main `select!` loop when its `model_switch_rx`
-    /// watch channel fires ÔÇö see the `model_switch_rx.changed()` arm
+    /// watch channel fires — see the `model_switch_rx.changed()` arm
     /// in `run_session`. The cap is therefore per-(session, model):
     /// switching models is a deliberate user action that resets
     /// expectations.
@@ -411,8 +411,8 @@ impl State {
     pub(crate) fn clear_pending_notifications(&mut self) {
         self.pending_notifications.clear();
     }
-    /// Prompt id of the in-flight turn, if any. This ÔÇö not
-    /// `current_prompt_id` / `is_running_prompt` ÔÇö is the running-turn
+    /// Prompt id of the in-flight turn, if any. This — not
+    /// `current_prompt_id` / `is_running_prompt` — is the running-turn
     /// identity for queue sweeps: `running_task` lives under the same lock as
     /// `pending_inputs`, while `handle_completion` clears `current_prompt_id`
     /// before taking this lock, so only `running_task` is race-free here.
@@ -424,7 +424,7 @@ impl State {
     /// them for telemetry counts / reservation releases).
     ///
     /// Returned items still carry live `respond_to` senders that this helper
-    /// does NOT resolve ÔÇö dropping them unfulfilled is correct only for
+    /// does NOT resolve — dropping them unfulfilled is correct only for
     /// synthetic items (no client RPC awaits them, the current callers); a
     /// caller whose predicate can match user-originated items must resolve
     /// each returned item (see `respond_removed_prompt`) or the
@@ -433,7 +433,7 @@ impl State {
     /// The guard is the safety invariant every sweep must inherit: the
     /// in-flight turn stays at the queue front until `handle_completion` or a
     /// cancel pops it, and an auto-wake turn's reminder makes the model poll
-    /// the very task that woke it ÔÇö so a sweep's predicate can match the
+    /// the very task that woke it — so a sweep's predicate can match the
     /// running turn's own slot. Deleting it shifts a queued user prompt to
     /// index 0, where `cancel_running_task`'s resolve-front rule destroys it
     /// (the message never runs and is lost from history). Pid-match, not
@@ -645,7 +645,7 @@ mod managed_gateway_error_tests {
         );
     }
 }
-/// Data carried from prepare_tool_call ÔåÆ dispatch_tool ÔåÆ finalize.
+/// Data carried from prepare_tool_call → dispatch_tool → finalize.
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedToolCall {
     /// The model's tool call ID (for tool_result matching).
@@ -787,13 +787,13 @@ pub(crate) struct SessionActor {
     /// Consolidated MCP state (configs, clients, init status) protected by a single lock.
     /// This ensures atomicity when updating configs or checking initialization status.
     pub(crate) mcp_state: Arc<TokioMutex<McpState>>,
-    /// MCP initialization strategy. `Cell`: per-attachment policy ÔÇö a
+    /// MCP initialization strategy. `Cell`: per-attachment policy — a
     /// resident `session/load` carrying explicit `startupHints` re-applies
     /// the attaching client's strategy (`UpdateAttachPolicy`), so a headless
     /// client attaching to an actor spawned by an interactive one still gets
     /// Blocking MCP init on its turns (and vice versa).
     pub(crate) mcp_strategy: std::cell::Cell<McpInitStrategy>,
-    /// Actor-based chat state handle ÔÇö manages conversation, tokens, timing, and persistence.
+    /// Actor-based chat state handle — manages conversation, tokens, timing, and persistence.
     /// Also stores credentials (api_key, optional extra access key,
     /// client_version) opaquely.
     pub(crate) chat_state_handle: xai_chat_state::ChatStateHandle,
@@ -806,7 +806,7 @@ pub(crate) struct SessionActor {
     /// `PendingInteractionGuard` at each reverse-request site. Never persisted.
     pub(crate) pending_interactions: crate::session::pending_interaction::PendingInteractions,
     /// Gates product analytics, not trace uploads. Resolved at spawn as
-    /// `is_telemetry_enabled() && !is_zdr()` ÔÇö ZDR teams always have this false.
+    /// `is_telemetry_enabled() && !is_zdr()` — ZDR teams always have this false.
     pub(crate) telemetry_enabled: bool,
     pub(crate) supports_backend_search: std::cell::Cell<bool>,
     /// Per-turn override, set at promotion. Not persisted; a reload reverts to the definition seed.
@@ -881,7 +881,7 @@ pub(crate) struct SessionActor {
     pub(crate) idle_flush_timeout: Option<std::time::Duration>,
     /// Periodic dream check interval: `None` = disabled.
     pub(crate) dream_check_timeout: Option<std::time::Duration>,
-    /// Conversation length at last idle flush ÔÇö skip if unchanged (no new messages).
+    /// Conversation length at last idle flush — skip if unchanged (no new messages).
     pub(crate) last_idle_flush_conversation_len: std::sync::atomic::AtomicUsize,
     /// Internal event queue for actor-owned replay buffering and flush barriers.
     pub(crate) event_tx: mpsc::UnboundedSender<SessionEvent>,
@@ -907,7 +907,7 @@ pub(crate) struct SessionActor {
     /// `GitHead` consumer (see `git_head_dedup_key`).
     pub(crate) last_reported_branch: Arc<parking_lot::Mutex<Option<String>>>,
     /// Client opted into `chutes.ai/gitHeadChanged`. When false (headless/SDK),
-    /// `maybe_notify_git_branch` no-ops ÔÇö no git subprocess.
+    /// `maybe_notify_git_branch` no-ops — no git subprocess.
     git_head_enabled: bool,
     /// A client that will draw a status row has attached (`chutes.ai/statusLine`).
     /// While false, the emitter wakes and returns without building anything: no
@@ -977,7 +977,7 @@ pub(crate) struct SessionActor {
     /// Design-Execute-Verify loop. Modeled after `plan_mode` above.
     pub(crate) goal_tracker: Arc<parking_lot::Mutex<crate::session::goal_tracker::GoalTracker>>,
     /// `task_id`s of background tasks (and monitors) that originated during
-    /// the goal turn ÔÇö either spawned by the goal model itself or reparented
+    /// the goal turn — either spawned by the goal model itself or reparented
     /// from a harness verifier/planner subagent on its exit. Their late
     /// auto-wake completions are dropped by [`Self::maybe_drain_notifications`]
     /// regardless of the goal's current status, so a leftover dev/verification
@@ -989,7 +989,7 @@ pub(crate) struct SessionActor {
     /// the goal is `Active`. Reset to 0 on a successful turn or on user
     /// `/goal resume`. Auto-pauses the goal with `GoalPauseReason::BackOff`
     /// once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
-    /// In-memory only ÔÇö session restart is itself a reset.
+    /// In-memory only — session restart is itself a reset.
     pub(crate) goal_continuation_streak: std::sync::atomic::AtomicU32,
     pub(crate) goal_blocked_streak: std::sync::atomic::AtomicU32,
     pub(crate) goal_update_rx: std::cell::RefCell<
@@ -1033,7 +1033,7 @@ pub(crate) struct SessionActor {
     /// every `/goal` role inherits the current model. `goal_role_models`
     /// already reflects it (planner/strategist `InheritCurrent`, empty pool),
     /// but the skeptic panel also checks this flag directly so a
-    /// previously-frozen `skeptic_model_assignment` is overridden too ÔÇö an
+    /// previously-frozen `skeptic_model_assignment` is overridden too — an
     /// instant rollback even for an already-frozen goal.
     pub(crate) goal_use_current_model_only: bool,
     /// auto-pauses via `BackOff`). Cached at actor construction like
@@ -1043,7 +1043,7 @@ pub(crate) struct SessionActor {
     /// resolver. Read by [`Self::resolve_goal_classifier_policy`].
     pub(crate) goal_classifier_max_runs: u32,
     /// Resolved N for the stall-triggered strategist: it fires every N
-    /// consecutive `NotAchieved` verifications (and again at 2N, 3N, ÔÇª).
+    /// consecutive `NotAchieved` verifications (and again at 2N, 3N, …).
     /// Cached at actor construction. Default `max(1, goal_classifier_max_runs
     /// / 2)`; clamped to `>= 1` by the resolver. Read by the strategist
     /// trigger in `apply_classifier_outcome`.
@@ -1070,7 +1070,7 @@ pub(crate) struct SessionActor {
     pub(crate) tool_metadata_snapshot:
         Arc<std::sync::Mutex<crate::session::tool_index::ToolMetadataSnapshot>>,
     /// MCP servers (connected and failed) already announced via
-    /// system-reminder ÔÇö see [`crate::session::announcement_state::McpAnnounced`]
+    /// system-reminder — see [`crate::session::announcement_state::McpAnnounced`]
     /// for the dedupe semantics.
     pub(crate) mcp_announcements: Mutex<crate::session::announcement_state::McpAnnounced>,
     /// Controls whether MCP server reminders inject only changes (Delta)
@@ -1153,8 +1153,8 @@ pub(crate) struct SessionActor {
     /// recap suppresses emit if this changes before commit.
     pub(crate) recap_epoch: std::cell::Cell<u64>,
     /// The in-flight turn-summary side-call, if any. A newer completion (or a
-    /// real prompt / rewind / cancel / shutdown) aborts it ÔÇö its result would
-    /// describe an older turn ÔÇö and a completion respawns; see
+    /// real prompt / rewind / cancel / shutdown) aborts it — its result would
+    /// describe an older turn — and a completion respawns; see
     /// `restart_turn_summary`. Cleared when the task finishes so `Some` means
     /// "still running".
     pub(crate) turn_summary_task: std::cell::RefCell<Option<tokio::task::JoinHandle<()>>>,
@@ -1175,12 +1175,12 @@ pub(crate) struct SessionActor {
     /// task whose generation no longer matches must not persist its result.
     pub(crate) title_refresh_generation: std::cell::Cell<u64>,
     /// Index into `TITLE_REFRESH_TURNS` of the next checkpoint to apply.
-    /// Advanced when an attempt completes ÔÇö success *or* failure ÔÇö (with
+    /// Advanced when an attempt completes — success *or* failure — (with
     /// catch-up past skipped checkpoints), and persisted to the watermark;
     /// once it reaches the end the title is frozen.
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in
-    /// `handle_prompt`, like `tool_context.is_turn_active` ÔÇö which is the
+    /// `handle_prompt`, like `tool_context.is_turn_active` — which is the
     /// agent-wide coordinator flag shared by all sessions and so unusable
     /// for per-session decisions). `Arc` so it can be re-checked inside the
     /// chat-state actor's `RepairHistory` handler.
@@ -1221,7 +1221,7 @@ pub(crate) struct SessionActor {
     /// the process-global, monotonically-increasing `eventId` AT CALL TIME (see
     /// `generate_event_id`). Because the two run as distinct tasks on the
     /// session `LocalSet`, the tool call's `send_update` could interleave
-    /// BETWEEN two still-draining text chunks ÔÇö allocating an `eventId` mid
+    /// BETWEEN two still-draining text chunks — allocating an `eventId` mid
     /// message and splitting the assistant text around the tool call on every
     /// attached client (the eventId order is what clients render in).
     ///
@@ -1303,14 +1303,14 @@ pub(crate) struct SessionActor {
     /// field would re-introduce a per-actor lock for a use case an
     /// `AtomicU64` already covers correctly. Model-switch differs
     /// because its main-loop arm DOES need a wakeup to zero the
-    /// per-session nudge counter ÔÇö the watch channel's `.changed()`
+    /// per-session nudge counter — the watch channel's `.changed()`
     /// is the right primitive there.
     pub(crate) user_input_generation: std::sync::atomic::AtomicU64,
     /// Session-scoped `--laziness-debug-log <path>`. When `Some`, the
     /// Layer-3 classifier fires after every turn end (bypassing the
     /// idle wait, the per-model enable gate, and the nudge cap), and
     /// the full outcome is appended as a JSONL line to this file.
-    /// Observation-only ÔÇö no nudges are ever injected when this is
+    /// Observation-only — no nudges are ever injected when this is
     /// `Some`. `Arc<Path>` because the path is immutable after
     /// session spawn; concurrent appends rely on `O_APPEND`'s atomic
     /// guarantee for writes under `PIPE_BUF` (JSONL lines fit).
@@ -1346,7 +1346,7 @@ impl SessionActor {
         self.events.emit_turn_ended(outcome, category, context);
     }
     /// Current model ID for OTLP span attributes. Reads from chat_state_handle
-    /// so it always reflects the latest model override ÔÇö no stale cached field.
+    /// so it always reflects the latest model override — no stale cached field.
     /// Returns "unknown" if no sampling config is set.
     async fn current_model_id(&self) -> String {
         self.chat_state_handle
@@ -1361,7 +1361,7 @@ impl SessionActor {
         self.session_info.id.0.to_string()
     }
     /// Send a before-turn hook via the local workspace channel.
-    /// Fire-and-forget ÔÇö failures are logged but do not interrupt the turn.
+    /// Fire-and-forget — failures are logged but do not interrupt the turn.
     async fn send_before_turn_event(
         &self,
         payload: xai_tool_protocol::turn_hook::BeforeTurnPayload,
@@ -1371,7 +1371,7 @@ impl SessionActor {
             .await;
     }
     /// Send an after-turn hook via the local workspace channel.
-    /// Fire-and-forget ÔÇö failures are logged but do not interrupt the turn.
+    /// Fire-and-forget — failures are logged but do not interrupt the turn.
     #[tracing::instrument(
         name = "session.after_turn",
         skip_all,
@@ -1530,7 +1530,7 @@ impl SessionActor {
 impl SessionActor {
     /// Owned handle to the active `ToolBridge`. Used by async methods
     /// that need to drop the `RefCell::Ref<Agent>` borrow before
-    /// awaiting ÔÇö `Arc::clone` is cheap, and an outstanding `Ref`
+    /// awaiting — `Arc::clone` is cheap, and an outstanding `Ref`
     /// across `.await` would panic if anything on the suspended path
     /// did `self.agent.borrow_mut()`.
     fn tool_bridge_handle(&self) -> Arc<xai_grok_tools::bridge::ToolBridge> {

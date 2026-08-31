@@ -35,7 +35,7 @@ fn generate_test_line(line_num: usize, terminal_width: usize) -> String {
         1 => lipsum(40), // Long line
         2 => {
             // Unicode string with ANSI colors and hyperlink for testing
-            let unicode_with_ansi = "\x1b[31m😀\u{200D}\x1b[0m\x1b[32mé\x1b[0m中\u{0300}\x1b[34mX\x1b[0m\x1b]8;;https://example.com\x1b\\H\x1b]8;;\x1b\\";
+            let unicode_with_ansi = "\x1b[31m­ƒÿÇ\u{200D}\x1b[0m\x1b[32m├®\x1b[0mõ©¡\u{0300}\x1b[34mX\x1b[0m\x1b]8;;https://example.com\x1b\\H\x1b]8;;\x1b\\";
             let visual_width = ansi_width(unicode_with_ansi);
             let marker_adjustment = if i % 6 >= 3 { 7 } else { 14 };
             let remaining_width = terminal_width * 2 - marker_adjustment - visual_width;
@@ -132,7 +132,9 @@ struct Spinner {
 
 impl Spinner {
     fn new() -> Self {
-        let frames = vec!["⠋", "⠙", "⠚", "⠞", "⠖", "⠦", "⠴", "⠲", "⠳", "⠓"];
+        let frames = vec![
+            "Ôáï", "ÔáÖ", "ÔáÜ", "Ôá×", "Ôáû", "Ôáª", "Ôá┤", "Ôá▓", "Ôá│", "Ôáô",
+        ];
         Self {
             frames,
             current: 0,

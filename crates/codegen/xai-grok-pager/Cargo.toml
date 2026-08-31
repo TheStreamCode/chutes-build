@@ -1,13 +1,12 @@
 [package]
 name = "xai-grok-pager"
-version = "1.3.1"
+version = "1.0.12"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
 
 [dependencies]
-# TTY safety — detach subprocesses from the controlling terminal
-chutes-build-core = { path = "../../chutes-build-core" }
+# TTY safety ÔÇö detach subprocesses from the controlling terminal
 dunce = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-grok-version = { workspace = true }
@@ -18,6 +17,12 @@ xai-prompt-queue = { workspace = true }
 # Presentation-primitives layer (extracted)
 xai-grok-pager-render = { path = "../xai-grok-pager-render" }
 
+# The /gboom easter-egg game (extracted)
+xai-grok-gboom = { path = "../xai-grok-gboom" }
+
+# Diff hunk construction (extracted)
+xai-grok-pager-diff = { path = "../xai-grok-pager-diff" }
+
 # Rendering
 ratatui = { workspace = true, features = ["crossterm", "unstable-widget-ref"] }
 xai-grok-announcements = { workspace = true }
@@ -27,7 +32,6 @@ regex = { workspace = true }
 unicode-width = { workspace = true }
 unicode-segmentation = { workspace = true }
 strip-ansi-escapes = { workspace = true }
-enum_delegate = { workspace = true }
 
 # Markdown / syntax highlighting
 xai-grok-markdown = { workspace = true }
@@ -43,6 +47,7 @@ indexmap = { workspace = true }
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+strum = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true, features = ["serde"] }
 
@@ -53,7 +58,6 @@ ansi-to-tui = { workspace = true }
 portable-pty = "0.9"
 
 # Utilities
-derive_more = { workspace = true, features = ["deref", "deref_mut"] }
 anyhow = { workspace = true }
 shlex = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
@@ -91,15 +95,23 @@ xai-grok-update = { path = "../xai-grok-update" }
 agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
 xai-file-utils = { path = "../xai-file-utils" }
+# Crash-recovery registry of open TUI sessions.
+xai-grok-active-sessions = { workspace = true }
 xai-grok-config = { workspace = true }
+xai-dirs = { workspace = true }
+xai-grok-dashboard-store = { workspace = true }
 # Voice dictation. `audio` (mic capture) is enabled on every target. On
 # macOS/Windows it links cpal; on Linux it compiles a subprocess-recorder
 # backend instead, so cpal -> alsa-sys never reaches the static musl binary
 # (cpal is target-gated to non-Linux inside xai-grok-voice).
 xai-grok-voice = { path = "../xai-grok-voice", default-features = false, features = ["audio"] }
 xai-grok-shell = { workspace = true }
+# The status-line contract: the config the user writes and the payload the
+# agent sends. A leaf crate rather than the agent's, so the client reads it
+# from upstream of the crate that fills it in.
+xai-grok-status-line = { workspace = true }
 xai-grok-workspace = { workspace = true }
-xai-grok-active-sessions = { workspace = true }
+# Foreign coding-agent session discovery.
 xai-grok-foreign-sessions = { workspace = true }
 xai-token-estimation = { workspace = true }
 xai-grok-telemetry = { workspace = true }
@@ -111,8 +123,9 @@ tar = { workspace = true }
 xai-grok-tools = { workspace = true }
 xai-grok-agent = { workspace = true }
 xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
+# Blocked-card copy: `hook_display_name` lives next to the hook-name grammar.
+xai-grok-hooks = { path = "../xai-grok-hooks" }
 xai-hooks-plugins-types = { path = "../xai-hooks-plugins-types" }
-wait-timeout = { workspace = true }
 walkdir = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 
@@ -126,7 +139,6 @@ image = { workspace = true, features = ["png", "jpeg", "tiff", "gif", "webp"] }
 uuid = { workspace = true, features = ["v4"] }
 
 # Path computation (plan file, etc.)
-dirs = { workspace = true }
 shellexpand = "3.1"
 
 # libgit2 for the startup git-info populator (no fork/exec, runs once on launch
@@ -165,7 +177,10 @@ core-foundation = { workspace = true }
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
+# The fixture that builds a `[ui.status_line]` section field by field.
+xai-grok-status-line = { workspace = true, features = ["test-support"] }
 xai-grok-pager-render = { path = "../xai-grok-pager-render", features = ["test-support"] }
+xai-grok-gboom = { path = "../xai-grok-gboom", features = ["test-support"] }
 xai-grok-shell = { workspace = true, features = ["test-support"] }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
@@ -177,16 +192,8 @@ xai-grok-pager-pty-harness = { path = "../xai-grok-pager-pty-harness" }
 # In-process leader-cluster harness (mock inference server; no cycle:
 # xai-grok-test-support depends on neither the pager nor the shell).
 xai-grok-test-support = { workspace = true, features = [] }
-# Ring CryptoProvider install for the in-process leader-cluster tests. Explicit
-# spec mirroring the shell's, NOT `workspace = true`: the workspace pin enables
-# aws-lc-rs, under which `rustls::crypto::ring` does not exist. Dev-only — the
-# production lib deliberately dropped rustls (moved to xai-grok-pager-bin).
-rustls = { version = "0.23", default-features = false, features = [
-    "ring",
-    "logging",
-    "std",
-    "tls12",
-] }
+# Provider install for the in-process leader-cluster tests.
+xai-grok-extra-ca = { workspace = true }
 
 [[bench]]
 name = "render"
@@ -244,43 +251,27 @@ path = "tests/pty_e2e_persistence.rs"
 name = "pty_e2e_clipboard"
 path = "tests/pty_e2e_clipboard.rs"
 
-# Leader-mode PTY e2e — split from ordinary PTY families so multi-process
+# Leader-mode PTY e2e ÔÇö split from ordinary PTY families so multi-process
 # cluster bring-up never contends with their bounded pools.
 [[test]]
 name = "leader_pty_e2e"
 path = "tests/leader_pty_e2e/mod.rs"
 
-# Settings modal regression tests — keyboard/mouse dispatch + registry
+# Settings modal regression tests ÔÇö keyboard/mouse dispatch + registry
 # contracts. Not gated by `--ignored`; runs on every `cargo test`.
 [[test]]
 name = "settings_e2e"
 path = "tests/settings_e2e.rs"
 
-# Declarative scripted TUI scenarios — opt-in because they spawn the real pager.
+# Declarative scripted TUI scenarios ÔÇö opt-in because they spawn the real pager.
 [[test]]
 name = "scripted_scenarios"
 path = "tests/scripted_scenarios.rs"
 
-# Permission Auto mode PTY e2e (Shift+Tab → Auto banner via PtyHarness).
+# Permission Auto mode PTY e2e (Shift+Tab ÔåÆ Auto banner via PtyHarness).
 [[test]]
 name = "pty_auto_mode"
 path = "tests/pty_auto_mode.rs"
-
-[[bin]]
-name = "mouse-events-playground"
-path = "src/bin/mouse_events_playground.rs"
-
-[[bin]]
-name = "scrollback-selection-playground"
-path = "src/bin/scrollback_selection_playground.rs"
-
-[[bin]]
-name = "question-view-playground"
-path = "src/bin/question_view_playground.rs"
-
-[[bin]]
-name = "todo-pane-playground"
-path = "src/bin/todo_pane_playground.rs"
 
 # Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
 # `cargo clippy --workspace -- -D warnings` on this package is stricter than
@@ -306,6 +297,6 @@ jemalloc = []
 sandbox-enforce = ["xai-grok-sandbox/enforce"]
 release-dist = []
 # Exposes test-only view-model constructors/setters (e.g. `test_agent_view`,
-# `AgentSession::set_yolo_mode_for_test`) to sibling crates' test builds — used
+# `AgentSession::set_yolo_mode_for_test`) to sibling crates' test builds ÔÇö used
 # by `xai-grok-pager-minimal`'s unit tests. Never enabled in production builds.
-test-support = ["xai-grok-pager-render/test-support"]
+test-support = ["xai-grok-pager-render/test-support", "xai-grok-gboom/test-support"]

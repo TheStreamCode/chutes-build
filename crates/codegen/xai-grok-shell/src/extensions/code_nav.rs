@@ -173,6 +173,7 @@ pub(crate) struct StatusResponse {
 ///
 /// Routes through [`WorkspaceOps`]. Eligibility checks still run in shell since
 /// they depend on agent-level config (client type, feature flags).
+#[tracing::instrument(name = "ext.code_nav", skip_all, fields(method = %args.method))]
 pub async fn handle(
     agent: &MvpAgent,
     ops: &xai_grok_workspace::WorkspaceOps,
@@ -181,7 +182,7 @@ pub async fn handle(
     use xai_grok_workspace::workspace_ops::*;
 
     match args.method.as_ref() {
-        "chutes.build/code/goto-definition" => {
+        "chutes.ai/code/goto-definition" => {
             let req: GotoRequest = serde_json::from_str(args.params.get())
                 .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
             let cwd = resolve_cwd(agent, req.cwd.clone(), req.session_id.as_ref())?;
@@ -209,7 +210,7 @@ pub async fn handle(
             );
             to_code_nav_ext_response(result)
         }
-        "chutes.build/code/goto-references" => {
+        "chutes.ai/code/goto-references" => {
             let req: GotoRequest = serde_json::from_str(args.params.get())
                 .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
             let cwd = resolve_cwd(agent, req.cwd.clone(), req.session_id.as_ref())?;
@@ -238,7 +239,7 @@ pub async fn handle(
             );
             to_code_nav_ext_response(result)
         }
-        "chutes.build/code/find-definitions" => {
+        "chutes.ai/code/find-definitions" => {
             let req: FindSymbolRequest = serde_json::from_str(args.params.get())
                 .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
             let cwd = resolve_cwd(agent, req.cwd.clone(), req.session_id.as_ref())?;
@@ -268,7 +269,7 @@ pub async fn handle(
             );
             to_code_nav_ext_response(result)
         }
-        "chutes.build/code/find-references" => {
+        "chutes.ai/code/find-references" => {
             let req: FindSymbolRequest = serde_json::from_str(args.params.get())
                 .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
             let cwd = resolve_cwd(agent, req.cwd.clone(), req.session_id.as_ref())?;
@@ -298,7 +299,7 @@ pub async fn handle(
             );
             to_code_nav_ext_response(result)
         }
-        "chutes.build/code/status" => {
+        "chutes.ai/code/status" => {
             let req: StatusRequest = serde_json::from_str(args.params.get())
                 .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
             let cwd = resolve_cwd(agent, req.cwd.clone(), req.session_id.as_ref())?;

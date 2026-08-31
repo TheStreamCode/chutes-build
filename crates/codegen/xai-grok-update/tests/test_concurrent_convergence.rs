@@ -1,7 +1,7 @@
 //! End-to-end tests for the lock-free concurrent-updater convergence model
 //! (the "double download" fix): updaters key staleness off the on-disk
 //! install, so a binary another process already installed is never
-//! downloaded again — and the accepted same-instant residual race is
+//! downloaded again ÔÇö and the accepted same-instant residual race is
 //! genuinely harmless thanks to per-attempt download temp names.
 //!
 //! Production has three independent downloader paths that can race around a
@@ -22,7 +22,7 @@
 //!   not assumed.
 //! - **Race integrity** (`install_internal_from_base` run concurrently): the
 //!   same-instant race is accepted as rare; these tests pin the property
-//!   that makes it acceptable — concurrent installs (same or *different*
+//!   that makes it acceptable ÔÇö concurrent installs (same or *different*
 //!   versions) never corrupt the active binary. Before the per-attempt
 //!   temp-name fix, every `0.1.x` download shared one `grok-0.1.tmp`
 //!   (`with_extension("tmp")` eats everything after the last dot), so racer
@@ -42,7 +42,9 @@ use common::{
     FakeBinGuard, can_exec_shell_scripts, host_platform, make_update_config, reset_home,
     set_test_version, small_good_artifact, test_home,
 };
-use xai_grok_update::auto_update::{ensure_latest_on_disk, install_internal_from_base, run_update};
+use xai_grok_update::auto_update::{
+    CliUpdateTrigger, ensure_latest_on_disk, install_internal_from_base, run_update,
+};
 use xai_grok_update::version::installed_on_disk_version;
 
 /// Assert the active `~/.chutes-build/bin/grok` resolves to the expected versioned
@@ -146,12 +148,12 @@ fn setup_gh_release(running_version: &str) -> FakeBinGuard {
     FakeBinGuard::install("gh", fake_gh_serving_releases)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Convergence: ensure_latest_on_disk downloads once, then every subsequent
 // pass (the leader's hourly re-entry) converges without re-downloading.
 // This is the e2e companion to the decision-level tests in
-// test_downgrade_matrix.rs — it asserts on actual download invocations.
-// ─────────────────────────────────────────────────────────────────────────────
+// test_downgrade_matrix.rs ÔÇö it asserts on actual download invocations.
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
@@ -164,14 +166,14 @@ async fn ensure_latest_downloads_once_then_converges_without_redownload() {
     g.set_stable_only_stdout("v0.2.7\n");
     let cfg = make_update_config("stable");
 
-    // Pass 1: disk is empty → downloads and installs.
+    // Pass 1: disk is empty ÔåÆ downloads and installs.
     let first = ensure_latest_on_disk(&cfg).await.unwrap();
     assert_eq!(first.installed.as_deref(), Some("0.2.7"));
     assert!(first.relaunch_needed, "running 0.2.5 < disk 0.2.7");
     assert_eq!(gh_download_count(&g), 1, "first pass downloads");
     assert_eq!(installed_on_disk_version().as_deref(), Some("0.2.7"));
 
-    // Pass 2 (the pre-fix hourly re-download): disk already current →
+    // Pass 2 (the pre-fix hourly re-download): disk already current ÔåÆ
     // no download, but the stale running process still gets the relaunch
     // signal.
     let second = ensure_latest_on_disk(&cfg).await.unwrap();
@@ -184,11 +186,11 @@ async fn ensure_latest_downloads_once_then_converges_without_redownload() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Convergence: explicit `chutes-build update` (the Ctrl+U fallback path) finds the
-// binary another process already installed and skips the download — while
+// binary another process already installed and skips the download ÔÇö while
 // still returning the target version so stale leaders get signalled.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[tokio::test]
 #[serial]
@@ -203,7 +205,9 @@ async fn run_update_skips_download_when_disk_already_current() {
     fake_managed_install("0.2.7");
     let mut cfg = make_update_config("stable");
 
-    let result = run_update(false, None, None, &mut cfg).await.unwrap();
+    let result = run_update(false, None, None, &mut cfg, CliUpdateTrigger::UserCommand)
+        .await
+        .unwrap();
 
     assert_eq!(
         result.as_deref(),
@@ -230,7 +234,9 @@ async fn run_update_force_still_redownloads_when_disk_current() {
     fake_managed_install("0.2.7");
     let mut cfg = make_update_config("stable");
 
-    let result = run_update(true, None, None, &mut cfg).await.unwrap();
+    let result = run_update(true, None, None, &mut cfg, CliUpdateTrigger::UserCommand)
+        .await
+        .unwrap();
 
     assert_eq!(result.as_deref(), Some("0.2.7"));
     assert_eq!(
@@ -240,14 +246,14 @@ async fn run_update_force_still_redownloads_when_disk_current() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Installer gating: the disk-version probe must only be trusted for
 // installers that actually maintain the managed `~/.chutes-build/bin/grok` symlink
 // (internal, gh-release). For npm, a symlink left over from a previous
-// internal install LIES about the npm install's version — and in the worst
+// internal install LIES about the npm install's version ÔÇö and in the worst
 // direction (leftover "newer" than the registry) it would silently suppress
 // npm updates forever.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 fn setup_npm(running_version: &str) -> FakeBinGuard {
     let _ = test_home();
@@ -273,7 +279,9 @@ async fn npm_update_not_suppressed_by_leftover_newer_internal_symlink() {
     fake_managed_install("0.2.9");
     let mut cfg = make_update_config("stable");
 
-    let result = run_update(false, None, None, &mut cfg).await.unwrap();
+    let result = run_update(false, None, None, &mut cfg, CliUpdateTrigger::UserCommand)
+        .await
+        .unwrap();
 
     assert_eq!(
         result.as_deref(),
@@ -322,8 +330,8 @@ async fn ensure_latest_npm_ignores_leftover_internal_symlink() {
 async fn disk_probe_preserves_prerelease_versions() {
     let _ = test_home();
     reset_home();
-    // An alpha install must read back as the full pre-release version —
-    // truncating to "0.1.220" would mask the alpha → stable update.
+    // An alpha install must read back as the full pre-release version ÔÇö
+    // truncating to "0.1.220" would mask the alpha ÔåÆ stable update.
     fake_managed_install("0.1.220-alpha.4");
     assert_eq!(
         installed_on_disk_version().as_deref(),
@@ -335,7 +343,7 @@ async fn disk_probe_preserves_prerelease_versions() {
 #[serial]
 async fn disk_probe_rejects_dangling_symlink() {
     // If the symlink survives but its target binary was deleted (manual
-    // ~/.chutes-build/downloads cleanup), the probe must report None — otherwise
+    // ~/.chutes-build/downloads cleanup), the probe must report None ÔÇö otherwise
     // every updater would claim "already up to date" forever while no
     // runnable binary exists, and nothing would ever repair the install.
     let home = test_home();
@@ -394,18 +402,18 @@ async fn ensure_latest_repairs_dangling_symlink_by_downloading() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Race integrity: the accepted same-instant race must stay harmless. Two (or
-// three) installers running concurrently — even for DIFFERENT versions —
+// three) installers running concurrently ÔÇö even for DIFFERENT versions ÔÇö
 // must never leave a corrupt active binary. Pre-fix, all 0.1.x downloads
 // shared one `grok-0.1.tmp`, so a concurrent racer could atomically rename a
 // half-written file into place.
-// ─────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 async fn run_concurrent_installs(
     server: &ArtifactServer,
     versions: &[&str],
-) -> Vec<anyhow::Result<()>> {
+) -> Vec<anyhow::Result<String>> {
     let base = server.uri();
     let mut tasks = Vec::new();
     for version in versions {

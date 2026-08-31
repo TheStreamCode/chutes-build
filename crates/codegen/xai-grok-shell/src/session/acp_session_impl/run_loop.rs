@@ -70,10 +70,10 @@ pub(super) async fn fire_session_end_hooks(
 }
 /// Cancel the feedback sync loop, drain/sync under exit budgets, persist
 /// background-task state, and drop scratch. Owns the single final signal sync
-/// via [`FeedbackManager::shutdown`] ÔÇö the sync loop cancel arm does not sync.
+/// via [`FeedbackManager::shutdown`] — the sync loop cancel arm does not sync.
 ///
 /// `FeedbackManager::shutdown` short-circuits force_sync/drain when telemetry
-/// is off or the session is empty with nothing pending (empty openÔåÆexit).
+/// is off or the session is empty with nothing pending (empty open→exit).
 async fn finish_session_exit_feedback(session: &SessionActor, timer: &SharedSessionEndTimer) {
     let span = session_end::span(Phase::Feedback);
     if let Some(cancel) = &session.sync_loop_cancel {
@@ -386,7 +386,7 @@ pub(super) async fn run_session(
     loop {
         tokio::select! {
                 biased;
-                // Idle flush timer fired ÔÇö run background flush.
+                // Idle flush timer fired — run background flush.
                 _ = &mut idle_flush_sleep, if session.idle_flush_timeout.is_some()
                     && session.memory.is_enabled()
                     && !session.memory.is_flushing.load(std::sync::atomic::Ordering::Relaxed) => {
@@ -396,7 +396,7 @@ pub(super) async fn run_session(
                         .load(std::sync::atomic::Ordering::Relaxed);
                     if current_len > last_len {
                         tracing::info!(target: xai_grok_telemetry::memory_log::TARGET,
-                            "MEMORY_IDLE_FLUSH: timer fired (conversation {last_len} ÔåÆ {current_len})");
+                            "MEMORY_IDLE_FLUSH: timer fired (conversation {last_len} → {current_len})");
                         session.last_idle_flush_conversation_len
                             .store(current_len, std::sync::atomic::Ordering::Relaxed);
                         tokio::task::spawn_local({
@@ -404,7 +404,7 @@ pub(super) async fn run_session(
                             async move {
                                 if !session.run_memory_flush("interval", None).await {
                                     tracing::info!(target: xai_grok_telemetry::memory_log::TARGET,
-                                        "MEMORY_IDLE_FLUSH: skipped ÔÇö another flush already in progress");
+                                        "MEMORY_IDLE_FLUSH: skipped — another flush already in progress");
                                 }
                             }
                         });
@@ -417,7 +417,7 @@ pub(super) async fn run_session(
                         idle_flush_sleep.as_mut().reset(tokio::time::Instant::now() + timeout);
                     }
                 }
-                // Dream check timer ÔÇö periodically run dream consolidation.
+                // Dream check timer — periodically run dream consolidation.
                 _ = &mut dream_check_sleep, if session.dream_check_timeout.is_some()
                     && session.memory.is_enabled() => {
                     tracing::debug!(target: xai_grok_telemetry::memory_log::TARGET,
@@ -434,7 +434,7 @@ pub(super) async fn run_session(
                 }
                 // Layer-3 LazinessDetector: zero the per-session nudge
                 // counter whenever the user switches models. The cap
-                // is per-(session, model) ÔÇö switching is a deliberate
+                // is per-(session, model) — switching is a deliberate
                 // user action that resets expectations. `.changed()`
                 // only resolves on switches AFTER subscription, so
                 // there is no stored-permit hazard.
@@ -444,7 +444,7 @@ pub(super) async fn run_session(
                         session.handle_model_switch_for_laziness(new_gen).await;
                     }
                 }
-                // ChatStateActor events ÔÇö coordination signals for session-level concerns.
+                // ChatStateActor events — coordination signals for session-level concerns.
                 event = chat_state_event_rx.recv() => {
                     match event {
                         Some(xai_chat_state::ChatStateEvent::ConversationReset { new_len }) => {
@@ -483,11 +483,11 @@ pub(super) async fn run_session(
                         }
                         Some(xai_chat_state::ChatStateEvent::PromptIndexChanged { .. }) |
                         Some(xai_chat_state::ChatStateEvent::TokensUpdated { .. }) => {
-                            // Prompt index and token updates are informational ÔÇö
+                            // Prompt index and token updates are informational —
                             // consumers query the actor directly when they need them.
                         }
                         None => {
-                            // Actor shut down ÔÇö no more events.
+                            // Actor shut down — no more events.
                         }
                     }
                 }
@@ -521,7 +521,7 @@ pub(super) async fn run_session(
                 }
                 maybe_cmd = cmd_rx.recv() => {
                     let Some(cmd) = maybe_cmd else {
-                        // ÔöÇÔöÇ session_end (channel-closed path) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+                        // ── session_end (channel-closed path) ────────
                         // Queued reports first, so an earlier turn's report precedes the
                         // session-end `Stop`. Hooks fire BEFORE memory auto-save per plan contract.
                         let end_timer = session_end::SessionEndTimer::new_shared();
@@ -570,7 +570,7 @@ pub(super) async fn run_session(
                             // Detaching the handle is safe: the task is spawned on
                             // this session's `LocalSet`, so it is dropped (its
                             // `request_plan_approval` future cancelled, clearing
-                            // `awaiting` via the guard) when the session ends ÔÇö it
+                            // `awaiting` via the guard) when the session ends — it
                             // cannot outlive the actor. `resume_plan_approval`
                             // also self-guards against a concurrent/duplicate
                             // re-park via the `pending_interactions` registry.
@@ -635,7 +635,7 @@ pub(super) async fn run_session(
                                 // auto-wake) are not real user input
                                 // and must NOT bump the counter.
                                 // `AcqRel` (not bare `Release`): `fetch_add`
-                                // is a read-modify-write ÔÇö `AcqRel` publishes
+                                // is a read-modify-write — `AcqRel` publishes
                                 // our write AND synchronizes the read half,
                                 // so any future reader chaining off the
                                 // returned counter value sees all prior
@@ -1073,7 +1073,7 @@ pub(super) async fn run_session(
                             // Eager fan-out: a plugin was added/removed/reloaded
                             // in another session. Adopt the pushed snapshot so this
                             // session's hooks, MCP, skills, and the client's
-                            // slash-command catalog match ÔÇö the same refresh the
+                            // slash-command catalog match — the same refresh the
                             // originating session gets, so switching here needs no
                             // lazy refetch. Subagents inherit the parent registry.
                             if !session.startup_hints.is_subagent {
@@ -1092,7 +1092,7 @@ pub(super) async fn run_session(
                             // spawned task) like `ReloadPlugins`: `reload_hooks_impl`
                             // mutates `hook_registry`, and this actor's safety
                             // invariant (file-header `await_holding_refcell_ref`
-                            // allow) is "no concurrent mutation" of it ÔÇö spawning
+                            // allow) is "no concurrent mutation" of it — spawning
                             // would race turn tasks.
                             if !session.startup_hints.is_subagent {
                                 let _ = session.reload_hooks_impl().await;
@@ -1233,7 +1233,7 @@ pub(super) async fn run_session(
                                         .await;
                                     let _ = respond_to.send(());
                                 }
-                                // Drop oneshot ÔåÆ fold_acked=false on child; true-miss path runs.
+                                // Drop oneshot → fold_acked=false on child; true-miss path runs.
                                 Err(()) => {}
                             }
                         }
@@ -1308,7 +1308,7 @@ pub(super) async fn run_session(
                                 .send(PersistenceMsg::CopyFile { one_shot: respond_to });
                         }
                         SessionCommand::IsBusy { respond_to } => {
-                            // "Any work pending?" ÔÇö a running turn or queued
+                            // "Any work pending?" — a running turn or queued
                             // inputs. Consulted by the leader's idle-unload
                             // decision. Cheap: a single state lock.
                             let busy = {
@@ -1325,7 +1325,7 @@ pub(super) async fn run_session(
                             if let Some(notification) = replay_buffer.flush() {
                                 session.emit_buffered(notification).await;
                             }
-                            // Chain through persistence actor ÔÇö only signal after
+                            // Chain through persistence actor — only signal after
                             // flush_pending() completes on disk. This makes
                             // FlushComplete a true sync barrier (unlike the old
                             // pattern which signaled before the persistence actor
@@ -1363,7 +1363,7 @@ pub(super) async fn run_session(
                             // event sender alongside the diff so we
                             // can fan out `McpClientEvent::ConfigDiff`
                             // immediately after the in-memory swap
-                            // completes ÔÇö without holding the
+                            // completes — without holding the
                             // `mcp_state` lock across the emit.
                             let (diff, dispatch_event_tx) = {
                                 let mut mcp_state = session.mcp_state.lock().await;
@@ -1385,7 +1385,7 @@ pub(super) async fn run_session(
                             // `StatusDispatcher` fans out per-server
                             // `mcp/server_status` with
                             // `reason: ConfigAdded` / `ConfigRemoved`.
-                            // Best-effort ÔÇö a dropped dispatcher
+                            // Best-effort — a dropped dispatcher
                             // means `mcp.liveness_watchers` is
                             // off or the session has shut down; the
                             // tool-bridge tear-down and re-init below
@@ -1435,7 +1435,7 @@ pub(super) async fn run_session(
 
                             if enabled {
                                 if let Some(config) = server_config {
-                                    // Replace any prior entry so setup ÔåÆ enable can
+                                    // Replace any prior entry so setup → enable can
                                     // swap an unresolved placeholder for a resolved URL.
                                     configs.retain(|c| {
                                         crate::session::mcp_servers::mcp_server_name(c)
@@ -1474,7 +1474,7 @@ pub(super) async fn run_session(
                             };
 
                             // ToggleMcpServer mirrors
-                            // UpdateMcpServers ÔÇö fan out per-server
+                            // UpdateMcpServers — fan out per-server
                             // status via the dispatcher (`ConfigAdded`
                             // / `ConfigRemoved` reason codes on
                             // `mcp/server_status`).
@@ -1706,7 +1706,7 @@ pub(super) async fn run_session(
                                 // pager refetches the full catalog),
                                 // so `server_name` / `tools` stay
                                 // empty and skip-if-empty drops them
-                                // from the wire ÔÇö identical bytes to
+                                // from the wire — identical bytes to
                                 // the previous payload save for the
                                 // additional `sessionId` field.
                                 let payload = crate::extensions::mcp::McpToolsChanged {
@@ -1988,7 +1988,7 @@ pub(super) async fn run_session(
                         SessionCommand::Interject { text, id, images } => {
                             // Broadcast to every attached client so all panes
                             // viewing this session render the interjection block
-                            // ÔÇö not just the originating client. The originator
+                            // — not just the originating client. The originator
                             // dedups this echo by `id` against its optimistic
                             // local block; viewers render it.
                             session.broadcast_interjection(&text, id.as_deref());
@@ -2000,7 +2000,7 @@ pub(super) async fn run_session(
                                 image_count: images.len() as u32,
                                 redirect_kind: crate::session::events::RedirectKind::Interjection,
                             });
-                            // Buffer only into an actually-running turn ÔÇö the
+                            // Buffer only into an actually-running turn — the
                             // buffer is drained exclusively by the turn loop, so
                             // an interjection arriving while idle (the pager's
                             // running-state check races turn end) would strand
@@ -2132,7 +2132,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::TakeStreamingCapture { prompt_id, respond_to } => {
                             // Out-of-band: never touches `chat_state`. The
-                            // live slot is the only source of truth ÔÇö there
+                            // live slot is the only source of truth — there
                             // is no stash, so a queued prompt's
                             // `StreamStarted` racing this take will reset
                             // the slot to the new prompt-id and we'll log a
@@ -2145,7 +2145,7 @@ pub(super) async fn run_session(
                                     // Race: live slot now belongs to a
                                     // different turn. Drop this take rather
                                     // than misattribute the partial. The
-                                    // warn! is a production tripwire ÔÇö if
+                                    // warn! is a production tripwire — if
                                     // we ever see it fire in real traffic
                                     // we should add a per-prompt stash.
                                     if !cap.is_empty() {
@@ -2159,11 +2159,11 @@ pub(super) async fn run_session(
                                     None
                                 }
                             };
-                            // Consolidate outside the lock ÔÇö `finalize_for_upload`
+                            // Consolidate outside the lock — `finalize_for_upload`
                             // builds an up-to-8MB joined string, so it must not run
                             // while sampler events for a racing same-session turn
                             // contend for the mutex. Keep only uncommitted
-                            // generations; empty afterwards ÔçÆ nothing to upload.
+                            // generations; empty afterwards ⇒ nothing to upload.
                             let result = taken.and_then(|mut cap| {
                                 cap.finalize_for_upload();
                                 (!cap.is_empty()).then_some(cap)
@@ -2218,7 +2218,7 @@ pub(super) async fn run_session(
                             // abort.
                             session.drop_pending_synthetic_items().await;
 
-                            // ÔöÇÔöÇ session_end (shutdown path) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+                            // ── session_end (shutdown path) ────────────
                             // Hooks fire BEFORE memory auto-save per plan contract.
                             turn_end_queue.flush().await;
                             fire_session_end_hooks(&session, "shutdown", &end_timer).await;
@@ -2248,7 +2248,7 @@ pub(super) async fn run_session(
                     else {
                         // Completion channel closed: full feedback teardown so
                         // final signal sync + upload drain still run (cancel
-                        // alone no longer force-syncs ÔÇö shutdown owns that).
+                        // alone no longer force-syncs — shutdown owns that).
                         // No session-end hooks here, but the flush still has to precede
                         // `shutdown_workflows`, which makes a queued report's entry durable.
                         let end_timer = session_end::SessionEndTimer::new_shared();
@@ -2295,7 +2295,7 @@ pub(super) async fn run_session(
                         .await;
                     // Interjections that raced past the turn's final drain
                     // (arrived during turn-end bookkeeping) have no turn left
-                    // to merge into ÔÇö convert them to front-of-queue prompt
+                    // to merge into — convert them to front-of-queue prompt
                     // turns so the message runs instead of stranding.
                     //
                     // INVARIANT: this flush must only ever see interjections
@@ -2341,8 +2341,8 @@ pub(super) async fn run_session(
                     // `turn_succeeded` keeps cancelled/errored/refused turns
                     // from triggering a fresh model call (a user who hit
                     // Ctrl+C wants model activity to stop), and
-                    // `owned_completion` keeps a stale completion ÔÇö a turn
-                    // the Cancel path already finalized ÔÇö from summarizing
+                    // `owned_completion` keeps a stale completion — a turn
+                    // the Cancel path already finalized — from summarizing
                     // work the user aborted.
                     if turn_ran && turn_succeeded && owned_completion {
                         session.restart_turn_summary(completed_prompt_id);

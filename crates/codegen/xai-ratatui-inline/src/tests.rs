@@ -180,8 +180,12 @@ mod links {
     }
 
     fn span(col_start: u16, col_end: u16, url: &str, id: Option<u32>) -> LinkSpan {
+        span_at(0, col_start, col_end, url, id)
+    }
+
+    fn span_at(row: u16, col_start: u16, col_end: u16, url: &str, id: Option<u32>) -> LinkSpan {
         LinkSpan {
-            row: 0,
+            row,
             col_start,
             col_end,
             url: url.into(),
@@ -258,7 +262,7 @@ mod links {
     /// genuine grow would be misread as a shrink: the grow-time `scroll_up`
     /// would be skipped and the viewport's top would not move up, so the taller
     /// viewport would run off the bottom of the screen (dropdown items rendered
-    /// off-screen — the "empty dropdown over a full screen" bug).
+    /// off-screen ÔÇö the "empty dropdown over a full screen" bug).
     #[test]
     fn grow_after_out_of_band_area_shrink_still_scrolls() {
         let mut t = Terminal::with_options(
@@ -271,7 +275,7 @@ mod links {
         )
         .unwrap();
         // Out-of-band shrink to a 3-row viewport pinned at the bottom of the
-        // 24-row screen — as the commit path does. This does NOT update the
+        // 24-row screen ÔÇö as the commit path does. This does NOT update the
         // stored Inline height (still 21), creating the drift.
         t.set_viewport_area(Rect::new(0, 21, 80, 3));
 
@@ -305,7 +309,7 @@ mod links {
         let _ = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
         // Same glyphs, but the link is gone: the cells must be rewritten (so the
         // terminal's hyperlink clears) and carry no OSC 8. This is the `/new`
-        // regression — clearing is driven purely by the diff.
+        // regression ÔÇö clearing is driven purely by the diff.
         let out = frame(&mut t, "AB", &[]);
         assert!(out.contains("AB"), "cells should be redrawn: {out:?}");
         assert!(!out.contains("\x1b]8;"), "stale OSC8 leaked: {out:?}");
@@ -315,7 +319,7 @@ mod links {
     fn unchanged_link_and_content_emits_nothing() {
         let mut t = term(20, 3);
         let _ = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
-        // Identical glyphs AND identical link → empty diff → no output at all.
+        // Identical glyphs AND identical link ÔåÆ empty diff ÔåÆ no output at all.
         let out = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
         assert!(out.is_empty(), "expected empty diff, got: {out:?}");
     }
@@ -336,8 +340,85 @@ mod links {
         let mut t = term(20, 3);
         let out = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", Some(7))]);
         assert!(
-            out.contains("\x1b]8;id=7;https://chutes.ai\x07"),
+            out.contains("\x1b]8;id=1;https://chutes.ai\x07"),
             "id param missing: {out:?}"
+        );
+    }
+
+    #[test]
+    fn colliding_source_ids_different_urls_get_distinct_osc8_ids() {
+        let mut t = term(20, 3);
+        let out = frame(
+            &mut t,
+            "AxBxC",
+            &[
+                span(0, 1, "https://first.com", Some(0)),
+                span(2, 3, "https://second.com", Some(0)),
+                span(4, 5, "https://third.com", Some(0)),
+            ],
+        );
+        assert!(
+            out.contains("\x1b]8;id=1;https://first.com\x07"),
+            "first: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b]8;id=2;https://second.com\x07"),
+            "second: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b]8;id=3;https://third.com\x07"),
+            "third: {out:?}"
+        );
+    }
+
+    fn id1_payloads(out: &str, url: &str) -> String {
+        let open = format!("\x1b]8;id=1;{url}\x07");
+        let close = "\x1b]8;;\x07";
+        let mut payload = String::new();
+        let mut rest = out;
+        while let Some(i) = rest.find(&open) {
+            let after = &rest[i + open.len()..];
+            let end = after.find(close).expect("OSC 8 close after id=1 open");
+            payload.push_str(&after[..end]);
+            rest = &after[end + close.len()..];
+        }
+        payload
+    }
+
+    #[test]
+    fn wrapped_same_source_id_and_url_share_osc8_id() {
+        let mut t = term(20, 3);
+        t.backend_mut().buf.clear();
+        {
+            let mut f = t.get_frame();
+            f.buffer_mut().set_string(0, 0, "AB", Style::default());
+            f.buffer_mut().set_string(0, 1, "CD", Style::default());
+            f.buffer_mut().set_string(0, 2, "EF", Style::default());
+        }
+        t.set_frame_links(&[
+            span_at(0, 0, 2, "https://wrap.com", Some(3)),
+            span_at(1, 0, 2, "https://wrap.com", Some(3)),
+            span_at(2, 0, 2, "https://other.com", Some(3)),
+        ]);
+        t.flush_with_links().unwrap();
+        t.swap_buffers();
+        let out = String::from_utf8(t.backend().buf.clone()).unwrap();
+        let payload = id1_payloads(&out, "https://wrap.com");
+        assert!(
+            payload.contains("AB") && payload.contains("CD"),
+            "both wrap fragments must sit in id=1 runs: payload={payload:?} out={out:?}"
+        );
+        assert!(
+            !payload.contains('E') && !payload.contains('F'),
+            "following collision must not share wrap id: payload={payload:?} out={out:?}"
+        );
+        assert!(
+            !out.contains("\x1b]8;;https://wrap.com\x07"),
+            "un-id'd open must be absent: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b]8;id=2;https://other.com\x07"),
+            "collision remint missing: {out:?}"
         );
     }
 
@@ -354,7 +435,7 @@ mod links {
     #[test]
     fn distinct_links_split_into_separate_runs() {
         let mut t = term(20, 3);
-        // "AxB": A→a, gap x (no link), B→b.
+        // "AxB": AÔåÆa, gap x (no link), BÔåÆb.
         let out = frame(
             &mut t,
             "AxB",
@@ -376,16 +457,16 @@ mod links {
         let mut t = term(20, 3);
         // A width-2 char occupies two cells; only the lead cell is drawn, and
         // the OSC 8 wraps it.
-        let out = frame(&mut t, "世", &[span(0, 2, "https://chutes.ai", None)]);
+        let out = frame(&mut t, "õ©û", &[span(0, 2, "https://chutes.ai", None)]);
         assert!(
-            out.contains("\x1b]8;;https://chutes.ai\x07世\x1b]8;;\x07"),
+            out.contains("\x1b]8;;https://chutes.ai\x07õ©û\x1b]8;;\x07"),
             "wide-char run: {out:?}"
         );
     }
 
     #[test]
     fn nonzero_origin_viewport_maps_links() {
-        // The screen→cell mapping subtracts the viewport offset; verify a link
+        // The screenÔåÆcell mapping subtracts the viewport offset; verify a link
         // at an absolute (row, col) inside a non-origin viewport wraps the right
         // cells (regression guard for `(y - area.y)` / `(x - area.x)`).
         let area = Rect::new(2, 5, 20, 4);

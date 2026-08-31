@@ -477,7 +477,7 @@ pub(crate) fn build_tools_meta(tool_names: &[String]) -> acp::Meta {
     meta
 }
 /// Pager-owned slash trigger keys (canonical + aliases) plus shell command
-/// names the pager never offers (`hooks-add`, `reload-plugins`, ÔÇª). Burned
+/// names the pager never offers (`hooks-add`, `reload-plugins`, …). Burned
 /// when advertising skills so a colliding skill ships qualified (`acme:login`,
 /// `local:hooks-add`) instead of a bare name the pager will drop.
 ///
@@ -756,7 +756,7 @@ impl<'a> EffectiveCommandCatalog<'a> {
         self.skills.skill_exact(&slash_key(name))
     }
     /// Advertised name, else the canonical qualified form. Leading-token
-    /// only ÔÇö mid-prose `/word` matches advertised names so an unadvertised
+    /// only — mid-prose `/word` matches advertised names so an unadvertised
     /// spelling can't hijack sentence tails.
     fn skill_resolvable(&self, name: &str) -> Option<&'a SkillInfo> {
         self.skill(name).or_else(|| {
@@ -1060,19 +1060,19 @@ pub(crate) fn clear_product_skills_cache_for_test() {
 /// Never substitutes Build disk skills.
 ///
 /// Catalog source is product Skills REST (see `remote::skills_client`), not
-/// gateway `conversation.commands.updated` ÔÇö one process-local source for ACU
+/// gateway `conversation.commands.updated` — one process-local source for ACU
 /// and shell-side resolve without a gateway bridge.
 ///
-/// - `Some(skills)` ÔÇö REST succeeded (possibly empty; empty 200 is authoritative),
+/// - `Some(skills)` — REST succeeded (possibly empty; empty 200 is authoritative),
 ///   a fresh in-TTL success cache hit, a short-TTL degraded (user-list failed)
 ///   hit, or a prior successful catalog for **this** auth identity reused after
 ///   a transient failure
-/// - `None` ÔÇö no auth, REST failed with no matching cached catalog, or logout
+/// - `None` — no auth, REST failed with no matching cached catalog, or logout
 pub(crate) async fn product_skill_infos(
     auth: Option<std::sync::Arc<crate::auth::AuthManager>>,
 ) -> Option<Vec<SkillInfo>> {
     let Some(auth) = auth else {
-        tracing::warn!("product skills: no auth ÔÇö catalog unavailable");
+        tracing::warn!("product skills: no auth — catalog unavailable");
         return None;
     };
     let grok_auth = match auth.auth().await {
@@ -1100,7 +1100,7 @@ pub(crate) async fn product_skill_infos(
                 {
                     tracing::warn!(
                         skill_count = entry.skills.len(),
-                        "product skills: user list failed ÔÇö reusing last successful catalog"
+                        "product skills: user list failed — reusing last successful catalog"
                     );
                     return Some(entry.skills.clone());
                 }
@@ -1114,7 +1114,7 @@ pub(crate) async fn product_skill_infos(
             tracing::warn!(
                 skill_count = skills.len(),
                 used_untagged_recovery,
-                "product skills: user list failed ÔÇö caching degraded catalog briefly"
+                "product skills: user list failed — caching degraded catalog briefly"
             );
             Some(skills)
         }
@@ -1137,14 +1137,14 @@ pub(crate) async fn product_skill_infos(
                 tracing::warn!(
                     error = %err,
                     skill_count = entry.skills.len(),
-                    "product skills: catalog unavailable ÔÇö reusing last successful catalog"
+                    "product skills: catalog unavailable — reusing last successful catalog"
                 );
                 return Some(entry.skills);
             }
             *PRODUCT_SKILLS_NEGATIVE_CACHE.lock() = Some(product_skills_negative_stamp(&grok_auth));
             tracing::warn!(
                 error = %err,
-                "product skills: catalog unavailable after retries ÔÇö negative cache"
+                "product skills: catalog unavailable after retries — negative cache"
             );
             None
         }
@@ -1202,7 +1202,7 @@ pub(crate) fn acu_skill_source(is_chat_kind: bool) -> AcuSkillSource {
 /// - `Some(cwd)`: full skill discovery (Local + Repo + User) + builtins.
 /// - `None`: builtins + global (User-scoped) skills only.
 /// - `kind == Some("chat")` (feature `chat` only): **product Skills REST
-///   catalog** (same as grok-web) + builtins ÔÇö not Build disk skills. Without
+///   catalog** (same as grok-web) + builtins — not Build disk skills. Without
 ///   the feature, returns `Err` (invalid params). Product REST failure still
 ///   advertises builtins only (empty product skills).
 pub(crate) async fn list_commands(
@@ -1267,7 +1267,7 @@ pub(super) enum SlashCommandOutcome {
     Builtin(BuiltinAction),
     /// One or more skills detected in user input.
     ///
-    /// The original prompt `blocks` are preserved verbatim ÔÇö they are NOT
+    /// The original prompt `blocks` are preserved verbatim — they are NOT
     /// rewritten. The shell's prompt assembly layer will read each skill's
     /// SKILL.md, apply substitutions, and build the `<skill_information>`
     /// envelope alongside the `<user_query>` block.
@@ -1420,7 +1420,7 @@ impl BuiltinAction {
 ///
 /// - `RewriteToRun` (default): replace `/foo args` with `"run /foo args"`,
 ///   matching today's Chutes Build flow that calls our dedicated `skill` tool.
-/// - `Passthrough`: leave the prompt verbatim. Some templates use this ÔÇö
+/// - `Passthrough`: leave the prompt verbatim. Some templates use this —
 ///   the model is trained to spot a leading `/<name>`, look it up in the
 ///   `<agent_skills>` listing, and call the Read tool on `fullPath`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1433,7 +1433,7 @@ pub(crate) enum SkillSlashRewrite {
 /// a **known registered skill name** (bare or qualified).
 ///
 /// Unknown `/words` (like `/api/v2/users`, `/tmp/file`) are NOT treated as
-/// skill references ÔÇö only tokens that resolve to a known skill count.
+/// skill references — only tokens that resolve to a known skill count.
 ///
 /// Returns `None` when no known skill references are found. Otherwise returns
 /// the list of `ParsedSkillRef` entries with each skill's args (the text
@@ -1568,7 +1568,7 @@ pub(super) async fn build_skill_information_for_refs(
                     tracing::debug!(
                         skill = %sk.name,
                         path = %info.path,
-                        "product skill has no local body ÔÇö skip shell expansion"
+                        "product skill has no local body — skip shell expansion"
                     );
                 } else {
                     tracing::warn!(

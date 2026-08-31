@@ -1,5 +1,5 @@
 // Derived from ratatui's Terminal implementation (MIT / Apache-2.0 dual license).
-// Upstream: https://github.com/ratatui/ratatui — Copyright (c) The Ratatui Developers.
+// Upstream: https://github.com/ratatui/ratatui ÔÇö Copyright (c) The Ratatui Developers.
 // Modified for inline viewport support. See ../NOTICE and repository THIRD-PARTY-NOTICES.
 //
 #![allow(clippy::collapsible_if)]
@@ -26,6 +26,7 @@ pub struct LinkSpan {
     pub col_start: u16,
     pub col_end: u16,
     pub url: Arc<str>,
+    /// Source grouping key (markdown / overlay id), not the emitted OSC 8 `id=`.
     pub id: Option<u32>,
 }
 
@@ -34,7 +35,14 @@ pub struct LinkSpan {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct LinkRef {
     url: Arc<str>,
+    /// Reminted OSC 8 `id=`, not [`LinkSpan::id`].
     id: Option<u32>,
+}
+
+struct LastNamedOsc8 {
+    source_id: u32,
+    url: Arc<str>,
+    osc8_id: u32,
 }
 
 /// Resolve a per-cell link id (`0` = none) to its [`LinkRef`].
@@ -68,6 +76,32 @@ fn write_osc8_open<W: Write>(w: &mut W, url: &str, id: Option<u32>) -> io::Resul
 /// Emit an OSC 8 hyperlink close sequence.
 fn write_osc8_close<W: Write>(w: &mut W) -> io::Result<()> {
     w.write_all(b"\x1b]8;;\x07")
+}
+
+/// Markdown ids restart per document; OSC 8 `id=` is terminal-global.
+/// Consecutive wrap segments of the same source id+URL reuse the last emitted id.
+fn next_osc8_id(
+    span: &LinkSpan,
+    last_named: &mut Option<LastNamedOsc8>,
+    next: &mut u32,
+) -> Option<u32> {
+    let Some(source_id) = span.id else {
+        *last_named = None;
+        return None;
+    };
+    if let Some(last) = last_named.as_ref()
+        && last.source_id == source_id
+        && last.url.as_ref() == span.url.as_ref()
+    {
+        return Some(last.osc8_id);
+    }
+    *next = next.saturating_add(1);
+    *last_named = Some(LastNamedOsc8 {
+        source_id,
+        url: Arc::clone(&span.url),
+        osc8_id: *next,
+    });
+    Some(*next)
 }
 
 #[derive(Debug, Hash)]
@@ -302,7 +336,7 @@ where
     /// Uses [`diff_large`] instead of ratatui's [`Buffer::diff`] to avoid a `u16`
     /// truncation bug: upstream `pos_of()` casts the flat cell index to `u16`
     /// before computing `(x, y)`, which silently wraps around when
-    /// `width * height > 65 535`.  On extra-large terminals (e.g. 420×160 = 67 200
+    /// `width * height > 65 535`.  On extra-large terminals (e.g. 420├ù160 = 67 200
     /// cells) this causes the entire UI to be rendered into a tiny corner.
     pub fn flush(&mut self) -> io::Result<bool> {
         let previous_buffer = &self.buffers[1 - self.current];
@@ -324,6 +358,9 @@ where
     /// [`flush_with_links`]. Passing an empty slice clears the frame's links
     /// (so links from the previous frame are diffed away).
     ///
+    /// [`LinkSpan::id`] is a source grouping key. Consecutive spans with the
+    /// same id and URL share one reminted OSC 8 `id=` starting at 1.
+    ///
     /// [`flush_with_links`]: Self::flush_with_links
     pub fn set_frame_links(&mut self, spans: &[LinkSpan]) {
         let area = self.viewport_area;
@@ -336,6 +373,9 @@ where
         let table = &mut self.link_tables[self.current];
         table.clear();
 
+        let mut next = 0u32;
+        let mut last_named: Option<LastNamedOsc8> = None;
+
         for span in spans {
             if span.row < area.y || span.row >= area.bottom() {
                 continue;
@@ -345,10 +385,11 @@ where
             if start >= end {
                 continue;
             }
+            let osc8_id = next_osc8_id(span, &mut last_named, &mut next);
             let id = (table.len() + 1) as u32;
             table.push(LinkRef {
                 url: span.url.clone(),
-                id: span.id,
+                id: osc8_id,
             });
             let row = (span.row - area.y) as usize;
             for col in start..end {
@@ -364,7 +405,7 @@ where
     /// by the current link layer (see [`set_frame_links`](Self::set_frame_links)).
     ///
     /// A cell is rewritten when its content/style changed **or** its link
-    /// changed, so links are cleared automatically when they disappear — no
+    /// changed, so links are cleared automatically when they disappear ÔÇö no
     /// out-of-band repaint. Contiguous runs of cells sharing the same link are
     /// wrapped in a single OSC 8 open/close around the upstream cell draw.
     pub fn flush_with_links(&mut self) -> io::Result<bool>
@@ -376,7 +417,7 @@ where
 
         // Fast path: no hyperlinks in either the current or previous frame. The
         // link layer can't affect the diff or emission, so fall back to the
-        // plain cell diff + draw — byte-for-byte identical to `flush` with zero
+        // plain cell diff + draw ÔÇö byte-for-byte identical to `flush` with zero
         // per-cell link resolution. This keeps the overwhelmingly common
         // link-free frame (streaming output, etc.) as cheap as before.
         if self.link_tables[cur].is_empty() && self.link_tables[prev].is_empty() {
@@ -423,7 +464,7 @@ where
             // inline viewport anchored near the cursor and is wrong here in two
             // ways: (1) it clamps the height to the fixed `Viewport::Inline(height)`
             // captured at startup, so enlarging the terminal never grows the
-            // viewport — the UI ends up truncated at the bottom even though the
+            // viewport ÔÇö the UI ends up truncated at the bottom even though the
             // width tracks the resize; and (2) on shrink it can reposition the
             // viewport partly or fully off-screen. Filling the new area avoids both.
             Viewport::Inline(_)
@@ -854,7 +895,7 @@ where
         // `set_viewport_area` (minimal mode's content-anchored commit path
         // shrinks the viewport that way before `insert_before`). Comparing
         // against a stale stored height made a genuine grow read as a shrink,
-        // skipping the grow-time `scroll_up` below — so the viewport's top never
+        // skipping the grow-time `scroll_up` below ÔÇö so the viewport's top never
         // moved up and the taller region ran off the bottom of the screen (an
         // opened dropdown's items landed off-screen). Keep the stored height in
         // lockstep with the area height on the way out so `resize`
@@ -1214,7 +1255,7 @@ fn diff_large_with_links<'a>(
 /// upstream [`Backend::draw`] is reused per run (so all SGR / wide-char / cursor
 /// handling is unchanged); each linked run is wrapped in one OSC 8 open/close.
 /// Keeping a link open across `draw`'s internal cursor moves is correct because
-/// OSC 8 is a sticky terminal mode — only the written cells inherit it, and
+/// OSC 8 is a sticky terminal mode ÔÇö only the written cells inherit it, and
 /// unchanged cells in any gap keep whatever link they already had.
 fn emit_frame_with_links<B: Backend + Write>(
     backend: &mut B,
@@ -1315,6 +1356,40 @@ impl<B: Backend> Terminal<B> {
         self.last_known_area
     }
 
+    /// Switch the viewport kind in place, keeping the backend alive.
+    ///
+    /// `Viewport::Inline` issues a cursor-position query (caller must be the
+    /// only stdin reader), and both buffers reset ÔÇö follow with a full redraw.
+    pub fn set_viewport(&mut self, viewport: Viewport) -> io::Result<()> {
+        let area = match viewport {
+            Viewport::Fullscreen | Viewport::Inline(_) => {
+                Rect::from((Position::ORIGIN, self.backend.size()?))
+            }
+            Viewport::Fixed(area) => area,
+        };
+        let (viewport_area, cursor_pos) = match viewport {
+            Viewport::Fullscreen => (area, Position::ORIGIN),
+            Viewport::Inline(height) => {
+                compute_inline_size(&mut self.backend, height, area.as_size(), 0)?
+            }
+            Viewport::Fixed(area) => (area, area.as_position()),
+        };
+        let link_len = (viewport_area.width as usize) * (viewport_area.height as usize);
+        self.viewport = viewport;
+        self.viewport_area = viewport_area;
+        self.last_known_area = area;
+        self.last_known_cursor_pos = cursor_pos;
+        self.buffers = [Buffer::empty(viewport_area), Buffer::empty(viewport_area)];
+        self.current = 0;
+        for layer in self.link_ids.iter_mut() {
+            layer.clear();
+            layer.resize(link_len, 0);
+        }
+        self.link_tables[0].clear();
+        self.link_tables[1].clear();
+        Ok(())
+    }
+
     /// HACK: this is made pub
     pub fn set_viewport_area(&mut self, area: Rect) {
         self.buffers[self.current].resize(area);
@@ -1390,7 +1465,39 @@ mod inline_resize_tests {
         assert_eq!(terminal.viewport_area(), Rect::new(0, 0, 80, 20));
     }
 
-    /// Growth after a shrink must expand again — the viewport tracks the live
+    /// `set_viewport` must match what a fresh `with_options` would compute.
+    #[test]
+    fn set_viewport_round_trips_fullscreen_and_inline() {
+        let mut terminal = Terminal::with_options(
+            TestBackend::new(80, 24),
+            TerminalOptions {
+                viewport: Viewport::Fullscreen,
+            },
+        )
+        .unwrap();
+        assert_eq!(terminal.viewport_area(), Rect::new(0, 0, 80, 24));
+
+        terminal.set_viewport(Viewport::Inline(10)).unwrap();
+        let inline_area = terminal.viewport_area();
+        assert_eq!(inline_area.width, 80);
+        assert_eq!(inline_area.height, 10);
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                assert_eq!(area.height, 10);
+            })
+            .unwrap();
+
+        terminal.set_viewport(Viewport::Fullscreen).unwrap();
+        assert_eq!(terminal.viewport_area(), Rect::new(0, 0, 80, 24));
+        terminal
+            .draw(|f| {
+                assert_eq!(f.area(), Rect::new(0, 0, 80, 24));
+            })
+            .unwrap();
+    }
+
+    /// Growth after a shrink must expand again ÔÇö the viewport tracks the live
     /// terminal size in both directions, repeatedly.
     #[test]
     fn inline_full_height_tracks_across_shrink_then_grow() {
@@ -1406,7 +1513,7 @@ mod inline_resize_tests {
     }
 
     /// A *small* inline viewport (height < terminal height, anchored near the
-    /// bottom) must NOT be forced to full height — it keeps the standard
+    /// bottom) must NOT be forced to full height ÔÇö it keeps the standard
     /// `compute_inline_size` behavior, so the full-height special-case does not
     /// over-apply.
     #[test]
@@ -1427,7 +1534,7 @@ mod inline_resize_tests {
         // The full-height special-case keys off the viewport spanning the whole
         // terminal (height >= terminal height). A small inline viewport does not,
         // so its height stays clamped to the small inline target while the width
-        // tracks the resize — i.e. it keeps the standard `compute_inline_size`
+        // tracks the resize ÔÇö i.e. it keeps the standard `compute_inline_size`
         // behavior and is not ballooned to full height.
         assert_eq!(terminal.viewport_area().height, 3);
         assert_eq!(terminal.viewport_area().width, 120);

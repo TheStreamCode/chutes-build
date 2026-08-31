@@ -622,22 +622,17 @@ pub(crate) fn test_backdate_provider_mint(name: &str, age: std::time::Duration) 
 }
 
 /// A counting provider that prints "tok-1", "tok-2", ... on successive runs.
-/// Drives the `auth-provider-fixture` binary so the same test runs on every
-/// platform: the old POSIX one-liner (`echo >> …; printf "$(wc -l …)"`) has
-/// no `cmd /C` equivalent and never ran on Windows.
 #[cfg(test)]
 pub(crate) fn test_counting_provider(name: &str, dir: &std::path::Path) -> AuthProviderRef {
     let counter = dir.join("count");
     AuthProviderRef::new(
         name.to_owned(),
         AuthProviderConfig {
-            command: crate::auth::provider_fixture_bin()
-                .to_string_lossy()
-                .into_owned(),
-            args: Some(vec![
-                "count".to_owned(),
-                counter.to_string_lossy().into_owned(),
-            ]),
+            command: format!(
+                "echo run >> {c}; printf 'tok-%s' \"$(wc -l < {c} | tr -d ' ')\"",
+                c = counter.display()
+            ),
+            args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
             cwd: None,

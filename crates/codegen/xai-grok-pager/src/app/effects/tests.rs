@@ -1,8 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 use super::*;
 use xai_grok_shell::extensions::billing::{BillingConfig, Cent, UsagePeriod};
-/// The invalid-params server detail survives `attach_prompt_usage`
-/// wrapping `error.data` as `{message, promptUsage}`.
+/// The invalid-params server detail survives `attach_prompt_usage` wrapping `error.data` as `{message, promptUsage}`.
 #[test]
 fn format_acp_error_reads_detail_from_wrapped_data() {
     let bare = acp::Error::invalid_params().data("model does not support tools");
@@ -27,7 +26,34 @@ fn format_acp_error_formats_http_500_dump() {
         );
     assert_eq!(
             format_acp_error(&err, false),
-            "Server error (500) \u{2014} Something went wrong on our side. Wait a minute and send again."
+            "Server error (500): Something went wrong on our side. Wait a minute and send again."
+        );
+}
+/// The typed kind in `error.data` (the shell's `terminal_error_data` shape) picks the truncation copy.
+/// The placeholder message proves the typed extraction, not the text fallback, chose it.
+#[test]
+fn format_acp_error_typed_truncation_kind_renders_truncation_copy() {
+    let err = acp::Error::internal_error()
+        .data(
+            serde_json::json!({
+            "message": "turn ended early",
+            "error_kind": "max_tokens_truncation"
+        }),
+        );
+    assert_eq!(
+            format_acp_error(&err, false),
+            "Response truncated: turn ended early"
+        );
+    let unknown = acp::Error::internal_error()
+        .data(
+            serde_json::json!({
+            "message": "a future failure quoting: response truncated by max_tokens",
+            "error_kind": "a_future_kind"
+        }),
+        );
+    assert_eq!(
+            format_acp_error(&unknown, false),
+            "Request failed: a future failure quoting: response truncated by max_tokens. Try sending again."
         );
 }
 #[test]
@@ -71,8 +97,7 @@ fn format_acp_error_rate_limit_surfaces_detail_or_fallback() {
             FREE_USAGE_USER_MESSAGE
         );
 }
-/// Non-empty token ranges ride the wire block meta as `skillTokenRanges`
-/// byte pairs; the text itself is untouched.
+/// Non-empty token ranges ride the wire block meta as `skillTokenRanges` byte pairs; the text itself is untouched.
 #[test]
 fn plain_prompt_block_stamps_skill_token_ranges_meta() {
     let block = plain_prompt_content_block("great /pr-workflow go".into(), &[6..18]);
@@ -83,7 +108,7 @@ fn plain_prompt_block_stamps_skill_token_ranges_meta() {
     let meta = tb.meta.expect("meta stamped when ranges non-empty");
     assert_eq!(meta["skillTokenRanges"], serde_json::json!([[6, 18]]));
 }
-/// Empty ranges keep `meta: None` — the legacy wire shape is unchanged.
+/// Empty ranges keep `meta: None`; the legacy wire shape is unchanged.
 #[test]
 fn plain_prompt_block_no_meta_when_ranges_empty() {
     let block = plain_prompt_content_block("hello".into(), &[]);
@@ -93,8 +118,7 @@ fn plain_prompt_block_no_meta_when_ranges_empty() {
     assert_eq!(tb.text, "hello");
     assert!(tb.meta.is_none());
 }
-/// With a screen mode, `_meta` carries both `promptId` and `screenMode`
-/// (the shell threads the latter into `prompt_submitted.screen_mode`).
+/// With a screen mode, `_meta` carries both `promptId` and `screenMode` (the shell threads the latter into `prompt_submitted.screen_mode`).
 #[test]
 fn prompt_request_meta_stamps_screen_mode() {
     let meta = prompt_request_meta("p-1", Some("minimal"));
@@ -103,15 +127,13 @@ fn prompt_request_meta_stamps_screen_mode() {
             serde_json::json!({ "promptId": "p-1", "screenMode": "minimal" })
         );
 }
-/// Without a screen mode (`SessionFlags::default()` in tests), the key is
-/// omitted — the legacy `{"promptId": …}` wire shape stays byte-identical.
+/// Without a screen mode (`SessionFlags::default()` in tests), the key is omitted; the legacy `{"promptId": …}` wire shape stays byte-identical.
 #[test]
 fn prompt_request_meta_omits_screen_mode_when_unset() {
     let meta = prompt_request_meta("p-2", None);
     assert_eq!(meta, serde_json::json!({ "promptId": "p-2" }));
 }
-/// Text-only interjections must omit the `content` key entirely — the
-/// legacy `chutes.ai/interject` wire shape stays byte-identical.
+/// Text-only interjections must omit the `content` key entirely; the legacy `chutes.ai/interject` wire shape stays byte-identical.
 #[test]
 fn interject_params_omit_content_when_no_blocks() {
     let sid = acp::SessionId::new("s1");
@@ -131,7 +153,7 @@ fn picker_keeps_conversation_with_empty_cwd_and_missing_updated_at() {
                 "cwd": "",
                 "summary": "Compare GPU vendors",
                 "source": "conversation",
-                "_meta": { "chutes.build/session": { "kind": "chat" } }
+                "_meta": { "chutes.ai/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
@@ -149,7 +171,7 @@ fn picker_keeps_old_conversation_past_cutoff() {
                 "summary": "Ancient chat",
                 "source": "conversation",
                 "updatedAt": "2020-01-01T00:00:00Z",
-                "_meta": { "chutes.build/session": { "kind": "chat" } }
+                "_meta": { "chutes.ai/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
@@ -182,7 +204,7 @@ fn picker_keeps_untitled_conversation_as_untitled() {
                 "summary": "",
                 "source": "conversation",
                 "updatedAt": "2026-07-01T00:00:00Z",
-                "_meta": { "chutes.build/session": { "kind": "chat" } }
+                "_meta": { "chutes.ai/session": { "kind": "chat" } }
             }]
         });
     let entries = parse_session_picker_entries(&payload);
@@ -190,7 +212,61 @@ fn picker_keeps_untitled_conversation_as_untitled() {
     assert_eq!(entries[0].summary, "Untitled");
     assert_eq!(entries[0].source, "conversation");
 }
-/// Canary: the empty-summary drop still applies to Build rows.
+/// The recap and last-turn summary ride the session-list wire and land on the picker entry so the expanded card can show them.
+#[test]
+fn picker_parses_last_recap_and_last_turn_summary() {
+    let recent = chrono::Utc::now().to_rfc3339();
+    let payload = serde_json::json!({
+            "sessions": [{
+                "sessionId": "s_recap",
+                "cwd": "/Users/me/xai",
+                "summary": "Auth refactor",
+                "source": "local",
+                "updatedAt": recent,
+                "lastTurnSummary": "Wired retries into billing",
+                "lastRecap": "Where we left off: auth refactor across the API"
+            }]
+        });
+    let entries = parse_session_picker_entries(&payload);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+            entries[0].last_turn_summary.as_deref(),
+            Some("Wired retries into billing")
+        );
+    assert_eq!(
+            entries[0].last_recap.as_deref(),
+            Some("Where we left off: auth refactor across the API")
+        );
+}
+/// `sessionKind` rides the session-list wire onto the entry; the picker's Headless page filter keys on it.
+#[test]
+fn picker_parses_session_kind() {
+    let recent = chrono::Utc::now().to_rfc3339();
+    let payload = serde_json::json!({
+            "sessions": [
+                {
+                    "sessionId": "s_headless",
+                    "cwd": "/Users/me/xai",
+                    "summary": "Classify clip",
+                    "source": "local",
+                    "updatedAt": recent,
+                    "sessionKind": "headless"
+                },
+                {
+                    "sessionId": "s_plain",
+                    "cwd": "/Users/me/xai",
+                    "summary": "Interactive work",
+                    "source": "local",
+                    "updatedAt": recent
+                }
+            ]
+        });
+    let entries = parse_session_picker_entries(&payload);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].session_kind.as_deref(), Some("headless"));
+    assert_eq!(entries[1].session_kind, None);
+}
+/// The empty-summary drop still applies to Build rows.
 #[test]
 fn picker_still_drops_build_row_with_empty_summary() {
     let payload = serde_json::json!({
@@ -210,7 +286,7 @@ fn session_list_partial_parses_reasons() {
     let payload = |reason: &str| {
         serde_json::json!({
                 "sessions": [],
-                "_meta": { "chutes.build/partial": { "conversations": true, "reason": reason } }
+                "_meta": { "chutes.ai/partial": { "conversations": true, "reason": reason } }
             })
     };
     assert_eq!(
@@ -234,16 +310,14 @@ fn session_list_partial_parses_reasons() {
 fn session_list_partial_absent_for_healthy_or_meta_less_responses() {
     let healthy = serde_json::json!({
             "sessions": [],
-            "_meta": { "chutes.build/partial": { "conversations": false } }
+            "_meta": { "chutes.ai/partial": { "conversations": false } }
         });
     assert_eq!(parse_session_list_partial(&healthy), None);
     let legacy = serde_json::json!({ "sessions": [] });
     assert_eq!(parse_session_list_partial(&legacy), None);
 }
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`: the outcome
-/// lives at `result.outcome`. Probing the top level (the pre-fix code)
-/// was why the tasks-pane ✗ never removed stale (`not_found`) rows after
-/// a session resume.
+/// The agent serializes `ExtMethodResult<KillTaskResponse>`: the outcome lives at `result.outcome`.
+/// Probing the top level instead was why the tasks-pane ✗ never removed stale (`not_found`) rows after a session resume.
 #[test]
 fn parse_kill_outcome_reads_result_envelope() {
     use xai_grok_tools::types::KillOutcome;
@@ -254,9 +328,8 @@ fn parse_kill_outcome_reads_result_envelope() {
     let resp = r#"{"result":{"taskId":"t-1","outcome":"already_exited"}}"#;
     assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::AlreadyExited));
 }
-/// Round-trip through the agent's own serializer: what
-/// `extensions::task::respond()` produces must parse back to the same
-/// typed outcome (guards against the two sides drifting apart).
+/// Round-trip through the agent's own serializer: what `extensions::task::respond()` produces must parse back to the same typed outcome.
+/// This guards against the two sides drifting apart.
 #[test]
 fn parse_kill_outcome_round_trips_agent_serialization() {
     use xai_grok_shell::extensions::task::KillTaskResponse;
@@ -271,8 +344,7 @@ fn parse_kill_outcome_round_trips_agent_serialization() {
         .unwrap();
     assert_eq!(parse_kill_outcome(&wire), Some(KillOutcome::NotFound));
 }
-/// Error envelopes and malformed payloads yield `None` (clear pending
-/// state, keep the row).
+/// Error envelopes and malformed payloads yield `None` (clear pending state, keep the row).
 #[test]
 fn parse_kill_outcome_none_for_error_or_malformed() {
     assert_eq!(
@@ -286,8 +358,7 @@ fn parse_kill_outcome_none_for_error_or_malformed() {
             None
         );
 }
-/// Typed `outcome`: `Cancelled` → `StoppedLive`; `AlreadyFinished` /
-/// `NotFound` → `NothingLive` (carrying the real status when known).
+/// Typed `outcome`: `Cancelled` maps to `StoppedLive`; `AlreadyFinished` and `NotFound` map to `NothingLive` (carrying the real status when known).
 #[test]
 fn parse_subagent_kill_outcome_reads_typed_outcome() {
     assert!(matches!(
@@ -309,8 +380,7 @@ fn parse_subagent_kill_outcome_reads_typed_outcome() {
             SubagentKillOutcome::NothingLive { status: None }
         ));
 }
-/// An older shell sends no `outcome`; the parser falls back to the legacy
-/// `cancelled` bool (true → `StoppedLive`, false → `NothingLive`).
+/// An older shell sends no `outcome`; the parser falls back to the legacy `cancelled` bool: true means `StoppedLive`, false means `NothingLive`.
 #[test]
 fn parse_subagent_kill_outcome_falls_back_to_legacy_bool() {
     assert!(matches!(
@@ -322,9 +392,8 @@ fn parse_subagent_kill_outcome_falls_back_to_legacy_bool() {
             SubagentKillOutcome::NothingLive { status: None }
         ));
 }
-/// An unknown future `kind` deserializes to `Unknown` (via `#[serde(other)]`)
-/// and falls back to the always-present `cancelled` bool — not `RpcFailed`,
-/// which would leave the row stuck.
+/// An unknown future `kind` deserializes to `Unknown` (via `#[serde(other)]`) and falls back to the always-present `cancelled` bool.
+/// It must not become `RpcFailed`, which would leave the row stuck.
 #[test]
 fn parse_subagent_kill_outcome_unknown_kind_falls_back_to_legacy_bool() {
     assert!(matches!(
@@ -340,8 +409,7 @@ fn parse_subagent_kill_outcome_unknown_kind_falls_back_to_legacy_bool() {
             SubagentKillOutcome::NothingLive { status: None }
         ));
 }
-/// Round-trip through the agent's own serializer guards the two sides
-/// against drifting apart.
+/// Round-trip through the agent's own serializer guards the two sides against drifting apart.
 #[test]
 fn parse_subagent_kill_outcome_round_trips_agent_serialization() {
     use xai_grok_shell::extensions::task::{
@@ -362,9 +430,8 @@ fn parse_subagent_kill_outcome_round_trips_agent_serialization() {
             SubagentKillOutcome::NothingLive { status: Some(s) } if s == "failed"
         ));
 }
-/// A top-level payload (no `result` envelope), error envelopes, and
-/// malformed payloads are a failed RPC (`RpcFailed`) — the caller must NOT
-/// finalize a possibly-live row.
+/// A top-level payload (no `result` envelope), error envelopes, and malformed payloads are a failed RPC (`RpcFailed`).
+/// The caller must not finalize a possibly-live row.
 #[test]
 fn parse_subagent_kill_outcome_rpc_failed_for_error_or_malformed() {
     assert!(matches!(
@@ -401,8 +468,7 @@ fn interject_params_carry_content_when_blocks_present() {
     assert_eq!(content.len(), 1);
     assert_eq!(content[0]["text"], "look at [Image #1]");
 }
-/// A billing config with every field unset, for use as a base in
-/// `credit_balance_from_config` tests via struct-update syntax.
+/// A billing config with every field unset, for use as a base in `credit_balance_from_config` tests via struct-update syntax.
 fn empty_billing_config() -> BillingConfig {
     BillingConfig {
         credit_usage_percent: None,
@@ -416,10 +482,6 @@ fn empty_billing_config() -> BillingConfig {
         billing_period_start: None,
         billing_period_end: None,
         history: vec![],
-        // Chutes reports usage as a set of rolling windows (4h/daily/weekly/
-        // monthly) rather than a single monthly cap; empty here so the
-        // credit-balance tests below exercise the legacy limit/used path.
-        usage_windows: vec![],
     }
 }
 #[test]
@@ -456,7 +518,7 @@ fn credit_balance_falls_back_to_limit_used_when_percent_absent() {
     };
     assert_eq!(credit_balance_from_config(c).usage_pct, 25.0);
 }
-/// Match production: RFC 3339 → user's local wall-clock (no zone label).
+/// Match production: RFC 3339 renders as the user's local wall-clock (no zone label).
 fn expected_period_end_display(rfc3339: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(rfc3339)
         .expect("test fixture is valid RFC 3339")
@@ -694,8 +756,7 @@ fn parse_worktree_restore_payload_missing_fields() {
     assert!(summary.is_none());
     assert!(degree.is_none());
 }
-/// A typo / unknown variant must parse as `None` rather than
-/// silently round-tripping a bogus value.
+/// A typo or unknown variant must parse as `None` rather than silently round-tripping a bogus value.
 #[test]
 fn parse_worktree_restore_payload_rejects_unknown_degree() {
     let value = serde_json::json!({
@@ -760,7 +821,7 @@ async fn persist_setting_unknown_key_returns_err() {
         Ok(()) => panic!("expected Err for unknown key"),
     }
 }
-/// Type-mismatch returns Err (not panic) for spawned-task safety.
+/// Type-mismatch returns Err, not panic: the parser runs inside spawned tasks.
 #[tokio::test]
 async fn persist_setting_type_mismatch_errors_compact_mode() {
     use crate::settings::SettingValue;
@@ -843,8 +904,8 @@ async fn persist_setting_type_mismatch_errors_simple_mode() {
 }
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-/// Spawn a fake ACP agent that counts `chutes.ai/yolo_mode_changed`
-/// notifications. Exits when the channel closes.
+/// Spawn a fake ACP agent that counts `chutes.ai/yolo_mode_changed` notifications.
+/// Exits when the channel closes.
 fn spawn_fake_acp_agent(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpAgentMessage>,
 ) -> Arc<AtomicUsize> {
@@ -853,7 +914,7 @@ fn spawn_fake_acp_agent(
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpAgentMessage::ExtNotification(args) = msg {
-                if args.request.method.as_ref() == "chutes.build/yolo_mode_changed" {
+                if args.request.method.as_ref() == "chutes.ai/yolo_mode_changed" {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                 }
                 let _ = args.response_tx.send(Ok(()));
@@ -899,8 +960,7 @@ fn unregister_best_effort_removes_entry_when_lock_free() {
         );
 }
 /// Contended: the quit path must skip the shared flock rather than block.
-/// The unregister runs on a worker joined against a deadline so a blocking
-/// regression fails fast here instead of deadlocking the test binary.
+/// The unregister runs on a worker joined against a deadline so a blocking regression fails fast instead of deadlocking the test binary.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn unregister_best_effort_is_nonblocking_under_lock_contention() {
@@ -938,16 +998,14 @@ fn unregister_best_effort_is_nonblocking_under_lock_contention() {
             "contended unregister must leave the entry for collect_crashed",
         );
 }
-/// A real I/O error (uncreatable registry root) is swallowed: the
-/// best-effort helper logs and returns instead of panicking.
+/// A real I/O error (uncreatable registry root) is swallowed: the best-effort helper logs and returns instead of panicking.
 #[test]
 fn unregister_best_effort_swallows_io_error() {
     let file = tempfile::NamedTempFile::new().expect("tempfile");
     let bad_root = file.path().join("not-a-dir");
     unregister_active_session_best_effort_in(&bad_root, &acp::SessionId::new("s1"));
 }
-/// BestEffort path fires exactly one ACP notification regardless
-/// of disk outcome.
+/// BestEffort path fires exactly one ACP notification regardless of disk outcome.
 #[tokio::test]
 async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
     use agent_client_protocol as acp;
@@ -980,8 +1038,7 @@ async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
              SettingPersistFailedBestEffort (Err), got {result:?}",
         );
 }
-/// WithRollback: notification count matches disk outcome
-/// (1 on Ok, 0 on Err).
+/// WithRollback: notification count matches disk outcome (1 on Ok, 0 on Err).
 #[tokio::test]
 async fn persist_permission_mode_acp_notification_gated_on_disk_for_with_rollback() {
     use agent_client_protocol as acp;
@@ -1040,7 +1097,7 @@ async fn persist_permission_mode_no_session_id_suppresses_acp() {
              agents have no ACP channel to notify",
         );
 }
-/// BestEffort + disk failure must NOT return `SettingPersisted`.
+/// BestEffort with a disk failure must not return `SettingPersisted`.
 #[tokio::test]
 async fn persist_permission_mode_best_effort_failure_returns_dedicated_variant() {
     let _guard = setup_grok_home_in_tempdir();
@@ -1074,7 +1131,7 @@ async fn persist_permission_mode_best_effort_failure_returns_dedicated_variant()
         }
     }
 }
-/// (Err, WithRollback) → SUPPRESS for all canonicals.
+/// (Err, WithRollback) suppresses for all canonicals.
 #[test]
 fn should_send_yolo_acp_with_rollback_suppresses_on_err() {
     let result: Result<(), String> = Err("simulated disk failure".to_string());
@@ -1097,7 +1154,7 @@ fn should_send_yolo_acp_with_rollback_suppresses_on_err() {
             "WithRollback + Err MUST suppress for the 'default' prior canonical too",
         );
 }
-/// (Ok, WithRollback) → FIRE for all canonicals.
+/// (Ok, WithRollback) fires for all canonicals.
 #[test]
 fn should_send_yolo_acp_with_rollback_fires_on_ok() {
     let ok: Result<(), String> = Ok(());
@@ -1232,7 +1289,7 @@ fn route_permission_mode_result_ok_preserves_default_canonical() {
         other => panic!("Ok must return SettingPersisted, got {other:?}"),
     }
 }
-/// `(Err, BestEffort)` must NOT return `SettingPersisted`.
+/// `(Err, BestEffort)` must not return `SettingPersisted`.
 #[test]
 fn route_permission_mode_result_err_best_effort_routes_to_dedicated_variant() {
     let result = route_permission_mode_result(
@@ -1293,7 +1350,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 match args.request.method.as_ref() {
-                    "chutes.build/marketplace/list" => {
+                    "chutes.ai/marketplace/list" => {
                         let response = serde_json::json!({
                                 "result": {
                                     "sources": [{
@@ -1327,7 +1384,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "chutes.build/marketplace/action" => {
+                    "chutes.ai/marketplace/action" => {
                         action_calls_for_task.fetch_add(1, Ordering::SeqCst);
                         let req: xai_hooks_plugins_types::MarketplaceActionRequest = serde_json::from_str(
                                 args.request.params.get(),
@@ -1360,7 +1417,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
                             .response_tx
                             .send(Ok(acp::ExtResponse::new(Arc::from(raw))));
                     }
-                    "chutes.build/plugins/notify-updates" => {
+                    "chutes.ai/plugins/notify-updates" => {
                         saw_success_notification_for_task.store(true, Ordering::SeqCst);
                         let raw = serde_json::value::RawValue::from_string("{}".into())
                             .expect("serialize notify response");
@@ -1496,9 +1553,8 @@ async fn foreign_resume_detection_runs_as_task_result() {
         other => panic!("expected ForeignResumeHintDetected, got {other:?}"),
     }
 }
-/// `FetchSessionList` wire shape: search sends `query` (no `allowRelax`);
-/// browse opts into `allowRelax` and parses `chutes.ai/listScope`; all
-/// outcomes echo `seq`/`query`.
+/// `FetchSessionList` wire shape: search sends `query` (no `allowRelax`); browse opts into `allowRelax` and parses `chutes.ai/listScope`.
+/// All outcomes echo `seq` and `query`.
 #[tokio::test]
 async fn fetch_session_list_pushes_query_and_echoes_seq() {
     use std::sync::{Arc, Mutex};
@@ -1509,7 +1565,7 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
-                assert_eq!(args.request.method.as_ref(), "chutes.build/session/list");
+                assert_eq!(args.request.method.as_ref(), "chutes.ai/session/list");
                 let params: serde_json::Value = serde_json::from_str(
                         args.request.params.get(),
                     )
@@ -1524,7 +1580,7 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
                     serde_json::json!({
                             "result": {
                                 "sessions": [],
-                                "_meta": { "chutes.build/listScope": "repo" },
+                                "_meta": { "chutes.ai/listScope": "repo" },
                             }
                         })
                 } else {
@@ -1549,14 +1605,28 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
         );
         tasks
     };
+    use crate::views::session_picker_surface::SessionPickerHost;
     let mut tasks = run(Effect::FetchSessionList {
+        host: SessionPickerHost::AgentModal,
+        generation: 41,
         query: Some("hit".into()),
         seq: 7,
         kind_filter: None,
+        headless_policy: Default::default(),
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { sessions, scope, seq, query, .. } => {
+        TaskResult::SessionListLoaded {
+            host,
+            generation,
+            sessions,
+            scope,
+            seq,
+            query,
+            ..
+        } => {
             assert!(sessions.is_empty());
+            assert_eq!(host, SessionPickerHost::AgentModal, "host must be echoed");
+            assert_eq!(generation, 41, "generation must be echoed");
             assert_eq!(seq, 7, "seq must be echoed, not reconstructed");
             assert_eq!(query.as_deref(), Some("hit"), "query must be echoed");
             assert!(
@@ -1567,9 +1637,12 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
     let mut tasks = run(Effect::FetchSessionList {
+        host: SessionPickerHost::Welcome,
+        generation: 42,
         query: None,
         seq: 8,
         kind_filter: None,
+        headless_policy: Default::default(),
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
         TaskResult::SessionListLoaded { scope, seq, query, .. } => {
@@ -1577,19 +1650,24 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
             assert_eq!(query, None);
             assert!(
                     scope.is_relaxed(),
-                    "_meta[\"chutes.build/listScope\"] must parse into the task result"
+                    "_meta[\"chutes.ai/listScope\"] must parse into the task result"
                 );
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
     let mut tasks = run(Effect::FetchSessionList {
+        host: SessionPickerHost::Welcome,
+        generation: 43,
         query: Some("fail-me".into()),
         seq: 9,
         kind_filter: None,
+        headless_policy: Default::default(),
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListFailed { error, seq, query } => {
+        TaskResult::SessionListFailed { host, generation, error, seq, query } => {
             assert_eq!(error, "boom");
+            assert_eq!(host, SessionPickerHost::Welcome, "failure must echo the host");
+            assert_eq!(generation, 43, "failure must echo the generation");
             assert_eq!(seq, 9);
             assert_eq!(
                     query.as_deref(),
@@ -1603,6 +1681,9 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
     assert_eq!(captured.len(), 3);
     assert_eq!(captured[0]["query"], "hit");
     assert_eq!(captured[0]["limit"], 30);
+    assert_eq!(captured[0]["headless"], "exclude");
+    assert_eq!(captured[1]["headless"], "exclude");
+    assert_eq!(captured[2]["headless"], "exclude");
     assert!(captured[0]["cwd"].is_string());
     assert!(
             captured[0].get("allowRelax").is_none(),
@@ -1619,6 +1700,45 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
             "browse fetches opt into relaxing"
         );
     assert_eq!(captured[2]["query"], "fail-me");
+}
+#[tokio::test]
+async fn fetch_dashboard_sessions_explicitly_excludes_headless() {
+    use std::sync::{Arc, Mutex};
+    use xai_acp_lib::AcpAgentMessage;
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::default();
+    let captured_for_task = captured.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let AcpAgentMessage::ExtMethod(args) = msg {
+                assert_eq!(args.request.method.as_ref(), "chutes.ai/session/list");
+                let params = serde_json::from_str(args.request.params.get())
+                    .expect("params JSON");
+                *captured_for_task.lock().unwrap() = Some(params);
+                let body = serde_json::json!({ "result": { "sessions": [] } });
+                let raw = serde_json::value::RawValue::from_string(body.to_string())
+                    .expect("serialize list response");
+                let _ = args.response_tx.send(Ok(acp::ExtResponse::new(Arc::from(raw))));
+                break;
+            }
+        }
+    });
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::FetchDashboardSessions,
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
+    match tasks.join_next().await.expect("task").expect("no panic") {
+        TaskResult::DashboardSessionsLoaded { sessions } => assert!(sessions.is_empty()),
+        other => panic!("expected DashboardSessionsLoaded, got {other:?}"),
+    }
+    let captured = captured.lock().unwrap();
+    assert_eq!(captured.as_ref().unwrap()["headless"], "exclude");
 }
 #[tokio::test]
 async fn fetch_session_list_sends_kind_facet_filter() {
@@ -1646,9 +1766,12 @@ async fn fetch_session_list_sends_kind_facet_filter() {
     let mut tasks = JoinSet::new();
     execute(
         Effect::FetchSessionList {
+            host: crate::views::session_picker_surface::SessionPickerHost::Welcome,
+            generation: 1,
             query: None,
             seq: 1,
             kind_filter: Some(vec!["build".into()]),
+            headless_policy: Default::default(),
         },
         &mut tasks,
         &tx,
@@ -1660,7 +1783,7 @@ async fn fetch_session_list_sends_kind_facet_filter() {
     let captured = captured.lock().unwrap();
     assert_eq!(captured.len(), 1);
     assert_eq!(
-            captured[0]["_meta"]["chutes.build/facetFilters"]["kind"],
+            captured[0]["_meta"]["chutes.ai/facetFilters"]["kind"],
             serde_json::json!(["build"])
         );
 }
@@ -1674,7 +1797,7 @@ async fn fetch_workflows_list_sends_session_id() {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
-                assert_eq!(args.request.method.as_ref(), "chutes.build/workflows/list");
+                assert_eq!(args.request.method.as_ref(), "chutes.ai/workflows/list");
                 let params: serde_json::Value = serde_json::from_str(
                         args.request.params.get(),
                     )
@@ -1718,16 +1841,18 @@ async fn fetch_workflows_list_sends_session_id() {
     assert_eq!(captured[0]["sessionId"], "test-session");
     assert!(captured[0].get("cwd").is_none());
 }
-/// The debounce arm must echo `query` and `seq` exactly. Awaits the real
-/// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
-/// in this crate).
+/// The debounce arm must echo `query` and `seq` exactly.
+/// Awaits the real 250 ms debounce (tokio's paused clock needs `test-util`, not enabled in this crate).
 #[tokio::test]
 async fn debounce_session_search_echoes_query_and_seq() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
+    use crate::views::session_picker_surface::SessionPickerHost;
     execute(
         Effect::DebounceSessionSearch {
+            host: SessionPickerHost::Welcome,
+            generation: 5,
             query: "abc".into(),
             seq: 9,
         },
@@ -1738,15 +1863,116 @@ async fn debounce_session_search_echoes_query_and_seq() {
         &progress_tx,
     );
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionSearchDebounceExpired { query, seq } => {
+        TaskResult::SessionSearchDebounceExpired { host, generation, query, seq } => {
+            assert_eq!(host, SessionPickerHost::Welcome, "host must be echoed");
+            assert_eq!(generation, 5, "generation must be echoed");
             assert_eq!(query, "abc");
             assert_eq!(seq, 9);
         }
         other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
     }
 }
-/// Verify that every profile name produced by `SessionFlags::agent_profile()`
-/// is a valid `BuiltinAgentName` that the shell can resolve.
+/// The deep-search executor must echo host, generation, and seq verbatim and carry the selected Headless policy on the wire.
+#[tokio::test]
+async fn deep_search_sessions_echoes_routing_and_policy() {
+    use std::sync::{Arc, Mutex};
+    use crate::views::session_picker_surface::SessionPickerHost;
+    use xai_acp_lib::AcpAgentMessage;
+    let captured: Arc<Mutex<Vec<(String, serde_json::Value)>>> = Arc::default();
+    let captured_for_task = captured.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let AcpAgentMessage::ExtMethod(args) = msg {
+                let params = serde_json::from_str(args.request.params.get())
+                    .expect("deep-search params JSON");
+                captured_for_task
+                    .lock()
+                    .unwrap()
+                    .push((args.request.method.as_ref().to_string(), params));
+                let body = serde_json::json!({
+                        "result": { "results": [], "bootstrapping": false }
+                    });
+                let raw = serde_json::value::RawValue::from_string(body.to_string())
+                    .expect("serialize search response");
+                let _ = args.response_tx.send(Ok(acp::ExtResponse::new(Arc::from(raw))));
+            }
+        }
+    });
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::DeepSearchSessions {
+            host: SessionPickerHost::AgentModal,
+            generation: 11,
+            query: "abc".into(),
+            seq: 4,
+            headless_policy: xai_grok_shell::session::unified_list::HeadlessPolicy::Only,
+        },
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
+    match tasks.join_next().await.expect("task").expect("no panic") {
+        TaskResult::DeepSearchResults { host, generation, results, seq } => {
+            assert_eq!(host, SessionPickerHost::AgentModal, "host must be echoed");
+            assert_eq!(generation, 11, "generation must be echoed");
+            assert_eq!(seq, 4, "seq must be echoed");
+            assert!(results.is_empty());
+        }
+        other => panic!("expected DeepSearchResults, got {other:?}"),
+    }
+    let captured = captured.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].0, "chutes.ai/session/search");
+    assert_eq!(captured[0].1["headless"], "only");
+}
+/// The card-detail executor must echo host, generation, seq, and the row identity verbatim; a session missing on disk zeroes the stats.
+#[tokio::test]
+async fn load_card_detail_echoes_identity_and_zeroes_missing_session() {
+    use crate::views::session_picker_surface::SessionPickerHost;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = JoinSet::new();
+    execute(
+        Effect::LoadCardDetail {
+            host: SessionPickerHost::Welcome,
+            generation: 6,
+            source: "local".into(),
+            session_id: "wire-echo-missing-session-e5b1".into(),
+            cwd: "/nonexistent/effects-test".into(),
+            seq: 3,
+        },
+        &mut tasks,
+        &tx,
+        Path::new("."),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
+    match tasks.join_next().await.expect("task").expect("no panic") {
+        TaskResult::CardDetailLoaded {
+            host,
+            generation,
+            source,
+            session_id,
+            seq,
+            detail,
+        } => {
+            assert_eq!(host, SessionPickerHost::Welcome, "host must be echoed");
+            assert_eq!(generation, 6, "generation must be echoed");
+            assert_eq!(seq, 3, "seq must be echoed");
+            assert_eq!(source, "local");
+            assert_eq!(session_id, "wire-echo-missing-session-e5b1");
+            assert_eq!(detail.turn_count, 0);
+            assert_eq!(detail.tool_call_count, 0);
+            assert!(detail.first_prompt_preview.is_empty());
+        }
+        other => panic!("expected CardDetailLoaded, got {other:?}"),
+    }
+}
+/// Verify that every profile name produced by `SessionFlags::agent_profile()` is a valid `BuiltinAgentName` that the shell can resolve.
 #[test]
 fn agent_profile_names_are_valid_builtins() {
     use std::str::FromStr;
@@ -1759,7 +1985,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "chutes-build-plan",
+            "grok-build-plan",
         ),
         (
             SessionFlags {
@@ -1768,7 +1994,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "chutes-build-plan-no-subagents",
+            "grok-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1777,7 +2003,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "chutes-build-plan",
+            "grok-build-plan",
         ),
         (
             SessionFlags {
@@ -1786,7 +2012,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "chutes-build-plan-no-subagents",
+            "grok-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1795,7 +2021,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "chutes-build-ask-user",
+            "grok-build-ask-user",
         ),
         (
             SessionFlags {
@@ -1804,7 +2030,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "chutes-build-ask-user",
+            "grok-build-ask-user",
         ),
     ];
     for (flags, expected_name) in test_cases {
@@ -1822,13 +2048,13 @@ fn agent_profile_names_are_valid_builtins() {
             );
     }
 }
-/// Default flags produce no agent profile (uses chutes-build default).
+/// Default flags produce no agent profile (uses grok-build default).
 #[test]
 fn default_flags_produce_no_profile() {
     let flags = SessionFlags::default();
     assert_eq!(flags.agent_profile(), None);
 }
-/// --subagents alone produces no profile (chutes-build already has TaskTool).
+/// --subagents alone produces no profile (grok-build already has TaskTool).
 #[test]
 fn subagents_without_plan_produces_no_profile() {
     let flags = SessionFlags {
@@ -1839,17 +2065,16 @@ fn subagents_without_plan_produces_no_profile() {
     };
     assert_eq!(flags.agent_profile(), None);
 }
-/// Neutralize `CHUTES_BUILD_AGENT` for the profile-matrix tests below: agent-driven
-/// dev shells export it, which flips `to_meta` into the defer-to-shell
-/// escape hatch and drops `agentProfile` — the tests would then assert the
-/// wrong branch. Empty string counts as unset (`!s.trim().is_empty()`).
+/// Neutralize `CHUTES_BUILD_AGENT` for the profile-matrix tests below.
+/// Agent-driven dev shells export it, which flips `to_meta` into the defer-to-shell escape hatch and drops `agentProfile`.
+/// The tests would then assert the wrong branch.
+/// Empty string counts as unset (`!s.trim().is_empty()`).
 /// Callers must be `#[serial_test::serial(CHUTES_BUILD_AGENT)]` (process-global env).
 fn without_grok_agent() -> crate::test_util::EnvVarGuard {
     crate::test_util::EnvVarGuard::set("CHUTES_BUILD_AGENT", "")
 }
-/// At the runtime defaults (every `--no-*` flag false → every
-/// `SessionFlags` bool true via `!args.no_*`), `to_meta()` reflects the
-/// full plan profile and no separate `askUserQuestion` toggle.
+/// At the runtime defaults every `--no-*` flag is false, so every `SessionFlags` bool is true via `!args.no_*`.
+/// `to_meta()` then reflects the full plan profile and no separate `askUserQuestion` toggle.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn runtime_default_flags_produce_plan_meta() {
@@ -1861,12 +2086,11 @@ fn runtime_default_flags_produce_plan_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-plan");
+    assert_eq!(meta["agentProfile"], "grok-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
-/// --plan alone produces meta with `agentProfile` only and a
-/// `askUserQuestion: false` since `ask_user` is off here.
+/// --plan alone produces meta with `agentProfile` only and a `askUserQuestion: false` since `ask_user` is off here.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn plan_only_meta() {
@@ -1878,7 +2102,7 @@ fn plan_only_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-plan-no-subagents");
+    assert_eq!(meta["agentProfile"], "grok-build-plan-no-subagents");
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1894,11 +2118,11 @@ fn plan_with_subagents_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-plan");
+    assert_eq!(meta["agentProfile"], "grok-build-plan");
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
-/// --ask-user alone selects the chutes-build-ask-user profile.
+/// --ask-user alone selects the grok-build-ask-user profile.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn ask_user_alone_meta() {
@@ -1910,7 +2134,7 @@ fn ask_user_alone_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-ask-user");
+    assert_eq!(meta["agentProfile"], "grok-build-ask-user");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1926,14 +2150,13 @@ fn plan_with_ask_user_uses_plan_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-plan-no-subagents");
+    assert_eq!(meta["agentProfile"], "grok-build-plan-no-subagents");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
-/// --no-plan --no-subagents --no-ask-user picks the default profile but
-/// must still emit `askUserQuestion: false` so the shell can strip the
-/// tool at the builder. Mirrors the runtime: `subagents` toggle alone
-/// does not need an `agentProfile` (default `chutes-build` already has it).
+/// --no-plan --no-subagents --no-ask-user picks the default profile.
+/// It must still emit `askUserQuestion: false` so the shell can strip the tool at the builder.
+/// Mirrors the runtime: the `subagents` toggle alone does not need an `agentProfile` (default `grok-build` already has it).
 #[test]
 fn subagents_alone_emits_only_ask_user_question_disable() {
     let flags = SessionFlags {
@@ -1946,8 +2169,7 @@ fn subagents_alone_emits_only_ask_user_question_disable() {
     assert!(meta.get("agentProfile").is_none());
     assert_eq!(meta["askUserQuestion"], false);
 }
-/// All three flags on at the runtime default produce chutes-build-plan
-/// and no `askUserQuestion` field.
+/// All three flags on at the runtime default produce grok-build-plan and no `askUserQuestion` field.
 #[serial_test::serial(CHUTES_BUILD_AGENT)]
 #[test]
 fn all_flags_meta() {
@@ -1959,13 +2181,11 @@ fn all_flags_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "chutes-build-plan");
+    assert_eq!(meta["agentProfile"], "grok-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
-/// `--no-ask-user` is the user-discovered bug — the flag must surface
-/// as `_meta.askUserQuestion = false` regardless of which profile (if
-/// any) the other flags select.
+/// `--no-ask-user` must land as `_meta.askUserQuestion = false` regardless of which profile (if any) the other flags select.
 #[test]
 fn to_meta_emits_ask_user_question_false_when_disabled() {
     for plan in [false, true] {
@@ -1990,9 +2210,8 @@ fn to_meta_emits_ask_user_question_false_when_disabled() {
         }
     }
 }
-/// Symmetric positive control: when `ask_user` is enabled the field is
-/// omitted entirely (the shell defaults to enabled when the key is
-/// absent — see `parse_ask_user_question_from_meta`).
+/// Symmetric positive control: when `ask_user` is enabled the field is omitted entirely.
+/// The shell defaults to enabled when the key is absent (see `parse_ask_user_question_from_meta`).
 #[test]
 fn to_meta_omits_ask_user_question_when_enabled() {
     for plan in [false, true] {
@@ -2027,9 +2246,21 @@ fn to_meta_emits_auto_mode_when_enabled() {
              back to the shell's connect-time default / leader injection)"
         );
 }
-/// yoloMode must ride the meta explicitly for BOTH polarities — absent
-/// key ≠ off (see the emit-site comment in `to_meta`). Pins the
-/// pre-session Always-Approve → Normal cycle not creating a yolo session.
+#[test]
+fn create_permission_override_replaces_global_permission_seeds() {
+    let flags = SessionFlags {
+        yolo_mode: true,
+        auto_mode: false,
+        ..Default::default()
+    };
+    let mut meta = flags.to_meta();
+    apply_permission_mode_override(&mut meta, Some(PermissionModeKind::Auto));
+    let meta = meta.expect("permission metadata");
+    assert_eq!(meta["yoloMode"], false);
+    assert_eq!(meta["autoMode"], true);
+}
+/// yoloMode must ride the meta explicitly for both polarities; an absent key does not mean off (see the emit-site comment in `to_meta`).
+/// Cycling Always-Approve back to Normal before the session starts must not create a yolo session.
 #[test]
 fn to_meta_always_emits_yolo_mode_explicitly() {
     for yolo in [false, true] {
@@ -2055,7 +2286,7 @@ fn to_meta_chat_mode_stamps_kind_and_omits_agent_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("chat_mode must emit meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
     assert!(
             meta.get("agentProfile").is_none(),
             "K12: chat mode must omit Build agentProfile"
@@ -2064,8 +2295,7 @@ fn to_meta_chat_mode_stamps_kind_and_omits_agent_profile() {
         &serde_json::Value::Object(meta.clone()),
     );
 }
-/// Load meta merge: explicit `chat_kind` alone (no process-wide chat_mode)
-/// stamps kind and strips agentProfile — conversation resume acceptance.
+/// Load meta merge: explicit `chat_kind` alone (no process-wide chat_mode) stamps kind and strips agentProfile, the conversation-resume case.
 #[test]
 fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
     let flags = SessionFlags {
@@ -2082,7 +2312,7 @@ fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
         scrub_chat_workspace_bind_meta(&mut meta);
     }
     let meta = meta.expect("chat_kind must produce meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
     assert!(
             meta.get("agentProfile").is_none(),
             "entry chat_kind must strip Build agentProfile"
@@ -2091,9 +2321,8 @@ fn load_meta_chat_kind_alone_stamps_kind_and_strips_profile() {
         &serde_json::Value::Object(meta.clone()),
     );
 }
-/// Chat create/load meta must never include client workspace-bind keys
-/// (`envId`, Direct hub id, gateway attach), even if cloud fields are
-/// present on the effect — backend owns workspace for `kind=chat`.
+/// Chat create and load meta must never include client workspace-bind keys (`envId`, Direct hub id, gateway attach).
+/// That holds even when cloud fields are present on the effect; the backend owns the workspace for `kind=chat`.
 fn assert_chat_meta_has_no_workspace_bind_keys(meta: &serde_json::Value) {
     for key in CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS {
         assert!(
@@ -2102,7 +2331,7 @@ fn assert_chat_meta_has_no_workspace_bind_keys(meta: &serde_json::Value) {
             );
     }
     assert!(
-            meta.get("chutes.build/cloud_existing_workspace").is_none(),
+            meta.get("chutes.ai/cloud_existing_workspace").is_none(),
             "chat meta without attach must not include existing workspace: {meta}"
         );
 }
@@ -2116,7 +2345,7 @@ fn chat_create_meta_never_includes_workspace_bind_keys_when_cloud_fields_set() {
     apply_chat_kind_meta(&mut meta);
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat create must emit meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );
@@ -2129,9 +2358,9 @@ fn chat_load_meta_never_includes_workspace_bind_keys() {
     {
         let obj = meta.get_or_insert_with(acp::Meta::new);
         obj.insert("envId".into(), serde_json::json!("env-poison"));
-        obj.insert("chutes.build/cloud_server_id".into(), serde_json::json!("srv-poison"));
+        obj.insert("chutes.ai/cloud_server_id".into(), serde_json::json!("srv-poison"));
         obj.insert(
-            "chutes.build/cloud_existing_workspace".into(),
+            "chutes.ai/cloud_existing_workspace".into(),
             serde_json::json!({
                     "server_id": "srv-poison",
                     "cwd": "/ws",
@@ -2140,12 +2369,12 @@ fn chat_load_meta_never_includes_workspace_bind_keys() {
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let meta = meta.expect("chat load must emit meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
     assert_chat_meta_has_no_workspace_bind_keys(
         &serde_json::Value::Object(meta.clone()),
     );
 }
-/// Attach stamp keeps existing workspace + local intent; envId / Direct hub stay stripped.
+/// The attach stamp keeps the existing workspace and local intent; envId and Direct hub stay stripped.
 #[cfg(feature = "local-workspace")]
 #[test]
 fn scrub_chat_workspace_matrix_attach_exception() {
@@ -2154,17 +2383,17 @@ fn scrub_chat_workspace_matrix_attach_exception() {
     {
         let obj = meta.as_mut().unwrap();
         obj.insert("envId".into(), serde_json::json!("env-x"));
-        obj.insert("chutes.build/cloud_server_id".into(), serde_json::json!("hub-x"));
+        obj.insert("chutes.ai/cloud_server_id".into(), serde_json::json!("hub-x"));
         obj.insert(
-            "chutes.build/cloud_existing_workspace".into(),
+            "chutes.ai/cloud_existing_workspace".into(),
             serde_json::json!({"server_id": "srv-x", "cwd": "/ws"}),
         );
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let scrubbed = meta.as_ref().unwrap();
     assert!(scrubbed.get("envId").is_none());
-    assert!(scrubbed.get("chutes.build/cloud_server_id").is_none());
-    assert!(scrubbed.get("chutes.build/cloud_existing_workspace").is_none());
+    assert!(scrubbed.get("chutes.ai/cloud_server_id").is_none());
+    assert!(scrubbed.get("chutes.ai/cloud_existing_workspace").is_none());
     let mut meta = Some(acp::Meta::new());
     apply_local_workspace_meta(
         &mut meta,
@@ -2177,22 +2406,22 @@ fn scrub_chat_workspace_matrix_attach_exception() {
     {
         let obj = meta.as_mut().unwrap();
         obj.insert("envId".into(), serde_json::json!("env-must-go"));
-        obj.insert("chutes.build/cloud_server_id".into(), serde_json::json!("hub-must-go"));
+        obj.insert("chutes.ai/cloud_server_id".into(), serde_json::json!("hub-must-go"));
     }
     scrub_chat_workspace_bind_meta(&mut meta);
     let scrubbed = meta.as_ref().unwrap();
     assert!(scrubbed.get("envId").is_none(), "envId must stay scrubbed");
     assert!(
-            scrubbed.get("chutes.build/cloud_server_id").is_none(),
+            scrubbed.get("chutes.ai/cloud_server_id").is_none(),
             "Direct hub must stay scrubbed"
         );
     assert_eq!(
-            scrubbed["chutes.build/cloud_existing_workspace"]["server_id"],
+            scrubbed["chutes.ai/cloud_existing_workspace"]["server_id"],
             "srv-dogfood"
         );
-    assert_eq!(scrubbed["chutes.build/local_workspace"]["mode"], "attach");
-    assert_eq!(scrubbed["chutes.build/local_workspace"]["server_id"], "srv-dogfood");
-    assert_eq!(scrubbed["chutes.build/local_workspace"]["cwd"], "/tmp/repo");
+    assert_eq!(scrubbed["chutes.ai/local_workspace"]["mode"], "attach");
+    assert_eq!(scrubbed["chutes.ai/local_workspace"]["server_id"], "srv-dogfood");
+    assert_eq!(scrubbed["chutes.ai/local_workspace"]["cwd"], "/tmp/repo");
 }
 #[cfg(feature = "local-workspace")]
 #[test]
@@ -2208,11 +2437,11 @@ fn to_meta_chat_attach_stamps_local_and_existing() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
-    assert_eq!(meta["chutes.build/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["chutes.build/cloud_existing_workspace"]["server_id"], "srv-1");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/local_workspace"]["mode"], "attach");
+    assert_eq!(meta["chutes.ai/cloud_existing_workspace"]["server_id"], "srv-1");
     assert!(meta.get("envId").is_none());
-    assert!(meta.get("chutes.build/cloud_server_id").is_none());
+    assert!(meta.get("chutes.ai/cloud_server_id").is_none());
 }
 #[cfg(feature = "local-workspace")]
 #[test]
@@ -2228,34 +2457,14 @@ fn to_meta_chat_own_stamps_intent_without_existing() {
         ..Default::default()
     };
     let meta = flags.to_meta().expect("meta");
-    assert_eq!(meta["chutes.build/local_workspace"]["mode"], "own");
-    assert_eq!(meta["chutes.build/local_workspace"]["cwd"], "/tmp/repo-own");
-    assert!(meta["chutes.build/local_workspace"].get("server_id").is_none());
+    assert_eq!(meta["chutes.ai/local_workspace"]["mode"], "own");
+    assert_eq!(meta["chutes.ai/local_workspace"]["cwd"], "/tmp/repo-own");
+    assert!(meta["chutes.ai/local_workspace"].get("server_id").is_none());
     assert!(
-            meta.get("chutes.build/cloud_existing_workspace").is_none(),
+            meta.get("chutes.ai/cloud_existing_workspace").is_none(),
             "own must not stamp existing; shell mints server_id"
         );
     assert!(meta.get("envId").is_none());
-}
-#[cfg(feature = "local-workspace")]
-#[test]
-fn mid_session_add_params_scrub_envid() {
-    use crate::app::session_startup::{LocalWorkspaceConfig, LocalWorkspaceMode};
-    let params = mid_session_add_local_workspace_params(
-        "sess-1",
-        &LocalWorkspaceConfig {
-            mode: LocalWorkspaceMode::Attach,
-            cwd: Some(std::path::PathBuf::from("/tmp/repo")),
-            server_id: Some("srv-add".into()),
-        },
-    );
-    assert_eq!(params["sessionId"], "sess-1");
-    assert_eq!(params["meta"]["chutes.build/local_workspace"]["mode"], "attach");
-    assert_eq!(
-            params["meta"]["chutes.build/cloud_existing_workspace"]["server_id"],
-            "srv-add"
-        );
-    assert!(params["meta"].get("envId").is_none());
 }
 #[cfg(feature = "local-workspace")]
 #[test]
@@ -2294,9 +2503,9 @@ fn finalize_chat_session_meta_stamps_attach_on_worktree_path() {
     let mut meta = flags.to_meta();
     finalize_chat_session_meta(&mut meta, true, &flags);
     let meta = meta.expect("meta");
-    assert_eq!(meta["chutes.build/session"]["kind"], "chat");
-    assert_eq!(meta["chutes.build/local_workspace"]["mode"], "attach");
-    assert_eq!(meta["chutes.build/cloud_existing_workspace"]["server_id"], "srv-wt");
+    assert_eq!(meta["chutes.ai/session"]["kind"], "chat");
+    assert_eq!(meta["chutes.ai/local_workspace"]["mode"], "attach");
+    assert_eq!(meta["chutes.ai/cloud_existing_workspace"]["server_id"], "srv-wt");
     assert!(meta.get("envId").is_none());
 }
 #[test]
@@ -2313,16 +2522,15 @@ fn to_meta_yolo_suppresses_auto_mode() {
             "yolo wins; autoMode must be explicitly false (not omitted)"
         );
 }
-/// Verify that each resolved profile name produces a valid
-/// `AgentDefinition` whose name matches the expected kebab-case string.
+/// Verify that each resolved profile name produces a valid `AgentDefinition` whose name matches the expected kebab-case string.
 #[test]
 fn agent_profile_definitions_have_correct_names() {
     use std::str::FromStr;
     use xai_grok_agent::config::BuiltinAgentName;
     for name in [
-        "chutes-build-plan",
-        "chutes-build-plan-no-subagents",
-        "chutes-build-ask-user",
+        "grok-build-plan",
+        "grok-build-plan-no-subagents",
+        "grok-build-ask-user",
     ] {
         let builtin = BuiltinAgentName::from_str(name).unwrap();
         let def = builtin.definition();
@@ -2430,6 +2638,35 @@ fn format_session_info_hides_resolved_when_disabled() {
     assert!(text.contains("Model: grok-4.5"));
     assert!(!text.contains("grok-4.3"));
 }
+/// The (cwd, id)-derived summary path resolves and `generated_title` wins.
+#[tokio::test]
+async fn lookup_session_title_loads_single_summary_by_cwd() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = "/workspace";
+    let dir = root
+        .path()
+        .join("sessions")
+        .join(xai_grok_shell::util::grok_home::encode_cwd_dirname(cwd))
+        .join("sess-1");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+            dir.join("summary.json"),
+            serde_json::json!({
+                "info": { "id": "sess-1", "cwd": cwd },
+                "session_summary": "raw summary",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "num_messages": 1,
+                "current_model_id": "m",
+                "generated_title": "Renamed title"
+            })
+                .to_string(),
+        )
+        .unwrap();
+    let id = acp::SessionId::new("sess-1");
+    let title = lookup_session_title_in(root.path().to_path_buf(), &id, cwd).await;
+    assert_eq!(title.as_deref(), Some("Renamed title"));
+}
 #[test]
 fn format_session_info_no_parens_when_resolved_matches_requested() {
     let info = make_session_info("grok-4.5", Some("grok-4.5"), 1000, 10000);
@@ -2454,12 +2691,12 @@ fn format_session_info_hides_model_hash_for_noncoding_without_flag() {
     assert!(!text.contains("Model Hash"));
 }
 #[test]
-fn format_session_info_shows_model_hash_for_coding_slug_without_flag() {
-    let mut info = make_session_info("grok-build", None, 1000, 10000);
+fn format_session_info_hides_model_hash_for_coding_slug_without_flag() {
+    let mut info = make_session_info("grok-4.6", None, 1000, 10000);
     info.data.model_fingerprint = Some("abc123".into());
     info.data.show_model_fingerprint = false;
     let text = format_session_info(&info, None, false, false, false);
-    assert!(text.contains("Model Hash: abc123"));
+    assert!(!text.contains("Model Hash"));
 }
 #[test]
 fn session_picker_summary_strips_skill_xml() {
@@ -2477,6 +2714,30 @@ fn session_picker_summary_preserves_normal_text() {
     let summary = "Fix authentication bug in login flow".to_string();
     let display = extract_skill_display_text(&summary).unwrap_or(summary);
     assert_eq!(display, "Fix authentication bug in login flow");
+}
+#[test]
+fn sanitize_user_error_rewrites_shared_service_names() {
+    for (pattern, replacement) in xai_grok_shell::sampling::error::SERVICE_NAME_REWRITES {
+        for variant in [pattern.to_string(), pattern.to_ascii_uppercase()] {
+            assert_eq!(
+                    sanitize_user_error(&format!("ACP error: {variant} unreachable")),
+                    format!("error: {replacement} unreachable")
+                );
+        }
+    }
+}
+#[test]
+fn compact_error_message_empty_data_renders_terse_and_no_data_uses_display() {
+    let empty = compact_error_message(&acp::Error::internal_error().data(""));
+    assert_eq!(empty, "");
+    assert_eq!(
+            crate::scrollback::blocks::SessionEvent::CompactionFailed { error: empty }.message(),
+            "Compaction failed."
+        );
+    assert_eq!(
+            compact_error_message(&acp::Error::internal_error()),
+            "Internal error"
+        );
 }
 #[test]
 fn sanitize_user_error_strips_auth_prefixes() {
@@ -2518,10 +2779,8 @@ fn sanitize_user_error_collapses_disk_full() {
             "couldn't create worktree: failed to get HEAD commit from source"
         );
 }
-/// Production ordering of the deferred worktree resume failure: the
-/// detail is sanitized FIRST, then composed — sanitizing the composed
-/// message would collapse a disk-full chain whole and erase the title
-/// hint for a deferred local-miss target.
+/// Production ordering of the deferred worktree resume failure: the detail is sanitized first, then composed.
+/// Sanitizing the composed message would collapse a disk-full chain whole and erase the title hint for a deferred local-miss target.
 #[test]
 fn worktree_resume_failure_sanitizes_detail_before_hint() {
     let raw = "failed to copy index: No space left on device (os error 28)";
@@ -2539,9 +2798,8 @@ fn worktree_resume_failure_sanitizes_detail_before_hint() {
     let id_msg = worktree_resume_failure_message(None, &sanitize_user_error(raw));
     assert_eq!(id_msg, "couldn't resume worktree session: No space left on device");
 }
-/// A resume-picker entry converts to a **dormant** dashboard roster row
-/// (the non-leader idle source) preserving title, cwd, model, worktree
-/// flag, origin, and last-change time.
+/// A resume-picker entry converts to a dormant dashboard roster row (the non-leader idle source).
+/// It preserves title, cwd, model, worktree flag, origin, and last-change time.
 #[test]
 fn session_picker_entry_maps_to_dormant_roster_row() {
     use crate::app::app_view::SessionPickerEntry;
@@ -2562,6 +2820,8 @@ fn session_picker_entry_maps_to_dormant_roster_row() {
         repo_name: "repo-app".to_string(),
         worktree_label: Some("wt".to_string()),
         last_turn_summary: Some("Fixed the parser".to_string()),
+        last_recap: None,
+        session_kind: None,
         card_detail: None,
     };
     let roster = session_picker_entry_to_roster(&entry);

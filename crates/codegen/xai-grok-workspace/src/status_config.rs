@@ -400,7 +400,10 @@ impl StatusConfig {
                 "CHUTES_BUILD_WORKSPACE_SESSION_IDLE_PRUNE_SECS",
                 defaults.session_idle_prune,
             ),
-            drain_timeout: secs_or("CHUTES_BUILD_WORKSPACE_DRAIN_TIMEOUT_SECS", defaults.drain_timeout),
+            drain_timeout: secs_or(
+                "CHUTES_BUILD_WORKSPACE_DRAIN_TIMEOUT_SECS",
+                defaults.drain_timeout,
+            ),
             agent_rpc_timeout: agent_rpc,
             agent_connect_timeout: agent_connect,
             idle_ignores_background: parse_or(
@@ -448,13 +451,17 @@ impl StatusConfig {
                 defaults.preview_discovery_refresh,
             ),
             preview_control_port: defaults.preview_control_port,
-            session_restored: std::env::var("CHUTES_BUILD_SESSION_RESTORED").as_deref() == Ok("true"),
-            revive_script_configured: std::env::var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED").as_deref()
+            session_restored: std::env::var("CHUTES_BUILD_SESSION_RESTORED").as_deref()
+                == Ok("true"),
+            revive_script_configured: std::env::var("CHUTES_BUILD_REVIVE_SCRIPT_CONFIGURED")
+                .as_deref()
                 == Ok("true"),
             resume_nudge_disabled: std::env::var("CHUTES_BUILD_RESUME_NUDGE_DISABLED").as_deref()
                 == Ok("true"),
-            computer_session_resumed_emit: std::env::var("CHUTES_BUILD_COMPUTER_SESSION_RESUMED_EMIT")
-                .as_deref()
+            computer_session_resumed_emit: std::env::var(
+                "CHUTES_BUILD_COMPUTER_SESSION_RESUMED_EMIT",
+            )
+            .as_deref()
                 == Ok("true"),
         };
         cfg.validate();
@@ -1108,7 +1115,12 @@ mod tests {
     #[test]
     fn from_env_reads_idle_ignore_background_true() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS", "true") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS",
+                "true",
+            )
+        };
         let cfg = StatusConfig::from_env();
         unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS") };
         assert!(cfg.idle_ignores_background);
@@ -1117,7 +1129,12 @@ mod tests {
     #[test]
     fn from_env_reads_preview_activity_window() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS", "120000") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS",
+                "120000",
+            )
+        };
         let cfg = StatusConfig::from_env();
         unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS") };
         assert_eq!(cfg.preview_activity_window, Duration::from_millis(120_000));
@@ -1126,9 +1143,16 @@ mod tests {
     #[test]
     fn from_env_reads_preview_activity_scrape_interval() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS", "5000") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS",
+                "5000",
+            )
+        };
         let cfg = StatusConfig::from_env();
-        unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS") };
+        unsafe {
+            std::env::remove_var("CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS")
+        };
         assert_eq!(
             cfg.preview_activity_scrape_interval,
             Duration::from_millis(5_000)
@@ -1205,7 +1229,12 @@ mod tests {
     #[test]
     fn from_env_reads_presence_activity_window() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_PRESENCE_ACTIVITY_WINDOW_MS", "45000") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_PRESENCE_ACTIVITY_WINDOW_MS",
+                "45000",
+            )
+        };
         let cfg = StatusConfig::from_env();
         unsafe { std::env::remove_var("CHUTES_BUILD_WORKSPACE_PRESENCE_ACTIVITY_WINDOW_MS") };
         assert_eq!(cfg.presence_activity_window, Duration::from_millis(45_000));
@@ -1404,11 +1433,26 @@ mod tests {
         assert_eq!(cfg, ProactiveRefreshConfig::default());
         assert!(!cfg.enabled);
 
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_OIDC_PROACTIVE_REFRESH_ENABLED", "true") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_OIDC_PROACTIVE_REFRESH_ENABLED",
+                "true",
+            )
+        };
         unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_OIDC_REFRESH_FRACTION", "0.7") };
         unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_OIDC_REFRESH_JITTER_FRACTION", "0.1") };
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_OIDC_REFRESH_SAFETY_MARGIN_SECS", "90") };
-        unsafe { std::env::set_var("CHUTES_BUILD_WORKSPACE_OIDC_MIN_REFRESH_INTERVAL_SECS", "30") };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_OIDC_REFRESH_SAFETY_MARGIN_SECS",
+                "90",
+            )
+        };
+        unsafe {
+            std::env::set_var(
+                "CHUTES_BUILD_WORKSPACE_OIDC_MIN_REFRESH_INTERVAL_SECS",
+                "30",
+            )
+        };
         let cfg = ProactiveRefreshConfig::from_env();
         assert!(cfg.enabled);
         assert_eq!(cfg.fraction, 0.7);

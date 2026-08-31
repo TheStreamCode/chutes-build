@@ -1,4 +1,3 @@
-//! CLI argument parsing for the pager.
 pub use crate::headless::OutputFormat;
 use clap::{ArgAction, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
@@ -56,15 +55,14 @@ pub enum Command {
     Sessions(crate::sessions_cmd::SessionsArgs),
     /// Fetch and install managed configuration
     Setup {
-        /// Print the fetched configuration as JSON instead of installing it;
-        /// writes nothing to ~/.chutes-build.
+        /// Print the fetched configuration as JSON instead of installing it; writes nothing to ~/.chutes-build.
         #[arg(long)]
         json: bool,
     },
     /// Share a session and print the share URL
     #[command(hide = true)]
     Share(crate::share_cmd::ShareArgs),
-    /// Run any command with local clipboard support (OSC 52 → system clipboard).
+    /// Run any command with local clipboard support (forwards OSC 52 to the system clipboard).
     #[cfg_attr(not(any(unix, windows)), command(hide = true))]
     #[command(long_about = "\
 Run any command inside a local PTY that forwards its clipboard to yours.
@@ -111,6 +109,12 @@ See ~/.chutes-build/README.md for more information.
         /// Switch to the enterprise release channel.
         #[arg(long, conflicts_with_all = ["alpha", "stable"], hide = true)]
         enterprise: bool,
+        /// Internal: what spawned this `chutes-build update` (`user_command`, `auto_background`, `leader_converge`). Hidden.
+        #[arg(long, hide = true)]
+        trigger: Option<String>,
+        /// Internal compat alias for `--trigger=auto_background` (older parents still spawn children with it).
+        #[arg(long, hide = true)]
+        auto: bool,
     },
     /// Print version information
     #[command(visible_alias = "v")]
@@ -132,23 +136,19 @@ See ~/.chutes-build/README.md for more information.
     DiskUsage(crate::disk_usage_cmd::DiskUsageArgs),
     /// Expose this workspace to the Computer Hub (via the leader).
     ///
-    /// Disabled by default and enabled server-side per account; set
-    /// `CHUTES_BUILD_WORKSPACE_COMMAND=1` to enable it locally for testing.
+    /// Disabled by default and enabled server-side per account; set `CHUTES_BUILD_WORKSPACE_COMMAND=1` to enable it locally for testing.
     #[command(hide = true)]
     Workspace(WorkspaceMgmtArgs),
     /// Open the Agent Dashboard view at startup.
     ///
-    /// Centralised, agent-native overview of every session (top-level and
-    /// subagents). Disabled when `[dashboard].enabled = false` in
-    /// `~/.chutes-build/config.toml` or when the `CHUTES_BUILD_AGENT_DASHBOARD=0` env
-    /// var is set.
+    /// The dashboard shows every session, top-level and subagents.
+    /// Disabled when `[dashboard].enabled = false` in `~/.chutes-build/config.toml` or when the `CHUTES_BUILD_AGENT_DASHBOARD=0` env var is set.
     Dashboard,
 }
 /// Arguments for the `wrap` subcommand: the command to run, then its args.
 #[derive(Debug, clap::Args, Clone)]
 pub struct WrapArgs {
-    /// Command to run, followed by its arguments
-    /// (e.g. `docker exec -it my-container bash`).
+    /// Command to run, followed by its arguments (e.g. `docker exec -it my-container bash`).
     /// On Unix a single quoted string or an aliased command runs via `$SHELL -i -c`.
     #[arg(
         required = true,
@@ -196,7 +196,7 @@ pub struct WorkspaceMgmtArgs {
 }
 #[derive(Debug, Subcommand, Clone)]
 pub enum WorkspaceMgmtCommand {
-    /// Start (or update) the workspace→hub exposure.
+    /// Start (or update) the workspace-to-hub exposure.
     Start(WorkspaceStartArgs),
     /// Drain and disconnect from the hub, keeping the exposure warm.
     Pause {
@@ -280,9 +280,8 @@ pub struct AgentArgs {
     #[arg(long = "agent-profile", value_name = "PATH")]
     pub agent_profile: Option<PathBuf>,
     /// Load a plugin from this directory for this process only (repeatable).
-    /// Highest-priority plugin scope; always trusted — hooks and MCP servers
-    /// activate without a prompt. Used by the Agent SDKs to inject
-    /// per-connection plugins.
+    /// Highest-priority plugin scope; always trusted: hooks and MCP servers activate without a prompt.
+    /// Used by the Agent SDKs to inject per-connection plugins.
     #[arg(long = "plugin-dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub plugin_dirs: Vec<PathBuf>,
     /// Connect to a shared leader process instead of starting a new agent.
@@ -298,17 +297,16 @@ pub struct AgentArgs {
     /// Override the CLI chat proxy base URL.
     #[arg(long = "cli-chat-proxy-base-url")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Override the Chutes inference API base URL.
-    #[arg(long = "chutes-api-base-url", value_name = "URL")]
+    /// Override the public xAI API base URL.
+    #[arg(long = "xai-api-base-url")]
     pub xai_api_base_url: Option<String>,
     /// Agent runtime mode
     #[command(subcommand)]
     pub mode: Option<AgentCmd>,
 }
 impl AgentArgs {
-    /// Canonicalized `--plugin-dir` paths, warning to stderr and skipping
-    /// anything that isn't an existing directory (stderr is safe: JSON-RPC
-    /// rides stdout).
+    /// Canonicalized `--plugin-dir` paths, warning to stderr and skipping anything that isn't an existing directory.
+    /// stderr is safe: JSON-RPC uses stdout.
     pub fn canonical_plugin_dirs(&self) -> Vec<PathBuf> {
         self.plugin_dirs
             .iter()
@@ -344,9 +342,9 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "chutes-ws-origin", value_name = "ORIGIN", hide = true)]
+    #[arg(long = "grok-ws-origin")]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "chutes-ws-url", value_name = "URL", hide = true)]
+    #[arg(long = "grok-ws-url")]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
@@ -366,28 +364,17 @@ pub struct ServeArgs {
     pub headless: HeadlessArgs,
 }
 impl ServeArgs {
-    /// The token clients must present, generated if `--secret` was not given.
+    /// Get the secret, generating a random one if not provided.
     pub fn get_secret(&self) -> String {
-        self.secret.clone().unwrap_or_else(generate_server_key)
+        self.secret
+            .clone()
+            .unwrap_or_else(|| generate_random_key(12))
     }
 }
-/// Bytes of entropy in a generated server key. This token authorises a server
-/// that runs shell commands and edits files, and `/ws` has no rate limit, so it
-/// is sized like a credential rather than like an identifier.
-const SERVER_KEY_BYTES: usize = 32;
-/// Generate a server key: [`SERVER_KEY_BYTES`] from the OS CSPRNG, base64url
-/// without padding so it survives a query string unescaped.
-///
-/// The previous version took twelve characters of a v4 UUID's hex — 48 bits, for
-/// a token that grants code execution.
-fn generate_server_key() -> String {
-    use base64::Engine as _;
-    use rand::TryRngCore as _;
-    let mut bytes = [0u8; SERVER_KEY_BYTES];
-    rand::rngs::OsRng
-        .try_fill_bytes(&mut bytes)
-        .expect("OS CSPRNG must be available to mint a server key");
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+/// Generate a random alphanumeric key of the given length.
+fn generate_random_key(len: usize) -> String {
+    let raw = uuid::Uuid::new_v4().to_string().replace('-', "");
+    raw.chars().cycle().take(len).collect()
 }
 /// Arguments for the `agent leader` subcommand.
 #[derive(Debug, clap::Args, Clone)]
@@ -395,12 +382,10 @@ pub struct LeaderArgs {
     /// Keep the leader running after the last client disconnects.
     #[arg(long)]
     pub no_exit_on_disconnect: bool,
-    /// Defer the chutes.ai relay WebSocket until the first headless IPC client
-    /// registers. Without this flag the leader connects the relay eagerly at
-    /// startup — required for bare leaders (headless remote env / systemd) that
-    /// receive remote prompts *through* the relay. Passed by leaders auto-spawned
-    /// from interactive clients (TUI/IDE), which only need the relay if a
-    /// headless client appears.
+    /// Defer the chutes.ai relay WebSocket until the first headless IPC client registers.
+    /// Without this flag the leader connects the relay eagerly at startup.
+    /// Bare leaders (headless remote env / systemd) need the eager connect: they receive remote prompts *through* the relay.
+    /// Passed by leaders auto-spawned from interactive clients (TUI/IDE), which only need the relay if a headless client appears.
     #[arg(long)]
     pub relay_on_demand: bool,
     /// Disable periodic auto-update checks for the leader.
@@ -412,9 +397,9 @@ pub struct LeaderArgs {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "chutes-build",
-    version = env!("VERSION_WITH_COMMIT"),
-    about = "Chutes Build — privacy-first coding agent for Chutes",
+    name = "grok",
+    version = xai_grok_version::full_version(),
+    about = "Chutes Build TUI",
     disable_version_flag = true,
     next_display_order = None,
     help_template = "\
@@ -516,12 +501,12 @@ pub struct PagerArgs {
     /// Output format for headless mode.
     #[clap(long = "output-format", value_enum, default_value = "plain")]
     pub output_format: OutputFormat,
-    /// Emit incremental `stream_event` lines (text/thinking deltas) alongside
-    /// whole messages. Only affects `--output-format streaming-messages-json`.
+    /// Emit incremental `stream_event` lines (text/thinking deltas) alongside whole messages.
+    /// Only affects `--output-format streaming-messages-json`.
     #[clap(long = "include-partial-messages")]
     pub include_partial_messages: bool,
-    /// JSON Schema for structured output. When set, the model is constrained to
-    /// produce JSON matching this schema. Implies --output-format json.
+    /// JSON Schema for structured output. When set, the model is constrained to produce JSON matching this schema.
+    /// Implies --output-format json.
     /// Example: --json-schema '{"type":"object","properties":{"name":{"type":"string"}}}'
     #[clap(long = "json-schema", value_name = "SCHEMA")]
     pub json_schema: Option<String>,
@@ -539,14 +524,13 @@ pub struct PagerArgs {
     /// Extra rules to append to the system prompt.
     #[clap(long = "rules", alias = "append-system-prompt")]
     pub rules: Option<String>,
-    /// Compaction mode [summary|transcript|segments]: `summary` (default) adds
-    /// no pointer; `transcript` points at the raw transcript; `segments`
-    /// persists per-segment markdown to grep. Sets `CHUTES_BUILD_COMPACTION_MODE`.
+    /// Compaction mode [summary|transcript|segments].
+    /// `summary` adds no pointer; `transcript` points at the raw transcript; `segments` (default) persists per-segment markdown to grep.
+    /// Sets `CHUTES_BUILD_COMPACTION_MODE`.
     #[clap(long = "compaction-mode", value_name = "MODE", hide = true)]
     pub compaction_mode: Option<String>,
-    /// Segments verbatim detail [none|minimal|balanced|verbose] (default
-    /// `verbose`). Only affects `--compaction-mode segments`. Sets
-    /// `CHUTES_BUILD_COMPACTION_DETAIL`.
+    /// Segments verbatim detail [none|minimal|balanced|verbose] (default `verbose`).
+    /// Only affects `--compaction-mode segments`. Sets `CHUTES_BUILD_COMPACTION_DETAIL`.
     #[clap(long = "compaction-detail", value_name = "DETAIL", hide = true)]
     pub compaction_detail: Option<String>,
     /// Override the agent's system prompt (compat alias: --system-prompt).
@@ -557,9 +541,8 @@ pub struct PagerArgs {
     )]
     pub system_prompt_override: Option<String>,
     /// Resume a session by ID or title, or the most recent if omitted.
-    /// Non-ID values match session titles for the current directory
-    /// (ignoring letter case; a sole renamed match wins among duplicates,
-    /// otherwise ambiguity errors; UUID-shaped values always mean IDs).
+    /// Non-ID values match session titles for the current directory, ignoring letter case; UUID-shaped values always mean IDs.
+    /// Among duplicate titles a sole renamed match wins; otherwise the resume fails as ambiguous.
     #[arg(
         long = "resume",
         short = 'r',
@@ -577,15 +560,12 @@ pub struct PagerArgs {
         conflicts_with_all = ["continue_last_session"]
     )]
     pub load_session: Option<String>,
-    /// Set by [`Self::pin_local_resume_target`]: the resume target was
-    /// resolved (or definitively missed) before the OS sandbox, so
-    /// materialization must not re-run local title selection.
+    /// Set by [`Self::pin_local_resume_target`]: the resume target was resolved (or definitively missed) before the OS sandbox.
+    /// Materialization must therefore not re-run local title selection.
     #[clap(skip)]
     pub resume_target_pinned: bool,
-    /// Sandbox profile of the title-pinned session, captured at pin time from
-    /// the selected summary (outer `None` = no title pin happened). The
-    /// id-based peek cannot re-derive it: a legacy id duplicated across cwd
-    /// dirs makes that lookup ambiguous.
+    /// Sandbox profile of the title-pinned session, captured at pin time from the selected summary (outer `None` means no title pin happened).
+    /// The id-based peek cannot re-derive it: a legacy id duplicated across cwd dirs makes that lookup ambiguous.
     #[clap(skip)]
     pub(crate) pinned_resume_profile: Option<Option<String>>,
     /// Continue the most recent session for the current working directory.
@@ -596,20 +576,16 @@ pub struct PagerArgs {
         "load_session"]
     )]
     pub continue_last_session: bool,
-    /// Use a specific session UUID for a **new** conversation (must be a valid
-    /// UUID and must not already exist under the target session directory).
-    /// With `--resume`/`--continue`, only valid together with `--fork-session`
-    /// (names the forked session). Does not resume existing sessions — use
-    /// `--resume` / `--continue` instead.
+    /// Use a specific session UUID for a **new** conversation (must be a valid UUID and must not already exist under the target session directory).
+    /// With `--resume`/`--continue`, only valid together with `--fork-session` (names the forked session).
+    /// Does not resume existing sessions, use `--resume` / `--continue` instead.
     #[arg(short = 's', long = "session-id", value_name = "SESSION_ID")]
     pub session_id: Option<String>,
-    /// When resuming (`--resume` / `--continue`), create a new session ID
-    /// instead of reusing the original (optionally set via `--session-id`).
+    /// When resuming (`--resume` / `--continue`), create a new session ID instead of reusing the original (optionally set via `--session-id`).
     #[arg(long = "fork-session")]
     pub fork_session: bool,
     /// Start the session in a new git worktree, optionally named.
-    /// With `--resume` of a remote session, pass `--restore-code` to apply
-    /// the snapshot codebase (conversation is restored either way).
+    /// With `--resume` of a remote session, pass `--restore-code` to apply the snapshot codebase (conversation is restored either way).
     /// Headless (`-p`) does not create a worktree from this flag.
     #[arg(short = 'w', long = "worktree", num_args = 0..= 1, default_missing_value = "")]
     pub worktree: Option<String>,
@@ -618,8 +594,8 @@ pub struct PagerArgs {
     #[arg(long = "worktree-ref", visible_alias = "ref", requires = "worktree")]
     pub worktree_ref: Option<String>,
     /// Restore the original session's repository snapshot when resuming.
-    /// Remote sessions require `--worktree` (never checks out into the current
-    /// directory). Without this flag, resume restores conversation only.
+    /// Remote sessions require `--worktree` (never checks out into the current directory).
+    /// Without this flag, resume restores conversation only.
     #[arg(long = "restore-code", requires = "resume_session")]
     pub restore_code: bool,
     /// Disable plan mode.
@@ -637,8 +613,7 @@ pub struct PagerArgs {
         requires = "chat"
     )]
     pub local_workspace: Option<Option<PathBuf>>,
-    /// Attach an existing local `workspace_server` by `server_id`,
-    /// replacing the chat sandbox (ExistingWorkspace only). Requires `--chat`.
+    /// Attach an existing local `workspace_server` by `server_id`, replacing the chat sandbox (ExistingWorkspace only). Requires `--chat`.
     #[cfg(feature = "local-workspace")]
     #[arg(
         long = "local-workspace-attach",
@@ -657,11 +632,19 @@ pub struct PagerArgs {
     /// Disable structured question prompts from the agent.
     #[arg(long = "no-ask-user", hide = true)]
     pub no_ask_user: bool,
-    /// Enable cross-session memory.
-    #[arg(long = "experimental-memory", conflicts_with = "no_memory")]
+    /// Legacy compatibility flag for enabling cross-session memory.
+    #[arg(
+        long = "experimental-memory",
+        conflicts_with = "no_memory",
+        hide = true
+    )]
     pub experimental_memory: bool,
-    /// Disable cross-session memory for this session.
-    #[arg(long = "no-memory", conflicts_with = "experimental_memory")]
+    /// Legacy compatibility flag for disabling cross-session memory.
+    #[arg(
+        long = "no-memory",
+        conflicts_with = "experimental_memory",
+        hide = true
+    )]
     pub no_memory: bool,
     /// Agent name or definition file path.
     #[arg(long = "agent", value_name = "NAME")]
@@ -694,20 +677,16 @@ pub struct PagerArgs {
     /// Disable web search and web fetch tools.
     #[arg(long = "disable-web-search")]
     pub disable_web_search: bool,
-    /// Exit as soon as the first agent turn ends, without waiting for pending
-    /// background bash/monitor tasks or background subagents (headless only).
-    /// Default for all `chutes-build -p` runs is to wait (up to `--background-wait-timeout`)
-    /// so eval harnesses see full task completion. Use this for fast scripts that
-    /// only need the first turn's text. Does not wait for server-side auto-wake
-    /// output or persistent monitors (those hit the timeout).
+    /// Exit as soon as the first agent turn ends, without waiting for pending background bash/monitor tasks or background subagents (headless only).
+    /// Default for all `chutes-build -p` runs is to wait (up to `--background-wait-timeout`) so eval harnesses see full task completion.
+    /// Use this for fast scripts that only need the first turn's text.
+    /// Does not wait for server-side auto-wake output or persistent monitors (those hit the timeout).
     #[arg(long = "no-wait-for-background", hide = true)]
     pub no_wait_for_background: bool,
-    /// Max seconds to wait for background work after the first turn ends
-    /// (headless only). Applies to bash/monitor `task_completed`, background
-    /// subagents (`SubagentFinished`), and any still-running non-persistent
-    /// work. Persistent `monitor(persistent:true)` never completes and always
-    /// waits the full timeout — use `--no-wait-for-background` or a lower
-    /// timeout for throughput. Conflicts with `--no-wait-for-background`.
+    /// Max seconds to wait for background work after the first turn ends (headless only).
+    /// Applies to bash/monitor `task_completed`, background subagents (`SubagentFinished`), and any still-running non-persistent work.
+    /// Persistent `monitor(persistent:true)` never completes and always waits the full timeout.
+    /// Use `--no-wait-for-background` or a lower timeout for throughput. Conflicts with `--no-wait-for-background`.
     #[arg(
         long = "background-wait-timeout",
         value_name = "SECS",
@@ -726,8 +705,7 @@ pub struct PagerArgs {
     /// Override the client identifier sent to the agent.
     #[arg(long = "client-identifier", value_name = "ID", hide = true)]
     pub client_identifier: Option<String>,
-    /// Hunk tracker mode: agent_only, all_dirty, or off ("disabled" is an
-    /// alias for off, which turns the hunk tracker off entirely).
+    /// Hunk tracker mode: agent_only, all_dirty, or off ("disabled" is an alias for off, which turns the hunk tracker off entirely).
     #[arg(long = "hunk-tracker-mode", value_name = "MODE", hide = true)]
     pub hunk_tracker_mode: Option<String>,
     /// Enable terminal support for the agent.
@@ -744,9 +722,8 @@ pub struct PagerArgs {
     pub no_auto_update: bool,
     /// Enable the runtime turn-end TodoGate for this session.
     ///
-    /// Session-scoped (not persisted). Highest precedence —
-    /// overrides remote `todo_gate_enabled` and the built-in
-    /// default (which is `false`).
+    /// Session-scoped (not persisted).
+    /// Highest precedence: overrides remote `todo_gate_enabled` and the built-in default (which is `false`).
     #[arg(long = "todo-gate", hide = true)]
     pub todo_gate: bool,
     /// Set the installer field in config.toml.
@@ -755,17 +732,16 @@ pub struct PagerArgs {
     /// Run inline instead of using the terminal alternate screen.
     #[arg(long = "no-alt-screen")]
     pub no_alt_screen: bool,
-    /// Experimental: scrollback-native rendering. Finalized blocks are printed
-    /// into the terminal's native scrollback (use the terminal's own scroll /
-    /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `chutes-build` to
-    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.chutes-build/config.toml.
+    /// Experimental: scrollback-native rendering.
+    /// Finalized blocks are printed into the terminal's native scrollback (use the terminal's own scroll / selection).
+    /// A small pinned region holds the prompt and running turn.
+    /// Session-scoped only, does not write config.
+    /// To default plain `grok` to minimal, set `[ui] screen_mode = "minimal"` in ~/.chutes-build/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
-    /// Open in the standard fullscreen TUI for this session, overriding a
-    /// config `[ui] screen_mode = "minimal"` preference. Session-scoped only —
-    /// does not write config. Fullscreen-vs-inline still follows the alt-screen
-    /// policy (--no-alt-screen, [terminal] alt_screen, terminal auto-detection).
+    /// Open in the standard fullscreen TUI for this session, overriding a config `[ui] screen_mode = "minimal"` preference.
+    /// Session-scoped only, does not write config.
+    /// Fullscreen-vs-inline still follows the alt-screen policy (--no-alt-screen, [terminal] alt_screen, terminal auto-detection).
     #[arg(long = "fullscreen", conflicts_with = "minimal")]
     pub fullscreen: bool,
     /// Write sampling events to ~/.chutes-build/logs/sampling.jsonl.
@@ -783,7 +759,7 @@ pub struct PagerArgs {
     /// Run standalone even when leader mode is configured.
     #[arg(long, conflicts_with = "leader", hide = true)]
     pub no_leader: bool,
-    /// Initial prompt for the interactive session, e.g. `chutes-build "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
+    /// Initial prompt for the interactive session, e.g. `grok "fix the bug"` or `chutes-build --worktree=feat "create this feature"`.
     #[arg(
         value_name = "PROMPT",
         conflicts_with_all = &["single",
@@ -795,14 +771,13 @@ pub struct PagerArgs {
     #[command(subcommand, next_display_order = 0)]
     pub command: Option<Command>,
 }
-/// Outcome of resolving the startup sandbox profile for a (possibly resumed)
-/// session. See [`PagerArgs::startup_sandbox_profile`].
+/// Outcome of resolving the startup sandbox profile for a (possibly resumed) session. See [`PagerArgs::startup_sandbox_profile`].
 #[derive(Debug, PartialEq, Eq)]
 pub enum SandboxStartup {
     /// Apply this profile. `None` means fall through to config/`off`.
     Apply(Option<String>),
-    /// Resume requested a profile that differs from the one the session was
-    /// created with. Refused so resuming can't silently change the sandbox.
+    /// Resume requested a profile that differs from the one the session was created with.
+    /// Refused so resuming can't silently change the sandbox.
     Conflict { requested: String, saved: String },
 }
 /// How resume-selection flags resolve for sandbox profile lookup.
@@ -831,6 +806,24 @@ fn strip_cur_dir(path: PathBuf) -> PathBuf {
         .collect()
 }
 impl PagerArgs {
+    pub(crate) fn memory_enabled_override(&self) -> Option<bool> {
+        if self.experimental_memory {
+            Some(true)
+        } else if self.no_memory {
+            Some(false)
+        } else {
+            None
+        }
+    }
+    pub(crate) fn memory_override_flag(&self) -> Option<&'static str> {
+        if self.experimental_memory {
+            Some("--experimental-memory")
+        } else if self.no_memory {
+            Some("--no-memory")
+        } else {
+            None
+        }
+    }
     /// Parse CLI arguments without applying side effects.
     pub fn parse_cli() -> Self {
         let bin_name = std::env::args()
@@ -839,17 +832,12 @@ impl PagerArgs {
             .map(std::path::Path::new)
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            // Only a known launcher name is trusted: argv[0] reaches the help
-            // and usage text, so an arbitrary value would let a renamed copy
-            // print whatever it likes. `agent` is the headless entry point.
-            .filter(|n| *n == "chutes-build" || *n == "grok.exe" || *n == "agent")
-            .map(|n| n.trim_end_matches(".exe"))
-            .unwrap_or("chutes-build")
+            .filter(|n| *n == "grok" || *n == "agent")
+            .unwrap_or("grok")
             .to_owned();
         Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)))
     }
-    /// Apply launch-directory path anchoring and `--cwd` after early commands
-    /// have been dispatched without filesystem or process initialization.
+    /// Apply launch-directory path anchoring and `--cwd` after early commands have been dispatched without filesystem or process initialization.
     pub fn apply_cwd(self) -> anyhow::Result<Self> {
         let launch_dir = std::env::current_dir().ok();
         self.apply_cwd_from(launch_dir.as_deref())
@@ -868,8 +856,7 @@ impl PagerArgs {
         }
         Ok(self)
     }
-    /// Optional-flag accessor; always `false` in builds without the optional
-    /// feature, so call sites need no `cfg` of their own.
+    /// Optional-flag accessor; always `false` in builds without the optional feature, so call sites need no `cfg` of their own.
     pub fn chat(&self) -> bool {
         false
     }
@@ -890,8 +877,8 @@ impl PagerArgs {
     }
     /// Get the session ID to resume, from either --resume or --load (hidden alias).
     ///
-    /// Returns `None` when `--resume` was used without a value (the empty-string
-    /// sentinel). Use [`resume_most_recent`] to detect that case.
+    /// Returns `None` when `--resume` was used without a value (the empty-string sentinel).
+    /// Use [`resume_most_recent`] to detect that case.
     pub fn session_to_resume(&self) -> Option<&str> {
         self.resume_session
             .as_deref()
@@ -902,10 +889,21 @@ impl PagerArgs {
     pub fn resume_most_recent(&self) -> bool {
         self.resume_session.as_deref() == Some("")
     }
+    pub(crate) fn local_resume_selection(
+        &self,
+    ) -> xai_grok_shell::session::persistence::RecentSessionSelection {
+        use xai_grok_shell::session::unified_list::HeadlessPolicy;
+        let policy =
+            if self.single.is_some() || self.prompt_json.is_some() || self.prompt_file.is_some() {
+                HeadlessPolicy::Include
+            } else {
+                HeadlessPolicy::Exclude
+            };
+        xai_grok_shell::session::persistence::RecentSessionSelection::from_headless_policy(policy)
+    }
     /// Classify flags for sandbox profile lookup on an existing session.
     ///
-    /// Uses [`Self::session_startup_intent`]; invalid combos fall through to
-    /// `None` (caller should have rejected intent errors earlier at startup).
+    /// Uses [`Self::session_startup_intent`]; invalid combos fall through to `None` (caller should have rejected intent errors earlier at startup).
     pub fn resume_target(&self) -> ResumeTarget {
         use crate::app::session_startup::SessionStartupIntent;
         match self.session_startup_intent() {
@@ -928,35 +926,29 @@ impl PagerArgs {
             _ => ResumeTarget::None,
         }
     }
-    /// Resolve the sandbox profile to apply at startup, accounting for the
-    /// profile the resumed session was created with. `saved` is the resumed
-    /// session's persisted profile (read once via [`Self::saved_resume_profile`]).
+    /// Resolve the sandbox profile to apply at startup, accounting for the profile the resumed session was created with.
+    /// `saved` is the resumed session's persisted profile (read once via [`Self::saved_resume_profile`]).
     ///
-    /// A session's profile is fixed at creation. Resuming restores it; passing an
-    /// explicit `--sandbox`/`CHUTES_BUILD_SANDBOX` that differs from the saved profile is
-    /// refused (changing a session's sandbox on resume is a safety footgun). A
-    /// matching flag, or no flag, resumes with the saved profile.
+    /// A session's profile is fixed at creation. Resuming restores it.
+    /// An explicit `--sandbox`/`CHUTES_BUILD_SANDBOX` that differs from the saved profile is refused: changing a session's sandbox on resume would be unsafe.
+    /// A matching flag, or no flag, resumes with the saved profile.
     pub fn startup_sandbox_profile(&self, saved: Option<&str>) -> SandboxStartup {
         let explicit = self.sandbox.as_deref().filter(|s| !s.is_empty());
         Self::resolve_startup_sandbox(explicit, saved.map(String::from))
     }
-    /// Pin an explicit non-UUID, non-chat resume/load target to its canonical
-    /// local session id, before the (irreversible) OS sandbox is applied.
+    /// Pin an explicit non-UUID, non-chat resume/load target to its canonical local session id, before the (irreversible) OS sandbox is applied.
     ///
-    /// Resolving once — recorded via `resume_target_pinned` so materialization
-    /// never re-runs local title selection — makes the saved-profile peek and
-    /// materialization consume the same immutable target; re-selecting after
-    /// the sandbox would race a concurrent rename/create. Listing failures
-    /// and ambiguity are hard errors here (fail closed / surfaced before the
-    /// sandbox); a definitive no-match keeps the raw arg for the legacy
-    /// remote/worktree id path.
+    /// Resolving once makes the saved-profile peek and materialization consume the same immutable target.
+    /// `resume_target_pinned` records the pin so materialization never re-runs local title selection.
+    /// Re-selecting after the sandbox would race a concurrent rename/create.
+    /// Listing failures and ambiguity are hard errors here, reported before the sandbox (fail closed).
+    /// A definitive no-match keeps the raw arg for the legacy remote/worktree id path.
     pub fn pin_local_resume_target(&mut self) -> anyhow::Result<()> {
         let cwd_buf = std::env::current_dir().ok();
         let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
         self.pin_local_resume_target_for_cwd(cwd_str.as_deref())
     }
-    /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so
-    /// tests never mutate the process cwd.
+    /// Same as [`Self::pin_local_resume_target`] with an explicit cwd, so tests never mutate the process cwd.
     pub fn pin_local_resume_target_for_cwd(&mut self, cwd: Option<&str>) -> anyhow::Result<()> {
         if self.chat() {
             return Ok(());
@@ -965,7 +957,7 @@ impl PagerArgs {
             return Ok(());
         };
         use crate::app::session_title_resolve::{PinnedResumeTarget, presandbox_resume_target};
-        let pinned = presandbox_resume_target(&target, cwd)?;
+        let pinned = presandbox_resume_target(&target, cwd, self.local_resume_selection())?;
         self.resume_target_pinned = true;
         if let PinnedResumeTarget::Title {
             ref id,
@@ -990,15 +982,14 @@ impl PagerArgs {
         Ok(())
     }
     /// The sandbox profile persisted with the session being resumed, if any.
-    /// Local, best-effort; `None` when not resuming or nothing is found. Read once
-    /// for the profile resume resolution.
+    /// Local, best-effort; `None` when not resuming or nothing is found.
+    /// Read once for the profile resume resolution.
     pub fn saved_resume_profile(&self) -> Option<String> {
         let cwd_buf = std::env::current_dir().ok();
         let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
         self.saved_resume_profile_for_cwd(cwd_str.as_deref())
     }
-    /// Same as [`Self::saved_resume_profile`] with an explicit cwd, so tests
-    /// never mutate the process cwd.
+    /// Same as [`Self::saved_resume_profile`] with an explicit cwd, so tests never mutate the process cwd.
     pub fn saved_resume_profile_for_cwd(&self, cwd: Option<&str>) -> Option<String> {
         if let Some(pinned) = &self.pinned_resume_profile {
             return pinned.clone();
@@ -1011,13 +1002,16 @@ impl PagerArgs {
                 )
             }
             ResumeTarget::MostRecentForCwd => {
-                xai_grok_shell::session::persistence::resumed_session_sandbox_profile(None, cwd)
+                xai_grok_shell::session::persistence::resolve_recent_session_sandbox_profile(
+                    cwd,
+                    self.local_resume_selection(),
+                )
             }
             ResumeTarget::None => None,
         }
     }
-    /// Pure resolution of the explicit flag against the resumed session's saved
-    /// profile. Separated from disk access so it can be unit-tested.
+    /// Pure resolution of the explicit flag against the resumed session's saved profile.
+    /// Separated from disk access so it can be unit-tested.
     fn resolve_startup_sandbox(explicit: Option<&str>, saved: Option<String>) -> SandboxStartup {
         match (explicit, saved) {
             (Some(x), Some(s))
@@ -1034,10 +1028,8 @@ impl PagerArgs {
         }
     }
     /// The initial interactive prompt from the positional argument, trimmed.
-    ///
-    /// Returns `None` when no positional prompt was given or it is only
-    /// whitespace. This is the `grok "<prompt>"` launch form; the headless
-    /// `-p`/`--single` path is handled separately.
+    /// Returns `None` when no positional prompt was given or it is only whitespace.
+    /// This is the `grok "<prompt>"` launch form; the headless `-p`/`--single` path is handled separately.
     pub fn initial_prompt(&self) -> Option<&str> {
         self.prompt
             .as_deref()
@@ -1170,9 +1162,8 @@ mod tests {
             ResumeTarget::SessionId("old".to_string())
         );
     }
-    /// The screen-mode flags are mutually exclusive: the pair exists so one
-    /// can override the other's sticky config value, so accepting both in one
-    /// invocation would be ambiguous.
+    /// The screen-mode flags are mutually exclusive.
+    /// The pair exists so one can override the other's sticky config value; accepting both in one invocation would be ambiguous.
     #[test]
     fn minimal_and_fullscreen_flags_conflict() {
         let args = PagerArgs::try_parse_from(["grok", "--minimal"]).unwrap();
@@ -1475,41 +1466,5 @@ mod tests {
             panic!("expected agent subcommand");
         };
         assert_eq!(agent.reasoning_effort.as_deref(), Some("max"));
-    }
-
-    /// The `agent serve` token authorises code execution, so it is sized like a
-    /// credential. The previous implementation took twelve characters of a v4
-    /// UUID's hex — 48 bits — which this length check rejects.
-    #[test]
-    fn generated_server_key_carries_full_entropy() {
-        use base64::Engine as _;
-        let key = generate_server_key();
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&key)
-            .expect("server key must be base64url");
-        assert_eq!(decoded.len(), SERVER_KEY_BYTES);
-        assert!(
-            !key.contains('=') && !key.contains('+') && !key.contains('/'),
-            "must survive a query string unescaped: {key}"
-        );
-    }
-
-    /// Two draws must differ. Cheap, and it would have caught a key derived from
-    /// something constant.
-    #[test]
-    fn generated_server_keys_differ() {
-        assert_ne!(generate_server_key(), generate_server_key());
-    }
-
-    /// An explicit `--secret` is used verbatim; only the absent case is generated.
-    #[test]
-    fn explicit_secret_is_not_replaced() {
-        let args = ServeArgs {
-            bind: "127.0.0.1:2419".parse().unwrap(),
-            secret: Some("chosen-by-the-operator".into()),
-            remote: None,
-            headless: HeadlessArgs::default(),
-        };
-        assert_eq!(args.get_secret(), "chosen-by-the-operator");
     }
 }

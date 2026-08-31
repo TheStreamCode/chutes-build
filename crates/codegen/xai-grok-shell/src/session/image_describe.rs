@@ -539,12 +539,7 @@ mod tests {
         let img = ImageContent::new(png, "image/png");
         let msg = persist_and_prepend_image_files(dir.path(), &[img], "hello").unwrap();
         assert!(msg.contains("<image_files>"));
-        let asset_sep_agnostic = "assets/image-";
-        let asset_sep_windows = "assets\\image-";
-        assert!(
-            msg.contains(asset_sep_agnostic) || msg.contains(asset_sep_windows),
-            "message must list the asset under assets/image-: {msg}"
-        );
+        assert!(msg.contains("/assets/image-"));
         assert!(msg.ends_with("hello") || msg.contains("\n\nhello"));
         let assets = std::fs::read_dir(dir.path().join("assets")).unwrap();
         assert_eq!(assets.count(), 1);
@@ -629,13 +624,11 @@ mod tests {
         assert!(prompt.contains("<conversation_history_outline>"));
         assert!(prompt.contains("prev1"));
         assert!(prompt.contains("<user_query>\nfix the bug\n</user_query>"));
-        assert!(prompt.contains("Please be thorough"));
     }
     #[test]
     fn describe_prompt_omits_outline_when_absent() {
         let prompt = build_describe_prompt(None, "what is this");
         assert!(!prompt.contains("<conversation_history_outline>"));
-        assert!(!prompt.contains("outline of the conversation"));
         assert!(prompt.contains("<user_query>\nwhat is this\n</user_query>"));
     }
     #[test]

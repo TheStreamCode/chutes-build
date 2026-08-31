@@ -106,15 +106,15 @@ pub struct EntryGetResult {
 }
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/bundle/sync" => {
+        "chutes.ai/bundle/sync" => {
             let req: BundleSyncRequest = parse_params(args)?;
             to_ext_response(sync_bundle(agent, req).await)
         }
-        "chutes.build/bundle/status" => {
+        "chutes.ai/bundle/status" => {
             let _req: BundleStatusRequest = parse_params(args)?;
             to_ext_response(status_bundle())
         }
-        "chutes.build/bundle/entry/get" => {
+        "chutes.ai/bundle/entry/get" => {
             let req: EntryGetRequest = parse_params(args)?;
             to_ext_response(get_entry(&req.kind, &req.name))
         }

@@ -39,6 +39,8 @@ pub(super) fn make_session(session_id: Option<&str>) -> AgentSession {
         available_commands_generation: 0,
         available_tools: None,
         model_switch_pending: false,
+        hook_block_hold: false,
+        blocked_prompt: None,
         user_model_preference: None,
         deferred_model_switch: None,
         bg_tasks: std::collections::BTreeMap::new(),
@@ -110,7 +112,7 @@ pub(super) fn make_subagent_info(child_sid: &str) -> SubagentInfo {
         prompt: None,
         child_cwd: None,
         worktree_path: None,
-        child_updates_replayed: false,
+        transcript: Default::default(),
     }
 }
 #[test]
@@ -191,14 +193,13 @@ pub(super) fn make_app_with_agent(session_id: &str) -> AppView {
     );
     app
 }
-/// A server-shape interjection broadcast (no `interjectionId`, like the
-/// shared-queue interject path — every pane renders it).
+/// A server-shape interjection broadcast (no `interjectionId`, like the shared-queue interject path; every pane renders it).
 pub(super) fn interjection_broadcast(
     session_id: &str,
     text: &str,
 ) -> acp::ExtNotification {
     acp::ExtNotification::new(
-        "chutes.build/session/interjection",
+        "chutes.ai/session/interjection",
         std::sync::Arc::from(
             serde_json::value::to_raw_value(
                     &serde_json::json!({
@@ -263,7 +264,7 @@ pub(super) fn follow_ups_ext(
             "suggestions": suggestions,
         });
     acp::ExtNotification::new(
-        "chutes.build/follow_ups",
+        "chutes.ai/follow_ups",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -282,13 +283,13 @@ pub(super) fn follow_ups_ext_with_prompt(
             "suggestions": suggestions,
         });
     acp::ExtNotification::new(
-        "chutes.build/follow_ups",
+        "chutes.ai/follow_ups",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
 pub(super) fn voice_settings_update(enabled: bool) -> acp::ExtNotification {
     acp::ExtNotification::new(
-        "chutes.build/settings/update",
+        "chutes.ai/settings/update",
         std::sync::Arc::from(
             serde_json::value::to_raw_value(
                     &serde_json::json!({ "voice_mode_enabled": enabled }),
@@ -299,7 +300,7 @@ pub(super) fn voice_settings_update(enabled: bool) -> acp::ExtNotification {
 }
 pub(super) fn tier_settings_update(tier: &str) -> acp::ExtNotification {
     acp::ExtNotification::new(
-        "chutes.build/settings/update",
+        "chutes.ai/settings/update",
         std::sync::Arc::from(
             serde_json::value::to_raw_value(
                     &serde_json::json!({
@@ -318,7 +319,7 @@ pub(super) fn group_tool_verbs_settings_update(
         None => serde_json::json!({}),
     };
     acp::ExtNotification::new(
-        "chutes.build/settings/update",
+        "chutes.ai/settings/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -330,7 +331,7 @@ pub(super) fn collapsed_edit_blocks_settings_update(
         None => serde_json::json!({}),
     };
     acp::ExtNotification::new(
-        "chutes.build/settings/update",
+        "chutes.ai/settings/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -345,7 +346,7 @@ pub(super) fn subagent_ext_replay(
             "_meta": { "isReplay": true, "eventId": event_id },
         });
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -372,7 +373,7 @@ pub(super) fn make_exit_plan_ext_with_tool_call_id(
         }),
         )
         .unwrap();
-    let request = acp::ExtRequest::new("chutes.build/exit_plan_mode", raw.into());
+    let request = acp::ExtRequest::new("chutes.ai/exit_plan_mode", raw.into());
     let (tx, rx) = tokio::sync::oneshot::channel();
     (
         xai_acp_lib::AcpArgs {
@@ -420,7 +421,7 @@ pub(super) fn queue_changed_ext(session_id: &str, ids: &[&str]) -> acp::ExtNotif
         .collect();
     let params = serde_json::json!({ "sessionId": session_id, "entries": entries });
     acp::ExtNotification::new(
-        "chutes.build/queue/changed",
+        "chutes.ai/queue/changed",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -432,8 +433,7 @@ pub(super) fn queue_changed_running(
 ) -> acp::ExtNotification {
     queue_changed_running_ex(session_id, ids, running, None, None, None)
 }
-/// Like [`queue_changed_running`], with optional running-turn display
-/// fields (`runningText` / `runningKind` / `runningCombinedTexts`).
+/// Like [`queue_changed_running`], with optional running-turn display fields (`runningText` / `runningKind` / `runningCombinedTexts`).
 pub(super) fn queue_changed_running_ex(
     session_id: &str,
     ids: &[&str],
@@ -469,7 +469,7 @@ pub(super) fn queue_changed_running_ex(
         params["runningCombinedTexts"] = serde_json::json!(segs);
     }
     acp::ExtNotification::new(
-        "chutes.build/queue/changed",
+        "chutes.ai/queue/changed",
         std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
     )
 }
@@ -552,7 +552,7 @@ pub(super) fn tool_call_block_count(agent: &AgentView) -> usize {
 pub(super) fn make_inject_notif(payload: &serde_json::Value) -> acp::ExtNotification {
     let raw = serde_json::value::to_raw_value(payload).unwrap();
     acp::ExtNotification::new(
-        "chutes.build/scheduled_task_inject_prompt",
+        "chutes.ai/scheduled_task_inject_prompt",
         std::sync::Arc::from(raw),
     )
 }
@@ -575,7 +575,7 @@ pub(super) fn make_fired_notif(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/scheduled_task_fired", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/scheduled_task_fired", std::sync::Arc::from(raw))
 }
 pub(super) fn make_fired_notif_with_subagent(
     session_id: &str,
@@ -594,11 +594,10 @@ pub(super) fn make_fired_notif_with_subagent(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/scheduled_task_fired", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/scheduled_task_fired", std::sync::Arc::from(raw))
 }
-/// Set up an app with two agents; the active view points to agent 1, but
-/// agent 0 owns the scheduled task. Handlers that gate on `active_view`
-/// will mutate the wrong agent (or silently no-op).
+/// Set up an app with two agents; the active view points to agent 1, but agent 0 owns the scheduled task.
+/// Handlers that gate on `active_view` will mutate the wrong agent (or silently no-op).
 pub(super) fn make_app_two_agents() -> AppView {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let mut app = AppView::new(tx.clone(), ModelState::default(), Vec::new());
@@ -632,7 +631,7 @@ pub(super) fn announcements_update_notif(
     announcements: &[xai_grok_announcements::RemoteAnnouncement],
 ) -> acp::ExtNotification {
     acp::ExtNotification::new(
-        "chutes.build/announcements/update",
+        "chutes.ai/announcements/update",
         std::sync::Arc::from(
             serde_json::value::to_raw_value(
                     &serde_json::json!({ "gen": r#gen, "announcements": announcements }),
@@ -641,7 +640,7 @@ pub(super) fn announcements_update_notif(
         ),
     )
 }
-/// Id of the item the banner slot currently selects (None = banner closed).
+/// Id of the item the banner slot currently selects (`None` means the banner is closed).
 pub(super) fn shown_banner_id(app: &AppView) -> Option<String> {
     crate::views::announcements::first_session_announcement(
             &app.active_announcements,
@@ -667,22 +666,35 @@ pub(super) fn make_created_ext_notif(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/scheduled_task_created", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/scheduled_task_created", std::sync::Arc::from(raw))
 }
 pub(super) fn make_deleted_ext_notif(
     session_id: &str,
     task_id: &str,
 ) -> acp::ExtNotification {
+    make_deleted_ext_notif_with_reason(
+        session_id,
+        task_id,
+        xai_grok_tools::notification::ScheduledTaskRemovedReason::Unknown,
+        false,
+    )
+}
+pub(super) fn make_deleted_ext_notif_with_reason(
+    session_id: &str,
+    task_id: &str,
+    reason: xai_grok_tools::notification::ScheduledTaskRemovedReason,
+    is_replay: bool,
+) -> acp::ExtNotification {
     let notif = SessionNotification {
         session_id: acp::SessionId::new(session_id),
         update: XaiSessionUpdate::ScheduledTaskDeleted {
             task_id: task_id.into(),
-            reason: Default::default(),
+            reason,
         },
-        meta: None,
+        meta: is_replay.then(crate::acp::meta::ReplayMetaStamp::replayed),
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/scheduled_task_deleted", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/scheduled_task_deleted", std::sync::Arc::from(raw))
 }
 pub(super) fn make_token_notification_message(
     session_id: &str,
@@ -723,7 +735,7 @@ pub(super) fn make_agent_chunk_message(
         response_tx: tx,
     })
 }
-/// `AgentMessageChunk` with `promptId`/`isReplay` + optional `eventId`.
+/// `AgentMessageChunk` with `promptId`/`isReplay` and an optional `eventId`.
 pub(super) fn make_agent_chunk_meta(
     session_id: &str,
     text: &str,
@@ -752,7 +764,7 @@ pub(super) fn make_agent_chunk_meta(
         response_tx: tx,
     })
 }
-/// `promptId`-tagged chunk (no `eventId`) — drives the viewer live-delta path.
+/// `promptId`-tagged chunk (no `eventId`); drives the viewer live-delta path.
 pub(super) fn make_agent_chunk_message_with_prompt(
     session_id: &str,
     text: &str,
@@ -833,7 +845,7 @@ pub(super) fn xai_model_switch_notif(
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
@@ -847,12 +859,11 @@ pub(super) fn xai_unhandled_notif(
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
-/// Build an `agent_message_chunk` notification carrying both `totalTokens`
-/// and an explicit `eventId`, for context/dedup interaction tests.
+/// Build an `agent_message_chunk` notification carrying both `totalTokens` and an explicit `eventId`, for context/dedup interaction tests.
 pub(super) fn make_token_notification_with_event(
     session_id: &str,
     total_tokens: u64,
@@ -889,14 +900,13 @@ pub(super) fn prompt_complete_ext(session_id: &str) -> acp::ExtNotification {
         }),
         )
         .unwrap();
-    acp::ExtNotification::new("chutes.build/session/prompt_complete", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session/prompt_complete", std::sync::Arc::from(raw))
 }
 /// Insert a fresh agent at `id` with an optional pre-assigned session id.
 pub(super) fn insert_agent(app: &mut AppView, id: AgentId, session_id: Option<&str>) {
     app.agents.insert(id, make_agent(session_id));
 }
-/// Build an `chutes.ai/session/prompt_complete` ext-notification with an explicit
-/// `stopReason` and optional `agentResult`.
+/// Build an `chutes.ai/session/prompt_complete` ext-notification with an explicit `stopReason` and optional `agentResult`.
 pub(super) fn prompt_complete_ext_with_reason(
     session_id: &str,
     stop_reason: &str,
@@ -910,12 +920,35 @@ pub(super) fn prompt_complete_ext_with_reason(
         payload["agentResult"] = serde_json::json!(r);
     }
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/session/prompt_complete", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session/prompt_complete", std::sync::Arc::from(raw))
 }
-/// Build an `chutes.ai/session/prompt_complete` ext-notification carrying a
-/// `promptId` (shells with the lost-response fix). Built through the
-/// typed [`PromptCompletePayload`] so the test wire shape can never
-/// drift from what `handle_prompt_complete` parses.
+/// Failed `chutes.ai/session/prompt_complete` carrying the typed `errorKind`.
+/// Built through the typed [`PromptCompletePayload`] so the test wire shape can never drift from what `handle_prompt_complete` parses.
+/// Callers pass an `agent_result` with no canonical truncation text.
+/// A rail test therefore fails if its typed-kind read is deleted; the text fallback cannot mask it.
+pub(super) fn prompt_complete_ext_failed_with_error_kind(
+    session_id: &str,
+    agent_result: &str,
+    error_kind: &str,
+) -> acp::ExtNotification {
+    let raw = serde_json::value::to_raw_value(
+            &PromptCompletePayload {
+                session_id: session_id.to_string(),
+                stop_reason: Some("error".to_string()),
+                prompt_id: None,
+                agent_result: Some(agent_result.to_string()),
+                cancel_trigger: None,
+                cancellation_category: None,
+                cancellation_context: None,
+                error_kind: Some(error_kind.to_string()),
+                meta: None,
+            },
+        )
+        .unwrap();
+    acp::ExtNotification::new("chutes.ai/session/prompt_complete", std::sync::Arc::from(raw))
+}
+/// Build an `chutes.ai/session/prompt_complete` ext-notification carrying a `promptId` (shells with the lost-response fix).
+/// Built through the typed [`PromptCompletePayload`] so the test wire shape can never drift from what `handle_prompt_complete` parses.
 pub(super) fn prompt_complete_ext_with_prompt_id(
     session_id: &str,
     prompt_id: &str,
@@ -928,15 +961,17 @@ pub(super) fn prompt_complete_ext_with_prompt_id(
                 prompt_id: Some(prompt_id.to_string()),
                 agent_result: None,
                 cancel_trigger: None,
+                cancellation_category: None,
+                cancellation_context: None,
+                error_kind: None,
                 meta: None,
             },
         )
         .unwrap();
-    acp::ExtNotification::new("chutes.build/session/prompt_complete", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session/prompt_complete", std::sync::Arc::from(raw))
 }
-/// Build a live `AgentMessageChunk` whose meta carries `promptId` plus a
-/// `turnStartMs` `start_ms_ago` milliseconds in the past — drives the viewer
-/// adoption path with a known authoritative turn start.
+/// Build a live `AgentMessageChunk` whose meta carries `promptId` plus a `turnStartMs` `start_ms_ago` milliseconds in the past.
+/// Drives the viewer adoption path with a known authoritative turn start.
 pub(super) fn make_viewer_chunk_with_turn_start(
     session_id: &str,
     prompt_id: &str,
@@ -966,9 +1001,106 @@ pub(super) fn make_viewer_chunk_with_turn_start(
         response_tx: tx,
     })
 }
-/// Build a durable `TurnCompleted` update on the `chutes.ai/session/update` rail,
-/// optionally stamped `isReplay`. Built through the typed `SessionNotification`
-/// so the wire shape can't drift from what the dispatch parses.
+/// Same as [`make_viewer_chunk_with_turn_start`] but stamped `isReplay`.
+pub(super) fn make_replay_chunk_with_turn_start(
+    session_id: &str,
+    prompt_id: &str,
+    start_ms_ago: i64,
+) -> AcpClientMessage {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    let turn_start_ms = chrono::Utc::now().timestamp_millis() - start_ms_ago;
+    let request = acp::SessionNotification::new(
+            acp::SessionId::new(session_id),
+            acp::SessionUpdate::AgentMessageChunk(
+                acp::ContentChunk::new(
+                    acp::ContentBlock::Text(acp::TextContent::new("replayed chunk")),
+                ),
+            ),
+        )
+        .meta(
+            serde_json::json!({
+                "promptId": prompt_id,
+                "isReplay": true,
+                "turnStartMs": turn_start_ms,
+            })
+                .as_object()
+                .cloned(),
+        );
+    AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+        request,
+        response_tx: tx,
+    })
+}
+/// Replayed TodoWrite; the tracker suppresses it (`changed == false`).
+pub(super) fn send_replay_suppressed_tool_call(
+    app: &mut AppView,
+    session_id: &str,
+    prompt_id: &str,
+) {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    handle(
+        AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+            request: acp::SessionNotification::new(
+                    acp::SessionId::new(session_id),
+                    acp::SessionUpdate::ToolCall(
+                        acp::ToolCall::new(acp::ToolCallId::new("todo-1"), "TodoWrite")
+                            .kind(acp::ToolKind::Other)
+                            .status(acp::ToolCallStatus::Completed),
+                    ),
+                )
+                .meta(
+                    serde_json::json!({
+                        "promptId": prompt_id,
+                        "isReplay": true,
+                    })
+                        .as_object()
+                        .cloned(),
+                ),
+            response_tx: tx,
+        }),
+        app,
+    );
+}
+/// Replayed direct-bash execute (`bash_mode` on the tool-call `_meta`).
+pub(super) fn send_replay_bash_tool_call(
+    app: &mut AppView,
+    session_id: &str,
+    prompt_id: &str,
+) {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    handle(
+        AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+            request: acp::SessionNotification::new(
+                    acp::SessionId::new(session_id),
+                    acp::SessionUpdate::ToolCall(
+                        acp::ToolCall::new(
+                                acp::ToolCallId::new("bash-mode-1"),
+                                "Execute `ls`",
+                            )
+                            .kind(acp::ToolKind::Execute)
+                            .status(acp::ToolCallStatus::Completed)
+                            .meta(
+                                serde_json::json!({ "bash_mode": true })
+                                    .as_object()
+                                    .cloned(),
+                            ),
+                    ),
+                )
+                .meta(
+                    serde_json::json!({
+                        "promptId": prompt_id,
+                        "isReplay": true,
+                    })
+                        .as_object()
+                        .cloned(),
+                ),
+            response_tx: tx,
+        }),
+        app,
+    );
+}
+/// Build a durable `TurnCompleted` update on the `chutes.ai/session/update` rail, optionally stamped `isReplay`.
+/// Built through the typed `SessionNotification` so the wire shape can't drift from what the dispatch parses.
 pub(super) fn xai_turn_completed_notif(
     session_id: &str,
     prompt_id: &str,
@@ -981,12 +1113,73 @@ pub(super) fn xai_turn_completed_notif(
             prompt_id: prompt_id.into(),
             stop_reason: stop_reason.into(),
             agent_result: None,
+            error_kind: None,
             usage: None,
+            elapsed_ms: None,
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
+}
+/// Replay `TurnCompleted` with optional elapsed, agent_result, and extra `_meta`.
+pub(super) fn xai_turn_completed_replay(
+    session_id: &str,
+    prompt_id: &str,
+    stop_reason: &str,
+    elapsed_ms: Option<u64>,
+    agent_result: Option<&str>,
+    extra_meta: serde_json::Value,
+) -> acp::ExtNotification {
+    let mut meta = serde_json::json!({ "isReplay": true });
+    if let Some(obj) = extra_meta.as_object() {
+        for (k, v) in obj {
+            meta[k] = v.clone();
+        }
+    }
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::TurnCompleted {
+            prompt_id: prompt_id.into(),
+            stop_reason: stop_reason.into(),
+            agent_result: agent_result.map(str::to_string),
+            error_kind: None,
+            usage: None,
+            elapsed_ms,
+        },
+        meta: Some(meta),
+    };
+    acp::ExtNotification::new(
+        "chutes.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
+}
+/// Failed `TurnCompleted` carrying `agent_result` plus the typed `error_kind` field.
+/// Callers pass an `agent_result` with no canonical truncation text.
+/// A rail test therefore fails if its typed-kind read is deleted; the text fallback cannot mask it.
+pub(super) fn xai_turn_completed_failed_with_error_kind(
+    session_id: &str,
+    prompt_id: &str,
+    agent_result: &str,
+    error_kind: &str,
+    is_replay: bool,
+) -> acp::ExtNotification {
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::TurnCompleted {
+            prompt_id: prompt_id.into(),
+            stop_reason: "error".into(),
+            agent_result: Some(agent_result.to_string()),
+            error_kind: Some(error_kind.to_string()),
+            usage: None,
+            elapsed_ms: None,
+        },
+        meta: Some(serde_json::json!({ "isReplay": is_replay })),
+    };
+    acp::ExtNotification::new(
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
@@ -1003,7 +1196,9 @@ pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
             prompt_id: prompt_id.into(),
             stop_reason: stop_reason.into(),
             agent_result: None,
+            error_kind: None,
             usage: None,
+            elapsed_ms: None,
         },
         meta: Some(
             serde_json::json!({
@@ -1013,12 +1208,11 @@ pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
         ),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
-/// A live durable `TurnCompleted`, optionally stamped with the shell
-/// completion clock (`agentTimestampMs`) the wake marker's elapsed reads.
+/// A live durable `TurnCompleted`, optionally stamped with the shell completion clock (`agentTimestampMs`) the wake marker's elapsed reads.
 pub(super) fn xai_wake_turn_completed_notif(
     session_id: &str,
     prompt_id: &str,
@@ -1034,17 +1228,18 @@ pub(super) fn xai_wake_turn_completed_notif(
             prompt_id: prompt_id.into(),
             stop_reason: "end_turn".into(),
             agent_result: None,
+            error_kind: None,
             usage: None,
+            elapsed_ms: None,
         },
         meta: Some(meta),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
-/// Build a `HookExecution` update (one successful run) on the
-/// `chutes.ai/session/update` rail, optionally stamped `isReplay`.
+/// Build a `HookExecution` update (one successful run) on the `chutes.ai/session/update` rail, optionally stamped `isReplay`.
 /// `prompt_id == None` models pre-attribution shells.
 pub(super) fn xai_hook_execution_notif_for_prompt(
     session_id: &str,
@@ -1083,7 +1278,7 @@ pub(super) fn xai_hook_execution_notif_with_runs(
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
     acp::ExtNotification::new(
-        "chutes.build/session/update",
+        "chutes.ai/session/update",
         serde_json::value::to_raw_value(&payload).unwrap().into(),
     )
 }
@@ -1132,8 +1327,7 @@ pub(super) fn work_status_lines(sb: &ScrollbackState) -> Vec<String> {
         })
         .collect()
 }
-/// Register two running background commands on the (idle) agent through
-/// the wire.
+/// Register two running background commands on the (idle) agent through the wire.
 pub(super) fn seed_two_bg_tasks(app: &mut AppView, session_id: &str) {
     let _ = handle_ext_notification(
         &make_task_backgrounded_notif(session_id, "tc-1", "task-1", "sleep 98"),
@@ -1148,8 +1342,7 @@ pub(super) fn seed_two_bg_tasks(app: &mut AppView, session_id: &str) {
 pub(super) fn interjection_ext(session_id: &str, text: &str) -> acp::ExtNotification {
     interjection_ext_with_id(session_id, text, None)
 }
-/// Build an `chutes.ai/session/interjection` ext-notification with an optional
-/// `interjectionId` (the originator-dedup key).
+/// Build an `chutes.ai/session/interjection` ext-notification with an optional `interjectionId` (the originator-dedup key).
 pub(super) fn interjection_ext_with_id(
     session_id: &str,
     text: &str,
@@ -1160,7 +1353,7 @@ pub(super) fn interjection_ext_with_id(
         payload["interjectionId"] = serde_json::json!(id);
     }
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/session/interjection", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session/interjection", std::sync::Arc::from(raw))
 }
 /// Text of the most recent user prompt block in scrollback, if any.
 /// Interjections render as standard user prompt blocks.
@@ -1172,9 +1365,8 @@ pub(super) fn last_interjection_text(sb: &ScrollbackState) -> Option<String> {
             _ => None,
         })
 }
-/// Switch the active view to `id` via the canonical helper. Wrapping
-/// here keeps the source-scan invariant test
-/// (`no_direct_active_view_assignment_outside_switch_to_agent`) happy.
+/// Switch the active view to `id` via the canonical helper.
+/// Wrapping here keeps the source-scan invariant test (`no_direct_active_view_assignment_outside_switch_to_agent`) happy.
 pub(super) fn switch_active_to(app: &mut AppView, id: AgentId) {
     crate::app::dispatch::switch_to_agent(
         app,
@@ -1235,8 +1427,8 @@ pub(super) fn make_commands_update_message(
         response_tx: tx,
     })
 }
-/// Build a `ToolCallUpdate` notification carrying a Bash `raw_output`
-/// chunk for `tool_call_id`. Used to drive the bg-task stdout route.
+/// Build a `ToolCallUpdate` notification carrying a Bash `raw_output` chunk for `tool_call_id`.
+/// Used to drive the bg-task stdout route.
 pub(super) fn make_bash_stdout_message(
     session_id: &str,
     tool_call_id: &str,
@@ -1272,7 +1464,7 @@ pub(super) fn make_ext_session_notification(
 ) -> AcpClientMessage {
     make_ext_session_notification_with_method(
         session_id,
-        "chutes.build/session_notification",
+        "chutes.ai/session_notification",
         update,
     )
 }
@@ -1300,6 +1492,13 @@ pub(super) fn test_subagent_spawned(
     parent_sid: &str,
     child_sid: &str,
 ) -> XaiSessionUpdate {
+    test_subagent_spawned_for_workflow(parent_sid, child_sid, None)
+}
+pub(super) fn test_subagent_spawned_for_workflow(
+    parent_sid: &str,
+    child_sid: &str,
+    workflow_run_id: Option<String>,
+) -> XaiSessionUpdate {
     XaiSessionUpdate::SubagentSpawned {
         subagent_id: child_sid.into(),
         parent_session_id: parent_sid.into(),
@@ -1310,7 +1509,7 @@ pub(super) fn test_subagent_spawned(
         effective_context_source: None,
         context_normalized: false,
         capability_mode: None,
-        workflow_run_id: None,
+        workflow_run_id,
         persona: None,
         role: None,
         model: None,
@@ -1434,9 +1633,8 @@ pub(super) fn run_subagent_lifecycle_via_method(
     let finish = snapshot_after_subagent_finish(&app, child_sid);
     (spawn, finish)
 }
-/// Shared temp `CHUTES_BUILD_HOME` for disk-replay tests. `grok_home()` uses a
-/// process-wide `OnceLock`, so parallel tests must not each set `CHUTES_BUILD_HOME`
-/// to a different tempdir.
+/// Shared temp `CHUTES_BUILD_HOME` for disk-replay tests.
+/// `grok_home()` uses a process-wide `OnceLock`, so parallel tests must not each set `CHUTES_BUILD_HOME` to a different tempdir.
 pub(super) fn replay_disk_test_home() -> &'static std::path::Path {
     use std::sync::OnceLock;
     static HOME: OnceLock<tempfile::TempDir> = OnceLock::new();
@@ -1449,8 +1647,8 @@ pub(super) fn replay_disk_test_home() -> &'static std::path::Path {
         })
         .path()
 }
-/// Runs `f` with a thread-local Chutes Build home override so disk replay tests do not
-/// depend on process-wide `grok_home()` cache order when the full suite runs.
+/// Runs `f` with a thread-local Chutes Build home override.
+/// Disk replay tests then do not depend on process-wide `grok_home()` cache order when the full suite runs.
 pub(super) fn with_replay_disk_home<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
     let home = replay_disk_test_home();
     crate::app::subagent::set_replay_grok_home_for_tests(Some(home.to_path_buf()));
@@ -1463,9 +1661,17 @@ pub(super) fn write_child_updates_jsonl(
     child_sid: &str,
     content: &str,
 ) {
+    write_child_updates_jsonl_under_cwd(grok_home, "/tmp", child_sid, content);
+}
+pub(super) fn write_child_updates_jsonl_under_cwd(
+    grok_home: &std::path::Path,
+    cwd: &str,
+    child_sid: &str,
+    content: &str,
+) {
     let sessions_dir = grok_home
         .join("sessions")
-        .join(urlencoding::encode("/tmp").as_ref())
+        .join(xai_grok_config::encode_cwd_dirname(cwd))
         .join(child_sid);
     std::fs::create_dir_all(&sessions_dir).unwrap();
     std::fs::write(sessions_dir.join("summary.json"), "{}").unwrap();
@@ -1482,6 +1688,21 @@ pub(super) fn child_scrollback_tool_call_count(
                 .scrollback
                 .entry(*i)
                 .is_some_and(|e| matches!(e.block, RenderBlock::ToolCall(_)))
+        })
+        .count()
+}
+/// `SessionEvent` blocks (the `TurnCompleted` footer) in a child scrollback.
+pub(super) fn child_scrollback_session_event_count(
+    agent: &AgentView,
+    child_sid: &str,
+) -> usize {
+    let child = agent.subagent_views.get(child_sid).expect("child subagent view");
+    (0..child.scrollback.len())
+        .filter(|i| {
+            child
+                .scrollback
+                .entry(*i)
+                .is_some_and(|e| matches!(e.block, RenderBlock::SessionEvent(_)))
         })
         .count()
 }
@@ -1512,12 +1733,15 @@ pub(super) fn write_subagent_meta_json(
     let json = format!(r#"{{"prompt":{}}}"#, serde_json::to_string(prompt).unwrap());
     std::fs::write(sessions_dir.join("meta.json"), json).unwrap();
 }
+/// The persisted echo of a task prompt wraps differently from the injected copy, so compare with internal whitespace collapsed.
+fn subagent_prompt_text_eq(a: &str, b: &str) -> bool {
+    a.split_whitespace().eq(b.split_whitespace())
+}
 pub(super) fn child_scrollback_matching_prompt_count(
     agent: &AgentView,
     child_sid: &str,
     prompt: &str,
 ) -> usize {
-    use crate::app::subagent::subagent_prompt_text_eq;
     let child = agent.subagent_views.get(child_sid).expect("child subagent view");
     if prompt.trim().is_empty() {
         return 0;
@@ -1560,14 +1784,13 @@ pub(super) fn spawn_subagent_with_optional_updates(
     let _ = handle(
         make_ext_session_notification_with_method(
             "sess-parent",
-            "chutes.build/session/update",
+            "chutes.ai/session/update",
             test_subagent_spawned("sess-parent", child_sid),
         ),
         app,
     );
 }
-/// A minimal `GoalUpdated` `update` object (the required wire fields) for
-/// `sess-A`; callers add optional fields before dispatching.
+/// A minimal `GoalUpdated` `update` object (the required wire fields) for `sess-A`; callers add optional fields before dispatching.
 pub(super) fn goal_update_value(
     goal_id: &str,
     status: &str,
@@ -1589,8 +1812,7 @@ pub(super) fn goal_update_value(
             "finished_subagent_tokens": 0,
         })
 }
-/// Wrap an `update` object in the session envelope and run it through the
-/// real handler; returns whether the notification requested a redraw.
+/// Wrap an `update` object in the session envelope and run it through the real handler; returns whether the notification requested a redraw.
 pub(super) fn dispatch_goal_update(
     app: &mut AppView,
     update: serde_json::Value,
@@ -1600,14 +1822,13 @@ pub(super) fn dispatch_goal_update(
     let (tx, _rx) = tokio::sync::oneshot::channel();
     handle(
         AcpClientMessage::ExtNotification(xai_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("chutes.build/session_notification", raw.into()),
+            request: acp::ExtNotification::new("chutes.ai/session_notification", raw.into()),
             response_tx: tx,
         }),
         app,
     )
 }
-/// Build + dispatch a `GoalUpdated` for `sess-A` with the given id /
-/// status / elapsed; returns whether the notification requested a redraw.
+/// Build and dispatch a `GoalUpdated` for `sess-A` with the given id / status / elapsed; returns whether the notification requested a redraw.
 pub(super) fn send_goal_update(
     app: &mut AppView,
     goal_id: &str,
@@ -1616,8 +1837,7 @@ pub(super) fn send_goal_update(
 ) -> bool {
     dispatch_goal_update(app, goal_update_value(goal_id, status, elapsed_ms))
 }
-/// Build a minimal `RequestPermission` message that carries `session_id`
-/// and one `AllowOnce` option.
+/// Build a minimal `RequestPermission` message that carries `session_id` and one `AllowOnce` option.
 pub(super) fn make_permission_message(
     session_id: &str,
 ) -> (
@@ -1644,9 +1864,8 @@ pub(super) fn make_permission_message(
     });
     (msg, rx)
 }
-/// Build an `chutes.ai/session_notification` carrying
-/// `InteractionResolved{tool_call_id}` (the first-answer-wins broadcast that
-/// tells every other pane to retract its shared interaction modal).
+/// Build an `chutes.ai/session_notification` carrying `InteractionResolved{tool_call_id}`.
+/// This is the first-answer-wins broadcast that tells every other pane to retract its shared interaction modal.
 pub(super) fn interaction_resolved_ext(
     session_id: &str,
     tool_call_id: &str,
@@ -1659,7 +1878,7 @@ pub(super) fn interaction_resolved_ext(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/session_notification", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session_notification", std::sync::Arc::from(raw))
 }
 pub(super) fn make_git_head_changed_notif(
     session_id: &str,
@@ -1674,7 +1893,7 @@ pub(super) fn make_git_head_changed_notif(
         main_repo: main_repo.map(str::to_string),
     };
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/git_head_changed", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/git_head_changed", std::sync::Arc::from(raw))
 }
 pub(super) fn make_task_backgrounded_notif(
     session_id: &str,
@@ -1696,11 +1915,10 @@ pub(super) fn make_task_backgrounded_notif(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/task_backgrounded", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/task_backgrounded", std::sync::Arc::from(raw))
 }
-/// Like [`make_task_backgrounded_notif`] but stamped `_meta.isReplay:
-/// true` via the typed [`ReplayMetaStamp`](crate::acp::meta::ReplayMetaStamp),
-/// mirroring the `session/load` replay envelope.
+/// Like [`make_task_backgrounded_notif`] but stamped `_meta.isReplay: true` via the typed [`ReplayMetaStamp`](crate::acp::meta::ReplayMetaStamp).
+/// Mirrors the `session/load` replay envelope.
 pub(super) fn make_replayed_task_backgrounded_notif(
     session_id: &str,
     tool_call_id: &str,
@@ -1721,10 +1939,10 @@ pub(super) fn make_replayed_task_backgrounded_notif(
         meta: Some(crate::acp::meta::ReplayMetaStamp::replayed()),
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/session/update", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session/update", std::sync::Arc::from(raw))
 }
-/// Register a pending Execute tool call in the tracker and send an InProgress
-/// update to create the scrollback entry. Returns the agent for further use.
+/// Register a pending Execute tool call in the tracker and send an InProgress update to create the scrollback entry.
+/// Returns the agent for further use.
 pub(super) fn setup_pending_execute_tool(app: &mut AppView, tc_id: &str) {
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
     let meta = crate::acp::meta::NotificationMeta::default();
@@ -1855,7 +2073,7 @@ pub(super) fn task_completed_notif(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/task_completed", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/task_completed", std::sync::Arc::from(raw))
 }
 pub(super) fn make_monitor_event_notif(
     session_id: &str,
@@ -1872,7 +2090,7 @@ pub(super) fn make_monitor_event_notif(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
-    acp::ExtNotification::new("chutes.build/monitor_event", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/monitor_event", std::sync::Arc::from(raw))
 }
 pub(super) fn make_model_info(id: &str) -> acp::ModelInfo {
     acp::ModelInfo::new(acp::ModelId::new(std::sync::Arc::from(id)), id.to_string())
@@ -1890,11 +2108,10 @@ pub(super) fn make_models_update_notif(
         models,
     );
     let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("chutes.build/models/update", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/models/update", std::sync::Arc::from(raw))
 }
-/// `chutes.ai/models/update` carrying a single reasoning-capable model whose
-/// catalog-default effort is `default_effort` (what the broadcast reports
-/// for every client — never the per-session selection).
+/// `chutes.ai/models/update` carrying a single reasoning-capable model whose catalog-default effort is `default_effort`.
+/// The broadcast reports that catalog default for every client, never the per-session selection.
 pub(super) fn make_reasoning_models_update_notif(
     current_model_id: &str,
     default_effort: &str,
@@ -1911,12 +2128,10 @@ pub(super) fn make_reasoning_models_update_notif(
         vec![info],
     );
     let raw = serde_json::value::to_raw_value(&state).unwrap();
-    acp::ExtNotification::new("chutes.build/models/update", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/models/update", std::sync::Arc::from(raw))
 }
-/// Seed a session's model catalog with the given ids and mark
-/// `current_model_id` as the active one (must be in the list). Used by
-/// the `ModelChanged` broadcast tests to set up a starting state that
-/// the simulated remote/local switch then transitions away from.
+/// Seed a session's model catalog with the given ids and mark `current_model_id` as the active one (must be in the list).
+/// Used by the `ModelChanged` broadcast tests to set up a starting state that the simulated remote/local switch then transitions away from.
 pub(super) fn seed_models(agent: &mut AgentView, current: &str, available: &[&str]) {
     for id in available {
         let model_id = acp::ModelId::new(std::sync::Arc::from(*id));
@@ -1940,7 +2155,7 @@ pub(super) fn model_changed_ext(
         meta: None,
     };
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/session_notification", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session_notification", std::sync::Arc::from(raw))
 }
 pub(super) fn model_changed_ext_with_event(
     session_id: &str,
@@ -1956,7 +2171,7 @@ pub(super) fn model_changed_ext_with_event(
         meta: Some(serde_json::json!({ "eventId": event_id })),
     };
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/session_notification", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/session_notification", std::sync::Arc::from(raw))
 }
 pub(super) fn make_tool_call_update(title: &str) -> acp::SessionUpdate {
     acp::SessionUpdate::ToolCallUpdate(
@@ -1994,7 +2209,7 @@ pub(super) fn make_mcp_init_progress_notif(
         }),
         )
         .unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/init_progress", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/init_progress", std::sync::Arc::from(raw))
 }
 pub(super) fn make_mcps_modal_with_servers(
     servers: Vec<crate::views::mcps_modal::McpServerInfo>,
@@ -2030,10 +2245,8 @@ pub(super) fn seed_owner_agent_with_open_modal(app: &mut AppView) {
         ),
     );
 }
-/// Build a `server_status` notification using the SHELL's canonical
-/// `McpServerStatusPayload` so the test exercises the actual wire
-/// type — not a synthesized json object that could drift from
-/// the shell.
+/// Build a `server_status` notification using the SHELL's canonical `McpServerStatusPayload`.
+/// The test then exercises the actual wire type, not a synthesized json object that could drift from the shell.
 pub(super) fn make_server_status_notif(
     session_id: &str,
     name: &str,
@@ -2053,19 +2266,16 @@ pub(super) fn make_server_status_notif(
         tools,
     };
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/server_status", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/server_status", std::sync::Arc::from(raw))
 }
-/// `mcp/servers_updated` real wire shape — `{ mcpServers: [...] }`
-/// with NO `sessionId`. Regression guard: anything that tries to
-/// extract a session id here must fail and fall through to the
-/// broadcast path.
+/// `mcp/servers_updated` real wire shape: `{ mcpServers: [...] }` with NO `sessionId`.
+/// Regression guard: anything that tries to extract a session id here must fail and fall through to the broadcast path.
 pub(super) fn make_servers_updated_notif() -> acp::ExtNotification {
     let payload = serde_json::json!({ "mcpServers": [] });
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/servers_updated", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/servers_updated", std::sync::Arc::from(raw))
 }
-/// Real post-handshake / auth-recovery wire shape:
-/// `McpToolsChanged { sessionId, serverName, tools }`.
+/// Real post-handshake / auth-recovery wire shape: `McpToolsChanged { sessionId, serverName, tools }`.
 pub(super) fn make_tools_changed_notif_post_h2(
     session_id: &str,
 ) -> acp::ExtNotification {
@@ -2075,18 +2285,16 @@ pub(super) fn make_tools_changed_notif_post_h2(
         tools: Vec::new(),
     };
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/tools_changed", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/tools_changed", std::sync::Arc::from(raw))
 }
-/// Legacy / forward-compat wire shape: older shells emit
-/// `{ serverName, tools }` with NO sessionId. The pager must fall
-/// back to active_view for this shape.
+/// Legacy / forward-compat wire shape: older shells emit `{ serverName, tools }` with NO sessionId.
+/// The pager must fall back to active_view for this shape.
 pub(super) fn make_tools_changed_notif_pre_h2() -> acp::ExtNotification {
     let payload = serde_json::json!({ "serverName": "grok_com_linear", "tools": [] });
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/tools_changed", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/tools_changed", std::sync::Arc::from(raw))
 }
-/// Real `mcp_initialized` wire shape:
-/// `{ sessionId, mcpToolCount, elapsedMs }`.
+/// Real `mcp_initialized` wire shape: `{ sessionId, mcpToolCount, elapsedMs }`.
 pub(super) fn make_mcp_initialized_notif(session_id: &str) -> acp::ExtNotification {
     let payload = serde_json::json!({
             "sessionId": session_id,
@@ -2094,7 +2302,7 @@ pub(super) fn make_mcp_initialized_notif(session_id: &str) -> acp::ExtNotificati
             "elapsedMs": 250_u64,
         });
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
-    acp::ExtNotification::new("chutes.build/mcp_initialized", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp_initialized", std::sync::Arc::from(raw))
 }
 /// Helper: `init_progress` notification carrying an explicit sessionId.
 pub(super) fn make_mcp_init_progress_notif_for(
@@ -2110,7 +2318,7 @@ pub(super) fn make_mcp_init_progress_notif_for(
         }),
         )
         .unwrap();
-    acp::ExtNotification::new("chutes.build/mcp/init_progress", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp/init_progress", std::sync::Arc::from(raw))
 }
 /// Helper: `mcp_initialized` notification for a specific sessionId.
 pub(super) fn make_mcp_initialized_notif_for(session_id: &str) -> acp::ExtNotification {
@@ -2122,7 +2330,7 @@ pub(super) fn make_mcp_initialized_notif_for(session_id: &str) -> acp::ExtNotifi
         }),
         )
         .unwrap();
-    acp::ExtNotification::new("chutes.build/mcp_initialized", std::sync::Arc::from(raw))
+    acp::ExtNotification::new("chutes.ai/mcp_initialized", std::sync::Arc::from(raw))
 }
 mod permissions;
 mod session_events;

@@ -807,7 +807,8 @@ mod tests {
         // A plugin-only repo (no MCP/LSP/hooks configs) must still be gated, so a
         // project plugin's hooks/MCP don't run ungated when the folder is untrusted.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("plugins").join("x")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".chutes-build").join("plugins").join("x"))
+            .unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 

@@ -34,7 +34,7 @@ pub use keyboard::{
 };
 pub use kitty_keyboard::{
     kitty_event_types_withheld, kitty_flags_pushed, kitty_releases_reported,
-    negotiated_kitty_flags, set_pushed_kitty_flags, take_kitty_flags_pushed,
+    negotiated_kitty_flags, pushed_kitty_flags, set_pushed_kitty_flags, take_kitty_flags_pushed,
 };
 pub use term_version::{TermVersion, TermVersionSource};
 
@@ -124,6 +124,16 @@ impl TerminalName {
         matches!(
             self,
             Self::VsCode | Self::Cursor | Self::Windsurf | Self::Zed
+        )
+    }
+
+    /// Terminals that embed xterm.js (Zed's terminal is alacritty-based and
+    /// is NOT one). The boundary for xterm.js-specific quirks, e.g. the
+    /// wedged button tracker that eats mouse releases.
+    pub fn is_xtermjs_embed(self) -> bool {
+        matches!(
+            self,
+            Self::VsCode | Self::Cursor | Self::Windsurf | Self::GrokDesktop
         )
     }
 

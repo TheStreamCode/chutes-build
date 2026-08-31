@@ -108,8 +108,10 @@ async fn every_startup_phase_and_the_boot_total_fit_their_budgets() {
     let (total_ms, phases) = boot_and_attribute(&server).await;
     assert!(!phases.is_empty(), "boot reported no startup phases");
 
-    let (phase_budget_ms, phase_note) =
-        env_budget_ms("CHUTES_BUILD_PERF_STARTUP_PHASE_BUDGET_MS", DEFAULT_PHASE_BUDGET);
+    let (phase_budget_ms, phase_note) = env_budget_ms(
+        "CHUTES_BUILD_PERF_STARTUP_PHASE_BUDGET_MS",
+        DEFAULT_PHASE_BUDGET,
+    );
     let over: Vec<&(String, u64)> = phases
         .iter()
         .filter(|(_, ms)| *ms > phase_budget_ms)
@@ -122,8 +124,10 @@ async fn every_startup_phase_and_the_boot_total_fit_their_budgets() {
          all phases: {phases:?}",
     );
 
-    let (total_budget_ms, total_note) =
-        env_budget_ms("CHUTES_BUILD_PERF_STARTUP_TOTAL_BUDGET_MS", DEFAULT_TOTAL_BUDGET);
+    let (total_budget_ms, total_note) = env_budget_ms(
+        "CHUTES_BUILD_PERF_STARTUP_TOTAL_BUDGET_MS",
+        DEFAULT_TOTAL_BUDGET,
+    );
     let attributed: u64 = phases.iter().map(|(_, ms)| *ms).sum();
     assert!(
         total_ms <= total_budget_ms,
@@ -174,7 +178,11 @@ fn a_missing_or_valid_budget_override_resolves() {
 #[test]
 #[should_panic(expected = "CHUTES_BUILD_PERF_STARTUP_PHASE_BUDGET_MS must be an integer")]
 fn an_unparseable_budget_override_panics_naming_the_variable() {
-    budget_ms("CHUTES_BUILD_PERF_STARTUP_PHASE_BUDGET_MS", Some("fast"), 10_000);
+    budget_ms(
+        "CHUTES_BUILD_PERF_STARTUP_PHASE_BUDGET_MS",
+        Some("fast"),
+        10_000,
+    );
 }
 
 #[test]

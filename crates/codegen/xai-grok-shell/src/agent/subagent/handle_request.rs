@@ -426,7 +426,7 @@ pub(crate) async fn run_shell_child(
                 subagent_id = %request.id,
                 resolved_model = %model_str,
                 parent_model = %parent_config.model,
-                "Resolved subagent model not found in available models ÔÇö \
+                "Resolved subagent model not found in available models — \
                  falling back to parent model"
             );
             effective_sampling_config = parent_config;

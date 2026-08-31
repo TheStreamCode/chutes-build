@@ -20,7 +20,7 @@ use xai_grok_telemetry::id::agent_id;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/share_session" => {
+        "chutes.ai/share_session" => {
             tracing::info!("handling share session request");
             handle_share_session(agent, args).await
         }

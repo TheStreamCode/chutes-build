@@ -39,7 +39,7 @@ pub(crate) enum SessionLiveState {
 /// `_meta` key carrying [`SessionHandle::scheduler_background_loops`] on the
 /// `session/new` and `session/load` responses. Defined here so the shell that
 /// publishes it and the clients that read it share one spelling.
-pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.build/schedulerBackgroundLoops";
+pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.ai/schedulerBackgroundLoops";
 /// Handle for interacting with a session actor.
 /// Note: Permission event receivers are returned separately from `spawn_session_actor`
 /// and should be stored/managed by the caller.
@@ -192,6 +192,12 @@ pub struct SessionHandle {
         Option<xai_grok_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
 }
 impl SessionHandle {
+    pub(crate) fn message_delivery(&self) -> super::message_delivery::MessageDeliveryHandle {
+        super::message_delivery::MessageDeliveryHandle::new(
+            self.cmd_tx.clone(),
+            self.info.id.0.to_string(),
+        )
+    }
     /// Last assistant `model_id` / `model_fingerprint` in conversation (global, not turn-scoped).
     pub(crate) async fn get_model_metadata(&self) -> xai_chat_state::ModelMetadata {
         let (tx, rx) = oneshot::channel();

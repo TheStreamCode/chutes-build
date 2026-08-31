@@ -18,12 +18,12 @@ use crate::session::{ExtMethodResult, SessionCommand};
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/debug/trigger_feedback" => {
+        "chutes.ai/debug/trigger_feedback" => {
             tracing::info!("debug: triggering test feedback request");
             handle_trigger_feedback(agent, args).await
         }
-        "chutes.build/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
-        "chutes.build/debug/agent" => handle_agent(agent).await,
+        "chutes.ai/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
+        "chutes.ai/debug/agent" => handle_agent(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

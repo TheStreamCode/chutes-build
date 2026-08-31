@@ -149,8 +149,8 @@ pub(crate) fn jwt_tier_claim(jwt: &str) -> Option<String> {
 ///
 /// Precedence:
 /// 1. CCP `/settings` `subscription_tier_display` (when present and non-empty)
-/// 2. [`AuthMode::ApiKey`] ÔåÆ `"api_key"` (never free)
-/// 3. JWT `tier` claim via [`jwt_tier_claim`] (OAuth free ÔåÆ `"free"`)
+/// 2. [`AuthMode::ApiKey`] → `"api_key"` (never free)
+/// 3. JWT `tier` claim via [`jwt_tier_claim`] (OAuth free → `"free"`)
 pub(crate) fn resolve_subscription_tier_for_telemetry(
     display: Option<String>,
     auth: Option<&crate::auth::GrokAuth>,
@@ -200,7 +200,7 @@ fn local_workspace_intent_present(meta: Option<&acp::Meta>) -> bool {
         .and_then(|m| m.as_str())
         .is_some_and(|mode| mode == "own" || mode == "attach")
 }
-/// valid local-workspace intent ÔåÆ ExistingWorkspace only.
+/// valid local-workspace intent → ExistingWorkspace only.
 ///
 /// `server_id` comes from the intent object, else `cloud_existing_workspace`.
 /// Never reads `envId` / never emits `SandboxEnvironment`.
@@ -255,7 +255,7 @@ pub(crate) struct SessionSpawnOptions<'a> {
     pub client_terminal: bool,
     pub client_fs_read: bool,
     pub client_fs_write: bool,
-    /// In-flight `.envrc` load; `None` ÔåÆ `spawn_and_register_session` spawns its own.
+    /// In-flight `.envrc` load; `None` → `spawn_and_register_session` spawns its own.
     pub envrc: Option<xai_grok_workspace::envrc::EnvrcLoad>,
     pub persisted_signals: Option<crate::session::signals::SessionSignals>,
     pub persisted_plan_mode: Option<crate::session::plan_mode::PlanModeSnapshot>,
@@ -284,7 +284,7 @@ pub(crate) struct SessionSpawnOptions<'a> {
 pub(crate) enum BridgeAttach {
     /// No session handle, or no gateway URL and no pre-existing bridge.
     NotAttached,
-    /// A bridge already existed ÔÇö the caller's options (incl. any
+    /// A bridge already existed — the caller's options (incl. any
     /// `initial_model` seed) were dropped.
     AlreadyAttached,
     /// This call spawned the bridge; its options took effect.
@@ -296,7 +296,7 @@ impl BridgeAttach {
         !matches!(self, Self::NotAttached)
     }
 }
-/// `_meta["chutes.ai/session"].kind` ÔåÆ [`SessionKind`]; absent/unknown/malformed ÔåÆ `Build`.
+/// `_meta["chutes.ai/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
 fn parse_session_kind(
     meta: Option<&acp::Meta>,
 ) -> crate::session::unified_list::SessionKind {
@@ -456,7 +456,7 @@ pub(crate) fn chat_session_spawn_options<'a>(
         is_chat_kind: true,
     }
 }
-/// `_meta.noReplay` ÔåÆ skip gateway replay (client already has the transcript).
+/// `_meta.noReplay` → skip gateway replay (client already has the transcript).
 fn parse_no_replay(meta: Option<&acp::Meta>) -> bool {
     meta.and_then(|m| m.get("noReplay")).and_then(|v| v.as_bool()).unwrap_or(false)
 }
@@ -513,12 +513,12 @@ pub(crate) struct PromptResponseMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::extensions::notification::PromptUsage>,
     /// Why the turn ended early (`cancellation_category_meta`): a cancel's
-    /// category (`"HookDenied"`, `"MidTurnAbort"`, ÔÇª) or a synthetic end
+    /// category (`"HookDenied"`, `"MidTurnAbort"`, …) or a synthetic end
     /// (`"max_turns_reached"`, `"action_stationarity"`); `None` for normal
     /// completions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation_category: Option<String>,
-    /// Structured detail of an early end (hook name, reason, trigger) ÔÇö
+    /// Structured detail of an early end (hook name, reason, trigger) —
     /// `cancellation_context_meta`. `None` unless the cancel carried one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancellation_context: Option<serde_json::Value>,
@@ -658,7 +658,7 @@ pub(crate) enum AnnouncementsPushMode {
 /// clients get exactly one clearing push. An addition that is already expired
 /// on arrival never enters `current` and stays silent.
 ///
-/// `mode` decides when an unchanged list still pushes ÔÇö see
+/// `mode` decides when an unchanged list still pushes — see
 /// [`AnnouncementsPushMode`].
 fn announcements_push_payload(
     stored: Option<&[xai_grok_announcements::RemoteAnnouncement]>,
@@ -756,7 +756,7 @@ pub struct MvpAgent {
     session_registry: SessionRegistry,
     /// `(title, last_turn_summary)` per resident session id, refreshed each
     /// `build_roster`. Lets the synchronous roster deltas reuse both instead
-    /// of emitting empty ones ÔÇö `resident_roster_entry` can't read disk.
+    /// of emitting empty ones — `resident_roster_entry` can't read disk.
     resident_roster_titles: RefCell<RosterDisplayCache>,
     pub(crate) initialize_request: OnceLock<acp::InitializeRequest>,
     pub(crate) gateway: GatewaySender,
@@ -789,7 +789,7 @@ pub struct MvpAgent {
     /// clients, the last `initialize` call wins and overwrites the global value.
     /// This means per-client telemetry attribution (AB experiments, analytics,
     /// worktree-pool eligibility) uses the identity of whichever client most
-    /// recently initialized ÔÇö not the client that owns the current session.
+    /// recently initialized — not the client that owns the current session.
     ///
     /// This is considered acceptable because `client_type` is used only for
     /// non-safety-critical telemetry and experiment filtering.  Fully per-session
@@ -797,18 +797,18 @@ pub struct MvpAgent {
     /// every session handler, which is deferred to future work.
     client_type: RefCell<ClientType>,
     /// Whether the current client advertised `chutes.ai/codeNavigation.enabled`.
-    /// Updated on every `initialize()` call ÔÇö same last-client-wins semantics
+    /// Updated on every `initialize()` call — same last-client-wins semantics
     /// as `client_type`.  Using `Cell<bool>` (not `RefCell`) so `.get()` is a
     /// plain copy with no borrow that could be held across an await point.
     code_nav_enabled: std::cell::Cell<bool>,
     /// Whether the current client advertised `chutes.ai/folderTrust.interactive` (it
     /// can render the interactive folder-trust prompt). Set on every
     /// `initialize()` (last-client-wins, like `code_nav_enabled`); gates the
-    /// DORMANT agentÔåÆclient trust round-trip in `new_session`/`load_session`.
+    /// DORMANT agent→client trust round-trip in `new_session`/`load_session`.
     /// `Cell<bool>` so `.get()` is a borrow-free copy across await points.
     interactive_trust_client: std::cell::Cell<bool>,
     /// Workspaces (canonical `workspace_key`) already prompted/decided for the
-    /// interactive folder-trust round-trip this process ÔÇö dedups re-prompts on
+    /// interactive folder-trust round-trip this process — dedups re-prompts on
     /// `load_session` reconnect and concurrent same-workspace sessions. Agent-
     /// owned (mirrors the `DECISIONS` cache, but not a process global), captured
     /// into the detached prompt task; cleared for a workspace on GUI untrust
@@ -825,7 +825,7 @@ pub struct MvpAgent {
     allow_access_resolved_for: std::cell::RefCell<Option<String>>,
     /// Writeback vs local. `Cell` so [`Self::reapply_storage_mode`] can
     /// upgrade it when remote settings land; persistence reads the live value.
-    /// Authoritative post-construction ÔÇö `Config.storage_mode` is only the
+    /// Authoritative post-construction — `Config.storage_mode` is only the
     /// boot seed.
     storage_mode: std::cell::Cell<StorageMode>,
     /// External-OTEL emission gate; see [`crate::agent::otel_gate`].
@@ -850,10 +850,10 @@ pub struct MvpAgent {
     /// [`crate::config::watcher::ConfigFileWatcher::watch_path`] (a
     /// **non-recursive** watch on `<cwd>/` and `<cwd>/.chutes-build/`).
     ///
-    /// `None` outside leader mode and in tests ÔÇö the registration is a
+    /// `None` outside leader mode and in tests — the registration is a
     /// no-op in that case, which is fine: the existing per-extra-path
     /// loop already covers the leader's startup cwd.
-    /// Plain `Option` (not `RefCell`) ÔÇö this is written
+    /// Plain `Option` (not `RefCell`) — this is written
     /// exactly once, by `set_config_watcher_path_tx(&mut self)` during
     /// leader construction while the agent is still uniquely owned, and
     /// only read thereafter. No interior mutability is required.
@@ -864,7 +864,7 @@ pub struct MvpAgent {
     /// Buffering configuration. LEADER-SAFE(init-once): set once per connection
     /// during initialize from client capabilities, read when spawning sessions.
     /// In leader mode, the last client to initialize overwrites previous settings
-    /// (same caveat as client_type ÔÇö acceptable for non-safety-critical config).
+    /// (same caveat as client_type — acceptable for non-safety-critical config).
     buffering_settings: RefCell<Option<update_chunk_merge::BufferingSettings>>,
     /// Context for managing background copy operations (e.g., copying ignored files)
     pub(crate) background_copy_context: BackgroundCopyContext,
@@ -924,7 +924,7 @@ pub struct MvpAgent {
     /// `plugin_registry_handle`.
     ///
     /// Boot-time plugin discovery is deferred past ACP `initialize` (it walks
-    /// cwdÔåÆgit root plus user/marketplace dirs and stalled grok-desktop's first
+    /// cwd→git root plus user/marketplace dirs and stalled grok-desktop's first
     /// `initialize`), so the shared snapshot starts empty. It is built once on
     /// the first session-creating call via [`Self::ensure_plugin_registry`];
     /// this flag keeps that to a single discovery walk.
@@ -945,16 +945,16 @@ pub struct MvpAgent {
     bundle_sync_in_flight: Arc<std::sync::atomic::AtomicBool>,
     /// Single-flight guard for [`spawn_post_unblock_jwt_and_catalog_retry`].
     ///
-    /// After freeÔåÆpaid unblock the JWT may still lack a `tier` claim for
+    /// After free→paid unblock the JWT may still lack a `tier` claim for
     /// several seconds. Overlapping `CheckSubscription` RPCs (watch debounce,
     /// paywall ticks, concurrent in-flight checks) would each otherwise spawn
-    /// another five-attempt `refresh_chain` backoff loop ÔÇö multiplying IdP
+    /// another five-attempt `refresh_chain` backoff loop — multiplying IdP
     /// traffic and redundant catalog work.
     ///
     /// Cleared by [`PostUnblockJwtRetryInFlightGuard`] on task exit (including
     /// panic/abort), not only on the normal post-backoff path.
     post_unblock_jwt_retry_in_flight: Arc<std::sync::atomic::AtomicBool>,
-    /// Single-flight claim for [`MvpAgent::retry_subscription_check`] ÔÇö the
+    /// Single-flight claim for [`MvpAgent::retry_subscription_check`] — the
     /// tier re-check work itself, so the detached initialize re-check, the
     /// awaited authenticate-path checks, and the pager's 5s poll can never
     /// run it concurrently (a second concurrent check would double IdP/HTTP
@@ -1004,7 +1004,7 @@ pub struct MvpAgent {
     announcements_gen: std::cell::Cell<u64>,
     /// Announcements list last actually emitted via `chutes.ai/announcements/update`
     /// (expiry-filtered), the diff baseline for `emit_announcements`.
-    /// Owned by the emit gate ÔÇö full-settings refreshes move `remote_settings`
+    /// Owned by the emit gate — full-settings refreshes move `remote_settings`
     /// without touching this, so their changes still get pushed on the next
     /// gate call. LEADER-SAFE(shared): one agent-wide push stream.
     last_emitted_announcements: RefCell<Vec<xai_grok_announcements::RemoteAnnouncement>>,
@@ -1023,8 +1023,8 @@ pub struct MvpAgent {
     #[cfg(test)]
     finalize_spy: RefCell<Vec<String>>,
     /// Test-only spy recording every terminal roster delta `(session_id,
-    /// final_state)` emitted by `record_roster_delta` (reap ÔåÆ `DeadFailed`,
-    /// explicit close ÔåÆ `Completed`). Lets tests observe a terminal demotion
+    /// final_state)` emitted by `record_roster_delta` (reap → `DeadFailed`,
+    /// explicit close → `Completed`). Lets tests observe a terminal demotion
     /// even though the `session_live_state` entry is dropped on removal
     /// (the map is kept bounded).
     #[cfg(test)]
@@ -1101,7 +1101,7 @@ pub(crate) fn inherited_harness_template(
 ///
 /// When a zero-turn switch rebuilds the harness (`did_rebuild`), the handle
 /// must adopt the rebuilt harness's agent type. Otherwise the name is left
-/// unchanged ÔÇö compatible stock switches (e.g. `grok-build` ÔåÆ
+/// unchanged — compatible stock switches (e.g. `grok-build` →
 /// `grok-build-plan`) intentionally preserve the session's original ACP
 /// `agentProfile`.
 pub(crate) fn agent_name_after_model_switch(
@@ -1117,13 +1117,13 @@ pub(crate) fn agent_name_after_model_switch(
 }
 /// Harness compatibility for zero-turn / mid-turn model switching.
 ///
-/// Two stock (non-strict) agents are interchangeable ÔÇö they share the
-/// default wire format and toolset, so switching e.g. `grok-build` ÔåÆ
+/// Two stock (non-strict) agents are interchangeable — they share the
+/// default wire format and toolset, so switching e.g. `grok-build` →
 /// `grok-build-plan` doesn't require rebuilding the harness and would
 /// destroy a client-supplied `_meta.agentProfile` if it did.
 ///
-/// Strict harnesses (`codex`, ÔÇª) are only compatible with
-/// themselves. StrictÔåöstock transitions are never compatible.
+/// Strict harnesses (`codex`, …) are only compatible with
+/// themselves. Strict↔stock transitions are never compatible.
 pub(crate) fn harnesses_are_compatible(active: &str, required: &str) -> bool {
     use xai_grok_agent::config::is_strict_harness_agent_type;
     match (
@@ -1155,7 +1155,7 @@ fn read_session_or_init_meta_str<'a>(
 /// Same OnceLock-bypass rationale as [`read_session_or_init_meta_str`], and
 /// it matters most for headless clients: the shared `initialize_request`
 /// holds whichever client initialized this process first, and a leader can
-/// multiplex many logical clients ÔÇö so on a leader-routed `session/load`
+/// multiplex many logical clients — so on a leader-routed `session/load`
 /// the init-level hints can belong to a *different* client than the one
 /// loading the session. Losing `nonInteractive` silently downgrades
 /// `McpInitStrategy::Blocking` to `Progressive`, letting the first prompt
@@ -1175,7 +1175,7 @@ fn startup_hints_from_meta(
         .unwrap_or_default()
 }
 /// Parse `startupHints` carried explicitly on one `_meta` object. `None`
-/// when absent or unparseable ÔÇö callers that must distinguish "client made
+/// when absent or unparseable — callers that must distinguish "client made
 /// no claim" from "client sent defaults" (the resident re-attach rail) key
 /// on this, so an attach without hints never resets a session's policy.
 fn explicit_startup_hints(
@@ -1197,7 +1197,7 @@ fn system_prompt_override_from_meta<'a>(
 }
 /// Compose the system prompt for a *fresh* session: a full `systemPromptOverride`
 /// verbatim, else the agent template with `_meta.rules` folded into
-/// `<human_rules>`. Note: `rules` is applied at creation only ÔÇö resumed sessions
+/// `<human_rules>`. Note: `rules` is applied at creation only — resumed sessions
 /// sync `systemPromptOverride` (see `enqueue_replace_system_prompt_override`) but
 /// not `rules`, by design.
 fn build_spawn_system_prompt(
@@ -1256,7 +1256,7 @@ pub(crate) fn warn_on_missing_parent_session_for_validate_type(
     if !parent_session_present {
         tracing::warn!(
             parent_session_id,
-            "ValidateType received for unknown parent session ÔÇö \
+            "ValidateType received for unknown parent session — \
              validating against built-ins only",
         );
     }
@@ -1288,7 +1288,7 @@ struct AuthRequestMeta {
     use_oauth: bool,
     /// When true, skip cached tokens and force the interactive browser login
     /// flow. Used by the `/login` slash command for mid-session re-auth.
-    /// Unlike `reauth`, this does NOT clear existing credentials ÔÇö if the
+    /// Unlike `reauth`, this does NOT clear existing credentials — if the
     /// user abandons the browser flow, the current session continues.
     #[serde(default)]
     force_interactive: bool,
@@ -1298,7 +1298,7 @@ struct AuthRequestMeta {
     request_seq: Option<u64>,
 }
 impl AuthRequestMeta {
-    /// `--oauth` ÔåÆ force loopback; otherwise default (loopback).
+    /// `--oauth` → force loopback; otherwise default (loopback).
     fn login_override(&self) -> crate::auth::LoginTransportOverride {
         if self.use_oauth {
             crate::auth::LoginTransportOverride::ForceLoopback
@@ -1455,7 +1455,7 @@ fn resolve_hunk_tracking_mode(
 /// LOC sink together, so the disable path can't be left half-wired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HunkTrackingPlan {
-    /// `Some` ÔåÆ spawn the actor in this mode; `None` ÔåÆ use `noop()`, no actor.
+    /// `Some` → spawn the actor in this mode; `None` → use `noop()`, no actor.
     actor_mode: Option<xai_hunk_tracker::TrackingMode>,
 }
 impl HunkTrackingPlan {
@@ -1479,7 +1479,7 @@ pub(crate) struct SessionLoadGuard<'a> {
     agent: &'a MvpAgent,
     session_id: acp::SessionId,
     rx: tokio::sync::watch::Receiver<bool>,
-    /// Dropped with the guard ÔÇö closes the watch channel, waking waiters.
+    /// Dropped with the guard — closes the watch channel, waking waiters.
     _tx: tokio::sync::watch::Sender<bool>,
 }
 impl Drop for SessionLoadGuard<'_> {
@@ -1743,10 +1743,10 @@ impl MvpAgent {
     ///
     /// Queries `/user?include=subscription` for the live tier from the
     /// subscription API. If a qualifying tier is found, does a best-effort
-    /// JWT refresh and settings re-fetch, lifts the gate, then ÔÇö when the
+    /// JWT refresh and settings re-fetch, lifts the gate, then — when the
     /// access token's `tier` claim **matches** that live tier
     /// ([`jwt_claim_matches_user_subscription_tier`]; bare `refresh_chain`
-    /// Ok or any older paid claim is not enough) ÔÇö fire-and-forgets an
+    /// Ok or any older paid claim is not enough) — fire-and-forgets an
     /// explicit model catalog refresh (`ModelsManager::on_auth_changed`) so
     /// tier-targeted models appear without restart.
     /// Catalog refresh is not awaited so gate lift / auth meta are not
@@ -2171,7 +2171,7 @@ impl MvpAgent {
     }
     /// Eagerly fan out the current on-disk plugin registry to every live
     /// session so each adopts a cwd-correct snapshot (hooks + MCP + skills +
-    /// client slash-command catalog) ÔÇö the same refresh the session where the
+    /// client slash-command catalog) — the same refresh the session where the
     /// plugin changed already gets. Mirrors the MCP fan-out in
     /// `handle_plugins_reload`, extended to the whole registry. Each session
     /// gets its own `build_for_cwd` result because project-scoped plugins
@@ -2261,13 +2261,13 @@ impl MvpAgent {
     /// "Check subscription" every 5s while the paywall shows, so a background
     /// lift lands within one poll. No outer timeout: every await inside is
     /// bounded (HTTP, bounded refresh), and a drop-at-deadline would abandon
-    /// an in-flight IdP exchange. Deduplication lives on the work itself ÔÇö
-    /// `retry_subscription_check` claims `tier_recheck_in_flight` ÔÇö so this
+    /// an in-flight IdP exchange. Deduplication lives on the work itself —
+    /// `retry_subscription_check` claims `tier_recheck_in_flight` — so this
     /// spawn, the awaited authenticate-path checks, and the pager's poll can
     /// never run the re-check concurrently.
     ///
     /// Two deliberate user-visible consequences (also documented in
-    /// AUTH.md ┬º "Reconnect tier re-check"): a subscribed user with a stale
+    /// AUTH.md § "Reconnect tier re-check"): a subscribed user with a stale
     /// cached verdict can see a paywall flash on reconnect that the detached
     /// check clears within one poll, and the gate lift can land up to the
     /// bounded refresh budget (`BEST_EFFORT_REFRESH_TIMEOUT`, 20s) later
@@ -2287,10 +2287,10 @@ impl MvpAgent {
     /// so reconnects are cheap.
     ///
     /// Pre-spawn gating order (cheapest first, all synchronous):
-    /// 1. Auth gate ÔÇö avoid spawning a no-op task on every init.
-    /// 2. Freshness check ÔÇö skip the sender snapshot + spawn entirely on
+    /// 1. Auth gate — avoid spawning a no-op task on every init.
+    /// 2. Freshness check — skip the sender snapshot + spawn entirely on
     ///    cache hits, which is the steady-state on every reconnect.
-    /// 3. Single-flight guard ÔÇö if a previous sync is still in flight (e.g.,
+    /// 3. Single-flight guard — if a previous sync is still in flight (e.g.,
     ///    initialize + cached_token + oidc fired in quick succession before
     ///    the first sync's tar extract finished), drop this call to avoid
     ///    racing concurrent extracts that would interleave per-file writes
@@ -2596,8 +2596,8 @@ async fn handle_synthetic_turn_trace(
         },
     );
 }
-/// Clears [`MvpAgent::post_unblock_jwt_retry_in_flight`] on scope exit ÔÇö
-/// success, exhaustion, cancel/abort, or panic ÔÇö so the single-flight flag
+/// Clears [`MvpAgent::post_unblock_jwt_retry_in_flight`] on scope exit —
+/// success, exhaustion, cancel/abort, or panic — so the single-flight flag
 /// cannot wedge `true` for the rest of the process.
 struct PostUnblockJwtRetryInFlightGuard {
     flag: Arc<std::sync::atomic::AtomicBool>,
@@ -2607,8 +2607,8 @@ impl Drop for PostUnblockJwtRetryInFlightGuard {
         self.flag.store(false, std::sync::atomic::Ordering::Release);
     }
 }
-/// Clears [`MvpAgent::tier_recheck_in_flight`] on scope exit ÔÇö completion,
-/// early identity-changed bail, cancel/abort, or panic ÔÇö so the single-flight
+/// Clears [`MvpAgent::tier_recheck_in_flight`] on scope exit — completion,
+/// early identity-changed bail, cancel/abort, or panic — so the single-flight
 /// flag cannot wedge `true` for the rest of the process.
 struct TierRecheckInFlightGuard {
     flag: Arc<std::sync::atomic::AtomicBool>,

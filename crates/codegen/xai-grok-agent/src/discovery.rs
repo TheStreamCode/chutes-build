@@ -73,7 +73,12 @@ pub enum SubagentSource {
 /// 4. Filter: remove agents toggled off via `[subagents.toggle]`
 pub fn all_subagents(cwd: &Path, toggle: &HashMap<String, bool>) -> Vec<SubagentEntry> {
     let grok = xai_grok_config::user_grok_home();
-    all_subagents_with_home(cwd, toggle, xai_dirs::home_dir().as_deref(), grok.as_deref())
+    all_subagents_with_home(
+        cwd,
+        toggle,
+        xai_dirs::home_dir().as_deref(),
+        grok.as_deref(),
+    )
 }
 
 fn all_subagents_with_home(

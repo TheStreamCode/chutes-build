@@ -116,10 +116,11 @@ fn reap_request_for_task_kills_with_session_scope() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Task("task-42".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "chutes.build/task/kill");
+    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["sessionId"], "sess-1");
     assert_eq!(params["taskId"], "task-42");
+    assert_eq!(params["source"], "teardown");
 }
 
 /// A numeric `task_id` is coerced to its string form, tracked, and reaped on exit.
@@ -132,7 +133,7 @@ fn numeric_task_id_is_decoded_tracked_and_reaped() {
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let notif = xai_acp_lib::AcpArgs {
-        request: acp::ExtNotification::new("chutes.build/task_backgrounded", raw.into()),
+        request: acp::ExtNotification::new("x.ai/task_backgrounded", raw.into()),
         response_tx: tx,
     }
     .boxed();
@@ -147,10 +148,11 @@ fn numeric_task_id_is_decoded_tracked_and_reaped() {
     );
     let session_id = acp::SessionId::new("sess-1");
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "chutes.build/task/kill");
+    assert_eq!(request.method.as_ref(), "x.ai/task/kill");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["taskId"], "4242");
     assert_eq!(params["sessionId"], "sess-1");
+    assert_eq!(params["source"], "teardown");
 }
 
 #[test]
@@ -158,7 +160,7 @@ fn reap_request_for_subagent_cancels_with_typed_id() {
     let session_id = acp::SessionId::new("sess-1");
     let work = super::BackgroundWork::Subagent("sub-7".into());
     let request = super::reap_request_for_work(&work, &session_id).unwrap();
-    assert_eq!(request.method.as_ref(), "chutes.build/subagent/cancel");
+    assert_eq!(request.method.as_ref(), "x.ai/subagent/cancel");
     let params: serde_json::Value = serde_json::from_str(request.params.get()).unwrap();
     assert_eq!(params["subagentId"], "sub-7");
 }
@@ -175,7 +177,7 @@ fn drain_records_task_backgrounded_delivered_at_exit() {
     let (resp_tx, _resp_rx) = tokio::sync::oneshot::channel();
     tx.send(xai_acp_lib::AcpClientMessage::ExtNotification(
         xai_acp_lib::AcpArgs {
-            request: acp::ExtNotification::new("chutes.build/task_backgrounded", raw.into()),
+            request: acp::ExtNotification::new("x.ai/task_backgrounded", raw.into()),
             response_tx: resp_tx,
         },
     ))
@@ -200,7 +202,7 @@ fn drain_records_task_backgrounded_delivered_at_exit() {
     );
 }
 
-/// `begin_session` before the model/effort apply lets a post-open error carry the real context.
+/// `begin_session` runs before the model and effort are applied, so a post-open error carries the real context.
 #[test]
 fn post_open_error_carries_real_session_context() {
     let mut pre = reducer_for(OutputFormat::StreamingMessagesJson).unwrap();
@@ -284,7 +286,6 @@ fn headless_remote_miss_restores_conversation_instead_of_deferring_worktree() {
             RemoteMissPlan::DeferToWorktree { .. }
         ));
     }
-    // when asserting the conversation / in-place-refuse arms.
     let mut conv = headless_materialize_ctx(false, false);
     conv.allow_remote_restore = true;
     assert_eq!(
@@ -500,4 +501,36 @@ fn parse_json_schema_rejects_non_objects_and_invalid_json() {
             .to_string()
             .contains("invalid JSON")
     );
+}
+
+#[test]
+fn handler_answers_ext_method_instead_of_dropping() {
+    use agent_client_protocol as acp;
+    use xai_grok_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
+    let raw = serde_json::value::to_raw_value(&serde_json::json!({})).unwrap();
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    let msg = xai_acp_lib::AcpClientMessage::ExtMethod(xai_acp_lib::AcpArgs {
+        request: acp::ExtRequest::new("x.ai/ask_user_question", raw.into()),
+        response_tx: tx,
+    });
+    let mut emitter = super::HeadlessEmitter::new(super::OutputFormat::Json, false);
+    let mut pending = std::collections::HashSet::new();
+    let mut completed = std::collections::HashSet::new();
+    let mut ttf_logged = false;
+    super::handle_headless_acp_message(
+        msg.boxed(),
+        &mut emitter,
+        std::time::Instant::now(),
+        &mut ttf_logged,
+        false,
+        &mut pending,
+        &mut completed,
+    );
+    let resp = rx
+        .try_recv()
+        .expect("ExtMethod must be answered, never dropped")
+        .expect("policy reply, not an error");
+    let parsed: AskUserQuestionExtResponse =
+        serde_json::from_str(resp.0.get()).expect("typed wire reply");
+    assert!(matches!(parsed, AskUserQuestionExtResponse::Cancelled));
 }

@@ -28,6 +28,15 @@ use xai_tool_types::SubagentCompletedOutput;
 use xai_tool_types::TaskOutputOutput;
 /// Default tool name used in auto-wake completion messages.
 pub const DEFAULT_TASK_OUTPUT_TOOL: &str = "get_task_output";
+/// UI/Stop kill with no live waiter: tell the model not to relaunch the task.
+const USER_KILLED_NOTICE: &str = "This task was killed by the user ÔÇö do not restart it.\n";
+fn user_killed_notice(task: &TaskSnapshot) -> &'static str {
+    if task.explicitly_killed && !task.kill_result_delivered {
+        USER_KILLED_NOTICE
+    } else {
+        ""
+    }
+}
 /// Inline preview cap applied ONLY to bash completion reminders that ship
 /// with a disk-pointer footer. Subagent completions (which have no
 /// disk-backed output file) are never truncated -- the inline branch is
@@ -127,9 +136,11 @@ pub fn format_bash_completion(
             format!("exit code: {exit_code_str}")
         }
     };
+    let notice = user_killed_notice(task);
     let mut msg = format!(
         "Background task \"{}\" completed ({}).\n\
-         Command: {} | Duration: {:.1}s\n",
+         Command: {} | Duration: {:.1}s\n\
+         {notice}",
         task.task_id, status_str, command, duration_secs,
     );
     if task.signal.is_some() && duration_secs < 1.0 {
@@ -178,12 +189,14 @@ pub fn format_monitor_completion(task: &TaskSnapshot, task_output_name: Option<&
         .and_then(|d| d.strip_prefix("[monitor] "))
         .unwrap_or("monitor");
     let tool = task_output_name.unwrap_or(DEFAULT_TASK_OUTPUT_TOOL);
+    let notice = user_killed_notice(task);
     format!(
         "Monitor \"{id}\" ended: [monitor ended: {reason}].\n\
          Description: {description}\n\
          Command: {cmd}\n\
          Duration: {dur:.1}s\n\
-         Use {tool}(\"{id}\") for full output.",
+         Use {tool}(\"{id}\") for full output.\n\
+         {notice}",
         id = task.task_id,
         cmd = task.command,
         dur = task.duration_secs(),
@@ -212,7 +225,7 @@ fn format_running_tasks_warning(running: &[&TaskSnapshot], kill_task_name: Optio
     );
     buf
 }
-/// Split a pre-wrapped `<monitor-event description="…" task_id="…">…</monitor-event>`
+/// Split a pre-wrapped `<monitor-event description="ÔÇª" task_id="ÔÇª">ÔÇª</monitor-event>`
 /// into `(description, inner_text)`. `wrap_monitor_event` is the single
 /// writer with fixed attribute order; the `rfind` of `" task_id="`
 /// tolerates quotes inside the model-supplied description. `None` =>
@@ -227,7 +240,7 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
     Some((description, inner))
 }
 /// Format drained [`MonitorEventNotification`]s for the turn loop's hidden
-/// synthetic user message. Model-facing only — the pager renders monitor
+/// synthetic user message. Model-facing only ÔÇö the pager renders monitor
 /// events from the structured `chutes.ai/monitor_event` notification, never by
 /// parsing this text.
 ///
@@ -235,18 +248,18 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
 /// event per loop-top pass) renders the lean form:
 ///
 /// ```text
-/// <monitor-event task_id="0199…">
+/// <monitor-event task_id="0199ÔÇª">
 /// [heartbeat] beat 1
 /// </monitor-event>
 /// ```
 ///
 /// Multiple events batch under one count preamble, grouped per monitor
-/// (first-seen order, within-monitor order kept). Identity — description
-/// AND task id — is stated once on the group tag; tick lines carry only
-/// ordinals (a 100-tick monitor must not repeat its description 100×):
+/// (first-seen order, within-monitor order kept). Identity ÔÇö description
+/// AND task id ÔÇö is stated once on the group tag; tick lines carry only
+/// ordinals (a 100-tick monitor must not repeat its description 100├ù):
 ///
 /// ```text
-/// <monitor description="heartbeat" task_id="0199…">
+/// <monitor description="heartbeat" task_id="0199ÔÇª">
 /// [1] beat 1
 /// [2] beat 2
 /// </monitor>
@@ -395,6 +408,10 @@ pub async fn resolve_task_output_tool_name(bridge: &ToolBridge) -> Option<String
 pub async fn resolve_read_tool_name(bridge: &ToolBridge) -> Option<String> {
     bridge.tool_for_kind(ToolKind::Read).await
 }
+/// Resolve the active toolset's scheduled-task deletion tool name.
+pub async fn resolve_scheduler_delete_tool_name(bridge: &ToolBridge) -> Option<String> {
+    bridge.tool_for_registry_id("scheduler_delete")
+}
 /// Format a model-facing message from a [`SubagentCompletionSummary`] for
 /// the next-tool-call reminder surface.
 ///
@@ -404,11 +421,12 @@ pub async fn resolve_read_tool_name(bridge: &ToolBridge) -> Option<String> {
 /// the model will see it (no disk-backed output file exists for subagents).
 ///
 /// KEEP IN SYNC: the exact wording of this message is a compatibility
-/// surface — downstream mirrors reproduce it verbatim (grep for
+/// surface ÔÇö downstream mirrors reproduce it verbatim (grep for
 /// `format_subagent_completion_reminder`). Update them when changing it.
 pub fn format_subagent_completion(
     c: &SubagentCompletionSummary,
     task_output_name: Option<&str>,
+    scheduler_delete_name: Option<&str>,
 ) -> String {
     let status = if c.success {
         "successfully"
@@ -437,7 +455,31 @@ pub fn format_subagent_completion(
         task_output_name,
         None,
     );
+    append_scheduler_cleanup_hint(&mut out, c, scheduler_delete_name, "\n");
     out
+}
+fn append_scheduler_cleanup_hint(
+    out: &mut String,
+    completion: &SubagentCompletionSummary,
+    scheduler_delete_name: Option<&str>,
+    prefix: &str,
+) {
+    let Some(task_id) = completion
+        .loop_task_id
+        .as_deref()
+        .filter(|task_id| !task_id.is_empty())
+    else {
+        return;
+    };
+    let Some(delete_name) = scheduler_delete_name else {
+        return;
+    };
+    out.push_str(prefix);
+    out.push_str(
+        &format!(
+        "If the monitored work is complete, call `{delete_name}(\"{task_id}\")` to stop the monitor."
+    ),
+    );
 }
 /// Format buffered between-turn subagent completions into a system-reminder
 /// string. When `task_output_name` is `None` each subagent's full output is
@@ -445,6 +487,7 @@ pub fn format_subagent_completion(
 pub fn format_between_turn_completions(
     completions: &[SubagentCompletionSummary],
     task_output_name: Option<&str>,
+    scheduler_delete_name: Option<&str>,
 ) -> String {
     use std::fmt::Write as _;
     let n = completions.len();
@@ -473,6 +516,7 @@ pub fn format_between_turn_completions(
             task_output_name,
             None,
         );
+        append_scheduler_cleanup_hint(&mut buf, c, scheduler_delete_name, "\n  ");
         buf.push('\n');
     }
     buf
@@ -488,7 +532,12 @@ pub async fn format_between_turn_completion_reminder(
     bridge: &ToolBridge,
 ) -> String {
     let task_output_name = resolve_task_output_tool_name(bridge).await;
-    format_between_turn_completions(completions, task_output_name.as_deref())
+    let scheduler_delete_name = resolve_scheduler_delete_tool_name(bridge).await;
+    format_between_turn_completions(
+        completions,
+        task_output_name.as_deref(),
+        scheduler_delete_name.as_deref(),
+    )
 }
 /// Format between-turn bash task completions into a system-reminder string.
 pub fn format_between_turn_bash_completions(
@@ -527,7 +576,7 @@ pub fn format_between_turn_bash_completions(
 /// forces every new `ToolOutput` variant to opt in or out at compile
 /// time.
 ///
-/// Returns borrowed `&str` slices (no allocation) — the strings live in
+/// Returns borrowed `&str` slices (no allocation) ÔÇö the strings live in
 /// `output` for the duration of the call.
 /// Extract the subagent UUID from the body of a Task-tool-formatted
 /// text output. The shape is exactly:
@@ -602,6 +651,7 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::EnterPlanMode(_)
         | ToolOutput::ExitPlanMode(_)
         | ToolOutput::AskUserQuestion(_)
+        | ToolOutput::SendSubagentMessage(_)
         | ToolOutput::Monitor(_)
         | ToolOutput::SchedulerCreate(_)
         | ToolOutput::SchedulerDelete(_)
@@ -756,16 +806,22 @@ impl Reminder for TaskCompletionReminder {
                 let goal_loop_active = res
                     .get::<crate::implementations::grok_build::task::types::GoalLoopActive>()
                     .is_some_and(|g| g.0);
-                let task_output_name: Option<String> = res
-                    .get::<crate::types::template_renderer::TemplateRenderer>()
-                    .and_then(|r| {
-                        r.tool_for_kind(crate::types::tool::ToolKind::BackgroundTaskAction)
-                            .map(str::to_string)
-                    });
+                let renderer = res.get::<crate::types::template_renderer::TemplateRenderer>();
+                let task_output_name: Option<String> = renderer.and_then(|r| {
+                    r.tool_for_kind(crate::types::tool::ToolKind::BackgroundTaskAction)
+                        .map(str::to_string)
+                });
+                let scheduler_delete_name: Option<String> = res
+                    .get::<crate::types::resources::NativeToolClientNames>()
+                    .and_then(|names| names.0.get("scheduler_delete").cloned());
                 let state = res.get_or_default::<State<ReportedTaskCompletions>>();
                 for c in &completions {
                     if state.reported.insert(c.subagent_id.clone()) && !goal_loop_active {
-                        reminders.push(format_subagent_completion(c, task_output_name.as_deref()));
+                        reminders.push(format_subagent_completion(
+                            c,
+                            task_output_name.as_deref(),
+                            scheduler_delete_name.as_deref(),
+                        ));
                     }
                 }
             }
@@ -823,6 +879,46 @@ mod tests {
         assert!(msg.contains("exit code: 0"));
         assert!(msg.contains("cargo test"));
         assert!(msg.contains("get_command_or_subagent_output(\"abc-123\")"));
+        assert!(
+            !msg.contains("killed by the user"),
+            "natural completion must not carry the UI-kill notice: {msg}"
+        );
+    }
+    #[test]
+    fn format_bash_completion_ui_kill_says_do_not_restart() {
+        let mut task = TaskSnapshot {
+            task_id: "ui-kill".into(),
+            command: "sleep 60".into(),
+            display_command: None,
+            cwd: String::new(),
+            start_time: std::time::SystemTime::now(),
+            end_time: Some(std::time::SystemTime::now()),
+            output: String::new(),
+            output_file: std::path::PathBuf::new(),
+            truncated: false,
+            exit_code: None,
+            signal: Some("SIGKILL".into()),
+            completed: true,
+            kind: Default::default(),
+            block_waited: false,
+            explicitly_killed: true,
+            kill_result_delivered: false,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: true,
+            output_total_bytes: 0,
+        };
+        let msg = format_bash_completion(&task, Some("get_command_or_subagent_output"), None);
+        assert!(
+            msg.contains("killed by the user ÔÇö do not restart it"),
+            "UI-kill wake must include the do-not-restart line: {msg}"
+        );
+        task.kill_result_delivered = true;
+        let model_msg = format_bash_completion(&task, Some("get_command_or_subagent_output"), None);
+        assert!(
+            !model_msg.contains("killed by the user"),
+            "model-tool kill must not tell the model the user killed it: {model_msg}"
+        );
     }
     #[test]
     fn format_monitor_completion_exit_zero() {
@@ -890,6 +986,42 @@ mod tests {
             "expected signal wording: {msg}"
         );
         assert!(msg.contains("get_task_output(\"mon-sig\")"), "{msg}");
+    }
+    #[test]
+    fn format_monitor_completion_ui_kill_says_do_not_restart() {
+        let mut task = TaskSnapshot {
+            task_id: "mon-ui".into(),
+            command: "tail -f app.log".into(),
+            display_command: Some("[monitor] app".into()),
+            cwd: String::new(),
+            start_time: std::time::SystemTime::now(),
+            end_time: Some(std::time::SystemTime::now()),
+            output: String::new(),
+            output_file: std::path::PathBuf::new(),
+            truncated: false,
+            exit_code: None,
+            signal: Some("SIGKILL".into()),
+            completed: true,
+            kind: crate::computer::types::TaskKind::Monitor,
+            block_waited: false,
+            explicitly_killed: true,
+            kill_result_delivered: false,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: true,
+            output_total_bytes: 0,
+        };
+        let msg = format_monitor_completion(&task, None);
+        assert!(
+            msg.contains("\nThis task was killed by the user ÔÇö do not restart it.\n"),
+            "UI-killed monitor notice must be on its own line: {msg}"
+        );
+        task.kill_result_delivered = true;
+        let model_msg = format_monitor_completion(&task, None);
+        assert!(
+            !model_msg.contains("killed by the user"),
+            "model-tool monitor kill must not carry the UI-kill notice: {model_msg}"
+        );
     }
     #[test]
     fn format_bash_completion_prefers_display_command() {
@@ -1031,7 +1163,7 @@ mod tests {
         );
     }
     /// Short-duration tasks that exited cleanly (no signal) are normal
-    /// (`true`, `:`, etc.) — the hint must NOT fire.
+    /// (`true`, `:`, etc.) ÔÇö the hint must NOT fire.
     #[test]
     fn format_bash_completion_no_signal_short_duration_no_hint() {
         let now = std::time::SystemTime::now();
@@ -1317,7 +1449,7 @@ mod tests {
     /// Bash completions are scoped to the session that OWNS the task. A
     /// subagent shares the parent's terminal backend, so `list_tasks()` returns
     /// the parent's (and sibling subagents') tasks too; only this session's
-    /// (and unowned) tasks may surface. Regression guard for the parent →
+    /// (and unowned) tasks may surface. Regression guard for the parent ÔåÆ
     /// subagent background-task completion leak.
     #[tokio::test]
     async fn bash_completions_scoped_to_owning_session() {
@@ -1516,6 +1648,7 @@ mod tests {
             subagent_id: id.into(),
             subagent_type: "general-purpose".into(),
             description: "test task".into(),
+            loop_task_id: None,
             success,
             duration_ms: 5000,
             tool_calls: 3,
@@ -1709,7 +1842,7 @@ mod tests {
     #[test]
     fn format_subagent_completion_success_with_poll_tool() {
         let c = make_subagent_completion("sub-abc", true);
-        let msg = format_subagent_completion(&c, Some("get_task_output"));
+        let msg = format_subagent_completion(&c, Some("get_task_output"), None);
         assert!(msg.contains("sub-abc"));
         assert!(msg.contains("successfully"));
         assert!(msg.contains("general-purpose"));
@@ -1720,15 +1853,41 @@ mod tests {
         assert!(msg.contains(r#"get_task_output("sub-abc")"#));
     }
     #[test]
+    fn format_scheduler_loop_completion_includes_cleanup_instruction() {
+        let mut c = make_subagent_completion("sub-loop", true);
+        c.loop_task_id = Some("loop-123".into());
+        let msg = format_subagent_completion(
+            &c,
+            Some("get_task_output"),
+            Some("renamed_scheduler_delete"),
+        );
+        assert_eq!(
+            msg,
+            "Background subagent \"sub-loop\" (general-purpose: \"test task\") completed successfully.\n\
+             Duration: 5.0s | Tool calls: 3 | Turns: 2\n\
+             Use get_task_output(\"sub-loop\") to see the full output.\n\
+             If the monitored work is complete, call `renamed_scheduler_delete(\"loop-123\")` to stop the monitor."
+        );
+    }
+    #[test]
+    fn cleanup_instruction_requires_nonempty_id_and_delete_tool() {
+        for loop_task_id in [None, Some(String::new()), Some("loop-123".into())] {
+            let mut c = make_subagent_completion("sub-loop", true);
+            c.loop_task_id = loop_task_id;
+            let msg = format_subagent_completion(&c, Some("get_task_output"), None);
+            assert!(!msg.contains("to stop the monitor"));
+        }
+    }
+    #[test]
     fn format_subagent_completion_failure() {
         let c = make_subagent_completion("sub-fail", false);
-        let msg = format_subagent_completion(&c, Some("get_task_output"));
+        let msg = format_subagent_completion(&c, Some("get_task_output"), None);
         assert!(msg.contains("with failure"));
     }
     #[test]
     fn format_subagent_completion_inlines_output_when_no_poll_tool() {
         let c = make_subagent_completion("sub-abc", true);
-        let msg = format_subagent_completion(&c, None);
+        let msg = format_subagent_completion(&c, None, None);
         assert!(msg.contains("sub-abc"));
         assert!(msg.contains("successfully"));
         assert!(
@@ -1849,7 +2008,7 @@ mod tests {
         let mut c = make_subagent_completion("sub-large", true);
         let large_output = "y".repeat(MAX_INLINE_COMPLETION_BYTES * 5);
         c.output = std::sync::Arc::from(large_output.as_str());
-        let msg = format_subagent_completion(&c, None);
+        let msg = format_subagent_completion(&c, None, None);
         assert!(
             msg.contains(&large_output),
             "subagent inline output must be preserved verbatim, got len={}",
@@ -1866,14 +2025,14 @@ mod tests {
         let mut c = make_subagent_completion("sub-batch", true);
         let large_output = "z".repeat(MAX_INLINE_COMPLETION_BYTES * 3);
         c.output = std::sync::Arc::from(large_output.as_str());
-        let msg = format_between_turn_completions(&[c], None);
+        let msg = format_between_turn_completions(&[c], None, None);
         assert!(
             msg.contains(&large_output),
             "between-turn subagent inline output must be preserved verbatim"
         );
         assert!(!msg.contains("[Output truncated"));
     }
-    /// The reminder pipeline ignores `MonitorEventBuffer` — the turn loop
+    /// The reminder pipeline ignores `MonitorEventBuffer` ÔÇö the turn loop
     /// owns the drain. Guards against the tool-result append path being
     /// reintroduced.
     #[tokio::test]
@@ -2031,14 +2190,14 @@ mod tests {
             None,
             "missing description attribute must not parse"
         );
-        let multibyte = "<monitor-event description=\"日本語ログ 监视 🚨\" task_id=\"t-utf8\">\n警告: ライン①\n二行目 — ürgent 🚨\n</monitor-event>";
+        let multibyte = "<monitor-event description=\"µùÑµ£¼Þ¬×Òâ¡Òé░ þøæÞºå ­ƒÜ¿\" task_id=\"t-utf8\">\nÞ¡ªÕæè: Òâ®ÒéñÒâ│Ôæá\nõ║îÞíîþø« ÔÇö ├╝rgent ­ƒÜ¿\n</monitor-event>";
         let (desc, inner) = split_wrapped_monitor_event(multibyte).expect("multibyte parses");
-        assert_eq!(desc, "日本語ログ 监视 🚨");
-        assert_eq!(inner, "警告: ライン①\n二行目 — ürgent 🚨");
+        assert_eq!(desc, "µùÑµ£¼Þ¬×Òâ¡Òé░ þøæÞºå ­ƒÜ¿");
+        assert_eq!(inner, "Þ¡ªÕæè: Òâ®ÒéñÒâ│Ôæá\nõ║îÞíîþø« ÔÇö ├╝rgent ­ƒÜ¿");
     }
-    /// Writer↔parser round-trip through the REAL `wrap_monitor_event`,
+    /// WriterÔåöparser round-trip through the REAL `wrap_monitor_event`,
     /// including a hostile description (quotes + newline + `">\n` sequence).
-    /// The writer sanitizes, so the parser always recovers cleanly — if the
+    /// The writer sanitizes, so the parser always recovers cleanly ÔÇö if the
     /// writer's shape ever drifts from the parser, this fails loudly.
     #[test]
     fn wrap_monitor_event_round_trips_through_split() {
@@ -2063,19 +2222,28 @@ mod tests {
             ),
             owner_session_id: None,
         };
-        let single = format_monitor_events(&[event("t-1", "журнал 🚨", "строка №1 ✓")], None)
-            .expect("single formats");
-        assert!(single.contains("[журнал 🚨] строка №1 ✓"), "{single}");
+        let single = format_monitor_events(
+            &[event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû1 Ô£ô")],
+            None,
+        )
+        .expect("single formats");
+        assert!(
+            single.contains("[ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿] ÐüÐéÐÇð¥ð║ð░ Ôäû1 Ô£ô"),
+            "{single}"
+        );
         let batched = format_monitor_events(
             &[
-                event("t-1", "журнал 🚨", "строка №1"),
-                event("t-1", "журнал 🚨", "строка №2"),
+                event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû1"),
+                event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû2"),
             ],
             None,
         )
         .expect("batch formats");
-        assert!(batched.contains("description=\"журнал 🚨\""), "{batched}");
-        assert!(batched.contains("[1] строка №1"), "{batched}");
-        assert!(batched.contains("[2] строка №2"), "{batched}");
+        assert!(
+            batched.contains("description=\"ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿\""),
+            "{batched}"
+        );
+        assert!(batched.contains("[1] ÐüÐéÐÇð¥ð║ð░ Ôäû1"), "{batched}");
+        assert!(batched.contains("[2] ÐüÐéÐÇð¥ð║ð░ Ôäû2"), "{batched}");
     }
 }

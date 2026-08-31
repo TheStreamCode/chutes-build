@@ -24,9 +24,9 @@ fn assert_viewport_invariants(
 
 #[test]
 fn single_line_viewport_clips_only_at_grapheme_boundaries() {
-    let zwj = "👩🏽\u{200d}💻";
-    let flag = "🇺🇸";
-    let text = format!("a{zwj}b{flag}界");
+    let zwj = "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗";
+    let flag = "­ƒç║­ƒç©";
+    let text = format!("a{zwj}b{flag}þòî");
     let after_b = 1 + zwj.len() + 1;
     let mut buffer = EditBuffer::from_parts(text.as_str(), after_b);
 
@@ -51,7 +51,7 @@ fn single_line_viewport_clips_only_at_grapheme_boundaries() {
 
     let _ = buffer.set_cursor_byte(buffer.text().len());
     let viewport = buffer.single_line_viewport(4);
-    assert_eq!(&buffer.text()[viewport.visible_byte_range.clone()], "界");
+    assert_eq!(&buffer.text()[viewport.visible_byte_range.clone()], "þòî");
     assert_eq!(viewport.cursor_display_column, 2);
     assert_viewport_invariants(&buffer, &viewport, 4);
 
@@ -160,9 +160,9 @@ fn fixed_seed_edit_sequence_preserves_cursor_and_viewport_invariants() {
         "\r\n",
         "\u{200b}",
         "e\u{301}",
-        "👩🏽\u{200d}💻",
-        "🇺🇸",
-        "界",
+        "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗",
+        "­ƒç║­ƒç©",
+        "þòî",
     ];
     let mut rng = rand::rngs::StdRng::seed_from_u64(0x5eed_ed17);
     let mut buffer = EditBuffer::new();

@@ -1,8 +1,8 @@
 xai-ratatui-inline includes code derived from the Ratatui terminal UI library.
 
 Ratatui is dual-licensed under the MIT License and the Apache License, Version 2.0.
-This crate’s forked Terminal / viewport implementation is based on Ratatui source
-(see README “Why Fork ratatui's Terminal?” and comments in src/terminal.rs).
+This crateÔÇÖs forked Terminal / viewport implementation is based on Ratatui source
+(see README ÔÇ£Why Fork ratatui's Terminal?ÔÇØ and comments in src/terminal.rs).
 
 Upstream: https://github.com/ratatui/ratatui
 Copyright (c) 2023-2024 The Ratatui Developers

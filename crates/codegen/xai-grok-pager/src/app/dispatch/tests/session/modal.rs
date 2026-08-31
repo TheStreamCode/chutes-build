@@ -61,6 +61,56 @@ fn open_extensions_modal_with_session_resets_stale_flag() {
 }
 
 #[test]
+fn reload_skills_marks_both_lists_loading_and_refetches() {
+    use crate::views::extensions_modal::{ExtensionsModalState, ExtensionsTab, TabDataState};
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    let mut modal = ExtensionsModalState::new(ExtensionsTab::Workflows);
+    modal.skills_data = TabDataState::Loaded(vec![]);
+    modal.workflows_data = TabDataState::Loaded(vec![]);
+    app.agents.get_mut(&id).unwrap().extensions_modal = Some(modal);
+
+    let effects = dispatch(Action::ReloadSkills, &mut app);
+
+    // The router arm is the sole owner of the Loading transitions; the modal key handler only emits the action
+    let modal = app.agents[&id].extensions_modal.as_ref().unwrap();
+    assert!(matches!(modal.skills_data, TabDataState::Loading));
+    assert!(matches!(modal.workflows_data, TabDataState::Loading));
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::FetchSkillsList { .. })),
+        "reload must refetch skills, got {effects:?}"
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::FetchWorkflowsList { .. })),
+        "reload must refetch workflows, got {effects:?}"
+    );
+}
+
+#[test]
+fn reload_skills_without_session_keeps_loaded_state() {
+    use crate::views::extensions_modal::{ExtensionsModalState, ExtensionsTab, TabDataState};
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents.get_mut(&id).unwrap().session.session_id = None;
+    let mut modal = ExtensionsModalState::new(ExtensionsTab::Workflows);
+    modal.skills_data = TabDataState::Loaded(vec![]);
+    modal.workflows_data = TabDataState::Loaded(vec![]);
+    app.agents.get_mut(&id).unwrap().extensions_modal = Some(modal);
+
+    let effects = dispatch(Action::ReloadSkills, &mut app);
+
+    // Nothing can fetch without a session, so nothing may flip to Loading; a stranded spinner would make repeat presses no-ops
+    assert!(effects.is_empty(), "got {effects:?}");
+    let modal = app.agents[&id].extensions_modal.as_ref().unwrap();
+    assert!(matches!(modal.skills_data, TabDataState::Loaded(_)));
+    assert!(matches!(modal.workflows_data, TabDataState::Loaded(_)));
+}
+
+#[test]
 fn session_created_with_flag_but_modal_closed_clears_flag_no_fetches() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -119,8 +169,7 @@ fn dispatch_new_session_opens_question_modal_in_git_repo() {
 
 #[test]
 fn dispatch_new_session_skips_modal_in_non_git_repo() {
-    // current_branch stays None (no git repo) → no modal, straight
-    // to dispatch_new_session_inner.
+    // current_branch stays None (no git repo), so no modal opens and dispatch goes straight to dispatch_new_session_inner
     let mut app = test_app_with_agent();
     let effects = dispatch(Action::NewSession, &mut app);
     assert!(
@@ -157,7 +206,7 @@ fn close_agent_releases_retained_memory() {
 
     let mut app = three_agent_app();
 
-    // Dropping a real AgentView (scrollback + caches + child views) → purge.
+    // Dropping a real AgentView (scrollback, caches, child views) purges
     let before = test_support::calls();
     dispatch_sessions_confirm_close(&mut app, AgentId(2));
     assert!(!app.agents.contains_key(&AgentId(2)));
@@ -167,7 +216,7 @@ fn close_agent_releases_retained_memory() {
         "dropping the closed AgentView must purge retained pages"
     );
 
-    // Closing an unknown agent drops nothing → no purge.
+    // Closing an unknown agent drops nothing, so no purge
     let before = test_support::calls();
     dispatch_sessions_confirm_close(&mut app, AgentId(999));
     assert_eq!(
@@ -265,8 +314,7 @@ fn marketplace_fetch_coalesces_while_inflight() {
     );
     assert_eq!(count_marketplace_fetches(&effects), 1);
 
-    // A successful action while the open-fetch is still in flight must not
-    // stack a second scan; it queues one refetch instead.
+    // A successful action while the open-fetch is still in flight must not stack a second scan; it queues one refetch instead
     let effects = dispatch(
         Action::TaskComplete(TaskResult::PluginsActionResult {
             agent_id: id,

@@ -45,9 +45,9 @@ fn prefire_lead_percent() -> u64 {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_PREFIRE_LEAD_PERCENT)
 }
-/// Cheap fingerprint of a conversation prefix for prefire NOTEÔéü validity. A
+/// Cheap fingerprint of a conversation prefix for prefire NOTE₁ validity. A
 /// mismatch means the prefix changed (edit / rewind / branch) since pass-1, so
-/// the cached NOTEÔéü no longer summarizes the current prefix and must be dropped.
+/// the cached NOTE₁ no longer summarizes the current prefix and must be dropped.
 fn fingerprint_prefix(items: &[ConversationItem]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -69,7 +69,7 @@ fn fingerprint_prefix(items: &[ConversationItem]) -> u64 {
 /// Outcome of a background prefire pass-1 run, recorded on the
 /// `session.prefire_pass1` span as `compaction_prefire_outcome`.
 /// [`PrefireOutcome::as_str`] values are stable telemetry keys
-/// (telemetry/dashboards key off them) ÔÇö don't rename the strings.
+/// (telemetry/dashboards key off them) — don't rename the strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PrefireOutcome {
     Cached,
@@ -104,7 +104,7 @@ struct PrefirePass1Run {
     note1_chars: Option<usize>,
 }
 impl From<PrefireOutcome> for PrefirePass1Run {
-    /// A run that exited before splitting/sampling ÔÇö outcome only.
+    /// A run that exited before splitting/sampling — outcome only.
     fn from(outcome: PrefireOutcome) -> Self {
         Self {
             outcome,
@@ -187,7 +187,7 @@ impl SessionActor {
         let start_pct = threshold.saturating_sub(prefire_lead_percent());
         xai_token_estimation::exceeds_threshold(estimated_total, cw, start_pct as u8)
     }
-    /// Background pass-1: summarize the ~95% prefix ÔåÆ NOTEÔéü and cache it for a
+    /// Background pass-1: summarize the ~95% prefix → NOTE₁ and cache it for a
     /// later pass-2 apply. Always releases the in-flight guard. Spawned via
     /// `spawn_local` from the turn loop; reads a conversation snapshot and does
     /// not mutate session state. The span makes speculative pass-1 spend
@@ -237,7 +237,7 @@ impl SessionActor {
         {
             tracing::info!(
                 target: "two_pass",
-                "two_pass: DEBUG CHUTES_BUILD_DEBUG_TWO_PASS_FAIL_PASS1 ÔÇö prefire pass1 produces no cache"
+                "two_pass: DEBUG CHUTES_BUILD_DEBUG_TWO_PASS_FAIL_PASS1 — prefire pass1 produces no cache"
             );
             return PrefireOutcome::DebugFailPass1.into();
         }
@@ -300,9 +300,9 @@ impl SessionActor {
         self.compaction.prefire.store(cache);
         attempted(PrefireOutcome::Cached, Some(note1_chars))
     }
-    /// Pass-2 apply: if a valid cached NOTEÔéü exists for the current conversation,
-    /// summarize (NOTEÔéü + recent tail + special prompt) ÔåÆ final summary and
-    /// return its `CompactOutput`. `None` ÔåÆ caller runs the single-pass path.
+    /// Pass-2 apply: if a valid cached NOTE₁ exists for the current conversation,
+    /// summarize (NOTE₁ + recent tail + special prompt) → final summary and
+    /// return its `CompactOutput`. `None` → caller runs the single-pass path.
     ///
     /// **telemetry / `session.compact_inner` latency:** the returned `CompactOutput`
     /// stream timings are what land on `compaction_ttft_ms` /
@@ -408,7 +408,7 @@ fn lossy_input_budget(context_window: u64, tool_tokens: u64) -> u64 {
 }
 /// Why auto-compaction was suppressed after a deterministic failure.
 /// [`SuppressReason::as_str`] is a stable telemetry value (BQ/OTLP/dashboards key
-/// off it) ÔÇö don't rename the strings.
+/// off it) — don't rename the strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SuppressReason {
     CreditBlock,
@@ -428,10 +428,10 @@ impl SuppressReason {
         }
     }
     /// Suppression scope for this reason:
-    /// - `size | schema` ÔåÆ [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
-    /// - `credit_block` ÔåÆ [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
-    /// - `auth` ÔåÆ [`SUPPRESS_AUTH`]: clear on login/token refresh (not 200 ÔÇö over-window deadlock).
-    /// - `other` ÔåÆ [`SUPPRESS_TURN`]: optimistic per-turn retry.
+    /// - `size | schema` → [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
+    /// - `credit_block` → [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
+    /// - `auth` → [`SUPPRESS_AUTH`]: clear on login/token refresh (not 200 — over-window deadlock).
+    /// - `other` → [`SUPPRESS_TURN`]: optimistic per-turn retry.
     fn suppress_state(self) -> u8 {
         match self {
             SuppressReason::Size | SuppressReason::Schema => SUPPRESS_STICKY,
@@ -442,8 +442,8 @@ impl SuppressReason {
     }
 }
 /// Splice the preserved prefix (`conversation[0..prefix_len]`) onto the compacted
-/// suffix, dropping the suffix's leading System and ÔÇö if the prefix already has an
-/// AGENTS.md item ÔÇö its re-injected AGENTS.md too (else the model sees it twice).
+/// suffix, dropping the suffix's leading System and — if the prefix already has an
+/// AGENTS.md item — its re-injected AGENTS.md too (else the model sees it twice).
 /// Returns `Err(compacted_history)` unchanged when `prefix_len` is 0 or out of range.
 fn preserve_inherited_prefix(
     conversation: &[ConversationItem],
@@ -547,7 +547,7 @@ impl SessionActor {
         }
     }
     /// Tag the current `session.compact` span with `mode` (and `detail`, for
-    /// `segments`) ÔÇö the A/B variant key for grouping outcomes in telemetry.
+    /// `segments`) — the A/B variant key for grouping outcomes in telemetry.
     fn record_compaction_variant(&self) {
         let mode = self.compaction.compaction_mode;
         let span = tracing::Span::current();
@@ -678,14 +678,14 @@ impl SessionActor {
         }
     }
     /// Suppress notification text, canned per reason; `Other` carries the real
-    /// error. Starts lowercase ÔÇö the renderer prepends its own headline.
+    /// error. Starts lowercase — the renderer prepends its own headline.
     fn suppress_notification_message(reason: SuppressReason, detail: &str) -> String {
         match reason {
             SuppressReason::CreditBlock => {
                 "out of credits or over your spending limit. Add credits and retry.".to_string()
             }
             SuppressReason::Auth => {
-                "authentication problem ÔÇö re-authenticate using /login and retry.".to_string()
+                "authentication problem — re-authenticate using /login and retry.".to_string()
             }
             SuppressReason::Size => "this conversation is too large to compact.".to_string(),
             SuppressReason::Schema => "this conversation can't be summarized.".to_string(),
@@ -693,7 +693,7 @@ impl SessionActor {
         }
     }
     /// Retry/new-session guidance headline, normalized detail on its own
-    /// line. Shared by the `Other` suppress arm and the transient failure ÔÇö
+    /// line. Shared by the `Other` suppress arm and the transient failure —
     /// both retry on the next turn.
     fn failure_with_retry_guidance(detail: &str) -> String {
         const RETRY_GUIDANCE: &str =
@@ -749,7 +749,7 @@ impl SessionActor {
         }
         normalize_compact_detail(rest)
     }
-    /// Auth/401 compact failure ÔÇö abort for reauth resubmit; don't sample oversized.
+    /// Auth/401 compact failure — abort for reauth resubmit; don't sample oversized.
     pub(crate) fn is_auth_compact_error(err: &acp::Error) -> bool {
         matches!(
             Self::classify_suppress_reason(&crate::sampling::error::acp_error_message(err)),
@@ -766,7 +766,7 @@ impl SessionActor {
             detailed
         } else {
             format!(
-                "{UNAUTHORIZED_NEEDLE}: compaction failed ÔÇö re-authenticate with /login \
+                "{UNAUTHORIZED_NEEDLE}: compaction failed — re-authenticate with /login \
                  and retry. ({detailed})"
             )
         };
@@ -804,7 +804,7 @@ impl SessionActor {
             std::sync::atomic::Ordering::Relaxed,
         );
     }
-    /// Credit or auth suppress ÔÇö a model switch cannot clear these.
+    /// Credit or auth suppress — a model switch cannot clear these.
     fn is_account_state_suppressed(&self) -> bool {
         matches!(
             self.compaction
@@ -2180,7 +2180,7 @@ impl SessionActor {
     /// the exact ConversationItem list sent to the compaction model plus the
     /// summary (or final error) it produced. The file rides on
     /// the post-turn session archive to cloud storage via the existing per-turn upload
-    /// pipeline ÔÇö no separate upload path is needed.
+    /// pipeline — no separate upload path is needed.
     ///
     /// `created_at` is taken from the caller-supplied `started_at` (captured
     /// before the retry loop) rather than `Utc::now()` here, so transient

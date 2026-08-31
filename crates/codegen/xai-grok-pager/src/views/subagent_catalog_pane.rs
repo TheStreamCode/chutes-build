@@ -1,8 +1,6 @@
-//! Subagent catalog pane — browseable list of bundled personas/roles/agents.
-//!
-//! Read-only pane that renders grouped entries from [`BundleState`]. Headers
-//! (Personas, Roles, Agents) are non-selectable; items below each header
-//! are selectable and scrollable via the standard [`ListPane`] machinery.
+//! Read-only pane that renders grouped entries from [`BundleState`].
+//! Headers (Personas, Roles, Agents) are non-selectable.
+//! Items below each header are selectable and scrollable via the standard [`ListPane`] machinery.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -156,7 +154,7 @@ impl SubagentCatalogPane {
                 let spans = if let Some(d) = &desc {
                     vec![
                         Span::styled(format!("  {item}"), item_style),
-                        Span::styled(format!(" \u{2014} {d}"), desc_style),
+                        Span::styled(format!(" \u{00b7} {d}"), desc_style),
                     ]
                 } else {
                     vec![Span::styled(format!("  {item}"), item_style)]
@@ -324,7 +322,7 @@ mod tests {
         let mut pane = SubagentCatalogPane::new();
         let state = make_state(&["researcher", "implementer"], &["reviewer"], &["default"]);
         pane.sync_from_bundle(&state);
-        // 3 headers + 4 items = 7 entries
+        // 3 headers plus 4 items
         assert_eq!(pane.entries.len(), 7);
         assert!(pane.entries[0].is_header);
         assert_eq!(pane.entries[0].label, "Personas");
@@ -347,7 +345,7 @@ mod tests {
         let mut pane = SubagentCatalogPane::new();
         let state = make_state(&["researcher", "auditor"], &[], &[]);
         pane.sync_from_bundle(&state);
-        // 1 header + 2 items = 3 (no Roles/Agents headers)
+        // 1 header plus 2 items; the empty Roles and Agents groups get no headers
         assert_eq!(pane.entries.len(), 3);
         assert!(pane.entries[0].is_header);
         assert_eq!(pane.entries[0].label, "Personas");
@@ -378,7 +376,7 @@ mod tests {
         pane.overlay.visible = true;
         let state = make_state(&["a", "b"], &[], &[]);
         pane.sync_from_bundle(&state);
-        // 1 header + 2 items = 3 entries, should cap at 3
+        // 1 header plus 2 items: the entry count of 3 is the cap
         assert_eq!(pane.desired_height(80), 3);
     }
 
@@ -406,11 +404,11 @@ mod tests {
         let mut pane = SubagentCatalogPane::new();
         let state1 = make_state(&["a", "b", "c"], &[], &[]);
         pane.sync_from_bundle(&state1);
-        assert_eq!(pane.entries.len(), 4); // 1 header + 3
+        assert_eq!(pane.entries.len(), 4); // 1 header plus 3 items
 
         let state2 = make_state(&["x"], &[], &[]);
         pane.sync_from_bundle(&state2);
-        assert_eq!(pane.entries.len(), 2); // 1 header + 1
+        assert_eq!(pane.entries.len(), 2); // 1 header plus 1 item
         assert_eq!(pane.entries[1].label, "x");
     }
 
@@ -467,9 +465,8 @@ mod tests {
         }];
         pane.sync_from_bundle(&state);
 
-        // researcher entry should have 2 spans (name + description)
+        // The researcher entry renders a name span and a description span
         assert_eq!(pane.entries[1].styled.spans.len(), 2);
-        // reviewer entry should have 2 spans
         assert_eq!(pane.entries[3].styled.spans.len(), 2);
     }
 
@@ -479,12 +476,12 @@ mod tests {
         let state = make_state(&["researcher"], &[], &[]);
         pane.sync_from_bundle(&state);
 
-        // No detail → single span
+        // No detail: single span
         assert_eq!(pane.entries[1].styled.spans.len(), 1);
     }
 
     #[test]
-    fn empty_persona_description_renders_no_em_dash() {
+    fn empty_persona_description_renders_no_separator() {
         use crate::app::bundle::PersonaDetail;
         let mut pane = SubagentCatalogPane::new();
         let mut state = make_state(&["researcher"], &[], &[]);
@@ -498,7 +495,7 @@ mod tests {
         }];
         pane.sync_from_bundle(&state);
 
-        // Empty description should be filtered — single span, no dangling em-dash.
+        // The empty description is filtered out: a single span, no dangling separator
         assert_eq!(pane.entries[1].styled.spans.len(), 1);
     }
 

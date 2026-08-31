@@ -319,7 +319,7 @@ fn send_streamed_chunks<T: AsRef<str>>(
 
         if let Ok(raw) = serde_json::value::to_raw_value(&params) {
             gateway.forward_fire_and_forget(acp::ExtNotification::new(
-                "chutes.build/session/updates/chunk",
+                "chutes.ai/session/updates/chunk",
                 std::sync::Arc::from(raw),
             ));
         }
@@ -528,7 +528,7 @@ mod tests {
         }
 
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
     }
 
     #[tokio::test]
@@ -695,7 +695,7 @@ mod tests {
             map.insert("offset".into(), serde_json::json!(off));
         }
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
     }
 
     fn extract_chunk_params(
@@ -804,7 +804,7 @@ mod tests {
             map.insert("limit".into(), serde_json::json!(lim));
         }
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
     }
 
     fn user_chunk(text: &str) -> String {

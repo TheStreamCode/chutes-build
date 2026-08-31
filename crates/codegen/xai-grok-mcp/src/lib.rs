@@ -33,7 +33,9 @@ pub use rmcp;
 pub fn isolate_grok_home_for_tests() {
     static HOME: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     HOME.get_or_init(|| {
-        let dir = tempfile::TempDir::new().expect("test Chutes Build home").keep();
+        let dir = tempfile::TempDir::new()
+            .expect("test Chutes Build home")
+            .keep();
         // SAFETY: OnceLock-guarded single set; the concurrent env-read race is accepted in tests.
         unsafe { std::env::set_var("CHUTES_BUILD_HOME", &dir) };
         let memo = xai_grok_config::grok_home();

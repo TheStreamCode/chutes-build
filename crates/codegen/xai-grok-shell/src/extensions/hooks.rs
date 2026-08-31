@@ -16,14 +16,6 @@ struct ListRequest {
     session_id: String,
 }
 
-pub(crate) fn hook_spec_to_info(spec: &xai_grok_hooks::config::HookSpec) -> HookInfo {
-    hook_spec_to_info_with(
-        spec,
-        &xai_grok_hooks::trust::DisabledHooks::default(),
-        &std::collections::HashSet::new(),
-    )
-}
-
 pub(crate) fn hook_spec_to_info_with(
     spec: &xai_grok_hooks::config::HookSpec,
     disabled: &xai_grok_hooks::trust::DisabledHooks,
@@ -399,7 +391,8 @@ mod tests {
         assert!(reconnect_client_hooks(None).is_none());
         assert!(reconnect_client_hooks(serde_json::json!({ "other": true }).as_object()).is_none());
 
-        let cleared = reconnect_client_hooks(serde_json::json!({ "chutes.ai/hooks": {} }).as_object());
+        let cleared =
+            reconnect_client_hooks(serde_json::json!({ "chutes.ai/hooks": {} }).as_object());
         assert!(cleared.is_some_and(|h| h.is_empty()));
 
         let set = reconnect_client_hooks(

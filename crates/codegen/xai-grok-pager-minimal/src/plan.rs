@@ -5,7 +5,7 @@
 //! into native scrollback** as a normal conversation block (see
 //! [`maybe_commit_plan`]), so it reads and scrolls exactly like the rest of the
 //! transcript. The prompt-anchored live region then holds only the decision
-//! controls — approve / revise / keep planning — plus the feedback input when
+//! controls ÔÇö approve / revise / keep planning ÔÇö plus the feedback input when
 //! revising. Nothing of the plan body is drawn under the prompt.
 //!
 //! Input routing is unchanged: while `line_viewer.is_some()` the agent's input
@@ -67,7 +67,7 @@ fn plan_scrollback_body(plan_content: Option<&str>) -> String {
 ///
 /// Minimal has no separate plan pane: the terminal's scrollback *is* the
 /// history, so the plan is pushed as an ordinary finalized agent-message block
-/// and printed into native scrollback by the normal commit pass — leaving only
+/// and printed into native scrollback by the normal commit pass ÔÇö leaving only
 /// the decision controls under the prompt. De-duplicated by the plan's
 /// `tool_call_id`; a revised plan arrives as a fresh ExitPlanMode with a new id
 /// and is committed as its own block. Empty / whitespace-only plans still commit
@@ -77,16 +77,16 @@ fn plan_scrollback_body(plan_content: Option<&str>) -> String {
 /// The block is anchored **above** the still-running `exit_plan_mode` tool row,
 /// not appended after it, so the commit frontier reaches the plan while the
 /// approval is still parked. Users reported losing the head of a plan to the
-/// clipped live tail; design doc §6.16 has the full argument and the rejected
+/// clipped live tail; design doc ┬º6.16 has the full argument and the rejected
 /// alternatives.
 ///
 /// NOTE (draw-path state mutation + replay durability): this pushes into
-/// `ScrollbackState` from the render path — a deliberate exception, since the
+/// `ScrollbackState` from the render path ÔÇö a deliberate exception, since the
 /// plan block must enter the normal commit pipeline. The pushed block is
 /// client-render state, not a server event: a resumed session will not replay
 /// it, so post-reload `/transcript` shows the plan only through whatever the
-/// agent itself messaged. Accepted for v1 (the live session — the mode's whole
-/// surface — is consistent).
+/// agent itself messaged. Accepted for v1 (the live session ÔÇö the mode's whole
+/// surface ÔÇö is consistent).
 ///
 /// Call once per frame from [`crate::draw`], before the commit pass.
 pub fn maybe_commit_plan(app: &mut AppView) {
@@ -118,7 +118,7 @@ pub fn maybe_commit_plan(app: &mut AppView) {
     if let Some(agent) = app.agents.get_mut(&id) {
         let block = RenderBlock::agent_message(content);
         // No anchor (the tool was reaped): append, and the plan commits at turn
-        // end — the pre-fix behavior, still better than dropping it.
+        // end ÔÇö the pre-fix behavior, still better than dropping it.
         match minimal_api::pending_tool_entry_id(agent, &tool_call_id) {
             Some(anchor) => {
                 agent.scrollback.insert_block_before(anchor, block);
@@ -144,7 +144,7 @@ pub fn height(agent: &AgentView) -> u16 {
 
 /// Render the compact plan-approval controls strip into `area`. The plan itself
 /// lives in native scrollback ([`maybe_commit_plan`]); this only draws the
-/// header, the decision hint, and — when revising — the feedback input. Returns
+/// header, the decision hint, and ÔÇö when revising ÔÇö the feedback input. Returns
 /// the text cursor when the feedback input is focused, else `None`.
 pub fn render(
     buf: &mut Buffer,
@@ -162,10 +162,10 @@ pub fn render(
         0
     };
 
-    // header (1) · controls (1) · input (0/1)
+    // header (1) ┬À controls (1) ┬À input (0/1)
     let controls_y = (area.y + area.height).saturating_sub(1 + input_h);
 
-    // ── header ──
+    // ÔöÇÔöÇ header ÔöÇÔöÇ
     let has_plan = minimal_api::plan_approval_view(agent)
         .map(|p| p.has_plan)
         .unwrap_or(false);
@@ -184,7 +184,7 @@ pub fn render(
         area.width,
     );
 
-    // ── controls hint ──
+    // ÔöÇÔöÇ controls hint ÔöÇÔöÇ
     let has_content = minimal_api::plan_approval_view(agent)
         .map(|p| !p.comments.is_empty())
         .unwrap_or(false)
@@ -213,7 +213,7 @@ pub fn render(
         area.width,
     );
 
-    // ── feedback input (revise mode) ──
+    // ÔöÇÔöÇ feedback input (revise mode) ÔöÇÔöÇ
     if input_h > 0 {
         let row = Rect {
             x: area.x,

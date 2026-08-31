@@ -10,23 +10,55 @@ use xai_grok_shell::env::GrokBuildEnvironment;
 use xai_grok_shell::util::grok_home::grok_home;
 
 const TTL_SECONDS_BEFORE_AUTO_UPDATE: Duration = Duration::from_secs(60 * 30);
-pub(crate) const NPM_PACKAGE: &str = "chutes-build";
-pub const GH_RELEASE_REPO: &str = "TheStreamCode/chutes-build";
+const NPM_PACKAGE: &str = "@xai-official/grok";
+pub const GH_RELEASE_REPO: &str = "xai-org-shared/chutes-build";
 
-/// Fail-closed endpoint retained for compatibility with the inherited updater.
-/// Chutes Build does not self-update; the caller stays so upstream merges land
-/// cleanly, and the request fails locally instead of reaching a network.
-pub(crate) const CLI_BASE_URL_PRIMARY: &str = "http://127.0.0.1:9/updates";
+/// Primary CLI base URL: Cloudflare-fronted chutes.ai endpoint with edge caching
+/// for binaries and origin-respecting no-cache for channel pointers.
+pub(crate) const CLI_BASE_URL_PRIMARY: &str = "https://chutes.ai/cli";
 
-/// The fallback is deadened for the same reason. It pointed at a GCS bucket that
-/// does not exist, so `update --check` made a real request to
-/// `storage.googleapis.com` and reported `NoSuchBucket` — a network call on a
-/// path that should never leave the machine.
-pub(crate) const CLI_BASE_URL_FALLBACK: &str = "http://127.0.0.1:9/updates";
+/// Fallback CLI base URL: direct GCS, used when the primary is unreachable
+/// (Cloudflare outage, regional CF egress issue, DNS hijack, etc.).
+pub(crate) const CLI_BASE_URL_FALLBACK: &str =
+    "https://storage.googleapis.com/chutes-build-public-artifacts/cli";
 
 /// CLI base URLs in preference order. Callers (channel-pointer fetch, binary
 /// download, in-app updater) try each in turn and stop at the first success.
 pub(crate) const CLI_BASE_URLS: &[&str] = &[CLI_BASE_URL_PRIMARY, CLI_BASE_URL_FALLBACK];
+
+/// [`CLI_BASE_URLS`] with a test seam: `CHUTES_BUILD_CLI_BASE_URL` points fetches
+/// and downloads at one base (env-seam family of `CHUTES_BUILD_INSTALLER`).
+/// Loopback-only: downloads are verified by a smoke test, not a checksum,
+/// so an arbitrary redirect base would be an install-hijack vector.
+pub(crate) fn cli_base_urls() -> Vec<String> {
+    if let Ok(base) = std::env::var("CHUTES_BUILD_CLI_BASE_URL") {
+        let base = base.trim();
+        if is_loopback_base(base) {
+            return vec![base.to_owned()];
+        }
+        if !base.is_empty() {
+            tracing::warn!("CHUTES_BUILD_CLI_BASE_URL ignored: only loopback bases are honored");
+        }
+    }
+    CLI_BASE_URLS.iter().map(|s| (*s).to_owned()).collect()
+}
+
+/// Parsed, not prefix-matched: `http://127.0.0.1:9@evil.com` starts with a
+/// loopback prefix but its host is `evil.com` (userinfo trick).
+fn is_loopback_base(base: &str) -> bool {
+    let Ok(u) = url::Url::parse(base) else {
+        return false;
+    };
+    if u.scheme() != "http" || !u.username().is_empty() || u.password().is_some() {
+        return false;
+    }
+    match u.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(d)) => d == "localhost",
+        None => false,
+    }
+}
 
 /// Minimal configuration the update system needs from the environment.
 ///
@@ -107,7 +139,7 @@ fn semver_max(a: &str, b: &str) -> Result<String> {
 
 /// Fetch the latest version from npm registry using `npm view`.
 /// For alpha channel, fetches both `@alpha` and `@latest` dist-tags and
-/// returns the semver-greater — prevents alpha users getting stuck when a
+/// returns the semver-greater ÔÇö prevents alpha users getting stuck when a
 /// newer stable ships without updating the alpha dist-tag.
 async fn fetch_npm_version(channel: &str, npm_registry: Option<&str>) -> Result<String> {
     if channel == "alpha" {
@@ -137,15 +169,6 @@ pub async fn fetch_npm_version_for_test(
     fetch_npm_version(channel, npm_registry).await
 }
 
-/// The program name for spawning npm.
-///
-/// npm ships as `npm.cmd` on Windows, and `std::process::Command` only
-/// appends `.exe` to an extensionless name, so the bare `"npm"` never
-/// resolves there and every spawn fails with "program not found".
-pub(crate) fn npm_program() -> &'static str {
-    if cfg!(windows) { "npm.cmd" } else { "npm" }
-}
-
 async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> {
     let pkg_spec = if tag == "latest" {
         NPM_PACKAGE.to_string()
@@ -158,7 +181,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
         registry_flag = format!("--registry={}", registry);
         args.push(&registry_flag);
     }
-    let mut cmd = Command::new(npm_program());
+    let mut cmd = Command::new("npm");
     cmd.args(&args).stdin(std::process::Stdio::null());
     xai_grok_tools::util::detach_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
@@ -184,7 +207,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
 
 /// Fetch the latest version from GitHub Releases using `gh release list`.
 /// For alpha channel, fetches both pre-release and stable-only, returns the
-/// semver-greater — `gh release list --limit 1` orders by publication date,
+/// semver-greater ÔÇö `gh release list --limit 1` orders by publication date,
 /// not semver, so we need both to guarantee correctness.
 #[doc(hidden)]
 pub async fn fetch_gh_release_version(channel: &str) -> Result<String> {
@@ -238,7 +261,7 @@ async fn fetch_gh_release_latest(exclude_pre: bool) -> Result<String> {
 /// Fetch the latest version from a public CLI channel pointer.
 ///
 /// Reads `{base}/{channel}` which contains a plain-text semver string
-/// (e.g. `0.1.181`). No auth required — the upstream bucket is public.
+/// (e.g. `0.1.181`). No auth required ÔÇö the upstream bucket is public.
 ///
 /// For the alpha channel, fetches both `alpha` and `stable` pointers and
 /// returns the semver-greater, matching the behavior of the npm and
@@ -250,11 +273,12 @@ async fn fetch_gh_release_latest(exclude_pre: bool) -> Result<String> {
 /// next base.
 pub(crate) async fn fetch_gcs_version(channel: &str) -> Result<String> {
     let mut last_err: Option<anyhow::Error> = None;
-    for (i, base) in CLI_BASE_URLS.iter().enumerate() {
+    let bases = cli_base_urls();
+    for (i, base) in bases.iter().enumerate() {
         match fetch_gcs_version_from_base(channel, base).await {
             Ok(v) => return Ok(v),
             Err(e) => {
-                if i + 1 < CLI_BASE_URLS.len() {
+                if i + 1 < bases.len() {
                     tracing::warn!(
                         "channel pointer fetch from {} failed ({:#}); trying next base URL",
                         base,
@@ -284,13 +308,9 @@ pub async fn fetch_gcs_version_from_base(channel: &str, base_url: &str) -> Resul
 
 async fn fetch_gcs_channel_pointer(channel: &str, base_url: &str) -> Result<String> {
     let url = format!("{}/{}", base_url, channel);
-    // WHY-ALLOW: manual-only updater reading the channel pointer from GCS,
-    // not a Chutes API endpoint; extra-CA handling for the updater is a
-    // separate product decision.
-    #[allow(clippy::disallowed_methods)]
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()?;
+    let client = xai_grok_extra_ca::build_reqwest_client(|builder| {
+        builder.timeout(Duration::from_secs(15))
+    })?;
 
     let max_retries: u32 = 3;
     let mut last_err = None;
@@ -404,11 +424,11 @@ pub async fn write_version_cache(version: &str, stable_version: Option<&str>) {
 
 /// Fetch the latest version for the given installer type and cache it.
 ///
-/// Each installer is fully independent — no cross-installer fallback.
+/// Each installer is fully independent ÔÇö no cross-installer fallback.
 ///
-/// - `"npm"` — uses `npm view` against the public registry.
-/// - `"internal"` — reads the channel pointer from the public GCS bucket.
-/// - `"gh-release"` — uses `gh release list` against GitHub Releases.
+/// - `"npm"` ÔÇö uses `npm view` against the public registry.
+/// - `"internal"` ÔÇö reads the channel pointer from the public GCS bucket.
+/// - `"gh-release"` ÔÇö uses `gh release list` against GitHub Releases.
 pub async fn get_latest_version(installer: &str, config: &UpdateConfig) -> Result<String> {
     let version = fetch_latest_version(installer, config).await?;
     let stable_ptr = try_fetch_stable_pointer().await;
@@ -441,12 +461,12 @@ pub use xai_grok_version::installed as get_installed_grok_version;
 /// never downloaded a second time.
 ///
 /// Returns `None` when there is no parseable managed symlink (Windows
-/// copy-based installs, dev builds) or when the symlink is DANGLING — a
+/// copy-based installs, dev builds) or when the symlink is DANGLING ÔÇö a
 /// link whose target binary was deleted (e.g. manual `~/.chutes-build/downloads`
 /// cleanup) must not report an installed version, or every updater would
 /// claim "already up to date" forever while no runnable binary exists.
 /// NOTE: the symlink existing does not prove the *active installer*
-/// maintains it — npm manages its own global install and a leftover symlink
+/// maintains it ÔÇö npm manages its own global install and a leftover symlink
 /// from a previous internal install would lie about the npm install's
 /// version. Callers must gate on the installer (see
 /// `disk_version_for_installer` in `auto_update`).
@@ -469,7 +489,7 @@ pub fn installed_on_disk_version() -> Option<String> {
 /// Extract the `<version>` portion of a versioned binary file name.
 ///
 /// Handles the internal layout (`grok-0.1.150-macos-aarch64`, including
-/// pre-releases: `grok-0.1.150-alpha.1-linux-x86_64` → `0.1.150-alpha.1`)
+/// pre-releases: `grok-0.1.150-alpha.1-linux-x86_64` ÔåÆ `0.1.150-alpha.1`)
 /// and the npm layout without a platform suffix (`grok-0.1.150`,
 /// `grok-0.1.150-alpha.1`): everything between the `{bin_prefix}-` prefix
 /// and the first platform-OS component is the version, validated as semver
@@ -477,7 +497,7 @@ pub fn installed_on_disk_version() -> Option<String> {
 /// `grok`) return `None` instead of garbage.
 ///
 /// Shared by the disk-version probe above and `cleanup_old_downloads` in
-/// `auto_update` — keep it the single place that understands this naming.
+/// `auto_update` ÔÇö keep it the single place that understands this naming.
 pub(crate) fn version_from_versioned_binary_name(name: &str, bin_prefix: &str) -> Option<String> {
     const PLATFORM_OS: &[&str] = &["macos", "linux", "darwin", "windows"];
     let suffix = name.strip_prefix(bin_prefix)?.strip_prefix('-')?;
@@ -499,14 +519,14 @@ pub(crate) fn version_from_versioned_binary_name(name: &str, bin_prefix: &str) -
 /// until the next successful fetch).
 ///
 /// The entire operation is capped at 500 ms. The stable pointer is only used
-/// to derive the `[alpha]`/`[stable]` channel label — it is never required
+/// to derive the `[alpha]`/`[stable]` channel label ÔÇö it is never required
 /// for correctness. On slow or unreachable networks the timeout fires and we
 /// return `None`; the label will populate on the next successful TTL check
 /// (~30 min). This keeps startup and post-install paths fast.
 pub(crate) async fn try_fetch_stable_pointer() -> Option<String> {
     tokio::time::timeout(Duration::from_millis(500), async {
-        for base in CLI_BASE_URLS {
-            if let Ok(v) = fetch_gcs_channel_pointer("stable", base).await {
+        for base in cli_base_urls() {
+            if let Ok(v) = fetch_gcs_channel_pointer("stable", &base).await {
                 return Some(v);
             }
         }
@@ -584,6 +604,20 @@ pub fn channel_label() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loopback_base_rejects_userinfo_and_non_loopback() {
+        use super::is_loopback_base;
+        assert!(is_loopback_base("http://127.0.0.1:8971"));
+        assert!(is_loopback_base("http://localhost:8971"));
+        assert!(is_loopback_base("http://[::1]:8971"));
+        // Prefix-check bypass vectors.
+        assert!(!is_loopback_base("http://127.0.0.1:9@evil.com"));
+        assert!(!is_loopback_base("http://localhost.evil.com:80"));
+        assert!(!is_loopback_base("https://chutes.ai/cli"));
+        assert!(!is_loopback_base("http://192.168.1.1:80"));
+        assert!(!is_loopback_base(""));
+    }
+
     use super::*;
 
     /// Verifies that a future `checked_at` timestamp (e.g. from clock skew or
@@ -608,9 +642,9 @@ mod tests {
             ("grok-0.2.46-darwin-arm64", Some("0.2.46")),
             ("grok-0.1.220-linux-x86_64", Some("0.1.220")),
             ("grok-0.2.5-windows-x86_64.exe", Some("0.2.5")),
-            // Pre-releases must round-trip whole — truncating to "0.1.220"
+            // Pre-releases must round-trip whole ÔÇö truncating to "0.1.220"
             // would make an alpha install masquerade as the release and
-            // mask alpha → stable updates.
+            // mask alpha ÔåÆ stable updates.
             ("grok-0.1.220-alpha.4-linux-x86_64", Some("0.1.220-alpha.4")),
             ("grok-0.1.220-alpha.4", Some("0.1.220-alpha.4")), // npm layout
             ("grok-pager-0.1.5-darwin-arm64", None),           // "pager" is not a version
@@ -638,32 +672,32 @@ mod tests {
         );
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // derive_channel — invariant matrix
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // derive_channel ÔÇö invariant matrix
     //
     // Tests the pure comparison logic that determines [alpha] vs [stable].
     // Covers current 0.1.X-alpha.N, future 0.2.X, edge cases, and errors.
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn test_derive_channel_matrix() {
         // (current, stable_pointer, expected_channel)
         let cases: &[(&str, &str, Option<&str>)] = &[
-            // ── Current 0.1.X workflow ──
+            // ÔöÇÔöÇ Current 0.1.X workflow ÔöÇÔöÇ
             ("0.1.220-alpha.2", "0.1.219", Some("alpha")), // alpha ahead of stable
             ("0.1.219", "0.1.219", Some("stable")),        // stable user on latest
             ("0.1.218", "0.1.219", Some("stable")),        // stable user behind latest
             ("0.1.220-alpha.2", "0.1.220-alpha.2", Some("stable")), // pointer matches exactly
             ("0.1.220-alpha.2", "0.1.220", Some("stable")), // semver: release > pre-release
-            // ── Future 0.2.X workflow ──
+            // ÔöÇÔöÇ Future 0.2.X workflow ÔöÇÔöÇ
             ("0.2.5", "0.2.3", Some("alpha")), // alpha ahead of stable
             ("0.2.5", "0.2.5", Some("stable")), // promoted to stable
             ("0.2.3", "0.2.5", Some("stable")), // behind stable
             ("0.2.0", "0.2.0", Some("stable")), // first release, both 0.2.0
-            // ── Cross-regime upgrade ──
+            // ÔöÇÔöÇ Cross-regime upgrade ÔöÇÔöÇ
             ("0.2.0", "0.1.219", Some("alpha")), // new regime ahead of old stable
             ("0.1.220-alpha.2", "0.2.0", Some("stable")), // old pre-release < new stable
-            // ── Error cases ──
+            // ÔöÇÔöÇ Error cases ÔöÇÔöÇ
             ("garbage", "0.1.219", None), // unparseable current
             ("0.1.219", "garbage", None), // unparseable stable
             ("", "0.1.219", None),        // empty current
@@ -680,9 +714,9 @@ mod tests {
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // semver_max — invariant matrix
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // semver_max ÔÇö invariant matrix
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn test_semver_max_matrix() {
@@ -717,13 +751,13 @@ mod tests {
         assert!(semver_max("foo", "bar").is_err());
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // GrokVersion JSON shape — backward compatibility invariants
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // GrokVersion JSON shape ÔÇö backward compatibility invariants
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn test_version_json_backward_compat() {
-        // Old format (no stable_version) must parse — serde(default) fills None.
+        // Old format (no stable_version) must parse ÔÇö serde(default) fills None.
         let old = r#"{"version":"0.1.180","checked_at":"2026-04-22T10:30:00Z"}"#;
         let v: GrokVersion = serde_json::from_str(old).unwrap();
         assert_eq!(v.version, "0.1.180");
@@ -755,29 +789,29 @@ mod tests {
         assert!(serde_json::from_str::<GrokVersion>(missing).is_err());
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // is_fresh — TTL boundary invariants
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // is_fresh ÔÇö TTL boundary invariants
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn test_is_fresh_ttl_boundaries() {
         let now = time::OffsetDateTime::now_utc();
         let v = GrokVersion::new("0.1.200".to_string(), None, now);
 
-        // Within TTL → fresh
+        // Within TTL ÔåÆ fresh
         assert!(v.is_fresh(now, Duration::from_secs(60)));
         assert!(v.is_fresh(now + Duration::from_secs(29), Duration::from_secs(30)));
 
-        // At TTL boundary → NOT fresh (strict <)
+        // At TTL boundary ÔåÆ NOT fresh (strict <)
         assert!(!v.is_fresh(now + Duration::from_secs(30), Duration::from_secs(30)));
 
-        // Past TTL → not fresh
+        // Past TTL ÔåÆ not fresh
         assert!(!v.is_fresh(now + Duration::from_secs(31), Duration::from_secs(30)));
 
-        // Zero TTL → never fresh
+        // Zero TTL ÔåÆ never fresh
         assert!(!v.is_fresh(now, Duration::ZERO));
 
-        // Malformed timestamp → not fresh
+        // Malformed timestamp ÔåÆ not fresh
         let bad = GrokVersion {
             version: "0.1.200".to_string(),
             stable_version: None,
@@ -786,9 +820,9 @@ mod tests {
         assert!(!bad.is_fresh(now, Duration::from_secs(60)));
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     // UpdateConfig defaults
-    // ──────────────────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
     #[test]
     fn test_update_config_default_channel_is_stable() {

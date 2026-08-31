@@ -71,16 +71,10 @@ fn nonblocking_acquire_writes_holder_info() {
 
     let _lock = try_lock_auth_file_nonblocking(&path).expect("uncontended non-blocking acquire");
 
-    // On Windows the guard's LockFileEx range blocks a plain read of the
-    // locked region from another handle, even in-process, so the holder-info
-    // bytes can only be inspected where flock leaves the file readable.
-    #[cfg(unix)]
-    {
-        let content = std::fs::read_to_string(&lock_path).unwrap();
-        let (pid, _ts) =
-            parse_holder_info(&content).expect("non-blocking acquire must write parseable info");
-        assert_eq!(pid, std::process::id());
-    }
+    let content = std::fs::read_to_string(&lock_path).unwrap();
+    let (pid, _ts) =
+        parse_holder_info(&content).expect("non-blocking acquire must write parseable info");
+    assert_eq!(pid, std::process::id());
 }
 
 #[test]
@@ -280,15 +274,10 @@ async fn acquire_release_and_reacquire_succeed() {
         .into_guard();
     assert!(lock.is_some(), "should acquire lock");
 
-    // See the sibling test: the holder-info read is Unix-only, where flock
-    // leaves the file readable; Windows holds a byte range over it.
-    #[cfg(unix)]
-    {
-        let lock_path = path.with_file_name("auth.json.lock");
-        let content = std::fs::read_to_string(&lock_path).unwrap();
-        let (pid, _ts) = parse_holder_info(&content).unwrap();
-        assert_eq!(pid, std::process::id());
-    }
+    let lock_path = path.with_file_name("auth.json.lock");
+    let content = std::fs::read_to_string(&lock_path).unwrap();
+    let (pid, _ts) = parse_holder_info(&content).unwrap();
+    assert_eq!(pid, std::process::id());
 
     drop(lock);
 

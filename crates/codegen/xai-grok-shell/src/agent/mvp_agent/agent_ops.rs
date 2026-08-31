@@ -152,7 +152,7 @@ impl MvpAgent {
         self.auth_method_id.store(Some(std::sync::Arc::new(id)));
     }
     /// Publish model-owned credentials for voice/tools static fallthrough.
-    /// Only [`ModelEntry::own_credential`] ÔÇö not `sampling_config.api_key` (may be a session JWT).
+    /// Only [`ModelEntry::own_credential`] — not `sampling_config.api_key` (may be a session JWT).
     pub(crate) fn sync_process_static_api_key(&self, preferred_model_id: Option<&str>) {
         if self.cfg.borrow().grok_com_config.api_key_auth_disabled() {
             self.auth_manager.set_process_static_api_key(None);
@@ -379,12 +379,12 @@ impl MvpAgent {
     }
     /// Build the launch-dir plugin registry snapshot on first use.
     ///
-    /// Boot-time discovery was deferred past ACP `initialize` (the cwdÔåÆgit-root
+    /// Boot-time discovery was deferred past ACP `initialize` (the cwd→git-root
     /// plus user/marketplace walks stalled grok-desktop's first `initialize`),
     /// leaving `plugin_registry_handle` empty. That shared snapshot still backs
     /// the launch-dir plugin MCP/LSP merges read in `resolve_mcp_servers` and
-    /// the session LSP build, so populate it lazily ÔÇö off the `initialize`
-    /// critical path ÔÇö on the first session-creating call. Runs the discovery
+    /// the session LSP build, so populate it lazily — off the `initialize`
+    /// critical path — on the first session-creating call. Runs the discovery
     /// walk once; per-session `build_for_cwd` still re-resolves project-scoped
     /// plugins for each session's own cwd.
     pub(super) fn ensure_plugin_registry(&self) {
@@ -467,7 +467,7 @@ impl MvpAgent {
     /// Best-effort fan-out of a new session's `cwd` to the leader's
     /// `ConfigFileWatcher` for dynamic non-recursive registration
     /// No-op if the channel was never installed
-    /// (`set_config_watcher_path_tx` was not called ÔÇö simple mode,
+    /// (`set_config_watcher_path_tx` was not called — simple mode,
     /// tests) or if the receiver has been dropped. Watcher errors are
     /// logged inside the spawned task and do NOT propagate here.
     pub(crate) fn notify_session_cwd_for_watch(&self, cwd: &std::path::Path) {
@@ -612,7 +612,7 @@ impl MvpAgent {
     /// which fire before any session exists. The eventual agent's toolset
     /// is unknown (depends on the model the user picks), so we fail-closed
     /// for runtime/tool-dependent gates (`/flush`, `/loop`, `/memory`,
-    /// ÔÇª) and let the session-scoped `available_commands_update` in
+    /// …) and let the session-scoped `available_commands_update` in
     /// `acp_session.rs` fill in the real per-model gating as soon as a
     /// session starts.
     ///
@@ -640,7 +640,7 @@ impl MvpAgent {
     /// Re-sync the `Send` mirror of `cfg.is_trace_upload_enabled()` that the
     /// per-session collection gates read (`cfg` is `!Send`; the gates run on
     /// the tokio pool). Must be called after any mid-session config change
-    /// that can flip the switch ÔÇö i.e. every `remote_settings` rewrite.
+    /// that can flip the switch — i.e. every `remote_settings` rewrite.
     pub(super) fn sync_collection_config_gate(&self) {
         self.trace_upload_live
             .store(
@@ -1557,7 +1557,7 @@ impl MvpAgent {
     /// refresh and re-fetch if it yields a *different* token (recovers a 401
     /// from a token that expired mid-fetch). The caller waits at most
     /// `STARTUP_AUTH_REFRESH_TIMEOUT`, but the refresh is spawned and runs to
-    /// completion past the deadline ÔÇö dropping it mid-exchange could abandon
+    /// completion past the deadline — dropping it mid-exchange could abandon
     /// an IdP response carrying the rotated refresh token. On timeout or
     /// error the original `Rejected` stands.
     async fn fetch_settings_self_healing_401(
@@ -1695,7 +1695,7 @@ impl MvpAgent {
     /// [`refresh_remote_settings`] by also re-running [`resolve_runtime_fields`]
     /// with the fresh settings.
     ///
-    /// In-flight sessions are unaffected ÔÇö they snapshot config at creation.
+    /// In-flight sessions are unaffected — they snapshot config at creation.
     pub(super) async fn refresh_settings_and_reapply(
         &self,
         auth: &crate::auth::GrokAuth,
@@ -1799,7 +1799,7 @@ impl MvpAgent {
     }
     /// Spawn the periodic remote-settings poll that pushes mid-session
     /// announcement changes to connected clients. Idempotent; plain loop (no
-    /// cancellation) like `ensure_session_supervisor` ÔÇö the LocalSet drop at
+    /// cancellation) like `ensure_session_supervisor` — the LocalSet drop at
     /// process exit ends it. Skipped under `cfg!(test)` like the
     /// managed-config sync (PTY e2e runs the real binary and is unaffected).
     pub(super) fn spawn_announcements_refresh(&self) {
@@ -1827,7 +1827,7 @@ impl MvpAgent {
     /// One poll cycle. With no settings baseline, first population is
     /// delegated to the sanctioned fill-if-missing path (which emits on
     /// success); otherwise refresh the stored announcements best-effort, then
-    /// run the emit gate ÔÇö even when the fetch was skipped or failed, so a
+    /// run the emit gate — even when the fetch was skipped or failed, so a
     /// pure expiry crossing still clears client banners on time.
     async fn poll_announcements_refresh_once(&self) {
         if self.cfg.borrow().remote_settings.is_none() {
@@ -1838,7 +1838,7 @@ impl MvpAgent {
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
     }
     /// Fetch half of a poll cycle: fresh settings from the proxy, then the
-    /// announcements-only apply. Every failure path is a silent skip ÔÇö the
+    /// announcements-only apply. Every failure path is a silent skip — the
     /// next tick retries.
     async fn fetch_and_store_polled_announcements(&self) {
         let Ok(auth) = self.auth_manager.auth().await else {
@@ -1858,7 +1858,7 @@ impl MvpAgent {
         self.apply_polled_announcements(settings, pre_fetch);
     }
     /// Store the polled announcements unless another writer (full refresh /
-    /// paywall unblock) landed mid-fetch ÔÇö then this fetch is stale and the
+    /// paywall unblock) landed mid-fetch — then this fetch is stale and the
     /// next tick reconciles. Emission is `emit_announcements`'s job, not
     /// this store's.
     pub(super) fn apply_polled_announcements(
@@ -1876,14 +1876,14 @@ impl MvpAgent {
         }
         stored.announcements = fresh.announcements;
     }
-    /// The single announcements push gate ÔÇö every `remote_settings` writer
+    /// The single announcements push gate — every `remote_settings` writer
     /// funnels through here. Emits `chutes.ai/announcements/update` and advances
     /// the last-emitted baseline per [`announcements_push_payload`] (`mode`
     /// decides when an unchanged list still pushes), but only once the
-    /// gateway accepts the send ÔÇö a failed enqueue leaves the baseline
+    /// gateway accepts the send — a failed enqueue leaves the baseline
     /// untouched so the next gate call re-diffs and re-pushes.
     ///
-    /// Synchronous by design: the decideÔåÆsendÔåÆadvance sequence cannot
+    /// Synchronous by design: the decide→send→advance sequence cannot
     /// interleave with another gate call on the LocalSet.
     pub(super) fn emit_announcements(&self, mode: AnnouncementsPushMode) {
         let payload_list = {
@@ -1990,7 +1990,7 @@ impl MvpAgent {
                 .await;
         }
     }
-    /// Pure id ÔåÆ entry resolver (the `allowed_models` gate lives in `set_session_model`).
+    /// Pure id → entry resolver (the `allowed_models` gate lives in `set_session_model`).
     pub(crate) fn resolve_model_id(
         &self,
         requested: &acp::ModelId,
@@ -2132,7 +2132,7 @@ impl MvpAgent {
     /// Apply a profile's pinned-model override to the session's sampling config.
     ///
     /// `pinned_model` is resolved once by the caller (shared with harness
-    /// inheritance). `None` ÔÇö no override, or model not in catalog ÔÇö keeps the
+    /// inheritance). `None` — no override, or model not in catalog — keeps the
     /// session defaults.
     fn apply_agent_model_override(
         &self,
@@ -2158,11 +2158,11 @@ impl MvpAgent {
     /// `tier_restricted`).
     ///
     /// Fails **open** (returns `false`) whenever we can't positively confirm a
-    /// restricted personal tier ÔÇö no auth yet, BYOK / API-key sessions, team
+    /// restricted personal tier — no auth yet, BYOK / API-key sessions, team
     /// accounts, and an unknown/absent tier all pass. The server
     /// authoritatively zero-limits Imagine for free & X Basic (429), so this
     /// client gate is a UX optimization (a clean in-chat upsell instead of a
-    /// doomed request), never the security boundary ÔÇö under-restricting is safe,
+    /// doomed request), never the security boundary — under-restricting is safe,
     /// over-restricting would wrongly disable a paid feature.
     ///
     /// Mirrors the pager's cosmetic slash-command gate
@@ -2546,7 +2546,7 @@ impl MvpAgent {
         }
         instance
     }
-    /// Handle `chutes.ai/internal/evict_sessions` ÔÇö the leader server tells us a
+    /// Handle `chutes.ai/internal/evict_sessions` — the leader server tells us a
     /// client disconnected and these sessions lost their IPC owner.
     ///
     /// **This is the no-evict keystone.** A disconnect must
@@ -2561,9 +2561,9 @@ impl MvpAgent {
     ///   live state.
     /// - **Fully idle sessions are unloaded to disk** to bound memory (the
     ///   `sessions`/`session_threads` maps are uncapped). This preserves the
-    ///   legacy unload path ÔÇö `Shutdown` the actor, drop the `SessionHandle`,
+    ///   legacy unload path — `Shutdown` the actor, drop the `SessionHandle`,
     ///   but KEEP the `SessionThread` so `drain_old_session_thread` can drain it
-    ///   on reconnect ÔÇö and crucially does **not** finalize the cloud replica
+    ///   on reconnect — and crucially does **not** finalize the cloud replica
     ///   (the session remains resumable via `session/load`).
     ///
     /// The "live work" check is the coarse PR-2 stub (`session_has_live_work`);
@@ -2742,7 +2742,7 @@ impl MvpAgent {
     /// reconnect-replayed `session/load` waits for the session to land
     /// rather than failing with "unknown session id" / "session not found".
     ///
-    /// Returns `None` only when the session is genuinely absent ÔÇö no load in
+    /// Returns `None` only when the session is genuinely absent — no load in
     /// flight (or the load failed / timed out), exactly the cases where the
     /// legacy error is correct.
     pub(crate) async fn session_handle_waiting_for_load(
@@ -2890,8 +2890,8 @@ impl MvpAgent {
         }
     }
     /// Cancel a subagent by id, returning a typed outcome that backs the pager's
-    /// `chutes.ai/subagent/cancel`. Active/pending ÔåÆ cancelled (a finish follows);
-    /// already-finished ÔåÆ its terminal status; unknown id ÔåÆ `NotFound`.
+    /// `chutes.ai/subagent/cancel`. Active/pending → cancelled (a finish follows);
+    /// already-finished → its terminal status; unknown id → `NotFound`.
     pub(crate) async fn cancel_subagent(
         &self,
         subagent_id: &str,
@@ -2989,7 +2989,7 @@ impl MvpAgent {
     /// Flush a session's persistence buffer with a 5-second timeout.
     ///
     /// Sends `FlushComplete` to the session actor, which chains through to
-    /// `FlushAndAck` on the persistence actor ÔÇö a true sync barrier that only
+    /// `FlushAndAck` on the persistence actor — a true sync barrier that only
     /// resolves after all queued writes (chat messages, updates) hit disk.
     ///
     /// Returns `Ok(())` on success, `Err(reason)` on timeout or channel failure.
@@ -3461,7 +3461,7 @@ impl MvpAgent {
     /// Seed the global sampling config with login auth when available.
     ///
     /// Only sets the `api_key` if missing. Does NOT resolve `base_url` from
-    /// `current_model_id` ÔÇö that's deferred to session creation time to avoid
+    /// `current_model_id` — that's deferred to session creation time to avoid
     /// cross-client contamination in leader mode (where `current_model_id` is
     /// shared mutable state).
     pub(super) fn seed_client_config_auth_if_available(&self) {
@@ -3535,7 +3535,7 @@ impl MvpAgent {
             .is_some_and(|auth| auth.team_name.is_some())
     }
     /// Whether `/feedback` may offer to turn trace upload on. An individual
-    /// coding-data opt-out still asks ÔÇö the card is how opted-out users
+    /// coding-data opt-out still asks — the card is how opted-out users
     /// switch sharing back on; ZDR has no self-serve way back, so it never
     /// asks.
     pub(crate) fn feedback_trace_offer(&self) -> bool {
@@ -3561,8 +3561,8 @@ impl MvpAgent {
         cfg.endpoints.deployment_key.is_none()
             && self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
     }
-    /// Trace upload being off as *policy* ÔÇö an MDM/requirements pin or a
-    /// telemetry-disabled posture ÔÇö must suppress the card, not invite the
+    /// Trace upload being off as *policy* — an MDM/requirements pin or a
+    /// telemetry-disabled posture — must suppress the card, not invite the
     /// user to override it: the accepted consent persists at the config
     /// tier, which those postures cannot outrank. Trace upload being off via
     /// the remote `trace_upload_enabled` default is different: that is the
@@ -3579,7 +3579,7 @@ impl MvpAgent {
     }
     /// Upload method for a user-consented feedback trace archive. Blocks ZDR
     /// and custom destinations; deliberately ignores the live `trace_upload`
-    /// flag and the cached coding-data opt-out ÔÇö the consent just granted may
+    /// flag and the cached coding-data opt-out — the consent just granted may
     /// not have reached either cache yet. Fails closed on unknown privacy
     /// state: with no credential (and no deployment key) the ZDR / team
     /// predicates can't be evaluated, so nothing may leave the machine.
@@ -3705,9 +3705,9 @@ impl MvpAgent {
             );
         }
     }
-    /// Number the drained harness turns `base, base+1, ÔÇª` and build their
+    /// Number the drained harness turns `base, base+1, …` and build their
     /// `(trace context, metadata, capture)` upload payloads. Stops at the first
-    /// turn whose trace context is `None` ÔÇö uploads are disabled (or the session
+    /// turn whose trace context is `None` — uploads are disabled (or the session
     /// is gone), a state uniform across the batch since all turns share one
     /// `session_id`. A `None` *after* a `Some` would be a broken invariant, so
     /// it is logged rather than dropped silently.
@@ -3871,7 +3871,7 @@ impl MvpAgent {
     /// Resolve the agent definition for a session.
     ///
     /// Priority (highest to lowest):
-    /// 1. Model `agent_type` if it names a strict harness (codex, ÔÇª).
+    /// 1. Model `agent_type` if it names a strict harness (codex, …).
     /// 2. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
     /// 3. `agent_profile_path` from CLI `--agent-profile`.
     /// 4. `agent_config` from config.toml `[agent]`.
@@ -3879,7 +3879,7 @@ impl MvpAgent {
     /// 6. Built-in default agent.
     ///
     /// `CHUTES_BUILD_AGENT` and an explicit `[agent] name` bypass step 1.
-    /// Strict-harness classification is structural ÔÇö see
+    /// Strict-harness classification is structural — see
     /// [`xai_grok_agent::config::is_strict_harness_agent_type`].
     ///
     /// Harness inheritance for a profile that pins its own model is applied by
@@ -4074,7 +4074,7 @@ impl MvpAgent {
     ///
     /// Parameters are bundled in [`SessionSpawnOptions`] (named fields) rather than
     /// passed positionally: there are too many same-typed args (`bool`s,
-    /// `Option<ÔÇª>`s) for positional calls to be transposition-safe.
+    /// `Option<…>`s) for positional calls to be transposition-safe.
     pub(super) async fn spawn_and_register_session(
         &self,
         init: &acp::InitializeRequest,

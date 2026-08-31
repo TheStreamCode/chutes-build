@@ -1123,7 +1123,9 @@ struct DurabilityPayloadFields {
 
 /// The durability idle-hold cap from `CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS`.
 fn durability_idle_hold_max_from_env() -> u64 {
-    durability_idle_hold_from_raw(std::env::var("CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS").ok())
+    durability_idle_hold_from_raw(
+        std::env::var("CHUTES_BUILD_WORKSPACE_DURABILITY_IDLE_HOLD_MAX_MS").ok(),
+    )
 }
 
 /// Pure parse of the idle-hold env value: a non-negative integer ms wins (0

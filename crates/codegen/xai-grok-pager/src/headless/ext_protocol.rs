@@ -1,13 +1,48 @@
-//! Decoding of the shell's `chutes.build/*` extension notifications into the headless
-//! [`ExtEvent`] the orchestrator dispatches. Owns the wire envelope shapes and
-//! the method to event mapping, kept out of `headless.rs`.
+//! Decodes the shell's `x.ai/*` extension notifications into the headless [`ExtEvent`] the orchestrator dispatches.
+//! Also answers reverse `ext_method` requests with policy replies.
+//! This module owns the wire envelope shapes and the method-to-event mapping, kept out of `headless.rs`.
 
 use agent_client_protocol as acp;
+use xai_acp_lib::{AcpArgsBox, AcpResult};
 
 use crate::headless::reducer::{Lifecycle, StreamEvent};
 
-/// Tolerate a numeric `task_id` (version skew) by coercing it to a string, so a
-/// numeric id does not fail the decode and leak an untracked background task.
+/// Serialize a typed ext-method reply; a serialize failure becomes an explicit ACP error so the oneshot is always answered.
+fn ext_response_from<T: serde::Serialize>(value: &T) -> AcpResult<acp::ExtResponse> {
+    serde_json::value::to_raw_value(value)
+        .map(|raw| acp::ExtResponse::new(raw.into()))
+        .map_err(|e| acp::Error::new(-32603, format!("serialize ext response: {e}")))
+}
+
+/// Answer a reverse `ext_method` request without a UI.
+/// Known interaction methods get a policy reply; dropping `response_tx` instead would fail the whole turn with a channel `recv_failed`.
+pub(crate) fn reply_headless_ext_method(args: AcpArgsBox<acp::ExtRequest>) {
+    use xai_grok_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
+    use xai_grok_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse;
+
+    let method = args.request.method.as_ref();
+    // Known methods are answered without parsing params: even a malformed request gets the policy reply rather than a dropped channel
+    let response = match method {
+        // The model sees the tool's NO_OPERATOR_TEXT (headless sessions are non-interactive), not the interactive "user declined" cancel text
+        "x.ai/ask_user_question" => ext_response_from(&AskUserQuestionExtResponse::Cancelled),
+        "x.ai/mcp/elicit" => {
+            use xai_grok_tools::mcp_elicitation::McpElicitExtResponse;
+            ext_response_from(&McpElicitExtResponse::Cancel)
+        }
+        // The model sees "Your plan has been approved. You can now start coding.".
+        "x.ai/exit_plan_mode" => ext_response_from(&ExitPlanModeExtResponse {
+            outcome: "approved".to_string(),
+            feedback: None,
+        }),
+        other => Err(acp::Error::new(
+            -32601,
+            format!("Method not found: {other}"),
+        )),
+    };
+    args.response_tx.send(response).ok();
+}
+
+/// Coerce a numeric `task_id` (version skew) to a string so it does not fail the decode and leak an untracked background task.
 fn de_task_id<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -47,20 +82,18 @@ pub(crate) fn handle_ext_notification(
 ) -> ExtEvent {
     let method = notif.request.method.as_ref();
     let params = notif.request.params.get();
+    if crate::acp::is_session_update_ext_method(method) {
+        return decode_session_notification(method, params);
+    }
     match method {
-        "chutes.build/task_backgrounded" => decode_task_backgrounded(method, params),
-        "chutes.build/task_completed" => decode_task_completed(method, params),
-        "chutes.build/monitor_event" => ExtEvent::MonitorEvent,
-        "chutes.build/session_notification" | "chutes.build/session/update" => {
-            decode_session_notification(method, params)
-        }
-        "chutes.build/leader/version_mismatch" => {
+        "x.ai/task_backgrounded" => decode_task_backgrounded(method, params),
+        "x.ai/task_completed" => decode_task_completed(method, params),
+        "x.ai/monitor_event" => ExtEvent::MonitorEvent,
+        "x.ai/leader/version_mismatch" => {
             match crate::acp::version_mismatch_banner(params) {
-                Some(banner) => tracing::warn!(%banner, "chutes.build/leader/version_mismatch"),
+                Some(banner) => tracing::warn!(%banner, "x.ai/leader/version_mismatch"),
                 None => {
-                    tracing::warn!(
-                        "ignoring chutes.build/leader/version_mismatch without usable versions"
-                    )
+                    tracing::warn!("ignoring x.ai/leader/version_mismatch without usable versions")
                 }
             }
             ExtEvent::None
@@ -95,12 +128,12 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 task_id,
                 is_monitor: monitor_description.is_some(),
             },
-            // Known-tag-on-wrong-carrier: log loudly instead of silently dropping.
+            // The sessionUpdate tag does not match the method; log loudly instead of silently dropping
             TaskBgUpdate::Other => {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: chutes.build/task_backgrounded with mismatched sessionUpdate \
+                    "headless: x.ai/task_backgrounded with mismatched sessionUpdate \
                      tag; background task will not be tracked for reaping"
                 );
                 ExtEvent::None
@@ -111,7 +144,7 @@ fn decode_task_backgrounded(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable chutes.build/task_backgrounded notification; \
+                "headless: undecodable x.ai/task_backgrounded notification; \
                  background task will not be tracked for reaping"
             );
             ExtEvent::None
@@ -143,12 +176,12 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
             TaskDoneUpdate::TaskCompleted { task_snapshot } => ExtEvent::TaskCompleted {
                 task_id: task_snapshot.task_id,
             },
-            // Known-tag-on-wrong-carrier: log loudly instead of silently dropping.
+            // The sessionUpdate tag does not match the method; log loudly instead of silently dropping
             TaskDoneUpdate::Other => {
                 tracing::error!(
                     method,
                     payload = params,
-                    "headless: chutes.build/task_completed with mismatched sessionUpdate \
+                    "headless: x.ai/task_completed with mismatched sessionUpdate \
                      tag; background task completion will not be recorded"
                 );
                 ExtEvent::None
@@ -159,7 +192,7 @@ fn decode_task_completed(method: &str, params: &str) -> ExtEvent {
                 method,
                 error = %e,
                 payload = params,
-                "headless: undecodable chutes.build/task_completed notification; \
+                "headless: undecodable x.ai/task_completed notification; \
                  background task completion will not be recorded"
             );
             ExtEvent::None
@@ -294,8 +327,8 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
             signature,
             stop_sequence,
         })),
-        // Background lifecycle tag on the wrong carrier: log loudly, but a
-        // genuinely unknown display tag stays a clean ignore.
+        // A task_backgrounded or task_completed tag arriving here belongs on its dedicated method; log loudly
+        // Any other unknown tag stays a clean ignore
         XaiUpdate::Other => {
             if let Some(tag) = session_update_tag(params)
                 && matches!(tag.as_str(), "task_backgrounded" | "task_completed")
@@ -305,7 +338,7 @@ fn decode_session_notification(method: &str, params: &str) -> ExtEvent {
                     tag,
                     payload = params,
                     "headless: background-task lifecycle tag on a session notification \
-                     (expected the dedicated chutes.build/task_backgrounded|task_completed method); \
+                     (expected the dedicated x.ai/task_backgrounded|task_completed method); \
                      background tracking will not be updated"
                 );
             }

@@ -149,17 +149,13 @@ fn count_skills_from(skills: &[SkillInfo], dir: &std::path::Path) -> usize {
 fn resolve_skill_path(raw: &str, cwd: &str) -> String {
     use std::path::PathBuf;
 
-    // Expand ~ to $HOME
+    // Expand ~ to the home directory
     let expanded = if let Some(rest) = raw.strip_prefix("~/") {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(|home| PathBuf::from(home).join(rest))
+        xai_dirs::home_dir()
+            .map(|home| home.join(rest))
             .unwrap_or_else(|| PathBuf::from(raw))
     } else if raw == "~" {
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(raw))
+        xai_dirs::home_dir().unwrap_or_else(|| PathBuf::from(raw))
     } else {
         PathBuf::from(raw)
     };
@@ -231,9 +227,7 @@ fn discover_auto_sources(cwd: &str, skills: &[SkillInfo]) -> Vec<(String, usize)
         try_add_source(grok_home.join(subdir), None);
     }
 
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    if let Some(ref h) = home {
-        let home_path = std::path::PathBuf::from(h);
+    if let Some(home_path) = xai_dirs::home_dir() {
         for subdir in &subdirs {
             try_add_source(home_path.join(".agents").join(subdir), None);
         }
@@ -289,7 +283,7 @@ pub async fn handle(
     compat: CompatConfig,
 ) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/skills/add" => {
+        "chutes.ai/skills/add" => {
             let req: SkillsAddRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -347,7 +341,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.build/skills/remove" => {
+        "chutes.ai/skills/remove" => {
             let req: SkillsRemoveRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -387,7 +381,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.build/skills/reset" => {
+        "chutes.ai/skills/reset" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -408,13 +402,13 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsResetResponse { skills, message }))
         }
 
-        "chutes.build/skills/list" => {
+        "chutes.ai/skills/list" => {
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
             super::to_ext_response(Ok(SkillsListResponse { skills }))
         }
 
-        "chutes.build/workflows/list" => {
+        "chutes.ai/workflows/list" => {
             let req: WorkflowsListRequest = serde_json::from_str(args.params.get())?;
             let Some(handle) = agent.session_handle_waiting_for_load(&req.session_id).await else {
                 return super::to_ext_response(Err::<serde_json::Value, _>(anyhow::anyhow!(
@@ -433,7 +427,7 @@ pub async fn handle(
             super::to_ext_response(Ok(serde_json::json!({ "workflows": workflows })))
         }
 
-        "chutes.build/skills/config" => {
+        "chutes.ai/skills/config" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -496,7 +490,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.build/skills/toggle" => {
+        "chutes.ai/skills/toggle" => {
             let req: SkillsToggleRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -627,31 +621,21 @@ mod tests {
         );
     }
 
-    /// Hermetic tilde expansion: pin HOME to a temp dir so remote sandboxes
-    /// (missing HOME, symlink-resolved homes, pre-existing ~/my-skills) cannot
-    /// make `starts_with($HOME)` fail spuriously. Serial because env mutation
-    /// is process-global.
+    /// Hermetic tilde expansion: pin both HOME and USERPROFILE to the temp dir
+    /// (`xai_dirs::home_dir()` prefers USERPROFILE on Windows) so remote
+    /// sandboxes (missing HOME, symlink-resolved homes, pre-existing
+    /// ~/my-skills) cannot make `starts_with($HOME)` fail spuriously. Serial
+    /// because env mutation is process-global.
     #[test]
     #[serial_test::serial]
     fn test_resolve_tilde_path() {
+        use xai_grok_test_support::env::EnvGuard;
+
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().to_path_buf();
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-        // SAFETY: serial test; restored in the same scope below.
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::remove_var("USERPROFILE");
-        }
+        let _home = EnvGuard::set("HOME", &home);
+        let _userprofile = EnvGuard::set("USERPROFILE", &home);
         let resolved = resolve_skill_path("~/my-skills", "/ignored");
-        match prev_home {
-            Some(v) => unsafe { std::env::set_var("HOME", v) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        match prev_userprofile {
-            Some(v) => unsafe { std::env::set_var("USERPROFILE", v) },
-            None => unsafe { std::env::remove_var("USERPROFILE") },
-        }
         let expected = home.join("my-skills");
         assert_eq!(
             std::path::PathBuf::from(&resolved),

@@ -126,7 +126,7 @@ fn effective_local_ts(m: &MergedSession) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RowMeta {
-    #[serde(rename = "chutes.build/session")]
+    #[serde(rename = "chutes.ai/session")]
     pub session: SessionMetaEnvelope,
 }
 
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(ext["sessionId"], "conv_abc123");
         assert_eq!(ext["cwd"], "");
         assert_eq!(ext["source"], "conversation");
-        assert_eq!(ext["_meta"]["chutes.build/session"]["kind"], "chat");
+        assert_eq!(ext["_meta"]["chutes.ai/session"]["kind"], "chat");
         // Chat rows have no local git enrichment (fields omitted).
         assert!(ext.get("gitRootDir").is_none());
         assert!(ext.get("gitRemotes").is_none());
@@ -222,13 +222,7 @@ mod tests {
             session_id: "sess_abc123".into(),
             summary: "Implement session list API".into(),
             updated_at: "2026-10-29T14:22:15Z".into(),
-            // Absolute on every platform: `/Users/...` is not absolute on
-            // Windows and the row conversion rejects a relative cwd.
-            cwd: if cfg!(windows) {
-                "C:\\Users\\me\\chutes".into()
-            } else {
-                "/Users/me/chutes".into()
-            },
+            cwd: "/Users/me/xai".into(),
             ..MergedSession::default()
         };
         let info = merged_session_to_row(merged, facet_registry()).into_session_info();

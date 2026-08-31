@@ -727,15 +727,23 @@ fn test_effective_worktree_path_non_prefix() {
 
 #[test]
 fn test_effective_worktree_cwd_empty_offset() {
-    let result = effective_worktree_cwd("/home/user/.chutes-build/worktrees/repo/ab-123-a", Path::new(""));
+    let result = effective_worktree_cwd(
+        "/home/user/.chutes-build/worktrees/repo/ab-123-a",
+        Path::new(""),
+    );
     assert_eq!(result, "/home/user/.chutes-build/worktrees/repo/ab-123-a");
 }
 
 #[test]
 fn test_effective_worktree_cwd_single_level_offset() {
-    let result =
-        effective_worktree_cwd("/home/user/.chutes-build/worktrees/repo/ab-123-a", Path::new("src"));
-    assert_eq!(result, "/home/user/.chutes-build/worktrees/repo/ab-123-a/src");
+    let result = effective_worktree_cwd(
+        "/home/user/.chutes-build/worktrees/repo/ab-123-a",
+        Path::new("src"),
+    );
+    assert_eq!(
+        result,
+        "/home/user/.chutes-build/worktrees/repo/ab-123-a/src"
+    );
 }
 
 #[test]

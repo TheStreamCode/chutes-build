@@ -350,7 +350,7 @@ async fn etag_refresh_is_bounded_and_single_flighted() {
     tokio::time::sleep(crate::http::STARTUP_FETCH_TIMEOUT * 2).await;
     tokio::task::yield_now().await;
 
-    // Guard released ÔåÆ a later etag change fetches again.
+    // Guard released → a later etag change fetches again.
     mgr.spawn_fetch_inner(Some("etag-3".into()), /*remote_fetch_enabled*/ true);
     tokio::task::yield_now().await;
     assert_eq!(
@@ -765,7 +765,7 @@ fn reselect_missing_current_model_bumps_watch() {
     mgr.apply_refresh_result(&cfg, Some(make_prefetched(&["grok-4", "grok-3"])), None);
     mgr.set_current_model_id(acp::ModelId::new("grok-4"));
     let start = mgr.model_switch_generation();
-    // A later catalog drops the current model ÔåÆ reselect_current_model_if_missing.
+    // A later catalog drops the current model → reselect_current_model_if_missing.
     mgr.apply_refresh_result(&cfg, Some(make_prefetched(&["grok-3"])), None);
     assert_ne!(mgr.current_model_id().0.as_ref(), "grok-4");
     assert!(
@@ -1079,7 +1079,7 @@ fn make_prefetched(ids: &[&str]) -> IndexMap<String, ModelEntry> {
         .collect()
 }
 
-// ÔöÇÔöÇ startup background refresh ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── startup background refresh ─────────────────────────────────────
 
 #[test]
 fn spawn_background_refresh_is_noop_when_real_catalog_present() {
@@ -1245,7 +1245,7 @@ fn from_config_without_prefetch_produces_usable_catalog() {
     );
 }
 
-// ÔöÇÔöÇ auth-change refresh: has_fetched_real_catalog flag ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── auth-change refresh: has_fetched_real_catalog flag ─────────────
 
 #[test]
 fn first_apply_refresh_reselects_default_model() {
@@ -1318,7 +1318,7 @@ fn failed_refresh_does_not_set_has_fetched_real_catalog() {
     );
 }
 
-// ÔöÇÔöÇ apply_config: honor changed preferred model from config ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── apply_config: honor changed preferred model from config ────────
 
 #[test]
 fn apply_config_honors_new_preferred_model() {
@@ -1428,7 +1428,7 @@ fn apply_config_old_some_new_none_preserves_current() {
     );
 }
 
-// ÔöÇÔöÇ end-to-end: auth refresh + config reload compose correctly ÔöÇÔöÇÔöÇ
+// ── end-to-end: auth refresh + config reload compose correctly ───
 
 #[test]
 fn auth_refresh_then_config_reload_preserves_user_model() {
@@ -1454,7 +1454,7 @@ fn auth_refresh_then_config_reload_preserves_user_model() {
     assert_eq!(mgr.current_model_id().0.as_ref(), "grok-4");
 }
 
-// ÔöÇÔöÇ disk-cache hot-reload (external models_cache.json writes) ÔöÇÔöÇÔöÇÔöÇ
+// ── disk-cache hot-reload (external models_cache.json writes) ────
 
 fn test_cache_manager(dir: &std::path::Path) -> ModelsCacheManager {
     ModelsCacheManager {
@@ -1660,7 +1660,7 @@ fn reload_from_disk_cache_ignores_legacy_cache_without_origin() {
     assert!(!mgr.models().contains_key("grok-legacy"));
 }
 
-// ÔöÇÔöÇ clear() resets has_fetched_real_catalog ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── clear() resets has_fetched_real_catalog ──────────────────────
 
 #[test]
 fn clear_resets_has_fetched_real_catalog() {
@@ -1795,7 +1795,7 @@ fn unavailable_campaign_default_falls_back_to_config_default() {
     );
 }
 
-// ÔöÇÔöÇ ModelFetchAuth::resolve priority tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── ModelFetchAuth::resolve priority tests ──────────────────────
 
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;
@@ -1890,7 +1890,7 @@ fn resolve_deployment_key_outranks_ambient_api_key() {
     );
 }
 
-// ÔöÇÔöÇ remote_fetch gate: resolve_prefetch_env_from_parts ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── remote_fetch gate: resolve_prefetch_env_from_parts ───────────
 
 #[test]
 #[serial]
@@ -1954,7 +1954,7 @@ async fn fetch_and_apply_degrades_offline_when_remote_fetch_disabled() {
     );
 }
 
-// ÔöÇÔöÇ supported_in_api tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── supported_in_api tests ──────────────────────────────────────
 
 #[test]
 fn default_model_skips_oauth_only_for_api_key_users() {
@@ -2011,7 +2011,7 @@ fn visible_for_auth_logic() {
     assert!(!info.visible_for_auth(false));
 }
 
-// ÔöÇÔöÇ duplicate model slug re-keying (A/B experiment "auto" alias) ÔöÇÔöÇ
+// ── duplicate model slug re-keying (A/B experiment "auto" alias) ──
 
 fn make_entry_config(model: &str, name: Option<&str>) -> config::ModelEntryConfig {
     make_entry_config_with_id(None, model, name)
@@ -2138,7 +2138,7 @@ fn build_prefetched_map_none_id_falls_back_to_slug() {
     assert!(map.contains_key("grok-build"));
 }
 
-// ÔöÇÔöÇ persisted model id ÔåÆ catalog key (session resume) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── persisted model id → catalog key (session resume) ─────────────
 
 #[test]
 fn resolve_catalog_key_maps_routing_slug_to_config_key() {

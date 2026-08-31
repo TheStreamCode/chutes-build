@@ -440,7 +440,7 @@ impl SessionActor {
 
     pub(super) async fn prepare_tool_definitions_inner(&self) -> Vec<ToolDefinition> {
         // Clone `ToolBridge` under a *short* `agent` RefCell borrow, then await
-        // on the Arc. Never hold `self.agent.borrow()` across `.await` ÔÇö prefire
+        // on the Arc. Never hold `self.agent.borrow()` across `.await` — prefire
         // runs `spawn_local` on the same LocalSet as the turn loop, so a parked
         // borrow here would panic if turn/compact/cancel also borrowed the agent.
         let bridge = self.agent.borrow().tool_bridge().clone();
@@ -604,12 +604,12 @@ impl SessionActor {
 
     /// Emit a unified-log breadcrumb whenever the session-token refresh gate is
     /// evaluated with an **`Unknown`** per-model BYOK status on a session-based
-    /// method ÔÇö the condition that (pre-fix) silently demoted live sessions to
+    /// method — the condition that (pre-fix) silently demoted live sessions to
     /// stale-token 401s. The uploaded per-turn unified log then shows whether
     /// the first-party-endpoint fallback kept refresh active or withheld it, so
     /// we can confirm the fix works (or catch a residual demotion) per session
     /// even when server-side metrics only show the aggregate 401. No-op for a
-    /// definite `Byok`/`NotByok`, so steady-state turns stay quiet ÔÇö a burst of
+    /// definite `Byok`/`NotByok`, so steady-state turns stay quiet — a burst of
     /// these is itself the signal that `Unknown` is being hit in the field.
     fn log_auth_gate_unknown(&self, site: &str, gate: SessionTokenAuthGate, base_url: &str) {
         use crate::agent::auth_method::ModelByok;
@@ -628,13 +628,13 @@ impl SessionActor {
         let sid = Some(self.session_info.id.0.as_ref());
         if refresh_active {
             xai_grok_telemetry::unified_log::info(
-                "auth gate: Unknown BYOK on first-party endpoint ÔÇö session-token refresh kept active",
+                "auth gate: Unknown BYOK on first-party endpoint — session-token refresh kept active",
                 sid,
                 Some(ctx),
             );
         } else {
             xai_grok_telemetry::unified_log::warn(
-                "auth gate: Unknown BYOK on non-first-party endpoint ÔÇö refresh withheld (may surface stale-token 401)",
+                "auth gate: Unknown BYOK on non-first-party endpoint — refresh withheld (may surface stale-token 401)",
                 sid,
                 Some(ctx),
             );
@@ -679,7 +679,7 @@ impl SessionActor {
             });
         let creds = self.chat_state_handle.get_credentials().await;
         let model_facts = self.model_auth_facts(cfg.model.as_str());
-        // Gate on the stable session classifier, not `creds.auth_type` ÔÇö see
+        // Gate on the stable session classifier, not `creds.auth_type` — see
         // `crate::agent::auth_method::session_token_auth_gate`. `cfg.base_url`
         // keeps an `Unknown` BYOK status refreshable against first-party xAI
         // hosts without leaking the session token to a third-party endpoint.
@@ -826,13 +826,13 @@ impl SessionActor {
             .map(|c| c.model)
             .unwrap_or_default();
         // Route the classifier to a dedicated model when a slug is configured;
-        // None / unresolvable slug ÔçÆ fall back to the session client + model.
+        // None / unresolvable slug ⇒ fall back to the session client + model.
         let aux_classifier_sampler = match auto_cfg.classifier_model.as_deref() {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
         };
         // Built-in defaults (just_command prompt; low effort if the model ACTUALLY
-        // used supports it ÔÇö the resolved aux model, else the session model we fall
+        // used supports it — the resolved aux model, else the session model we fall
         // back to when the slug is unset/unresolvable). Explicit config overrides.
         let models = self.models_manager.models();
         let effective_supports_re = crate::agent::config::effective_classifier_supports_re(
@@ -913,7 +913,7 @@ impl SessionActor {
                         ),
                         // Resolved `[auto_mode]` effort: explicit config/remote,
                         // else the built-in `Low` default when the model supports
-                        // it; None ÔçÆ provider default.
+                        // it; None ⇒ provider default.
                         reasoning_effort: classifier_reasoning_effort,
                         x_grok_conv_id: Some(format!("perm-classifier-{}", uuid::Uuid::new_v4())),
                         x_grok_req_id: Some(format!("xai-perm-auto-{}", uuid::Uuid::new_v4())),
@@ -957,7 +957,7 @@ impl SessionActor {
     /// catalog routing (Tier-1 catalog creds / Tier-2 xAI-proxy via session token
     /// / `CHUTES_API_KEY` / deployment key), gathering the session-local auth context
     /// once. Shared by image-describe and the classifier so the gather can't
-    /// drift. `None` ÔçÆ caller falls back to the session model.
+    /// drift. `None` ⇒ caller falls back to the session model.
     pub(super) async fn resolve_aux_sampler_config(
         &self,
         slug: &str,
@@ -988,7 +988,7 @@ impl SessionActor {
     /// Resolve a dedicated sampler for the Auto-mode classifier model `slug`,
     /// stamping session-local auth/attribution like image-describe (which relies
     /// on the resolver, not a config override, for `base_url`/`api_backend` so
-    /// credentials stay consistent). `None` ÔçÆ caller falls back to the session
+    /// credentials stay consistent). `None` ⇒ caller falls back to the session
     /// client + model.
     async fn resolve_auto_classifier_sampler(
         &self,
@@ -1010,101 +1010,6 @@ impl SessionActor {
             )
             .ok()?;
         Some((client, model, context_window))
-    }
-
-    pub(super) async fn record_response_items(
-        &self,
-        items: Vec<ConversationItem>,
-        usage_reported: bool,
-    ) {
-        for item in items {
-            match item {
-                ConversationItem::Assistant(_) => {
-                    self.record_assistant_response(item, usage_reported).await;
-                }
-                _ if usage_reported => self.chat_state_handle.push_model_output(item),
-                _ => self.chat_state_handle.push_tool_result(item),
-            }
-        }
-    }
-    /// Recover tool calls a chute delivered as plain assistant text.
-    ///
-    /// Open-weight models are served through vLLM/SGLang, and the server-side
-    /// tool-call parser belongs to that deployment, not to the model. When it is
-    /// absent the model still emits a well-formed call â€” as text, in its chat
-    /// template's own syntax â€” and `tool_calls` arrives empty, so the turn ends
-    /// having done nothing while the user stares at raw markup.
-    ///
-    /// Runs only when the provider returned no tool calls at all, and accepts a
-    /// candidate only when its name resolves to a registered tool *and* its
-    /// arguments pass that tool's own parser. Prose that merely looks like a
-    /// call therefore stays prose. `CHUTES_DISABLE_TOOL_TEXT_RECOVERY=1` turns
-    /// it off.
-    ///
-    /// No corrective reminder is pushed: a user message between the assistant's
-    /// tool calls and their results would break the pairing providers validate.
-    /// The model sees the tool result and continues as it would have anyway.
-    ///
-    /// Returns the number of calls recovered.
-    pub(super) async fn recover_text_tool_calls(
-        &self,
-        response: &mut xai_grok_sampling_types::ConversationResponse,
-    ) -> usize {
-        use crate::session::helpers::tool_text_recovery;
-
-        if !response.tool_calls().is_empty() || !tool_text_recovery::recovery_enabled() {
-            return 0;
-        }
-        let text = response.assistant_text();
-        if text.is_empty() {
-            return 0;
-        }
-        let candidates = tool_text_recovery::find_tool_calls_in_text(&text);
-        if candidates.is_empty() {
-            return 0;
-        }
-
-        let bridge = self.agent.borrow().tool_bridge().clone();
-        let mut calls = Vec::new();
-        let mut accepted = Vec::new();
-        for candidate in candidates {
-            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&candidate.arguments) else {
-                continue;
-            };
-            if bridge.try_parse(&candidate.name, parsed).await.is_err() {
-                continue;
-            }
-            calls.push(xai_grok_sampling_types::ToolCall {
-                id: std::sync::Arc::<str>::from(format!(
-                    "recovered_{}",
-                    uuid::Uuid::new_v4().simple()
-                )),
-                name: candidate.name.clone(),
-                arguments: std::sync::Arc::<str>::from(candidate.arguments.clone()),
-            });
-            accepted.push(candidate);
-        }
-        if calls.is_empty() {
-            return 0;
-        }
-
-        let recovered = calls.len();
-        // Strip the markup from the stored text: it was already streamed to the
-        // user and cannot be unsent, but leaving it in history would replay the
-        // malformed form to the model on every later turn.
-        let stripped = tool_text_recovery::strip_recovered_spans(&text, &accepted);
-        if let Some(assistant) = response.assistant_mut() {
-            assistant.content = std::sync::Arc::<str>::from(stripped);
-            assistant.tool_calls = calls;
-        }
-        response.stop_reason = Some(xai_grok_sampling_types::StopReason::ToolCalls);
-        tracing::warn!(
-            recovered,
-            tools = ?accepted.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-            "model emitted tool calls as text â€” the chute's tool-call parser is \
-             likely unconfigured; recovered them from the assistant message"
-        );
-        recovered
     }
 
     #[tracing::instrument(
@@ -1173,7 +1078,7 @@ impl SessionActor {
         (remedy.turn_error_type(), message)
     }
 
-    /// Terminal failure for a turn the auth-retry budget gave up on ÔÇö the one
+    /// Terminal failure for a turn the auth-retry budget gave up on — the one
     /// terminal path that lives outside [`Self::handle_sampling_failure`].
     ///
     /// Every terminal path owes the client one `RetryState::Failed`: it is
@@ -1405,7 +1310,7 @@ impl SessionActor {
                     is_session_based = gate.is_session_based,
                     model_byok = gate.model_byok.as_str(),
                     endpoint_is_first_party = gate.endpoint_is_first_party,
-                    "auth recovery: sampler 401 not refreshable (api-key auth) ÔÇö surfacing 401",
+                    "auth recovery: sampler 401 not refreshable (api-key auth) — surfacing 401",
                 );
                 xai_grok_telemetry::unified_log::warn(
                     "auth recovery: sampler 401 not eligible (api-key auth)",
@@ -1432,7 +1337,7 @@ impl SessionActor {
 
         // Observability: a 401 that did NOT classify as `Auth` kind bypasses
         // the session arm 4b; only provider-backed models recover (4c).
-        // Make that decision visible ÔÇö it is otherwise indistinguishable
+        // Make that decision visible — it is otherwise indistinguishable
         // from a failed refresh in the unified log.
         if !matches!(error.kind, SamplingErrorKind::Auth)
             && error.status_code == Some(401)
@@ -1448,13 +1353,13 @@ impl SessionActor {
             );
         }
 
-        // 4b. Auth 401 ÔÇö one-shot refresh + retry.
+        // 4b. Auth 401 — one-shot refresh + retry.
         //
         // Devboxes are not special-cased ahead of this. They used to be, and a
         // devbox re-mint attempted *before* the refresh authority was wrong
         // twice over: it threw away a perfectly good refresh token on any 401,
-        // and ÔÇö because `try_devbox_recovery` short-circuits on whatever is in
-        // memory ÔÇö it reported success with the bearer the server had just
+        // and — because `try_devbox_recovery` short-circuits on whatever is in
+        // memory — it reported success with the bearer the server had just
         // rejected, resubmitting it until the turn's retry budget ran out.
         // `try_recover_unauthorized`'s state machine already ends in a devbox
         // mint, in the right place: after disk adoption and the authority.
@@ -1577,7 +1482,7 @@ impl SessionActor {
         let auth_mode_str = format!("{auth_mode:?}");
         let client_version = xai_grok_version::VERSION;
 
-        // 5c. Legacy WebLogin auth ÔÇö always surface a deprecation message
+        // 5c. Legacy WebLogin auth — always surface a deprecation message
         //     regardless of error type.
         if auth_mode == crate::auth::AuthMode::WebLogin {
             let msg = format!(
@@ -1833,8 +1738,8 @@ impl SessionActor {
                     .unwrap_or_default();
                 if recovery_attempt_count > 0 && !confident_triggers.is_empty() {
                     let should_record = {
-                        // Same ownershipÔåÆtally lock order as cancel's
-                        // ownership-clearÔåÆtally-reset boundary.
+                        // Same ownership→tally lock order as cancel's
+                        // ownership-clear→tally-reset boundary.
                         let ownership = self.turn_stream_drained.lock();
                         if ownership.contains_key(&request_id) {
                             let mut tally = self.doom_loop_turn_tally.lock();
@@ -1986,7 +1891,7 @@ impl SessionActor {
     ///
     /// Session-token path is best-effort: on success, update credentials and
     /// return. On failure, do **not** fall through to the JWT/config.toml
-    /// branch when the session gate was active ÔÇö that path is for BYOK JWTs
+    /// branch when the session gate was active — that path is for BYOK JWTs
     /// only. Falling through after a failed session refresh left hard-expired
     /// opaque tokens (External/OIDC) on the wire and guaranteed a 401.
     /// Soft failures with a still-usable access token still return here
@@ -2057,7 +1962,7 @@ impl SessionActor {
             );
         }
 
-        // JWT from config.toml ÔÇö separate mechanism for BYOK tokens.
+        // JWT from config.toml — separate mechanism for BYOK tokens.
         use crate::auth::{is_jwt_expired_or_near, parse_jwt_expiration};
 
         const REFRESH_THRESHOLD: chrono::Duration = chrono::Duration::minutes(5);
@@ -2221,7 +2126,7 @@ impl SessionActor {
                 let _ = handle.mark_usage_incomplete(true, true).await;
             });
         }
-        // TODO: usage ÔÇö a `None` usage outside these contexts is left unmarked, so
+        // TODO: usage — a `None` usage outside these contexts is left unmarked, so
         // a genuine mid-turn omission understates spend with no incomplete flag.
     }
 

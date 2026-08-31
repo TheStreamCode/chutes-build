@@ -43,14 +43,14 @@ pub(crate) async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResul
         return handle_internal(agent, args, method).await;
     }
     match args.method.as_ref() {
-        "chutes.build/session/rename" => handle_session_rename(agent, args).await,
-        "chutes.build/session/delete" => handle_session_delete(agent, args).await,
-        "chutes.build/session/update_mcp_servers" => handle_update_mcp_servers(agent, args).await,
+        "chutes.ai/session/rename" => handle_session_rename(agent, args).await,
+        "chutes.ai/session/delete" => handle_session_delete(agent, args).await,
+        "chutes.ai/session/update_mcp_servers" => handle_update_mcp_servers(agent, args).await,
         #[cfg(feature = "local-workspace")]
-        "chutes.build/session/add_local_workspace" => handle_add_local_workspace(agent, args).await,
-        "chutes.build/session/fork" => handle_session_fork(agent, args).await,
-        "chutes.build/plugins/reload" => handle_plugins_reload(agent).await,
-        "chutes.build/commands/list" => handle_commands_list(agent, args).await,
+        "chutes.ai/session/add_local_workspace" => handle_add_local_workspace(agent, args).await,
+        "chutes.ai/session/fork" => handle_session_fork(agent, args).await,
+        "chutes.ai/plugins/reload" => handle_plugins_reload(agent).await,
+        "chutes.ai/commands/list" => handle_commands_list(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -373,7 +373,7 @@ async fn notify_session_title_unpinned(agent: &MvpAgent, session_id: acp::Sessio
     };
     if let Ok(params) = serde_json::value::to_raw_value(&notification) {
         let ext_notification =
-            acp::ExtNotification::new("chutes.build/session_notification", params.into());
+            acp::ExtNotification::new("chutes.ai/session_notification", params.into());
         let _ = agent.gateway.ext_notification(ext_notification).await;
     }
 
@@ -401,7 +401,7 @@ async fn notify_session_title(agent: &MvpAgent, session_id: acp::SessionId, titl
     };
     if let Ok(params) = serde_json::value::to_raw_value(&notification) {
         let ext_notification =
-            acp::ExtNotification::new("chutes.build/session_notification", params.into());
+            acp::ExtNotification::new("chutes.ai/session_notification", params.into());
         let _ = agent.gateway.ext_notification(ext_notification).await;
     }
 
@@ -615,7 +615,7 @@ async fn handle_add_local_workspace(agent: &MvpAgent, args: &acp::ExtRequest) ->
     if !agent.is_chat_kind_session(&params.session_id) {
         return Err(acp::Error::invalid_params().data(serde_json::json!({
             "code": "local_workspace_chat_only",
-            "message": "chutes.build/session/add_local_workspace is only available on chat-kind sessions",
+            "message": "chutes.ai/session/add_local_workspace is only available on chat-kind sessions",
         })));
     }
 

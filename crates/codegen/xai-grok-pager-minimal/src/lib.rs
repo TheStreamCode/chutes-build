@@ -1,4 +1,4 @@
-//! Minimal (scrollback-native) render mode — `chutes-build --minimal`.
+//! Minimal (scrollback-native) render mode ÔÇö `chutes-build --minimal`.
 //!
 //! In this mode finalized conversation blocks are printed once into the
 //! terminal's *native* scrollback (via `xai_ratatui_inline::Terminal::insert_before`,
@@ -7,17 +7,17 @@
 //! `ScrollbackPane` (scroll, fold, selection, mouse) is not used; the terminal
 //! owns history.
 //!
-//! - [`commit`] — committed-frontier logic, display policy, and the per-frame
+//! - [`commit`] ÔÇö committed-frontier logic, display policy, and the per-frame
 //!   commit-to-scrollback pass.
-//! - [`live`] — the pinned live region (tail + todos + `/btw` + status + prompt).
-//! - [`todo`] — the persistent todo panel shown above the prompt.
-//! - [`auth`] — the in-region sign-in flow shown before a session exists.
-//! - [`overlay`] — the inline-overlay host (prompt-anchored dropdowns; grows /
+//! - [`live`] ÔÇö the pinned live region (tail + todos + `/btw` + status + prompt).
+//! - [`todo`] ÔÇö the persistent todo panel shown above the prompt.
+//! - [`auth`] ÔÇö the in-region sign-in flow shown before a session exists.
+//! - [`overlay`] ÔÇö the inline-overlay host (prompt-anchored dropdowns; grows /
 //!   shrinks the live viewport).
 //!
 //! # Wiring
 //!
-//! `xai-grok-pager` (the lib) does **not** depend on this crate — that would be
+//! `xai-grok-pager` (the lib) does **not** depend on this crate ÔÇö that would be
 //! a cargo dependency cycle, since this crate reads deeply into the pager's
 //! [`AppView`] / view model. Instead the pager exposes an inversion-of-control
 //! seam ([`xai_grok_pager::minimal_hook`]) of function pointers, and the
@@ -48,29 +48,29 @@ use xai_grok_pager::app::app_view::AppView;
 ///
 /// Order matters:
 /// 0. Open a synchronized update and adopt the current terminal size (see
-///    below), so every write this frame — commits *and* the live region —
+///    below), so every write this frame ÔÇö commits *and* the live region ÔÇö
 ///    presents atomically at the right dimensions.
 /// 1. Commit the pending welcome card (fresh session / `/new`) so it lands
 ///    above the first conversation block, and push any ready plan into
 ///    scrollback (`plan::maybe_commit_plan`) so it commits like a normal block
-///    this frame — the live region then holds only the plan's decision controls.
+///    this frame ÔÇö the live region then holds only the plan's decision controls.
 /// 2. Size the viewport to its **post-commit** height (see
 ///    [`overlay::sync_viewport`] / [`live::tail_height`]). This runs *before* the
 ///    commit so that step 3's `insert_before` prints each finalized block and
 ///    repositions the correctly-sized viewport to sit directly after it
-///    (content-anchored — the prompt follows the content, and once the screen is
+///    (content-anchored ÔÇö the prompt follows the content, and once the screen is
 ///    full that position is the bottom). Otherwise the viewport was still at its
 ///    tall streaming height when the block committed, and the following shrink
 ///    stranded the prompt at the top of the screen ("input snaps to the top").
 /// 3. Commit finalized blocks into native scrollback (each `insert_before`
 ///    scrolls committed rows up above the pinned viewport), then re-print any
 ///    `Ctrl+E` / `/expand` re-prints fully expanded below.
-/// 4. Redraw the live region (tail · status · overlay · prompt) into the
+/// 4. Redraw the live region (tail ┬À status ┬À overlay ┬À prompt) into the
 ///    viewport's final position.
 ///
 /// ## Why step 0 exists (resize + flicker)
 ///
-/// **Resize:** `draw_frame` runs `terminal.autoresize()` — but that is the
+/// **Resize:** `draw_frame` runs `terminal.autoresize()` ÔÇö but that is the
 /// *last* step of this function, while the commit passes read
 /// `viewport_area().width` first. On the frame that processes a terminal
 /// resize, a block finalizing in that same frame would be laid out and printed
@@ -82,12 +82,12 @@ use xai_grok_pager::app::app_view::AppView;
 /// flush per chunk. Without a synchronized update around them, a multi-block
 /// commit (thinking + tool + message finalizing together) presents as several
 /// visible scroll/paint bursts before the live region repaints. Opening the
-/// synchronized update *before* the commits batches the whole frame — commits,
-/// viewport reposition, and live redraw — into one atomic present. The
+/// synchronized update *before* the commits batches the whole frame ÔÇö commits,
+/// viewport reposition, and live redraw ÔÇö into one atomic present. The
 /// matching `EndSynchronizedUpdate` is emitted by `draw_frame` (step 4), which
 /// every path through this function reaches; its own inner
 /// `BeginSynchronizedUpdate` is redundant-but-harmless (DEC 2026 is a mode,
-/// not a counter — the first End closes it).
+/// not a counter ÔÇö the first End closes it).
 pub fn draw(app: &mut AppView, terminal: &mut PagerTerminal) {
     let _ = terminal.backend_mut().queue(BeginSynchronizedUpdate);
     let _ = terminal.autoresize();
