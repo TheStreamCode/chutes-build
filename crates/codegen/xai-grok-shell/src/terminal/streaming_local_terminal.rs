@@ -917,7 +917,11 @@ fn spawn_with_argv(
             if xai_grok_sandbox::should_restrict_child_network() {
                 // SAFETY: single prctl syscall (async-signal-safe).
                 unsafe {
-                    cmd.pre_exec(|| xai_grok_sandbox::child_net::install_child_network_filter());
+                    cmd.pre_exec(|| {
+                        xai_grok_sandbox::child_net::install_child_network_filter(
+                            xai_grok_sandbox::child_net::prebuilt_child_network_filter(),
+                        )
+                    });
                 }
             }
         });

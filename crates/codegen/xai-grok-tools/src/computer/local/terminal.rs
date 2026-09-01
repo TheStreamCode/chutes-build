@@ -713,7 +713,11 @@ impl LocalTerminalActor {
         #[cfg(target_os = "linux")]
         if xai_grok_sandbox::should_restrict_child_network() {
             unsafe {
-                cmd.pre_exec(|| xai_grok_sandbox::child_net::install_child_network_filter());
+                cmd.pre_exec(|| {
+                    xai_grok_sandbox::child_net::install_child_network_filter(
+                        xai_grok_sandbox::child_net::prebuilt_child_network_filter(),
+                    )
+                });
             }
         }
 
@@ -834,7 +838,11 @@ impl LocalTerminalActor {
         #[cfg(target_os = "linux")]
         if xai_grok_sandbox::should_restrict_child_network() {
             unsafe {
-                cmd.pre_exec(|| xai_grok_sandbox::child_net::install_child_network_filter());
+                cmd.pre_exec(|| {
+                    xai_grok_sandbox::child_net::install_child_network_filter(
+                        xai_grok_sandbox::child_net::prebuilt_child_network_filter(),
+                    )
+                });
             }
         }
 

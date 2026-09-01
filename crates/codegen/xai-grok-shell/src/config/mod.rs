@@ -1481,10 +1481,7 @@ pub fn apply_sandbox(
     let requires_hook_write_deny =
         xai_grok_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
     #[cfg(target_os = "linux")]
-    let requires_data_write_deny =
-        xai_grok_sandbox::requires_data_write_deny(&sandbox_profile, &workspace);
-    #[cfg(target_os = "linux")]
-    let requires_bwrap = requires_read_deny || requires_hook_write_deny || requires_data_write_deny;
+    let requires_bwrap = requires_read_deny || requires_hook_write_deny;
     #[cfg(target_os = "linux")]
     {
         let refuse_unprotected = |cause: &str| {
@@ -1524,30 +1521,10 @@ pub fn apply_sandbox(
                     );
                     std::process::exit(1);
                 }
-                if requires_read_deny
-                    && let Err(e) =
-                        xai_grok_sandbox::verify_read_deny_enforced(&sandbox_profile, &workspace)
-                {
-                    eprintln!(
-                        "error: sandbox reports bwrap but required read-deny mounts \
-                         are not in effect ({e}); refusing to start \
-                         (possible __CHUTES_BUILD_INSIDE_BWRAP spoof)"
-                    );
-                    std::process::exit(1);
-                }
-                if requires_data_write_deny
-                    && let Err(e) = xai_grok_sandbox::verify_data_write_deny_enforced(
-                        &sandbox_profile,
-                        &workspace,
-                    )
-                {
-                    eprintln!(
-                        "error: sandbox reports bwrap but the required /data write-deny \
-                         mount is not in effect ({e}); refusing to start \
-                         (possible __CHUTES_BUILD_INSIDE_BWRAP spoof)"
-                    );
-                    std::process::exit(1);
-                }
+                // Fork: upstream's read-deny and /data write-deny verification
+                // (sentinel mounts, runtime-socket deny handoff) is not ported —
+                // it needs the 1.0.12 sandbox hardening, which diverges from the
+                // fork's sandbox and is recorded as observed-not-ported.
             }
             BwrapStartup::Refuse => {
                 refuse_unprotected(

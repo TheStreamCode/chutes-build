@@ -2189,7 +2189,12 @@ impl acp::Agent for MvpAgent {
         args: acp::SetSessionModeRequest,
     ) -> Result<acp::SetSessionModeResponse, acp::Error> {
         tracing::info!("Received set session mode request {args:?}");
+        let mode_id_str = args.mode_id.0.to_string();
         let handle = self.session_handle_waiting_for_load(&args.session_id).await;
+        let was_plan = handle.as_ref().is_some_and(|handle| {
+            handle.plan_mode.lock().state()
+                != crate::session::plan_mode::PlanModeState::Inactive
+        });
         let (tx, rx) = oneshot::channel();
         if let Some(handle) = handle {
             let _ = handle
@@ -2204,6 +2209,17 @@ impl acp::Agent for MvpAgent {
             .map_err(|_| {
                 acp::Error::internal_error().data("response to set session failed")
             })?;
+        // Opt-in `[models] plan_model`/`build_model` switch around the plan
+        // transition. Entering fires plan_model; leaving fires build_model.
+        let entering_plan = mode_id_str == xai_grok_tools::types::SessionMode::Plan.as_id();
+        if entering_plan != was_plan {
+            crate::agent::handlers::mode_model_switch::apply_for_mode_transition(
+                self,
+                &args.session_id,
+                entering_plan,
+            )
+            .await;
+        }
         Ok(acp::SetSessionModeResponse::new())
     }
     async fn set_session_model(
