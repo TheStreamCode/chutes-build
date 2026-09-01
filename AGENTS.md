@@ -307,6 +307,15 @@ the host's code page. CI sets the same override for exactly this reason (see
 reading any pager failure as a regression; with it, the suite returns to the 4
 recorded hook failures.
 
+**Never read pager/src files through PowerShell text redirection.** Writing a
+file with `git show <ref> | Out-File` (or `Set-Content`) on this machine
+decodes UTF-8 as CP1252: multi-byte characters (`é`, `…`, `│`, emoji ZWJ
+sequences) become mojibake that fails `rustfmt` with "character literal may
+only contain one codepoint" and breaks grapheme tests. A whole-port pass
+needed a cleanup sweep for these. The fix is to write bytes, never text —
+e.g. `pathlib.Path(...).write_bytes(git_show_stdout)` from a script, or
+`git cat-file blob <sha>` piped without decoding.
+
 **`xai-grok-shell --lib auth::` passes on Windows too**, since 2026-08-10. Its
 fixtures were POSIX shell one-liners (`printf`, `sleep 20; printf never`,
 `${VAR:-0}`) while a provider command runs through `cmd /C` there — see
@@ -329,6 +338,13 @@ list of what to fix. Three ways it lies, all met on 2026-08-10:
 - A terminal is attached here and not there, so anything reading terminal
   capabilities — extended keys, `Ctrl+i` versus Tab, the theme's colour level —
   can differ in both directions. VS Code's injected environment moves it again.
+- The dev-profile binary can overflow the 1 MiB Windows main-thread stack
+  before `main` runs (`STATUS_STACK_OVERFLOW` on `--version`), because the
+  workspace builds with 128 codegen-units at opt-level 0. Met on 2026-08-30 on
+  `main` as well as the sync branch, so it is not a port regression; the
+  shipped `release-dist` binaries are fine. `.cargo/config.toml` raises the
+  reserve with `/STACK:8388608` for this reason — do not remove it because a
+  release binary "works".
 
 **Read the whole step list, not the failing step.** A red step skips every step
 after it, and a job that has been red for a while is hiding however much work

@@ -1377,3 +1377,66 @@ one; it is recorded in the `Upstream` issue (`#7`) with the recommended
 session. `.github/upstream.json` still says `07b2f714` / 1.0.8 — the field
 means "this is the upstream this tree is", and it does not move until the port
 lands.
+
+## Porting session, in progress: 1.0.8 → 1.0.12 (2026-08-30, branch
+`sync/upstream-1.0.12-wip`)
+
+The port above started the same day on the sync branch. State at the cache
+cleanup: the **workspace compiles and `cargo fmt --check` is green** with the
+fork layer restored; verification is partially done and the gates below are
+**not yet run to completion** — the branch must not land before they are.
+
+### What the mechanical pass taught
+
+`port_assist.py --apply` classified 989 of 1,509 files as no-judgement
+(new/clean/mechanical) and wrote them; 520 stayed manual. Three lessons now
+pinned in the tree:
+
+- **The pager cannot be taken wholesale.** The clean take erased the fork's
+  TUI layer — 402 src files diverge from upstream by >40 lines, the dashboard
+  alone by ~10,000. Pager src/tests, pager-render, pager-minimal and pager-bin
+  went back to the fork tree; upstream deltas are reconciled call-site by
+  call-site (`effective_auto_for_launch` gains `unset_default`,
+  `fetch_merged` the `HeadlessPolicy`, `local_summaries_for_cwd_sync` the
+  `RecentSessionSelection`, `run_update*` the `CliUpdateTrigger`,
+  `StartupPhase` renames).
+- **Upstream renamed Rust identifiers the rebrand map never touches**
+  (`tasks_cancel` → `cancel`, `hub_auth.rs` → `hub_auth/`, `agent/models.rs`
+  → `agent/models/`, `ToolKind::ActiveAgentMessage`, `ToolNamespace` uses,
+  `dirs` → `xai_dirs`). The fork's namespace stays `ChutesBuild` in Rust —
+  the rename is applied mechanically across the ported files.
+- **Fork-owned items upstream dropped and that came back from `main`:**
+  `chutesday`/`chutesnight` themes, the wordmark pin in `logo.rs`,
+  `MediaArtifact` in `ToolOutput`, the Chutes `ToolInput` variants,
+  `MAX_TOKENS_TRUNCATION_MESSAGE`, `should_show_model_fingerprint`,
+  `PersistedInfoLight` (now an alias of upstream's merged `PersistedInfo`),
+  `usage_windows` in `BillingConfig`, and `cache_hit_calls`/`cache_miss_calls`
+  in `PromptUsageModel`.
+
+### Windows environment findings, 2026-08-30
+
+- **The dev-profile binary overflowed the 1 MiB Windows main-thread stack
+  before `main` ran** — on `main` too, so pre-existing, not a port
+  regression; the shipped `release-dist` binary was fine (1.3.1 verified).
+  `.cargo/config.toml` now raises the reserve with
+  `/STACK:8388608` on `x86_64-pc-windows-msvc`. The new upstream test
+  `update_never_blocked_by_config` spawns the debug binary, which is why this
+  only surfaced now.
+- **Raw-TCP mock servers on this machine need the full-request drain** (same
+  shape as the compaction mock fix). The update test's pointer server got the
+  same treatment, but its fetch still fails as a transport error — the
+  remaining failure is recorded in the last sync commit and needs its own
+  investigation with a listener log before any further guessing.
+- **Suite state on this branch**: core 63/63, agent 589/589, tools-chutes
+  47/47, pager lib 8263/4 (the 4 recorded hook failures), settings_e2e
+  274/274, chutes-build 35/35. `session::` and the clippy/seam/dead gates are
+  still to be run on this branch.
+
+### Still open on the branch
+
+1. Full gate (`AGENTS.md`) + fork gates (seam sweep, dead modules) on the
+   branch.
+2. The update-test raw-mock transport failure (above).
+3. `.github/upstream.json` advance — deliberately not done until the gate
+   passes.
+4. `CHANGELOG.md` entry for the 1.0.12 sync.

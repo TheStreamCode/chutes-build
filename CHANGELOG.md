@@ -4,6 +4,16 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The runtime is syncing to upstream `1.0.12` (`bc7f02ed`).** Ported by hand on `sync/upstream-1.0.12-wip`, one area per commit: 1,578 files of delta, 989 of them mechanical takes. New upstream features carried so far: active subagent messaging (`send_subagent_message`), hook HTTP runners with prompt/defer decisions, checkpoint remount after path virtualization, worktree detach/salvage rework, `xai-grok-shell-terminal`/`xai-grok-gboom`/`xai-grok-pager-diff`/`xai-grok-dashboard-store`/`xai-dirs`/`xai-message-delivery-core` crates, and the dashboard/session-picker TUI. The Chutes identity layer (prompt, wordmark, themes, `ChutesBuild` namespace, cache-effectiveness usage, compact tool schemas) is preserved; the branch awaits the full gate before landing.
+
+### Fixed
+
+- **The Windows dev build no longer overflows its stack on startup.** The 1 MiB main-thread reserve was too small for the opt-level-0 profile; the linker now reserves 8 MiB. The shipped release binaries were never affected.
+
 ## [1.3.1] - 2026-08-30
 
 ### Changed
