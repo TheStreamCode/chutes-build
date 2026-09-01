@@ -24,9 +24,11 @@ fn target_dir() -> Result<PathBuf> {
 }
 
 fn local_pager_binary_path() -> Result<PathBuf> {
+    // The composition-root package is `chutes-build` and its bin carries the
+    // public name; upstream kept `xai-grok-pager` as the bin name.
     Ok(target_dir()?
         .join("debug")
-        .join(format!("xai-grok-pager{}", std::env::consts::EXE_SUFFIX)))
+        .join(format!("chutes-build{}", std::env::consts::EXE_SUFFIX)))
 }
 
 fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
@@ -47,7 +49,7 @@ fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
 
     if !output.status.success() {
         bail!(
-            "failed to build xai-grok-pager (exit {:?})\nstdout:\n{}\nstderr:\n{}",
+            "failed to build chutes-build (exit {:?})\nstdout:\n{}\nstderr:\n{}",
             output.status.code(),
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
@@ -55,7 +57,7 @@ fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
     }
     if !binary.exists() {
         bail!(
-            "xai-grok-pager build completed but binary missing at {}",
+            "chutes-build build completed but binary missing at {}",
             binary.display()
         );
     }

@@ -11,15 +11,15 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 /// Resolve the pager binary like the PTY harness: `PAGER_BINARY` under
-/// Bazel (runfiles-relative), else cargo's compile-time constant.
+/// Bazel (runfiles-relative), else the PTY harness resolution order
+/// (CARGO_BIN_EXE, then a local build of the composition-root bin).
 fn pager_binary() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("PAGER_BINARY") {
         return std::path::absolute(&p)
             .unwrap_or_else(|e| panic!("failed to absolutize PAGER_BINARY {p}: {e}"));
     }
-    option_env!("CARGO_BIN_EXE_xai-grok-pager")
-        .map(std::path::PathBuf::from)
-        .expect("PAGER_BINARY is unset and this build is not `cargo test`")
+    xai_grok_pager_pty_harness::env::pager_binary()
+        .unwrap_or_else(|e| panic!("failed to resolve the pager binary: {e}"))
 }
 
 /// Local base answering every request with the channel pointer body.
@@ -29,18 +29,45 @@ fn spawn_pointer_server(body: Arc<Mutex<String>>) -> (std::net::TcpListener, Str
     let serving = listener.try_clone().unwrap();
     std::thread::spawn(move || {
         for stream in serving.incoming() {
-            let Ok(mut stream) = stream else { return };
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let version = body.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let _ = stream.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    version.len(),
-                    version
-                )
-                .as_bytes(),
-            );
+            let Ok(stream) = stream else { return };
+            // Drain the FULL request (headers + Content-Length body) before
+            // answering: a client that is still writing when the server
+            // closes the read side observes the response as a transport
+            // error instead of a 200 (same shape as the compaction raw mock).
+            let body = body.clone();
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stream);
+                use std::io::BufRead;
+                let mut content_length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    let read = reader.read_line(&mut line).unwrap_or(0);
+                    if read == 0 || line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    let lower = line.to_ascii_lowercase();
+                    if let Some(value) = lower.strip_prefix("content-length:")
+                        && let Ok(v) = value.trim().parse::<usize>()
+                    {
+                        content_length = v;
+                    }
+                }
+                let mut body_bytes = vec![0u8; content_length];
+                if content_length > 0 {
+                    use std::io::Read;
+                    let _ = reader.read_exact(&mut body_bytes);
+                }
+                let version = body.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let mut stream = reader.into_inner();
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        version.len(),
+                        version
+                    )
+                    .as_bytes(),
+                );
+            });
         }
     });
     (listener, base)
