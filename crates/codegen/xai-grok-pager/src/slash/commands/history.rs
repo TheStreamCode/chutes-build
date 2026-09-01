@@ -1,21 +1,31 @@
-//! `/history`: open the prompt-history search overlay.
+//! `/history` -- open the prompt-history search overlay.
 //!
-//! A search mode over the same prompts the panel's Up-arrow browsing steps through.
-//! Fuzzy-search the session's prior prompts; Enter/Tab drops the selection back into the composer.
-//! The slash pipeline clears the composer before dispatch, so the overlay opens with an empty query over the full history.
+//! Search mode over the panel Up-arrow browsing uses: fuzzy-search the
+//! session's prior prompts, Enter/Tab drops the selection back into the
+//! composer. The slash pipeline clears the composer before dispatch, so
+//! the overlay opens with an empty query over the full history.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
 /// Open the prompt-history search overlay via `/history`.
 pub struct HistoryCommand;
 
 impl SlashCommand for HistoryCommand {
-    slash_meta! {
-        name: "history",
-        description: "Search prompt history",
-        usage: "/history",
-        session_scoped: true,
+    fn name(&self) -> &str {
+        "history"
+    }
+
+    fn description(&self) -> &str {
+        "Search prompt history"
+    }
+
+    fn session_scoped(&self) -> bool {
+        true
+    }
+
+    fn usage(&self) -> &str {
+        "/history"
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -55,7 +65,8 @@ mod tests {
         ));
     }
 
-    /// `/history` resolves via the real builtin registry (guards against a name collision silently dropping it).
+    /// `/history` resolves via the real builtin registry (guards against a
+    /// name collision silently dropping it).
     #[test]
     fn resolves_via_builtin_registry() {
         let reg = crate::slash::registry::CommandRegistry::new(

@@ -2,9 +2,12 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Launching `chutes-build "<prompt>"` (the prompt as a positional CLI arg) auto-starts a new session and submits it as the first turn.
-/// No keystrokes are injected.
-/// The full loop runs: CLI positional, TUI launch, NewSession, SendPrompt, shell agent, mock inference, streamed chunks, pager render.
+/// 11. **Initial prompt positional.**
+/// Launching `chutes-build "<prompt>"` (the prompt passed as a positional CLI arg)
+/// auto-starts a new session and submits the prompt as the first turn —
+/// no keystrokes injected. This exercises the full loop end-to-end:
+/// CLI positional → TUI launch → NewSession → SendPrompt → shell agent →
+/// mock inference → streamed chunks → pager render.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn initial_prompt_positional_auto_submits() {
@@ -19,7 +22,8 @@ async fn initial_prompt_positional_auto_submits() {
         PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[PROMPT])
             .expect("spawn pager with initial prompt");
 
-    // No keys are injected: the positional prompt must auto-run and the mock response must appear on screen on its own
+    // No keys are injected: the positional prompt must auto-run and the
+    // mock response must appear on screen on its own.
     harness
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("mock response from auto-submitted initial prompt");

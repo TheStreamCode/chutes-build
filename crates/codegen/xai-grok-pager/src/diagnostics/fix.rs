@@ -215,8 +215,8 @@ pub struct FixOutcome {
     status: FixStatus,
     changed_file: ChangedFile,
     activation: FixActivation,
-    /// Shell used to plan/apply SSH-wrap.
-    /// Post-apply verification must use this rather than re-reading `$SHELL`, which may be missing or different.
+    /// Shell used to plan/apply SSH-wrap. Post-apply verification must use this
+    /// rather than re-reading `$SHELL`, which may be missing or different.
     shell: Option<ShellKind>,
 }
 
@@ -280,8 +280,8 @@ impl FixOutcome {
         self.shell
     }
 
-    /// Whether the SSH-wrap managed alias is present for the shell that applied this outcome.
-    /// Uses the planned shell, not the current `$SHELL`.
+    /// Whether the SSH-wrap managed alias is present for the shell that applied
+    /// this outcome. Uses the planned shell, not the current `$SHELL`.
     pub fn managed_alias_is_configured(&self) -> bool {
         self.shell
             .is_some_and(|shell| managed_alias_configured(&self.changed_file.path, shell))
@@ -411,13 +411,16 @@ enum TmuxEvidence {
     ColorPassthrough,
 }
 
-/// How a tmux remedy reaches its healthy state, which decides whether an existing line elsewhere in the config can defeat Chutes Build's managed block.
+/// How a tmux remedy reaches its healthy state, which decides whether an
+/// existing line elsewhere in the config can defeat Chutes Build's managed block.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TmuxRemedy {
-    /// `set -g <option> <value>`: the last assignment wins, so a direct assignment in the user's own config must be classified before writing.
+    /// `set -g <option> <value>`: the last assignment wins, so a direct
+    /// assignment in the user's own config must be classified before writing.
     Assignment,
-    /// `set -as <option> …`: tmux accumulates these and Chutes Build appends its block at the end of the file.
-    /// Earlier lines add to the fix rather than override it and are never a conflict.
+    /// `set -as <option> …`: tmux accumulates these and Chutes Build appends its block
+    /// at the end of the file, so earlier lines add to the fix rather than
+    /// override it and are never a conflict.
     Accumulating,
 }
 
@@ -426,8 +429,8 @@ struct TmuxOptionSpec {
     id: DiagnosticId,
     option: &'static str,
     line: &'static str,
-    /// Values that already satisfy the fix.
-    /// Empty for an accumulating remedy, whose health comes from the attached client, not from one option value.
+    /// Values that already satisfy the fix. Empty for an accumulating remedy,
+    /// whose health comes from the attached client, not from one option value.
     healthy_values: &'static [&'static str],
     remedy: TmuxRemedy,
     evidence: TmuxEvidence,
@@ -695,9 +698,27 @@ fn plan_ssh_wrap(
     report: &DiagnosticReport,
     terminal: &TerminalContext,
 ) -> Result<FixPlan, FixError> {
+    // Policy, and it comes first: there is no supported shell-alias fix on Windows,
+    // so the planner refuses before inspecting anything. Covered by
+    // `windows_is_manual_only_before_shell_selection`.
     if cfg!(windows) {
         return Err(FixError::PlatformUnsupported);
     }
+    plan_ssh_wrap_after_platform_check(request, report, terminal)
+}
+
+/// `plan_ssh_wrap` minus the platform refusal.
+///
+/// Split out so a test fixture can build a real plan on any host. The mechanics
+/// below — resolving a shell, joining a config path, inspecting the managed block —
+/// are platform-independent; only the refusal above is not. Nineteen tests covering
+/// the doctor-fix modal used to fail on Windows solely because their fixture ran the
+/// whole planner and unwrapped it.
+fn plan_ssh_wrap_after_platform_check(
+    request: FixRequest,
+    report: &DiagnosticReport,
+    terminal: &TerminalContext,
+) -> Result<FixPlan, FixError> {
     if terminal.is_official_vscode_remote {
         return Err(FixError::NotApplicable);
     }
@@ -806,7 +827,8 @@ fn tmux_caveats(remedy: TmuxRemedy) -> Vec<&'static str> {
             "The live tmux server is unchanged until you reload this config or restart it.",
             TMUX_SCANNER_CAVEAT,
         ],
-        // Reloading is not enough on its own: tmux fixes a client's feature set when that client attaches
+        // Reloading is not enough on its own: tmux fixes a client's feature set
+        // when that client attaches.
         TmuxRemedy::Accumulating => vec![
             "Reloading alone is not enough: the attached client keeps its current color depth until it reattaches.",
             "Terminals that cannot render 24-bit color ignore the extra escape sequence.",
@@ -1023,8 +1045,9 @@ fn shell_quote_path(path: &Path) -> Option<String> {
     Some(format!("'{}'", value.replace('\'', "'\\''")))
 }
 
-/// An accumulating remedy needs both steps: the server reads the new option only on reload, and a client resolves its feature set only at attach.
-/// Neither reloading nor reattaching alone changes anything.
+/// An accumulating remedy needs both steps: the server reads the new option
+/// only on reload, and a client resolves its feature set only at attach, so
+/// neither reloading nor reattaching alone changes anything.
 fn tmux_activation_instruction(spec: &TmuxOptionSpec, path: &Path) -> String {
     match spec.remedy {
         TmuxRemedy::Assignment => reload_instruction(path),
@@ -1364,8 +1387,8 @@ fn classify_tmux_assignment(
                 return TmuxAssignment::Ambiguous("missing tmux target argument".to_owned());
             }
         }
-        // -F, -f, -t and similar flags take one following argument
-        // Unknown flags on a possible target fail closed instead of shifting tokens
+        // -F, -f, -t and similar flags take one following argument. Unknown
+        // flags on a possible target fail closed instead of shifting tokens.
         if flags.chars().any(|flag| matches!(flag, 'F' | 'f')) {
             index += 1;
             if tokens.get(index).is_none() {
@@ -1393,8 +1416,8 @@ fn classify_tmux_assignment(
     let effective_scope = explicit_scope.unwrap_or(spec.scope);
     match spec.scope {
         TmuxOptionScope::Server => {
-            // tmux resolves known server options by option scope even when a window flag is supplied
-            // A target is nonsensical/ambiguous here
+            // tmux resolves known server options by option scope even when a
+            // window flag is supplied. A target is nonsensical/ambiguous here.
             if has_target {
                 return TmuxAssignment::Ambiguous(format!(
                     "targeted server assignment may affect `{}`",
@@ -1576,7 +1599,8 @@ fn detect_fish_ssh_customization(text: &str) -> Option<String> {
 }
 
 fn actual_home() -> Option<PathBuf> {
-    xai_dirs::home_dir()
+    #[allow(deprecated)]
+    std::env::home_dir()
 }
 
 pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> DiagnosticReport {
@@ -1586,9 +1610,36 @@ pub fn configured_report(mut report: DiagnosticReport, configured: bool) -> Diag
     report
 }
 
+/// `plan_fix` without the platform refusal, for tests about the planning itself.
+///
+/// The ssh-wrap fix is unsupported on Windows, and `plan_fix` says so before looking
+/// at anything — correct, and covered by `windows_is_manual_only_before_shell_selection`.
+/// But the tests that check *what the planner produces* — exact paths, aliases,
+/// conflict scanning, stale-plan rejection — are about mechanics that work on any
+/// host, and gating them behind `#[cfg(unix)]` would drop that coverage on the
+/// platform this tree is developed on.
 #[cfg(test)]
+pub(crate) fn plan_fix_ignoring_platform(
+    request: FixRequest,
+    report: &DiagnosticReport,
+    terminal: &TerminalContext,
+) -> Result<FixPlan, FixError> {
+    let spec = fix_spec(request.id).ok_or_else(|| FixError::UnknownId(request.id.to_string()))?;
+    match spec.kind {
+        FixKind::SshWrap => plan_ssh_wrap_after_platform_check(request, report, terminal),
+        FixKind::TmuxOption(tmux) => plan_tmux_option(request, report, terminal, tmux),
+    }
+}
+
+#[cfg(test)]
+/// A real ssh-wrap plan, on any host.
+///
+/// Deliberately bypasses the Windows refusal rather than the planning: the tests
+/// that use this are about the doctor-fix *modal*, not about which platforms the fix
+/// supports, and a synthetic `FixPlan` literal would drift from what the planner
+/// actually produces. `plan_fix` itself still refuses on Windows.
 pub(crate) fn test_fix_plan(home: &Path) -> FixPlan {
-    plan_fix(
+    plan_ssh_wrap_after_platform_check(
         tests::request(home, "/bin/bash"),
         &tests::report(),
         &TerminalContext::default(),

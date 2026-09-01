@@ -5,14 +5,14 @@
 //!
 //! ## Why this is a render-only change
 //!
-//! Input routing is unchanged ÔÇö the existing `handle_modal_key`
+//! Input routing is unchanged — the existing `handle_modal_key`
 //! (`ActiveModal::SessionPicker`) and `handle_extensions_modal_key`
 //! (`extensions_modal`) own navigation and close-on-Esc. Two different coupling
 //! contracts are honored here:
 //!
 //! * **Session picker** rebuilds its entry map from data on every keypress
 //!   (render-independent), so we just reuse the *same* builders
-//!   ([`build_grouped_picker_entries`]) ÔÇö the rendered order then matches the
+//!   ([`build_grouped_picker_entries`]) — the rendered order then matches the
 //!   handler's `selected`.
 //! * **Extensions modal** reads render-stored state (`entry_data_indices`,
 //!   `entry_group_keys`, `entry_non_selectable*`). The MCP renderer repopulates
@@ -99,7 +99,7 @@ pub(super) fn render(
     }
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ chrome ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────── chrome ─────────────────────────────────────
 
 /// Split `area` into (title_row, second_row, divider_row, list_area, footer_row).
 /// `second_row` hosts the subtitle (mcps) or the search bar (resume).
@@ -156,7 +156,7 @@ fn render_divider(buf: &mut Buffer, row: Rect, theme: &Theme) {
     picker::render_divider(buf, row.x, row.y, row.width, theme, None);
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ resume ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────── resume ─────────────────────────────────────
 
 /// Exact body height (display rows) for the session-picker list.
 fn resume_body_rows(agent: &AgentView, width: u16) -> u16 {
@@ -305,7 +305,7 @@ fn render_resume(
     None
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ mcps ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────── mcps ──────────────────────────────────────
 
 /// Exact body height (display rows) for the MCP list: one line per row.
 fn mcps_body_rows(agent: &AgentView) -> u16 {
@@ -314,7 +314,7 @@ fn mcps_body_rows(agent: &AgentView) -> u16 {
     };
     let servers = match &s.mcps_data {
         TabDataState::Loaded(v) => v.as_slice(),
-        _ => return 1, // a single "loadingÔÇª" / error row
+        _ => return 1, // a single "loading…" / error row
     };
     let rows = minimal_api::build_mcp_picker_rows(
         servers,
@@ -515,7 +515,7 @@ fn render_mcps(
     None
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ helpers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────── helpers ────────────────────────────────────
 
 /// Sum the display height of grouped picker entries: a header is one row (plus
 /// the blank spacer `render_picker_content` draws before non-first headers); a
@@ -604,8 +604,6 @@ mod tests {
             repo_name: "repo".into(),
             worktree_label: None,
             last_turn_summary: None,
-            last_recap: None,
-            session_kind: None,
             card_detail: None,
         }
     }
@@ -622,8 +620,6 @@ mod tests {
             content_results: None,
             content_loading: false,
             deep_search_seq: 0,
-            generation: 0,
-            detail_seq: 0,
             source_filter: xai_grok_pager::views::session_picker::SourceFilter::default(),
             pending_delete: None,
             entries_query: None,
@@ -716,8 +712,39 @@ mod tests {
     }
 
     #[test]
+    fn resume_panel_pins_hidden_external_hint_above_scrolling_list() {
+        // More native rows than the panel fits: the hint must stay pinned
+        // above the list instead of scrolling away with it.
+        let mut entries: Vec<_> = (0..20)
+            .map(|i| session_entry(&format!("native-{i}")))
+            .collect();
+        let mut foreign = session_entry("claude-session");
+        foreign.source = "claude".into();
+        entries.push(foreign);
+        let mut a = with_resume(entries);
+        let theme = Theme::current();
+        let area = Rect::new(0, 0, 80, 10);
+        let mut buf = Buffer::empty(area);
+        render(&mut buf, area, &mut a, ListPanel::Resume, &theme);
+
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("1 external session hidden \u{b7} f to show"),
+            "hidden foreign rows must stay explained while the list scrolls:\n{text}"
+        );
+        assert!(
+            text.find("external session hidden") < text.find("native-"),
+            "the hint must be pinned above the first list row:\n{text}"
+        );
+        assert!(
+            !text.contains("claude-session"),
+            "foreign row stays hidden under the default filter:\n{text}"
+        );
+    }
+
+    #[test]
     fn resume_search_uses_picker_grapheme_viewport_at_narrow_width() {
-        let grapheme = "­ƒæ®­ƒÅ¢\u{200d}­ƒÆ╗";
+        let grapheme = "👩🏽\u{200d}💻";
         let combining = "e\u{301}";
         let mut agent = with_resume(vec![session_entry("match")]);
         let Some(ActiveModal::SessionPicker { state, .. }) = &mut agent.active_modal else {

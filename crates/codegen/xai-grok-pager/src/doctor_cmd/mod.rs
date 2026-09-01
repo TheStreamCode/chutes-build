@@ -81,8 +81,31 @@ fn configured_report_for_terminal(
 fn collect_report_with(
     snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
 ) -> DiagnosticReport {
+    collect_report_with_voice(snapshot, true)
+}
+
+/// `collect_report_with`, with the live microphone probe under the caller's control.
+///
+/// `apply_voice_probe` queries the real audio device, and on a host without one that
+/// is not merely inaccurate — it is fatal. On Linux CI the missing device adds a
+/// finding, so tests asserting on `issue_count()` were asserting about the machine
+/// they ran on. On a Windows runner the *second* call in a process exits
+/// `0xc0000005`: `standalone_runtime_and_tmux_are_unavailable_without_false_wezterm_finding`
+/// killed the whole test binary after
+/// `fake_standalone_facts_compose_through_shared_view` had already probed once,
+/// which is the signature of a COM/WASAPI enumeration bug on a device-less host.
+///
+/// So `probe_voice: false` skips the probe entirely rather than only hiding its
+/// finding — which is what the tests want anyway, since they inject every other fact
+/// they name. Production passes `true` and is unchanged; `doctor` probes once.
+fn collect_report_with_voice(
+    snapshot: crate::diagnostics::probes::StandaloneDiagnosticSnapshot<'_>,
+    probe_voice: bool,
+) -> DiagnosticReport {
     let mut report = crate::diagnostics::view(snapshot.into());
-    crate::diagnostics::apply_voice_probe(&mut report, true);
+    if probe_voice {
+        crate::diagnostics::apply_voice_probe(&mut report, true);
+    }
     report
 }
 
@@ -197,7 +220,8 @@ fn write_fix_preview(plan: &FixPlan, writer: &mut impl Write) -> std::io::Result
 }
 
 fn shell_home_and_kind() -> Option<(std::path::PathBuf, ShellKind)> {
-    let home = xai_dirs::home_dir()?;
+    #[allow(deprecated)]
+    let home = std::env::home_dir()?;
     let shell = std::env::var_os("SHELL")?;
     let kind = ShellKind::from_shell_path(Path::new(&shell))?;
     Some((home, kind))

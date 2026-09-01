@@ -54,7 +54,7 @@ pub fn section_label(section: &McpSectionId, count: usize) -> String {
 }
 
 /// Base chutes.ai connectors URL (no team). Prefer [`managed_connectors_url`] when opening.
-pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://chutes.ai/connectors";
+pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://chutes.ai";
 
 /// Connectors deep link, appending percent-encoded `teamId` when the session is a team principal.
 pub fn managed_connectors_url(team_id: Option<&str>) -> String {
@@ -93,9 +93,11 @@ pub fn section_description_lines(section: &McpSectionId, team_id: Option<&str>) 
 
 /// Classify a server into a UI section.
 ///
-/// Priority: a gateway / managed wire source maps to Managed; else a plugin label maps to Plugin; else Local.
+/// Priority: `grok_com_` prefix or managed wire source → Managed; else plugin
+/// label → Plugin; else Local. A managed server with a plugin display label
+/// still lands in Managed.
 pub fn section_for(server: &McpServerInfo) -> McpSectionId {
-    if server.is_managed_gateway || server.wire_source == McpWireSource::Managed {
+    if server.name.starts_with("grok_com_") || server.wire_source == McpWireSource::Managed {
         McpSectionId::Managed
     } else if let Some(ref name) = server.plugin_name {
         McpSectionId::Plugin(name.clone())
@@ -106,7 +108,7 @@ pub fn section_for(server: &McpServerInfo) -> McpSectionId {
 
 /// Whether the user may delete this server from local config.
 pub fn is_removable(server: &McpServerInfo) -> bool {
-    server.wire_source == McpWireSource::Local && !server.is_managed_gateway
+    server.wire_source == McpWireSource::Local && !server.name.starts_with("grok_com_")
 }
 
 fn parse_wire_source(raw: Option<&str>) -> McpWireSource {
@@ -361,17 +363,22 @@ pub fn convert_list_response(resp: McpsListResponse) -> Vec<McpServerInfo> {
     servers
 }
 
-/// Patch a single server row in-place from an `chutes.ai/mcp/server_status` push.
+/// Patch a single server row in-place from an `chutes.ai/mcp/server_status`
+/// push.
 ///
-/// Finds the row by `name` and updates its `status` (and optionally its `tools` list and `tool_count`).
-/// When the named server is not present the call is a silent no-op.
-/// The pager may receive a status push for a server it has not yet fetched (e.g. the modal was just opened and `mcp/list` has not landed yet).
-/// The cheap no-op keeps the push subscription side-effect-free in that case.
+/// Finds the row by `name` and updates its `status` (and optionally its
+/// `tools` list + `tool_count`). When the named server is not present
+/// the call is a silent no-op — the pager may receive a status push
+/// for a server it has not yet fetched (e.g. the modal was just opened
+/// and the cached `mcp/list` response has not landed yet). The cheap
+/// no-op keeps the push subscription side-effect-free in that case.
 ///
 /// When duplicate names exist, only the first occurrence is mutated.
-/// In practice `build_mcp_catalog` deduplicates by name before the list reaches the pager, so this is dead-code in production.
+/// In practice `build_mcp_catalog` deduplicates by name before the
+/// list reaches the pager, so this is dead-code in production.
 ///
-/// Returns `true` when a row was actually mutated; the caller can use this signal to decide whether a redraw is warranted.
+/// Returns `true` when a row was actually mutated; the caller can use
+/// this signal to decide whether a redraw is warranted.
 pub fn patch_server_row(
     servers: &mut [McpServerInfo],
     name: &str,
@@ -460,22 +467,22 @@ mod tests {
             lines[0]
         );
         // URL sits alone on the second line, scheme-stripped and bracket-highlighted.
-        assert_eq!(lines[1], "[chutes.ai/connectors]");
+        assert_eq!(lines[1], "[chutes.ai]");
         assert!(
             !lines[1].contains("https://"),
             "displayed URL should drop the scheme: {}",
             lines[1]
         );
         let with_team = section_description_lines(&McpSectionId::Managed, Some("team-1"));
-        assert_eq!(with_team[1], "[chutes.ai/connectors?teamId=team-1]");
+        assert_eq!(with_team[1], "[chutes.ai?teamId=team-1]");
     }
 
     #[test]
     fn managed_connectors_url_display_strips_scheme() {
-        assert_eq!(managed_connectors_url_display(None), "chutes.ai/connectors");
+        assert_eq!(managed_connectors_url_display(None), "chutes.ai");
         assert_eq!(
             managed_connectors_url_display(Some("team-uuid-1")),
-            "chutes.ai/connectors?teamId=team-uuid-1"
+            "chutes.ai?teamId=team-uuid-1"
         );
     }
 
@@ -505,20 +512,13 @@ mod tests {
     }
 
     #[test]
-    fn section_for_gateway_with_plugin_label_is_managed() {
-        let server = server_from_wire_with_type(
-            "managed_gateway:linear",
+    fn section_for_grok_com_with_plugin_label_is_managed() {
+        let server = server_from_wire(
+            "grok_com_linear",
             Some("managed"),
             Some("plugin: my-plugin"),
-            Some("managedGateway"),
         );
         assert_eq!(section_for(&server), McpSectionId::Managed);
-    }
-
-    #[test]
-    fn section_for_grok_com_local_name_is_local() {
-        let server = server_from_wire("grok_com_linear", Some("local"), None);
-        assert_eq!(section_for(&server), McpSectionId::Local);
     }
 
     #[test]
@@ -543,9 +543,9 @@ mod tests {
     }
 
     #[test]
-    fn is_removable_allows_grok_com_local_name() {
+    fn is_removable_rejects_grok_com_prefix() {
         let server = server_from_wire("grok_com_slack", Some("local"), None);
-        assert!(is_removable(&server));
+        assert!(!is_removable(&server));
     }
 
     #[test]
@@ -733,7 +733,7 @@ mod tests {
         );
         assert!(mutated);
         assert_eq!(servers[0].status, McpServerDisplayStatus::Unavailable);
-        // Tools are left untouched when the caller passes None
+        // Tools left untouched when caller passes None.
         assert_eq!(servers[0].tool_count, 3);
         assert_eq!(servers[0].tools.len(), 1);
         assert_eq!(servers[0].tools[0].name, "existing");

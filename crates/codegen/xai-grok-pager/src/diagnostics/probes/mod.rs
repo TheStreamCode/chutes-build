@@ -67,8 +67,9 @@ pub struct DoctorProbeSnapshot<'a> {
     pub color_level: crate::theme::color_support::ColorLevel,
 }
 
-/// Whether the caller will read the colour-passthrough fact.
-/// Only `view()` reads it, and the startup path never calls `view()`, so probing there spends ~116ms before first paint on a value that is dropped.
+/// Whether the caller will read the colour-passthrough fact. Only `view()`
+/// reads it, and the startup path never calls `view()`, so probing there
+/// spends ~116ms before first paint on a value that is dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColorPassthroughProbe {
     Skip,
@@ -154,13 +155,13 @@ pub fn collect_doctor_tui<'a>(
     }
 }
 
-/// Collect standalone evidence without running live tmux subprocesses.
-/// Skipped tmux evidence is reported unavailable so a stuck server cannot block doctor.
+/// Collect standalone evidence without running live tmux subprocesses; skipped
+/// tmux evidence is reported unavailable so a stuck server cannot block doctor.
 pub fn collect_standalone<'a>(terminal: &'a TerminalContext) -> StandaloneDiagnosticSnapshot<'a> {
     collect_standalone_with_tmux(terminal, unavailable_tmux())
 }
 
-/// Collect live tmux facts, limited to what planning an explicit fix needs.
+/// Collect bounded live tmux facts for explicit fix planning.
 pub fn collect_standalone_fix<'a>(
     terminal: &'a TerminalContext,
     id: Option<crate::diagnostics::DiagnosticId>,
@@ -251,7 +252,8 @@ fn collect_standalone_with_tmux<'a>(
     )
 }
 
-// One argument per probe fact feeding the snapshot; other assemblers in the crate do the same (e.g. agent_view/render.rs).
+// Plumbing constructor: one argument per probe fact feeding the snapshot
+// (crate precedent for probe/render assemblers, e.g. agent_view/render.rs).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_standalone_from<'a>(
     terminal: &'a TerminalContext,
@@ -312,7 +314,7 @@ fn standalone_data_control(is_wayland: bool) -> TmuxProbeResult<bool> {
     }
 }
 
-// One argument per probe input feeding the snapshot
+// Plumbing constructor: one argument per probe input feeding the snapshot.
 #[allow(clippy::too_many_arguments)]
 fn collect_common<'a>(
     terminal: &'a TerminalContext,

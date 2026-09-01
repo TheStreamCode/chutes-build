@@ -1,3 +1,5 @@
+//! The streaming-json `AcpReducer` native-shape mapping.
+
 use super::*;
 use pretty_assertions::assert_eq;
 

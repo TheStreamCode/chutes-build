@@ -448,8 +448,6 @@ pub(crate) fn map_summary(summary: ForeignSessionSummary) -> SessionPickerEntry 
         repo_name: crate::views::session_picker::repo_name_from_cwd(&cwd),
         worktree_label: None,
         last_turn_summary: None,
-        last_recap: None,
-        session_kind: None,
         card_detail: None,
     }
 }
@@ -560,8 +558,6 @@ mod tests {
             repo_name: "repo".into(),
             worktree_label: None,
             last_turn_summary: None,
-            last_recap: None,
-            session_kind: None,
             card_detail: None,
         }
     }
@@ -617,7 +613,9 @@ mod tests {
     #[tokio::test]
     async fn async_gate_supports_bundled_and_user_skill_locations() {
         let enabled = gated_sources_async_with(compat_all(), Path::new("/grok"), |path| {
-            let path = path.to_string_lossy();
+            // The probe receives a real `PathBuf`, so off Unix it arrives
+            // `\`-joined and these `/`-shaped substrings would never match.
+            let path = path.to_string_lossy().replace('\\', "/");
             std::future::ready(
                 path.contains("bundled/skills/resume-claude")
                     || path.contains("skills/resume-codex")

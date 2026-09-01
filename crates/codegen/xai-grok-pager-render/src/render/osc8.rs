@@ -158,33 +158,9 @@ fn link_finder() -> &'static LinkFinder {
     static FINDER: OnceLock<LinkFinder> = OnceLock::new();
     FINDER.get_or_init(|| {
         let mut f = LinkFinder::new();
-        f.kinds(&[LinkKind::Url, LinkKind::Email]);
+        f.kinds(&[LinkKind::Url]);
         f
     })
-}
-
-/// True when `start..end` is a valid UTF-8 substring of `text`.
-fn is_str_range(text: &str, start: usize, end: usize) -> bool {
-    start <= end && end <= text.len() && text.is_char_boundary(start) && text.is_char_boundary(end)
-}
-
-/// linkify's Email kind yields the bare address; the opener expects `mailto:`.
-/// `None` for scp-style remotes (`git@github.com:org/repo`) so those stay
-/// plain text instead of becoming a mail link, or when the match range is
-/// not a char-boundary substring.
-fn linkify_href(text: &str, link: &linkify::Link<'_>) -> Option<String> {
-    if !is_str_range(text, link.start(), link.end()) {
-        return None;
-    }
-    match link.kind() {
-        LinkKind::Email => {
-            if matches!(text.as_bytes().get(link.end()), Some(b':' | b'/')) {
-                return None;
-            }
-            Some(format!("mailto:{}", link.as_str()))
-        }
-        _ => Some(link.as_str().to_string()),
-    }
 }
 
 /// One path segment without spaces (`main.rs`, `.grok`, `@scope`). Leading `.`
@@ -226,8 +202,20 @@ fn file_path_regex() -> &'static regex::Regex {
         // space-free so `…/bar here.` does not eat the word `here`.
         // Alternation prefers the spaced form first so it wins over the shorter
         // no-space prefix at the same start position.
+        // The second alternative is the Windows form, `C:\Users\me\x.md` — a drive
+        // letter, then segments joined by either separator. Without it no path
+        // mentioned in agent prose or in a command line was ever clickable on
+        // Windows, while the rest of this module already anticipated the shape
+        // (`file_link_presentation_for_resolved` tests for `Component::Prefix` and
+        // `~\`). Nothing needs gating by platform: a Windows path on Unix is not
+        // absolute there, so `from_file_path` declines it and no overlay appears.
+        //
+        // `\b` keeps the drive letter from being picked out of a longer word, so
+        // `note:\thing` does not linkify as `e:\thing`. Unlike the POSIX form this
+        // allows zero directory segments, because `C:\file.txt` is a real path
+        // whereas the POSIX `/file.txt` shape stays excluded as it was.
         let pat = format!(
-            r"~?/(?:{seg}/)+(?:{spaced}|{seg})",
+            r"~?/(?:{seg}/)+(?:{spaced}|{seg})|\b[a-zA-Z]:[\\/](?:{seg}[\\/])*(?:{spaced}|{seg})",
             seg = PATH_SEGMENT,
             spaced = PATH_SEGMENT_SPACED,
         );
@@ -338,19 +326,13 @@ fn file_link_presentation_with_home(
 /// Web/scheme URLs, `mailto:`/`tel:`, and anchors return `None`.
 ///
 /// - **Absolute / `~`** paths resolve directly (must be an existing file).
-/// - **Relative** paths (`images/1.jpg`, `src/main.rs`) resolve in two steps:
-///   1. Against `media_paths` (absolute paths of media generated in this transcript),
-///      by matching a unique entry whose path ends with those components. This binds
-///      each short path to the exact file its message produced (stable across forks and
-///      resumes); an ambiguous match is left unlinked rather than guessed.
-///   2. Failing that, against the session `cwd`: the path is joined to `cwd`, accepted
-///      only when it stays inside `cwd` (no `..` escape) and names an existing file.
-///      `cwd = None` disables this fallback (media only).
-pub fn local_link_to_file_target(
-    dest: &str,
-    media_paths: &[PathBuf],
-    cwd: Option<&Path>,
-) -> Option<LinkTarget> {
+/// - **Relative** paths (`images/1.jpg`) resolve against `media_paths` — the
+///   absolute paths of media actually generated in this transcript — by
+///   matching a unique entry whose path ends with those components. This ties
+///   each short path to the exact file its message produced (correct across
+///   forks/resumes) and never opens an arbitrary or out-of-session file; an
+///   ambiguous or absent match is left unlinked.
+pub fn local_link_to_file_target(dest: &str, media_paths: &[PathBuf]) -> Option<LinkTarget> {
     let dest = dest.trim();
     if dest.is_empty() || dest.starts_with('#') || dest.contains("://") {
         return None;
@@ -364,40 +346,20 @@ pub fn local_link_to_file_target(
     let resolved: PathBuf = if target.is_absolute() {
         target
     } else {
-        relative_link_target(path, media_paths, cwd)?
+        // Relative: match a single generated-media file ending with these
+        // components. Unique match only, so a forked transcript with a duplicate
+        // name resolves to neither rather than the wrong one.
+        let mut hits = media_paths.iter().filter(|p| p.ends_with(path));
+        let first = hits.next()?.clone();
+        if hits.next().is_some() {
+            return None;
+        }
+        first
     };
     if !resolved.is_file() {
         return None;
     }
     Some(LinkTarget::File(Arc::from(resolved)))
-}
-
-/// Resolve a *relative* markdown link destination to an absolute path.
-///
-/// Prefers a unique generated-media match (stable across forks/resumes); an
-/// ambiguous media match resolves to neither. When the path is not generated
-/// media, falls back to `cwd`-relative resolution that must stay inside `cwd`.
-/// The caller still gates on the result naming a real file.
-fn relative_link_target(
-    path: &Path,
-    media_paths: &[PathBuf],
-    cwd: Option<&Path>,
-) -> Option<PathBuf> {
-    let mut hits = media_paths.iter().filter(|p| p.ends_with(path));
-    match (hits.next(), hits.next()) {
-        (Some(unique), None) => return Some(unique.clone()),
-        // Ambiguous generated-media reference (e.g. a fork with duplicate
-        // names): resolve to neither rather than opening the wrong file.
-        (Some(_), Some(_)) => return None,
-        _ => {}
-    }
-    // Not generated media: resolve against the session cwd, refusing any `..`
-    // that would escape it.
-    let cwd = cwd?;
-    let joined = xai_grok_paths::normalize_lexically(&cwd.join(path));
-    joined
-        .starts_with(xai_grok_paths::normalize_lexically(cwd))
-        .then_some(joined)
 }
 
 /// Convert a display-cell column to a `u16` suitable for overlay coordinates.
@@ -557,17 +519,15 @@ fn scan_logical_line(
     let mut path_byte_ranges: Vec<std::ops::Range<usize>> = Vec::new();
 
     for link in finder.links(text) {
-        let Some(url) = linkify_href(text, &link) else {
-            continue;
-        };
-        if !crate::link_opener::is_safe_to_open(&url, scheme_filter) {
+        let url = link.as_str();
+        if !crate::link_opener::is_safe_to_open(url, scheme_filter) {
             continue;
         }
         url_byte_ranges
             .get_or_insert_with(Vec::new)
             .push(link.start()..link.end());
 
-        let target = LinkTarget::Url(Arc::from(url.as_str()));
+        let target = LinkTarget::Url(Arc::from(url));
         push_link_segments(
             text,
             rows,
@@ -683,9 +643,7 @@ fn scan_logical_line(
             let path = m
                 .as_str()
                 .trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
-            // Bare relative paths in prose stay media-only (no cwd fallback), so ordinary
-            // `a/b.ext`-shaped prose is not over-linkified.
-            let Some(file_target) = local_link_to_file_target(path, media_paths, None) else {
+            let Some(file_target) = local_link_to_file_target(path, media_paths) else {
                 continue;
             };
             let path_end = m.start() + path.len();
@@ -734,7 +692,7 @@ mod tests {
         let media = vec![dir.path().join("images/1.jpg")];
 
         // Short session-relative path matches the generated media by suffix.
-        let target = local_link_to_file_target("images/1.jpg", &media, None).unwrap();
+        let target = local_link_to_file_target("images/1.jpg", &media).unwrap();
         assert_eq!(target, LinkTarget::File(Arc::from(media[0].as_path())));
         let resolved = resolve_link_target(&target).expect("resolved target");
         let url = resolved.osc8_url.expect("OSC 8 URL");
@@ -751,13 +709,13 @@ mod tests {
         std::fs::write(dir.path().join("images/1.jpg"), b"x").unwrap();
         let media = vec![dir.path().join("images/1.jpg")];
 
-        assert!(local_link_to_file_target("https://chutes.ai", &media, None).is_none());
-        assert!(local_link_to_file_target("mailto:a@b.c", &media, None).is_none());
-        assert!(local_link_to_file_target("#section", &media, None).is_none());
-        // Relative path that isn't a known generated media file (no cwd).
-        assert!(local_link_to_file_target("images/2.jpg", &media, None).is_none());
+        assert!(local_link_to_file_target("https://chutes.ai", &media).is_none());
+        assert!(local_link_to_file_target("mailto:a@b.c", &media).is_none());
+        assert!(local_link_to_file_target("#section", &media).is_none());
+        // Relative path that isn't a known generated media file.
+        assert!(local_link_to_file_target("images/2.jpg", &media).is_none());
         // No known media at all.
-        assert!(local_link_to_file_target("images/1.jpg", &[], None).is_none());
+        assert!(local_link_to_file_target("images/1.jpg", &[]).is_none());
     }
 
     #[test]
@@ -773,57 +731,9 @@ mod tests {
             dir.path().join("a/images/1.jpg"),
             dir.path().join("b/images/1.jpg"),
         ];
-        assert!(local_link_to_file_target("images/1.jpg", &media, None).is_none());
+        assert!(local_link_to_file_target("images/1.jpg", &media).is_none());
         // A `..` never matches a clean absolute media path, so it can't escape.
-        assert!(local_link_to_file_target("../images/1.jpg", &media, None).is_none());
-    }
-
-    #[test]
-    fn local_link_relative_resolves_existing_cwd_file() {
-        // A relative markdown destination that is not generated media resolves
-        // against the session cwd when the file exists.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/main.rs"), b"fn main() {}").unwrap();
-
-        let target = local_link_to_file_target("src/main.rs", &[], Some(dir.path())).unwrap();
-        assert_eq!(
-            target,
-            LinkTarget::File(Arc::from(dir.path().join("src/main.rs").as_path()))
-        );
-
-        // Missing file under cwd stays unlinked (is_file guard).
-        assert!(local_link_to_file_target("src/missing.rs", &[], Some(dir.path())).is_none());
-        // A directory is not a file.
-        assert!(local_link_to_file_target("src", &[], Some(dir.path())).is_none());
-    }
-
-    #[test]
-    fn local_link_cwd_fallback_refuses_parent_escape() {
-        // `..` must not escape the session cwd even if the target file exists.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("secret.txt"), b"x").unwrap();
-        let cwd = dir.path().join("sub");
-        std::fs::create_dir(&cwd).unwrap();
-
-        assert!(local_link_to_file_target("../secret.txt", &[], Some(&cwd)).is_none());
-    }
-
-    #[test]
-    fn local_link_prefers_generated_media_over_cwd() {
-        // When a path matches both generated media and a cwd file, the unique
-        // media match wins (stable across forks/resumes).
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("images")).unwrap();
-        std::fs::write(dir.path().join("images/1.jpg"), b"media").unwrap();
-        let media = vec![dir.path().join("images/1.jpg")];
-
-        let cwd = tempfile::tempdir().unwrap();
-        std::fs::create_dir(cwd.path().join("images")).unwrap();
-        std::fs::write(cwd.path().join("images/1.jpg"), b"cwd").unwrap();
-
-        let target = local_link_to_file_target("images/1.jpg", &media, Some(cwd.path())).unwrap();
-        assert_eq!(target, LinkTarget::File(Arc::from(media[0].as_path())));
+        assert!(local_link_to_file_target("../images/1.jpg", &media).is_none());
     }
 
     // ── tool_path_file_target ──
@@ -1232,58 +1142,6 @@ mod tests {
         assert!(
             overlay.is_empty(),
             "javascript:// scheme should be filtered"
-        );
-    }
-
-    #[test]
-    fn scan_email_produces_mailto_overlay() {
-        let line = make_line("Email foo@bar.com please.");
-        let mut overlay = LinkOverlay::new();
-        scan_unjoined(std::iter::once((0, &line)), 0, &[], &mut overlay);
-
-        assert_eq!(overlay.links().len(), 1);
-        assert_eq!(
-            &*resolve_link_target(&overlay.links()[0].target)
-                .and_then(|resolved| resolved.osc8_url)
-                .expect("url"),
-            "mailto:foo@bar.com"
-        );
-        assert_eq!(overlay.links()[0].col_start, 6); // "Email "
-        assert_eq!(
-            overlay.links()[0].col_end,
-            6 + UnicodeWidthStr::width("foo@bar.com") as u16
-        );
-    }
-
-    #[test]
-    fn scan_email_after_multibyte_prefix_is_mailto() {
-        let line = make_line("連絡先: foo@bar.com です");
-        let mut overlay = LinkOverlay::new();
-        scan_unjoined(std::iter::once((0, &line)), 0, &[], &mut overlay);
-
-        assert_eq!(overlay.links().len(), 1);
-        assert_eq!(
-            &*resolve_link_target(&overlay.links()[0].target)
-                .and_then(|resolved| resolved.osc8_url)
-                .expect("url"),
-            "mailto:foo@bar.com"
-        );
-    }
-
-    #[test]
-    fn scan_scp_git_remote_is_not_mailto() {
-        let line = make_line("clone git@github.com:org/repo.git please");
-        let mut overlay = LinkOverlay::new();
-        scan_unjoined(std::iter::once((0, &line)), 0, &[], &mut overlay);
-
-        assert!(
-            overlay
-                .links()
-                .iter()
-                .all(|l| resolve_link_target(&l.target)
-                    .and_then(|resolved| resolved.osc8_url)
-                    .is_none_or(|u| !u.starts_with("mailto:"))),
-            "scp-style git remotes must not become mailto links"
         );
     }
 

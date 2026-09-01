@@ -1,14 +1,23 @@
-//! `/fork`: branch the current session into a peer top-level agent.
+//! `/fork` -- branch the current session into a peer top-level agent.
 //!
-//! The command parses optional flags (`--worktree`, `--no-worktree`) and an optional free-form directive.
-//! It returns [`Action::Fork`](crate::app::actions::Action::Fork) carrying a [`ForkArgs`] payload.
-//! The placeholder construction, modal routing, and effect emission live in `dispatch::dispatch_fork`.
-//! The fork itself is dispatched in `dispatch_fork_resolved`, after the worktree question is resolved and the placeholder spawn succeeds.
+//! The command parses optional flags (`--worktree`, `--no-worktree`) and
+//! an optional free-form directive, then returns
+//! [`Action::Fork`](crate::app::actions::Action::Fork) carrying a
+//! [`ForkArgs`] payload. The actual placeholder construction, modal
+//! routing, and effect emission live in `dispatch::dispatch_fork`.
+//!
+//! The actual fork dispatch happens in `dispatch_fork_resolved` (after
+//! the worktree question is resolved and the placeholder spawn succeeds),
+//! not in this command itself.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
-/// [`parse_fork_args`] returns this, and [`Action::Fork`](crate::app::actions::Action::Fork) carries it to the dispatcher.
+/// Parsed arguments for the `/fork` slash command.
+///
+/// Returned by [`parse_fork_args`] and carried in
+/// [`Action::Fork`](crate::app::actions::Action::Fork) for the
+/// dispatcher to consume.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ForkArgs {
     /// `None`        -> open the worktree question modal (the user is
@@ -17,21 +26,27 @@ pub struct ForkArgs {
     /// `Some(false)` -> force no-worktree, skipping the modal.
     pub worktree_override: Option<bool>,
     /// Optional first prompt for the new session. Whitespace-trimmed.
-    /// `None` when the user typed `/fork` (with or without flags) and no directive text; the new agent then opens with no first prompt.
+    /// `None` when the user invoked `/fork` (with or without flags) but
+    /// no directive text. The new agent simply opens with no first prompt.
     pub directive: Option<String>,
 }
 
 /// Parse the raw argument string after `/fork`.
 ///
-/// Recognised flags appear at the start; everything after the last flag is the directive.
-/// An unknown flag is treated as the start of the directive, so `/fork --foo bar` becomes the directive `--foo bar`.
-/// The args are user-typed text, and a directive that happens to begin with `--` must not be rejected.
+/// Recognised flags appear at the start; everything after the last flag
+/// is the directive. Unknown flags are deliberately treated as the
+/// start of the directive (so `/fork --foo bar` becomes a directive
+/// `--foo bar`) -- the parser is conservative because the args are
+/// user-typed text and we do not want to reject directives that happen
+/// to begin with `--`.
 ///
 /// Errors:
 /// - `--worktree` and `--no-worktree` cannot both appear.
-/// - `--at <turn>` returns a friendly "not supported in this version" message.
-///   The shell already supports the parameter as `xai_grok_shell::session::fork::ForkSessionRequest::target_prompt_index`.
-///   A turn-picker UI is planned; rejecting the flag now tells the user the feature is deferred.
+/// - `--at <turn>` returns a friendly "not supported in this version"
+///   message: the shell already supports the underlying parameter (see
+///   `xai_grok_shell::session::fork::ForkSessionRequest::target_prompt_index`)
+///   and a turn-picker UI is planned; this version deliberately rejects
+///   the flag so users discover the deferral cleanly.
 pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     let mut worktree_override: Option<bool> = None;
     let mut rest = args.trim_start();
@@ -80,17 +95,36 @@ pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     })
 }
 
+/// `/fork` slash command implementation.
 pub struct ForkCommand;
 
 impl SlashCommand for ForkCommand {
-    slash_meta! {
-        name: "fork",
-        description: "Branch the current session into a peer agent",
-        usage: "/fork [--worktree|--no-worktree] [directive]",
-        takes_args: true,
-        args_required: false,
-        session_scoped: true,
-        arg_placeholder: "[directive]",
+    fn name(&self) -> &str {
+        "fork"
+    }
+
+    fn description(&self) -> &str {
+        "Branch the current session into a peer agent"
+    }
+
+    fn session_scoped(&self) -> bool {
+        true
+    }
+
+    fn usage(&self) -> &str {
+        "/fork [--worktree|--no-worktree] [directive]"
+    }
+
+    fn takes_args(&self) -> bool {
+        true
+    }
+
+    fn args_required(&self) -> bool {
+        false
+    }
+
+    fn arg_placeholder(&self) -> Option<&str> {
+        Some("[directive]")
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -204,8 +238,10 @@ mod tests {
 
     #[test]
     fn parse_unknown_token_is_treated_as_directive_start() {
-        // Conservative behaviour: a bareword that isn't a recognised flag becomes the directive
-        // `/fork --foo bar` is not rejected as a typo; the model receives `--foo bar` as its first prompt
+        // Conservative behaviour: a bareword that isn't a recognised flag
+        // becomes the directive. This keeps `/fork --foo bar` from being
+        // rejected for typos -- the model just receives `--foo bar` as
+        // its first prompt.
         let parsed = parse_fork_args("--foo bar").expect("unknown flag parse");
         assert_eq!(parsed.worktree_override, None);
         assert_eq!(parsed.directive.as_deref(), Some("--foo bar"));

@@ -21,7 +21,7 @@ use xai_grok_shell::tools::TodoStatus;
 pub(super) const MAX_TODO_ROWS: u16 = 8;
 
 /// Whether the todo panel should render this frame. Hidden when there are no
-/// todos, or when every todo is finished (so a completed list doesn't linger ÔÇö
+/// todos, or when every todo is finished (so a completed list doesn't linger —
 /// nit: "still showing old TODOs on every turn even though all are complete").
 /// A new turn that creates fresh pending todos re-shows it immediately. `force`
 /// (Ctrl+T) pins it visible regardless, e.g. to review a finished list.
@@ -41,7 +41,7 @@ pub(super) fn todo_panel_visible(
         .any(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
 }
 
-/// Rows the todo panel will occupy (0 when hidden ÔÇö see [`todo_panel_visible`] ÔÇö
+/// Rows the todo panel will occupy (0 when hidden — see [`todo_panel_visible`] —
 /// or there are no todos), capped at [`MAX_TODO_ROWS`]. The overlay host uses
 /// this to size the idle viewport to exactly its content so the prompt sits
 /// right after the committed conversation (no bottom-pin, no gap).
@@ -79,7 +79,7 @@ pub(super) fn render_todo_panel(
 
 /// Build the persistent todo-panel lines (status glyph + content per item),
 /// shown directly above the prompt while there are todos. Capped to `max_rows`
-/// (the last row becomes `ÔÇª +N more` on overflow). Empty when there are no
+/// (the last row becomes `… +N more` on overflow). Empty when there are no
 /// todos. Mirrors the full-TUI `TodoPane`'s glyphs/colors.
 pub(super) fn todo_panel_lines(
     agent: &xai_grok_pager::app::agent_view::AgentView,
@@ -122,7 +122,7 @@ pub(super) fn todo_panel_lines(
             // No leading pad: the caller places the panel at the shared
             // live-region left edge (`live::live_left_inset` = 0, flush-left),
             // so the glyph
-            // column lines up with committed `Ôùå` bullets and the prompt `ÔØ»`.
+            // column lines up with committed `◆` bullets and the prompt `❯`.
             Line::from(vec![
                 Span::styled(format!("{glyph} "), style),
                 Span::styled(content, style),
@@ -144,13 +144,13 @@ pub(super) fn todo_panel_lines(
     lines
 }
 
-/// Truncate `s` to at most `max` characters, appending `ÔÇª` when shortened.
+/// Truncate `s` to at most `max` characters, appending `…` when shortened.
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
     let kept: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{kept}ÔÇª")
+    format!("{kept}…")
 }
 
 #[cfg(test)]
@@ -181,17 +181,17 @@ mod tests {
     fn todo_panel_visibility_auto_hides_when_work_is_done() {
         use xai_grok_pager::app::agent::AgentState;
         let mut a = agent();
-        // No todos ÔåÆ hidden.
+        // No todos → hidden.
         assert!(!todo_panel_visible(&a, false));
 
-        // At least one unfinished todo ÔåÆ shown.
+        // At least one unfinished todo → shown.
         a.todo.update_todos(vec![
             todo("done", TodoStatus::Completed),
             todo("doing", TodoStatus::InProgress),
         ]);
         assert!(todo_panel_visible(&a, false));
 
-        // All completed + idle ÔåÆ auto-hidden (don't linger forever).
+        // All completed + idle → auto-hidden (don't linger forever).
         a.todo.update_todos(vec![
             todo("a", TodoStatus::Completed),
             todo("b", TodoStatus::Completed),
@@ -201,7 +201,7 @@ mod tests {
             "auto-hide once every todo is done and the turn is idle"
         );
 
-        // ÔÇªand stays hidden even while a turn is actively running, so a previous
+        // …and stays hidden even while a turn is actively running, so a previous
         // turn's finished list never lingers at the start of the next turn.
         a.session.state = AgentState::TurnRunning;
         assert!(
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn todo_panel_empty_when_no_todos() {
         assert!(todo_panel_lines(&agent(), 8, false).is_empty());
-        // ÔÇªand empty when the cap is zero, regardless of todos.
+        // …and empty when the cap is zero, regardless of todos.
         let mut a = agent();
         a.todo.update_todos(vec![todo("x", TodoStatus::Pending)]);
         assert!(todo_panel_lines(&a, 0, false).is_empty());
@@ -239,12 +239,12 @@ mod tests {
         assert!(line_text(&lines[0]).contains("done one"));
         assert!(
             line_text(&lines[1]).contains("\u{25b6}"),
-            "in-progress row uses the ÔûÂ glyph"
+            "in-progress row uses the ▶ glyph"
         );
         assert!(line_text(&lines[1]).contains("active item"));
         assert!(
             line_text(&lines[2]).contains("\u{25a1}"),
-            "pending row uses the Ôûí glyph"
+            "pending row uses the □ glyph"
         );
     }
 
@@ -274,6 +274,6 @@ mod tests {
     #[test]
     fn truncate_chars_adds_ellipsis_only_when_needed() {
         assert_eq!(truncate_chars("hello", 10), "hello");
-        assert_eq!(truncate_chars("hello world", 5), "hellÔÇª");
+        assert_eq!(truncate_chars("hello world", 5), "hell…");
     }
 }

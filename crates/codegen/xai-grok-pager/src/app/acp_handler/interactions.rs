@@ -1,91 +1,14 @@
 use super::*;
 
-/// Resolve a superseded elicitation's reverse-request with `Cancel` so the awaiting MCP server is released before a replacement takes the slot.
-fn cancel_elicitation_request(
-    response_tx: tokio::sync::oneshot::Sender<xai_acp_lib::AcpResult<acp::ExtResponse>>,
-) {
-    let cancelled = xai_grok_tools::mcp_elicitation::McpElicitExtResponse::Cancel;
-    if let Ok(raw) = serde_json::value::to_raw_value(&cancelled) {
-        response_tx.send(Ok(acp::ExtResponse::new(raw.into()))).ok();
-    }
-}
-
-pub(crate) fn handle_mcp_elicit(
-    ext: xai_acp_lib::AcpArgs<acp::ExtRequest>,
-    app: &mut AppView,
-) -> bool {
-    use crate::views::elicitation_view::ElicitationViewState;
-    use xai_grok_tools::mcp_elicitation::McpElicitExtRequest;
-
-    let ext_req: McpElicitExtRequest = match serde_json::from_str(ext.request.params.get()) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to parse McpElicitExtRequest");
-            ext.response_tx
-                .send(Err(acp::Error::new(-32602, format!("Invalid params: {e}"))))
-                .ok();
-            return false;
-        }
-    };
-
-    let Some(id) = interaction_target_agent(app, &ext_req.session_id) else {
-        tracing::info!(
-            session_id = %ext_req.session_id,
-            "mcp elicit for a session with no local view; parked for leader replay-on-attach"
-        );
-        drop(ext.response_tx);
-        return false;
-    };
-    let is_active = is_matched_agent_active(app, id);
-    let Some(agent) = app.agents.get_mut(&id) else {
-        drop(ext.response_tx);
-        return false;
-    };
-
-    let waiting = agent
-        .elicitation_view
-        .as_ref()
-        .is_some_and(|ev| ev.is_url_waiting());
-    if waiting {
-        if let Some((_, old_tx)) = agent.pending_elicitation.take() {
-            cancel_elicitation_request(old_tx);
-        }
-        agent.pending_elicitation = Some((ext_req, ext.response_tx));
-        return is_active;
-    }
-
-    if let Some((_, old_tx)) = agent.pending_elicitation.take() {
-        cancel_elicitation_request(old_tx);
-    }
-
-    if let Some(mut old) = agent.elicitation_view.take() {
-        if let Some(old_tx) = old.take_response_tx() {
-            cancel_elicitation_request(old_tx);
-        }
-        agent.restore_elicitation_prompt(old.stashed_prompt);
-    }
-
-    let stashed = agent.stash_prompt_for_elicitation();
-    agent.elicitation_view = Some(ElicitationViewState::from_request(
-        ext_req,
-        stashed,
-        Some(ext.response_tx),
-    ));
-    agent.last_active_at = Some(std::time::Instant::now());
-
-    tracing::info!(
-        target_active = is_active,
-        "Opened MCP elicitation view from ext_method"
-    );
-    is_active
-}
-
 /// Handle `chutes.ai/ask_user_question` ext-method.
 ///
-/// Parses the typed request, creates a `QuestionViewState` with the `response_tx` stashed, and opens the question overlay.
-/// The pager does NOT respond immediately; the response is sent later when the user submits, cancels, or is replaced by another question.
+/// Parses the typed request, creates a `QuestionViewState` with the
+/// `response_tx` stashed, and opens the question overlay. The pager does
+/// NOT respond immediately — the response is sent later when the user
+/// submits, cancels, or is replaced by another question.
 ///
-/// If a question is already active, the old one is cancelled first (`Cancelled` is sent on its stashed `response_tx`).
+/// If a question is already active, the old one is cancelled first
+/// (`Cancelled` is sent on its stashed `response_tx`).
 pub(crate) fn handle_ask_user_question(
     ext: xai_acp_lib::AcpArgs<acp::ExtRequest>,
     app: &mut AppView,
@@ -107,11 +30,15 @@ pub(crate) fn handle_ask_user_question(
         }
     };
 
-    // Route by the request's session id (like `session/update`), so a question raised by a BACKGROUND session lands on its own view
-    // The user may be on the dashboard or another session and never have entered this one; the question must not fail for that
+    // Route by the request's session id (like `session/update`), so a question
+    // raised by a BACKGROUND session lands on its own view even when the user is
+    // on the dashboard or another session — rather than failing because the
+    // user hasn't entered the session yet.
     let Some(id) = interaction_target_agent(app, &ext_req.session_id) else {
-        // No local view for this session. Do NOT send an error: that would FAIL the tool (rendered red).
-        // Leave the reverse-request unanswered; the agent keeps awaiting and the leader replays it when a client attaches via `session/load`
+        // No local view for this session. Do NOT send an error — that would FAIL
+        // the tool (rendered red). Leave the reverse-request unanswered: the
+        // agent keeps awaiting and the leader replays it when a client attaches
+        // via `session/load`.
         tracing::info!(
             session_id = %ext_req.session_id,
             "ask_user_question for a session with no local view; parked for leader replay-on-attach"
@@ -121,7 +48,7 @@ pub(crate) fn handle_ask_user_question(
     };
     let is_active = is_matched_agent_active(app, id);
     let Some(agent) = app.agents.get_mut(&id) else {
-        // `interaction_target_agent` only returns ids that exist; this arm is defensive
+        // `interaction_target_agent` only returns ids that exist; defensive.
         tracing::warn!("ask_user_question: agent {id:?} not found");
         drop(ext.response_tx);
         return false;
@@ -143,73 +70,26 @@ pub(crate) fn handle_ask_user_question(
         }
         agent.restore_card_prompt(old_qv.stashed_prompt);
 
-        // An ACP ask displaced this local question, so tell the user why it vanished
+        // Local question displaced by an ACP ask, so surface why it vanished.
         // Any directive it carried is dropped; the user re-issues the command after answering.
-        if let Some(kind) = old_qv.local_kind.take() {
-            use crate::app::actions::FeedbackTraceChoice;
-            use crate::app::dispatch::notes;
+        if let Some(ref kind) = old_qv.local_kind {
             use crate::views::question_view::LocalQuestionKind;
-            match kind {
-                // A displaced trace-consent card still carries a committed report; it must send (like Esc/skip), not silently vanish
-                LocalQuestionKind::FeedbackTrace { report, images } => {
-                    if let Some(session_id) = agent.session.session_id.clone() {
-                        // `commit_feedback` closes the consent funnel, applies the emptiness rule, and picks the copy for a displaced card
-                        if let Some(effect) = notes::commit_feedback(
-                            agent,
-                            app.coding_data_retention_opt_out,
-                            id,
-                            session_id,
-                            report,
-                            images,
-                            Some(FeedbackTraceChoice::NoUpload),
-                            true,
-                        ) {
-                            app.pending_effects.push(effect);
-                        }
-                    } else {
-                        // No session to send through: still close the funnel.
-                        // Dropping `images` cleans up its staged temp files.
-                        notes::log_trace_consent_selected(
-                            app.coding_data_retention_opt_out,
-                            FeedbackTraceChoice::NoUpload,
-                        );
-                        agent.scrollback.push_block(RenderBlock::system(
-                            "/feedback cancelled because another question opened.".to_owned(),
-                        ));
-                    }
-                }
-                LocalQuestionKind::DoctorFix { .. } => {
-                    agent.scrollback.push_block(RenderBlock::system(
-                        "/doctor fix was cancelled because another question opened.".to_owned(),
-                    ));
-                }
-                // The hold and the requeued front row survive the displaced card, so the queue stays parked; only the card is lost
-                LocalQuestionKind::PromptBlocked { .. } => {
-                    agent.scrollback.push_block(RenderBlock::system(
-                        "The blocked-prompt card was replaced by another question. Your prompt is still held at the front of the queue.".to_owned(),
-                    ));
-                }
-                kind => {
-                    // The trace-consent and doctor-fix arms above own their variants; their labels here are graceful fallbacks
-                    let cmd = match kind {
-                        LocalQuestionKind::Fork { .. } => "/fork",
-                        LocalQuestionKind::NewSession => "/new",
-                        LocalQuestionKind::CreditLimitUpsell { .. } => "credit-limit upsell",
-                        LocalQuestionKind::FreeUsageUpsell { .. } => "SuperGrok upsell",
-                        LocalQuestionKind::AgentTypeMismatch { .. } => "model switch",
-                        LocalQuestionKind::DeleteCurrentSession => "/delete",
-                        LocalQuestionKind::Feedback | LocalQuestionKind::FeedbackTrace { .. } => {
-                            "/feedback"
-                        }
-                        LocalQuestionKind::DoctorFix { .. } => "/doctor fix",
-                        // The dedicated arm above owns this variant; the label is kept for exhaustiveness
-                        LocalQuestionKind::PromptBlocked { .. } => "blocked prompt",
-                    };
-                    agent.scrollback.push_block(RenderBlock::system(format!(
-                        "{cmd} cancelled because another question opened."
-                    )));
-                }
-            }
+            let cmd = match kind {
+                LocalQuestionKind::Fork { .. } => "/fork",
+                LocalQuestionKind::NewSession => "/new",
+                LocalQuestionKind::CreditLimitUpsell { .. } => "credit-limit upsell",
+                LocalQuestionKind::FreeUsageUpsell { .. } => "SuperGrok upsell",
+                LocalQuestionKind::AgentTypeMismatch { .. } => "model switch",
+                LocalQuestionKind::DoctorFix { .. } => "/doctor fix",
+                LocalQuestionKind::DeleteCurrentSession => "/delete",
+                LocalQuestionKind::Feedback => "/feedback",
+            };
+            let message = if matches!(kind, LocalQuestionKind::DoctorFix { .. }) {
+                "/doctor fix was cancelled because another question opened.".to_owned()
+            } else {
+                format!("{cmd} cancelled because another question opened.")
+            };
+            agent.scrollback.push_block(RenderBlock::system(message));
         }
     }
 
@@ -222,9 +102,12 @@ pub(crate) fn handle_ask_user_question(
         ext_req.mode,
     ));
 
+    // Clear prompt for question interaction.
     agent.prompt.set_text("");
 
-    // Stamp the "last activity" anchor so the dashboard's NeedsInput row shows time since this question arrived, not the previous turn's end
+    // Stamp the "last activity" anchor so the
+    // dashboard's NeedsInput row reflects "time since this question
+    // arrived" rather than the previous turn's end time.
     agent.last_active_at = Some(std::time::Instant::now());
 
     tracing::info!(
@@ -234,8 +117,9 @@ pub(crate) fn handle_ask_user_question(
         "Opened question view from ext_method"
     );
 
-    // Only the currently-displayed view needs an immediate redraw
-    // A question parked on a background agent shows up via the roster `NeedsInput` delta and renders when the user switches to that session
+    // Only the currently-displayed view needs an immediate redraw; a question
+    // parked on a background agent surfaces via the roster `NeedsInput` delta
+    // and renders when the user switches to that session.
     is_active
 }
 
@@ -243,8 +127,8 @@ pub(crate) fn handle_ask_user_question(
 ///
 /// Creates a `PlanApprovalViewState` overlay for interactive approval.
 ///
-/// Flow: parse, guard, cancel the old approval, capture the session draft, create state, then return true.
-/// Freeform is prefilled only when safe (not under an open permission).
+/// Follows the `handle_ask_user_question` pattern: parse → guard → cancel old
+/// → stash prompt → create state → clear prompt → return true.
 pub(super) fn handle_exit_plan_mode(
     ext: xai_acp_lib::AcpArgs<acp::ExtRequest>,
     app: &mut AppView,
@@ -266,11 +150,13 @@ pub(super) fn handle_exit_plan_mode(
         }
     };
 
-    // 2. Route by the request's session id (like `session/update`), so a plan-approval raised by a BACKGROUND session lands on its own view.
-    // The user may not be focused on that session; the approval must not fail for that
+    // 2. Route by the request's session id (like `session/update`), so a
+    // plan-approval raised by a BACKGROUND session lands on its own view even
+    // when the user isn't currently focused on it — rather than failing.
     let Some(id) = interaction_target_agent(app, &params.session_id) else {
-        // No local view for this session. Do NOT error (that fails the tool).
-        // Leave the reverse-request unanswered and rely on the leader's replay-on-attach
+        // No local view for this session. Do NOT error (that fails the tool):
+        // leave the reverse-request unanswered and rely on the leader's
+        // replay-on-attach.
         tracing::info!(
             session_id = %params.session_id,
             "exit_plan_mode for a session with no local view; parked for leader replay-on-attach"
@@ -280,7 +166,7 @@ pub(super) fn handle_exit_plan_mode(
     };
     let is_active = is_matched_agent_active(app, id);
     let Some(agent) = app.agents.get_mut(&id) else {
-        // `interaction_target_agent` only returns ids that exist; this arm is defensive
+        // `interaction_target_agent` only returns ids that exist; defensive.
         tracing::warn!("exit_plan_mode: agent {id:?} not found");
         drop(ext.response_tx);
         return false;
@@ -299,42 +185,27 @@ pub(super) fn handle_exit_plan_mode(
     }
 
     // Dismiss competing overlays so plan approval owns the screen.
-    // - active_modal: draw returns before line_viewer (plan never paints); keys still route to the invisible plan viewer
-    // - block_viewer: draw returns on line_viewer (plan visible) but handle_scroll prefers block_viewer, so wheel hits the hidden Edit pane
+    // - active_modal: draw returns before line_viewer (plan never paints);
+    //   keys still route to the invisible plan viewer.
+    // - block_viewer: draw returns on line_viewer (plan visible) but
+    //   handle_scroll prefers block_viewer, so wheel hits the hidden Edit pane.
     agent.active_modal = None;
     agent.block_viewer = None;
 
     let source = plan_review_source_for_tool(&params.tool_call_id, agent);
 
-    // If the user was writing a casual comment when this new plan-approval request arrived, restore the prompt from before the comment
-    // The upcoming `stash()` then captures the user's original text rather than the in-progress comment draft
-    // Taking `casual_stashed_prompt` also clears it, so the stale draft cannot dangle into the next casual entry
+    // If the user was mid-casual-comment when this new plan-approval
+    // request arrived, restore the pre-comment prompt first so the
+    // upcoming `stash()` captures the user's original text rather
+    // than the in-progress comment draft. Also clears the now-stale
+    // `casual_stashed_prompt` so it doesn't dangle into the next
+    // casual entry.
     if let Some(stashed) = agent.casual_stashed_prompt.take() {
         agent.prompt.restore(stashed);
     }
 
-    // While a permission is open, the session draft is `permission_stashed_prompt` and the live composer holds the followup
-    // Otherwise the live composer is the session draft
-    let permission_still_open = !agent.permission_queue.is_empty();
-    let session_draft = if let Some(perm_draft) = agent.permission_stashed_prompt.take() {
-        let _permission_followup = agent.prompt.stash();
-        perm_draft
-    } else {
-        agent.prompt.stash()
-    };
-
-    let had_session_draft = !session_draft.is_effectively_empty();
-    // Never prefill freeform while permission owns the keyboard: the followup would type into (and could send) the private session draft
-    // Set the deferred prefill flag instead so `restore_permission_stashes` applies it only when the queue actually drains
-    if had_session_draft && !permission_still_open {
-        agent.plan_freeform_prefill_deferred = false;
-        agent.prompt.restore(session_draft.clone_for_live_prefill());
-    } else {
-        agent.plan_freeform_prefill_deferred = permission_still_open;
-        agent.prompt.set_text("");
-    }
-
-    let state = PlanApprovalViewState::with_source(params, source, session_draft, ext.response_tx);
+    let stashed = agent.prompt.stash();
+    let state = PlanApprovalViewState::with_source(params, source, stashed, ext.response_tx);
 
     agent.plan_comments.clear();
     agent.plan_next_comment_id = 0;
@@ -345,6 +216,7 @@ pub(super) fn handle_exit_plan_mode(
         agent.latest_inline_plan_content = None;
     }
     agent.plan_approval_view = Some(state);
+    agent.prompt.set_text("");
 
     agent.casual_commenting_range = None;
     agent.casual_editing_comment_id = None;
@@ -355,13 +227,7 @@ pub(super) fn handle_exit_plan_mode(
         if let Some(ref mut viewer) = agent.line_viewer {
             viewer.plan_mut().feedback_active = true;
         }
-        if had_session_draft
-            && !permission_still_open
-            && let Some(ref mut pav) = agent.plan_approval_view
-        {
-            pav.focus = crate::views::plan_approval_view::PlanApprovalFocus::Prompt;
-        }
-    } else if !permission_still_open && let Some(ref mut pav) = agent.plan_approval_view {
+    } else if let Some(ref mut pav) = agent.plan_approval_view {
         pav.focus = crate::views::plan_approval_view::PlanApprovalFocus::Prompt;
     }
 
@@ -370,7 +236,8 @@ pub(super) fn handle_exit_plan_mode(
         "Opened plan approval view from ext_method"
     );
 
-    // An approval parked on a background session renders when the user switches to it; only the active view needs an immediate redraw
+    // Background-parked approval renders when the user switches to the session;
+    // only the active view needs an immediate redraw.
     is_active
 }
 

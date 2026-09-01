@@ -25,7 +25,7 @@ pub(super) fn dispatch_copy_block_content(app: &mut AppView) {
             return;
         };
 
-        // BgTask blocks: copy stdout from the shared `bg_tasks` store
+        // BgTask blocks: copy stdout from central store
         let text = if let RenderBlock::BgTask(block) = &entry.block {
             let stdout = agent
                 .session
@@ -63,7 +63,7 @@ pub(super) fn dispatch_copy_assistant_message(
             if let Some(entry) = agent.scrollback.entry(i)
                 && let RenderBlock::AgentMessage(msg) = &entry.block
             {
-                agent_messages.push(msg.copy_text(true));
+                agent_messages.push(msg.copy_text(false));
             }
         }
 
@@ -128,7 +128,7 @@ pub(super) fn dispatch_copy_assistant_message(
             }
             crate::clipboard::CopyDelivery::File { path } => {
                 agent.scrollback.push_block(RenderBlock::system(format!(
-                    "Clipboard unreachable: wrote {}{stats}",
+                    "Clipboard unreachable — wrote {}{stats}",
                     crate::clipboard::display_copy_path(path)
                 )));
             }
@@ -143,8 +143,9 @@ pub(super) fn dispatch_copy_assistant_message(
 }
 
 /// Dispatch for the `/export` command.
-/// Collects the active (sub)agent's scrollback and renders a clean Markdown transcript.
-/// The transcript is written to the (tilde-expanded) file, or copied to the clipboard through the full route (native, tmux, OSC 52).
+/// Collects the active (sub)agent's scrollback, renders a clean Markdown transcript,
+/// and either writes it to the (expanded) file or copies it to the clipboard using the
+/// full route (native + tmux + OSC 52) with appropriate feedback.
 pub(super) fn dispatch_export_conversation(
     app: &mut AppView,
     file_path: Option<std::path::PathBuf>,
@@ -164,7 +165,7 @@ pub(super) fn dispatch_export_conversation(
         }
 
         if let Some(p) = file_path {
-            // All fs logic (tilde, mkdir, write) lives here so the slash-command layer stays thin
+            // All fs logic (tilde, mkdir, write) lives here (single owner, thin command layer).
             let expanded =
                 std::path::PathBuf::from(shellexpand::tilde(&p.to_string_lossy()).as_ref());
             if let Some(parent) = expanded.parent()
@@ -183,17 +184,19 @@ pub(super) fn dispatch_export_conversation(
                     )));
                 }
                 Err(e) => {
-                    // Do not re-emit a user-supplied path in the error message (it may contain secrets or PII)
-                    // The generic failure is sufficient
+                    // Do not blindly re-emit a user-supplied path in the error message
+                    // (it may contain secrets or PII); the generic failure is sufficient.
                     agent
                         .scrollback
                         .push_block(RenderBlock::system(format!("Failed to write file: {}", e)));
                 }
             }
         } else {
-            // Clipboard path: a stats block (like assistant copy) and a route-aware toast (like block-content copy and selection)
-            // The scrollback line reflects where the copy actually landed, the same pattern as /copy N
-            // It never claims clipboard success when the delivery fell back to the backup file
+            // Clipboard path: stats block (like assistant copy) + route-aware toast
+            // (like block content copy / selection). Good UX for a potentially large transcript.
+            // The scrollback line reflects where the copy actually landed —
+            // same pattern as /copy N — instead of claiming clipboard success
+            // when the delivery fell back to the backup file.
             let stats = crate::clipboard::clipboard_stats_suffix(&md);
             let delivery = agent.copy_to_clipboard(&md);
             let block_msg = match &delivery {
@@ -205,7 +208,7 @@ pub(super) fn dispatch_export_conversation(
                     None => format!("Conversation copied to clipboard{stats}"),
                 },
                 crate::clipboard::CopyDelivery::File { path } => format!(
-                    "Clipboard unreachable: conversation written to {}{stats}",
+                    "Clipboard unreachable — conversation written to {}{stats}",
                     crate::clipboard::display_copy_path(path)
                 ),
                 crate::clipboard::CopyDelivery::Failed { .. } => {
@@ -219,14 +222,20 @@ pub(super) fn dispatch_export_conversation(
 
 /// Open the full transcript in `$PAGER`.
 ///
-/// Minimal mode renders a full-fidelity ANSI transcript: every block fully expanded (reasoning in full, tool output uncapped, diff colors kept).
-/// That is a full layout, syntax-highlight, and ANSI-serialization pass over the whole session.
-/// Rendering it inline froze the event loop for seconds on long sessions ("laggy /transcript").
-/// The block model is also `!Send` (syntect's resumable highlighter state lives inside markdown blocks), so the work can't move to a worker either.
-/// So this only records the request; the minimal render loop builds the transcript in time-budgeted slices per frame (`full_view::pump_transcript`).
-/// When done it sets `pending_pager_path` and the event loop suspends into `$PAGER`.
+/// **Minimal mode** renders a full-fidelity ANSI transcript — every block
+/// fully expanded (reasoning in full, tool output uncapped, diff colors kept)
+/// — a full layout + syntax-highlight + ANSI-serialization pass over the whole
+/// session. Rendering that inline froze the event loop for seconds on long
+/// sessions ("laggy /transcript"), and the block model is `!Send` (syntect's
+/// resumable highlighter state lives inside markdown blocks), so it can't be
+/// shipped to a worker either. Instead this only ARMS the request; the minimal
+/// render loop builds the transcript **incrementally, a time-budgeted slice
+/// per frame** (`full_view::pump_transcript`, the same time-sliced amortization
+/// pattern other TUIs use for heavy transcript work), then arms `pending_pager_path`
+/// for the event loop's suspend-into-`$PAGER`.
 ///
-/// Other modes keep the compact markdown export: string concatenation, no layout or highlighting, cheap enough to stay synchronous.
+/// **Other modes** keep the compact markdown export (string concatenation, no
+/// layout or highlighting — cheap enough to stay synchronous).
 pub(crate) fn dispatch_open_transcript_pager(app: &mut AppView) {
     if app.screen_mode.is_minimal() {
         crate::minimal_api::request_minimal_transcript(app);
@@ -282,7 +291,7 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
             return;
         };
 
-        // Block has images/media but the terminal can't render pixels: toast and bail
+        // Block has images/media but terminal can't render pixels — toast and bail.
         let has_media =
             !entry.block.image_references().is_empty() || entry.block.inline_media().is_some();
         if has_media && !crate::terminal::image::detect_graphics_protocol().supports_images() {
@@ -378,9 +387,10 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
     });
 }
 
-/// The fetches that populate every Extensions-modal tab.
-/// Three callers share it: opening the modal manually, the auth flow after a CTA install, and the session-ready handler that runs a deferred fetch.
-/// Sharing keeps them from drifting and leaving a tab stuck on its initial `Loading` state.
+/// Fetch-set that populates every Extensions-modal tab. Shared by the manual
+/// open path, the post-CTA-install auth handoff, and the deferred-fetch
+/// session-ready handlers so they can't drift and leave a tab stuck on its
+/// initial `Loading` state.
 pub(super) fn extensions_modal_tab_fetches(
     modal: &mut crate::views::extensions_modal::ExtensionsModalState,
     agent_id: AgentId,
@@ -413,10 +423,11 @@ pub(super) fn extensions_modal_tab_fetches(
     effects
 }
 
-/// Push a marketplace list fetch, coalescing overlapping requests.
-/// While one is in flight, further requests fold into a single queued refetch that fires when the current response lands.
-/// See the field docs on `ExtensionsModalState`.
-/// The other tab fetches are cheap local reads and don't need this.
+/// Push a marketplace list fetch, coalescing overlapping requests: while one
+/// is in flight, further requests fold into a single queued refetch that
+/// fires when the current response lands (see the field docs on
+/// `ExtensionsModalState`). The other tab fetches are cheap local reads and
+/// don't need this.
 pub(super) fn push_marketplace_fetch(
     modal: &mut crate::views::extensions_modal::ExtensionsModalState,
     effects: &mut Vec<Effect>,
@@ -434,7 +445,7 @@ pub(super) fn push_marketplace_fetch(
     });
 }
 
-/// Slash-command name for an extensions modal tab, used by the toast shown when the modal is opened off the agent view.
+/// Slash-command name for an extensions modal tab (toast when not on an agent).
 fn extensions_tab_slash_name(tab: crate::views::extensions_modal::ExtensionsTab) -> &'static str {
     use crate::views::extensions_modal::ExtensionsTab;
     match tab {
@@ -442,7 +453,6 @@ fn extensions_tab_slash_name(tab: crate::views::extensions_modal::ExtensionsTab)
         ExtensionsTab::Plugins => "plugins",
         ExtensionsTab::Marketplace => "marketplace",
         ExtensionsTab::Skills => "skills",
-        ExtensionsTab::Workflows => "workflows",
         ExtensionsTab::McpServers => "mcps",
     }
 }
@@ -456,7 +466,7 @@ fn config_agents_slash_name(tab: Option<crate::views::agents_modal::AgentsTab>) 
     }
 }
 
-/// Toast shown when a modal that needs a session is opened off the agent view.
+/// Toast when a session-hosted modal is opened off the agent view.
 fn toast_session_only_slash(app: &mut AppView, name: &str) {
     let msg = format!("/{name} only works in a session. Open an agent first.");
     match app.active_view {
@@ -539,16 +549,12 @@ pub(super) fn dispatch_open_config_agents_modal(
         .and_then(model_agent_type_from_info);
     let session_id = agent.session.session_id.clone();
     let active_agent = agent.session_agent_name.clone();
-    // One-shot plugin discovery (same gating as `/mcp doctor` and `inspect`) so plugin-provided agents are listed alongside native ones
-    let plugin_registry = xai_grok_shell::util::config::load_cli_plugin_registry(&cwd);
-    let plugin_registry = (!plugin_registry.is_empty()).then_some(plugin_registry);
     let mut modal = AgentsModalState::new(
         &cwd,
         &toggle,
         &bundle,
         model_agent_type.as_deref(),
         active_agent,
-        plugin_registry,
     );
     if let Some(tab) = initial_tab {
         modal.active_tab = tab;
@@ -595,7 +601,7 @@ pub(super) fn dispatch_copy_block_meta(app: &mut AppView) {
 }
 
 /// Dump the input flight recorder to a JSON file for debugging.
-/// See the `input_log.rs` module docs for how long this stays and how to remove it.
+/// See `input_log.rs` module docs for lifecycle/removal instructions.
 pub(super) fn dispatch_dump_input_log(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -677,8 +683,12 @@ pub(super) fn handle_hooks_list_loaded(
     {
         modal.hooks_data = match result {
             Ok(response) => {
-                // Seed once: re-collapsing on every refetch folded the user's expanded groups
-                modal.seed_hook_groups_once(&response.hooks);
+                // Default all groups to collapsed.
+                let mut seen = std::collections::HashSet::new();
+                for hook in &response.hooks {
+                    seen.insert(hook.source_dir.clone());
+                }
+                modal.hooks_collapsed_groups = seen;
                 TabDataState::Loaded(response)
             }
             Err(e) => TabDataState::Error(e),
@@ -703,8 +713,9 @@ pub(super) fn handle_plugins_list_loaded(
             }
             Err(e) => TabDataState::Error(e),
         };
-        // Clear pending_action so the UI unblocks as soon as the plugins list arrives
-        // Marketplace can continue loading independently via its own TabDataState::Loading
+        // Clear pending_action so the UI unblocks as soon as the
+        // plugins list arrives. Marketplace can continue loading
+        // independently via its own TabDataState::Loading.
         modal.pending_action = None;
         modal.pending_entry_index = None;
     }
@@ -787,9 +798,11 @@ pub(super) fn handle_marketplace_list_loaded(
             Ok(mut response) => {
                 response.sanitize();
                 // Only default to collapsed on first load (when state is Loading).
-                // On reloads (after install/uninstall/refresh), preserve the user's expand/collapse choices
+                // On reloads (after install/uninstall/refresh), preserve the user's
+                // expand/collapse choices.
                 let is_first_load = matches!(modal.marketplace_data, TabDataState::Loading);
                 if is_first_load {
+                    // All sources start collapsed.
                     modal.marketplace_collapsed_sources = (0..response.sources.len()).collect();
                 }
                 TabDataState::Loaded(response)
@@ -824,6 +837,7 @@ pub(super) fn handle_skills_toggle_done(
         }
     }
     // The toggle effect already called chutes.ai/skills/refresh-baseline
-    // That triggers the session to reload skills and push an AvailableCommandsUpdate notification with the updated list
+    // which triggers the session to reload skills and push an
+    // AvailableCommandsUpdate notification with the updated list.
     vec![]
 }

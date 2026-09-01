@@ -100,7 +100,7 @@ fn canonical_and_short_ids_resolve_to_canonical_id() {
 
 #[test]
 fn applicable_fix_listing_uses_report_metadata_and_planner_availability() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let report = report();
     let local = terminal();
     let local_fixes = applicable_automatic_fixes_with(&report, &local, |id| {
@@ -112,10 +112,15 @@ fn applicable_fix_listing_uses_report_metadata_and_planner_availability() {
             None,
         )
     });
-    assert_eq!(
-        local_fixes,
+    // Windows has no shell-alias fix, so the planner refuses and nothing is
+    // offered "here". The remote cases below are unaffected: availability
+    // short-circuits to `RunLocally` before the planner is consulted.
+    let expected_local = if cfg!(windows) {
+        Vec::new()
+    } else {
         vec![(SSH_WRAP_ID, "ssh-wrap", AutomaticFixAvailability::Here)]
-    );
+    };
+    assert_eq!(local_fixes, expected_local);
 
     let mut remote = local.clone();
     remote.is_ssh = true;
@@ -213,7 +218,7 @@ fn tmux_fix_registry_resolves_every_short_and_canonical_id() {
 
 #[test]
 fn tmux_fix_is_available_here_in_remote_sessions_while_ssh_wrap_stays_local_only() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut terminal = tmux_terminal(false);
     terminal.is_ssh = true;
     let mut report = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
@@ -240,7 +245,7 @@ fn tmux_fix_is_available_here_in_remote_sessions_while_ssh_wrap_stays_local_only
 
 #[test]
 fn tmux_specs_plan_exact_independent_managed_items() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     for (id, evidence, line) in [
         (
             TMUX_CLIPBOARD_ID,
@@ -329,8 +334,8 @@ fn reload_instruction_shell_quotes_and_markdown_escapes_paths() {
 fn full_preview_safely_renders_backtick_requested_symlink_target_and_backup_paths() {
     use std::os::unix::fs::symlink;
 
-    let temp = tempfile::tempdir().unwrap();
-    let root = dunce::canonicalize(temp.path()).unwrap();
+    let temp = crate::test_util::sandbox_dir();
+    let root = temp.path().canonicalize().unwrap();
     let home = root.join("home`dir");
     let target_dir = root.join("target`dir");
     std::fs::create_dir_all(&home).unwrap();
@@ -354,7 +359,7 @@ fn full_preview_safely_renders_backtick_requested_symlink_target_and_backup_path
 
 #[test]
 fn tmux_plain_byobu_and_custom_config_paths_are_physical() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let report = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
     let plain = plan_fix(
         tmux_request(temp.path(), TMUX_CLIPBOARD_ID),
@@ -400,7 +405,7 @@ fn tmux_plain_byobu_and_custom_config_paths_are_physical() {
 
 #[test]
 fn tmux_managed_items_coexist_and_each_apply_is_one_transaction() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     for (id, evidence, line) in [
         (
@@ -561,7 +566,7 @@ fn tmux_scanner_handles_server_scopes_separators_prefixes_and_native_blocks() {
 
 #[test]
 fn conflicting_direct_form_after_managed_block_fails_persistent_verification() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     for conflict in [
         "set set-clipboard off",
@@ -586,7 +591,7 @@ fn conflicting_direct_form_after_managed_block_fails_persistent_verification() {
 
 #[test]
 fn healthy_direct_does_not_suppress_repair_of_noncanonical_managed_item() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     let report = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
     for content in [
@@ -613,7 +618,7 @@ fn healthy_direct_does_not_suppress_repair_of_noncanonical_managed_item() {
 
 #[test]
 fn tmux_applicability_uses_exact_positive_probe_gates() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let terminal = tmux_terminal(false);
     let mut clipboard = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
     clipboard.facts.tmux.set_clipboard =
@@ -658,7 +663,7 @@ fn tmux_applicability_uses_exact_positive_probe_gates() {
 
 #[test]
 fn tmux_stale_plan_and_idempotence_reuse_managed_writer_safety() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     std::fs::write(&path, "set -g mouse on\n").unwrap();
     let report = tmux_report(TMUX_CLIPBOARD_ID, TmuxEvidence::Clipboard);
@@ -711,7 +716,7 @@ fn tmux_stale_plan_and_idempotence_reuse_managed_writer_safety() {
 
 #[test]
 fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     for (shell, relative, alias) in [
         ("/bin/bash", ".bashrc", "alias ssh='chutes-build wrap ssh'"),
         ("/bin/zsh", ".zshrc", "alias ssh='chutes-build wrap ssh'"),
@@ -721,7 +726,8 @@ fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
             "alias ssh 'chutes-build wrap ssh'",
         ),
     ] {
-        let plan = plan_fix(request(temp.path(), shell), &report(), &terminal()).unwrap();
+        let plan = plan_fix_ignoring_platform(request(temp.path(), shell), &report(), &terminal())
+            .unwrap();
         assert_eq!(plan.id(), SSH_WRAP_ID);
         assert_eq!(plan.change().requested_path, temp.path().join(relative));
         assert_eq!(
@@ -747,22 +753,22 @@ fn bash_zsh_and_fish_plans_use_exact_paths_and_aliases() {
 
 #[test]
 fn remote_vscode_and_unsupported_shell_are_refused() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut remote = terminal();
     remote.is_ssh = true;
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &remote),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &remote),
         Err(FixError::RemoteSession)
     ));
 
     let mut vscode = terminal();
     vscode.is_official_vscode_remote = true;
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &vscode),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &vscode),
         Err(FixError::NotApplicable)
     ));
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/tcsh"), &report(), &terminal()),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/tcsh"), &report(), &terminal()),
         Err(FixError::UnsupportedShell)
     ));
 }
@@ -770,7 +776,7 @@ fn remote_vscode_and_unsupported_shell_are_refused() {
 #[cfg(windows)]
 #[test]
 fn windows_is_manual_only_before_shell_selection() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut request = request(temp.path(), "C:\\Program Files\\Git\\bin\\bash.exe");
     request.shell = Some(PathBuf::from("bash"));
     assert!(matches!(
@@ -791,12 +797,12 @@ fn existing_alias_and_function_conflicts_are_preserved() {
         ),
     ];
     for (shell, relative, content) in cases {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = crate::test_util::sandbox_dir();
         let path = temp.path().join(relative);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
         assert!(matches!(
-            plan_fix(request(temp.path(), shell), &report(), &terminal()),
+            plan_fix_ignoring_platform(request(temp.path(), shell), &report(), &terminal()),
             Err(FixError::ExistingCustomization { .. })
         ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), content);
@@ -870,10 +876,12 @@ fn posix_function_scanner_requires_exact_ssh_name_boundary() {
 
 #[test]
 fn conflict_scan_uses_the_exact_validated_source_snapshot() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
     std::fs::write(&path, "export KEEP=1\n").unwrap();
-    let plan = plan_fix(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     std::fs::write(&path, "alias ssh='ssh -A'\n").unwrap();
     assert!(matches!(
         apply_fix(plan),
@@ -889,11 +897,11 @@ fn conflict_scan_uses_the_exact_validated_source_snapshot() {
 
 #[test]
 fn non_utf8_source_fails_closed_before_conflict_policy() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".zshrc");
     std::fs::write(&path, [0xff]).unwrap();
     assert!(matches!(
-        plan_fix(request(temp.path(), "/bin/zsh"), &report(), &terminal()),
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &terminal()),
         Err(FixError::Managed(
             xai_grok_config::managed_text::ManagedConfigError::UnsafePath { .. }
         ))
@@ -905,7 +913,7 @@ fn non_utf8_source_fails_closed_before_conflict_policy() {
 fn validator_prefers_custom_executable_shell_and_uses_path_for_basename_only() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let shadow = temp.path().join("shadow");
     let valid = temp.path().join("valid");
     std::fs::create_dir(&shadow).unwrap();
@@ -926,7 +934,8 @@ fn validator_prefers_custom_executable_shell_and_uses_path_for_basename_only() {
     assert_eq!(resolve_validator_program(&custom), Some(custom.clone()));
 
     std::fs::set_permissions(&custom, std::fs::Permissions::from_mode(0o644)).unwrap();
-    // A non-executable explicit SHELL path is not silently substituted with a different same-basename shell from PATH
+    // A non-executable explicit SHELL path is not silently substituted with a
+    // different same-basename shell from PATH.
     assert_eq!(resolve_validator_program(&custom), None);
 
     assert_eq!(
@@ -938,14 +947,15 @@ fn validator_prefers_custom_executable_shell_and_uses_path_for_basename_only() {
 
 #[test]
 fn comments_and_managed_alias_do_not_create_false_conflicts() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".zshrc");
     std::fs::write(
         &path,
         "# alias ssh='ssh -A'\n# >>> chutes-build doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='chutes-build wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< chutes-build doctor <<<\n",
     )
     .unwrap();
-    let plan = plan_fix(request(temp.path(), "/bin/zsh"), &report(), &terminal()).unwrap();
+    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/zsh"), &report(), &terminal())
+        .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.status(), FixStatus::AlreadyConfigured);
     assert!(outcome.backup_path().is_none());
@@ -964,7 +974,7 @@ fn managed_alias_with_later_unmanaged_conflict_is_not_configured() {
         ),
     ];
     for (shell, content) in cases {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = crate::test_util::sandbox_dir();
         let path = shell.config_path(temp.path());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, content).unwrap();
@@ -974,10 +984,12 @@ fn managed_alias_with_later_unmanaged_conflict_is_not_configured() {
 
 #[test]
 fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
     std::fs::write(&path, "export KEEP=1\n").unwrap();
-    let plan = plan_fix(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     std::fs::write(&path, "export KEEP=2\n").unwrap();
     assert!(matches!(
         apply_fix(plan),
@@ -987,7 +999,9 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "export KEEP=2\n");
 
-    let plan = plan_fix(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.status(), FixStatus::Applied);
     assert_eq!(outcome.id(), SSH_WRAP_ID);
@@ -998,18 +1012,21 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
 
 #[test]
 fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
-    // Post-apply verification must use the shell stored on the outcome
-    // Even if `$SHELL` is missing or points at a different shell family, a successful apply against bash must still report the alias configured
-    let temp = tempfile::tempdir().unwrap();
+    // Post-apply verification must use the shell stored on the outcome. Even if
+    // `$SHELL` is missing or points at a different shell family, a successful
+    // apply against bash must still report the managed alias as configured.
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".bashrc");
-    let plan = plan_fix(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
+    let plan =
+        plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &report(), &terminal())
+            .unwrap();
     let outcome = apply_fix(plan).unwrap();
     assert_eq!(outcome.shell(), Some(ShellKind::Bash));
     assert_eq!(outcome.changed_path(), path);
     assert!(outcome.managed_alias_is_configured());
 
-    // Fish uses a different alias syntax; checking the bash-written path with fish must not count as configured
-    // The outcome keeps bash regardless
+    // Fish uses a different alias syntax; checking the bash-written path with
+    // fish must not count as configured. The outcome keeps bash regardless.
     assert!(!managed_alias_configured(&path, ShellKind::Fish));
     assert!(
         outcome.managed_alias_is_configured(),
@@ -1044,10 +1061,11 @@ fn configured_report_reaches_pass_state_only_for_exact_managed_alias() {
             .any(|finding| finding.id == SSH_WRAP_ID)
     );
 
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let mut healthy = report();
     healthy.findings.clear();
-    let plan = plan_fix(request(temp.path(), "/bin/bash"), &healthy, &terminal()).unwrap();
+    let plan = plan_fix_ignoring_platform(request(temp.path(), "/bin/bash"), &healthy, &terminal())
+        .unwrap();
     assert_eq!(
         plan.id(),
         SSH_WRAP_ID,
@@ -1058,11 +1076,15 @@ fn configured_report_reaches_pass_state_only_for_exact_managed_alias() {
 #[cfg(unix)]
 #[test]
 fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let capture = temp.path().join("capture");
-    let grok = temp.path().join("grok");
+    // Named for the command the aliases below actually invoke. It used to be
+    // `grok`, which the rebrand left alone (bare `grok` is ambiguous, so
+    // `scripts/rebrand.py` never rewrites it) while rewriting the alias to
+    // `chutes-build` — so the shell found no such command and exited non-zero.
+    let stub = temp.path().join("chutes-build");
     std::fs::write(
-        &grok,
+        &stub,
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
             capture.display()
@@ -1070,7 +1092,7 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&grok, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     if let Some(bash) = find_on_path("bash") {
         let rc = temp.path().join("bashrc");
@@ -1210,12 +1232,12 @@ fn shell_aliases_expand_to_exact_argv_and_bypass_is_explicit() {
     }
 }
 
-/// An accumulating remedy is additive, so a user's own `terminal-features` lines are not a conflict.
-/// tmux applies Chutes Build's managed block last and the features merge.
-/// A direct-assignment remedy would refuse to touch the file.
+/// An accumulating remedy is additive, so a user's own `terminal-features`
+/// lines are not a conflict: tmux applies Chutes Build's managed block last and the
+/// features merge. A direct-assignment remedy would refuse to touch the file.
 #[test]
 fn tmux_truecolor_fix_appends_alongside_existing_terminal_features() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let path = temp.path().join(".tmux.conf");
     std::fs::write(
         &path,
@@ -1239,7 +1261,7 @@ fn tmux_truecolor_fix_appends_alongside_existing_terminal_features() {
 
 #[test]
 fn tmux_truecolor_fix_requires_a_reducing_client() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = crate::test_util::sandbox_dir();
     let report = tmux_report(TMUX_TRUECOLOR_ID, TmuxEvidence::Clipboard);
 
     assert!(matches!(

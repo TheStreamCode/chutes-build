@@ -168,6 +168,8 @@ impl PromptUsage {
             cache_creation_tokens, // subset of input_tokens on the wire
             reasoning_tokens: _,   // subset of output_tokens
             model_calls,
+            cache_hit_calls: _,
+            cache_miss_calls: _,
             api_duration_ms: _, // timing, not tokens
             cost_usd_ticks: _,  // cost without usage cannot occur
             cost_is_partial: _,
@@ -203,6 +205,12 @@ pub struct PromptUsageModel {
     pub reasoning_tokens: u64,
     #[serde(default)]
     pub model_calls: u64,
+    /// Calls whose prompt read from the server-side prefix cache.
+    #[serde(default)]
+    pub cache_hit_calls: u64,
+    /// Calls with no cached prompt read (`cached_prompt_tokens == 0`).
+    #[serde(default)]
+    pub cache_miss_calls: u64,
     #[serde(default)]
     pub api_duration_ms: u64,
     /// Server cost in USD ticks (`USD_TICKS_PER_USD` = 1e10 ticks per $1).
@@ -221,6 +229,18 @@ pub struct PromptUsageModel {
     /// `cost_is_partial` only — never on the public ACP wire.
     #[serde(default, skip_serializing)]
     pub cost_missing_calls: u64,
+}
+
+impl PromptUsageModel {
+    /// Cached prompt reads as a share of full prompt input, clamped to
+    /// `[0, 1]`. `0.0` when nothing read or input is empty.
+    pub fn cache_read_ratio(&self) -> f64 {
+        if self.input_tokens == 0 {
+            return 0.0;
+        }
+        let ratio = self.cached_read_tokens as f64 / self.input_tokens as f64;
+        ratio.clamp(0.0, 1.0)
+    }
 }
 
 /// One model call's token usage: the four Messages API `message.usage` fields
@@ -251,11 +271,12 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
+            cache_hit_calls,
+            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_missing_calls,
-            cache_hit_calls: _,
-            cache_miss_calls: _,
+            ..
         } = *t;
         Self {
             input_tokens,
@@ -265,6 +286,8 @@ impl From<&xai_chat_state::UsageTotals> for PromptUsageModel {
             cache_creation_tokens,
             reasoning_tokens,
             model_calls,
+            cache_hit_calls,
+            cache_miss_calls,
             api_duration_ms,
             cost_usd_ticks,
             cost_is_partial: t.cost_is_partial(),
@@ -327,6 +350,8 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
         cache_creation_tokens,
         reasoning_tokens,
         model_calls: _,     // totals-level; headless carries num_turns instead
+        cache_hit_calls: _, // headless projects the ratio, not the call counts
+        cache_miss_calls: _,
         api_duration_ms: _, // dropped: not part of the frozen headless shape
         cost_usd_ticks,
         cost_is_partial,
@@ -367,6 +392,8 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
                 cache_creation_tokens,
                 reasoning_tokens: _, // dropped: reduced per-model schema
                 model_calls,
+                cache_hit_calls: _, // per-model call counts stay internal
+                cache_miss_calls: _,
                 api_duration_ms: _, // dropped: reduced per-model schema
                 cost_usd_ticks,
                 cost_is_partial,

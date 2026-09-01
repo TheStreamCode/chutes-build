@@ -14,19 +14,14 @@ pub mod agent;
 pub mod agent_view;
 pub mod app_view;
 pub mod bundle;
-pub(crate) mod cancel_latency;
 pub mod cli;
-pub mod consent;
 pub use crate::link_opener;
-use xai_grok_telemetry::region;
-use xai_grok_telemetry::region::Parent;
 /// Off-thread full-file syntax highlight upgrade for edit diffs.
 pub mod edit_highlight_worker;
 /// Off-thread Mermaid diagram render worker (out of process) + per-session cache.
 pub mod mermaid_worker;
 pub use xai_prompt_queue as prompt_queue;
 mod acp_handler;
-mod connect_timeout;
 mod csi_filter;
 mod dispatch;
 /// Display-refresh probe + motion cadence + terminal telemetry at startup.
@@ -37,30 +32,21 @@ pub mod roster;
 pub mod session_startup;
 pub(crate) mod session_title_resolve;
 pub mod status_blocks;
-pub(crate) mod status_line;
-mod status_line_policy;
 pub mod subagent;
 pub mod subscription;
-mod x10_filter;
 pub(crate) use effects::sanitize_user_error;
 mod event_loop;
-mod event_loop_stall;
-mod exit_timeout;
 pub(crate) mod external_editor;
 mod foreign_sessions;
 mod inline_edit;
 #[cfg(all(test, unix))]
 mod leader_cluster;
 mod modals;
-pub(crate) mod mode_switch;
 mod mouse;
 mod queue_edit;
 pub(crate) mod screen_mode_relaunch;
-mod session_load_barrier;
 pub mod signal_handler;
-mod startup_failure;
 mod turn_completion;
-pub(crate) mod workspace_sync;
 mod xt_filter;
 pub(crate) use crate::terminal::{kitty_flags_pushed, kitty_releases_reported};
 pub use cli::{
@@ -79,20 +65,20 @@ pub(crate) use foreign_sessions::{
     badge_for_picker_source, foreign_tool_display_label, is_foreign_picker_source,
 };
 use ratatui::backend::CrosstermBackend;
-pub use startup_failure::StartupFailure;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
-pub(crate) use turn_completion::CANCELLATION_CATEGORY_KEY;
 use xai_grok_shell::util::config;
-/// Tracks the extra Kitty keyboard layer pushed while the `/gboom` game is open (see [`push_gboom_keyboard_flags`]).
-/// Kept separate from the base layer (`terminal::kitty_keyboard`) so teardown pops both, in LIFO order.
+/// Tracks the extra Kitty keyboard layer pushed while the `/gboom` game is
+/// open (see [`push_gboom_keyboard_flags`]). Kept separate from the base layer
+/// (`terminal::kitty_keyboard`) so teardown pops both, in LIFO order.
 static GBOOM_KEYBOARD_PUSHED: AtomicBool = AtomicBool::new(false);
-/// While the `/gboom` game owns input, additionally request `REPORT_ALL_KEYS_AS_ESCAPE_CODES` so plain letter keys (WASD) emit release events.
-/// Tracking several keys held at once needs those release events.
-/// Does nothing unless the Kitty keyboard protocol is active.
-/// [`pop_gboom_keyboard_flags`] pops the layer again (so does `restore_terminal` on teardown).
+/// While the `/gboom` game owns input, additionally request
+/// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` so plain letter keys (WASD) emit
+/// release events — required to track several keys held at once. No-op
+/// unless the Kitty keyboard protocol is active. Balanced by
+/// [`pop_gboom_keyboard_flags`] (and by `restore_terminal` on teardown).
 pub(crate) fn push_gboom_keyboard_flags() {
     if !kitty_flags_pushed() || GBOOM_KEYBOARD_PUSHED.swap(true, Ordering::AcqRel) {
         return;
@@ -112,10 +98,13 @@ pub(crate) fn pop_gboom_keyboard_flags() {
         });
     }
 }
-/// Tracks whether mouse capture (the five DEC modes enabled by crossterm `EnableMouseCapture`, plus bracketed paste) is currently active.
+/// Tracks whether mouse capture (the five DEC modes enabled by
+/// crossterm `EnableMouseCapture` + bracketed paste) is currently active.
 pub(crate) static MOUSE_CAPTURE_ENABLED: AtomicBool = AtomicBool::new(false);
-/// Whether minimal was auto-selected because the terminal leaks mouse reports as raw text (JediTerm/Windows) and the user expressed no preference.
-/// Gates the idle-hint "auto-set" note so it never misleads users who chose minimal themselves.
+/// Whether minimal was auto-selected solely because the terminal leaks mouse
+/// reports as raw text (JediTerm/Windows) and the user expressed no preference.
+/// Gates the idle-hint "auto-set" note so it never misleads users who chose
+/// minimal themselves.
 static MINIMAL_AUTO_SET_FOR_MOUSE_LEAK: AtomicBool = AtomicBool::new(false);
 /// See [`MINIMAL_AUTO_SET_FOR_MOUSE_LEAK`].
 pub fn minimal_auto_set_for_mouse_leak() -> bool {
@@ -130,52 +119,54 @@ pub fn minimal_show_switch_back_to_fullscreen() -> bool {
 pub fn set_minimal_show_switch_back_to_fullscreen_for_test(on: bool) {
     MINIMAL_SHOW_SWITCH_BACK_TO_FULLSCREEN.store(on, Ordering::Release);
 }
-/// Whether startup actually applied a forced cursor style.
-/// Teardown (and the panic hook, which can't thread parameters) resets the style only when this is true.
-/// Under inherit, `0 q` would clobber a shell-chosen style.
+/// Whether startup actually applied a forced cursor style. Teardown (and the
+/// panic hook, which can't thread parameters) resets the style only when
+/// true: under inherit, `0 q` would clobber a shell-chosen style.
 pub(crate) static CURSOR_STYLE_FORCED: AtomicBool = AtomicBool::new(false);
-/// The screen the terminal is ACTUALLY on, for teardown paths that cannot thread parameters (panic hook, signal handler, post-loop restore).
-/// It is updated eagerly at every screen flip so mid-switch failures tear down correctly.
-static CURRENT_SCREEN_MODE: std::sync::atomic::AtomicU8 =
-    std::sync::atomic::AtomicU8::new(ScreenMode::INITIAL_U8);
-pub(crate) fn set_current_screen_mode(mode: ScreenMode) {
-    CURRENT_SCREEN_MODE.store(mode.to_u8(), Ordering::Release);
-    signal_handler::set_mode(mode);
-}
-pub(crate) fn current_screen_mode() -> ScreenMode {
-    ScreenMode::from_u8(CURRENT_SCREEN_MODE.load(Ordering::Acquire))
-}
 /// Whether this process runs the minimal (scrollback-native) screen mode.
 /// Set once by [`apply_screen_mode_globals`] from the *effective* mode.
 ///
-/// Exists for code like `AgentView::handle_input` that needs minimal-mode behavior but sits below `AppView` and cannot see `AppView::screen_mode`.
-/// Do NOT gate behavior off the styling globals (`modal_window::embedded()`, `scrollbar hidden`, …): those are mode-agnostic render toggles.
-/// A future embedded host flipping them must not inherit minimal's key remaps or scrollback writes.
+/// Exists for the few places that need minimal-mode **behavior** (input
+/// semantics, state mutations) but sit below `AppView` and cannot see
+/// `AppView::screen_mode` (e.g. `AgentView::handle_input`). Do NOT use the
+/// styling globals (`modal_window::embedded()`, `scrollbar hidden`, …) for
+/// behavior gating: those are deliberately mode-agnostic render toggles, and a
+/// future embedded host flipping them must not inherit minimal's key remaps or
+/// scrollback writes.
 static MINIMAL_MODE_ACTIVE: AtomicBool = AtomicBool::new(false);
-/// Whether the process runs in minimal (scrollback-native) mode.
-/// See [`MINIMAL_MODE_ACTIVE`]; prefer `AppView::screen_mode.is_minimal()` wherever the screen mode is already in reach.
+/// Whether the process runs in minimal (scrollback-native) mode. See
+/// [`MINIMAL_MODE_ACTIVE`]; prefer `AppView::screen_mode.is_minimal()` wherever
+/// the screen mode is already in reach.
 pub(crate) fn minimal_mode_active() -> bool {
     MINIMAL_MODE_ACTIVE.load(Ordering::Acquire)
 }
-/// Test-only override for [`minimal_mode_active`] (unit tests exercising minimal-gated input paths without a terminal).
-/// Save/restore around use: this is process-global state.
+/// Test-only override for [`minimal_mode_active`] (unit tests exercising
+/// minimal-gated input paths without a terminal). Save/restore around use —
+/// this is process-global state.
 #[cfg(test)]
 pub(crate) fn set_minimal_mode_active_for_test(on: bool) {
     MINIMAL_MODE_ACTIVE.store(on, Ordering::Release);
 }
-/// Whether a bare Esc cancels a running turn: minimal mode and non-vim fullscreen get the single-Esc cancel.
-/// Fullscreen vim mode keeps the mid-turn swallow (Ctrl+C stays the cancel gesture there).
+/// Whether a bare Esc cancels a running turn: minimal mode and non-vim
+/// fullscreen get the single-Esc cancel; fullscreen vim mode keeps the
+/// mid-turn swallow (Ctrl+C stays the cancel gesture there).
 ///
-/// Production callers pass `AgentView::is_minimal_mode` (seeded by `apply_app_scoped_gates`), never the [`minimal_mode_active`] process global.
-/// `vim_mode` is the scrollback-nav setting (`[ui].vim_mode` / `/vim-mode`), not the prompt `simple_mode`.
+/// Pure over its inputs — production callers pass the agent's injected
+/// effective screen mode (`AgentView::is_minimal_mode`, seeded by
+/// `apply_app_scoped_gates`; never the [`minimal_mode_active`] process
+/// global) and tests pass explicit booleans. `vim_mode` is the
+/// scrollback-nav setting (`[ui].vim_mode` / `/vim-mode`), not the prompt
+/// `simple_mode`.
 pub(crate) fn esc_cancels_turn(is_minimal: bool, vim_mode: bool) -> bool {
     is_minimal || !vim_mode
 }
-/// Whether the opt-in mouse-reporting toggle feature is enabled (`[ui] mouse_reporting_toggle` / `CHUTES_BUILD_MOUSE_REPORTING_TOGGLE`).
-/// Seeded once at startup; gates both the `Ctrl+R` shortcut registration and the `/toggle-mouse-reporting` slash command's visibility/execution.
+/// Whether the opt-in mouse-reporting toggle feature is enabled
+/// (`[ui] mouse_reporting_toggle` / `CHUTES_BUILD_MOUSE_REPORTING_TOGGLE`). Seeded once
+/// at startup; gates both the `Ctrl+R` shortcut registration and the
+/// `/toggle-mouse-reporting` slash command's visibility/execution.
 pub(crate) static MOUSE_REPORTING_TOGGLE_ENABLED: AtomicBool = AtomicBool::new(false);
-/// Read the cached opt-in mouse-reporting toggle flag (see [`MOUSE_REPORTING_TOGGLE_ENABLED`]).
-/// Set once at startup from layered config.
+/// Read the cached opt-in mouse-reporting toggle flag (see
+/// [`MOUSE_REPORTING_TOGGLE_ENABLED`]). Set once at startup from layered config.
 pub(crate) fn mouse_reporting_toggle_enabled() -> bool {
     MOUSE_REPORTING_TOGGLE_ENABLED.load(Ordering::Acquire)
 }
@@ -189,9 +180,11 @@ pub(crate) fn voice_mode_enabled() -> bool {
 pub fn set_voice_mode_enabled_for_test(on: bool) {
     VOICE_MODE_ENABLED.store(on, Ordering::Release);
 }
-/// Process-global gate for the Ctrl+Space / F8 voice chord, for key-routing and view code without an `AppView` (`resolve_action`, the cheatsheet).
-/// Defaults ON; seeded at startup from `[ui].voice_keybind_enabled` and updated live by the settings setter.
-/// Unlike [`VOICE_MODE_ENABLED`] it only silences the keybinding; `/voice` and the other voice entry points stay up.
+/// Process-global gate for the Ctrl+Space / F8 voice chord, for key-routing
+/// and view code without an `AppView` (`resolve_action`, the cheatsheet).
+/// Default ON. Seeded at startup from `[ui].voice_keybind_enabled` and
+/// updated live by the settings setter; unlike [`VOICE_MODE_ENABLED`] it only
+/// silences the keybinding — `/voice` and the other voice surfaces stay up.
 pub(crate) static VOICE_KEYBIND_ENABLED: AtomicBool = AtomicBool::new(true);
 pub(crate) fn voice_keybind_enabled() -> bool {
     VOICE_KEYBIND_ENABLED.load(Ordering::Acquire)
@@ -200,42 +193,50 @@ pub(crate) fn voice_keybind_enabled() -> bool {
 pub fn set_voice_keybind_enabled_for_test(on: bool) {
     VOICE_KEYBIND_ENABLED.store(on, Ordering::Release);
 }
-fn voice_mode_in(layer: &toml::Value) -> Option<bool> {
-    layer
-        .get("features")?
-        .get(xai_grok_shell::agent::config::Feature::VoiceMode.key())?
-        .as_bool()
-}
 /// `[features] voice_mode` from merged `requirements.toml`.
 pub(crate) fn voice_mode_requirement_pin() -> Option<bool> {
-    voice_mode_in(&xai_grok_config::load_merged_requirements()?)
+    xai_grok_config::load_merged_requirements().and_then(|req| {
+        req.get("features")
+            .and_then(|f| f.get("voice_mode"))
+            .and_then(|v| v.as_bool())
+    })
 }
 /// `[features] voice_mode` from effective config (user + managed).
 pub(crate) fn voice_mode_config_value() -> Option<bool> {
-    voice_mode_in(&xai_grok_shell::config::load_effective_config().ok()?)
+    xai_grok_shell::config::load_effective_config()
+        .ok()
+        .and_then(|cfg| {
+            cfg.get("features")
+                .and_then(|f| f.get("voice_mode"))
+                .and_then(|v| v.as_bool())
+        })
 }
-/// The registry owns the precedence and the default.
-/// One rule has no row there: with `is_api_key`, a remote-only off is forced back on.
-/// A requirement, env, or config `false` still wins.
+/// Resolve voice availability.
+///
+/// Precedence: requirements > `CHUTES_BUILD_VOICE_MODE` > config/managed
+/// `[features] voice_mode` > remote `voice_mode_enabled` > default on.
+///
+/// When `is_api_key` and the only off-source is remote, force on. Requirement /
+/// env / config `false` still wins.
 pub(crate) fn resolve_voice_mode_enabled(
     requirement: Option<bool>,
     config: Option<bool>,
     remote: Option<bool>,
     is_api_key: bool,
 ) -> bool {
-    use xai_grok_shell::agent::config::{ConfigSource, Feature, FeatureSources};
-    let resolved = Feature::VoiceMode.resolve(FeatureSources {
-        pin: requirement,
-        config,
-        remote,
-        ..FeatureSources::from_process_env(Feature::VoiceMode)
-    });
+    use xai_grok_shell::agent::config::{BoolFlag, ConfigSource};
+    let resolved = BoolFlag::env("CHUTES_BUILD_VOICE_MODE")
+        .requirement(requirement)
+        .config(config)
+        .feature_flag(remote)
+        .default(true)
+        .resolve();
     if resolved.value {
         return true;
     }
     is_api_key && resolved.source == ConfigSource::Remote
 }
-/// Resolve from live policy, env, remote, and API-key state.
+/// Resolve from live policy + env + remote + API-key state.
 pub(crate) fn resolve_voice_mode_live(remote: Option<bool>, is_api_key: bool) -> bool {
     resolve_voice_mode_enabled(
         voice_mode_requirement_pin(),
@@ -268,51 +269,48 @@ mod voice_gate_tests {
         ));
     }
 }
-/// Sticky banner shown while mouse reporting is off, telling the user how to turn it back on.
-/// `Ctrl+R` only works from scrollback, so the prompt-focused variant points at `/toggle-mouse-reporting` (which toggles from any pane).
-/// The banner is stored in the scrollback form; `AgentView::active_toast_message` swaps to the prompt form at render time when the prompt is focused.
+/// Sticky banner shown while mouse reporting is off, telling the user how to
+/// turn it back on. The advertised invocation depends on focus: `Ctrl+R` only
+/// works from scrollback, so the prompt-focused variant points at the
+/// `/toggle-mouse-reporting` command (which toggles from any pane). The banner
+/// is stored in the scrollback form; `AgentView::active_toast_message` swaps to
+/// the prompt form at render time when the prompt is focused.
 pub(crate) const MOUSE_OFF_HINT_SCROLLBACK: &str =
     "Ctrl+r to enable mouse reporting and restore TUI features";
 pub(crate) const MOUSE_OFF_HINT_PROMPT: &str =
     "/toggle-mouse-reporting to enable mouse reporting and restore TUI features";
-/// Uses [`xai_ratatui_inline::Terminal`] instead of stock `ratatui::Terminal`: our `flush()` returns a `bool` saying whether any cells changed.
-/// This lets [`crate::render::draw::draw_frame`] skip cursor escape sequences on frames with empty diffs (e.g., off-screen animation ticks).
-/// Skipping them preserves the cursor blink timer; see [`crate::render::draw`] for details.
+/// Terminal type for the pager.
 ///
-/// The backend writes to a [`TermWriter`](crate::render::draw::TermWriter), which buffers frame data in memory and channels it to a writer thread.
-/// The writer thread performs the actual blocking `write()` to stderr / the pty fd.
-/// That keeps the tokio event loop free of pty back-pressure (e.g. when Ghostty is busy with another pane).
+/// Uses [`xai_ratatui_inline::Terminal`] instead of stock `ratatui::Terminal`
+/// because our `flush()` returns `bool` indicating whether any cells actually
+/// changed. This lets [`crate::render::draw::draw_frame`] skip cursor escape
+/// sequences on frames with empty diffs (e.g., off-screen animation ticks),
+/// preserving the cursor blink timer. See [`crate::render::draw`] for details.
+///
+/// The backend writes to a [`TermWriter`](crate::render::draw::TermWriter)
+/// that buffers frame data in memory and sends it to a dedicated writer
+/// thread via a channel. The writer thread performs the actual blocking
+/// `write()` to stderr / the pty fd, keeping the tokio event loop free
+/// from pty back-pressure (e.g. when Ghostty is busy with another pane).
 pub use crate::render::draw::PagerTerminal;
 /// Whether the pager uses the alternate screen (fullscreen) or stays inline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenMode {
     Fullscreen,
     Inline,
-    /// Scrollback-native (experimental, `--minimal`): finalized blocks are printed into the terminal's native scrollback via `insert_before`.
-    /// A small pinned live region holds the prompt, status, and running turn.
+    /// Scrollback-native (experimental, `--minimal`): finalized blocks are
+    /// printed into the terminal's native scrollback via `insert_before`, with
+    /// a small pinned live region for the prompt, status, and running turn.
     ///
-    /// All minimal-mode rendering lives in the sibling `xai-grok-pager-minimal` crate.
-    /// This crate keeps only three hooks for it: `crate::minimal_hook`, `crate::minimal_api`, and `AppView::minimal_state`.
-    /// `crate::minimal_hook` dispatches into minimal's `draw`/transcript; `crate::minimal_api` is what minimal reads.
-    /// If you don't work on minimal, treat this variant as opaque; the fullscreen/inline paths are unaffected.
+    /// All minimal-mode rendering lives in the sibling `xai-grok-pager-minimal`
+    /// crate. This crate only holds the seam: `crate::minimal_hook` (dispatch
+    /// into minimal's `draw`/transcript), `crate::minimal_api` (the read surface
+    /// minimal consumes), and `AppView::minimal_state`. If you don't work on
+    /// minimal, treat this variant as opaque — the fullscreen/inline paths are
+    /// unaffected.
     Minimal,
 }
 impl ScreenMode {
-    const INITIAL_U8: u8 = 1;
-    pub(crate) fn to_u8(self) -> u8 {
-        match self {
-            Self::Fullscreen => 0,
-            Self::Inline => 1,
-            Self::Minimal => 2,
-        }
-    }
-    pub(crate) fn from_u8(v: u8) -> Self {
-        match v {
-            0 => Self::Fullscreen,
-            2 => Self::Minimal,
-            _ => Self::Inline,
-        }
-    }
     pub(crate) fn is_fullscreen(self) -> bool {
         matches!(self, Self::Fullscreen)
     }
@@ -320,9 +318,10 @@ impl ScreenMode {
     pub(crate) fn is_minimal(self) -> bool {
         matches!(self, Self::Minimal)
     }
-    /// Stable wire label for the `_meta.screenMode` prompt-telemetry field (headless sends `"headless"`).
-    /// Values are pinned by the telemetry allowlist (`xai-grok-telemetry`'s `KNOWN_SCREEN_MODES`).
-    /// Renaming one silently collapses it to `"other"` on the external stream.
+    /// Stable wire label for the `_meta.screenMode` prompt-telemetry field
+    /// (headless sends `"headless"`). Values are pinned by the telemetry
+    /// allowlist (`xai-grok-telemetry`'s `KNOWN_SCREEN_MODES`); renaming one
+    /// silently collapses it to `"other"` on the external stream.
     pub(crate) fn meta_label(self) -> &'static str {
         match self {
             Self::Fullscreen => "fullscreen",
@@ -333,57 +332,59 @@ impl ScreenMode {
 }
 /// Install the process-wide render globals that depend on the screen mode.
 ///
-/// Consolidates every "minimal behaves differently here" toggle into one place.
-/// The rest of startup (and any future contributor) then never has to sprinkle `is_minimal()` checks through `run`.
-/// All of these globals do nothing outside minimal (they default to the full-TUI behavior).
-/// Calling this for every mode is therefore safe and keeps a single source of truth for the effective mode.
+/// Consolidates every "minimal behaves differently here" toggle into one place
+/// so the rest of startup (and any future contributor) doesn't have to sprinkle
+/// `is_minimal()` checks through `run`. All of these globals are no-ops outside
+/// minimal (they default to the full-TUI behavior), so calling this for every
+/// mode is safe and keeps the effective-mode source of truth singular.
 fn apply_screen_mode_globals(screen_mode: ScreenMode) {
     let minimal = screen_mode.is_minimal();
-    set_current_screen_mode(screen_mode);
     MINIMAL_MODE_ACTIVE.store(minimal, Ordering::Release);
     crate::terminal::image::set_inline_overlay_force_off(minimal);
     crate::views::modal_window::set_embedded(minimal);
     crate::render::scrollbar::set_scrollbars_hidden(minimal);
     crate::theme::cache::set_terminal_native_lock(minimal);
 }
-/// Startup theme state for the *requested* screen mode, step 1 of the two-phase startup theme handshake (step 2: [`finish_theme_after_probe`]).
-/// Must run before `init_terminal`, whose `apply_cursor_color()` reads the state installed here.
+/// Startup theme state for the *requested* screen mode — step 1 of the
+/// two-phase startup theme handshake (step 2: [`finish_theme_after_probe`]).
+/// Must run before `init_terminal`, whose `apply_cursor_color()` reads the
+/// state installed here.
 fn engage_startup_theme(screen_mode: ScreenMode) {
     if screen_mode.is_minimal() {
         crate::theme::cache::set_terminal_native_lock(true);
     } else {
         let initial_theme = crate::theme::cache::resolve_initial_theme();
         crate::theme::cache::set(initial_theme);
-        mode_switch::mark_theme_resolved();
     }
 }
-/// Step 2 of the startup theme handshake.
-/// If a `--minimal` start was downgraded to Inline by `init_terminal`'s probe, resolve the regular theme that [`engage_startup_theme`] skipped.
-/// Does nothing otherwise.
+/// Step 2 of the startup theme handshake: if a `--minimal` start was
+/// downgraded to Inline by `init_terminal`'s probe, resolve the regular
+/// theme that [`engage_startup_theme`] skipped. No-op otherwise.
 fn finish_theme_after_probe(requested_minimal: bool, effective_mode: ScreenMode) {
     if requested_minimal && !effective_mode.is_minimal() {
         let late_theme = crate::theme::cache::resolve_initial_theme_no_osc11();
         crate::theme::cache::set(late_theme);
         crate::theme::apply_cursor_color();
-        mode_switch::mark_theme_resolved();
         tracing::info!(?late_theme, "minimal downgrade: resolved regular theme");
     }
 }
 /// Info about the active session at exit time, used for the resume hint.
 ///
-/// Wrapped in a struct so additional fields (e.g., cwd, model) can be added without changing the return type.
+/// Wrapped in a struct so additional fields (e.g., cwd, model) can be added
+/// without changing the return type.
 pub(crate) struct ExitInfo {
     pub session_id: String,
     pub minimal: bool,
-    /// Session tail the user can take in at a glance; `Some` exactly when it should print.
-    /// The decision whether to print lives at the sole construction site, `finish_run`.
+    /// Glanceable session tail; `Some` exactly when it should print. The
+    /// presence policy lives at the sole construction site, `make_run_result`.
     pub summary: Option<ExitSummary>,
 }
 /// Session tail printed above the resume command on fullscreen quits.
 ///
-/// Invariant: every field is a pre-sanitized single line (built from the `views::session_title` helpers), so the printer only width-truncates.
+/// Invariant: every field is a pre-sanitized single line (built from the
+/// `views::session_title` helpers), so the printer only width-truncates.
 pub(crate) struct ExitSummary {
-    /// Display title: a rename wins over the generated title, which wins over the first prompt.
+    /// Display title (rename > generated > first prompt).
     pub title: String,
     pub last_prompt: Option<String>,
     /// `None` when the newest prompt is still unanswered.
@@ -391,13 +392,16 @@ pub(crate) struct ExitSummary {
 }
 /// Resolve leader mode, reporting both why it is off and what turned it off.
 ///
-/// Precedence, highest first: `--no-leader`, `--leader`, eligibility, local config `use_leader`, remote `leader_mode` (release-dist), default off.
-/// `requested_confinement` then vetoes leader use when `Some` (in-process tools stay under the OS sandbox) without reclaiming a shared leader.
+/// Precedence (highest first): `--no-leader` → `--leader` → eligibility → local
+/// config `use_leader` → remote `leader_mode` (release-dist) → default off.
+/// `requested_confinement` then vetoes leader use when `Some` (in-process tools
+/// stay under the OS sandbox) without reclaiming a shared leader on its own.
 ///
-/// `policy_disable_reason` is `Some("config"|"remote")` only when leader mode is *definitively* off by policy.
-/// Policy here means local `use_leader = false`, or remote `leader_mode` fetched as `false`.
-/// Unknown remote state (`None` / prefetch timeout), the default, `--no-leader`, and ineligibility are `None`.
-/// Never reclaim a leader on an unknown signal.
+/// `policy_disable_reason` is `Some("config"|"remote")` only when leader mode is
+/// *definitively* off by policy (local `use_leader = false`, or remote
+/// `leader_mode` fetched as `false`). Unknown remote state (`None` / prefetch
+/// timeout), the default, `--no-leader`, and ineligibility are `None` — never
+/// reclaim a leader on an unknown signal.
 pub fn resolve_leader_mode<'p>(
     leader_flag: bool,
     no_leader_flag: bool,
@@ -442,14 +446,17 @@ pub fn resolve_leader_mode<'p>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LeaderMode<'p> {
     pub use_leader: bool,
-    /// `Some` only when leader mode is *definitively* off by policy, which is what licenses reclaiming a leftover leader.
+    /// `Some` only when leader mode is *definitively* off by policy, which is
+    /// what licenses reclaiming a leftover leader.
     pub policy_disable_reason: Option<&'static str>,
-    /// The profile that turned leader mode off, set only when leader mode was otherwise on (the case worth telling the user about).
+    /// The profile that turned leader mode off, set only when leader mode was
+    /// otherwise on — the case worth telling the user about.
     pub disabled_by_confinement: Option<&'p str>,
 }
 /// The leader-mode decision alone, for callers with nothing to report.
 ///
-/// See [`resolve_leader_mode`] for the precedence chain and the `policy_disable_reason` contract.
+/// See [`resolve_leader_mode`] for the precedence chain and the
+/// `policy_disable_reason` contract.
 pub fn resolve_use_leader(
     leader_flag: bool,
     no_leader_flag: bool,
@@ -468,23 +475,24 @@ pub fn resolve_use_leader(
     );
     (resolved.use_leader, resolved.policy_disable_reason)
 }
-/// How long the sandbox note stays uncovered before a fullscreen TUI opens over it.
-/// Paid only when the note was printed and the screen is about to hide it.
+/// How long the sandbox note stays uncovered before a fullscreen TUI opens over
+/// it. Paid only when the note was printed and the screen is about to hide it.
 const SANDBOX_NOTICE_LINGER: std::time::Duration = std::time::Duration::from_millis(1_200);
 /// Tell the user at startup that the sandbox turned leader mode off.
 ///
-/// Writes to the dup'd terminal stderr, which survives the TUI's fd-2 redirect (`redirect_native_stderr`).
-/// A fullscreen TUI still paints over it, leaving the line to be read on exit.
-/// `leader_disabled_by_sandbox` on the leader-mode decision log is the durable record.
+/// Writes to the dup'd terminal stderr, which survives the TUI's fd-2 redirect
+/// (`redirect_native_stderr`). A fullscreen TUI still paints over it, leaving
+/// the line to be read on exit; `leader_disabled_by_sandbox` on the
+/// leader-mode decision log is the durable record.
 pub fn warn_leader_disabled_by_sandbox(profile: &str) {
     xai_grok_shell::util::with_locked_stderr(|stderr| {
         print_leader_disabled_by_sandbox(profile, stderr)
     });
 }
-/// Says only that the profile was *requested*.
-/// Enforcement can still fail (`apply_sandbox` warns and continues) while the leader is refused either way.
+/// Says only that the profile was *requested*: enforcement can still fail
+/// (`apply_sandbox` warns and continues) while the leader is refused either way.
 ///
-/// Write errors are dropped; `eprintln!` would panic on a closed stderr.
+/// Write errors are dropped — `eprintln!` would panic on a closed stderr.
 fn print_leader_disabled_by_sandbox(profile: &str, w: &mut impl Write) {
     let _ = writeln!(
         w,
@@ -496,8 +504,8 @@ fn print_leader_disabled_by_sandbox(profile: &str, w: &mut impl Write) {
 }
 /// Join early prefetch to get remote settings (with timeout).
 ///
-/// Remote settings come from the product settings API and contain `leader_mode`, announcements, etc.
-/// Waits up to 2 s for the background thread.
+/// Remote settings come from the product settings API and contain `leader_mode`,
+/// announcements, etc.  Waits up to 2 s for the background thread.
 pub fn join_early_prefetch(
     handle: Option<xai_grok_shell::agent::models::EarlyPrefetchHandle>,
 ) -> Option<xai_grok_shell::util::config::RemoteSettings> {
@@ -508,7 +516,6 @@ pub fn join_early_prefetch(
             Err(_) => None,
         };
     }
-    let _wait_span = region!("startup.prefetch_join_wait", Parent::Inherit);
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(handle.join());
@@ -518,8 +525,8 @@ pub fn join_early_prefetch(
         _ => None,
     }
 }
-/// First non-blank value of CLI, then env, then config.
-/// `None` means nothing was set; `acp::initialize` canonicalizes and applies the default.
+/// First non-blank of CLI > env > config (precedence + blank-skip). `None` →
+/// nothing set; `acp::initialize` canonicalizes and applies the default.
 fn resolve_hunk_tracker_mode(
     cli: Option<&str>,
     env: Option<&str>,
@@ -532,84 +539,77 @@ fn resolve_hunk_tracker_mode(
         .find(|s| !s.is_empty())
         .map(str::to_owned)
 }
-/// A failed connect attempt, classified for telemetry at the point of failure rather than by parsing the error message.
+/// A failed connect attempt, classified for telemetry at the point of failure
+/// rather than by parsing the error message.
 struct ConnectFailure {
     outcome: crate::acp::StartupOutcome,
     error: anyhow::Error,
     timeout_secs: Option<u64>,
-    longest_step: Option<crate::acp::StartupPhase>,
 }
 /// Bound connect so a hung leader/spawn cannot blank-screen forever.
+/// Timeout error includes phase summary (`stuck in` + `phases=`).
 async fn bounded_connect(
     cancel: &CancellationToken,
     timeout: std::time::Duration,
     target: crate::acp::AgentKind,
-    attempt: startup_failure::ConnectAttempt,
     timer: &crate::acp::StartupTimer,
     connect: impl std::future::Future<Output = anyhow::Result<crate::acp::AcpConnection>>,
 ) -> Result<crate::acp::AcpConnection, ConnectFailure> {
     use crate::acp::StartupOutcome;
-    let context = || startup_failure::Context {
-        target,
-        attempt,
-        version: xai_grok_version::display_version_with_commit(
-            xai_grok_version::full_version(),
-            xai_grok_update::channel_label(),
-        ),
-        log_path: xai_grok_telemetry::unified_log::path(),
-    };
     tokio::select! {
         biased;
         () = cancel.cancelled() => Err(ConnectFailure {
             outcome: StartupOutcome::Cancelled,
-            error: anyhow::Error::new(startup_failure::StartupFailure::cancelled(context())),
+            error: anyhow::anyhow!("startup cancelled before {target} connected"),
             timeout_secs: None,
-            longest_step: None,
         }),
-        connected = connect => connected.map_err(|error| ConnectFailure {
+        r = connect => r.map_err(|error| ConnectFailure {
             outcome: StartupOutcome::Error,
             error,
             timeout_secs: None,
-            longest_step: None,
         }),
         () = tokio::time::sleep(timeout) => {
             let timings = timer.phase_snapshot();
-            let longest_step = timings.longest_step();
-            // `connect_target`: tracing reserves bare `target=`.
+            let stuck = timings.stuck_in();
+            let phases = timings.summary();
+            // `connect_target`: tracing reserves bare `target=` for the log target.
             tracing::error!(
-                connect_target = target.label(),
-                stuck_in = timings.stuck_in(),
-                phases = %timings.summary(),
+                connect_target = %target,
+                stuck_in = stuck,
+                phases = %phases,
                 timeout_secs = timeout.as_secs(),
                 "connect timed out"
             );
             Err(ConnectFailure {
                 outcome: StartupOutcome::Timeout,
-                error: anyhow::Error::new(startup_failure::StartupFailure::timed_out(
-                    context(),
-                    // Measured, not the budget: a synchronous step can overrun it.
-                    timer.elapsed(),
-                    timings,
-                )),
+                error: anyhow::anyhow!(
+                    "timed out after {}s connecting to {target}\n  \
+                     stuck in: {stuck}\n  \
+                     phases: {phases}\n  \
+                     startup log: {}",
+                    timeout.as_secs(),
+                    xai_grok_telemetry::unified_log::path().display()
+                ),
                 timeout_secs: Some(timeout.as_secs()),
-                longest_step,
             })
         }
     }
 }
 /// Main entry point: connect to agent, init terminal, run event loop, restore.
 ///
-/// If a session ID is provided via `--resume` / `--load` / `--continue`, the pager skips the welcome screen and immediately loads that session.
-/// The load replays the session's history; sessions not found locally are restored from remote storage.
+/// If a session ID is provided via `--resume` / `--load` / `--continue`, the
+/// pager skips the welcome screen and immediately loads that session (replaying
+/// its history). Sessions not found locally are restored from remote storage.
 ///
-/// Returns `Ok(true)` when the user accepted a pending update.
-/// The caller should print a message telling the user to relaunch `grok`.
+/// Returns `Ok(true)` when the user accepted a pending update. The caller
+/// should print a message telling the user to relaunch `chutes-build`.
 pub async fn run(
-    mut args: PagerArgs,
+    args: PagerArgs,
     bg_update_rx: Option<
         tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
     >,
 ) -> anyhow::Result<bool> {
+    xai_tty_utils::redirect_native_stderr();
     let screen_mode_override = screen_mode_relaunch::take_screen_mode_env_override();
     let cancel = CancellationToken::new();
     let startup_start = std::time::Instant::now();
@@ -624,18 +624,6 @@ pub async fn run(
             xai_grok_shell::auth::GrokComConfig::default()
         }
     };
-    if matches!(
-        xai_grok_shell::auth::maybe_run_pre_tui_external_login(
-            &grok_com_config,
-            args.force_login,
-            io::stdin().is_terminal(),
-        )
-        .await?,
-        xai_grok_shell::auth::PreTuiLoginOutcome::SignedIn(_)
-    ) {
-        args.force_login = false;
-    }
-    xai_tty_utils::redirect_native_stderr();
     let refreshed_auth = tokio::time::timeout(
         xai_grok_shell::http::STARTUP_AUTH_REFRESH_TIMEOUT,
         xai_grok_shell::auth::try_ensure_fresh_auth(&grok_com_config),
@@ -651,12 +639,7 @@ pub async fn run(
     if let Ok(cwd) = std::env::current_dir() {
         crate::git_info::populate_from_cwd_async(cwd);
     }
-    let prefetch_wait_started = std::time::Instant::now();
-    let had_prefetch = early_prefetch.is_some();
     let remote_settings = join_early_prefetch(early_prefetch);
-    if had_prefetch {
-        xai_grok_telemetry::startup::record_prefetch_wait(prefetch_wait_started.elapsed());
-    }
     xai_grok_shell::util::config::cache_remote_auto_mode(
         remote_settings.as_ref().and_then(|s| s.auto_mode.clone()),
     );
@@ -681,7 +664,8 @@ pub async fn run(
         use_leader,
         ?policy_disable_reason,
         sandbox_profile = ?requested_confinement,
-        // The other fields cannot distinguish this from leader mode being off already while a sandbox is on
+        // The other fields cannot distinguish this from leader mode being off
+        // already while a sandbox is on.
         leader_disabled_by_sandbox = disabled_by_confinement.is_some(),
         prefetch_ms = prefetch_elapsed.as_millis() as u64,
         "pager TUI leader mode resolved"
@@ -694,7 +678,7 @@ pub async fn run(
     }
     if args.trust {
         match std::env::current_dir() {
-            Ok(cwd) => xai_grok_workspace::folder_trust::grant_folder_trust(&cwd),
+            Ok(cwd) => xai_grok_shell::agent::folder_trust::grant_folder_trust(&cwd),
             Err(e) => {
                 tracing::warn!(error = %e, "--trust: failed to resolve cwd; folder not trusted")
             }
@@ -797,12 +781,12 @@ pub async fn run(
         args.yolo,
         args.permission_mode_flag.as_deref(),
         remote_permission_mode,
-        xai_grok_shell::util::config::default_interactive_permission_mode(),
+        xai_grok_shell::util::config::PermissionMode::Ask,
     );
-    let mut connect_flags = crate::acp::ConnectFlags {
+    let connect_flags = crate::acp::ConnectFlags {
         subagents: !args.no_subagents,
-        memory_enabled_override: args.memory_enabled_override(),
-        memory_override_flag: args.memory_override_flag(),
+        experimental_memory: args.experimental_memory,
+        no_memory: args.no_memory,
         disable_web_search: args.disable_web_search,
         todo_gate: args.todo_gate,
         laziness_debug_log: None,
@@ -826,7 +810,6 @@ pub async fn run(
         ),
         default_yolo_mode: launch_yolo.yolo,
         default_auto_mode: launch_auto && !launch_yolo.yolo,
-        status_line: false,
     };
     let mut config_watcher = crate::appearance::ConfigWatcher::start().await?;
     let alt_screen_config_mode = config_watcher.current().alt_screen;
@@ -859,9 +842,6 @@ pub async fn run(
         Ordering::Release,
     );
     let minimal = screen_mode.is_minimal();
-    connect_flags.status_line = event_loop::load_initial_ui_config()
-        .status_line
-        .reserves_a_row();
     let relaunched_into_minimal = screen_mode_override == Some(ScreenMode::Minimal);
     let relaunched_into_fullscreen = screen_mode_override == Some(ScreenMode::Fullscreen);
     tracing::info!(
@@ -887,11 +867,7 @@ pub async fn run(
     let (frame_tx, writer_sync, writer_event_rx, writer_thread) =
         crate::render::draw::spawn_writer_thread();
     let cursor_blink = event_loop::load_initial_ui_config().cursor_blink;
-    let TerminalInit {
-        mut terminal,
-        screen_mode,
-        startup_typeahead,
-    } = init_terminal(
+    let (mut terminal, screen_mode) = init_terminal(
         screen_mode,
         minimal_live_rows,
         relaunched_into_minimal,
@@ -908,17 +884,7 @@ pub async fn run(
     if let Some(ref t) = session_title {
         set_terminal_title(t);
     }
-    let connect_ui_timeout_env = std::env::var(connect_timeout::CONNECT_UI_TIMEOUT_ENV).ok();
-    let connect_ui_timeout = connect_timeout::resolve(connect_ui_timeout_env.as_deref());
-    if let Some(raw) = connect_ui_timeout_env {
-        crate::unified_log::write_direct_info(
-            "startup connect budget from env",
-            Some(serde_json::json!({
-                "raw": raw,
-                "timeout_secs": connect_ui_timeout.as_secs(),
-            })),
-        );
-    }
+    const CONNECT_UI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
     let fallback_flags = use_leader.then(|| connect_flags.clone());
     let primary_target = if use_leader {
         crate::acp::AgentKind::Leader
@@ -928,34 +894,22 @@ pub async fn run(
     xai_grok_telemetry::external::init(
         xai_grok_shell::agent::config::resolve_external_otel_config(
             xai_grok_telemetry::external::config::ExternalClientInfo {
-                service_version: xai_grok_version::full_version().to_owned(),
+                service_version: env!("VERSION_WITH_COMMIT").to_owned(),
                 client_version: xai_grok_version::VERSION.to_owned(),
                 app_entrypoint: "tui".to_owned(),
             },
         ),
     );
-    if args.log_sampling {
-        unsafe { std::env::set_var("CHUTES_BUILD_LOG_SAMPLING", "1") };
-    }
-    let tracing_handle = crate::tracing::init_tracing();
-    let pending_startup = xai_grok_telemetry::startup::PendingStartup::new();
     let timer = xai_grok_telemetry::startup::begin(crate::acp::Owner::Client);
-    let primary_started = std::time::Instant::now();
-    let connect_result = bounded_connect(
-        &cancel,
-        connect_ui_timeout,
-        primary_target,
-        startup_failure::ConnectAttempt::First,
-        &timer,
-        async {
+    let connect_result =
+        bounded_connect(&cancel, CONNECT_UI_TIMEOUT, primary_target, &timer, async {
             if use_leader {
                 crate::acp::connect_via_leader(&cancel, connect_flags, &raw_config).await
             } else {
                 crate::acp::connect(&cancel, connect_flags).await
             }
-        },
-    )
-    .await;
+        })
+        .await;
     let (connect_result, embedded_fallback, timer, connect_target) = match connect_result {
         Err(f) if use_leader && !cancel.is_cancelled() => {
             tracing::warn!(error = %f.error, "leader connect failed; falling back to embedded agent");
@@ -963,19 +917,9 @@ pub async fn run(
             let flags = fallback_flags.expect("set on the use_leader path");
             let timer = xai_grok_telemetry::startup::begin(crate::acp::Owner::Client);
             let target = crate::acp::AgentKind::Embedded;
-            let fallback = bounded_connect(
-                &cancel,
-                connect_ui_timeout,
-                target,
-                startup_failure::ConnectAttempt::AfterFallback(startup_failure::EarlierAttempt {
-                    target: primary_target,
-                    wait: primary_started.elapsed(),
-                    outcome: f.outcome,
-                    longest_step: f.longest_step,
-                }),
-                &timer,
-                async { crate::acp::connect(&cancel, flags).await },
-            )
+            let fallback = bounded_connect(&cancel, CONNECT_UI_TIMEOUT, target, &timer, async {
+                crate::acp::connect(&cancel, flags).await
+            })
             .await;
             (fallback, true, timer, target)
         }
@@ -1001,9 +945,9 @@ pub async fn run(
         Err(f) => {
             timer.emit_telemetry(connect_target, f.outcome, f.timeout_secs, embedded_fallback);
             if f.outcome == crate::acp::StartupOutcome::Cancelled {
-                pending_startup.abandon();
+                xai_grok_telemetry::startup::clear();
             } else {
-                pending_startup.finish(f.outcome);
+                xai_grok_telemetry::startup::report_total(f.outcome);
             }
             crate::unified_log::flush_blocking().await;
             let _ = restore_terminal(terminal, writer_thread, screen_mode);
@@ -1027,13 +971,10 @@ pub async fn run(
         relaunched_into_minimal,
         relaunched_into_fullscreen,
         initial_theme: crate::theme::cache::current_kind(),
-        startup_typeahead,
     };
     let result = event_loop::run(
         &mut terminal,
         connection,
-        pending_startup,
-        tracing_handle,
         &mut config_watcher,
         &effective_args,
         session_cwd,
@@ -1044,22 +985,10 @@ pub async fn run(
         writer_event_rx,
     )
     .await;
-    signal_handler::clear_quit_notify();
-    let forced_exit_code = match &result {
-        Ok(run_result) if run_result.quit_for_update || run_result.relaunch.is_some() => None,
-        Ok(_) => Some(0),
-        Err(_) => Some(1),
-    };
-    if let Some(code) = forced_exit_code {
-        exit_timeout::arm(code);
-        exit_timeout::hold_teardown_for_test();
-    }
     crate::unified_log::flush_blocking().await;
-    let restore_result = restore_terminal(terminal, writer_thread, current_screen_mode());
+    let restore_result = restore_terminal(terminal, writer_thread, screen_mode);
     drop(agent_guard);
-    xai_grok_telemetry::session_ctx::drain_at_process_exit().await;
     xai_tty_utils::global_process_scope().kill_all();
-    crate::app::status_line::metrics::global().report_health();
     if let Err(cleanup_error) = restore_result {
         match &result {
             Ok(_) => {
@@ -1108,8 +1037,9 @@ pub async fn run(
 }
 /// Plain-quit "Resume this session with…" lines (after terminal restore).
 ///
-/// A summary, when present (title, last prompt, last response, one line each, width-truncated), precedes the command.
-/// That way a glance at the pane shows which session lives there and where it left off.
+/// A summary, when present — title, last prompt, last response, one line
+/// each, width-truncated — precedes the command so a glance at the pane
+/// shows which session lives there and where it left off.
 /// Best-effort: closed-pane EIO/BrokenPipe must not panic (`panic = "abort"`).
 fn print_exit_resume_hint(info: &ExitInfo, max_width: usize, w: &mut impl Write) {
     use crate::render::line_utils::truncate_str;
@@ -1152,29 +1082,49 @@ fn print_relaunch_failure_hint(
 }
 /// Write raw CSI sequences to disable mouse tracking and bracketed paste.
 ///
-/// Best-effort: failures are silently ignored since this runs on teardown and panic paths where stderr may already be broken.
+/// Best-effort: failures are silently ignored since this runs on teardown
+/// and panic paths where stderr may already be broken.
 fn disable_mouse_paste_raw() {
     xai_grok_shell::util::with_locked_stderr(|stderr| {
         let _ = stderr.write_all(xai_crash_handler::terminal::MOUSE_PASTE_RESET);
         let _ = stderr.flush();
     });
 }
-/// Set the console output code page to UTF-8 and enable `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on the stderr console handle.
+/// Drain any pending terminal input events.
 ///
-/// **Code page**: the pager outputs UTF-8 (Braille art in the logo, Powerline icons, box-drawing characters).
-/// On Windows the default console code page is a legacy OEM page (e.g. CP437).
-/// That misreads multi-byte UTF-8 sequences as individual single-byte characters, garbling the output.
-/// Setting the output code page to 65001 (UTF-8) fixes this.
+/// External processes (SSH/GPG agents, etc.) may write to the TTY (e.g. "Enter
+/// encryption key:") before we take over. This helper drains the crossterm
+/// event queue so those characters don't appear as ghost text in the input
+/// field.
+fn drain_pending_events() {
+    drain_pending_events_with_timeout(std::time::Duration::from_millis(0));
+}
+fn drain_pending_events_with_timeout(timeout: std::time::Duration) {
+    while crossterm::event::poll(timeout).unwrap_or(false) {
+        if crossterm::event::read().is_err() {
+            break;
+        }
+    }
+}
+/// Set the console output code page to UTF-8 and enable
+/// `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on the stderr console handle.
 ///
-/// **VTP on stderr**: each console handle (stdin, stdout, stderr) has independent mode flags.
-/// `crossterm::enable_raw_mode()` sets flags on stdin only.
-/// The pager renders to stderr (via `TermWriter`), so the stderr handle must process its ANSI sequences.
-/// Those cover background colors (SGR 48;2;R;G;B), the alternate screen, and cursor control.
-/// Without the VTP flag the console silently drops background-color sequences while foreground colors work.
-/// That is the "text renders but backgrounds are missing" symptom.
+/// **Code page** — The pager outputs UTF-8 (Braille art in the logo, Powerline
+/// icons, box-drawing characters). On Windows the default console code page is
+/// a legacy OEM page (e.g. CP437), so multi-byte UTF-8 sequences are
+/// misinterpreted as individual single-byte characters, producing garbled
+/// output. Setting the output code page to 65001 (UTF-8) fixes this.
 ///
-/// Best-effort: if any call fails (e.g. stderr is redirected to a file), the pager continues.
-/// Rendering may be degraded but the TUI is still usable.
+/// **VTP on stderr** — Each console handle (stdin, stdout, stderr) has
+/// independent mode flags. `crossterm::enable_raw_mode()` sets flags on stdin
+/// only. Since the pager renders to stderr (via `TermWriter`), ANSI sequences
+/// for background colors (SGR 48;2;R;G;B), alternate screen, and cursor
+/// control must be processed by the stderr handle. Without the VTP flag the
+/// console silently drops background-color sequences while foreground colors
+/// work, producing the "text renders but backgrounds are missing" symptom.
+///
+/// Best-effort: if any call fails (e.g. stderr is redirected to a file),
+/// the pager continues — rendering may be degraded but the TUI is still usable.
 #[cfg(windows)]
 fn configure_windows_console() {
     const STD_ERROR_HANDLE: u32 = 0xFFFF_FFF4u32;
@@ -1203,22 +1153,31 @@ fn configure_windows_console() {
         );
     }
 }
-/// On legacy conhost windows (classic `powershell.exe` / `cmd.exe`), native drag-to-select is conhost's **QuickEdit** mode.
-/// QuickEdit is controlled by console-input mode flags on the *stdin* handle, not by DEC private-mode escapes.
+/// Native drag-to-select on legacy conhost windows (classic `powershell.exe` /
+/// `cmd.exe` console host — not Windows Terminal / Warp) is conhost's
+/// **QuickEdit** mode, controlled by console-input mode flags on the *stdin*
+/// handle, not by DEC private-mode escapes.
 ///
-/// Minimal mode's contract is "the terminal owns the mouse", and on conhost merely *skipping* `EnableMouseCapture` is not enough:
+/// Minimal mode's contract is "the terminal owns the mouse" (design K7), and
+/// on conhost merely *skipping* `EnableMouseCapture` is not enough:
 ///
-/// - crossterm's `EnableMouseCapture` is winapi-only on Windows (`is_ansi_code_supported() == false`).
-///   It **replaces** the stdin mode with `ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT`.
-///   `ENABLE_EXTENDED_FLAGS` without `ENABLE_QUICK_EDIT_MODE` turns QuickEdit *off*.
-/// - `SetConsoleMode` state **outlives the process** for the console window, and teardown historically reset mouse state with ANSI only.
-///   One fullscreen/inline run therefore left the window with QuickEdit off and `ENABLE_MOUSE_INPUT` on.
-///   That broke native drag-select for every later `--minimal` run in that same window.
-///   The report: "works in a fresh cmd window but not in my PowerShell window".
-/// - Some PowerShell shortcuts ship QuickEdit disabled per window title (`HKCU\Console\<title>`), so even a pristine window may need it asserted.
+/// - crossterm's `EnableMouseCapture` is winapi-only on Windows
+///   (`is_ansi_code_supported() == false`): it **replaces** the stdin mode
+///   with `ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT`.
+///   `ENABLE_EXTENDED_FLAGS` without `ENABLE_QUICK_EDIT_MODE` turns QuickEdit
+///   *off*.
+/// - `SetConsoleMode` state **outlives the process** for the console window,
+///   and teardown historically reset mouse state with ANSI sequences only —
+///   so one fullscreen/inline run left the window with QuickEdit off and
+///   `ENABLE_MOUSE_INPUT` on, breaking native drag-select for every later
+///   `--minimal` run in that same window ("works in a fresh cmd window but
+///   not in my PowerShell window").
+/// - Some PowerShell shortcuts ship QuickEdit disabled per window title
+///   (`HKCU\Console\<title>`), so even a pristine window may need it asserted.
 ///
-/// Modern terminals (Windows Terminal, Warp) select host-side and decide "app owns the mouse" from the DEC `?100x` escapes.
-/// Minimal never emits those escapes, so these conhost flags are inert there and asserting them is harmless.
+/// Modern terminals (Windows Terminal, Warp) select host-side and decide "app
+/// owns the mouse" from the DEC `?100x` escapes — which minimal never emits —
+/// so these conhost flags are inert there and asserting them is harmless.
 /// Everything is best-effort: if stdin is not a console, calls are no-ops.
 #[cfg(any(windows, test))]
 pub(crate) mod win_native_selection {
@@ -1226,9 +1185,11 @@ pub(crate) mod win_native_selection {
     const ENABLE_MOUSE_INPUT: u32 = 0x0010;
     const ENABLE_QUICK_EDIT_MODE: u32 = 0x0040;
     const ENABLE_EXTENDED_FLAGS: u32 = 0x0080;
-    /// Stdin console mode for "terminal owns the mouse": QuickEdit on (with the extended-flags gate it needs), app mouse reporting off.
-    /// Window-resize events stay on for parity with the capture path; `WINDOW_BUFFER_SIZE_EVENT` is how resize reaches crossterm on conhost.
-    /// All other bits are preserved.
+    /// Stdin console mode for "terminal owns the mouse": QuickEdit on (with
+    /// the extended-flags gate that makes it effective), app-side mouse
+    /// reporting off, and window-resize events on (parity with the capture
+    /// path — `WINDOW_BUFFER_SIZE_EVENT` is how resize reaches crossterm on
+    /// conhost). All other bits are preserved.
     pub(crate) fn native_selection_mode(mode: u32) -> u32 {
         (mode & !ENABLE_MOUSE_INPUT)
             | ENABLE_EXTENDED_FLAGS
@@ -1241,17 +1202,18 @@ pub(crate) mod win_native_selection {
     mod imp {
         use std::sync::atomic::{AtomicU64, Ordering};
         const STD_INPUT_HANDLE: u32 = 0xFFFF_FFF6u32;
-        /// Stdin mode before the first `enable_native_selection`.
-        /// `u64::MAX` means "never touched" (the same sentinel scheme crossterm uses for its own capture snapshot).
-        /// First writer wins, so repeated enables (e.g. `/mouse` toggles) keep the true original for teardown.
+        /// Stdin mode before the first `enable_native_selection`; `u64::MAX`
+        /// means "never touched" (same sentinel scheme crossterm uses for its
+        /// own capture snapshot). First writer wins, so repeated enables (e.g.
+        /// `/mouse` toggles) keep the true original for teardown.
         static ORIGINAL_STDIN_MODE: AtomicU64 = AtomicU64::new(u64::MAX);
         unsafe extern "system" {
             fn GetStdHandle(nStdHandle: u32) -> *mut core::ffi::c_void;
             fn GetConsoleMode(hConsoleHandle: *mut core::ffi::c_void, lpMode: *mut u32) -> i32;
             fn SetConsoleMode(hConsoleHandle: *mut core::ffi::c_void, dwMode: u32) -> i32;
         }
-        /// Read the stdin console handle and its current mode.
-        /// `None` when stdin is redirected / not a console.
+        /// Read the stdin console handle + its current mode. `None` when
+        /// stdin is redirected / not a console.
         fn stdin_console_mode() -> Option<(*mut core::ffi::c_void, u32)> {
             unsafe {
                 let handle = GetStdHandle(STD_INPUT_HANDLE);
@@ -1265,8 +1227,9 @@ pub(crate) mod win_native_selection {
                 Some((handle, mode))
             }
         }
-        /// Assert the native-selection stdin mode (QuickEdit on, app mouse reporting off, resize events on).
-        /// Snapshots the original mode once for [`restore_stdin_mode`].
+        /// Assert the native-selection stdin mode (QuickEdit on, app mouse
+        /// reporting off, resize events on), snapshotting the original mode
+        /// once for [`restore_stdin_mode`].
         pub(crate) fn enable_native_selection() {
             let Some((handle, mode)) = stdin_console_mode() else {
                 return;
@@ -1284,18 +1247,20 @@ pub(crate) mod win_native_selection {
                 }
             }
         }
-        /// Restore the mode captured by the first `enable_native_selection` (does nothing if it never ran).
-        /// Teardown-only; consumes the snapshot so concurrent teardown paths (panic hook, restore_terminal) restore at most once.
+        /// Restore the mode captured by the first `enable_native_selection`
+        /// (no-op if it never ran). Teardown-only; consumes the snapshot so
+        /// concurrent teardown paths (panic hook + restore_terminal) restore
+        /// at most once.
         pub(crate) fn restore_stdin_mode() {
             let saved = ORIGINAL_STDIN_MODE.swap(u64::MAX, Ordering::AcqRel);
             let Ok(saved) = u32::try_from(saved) else {
                 return;
             };
-            if let Some((handle, current)) = stdin_console_mode() {
-                if current != saved {
-                    unsafe {
-                        let _ = SetConsoleMode(handle, saved);
-                    }
+            if let Some((handle, current)) = stdin_console_mode()
+                && current != saved
+            {
+                unsafe {
+                    let _ = SetConsoleMode(handle, saved);
                 }
             }
         }
@@ -1324,7 +1289,8 @@ pub(crate) mod win_native_selection {
             let once = native_selection_mode(ENABLE_MOUSE_INPUT | ENABLE_PROCESSED_INPUT);
             assert_eq!(native_selection_mode(once), once);
         }
-        /// The crossterm capture mode (what a crashed prior run leaves behind) maps to a QuickEdit-on, reporting-off mode.
+        /// The crossterm capture mode (what a crashed prior run leaves behind)
+        /// maps to a QuickEdit-on, reporting-off mode.
         #[test]
         fn recovers_from_stale_crossterm_capture_mode() {
             const CROSSTERM_ENABLE_MOUSE_MODE: u32 =
@@ -1335,16 +1301,16 @@ pub(crate) mod win_native_selection {
         }
     }
 }
-/// Startup cursor-style policy from `[ui].cursor_blink`.
-/// `Inherit` (the `None` default) emits no style escapes, so the terminal's configured cursor shape/blink survives.
-/// Forcing one was reported as cursor flicker.
+/// Startup cursor-style policy from `[ui].cursor_blink`: `Inherit` (the
+/// `None` default) emits no style escapes, so the terminal's configured
+/// cursor shape/blink survives; forcing one was reported as cursor flicker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CursorStylePolicy {
     /// Leave the terminal's cursor style untouched (default).
     Inherit,
-    /// Legacy: `EnableBlinking` and `SetCursorStyle::BlinkingBlock`.
+    /// Legacy: `EnableBlinking` + `SetCursorStyle::BlinkingBlock`.
     ForceBlinking,
-    /// `DisableBlinking` and `SetCursorStyle::SteadyBlock`.
+    /// `DisableBlinking` + `SetCursorStyle::SteadyBlock`.
     ForceSteady,
 }
 /// Map the `[ui].cursor_blink` tri-state onto the startup policy.
@@ -1355,20 +1321,11 @@ fn cursor_style_policy(cursor_blink: Option<bool>) -> CursorStylePolicy {
         Some(false) => CursorStylePolicy::ForceSteady,
     }
 }
-/// Outcome of [`init_terminal`]: the live terminal, the effective screen mode, and any startup type-ahead captured after raw mode was enabled.
-pub(crate) struct TerminalInit {
-    pub terminal: PagerTerminal,
-    /// The *effective* screen mode, which may differ from the requested one (see [`init_terminal`]).
-    pub screen_mode: ScreenMode,
-    /// Keystrokes the user typed while the app was still loading, captured by the post-raw-mode drains.
-    /// Replayed into the composer by [`event_loop::run`].
-    pub startup_typeahead: Vec<event_loop::TimedInputEvent>,
-}
-/// Initialize the terminal for `mode`.
-/// Returns the live terminal handle and the *effective* screen mode, which may differ from the requested one.
-/// A `Minimal` request downgrades to `Inline` if the inline-viewport probe fails.
-/// Minimal's `insert_before` / `set_viewport_height` commit pipeline is a no-op on the `Viewport::Fixed` fallback, so it cannot function there.
-/// Also returns any startup type-ahead captured by the post-raw-mode drains.
+/// Initialize the terminal for `mode`. Returns the live terminal handle and the
+/// *effective* screen mode, which may differ from the requested one: a
+/// `Minimal` request downgrades to `Inline` if the inline-viewport probe fails
+/// (its `insert_before` / `set_viewport_height` commit pipeline is a no-op on
+/// the `Viewport::Fixed` fallback, so minimal cannot function there).
 fn init_terminal(
     mode: ScreenMode,
     minimal_live_rows: u16,
@@ -1376,17 +1333,14 @@ fn init_terminal(
     frame_tx: crate::render::draw::WriterSender,
     writer_sync: crate::render::draw::WriterSync,
     cursor_blink: Option<bool>,
-) -> io::Result<TerminalInit> {
+) -> io::Result<(PagerTerminal, ScreenMode)> {
     xai_crash_handler::enable_terminal_escape_restore();
     terminal::enable_raw_mode()?;
     #[cfg(windows)]
     configure_windows_console();
     let want_minimal = mode.is_minimal();
-    let mut startup_typeahead: Vec<event_loop::TimedInputEvent> = Vec::new();
-    let (terminal, screen_mode) = (|| -> io::Result<(PagerTerminal, ScreenMode)> {
-        startup_typeahead.extend(event_loop::capture_startup_typeahead(
-            std::time::Duration::from_millis(0),
-        ));
+    (move || -> io::Result<(PagerTerminal, ScreenMode)> {
+        drain_pending_events();
         set_terminal_title("");
         if want_minimal && clear_main_screen {
             xai_grok_shell::util::with_locked_stderr(|stderr| {
@@ -1437,15 +1391,14 @@ fn init_terminal(
             io::Result::Ok(())
         })?;
         MOUSE_CAPTURE_ENABLED.store(!want_minimal, Ordering::Release);
-        set_current_screen_mode(mode);
-        set_panic_hook();
+        set_panic_hook(mode);
         signal_handler::install(mode);
         let drain_timeout = if crate::terminal::terminal_context().vte_version.is_some() {
             std::time::Duration::from_millis(20)
         } else {
             std::time::Duration::ZERO
         };
-        startup_typeahead.extend(event_loop::capture_startup_typeahead(drain_timeout));
+        drain_pending_events_with_timeout(drain_timeout);
         crate::theme::apply_cursor_color();
         let ctx = crate::terminal::terminal_context();
         let skip_reason: Option<&str> =
@@ -1564,15 +1517,11 @@ fn init_terminal(
         let _ = terminal::disable_raw_mode();
         signal_handler::mark_restored();
         xai_crash_handler::disable_terminal_escape_restore();
-    })?;
-    Ok(TerminalInit {
-        terminal,
-        screen_mode,
-        startup_typeahead,
     })
 }
-/// Drop the terminal (closing the writer mpsc channel) and join the writer thread.
-/// After this returns, subsequent direct stderr writes are guaranteed to land strictly after every queued frame.
+/// Drop the terminal (closing the writer mpsc channel) and join the
+/// writer thread. After this returns, subsequent direct stderr writes
+/// are guaranteed to land strictly after every queued frame.
 fn drain_writer_thread_before_teardown(
     terminal: PagerTerminal,
     writer_thread: crate::render::draw::WriterThread,
@@ -1580,13 +1529,16 @@ fn drain_writer_thread_before_teardown(
     drop(terminal);
     writer_thread.join()
 }
-/// Inline teardown escape sequences in the canonical order.
-/// Shared by `restore_terminal` and `set_panic_hook` so the on-wire byte order is defined exactly once.
+/// Inline teardown escape sequences in the canonical order, shared by
+/// `restore_terminal` and `set_panic_hook` so the on-wire byte order is
+/// defined exactly once.
 ///
-/// Order: EndSynchronizedUpdate, reset_cursor_color, disable_mouse_paste_raw, DisableFocusChange, kitty pop (if pushed), mode-specific block.
-/// EndSynchronizedUpdate is emitted first so multiplexers (zellij/tmux) stop buffering before the resets arrive.
-/// Does NOT call `disable_raw_mode`.
-/// Callers should drain queued writer-thread frames first when possible; the panic hook can't (it would deadlock).
+/// Order: EndSynchronizedUpdate -> reset_cursor_color ->
+/// disable_mouse_paste_raw -> DisableFocusChange -> pop kitty (if pushed)
+/// -> mode-specific final block. EndSynchronizedUpdate is emitted first so multiplexers
+/// (zellij/tmux) stop buffering before the resets arrive. Does NOT call
+/// `disable_raw_mode`. Callers should drain queued writer-thread frames
+/// first when possible; the panic hook can't (would deadlock).
 fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_row: Option<u16>) {
     xai_grok_shell::util::with_locked_stderr(|stderr| {
         let _ = stderr.write_all(crate::notifications::progress::OSC_CLEAR.as_bytes());
@@ -1636,9 +1588,10 @@ fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_row: Option<
     #[cfg(windows)]
     win_native_selection::restore_stdin_mode();
 }
-/// Consumes `terminal` and `writer_thread`: queues a final fullscreen clear, drains every accepted frame, then emits teardown sequences.
-/// Teardown still runs if draining fails, so terminal state is restored before returning that error.
-/// Draining first prevents a late frame after `LeaveAlternateScreen`.
+/// Consumes `terminal` and `writer_thread`: queues a final fullscreen clear,
+/// drains every accepted frame, then emits teardown sequences. Teardown still
+/// runs if draining fails, so terminal state is restored before returning that
+/// error. Draining first prevents a late frame after `LeaveAlternateScreen`.
 fn restore_terminal_with(
     mut terminal: PagerTerminal,
     writer_thread: crate::render::draw::WriterThread,
@@ -1656,7 +1609,7 @@ fn restore_terminal_with(
     let inline_cursor_row = (!mode.is_fullscreen()).then(|| terminal.viewport_area().bottom());
     let drain_result = drain(terminal, writer_thread);
     teardown(mode, inline_cursor_row);
-    let _ = event_loop::drain_pending_events(std::time::Duration::from_millis(10), |_| false);
+    drain_pending_events_with_timeout(std::time::Duration::from_millis(10));
     let _ = terminal::disable_raw_mode();
     signal_handler::mark_restored();
     xai_crash_handler::disable_terminal_escape_restore();
@@ -1682,24 +1635,24 @@ pub(crate) fn set_terminal_title(title: &str) {
         let _ = execute!(stderr, SetTitle(full));
     });
 }
-/// Sanitized/truncated window title.
-/// Strips control characters: crossterm's `SetTitle` emits the string raw inside an OSC sequence.
-/// An embedded BEL/ESC would terminate the OSC early and let the remainder inject arbitrary escape sequences into the terminal.
-/// Titles can arrive from grok.com conversation metadata.
+/// Sanitized/truncated window title. Strips control characters: crossterm's
+/// `SetTitle` emits the string raw inside an OSC sequence, so an embedded
+/// BEL/ESC (titles can arrive from grok.com conversation metadata) would
+/// terminate the OSC early and let the remainder inject arbitrary escape
+/// sequences into the terminal.
 fn terminal_title_string(title: &str) -> String {
     let sanitized: String = title.chars().filter(|c| !c.is_control()).collect();
     if sanitized.is_empty() {
-        "grok".into()
+        "chutes-build".into()
     } else {
         let truncated: String = sanitized.chars().take(80 - 6).collect();
-        format!("{} - grok", truncated)
+        format!("{} - chutes-build", truncated)
     }
 }
-/// Reads [`current_screen_mode`] at panic time; never capture a mode here, or an in-process mode switch tears down the wrong screen.
-fn set_panic_hook() {
+fn set_panic_hook(mode: ScreenMode) {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
-        emit_terminal_teardown_sequences(current_screen_mode(), None);
+        emit_terminal_teardown_sequences(mode, None);
         let _ = terminal::disable_raw_mode();
         signal_handler::mark_restored();
         xai_crash_handler::disable_terminal_escape_restore();
@@ -1745,7 +1698,8 @@ mod tests {
         assert!(result.is_err());
         assert!(teardown_called.get());
     }
-    /// `[ui].cursor_blink` tri-state maps to the startup cursor policy; the `None` default must be Inherit (emit nothing).
+    /// `[ui].cursor_blink` tri-state → startup cursor policy; the `None`
+    /// default must be Inherit (emit nothing).
     #[test]
     fn cursor_blink_config_maps_to_policy() {
         assert_eq!(cursor_style_policy(None), CursorStylePolicy::Inherit);
@@ -1765,15 +1719,61 @@ mod tests {
         let toml_str = format!("[cli]\nuse_leader = {enabled}");
         toml::from_str(&toml_str).unwrap()
     }
+    #[tokio::test]
+    async fn bounded_connect_times_out_when_the_target_stalls() {
+        xai_grok_telemetry::unified_log::redirect_to_temp_for_tests();
+        let cancel = CancellationToken::new();
+        let timer = crate::acp::StartupTimer::new();
+        timer.enter(crate::acp::StartupPhase::ConfigLoad);
+        timer.enter(crate::acp::StartupPhase::ModelCatalog);
+        let r = bounded_connect(
+            &cancel,
+            std::time::Duration::from_millis(20),
+            crate::acp::AgentKind::Embedded,
+            &timer,
+            std::future::pending::<anyhow::Result<crate::acp::AcpConnection>>(),
+        )
+        .await;
+        let Err(f) = r else {
+            panic!("should time out");
+        };
+        assert_eq!(f.outcome, crate::acp::StartupOutcome::Timeout);
+        let msg = f.error.to_string();
+        assert!(
+            msg.contains("timed out after 0s connecting to the embedded agent"),
+            "{msg}"
+        );
+        assert!(msg.contains("stuck in: model_catalog"), "{msg}");
+        assert!(msg.contains("startup log: "), "{msg}");
+    }
+    #[tokio::test]
+    async fn bounded_connect_returns_err_on_cancel() {
+        xai_grok_telemetry::unified_log::redirect_to_temp_for_tests();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let timer = crate::acp::StartupTimer::new();
+        let r = bounded_connect(
+            &cancel,
+            std::time::Duration::from_secs(60),
+            crate::acp::AgentKind::Embedded,
+            &timer,
+            std::future::pending::<anyhow::Result<crate::acp::AcpConnection>>(),
+        )
+        .await;
+        assert!(r.is_err_and(|f| {
+            f.outcome == crate::acp::StartupOutcome::Cancelled
+                && f.error.to_string().contains("cancelled")
+        }));
+    }
     #[test]
     fn terminal_title_strips_control_characters() {
         assert_eq!(
             terminal_title_string("evil\x07\x1b]52;c;payload\x07title"),
-            "evil]52;c;payloadtitle - grok"
+            "evil]52;c;payloadtitle - chutes-build"
         );
-        assert_eq!(terminal_title_string("\x07\x1b\x00"), "grok");
-        assert_eq!(terminal_title_string(""), "grok");
-        assert_eq!(terminal_title_string("My chat"), "My chat - grok");
+        assert_eq!(terminal_title_string("\x07\x1b\x00"), "chutes-build");
+        assert_eq!(terminal_title_string(""), "chutes-build");
+        assert_eq!(terminal_title_string("My chat"), "My chat - chutes-build");
     }
     #[test]
     fn hunk_tracker_mode_nothing_set_is_none() {
@@ -1868,8 +1868,8 @@ mod tests {
         assert!(!use_leader);
         assert_eq!(reason, None);
     }
-    /// `disabled_by_confinement` across the four leader/sandbox cells, driven by every input that can decide leader mode, not just
-    /// `[cli] use_leader`.
+    /// `disabled_by_confinement` for the four leader × sandbox cells, driven by
+    /// every input that can decide leader mode — not just `[cli] use_leader`.
     #[test]
     fn matrix_reports_the_profile_only_when_the_sandbox_takes_leader_mode_away() {
         let on = config_with_leader(true);
@@ -1958,25 +1958,6 @@ mod tests {
         assert!(args.no_leader);
     }
     #[test]
-    fn cli_hidden_memory_compat_flags_parse_and_collapse() {
-        let enabled = try_parse_pager(&["grok-pager", "--experimental-memory"]).unwrap();
-        assert_eq!(enabled.memory_enabled_override(), Some(true));
-        assert_eq!(
-            enabled.memory_override_flag(),
-            Some("--experimental-memory")
-        );
-        let disabled = try_parse_pager(&["grok-pager", "--no-memory"]).unwrap();
-        assert_eq!(disabled.memory_enabled_override(), Some(false));
-        assert_eq!(disabled.memory_override_flag(), Some("--no-memory"));
-        let deferred = try_parse_pager(&["grok-pager"]).unwrap();
-        assert_eq!(deferred.memory_enabled_override(), None);
-        assert_eq!(deferred.memory_override_flag(), None);
-    }
-    #[test]
-    fn cli_hidden_memory_compat_flags_conflict() {
-        assert!(try_parse_pager(&["grok-pager", "--experimental-memory", "--no-memory"]).is_err());
-    }
-    #[test]
     fn cli_neither_leader_flag_defaults_false() {
         let args = try_parse_pager(&["grok-pager"]).unwrap();
         assert!(!args.leader);
@@ -1989,7 +1970,8 @@ mod tests {
         assert!(!use_leader);
         assert_eq!(reason, None);
     }
-    /// clap accepts top-level --leader with agent subcommand, so main() must reject the combination at runtime.
+    /// clap accepts top-level --leader with agent subcommand, so
+    /// main() must reject the combination at runtime.
     #[test]
     fn cli_top_level_leader_with_agent_subcommand_parses_flag() {
         let args = try_parse_pager(&["grok-pager", "--leader", "agent"]).unwrap();
@@ -2131,7 +2113,8 @@ mod tests {
         assert_eq!(args.session_to_resume(), None);
         assert!(!args.chat());
     }
-    /// Without the optional feature the flag must not exist at all: a stable binary given that flag fails clap parsing instead of silently ignoring.
+    /// Without the optional feature the flag must not exist at all: a stable
+    /// binary given that flag fails clap parsing instead of silently ignoring.
     #[test]
     fn cli_chat_flag_rejected_without_feature() {
         assert!(try_parse_pager(&["grok-pager", "--chat"]).is_err());
@@ -2284,9 +2267,9 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_grok() {
+    fn cli_command_name_is_chutes_build() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "grok");
+        assert_eq!(PagerArgs::command().get_name(), "chutes-build");
     }
     #[test]
     fn cli_help_output_header() {
@@ -2296,9 +2279,9 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Chutes Build TUI",
+                "Chutes Build — privacy-first coding agent for Chutes",
                 "",
-                "Usage: grok [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: chutes-build [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]
@@ -2320,7 +2303,7 @@ mod tests {
             Some(Command::Completions { shell: Shell::Bash })
         ));
     }
-    /// Always fails writes with EIO (os error 5), like a closed-pane stderr.
+    /// Always fails writes with EIO (os error 5) — closed-pane stderr.
     struct AlwaysFailWrite;
     impl Write for AlwaysFailWrite {
         fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
@@ -2434,8 +2417,8 @@ mod tests {
         print_relaunch_failure_hint(&"exec failed", "sess-xyz", true, &mut w);
         print_leader_disabled_by_sandbox("strict", &mut w);
     }
-    /// Close the *read* end so writes on the write end get EPIPE.
-    /// SIGPIPE is SIG_IGN, so the write returns BrokenPipe instead of killing the process.
+    /// Close the *read* end so writes on the write end get EPIPE
+    /// (SIGPIPE is SIG_IGN → BrokenPipe, not process death).
     #[cfg(unix)]
     #[test]
     fn print_hints_survive_closed_pipe() {

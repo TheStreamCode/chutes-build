@@ -1,6 +1,6 @@
 //! Minimal-mode "full view": the complete conversation rendered with **every**
-//! block fully expanded ÔÇö reasoning shown in full (not the collapsed
-//! `Thought for Xs` marker), tool output uncapped ÔÇö as an ANSI string to open in
+//! block fully expanded — reasoning shown in full (not the collapsed
+//! `Thought for Xs` marker), tool output uncapped — as an ANSI string to open in
 //! `$PAGER` (`less -R`).
 //!
 //! Minimal commits blocks into the terminal's *native* scrollback as static
@@ -33,7 +33,7 @@ const FULL_VIEW_WIDTH: u16 = 100;
 
 /// Per-frame budget for the incremental transcript build. Small enough that a
 /// slice never blocks input/streaming noticeably (frames tick at ~16ms while a
-/// build is active ÔÇö see `AppView::tick_interval_ceiling`), large enough to
+/// build is active — see `AppView::tick_interval_ceiling`), large enough to
 /// drain a big session in a couple of seconds.
 const PUMP_BUDGET: Duration = Duration::from_millis(8);
 
@@ -43,7 +43,7 @@ const PUMP_BUDGET: Duration = Duration::from_millis(8);
 ///
 /// Why sliced: the full-fidelity transcript is a layout + syntax-highlight +
 /// ANSI-serialization pass over every block. Doing it in one shot froze the
-/// event loop for seconds on long sessions, and it cannot move off-thread ÔÇö
+/// event loop for seconds on long sessions, and it cannot move off-thread —
 /// the block model is `!Send` (syntect's resumable highlighter lives inside
 /// streaming-markdown blocks). Budgeted slices amortized across frames are how
 /// other scrollback TUIs keep transcript-scale work off the critical path
@@ -59,7 +59,7 @@ pub fn pump_transcript(app: &mut AppView) {
     // mid-build must not re-target the snapshot at another agent's scrollback
     // (id collisions would stitch the transcript from the wrong session). The
     // owner keeps existing across view switches, so the build also survives
-    // the user tabbing away ÔÇö only a truly-removed agent drops it.
+    // the user tabbing away — only a truly-removed agent drops it.
     let id = build.agent;
     let appearance = super::commit::committed_appearance(&app.appearance);
     {
@@ -73,12 +73,12 @@ pub fn pump_transcript(app: &mut AppView) {
         // Show every thinking entry THAT EXISTS in the session: this view is
         // the advertised full-fidelity "expand everything" surface, and
         // thinking entries render zero rows while the `[ui]`
-        // show_thinking_blocks toggle is off ÔÇö they were silently omitted from
+        // show_thinking_blocks toggle is off — they were silently omitted from
         // the transcript (bugbot). The toggle is thread-local; restore it
         // before returning to live rendering on this same thread.
         //
         // Scope caveat: with the setting off, the tracker drops reasoning at
-        // INGESTION (`handle_thought_chunk` returns before pushing ÔÇö a
+        // INGESTION (`handle_thought_chunk` returns before pushing — a
         // deliberate, test-encoded memory tradeoff that predates minimal), so
         // sessions run entirely with the toggle off have no thinking entries
         // for any view to show. This override covers the sessions that do:
@@ -108,7 +108,7 @@ pub fn pump_transcript(app: &mut AppView) {
     }
 
     if build.next < build.ids.len() {
-        // More to do ÔÇö resume next frame (ticks keep flowing via
+        // More to do — resume next frame (ticks keep flowing via
         // `needs_animation`; progress shows in the status row).
         minimal_api::set_minimal_transcript(app, Some(build));
         return;
@@ -118,9 +118,9 @@ pub fn pump_transcript(app: &mut AppView) {
     finish_transcript(app, id, build.out);
 }
 
-/// Write the finished transcript and arm `pending_pager_path` (ANSI ÔåÆ the
+/// Write the finished transcript and arm `pending_pager_path` (ANSI → the
 /// event loop adds `-R` for `less`). Errors surface as a system block on the
-/// build's owning agent (which may differ from the active view ÔÇö the user can
+/// build's owning agent (which may differ from the active view — the user can
 /// tab away while the build runs).
 fn finish_transcript(app: &mut AppView, id: xai_grok_pager::app::agent::AgentId, out: String) {
     if out.is_empty() {
@@ -152,8 +152,8 @@ fn finish_transcript(app: &mut AppView, id: xai_grok_pager::app::agent::AgentId,
 }
 
 /// Render one entry (fully expanded, at [`FULL_VIEW_WIDTH`]) and append its
-/// ANSI serialization to `out`. Cloning keeps the live entry's display mode ÔÇö
-/// which drives the on-screen committed look ÔÇö untouched.
+/// ANSI serialization to `out`. Cloning keeps the live entry's display mode —
+/// which drives the on-screen committed look — untouched.
 fn render_entry_to_ansi(
     entry: &ScrollbackEntry,
     theme: &Theme,
@@ -199,7 +199,7 @@ fn buffer_to_ansi(buf: &Buffer, out: &mut String) {
         }
         if let Some(last_x) = last {
             // Track the current style as the raw (fg, bg, modifier) tuple and
-            // only build the escape string on a run boundary ÔÇö comparing three
+            // only build the escape string on a run boundary — comparing three
             // Copy fields per cell is far cheaper than building + comparing an
             // SGR string per cell (the previous hot spot on long transcripts).
             let mut cur: Option<(Color, Color, Modifier)> = None;
@@ -210,7 +210,7 @@ fn buffer_to_ansi(buf: &Buffer, out: &mut String) {
                 };
                 let sym = cell.symbol();
                 if sym.is_empty() {
-                    // Continuation cell of a wide glyph ÔÇö already emitted.
+                    // Continuation cell of a wide glyph — already emitted.
                     continue;
                 }
                 let style = (cell.fg, cell.bg, cell.modifier);
@@ -232,7 +232,7 @@ fn buffer_to_ansi(buf: &Buffer, out: &mut String) {
 /// attributes across cells.
 ///
 /// Writes into `sgr` (cleared first) instead of allocating: this runs once per
-/// style *run*, which in syntax-highlighted code is nearly once per token ÔÇö
+/// style *run*, which in syntax-highlighted code is nearly once per token —
 /// the `Vec<String>` + `join` version dominated the serializer's profile on
 /// long transcripts.
 fn cell_sgr(fg: Color, bg: Color, modifier: Modifier, sgr: &mut String) {
@@ -306,8 +306,8 @@ mod tests {
     /// Bugbot "Transcript omits thinking blocks": with the `[ui]`
     /// show_thinking_blocks toggle off, a thinking entry renders zero rows and
     /// vanished from the "full-fidelity" transcript. The pump enables the
-    /// (thread-local) toggle for the build; this locks the mechanism: off ÔåÆ
-    /// omitted, on (what `pump_transcript` sets) ÔåÆ included.
+    /// (thread-local) toggle for the build; this locks the mechanism: off →
+    /// omitted, on (what `pump_transcript` sets) → included.
     #[test]
     fn transcript_includes_thinking_when_pump_enables_toggle() {
         let theme = Theme::current();

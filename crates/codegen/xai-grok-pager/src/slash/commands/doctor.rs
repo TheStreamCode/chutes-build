@@ -1,9 +1,10 @@
-//! `/doctor`: diagnose terminal, color/theme, clipboard, and voice input.
+//! `/doctor` — diagnose terminal, color/theme, clipboard, and voice input.
 //!
-//! Runs the shared TUI probe and diagnostics path, including live runtime evidence that the standalone command cannot observe.
+//! Runs the shared TUI probe and diagnostics path, including live runtime
+//! evidence that the standalone command cannot observe.
 
 use crate::slash::command::{
-    AppCtx, ArgItem, CommandExecCtx, CommandResult, DoctorRequest, SlashCommand, slash_meta,
+    AppCtx, ArgItem, CommandExecCtx, CommandResult, DoctorRequest, SlashCommand,
 };
 
 const USAGE: &str =
@@ -41,14 +42,28 @@ impl DoctorCommand {
 }
 
 impl SlashCommand for DoctorCommand {
-    slash_meta! {
-        name: "doctor",
-        aliases: ["terminal-setup", "terminal-check", "terminal-info"],
-        description: "Check this session and show available fixes",
-        usage: "/doctor [fix [FIX]]",
-        takes_args: true,
-        session_scoped: true,
-        arg_placeholder: "[fix [FIX]]",
+    fn name(&self) -> &str {
+        "doctor"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["terminal-setup", "terminal-check", "terminal-info"]
+    }
+
+    fn description(&self) -> &str {
+        "Check this session and show available fixes"
+    }
+
+    fn usage(&self) -> &str {
+        "/doctor [fix [FIX]]"
+    }
+
+    fn takes_args(&self) -> bool {
+        true
+    }
+
+    fn arg_placeholder(&self) -> Option<&str> {
+        Some("[fix [FIX]]")
     }
 
     fn suggest_args(&self, _ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
@@ -80,6 +95,10 @@ impl SlashCommand for DoctorCommand {
             insert_text: "fix".into(),
             description: "Show automatic fixes available here".into(),
         }])
+    }
+
+    fn session_scoped(&self) -> bool {
+        true
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -173,10 +192,7 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: false,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Inline,
-            current_title: None,
         };
         let command = DoctorCommand;
         assert!(command.suggest_args(&context, "").is_none());

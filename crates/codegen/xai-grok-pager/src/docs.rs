@@ -1,7 +1,8 @@
 //! In-app how-to documentation data (embedded markdown).
 //!
-//! Single source of truth: two static arrays (`USER_GUIDE`, `REFERENCE_DOCS`) hold every doc.
-//! All lookups are zero-allocation; `DocEntry` exists only for backward compatibility with the TUI doc picker.
+//! Single source of truth: two static arrays (`USER_GUIDE`, `REFERENCE_DOCS`)
+//! hold every doc. All lookups are zero-allocation; `DocEntry` exists only for
+//! backward compatibility with the TUI doc picker.
 
 /// A compile-time document entry. All fields are `&'static str`.
 #[derive(Debug)]
@@ -166,29 +167,21 @@ pub static USER_GUIDE: &[Doc] = &[
         "Export usage metrics to a customer OpenTelemetry collector"
     ),
     guide!(
-        "25-status-line.md",
-        "Status Line",
-        "A bottom row of live session context, or the output of your own script"
+        "25-chutes-ecosystem.md",
+        "Chutes Models and Ecosystem",
+        "Auto routing, reasoning, fallbacks, media, vision, and Context7"
     ),
     guide!(
-        "26-config-reference.md",
-        "Configuration Reference",
-        "Field list for config.toml, managed_config.toml, and requirements.toml"
+        "26-web-and-browser.md",
+        "Web and Browser",
+        "Web search providers and isolated Chrome or Edge automation"
     ),
-    // Direct include_str! so gazelle can put this file in compile_data.
-    // `guide!` hides the path inside concat!($file) and gazelle cannot see it.
-    Doc {
-        filename: "27-grok-clone.md",
-        title: "grok clone",
-        description: "Depth-1 Grove clone, --full-history, and safe deepen/switch commands",
-        content: include_str!("../docs/user-guide/27-grok-clone.md"),
-    },
 ];
 
-/// Non-user-guide reference docs.
-/// Separate from USER_GUIDE: they live under `docs/` (not `docs/user-guide/`) and are not extracted to disk.
-/// They also skip the NN-*.md managed naming pattern.
-/// Bundled via `include_str!` so they are available at runtime without a docs path.
+/// Non-user-guide reference docs. Separate from USER_GUIDE because they
+/// live under `docs/` (not `docs/user-guide/`), are not extracted to disk,
+/// and do not follow the NN-*.md managed naming pattern. Bundled via
+/// `include_str!` so they are available at runtime without a docs path.
 static REFERENCE_DOCS: &[Doc] = &[
     Doc {
         filename: "hooks-and-plugins.md",
@@ -365,8 +358,12 @@ mod tests {
         for doc in USER_GUIDE {
             let path = docs_dir.join(doc.filename);
             assert!(path.exists(), "Expected doc {} to exist", doc.filename);
-            let got = std::fs::read_to_string(&path).unwrap();
-            assert_eq!(got, doc.content, "Content mismatch for {}", doc.filename);
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                doc.content,
+                "Content mismatch for {}",
+                doc.filename
+            );
         }
         assert!(
             !docs_dir.join("99-removed.md").exists(),

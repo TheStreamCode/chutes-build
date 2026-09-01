@@ -6,24 +6,33 @@
 //! the shell like an unknown command, so only the bare invocation triggers.
 
 use crate::app::actions::Action;
-use crate::slash::command::{AppCtx, CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{AppCtx, CommandExecCtx, CommandResult, SlashCommand};
 
 /// Hidden GBOOM easter egg.
 pub struct GboomCommand;
 
 impl SlashCommand for GboomCommand {
-    slash_meta! {
-        name: "gboom",
+    fn name(&self) -> &str {
+        "gboom"
+    }
+
+    fn description(&self) -> &str {
         // Never shown: the command is hidden from the dropdown.
-        description: "Hidden easter egg",
-        usage: "/gboom",
-        // Needs an agent view to render in.
-        session_scoped: true,
+        "Hidden easter egg"
+    }
+
+    fn usage(&self) -> &str {
+        "/gboom"
     }
 
     /// Easter egg: typeable, never listed.
     fn visible(&self, _ctx: &AppCtx) -> bool {
         false
+    }
+
+    /// Needs an agent view to render in.
+    fn session_scoped(&self) -> bool {
+        true
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, args: &str) -> CommandResult {

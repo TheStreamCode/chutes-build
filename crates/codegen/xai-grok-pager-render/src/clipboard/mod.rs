@@ -142,24 +142,11 @@ impl std::fmt::Display for ClipboardRoute {
 /// which forces OSC 52 off everywhere. Tests that cannot control SSH env vars
 /// should skip asserting `osc52` for non-tmux cases.
 pub fn resolve_clipboard_route(ctx: &TerminalContext) -> ClipboardRoute {
-    resolve_clipboard_route_with(
-        ctx,
-        ClipboardRouteOpts {
-            no_osc52: osc52_disabled(),
-            wrap_sink: osc52_sink_active(),
-        },
-    )
+    resolve_clipboard_route_with(ctx, osc52_disabled())
 }
 
-/// Test/production overrides for pure clipboard-route resolution.
-#[derive(Clone, Copy)]
-struct ClipboardRouteOpts {
-    no_osc52: bool,
-    wrap_sink: bool,
-}
-
-/// Pure clipboard-route resolution (kill-switch / wrap-sink injected for tests).
-fn resolve_clipboard_route_with(ctx: &TerminalContext, opts: ClipboardRouteOpts) -> ClipboardRoute {
+/// Pure clipboard-route resolution (kill-switch injected for tests).
+fn resolve_clipboard_route_with(ctx: &TerminalContext, no_osc52: bool) -> ClipboardRoute {
     let is_tmux = ctx.multiplexer == MultiplexerKind::Tmux;
     // Linux: always emit OSC 52 as a safety net. This matches other
     // terminal agent CLIs which emit OSC 52 on every copy.
@@ -167,12 +154,12 @@ fn resolve_clipboard_route_with(ctx: &TerminalContext, opts: ClipboardRouteOpts)
     // upstream `chutes-build wrap` sink is capturing our output and will forward
     // the sequence to the real clipboard.
     // `CHUTES_BUILD_CLIPBOARD_NO_OSC52` wins over every automatic path.
-    let osc52 = !opts.no_osc52
+    let osc52 = !no_osc52
         && (cfg!(target_os = "linux")
             || is_tmux
             || is_remote()
             || is_container_no_display()
-            || opts.wrap_sink);
+            || osc52_sink_active());
     ClipboardRoute {
         native: true,
         tmux_buffer: is_tmux,
@@ -493,14 +480,14 @@ impl CopyDelivery {
         match self {
             Self::Clipboard { result, file } => match (result.delivery, file) {
                 (ClipboardDelivery::Unverified, Some(path)) => Cow::Owned(format!(
-                    "{}, saved to {}",
+                    "{} — saved to {}",
                     result.message_lead,
                     display_copy_path(path)
                 )),
                 _ => Cow::Borrowed(result.message),
             },
             Self::File { path } => Cow::Owned(format!(
-                "Clipboard unreachable: wrote {}",
+                "Clipboard unreachable — wrote {}",
                 display_copy_path(path)
             )),
             Self::Failed { clipboard, .. } => Cow::Borrowed(clipboard.message),
@@ -523,7 +510,7 @@ impl CopyDelivery {
 /// `~/.chutes-build/last-copy.txt` (chutes-build's per-user home — short, stable, and
 /// readable in a toast, unlike macOS's `/var/folders/...` temp dir).
 ///
-/// `None` when no Chutes Build home resolves and the env var is unset: rather than
+/// `None` when no chutes-build home resolves and the env var is unset: rather than
 /// writing to a predictable world-visible temp path, the backup file is
 /// simply skipped (the clipboard legs still fire).
 pub fn default_copy_fallback_path() -> Option<std::path::PathBuf> {
@@ -1804,13 +1791,7 @@ mod tests {
         for case in cases {
             // Pure helper with kill switch off so ambient CHUTES_BUILD_CLIPBOARD_NO_OSC52
             // cannot flake CI (route() itself still reads the real env).
-            let route = resolve_clipboard_route_with(
-                &case.ctx,
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false,
-                },
-            );
+            let route = resolve_clipboard_route_with(&case.ctx, false);
             assert_eq!(
                 route.native, case.native,
                 "native mismatch on case '{}'",
@@ -1886,43 +1867,11 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_route_osc52_when_wrap_sink_active() {
-        let on = resolve_clipboard_route_with(
-            &plain_terminal_ctx(),
-            ClipboardRouteOpts {
-                no_osc52: false,
-                wrap_sink: true,
-            },
-        );
-        assert!(
-            on.osc52,
-            "chutes-build wrap sink must emit OSC 52 so the local PTY can intercept it"
-        );
-        let killed = resolve_clipboard_route_with(
-            &plain_terminal_ctx(),
-            ClipboardRouteOpts {
-                no_osc52: true,
-                wrap_sink: true,
-            },
-        );
-        assert!(
-            !killed.osc52,
-            "CHUTES_BUILD_CLIPBOARD_NO_OSC52 still wins over the wrap sink"
-        );
-    }
-
-    #[test]
     fn clipboard_route_osc52_always_for_tmux_backed() {
         // In tmux-backed environments, OSC 52 is always emitted regardless of
         // remote session status (unless the kill switch is on — tested below).
         for ctx in [plain_tmux_ctx(), byobu_tmux_ctx()] {
-            let route = resolve_clipboard_route_with(
-                &ctx,
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false,
-                },
-            );
+            let route = resolve_clipboard_route_with(&ctx, false);
             assert!(
                 route.osc52,
                 "OSC 52 should always be emitted in tmux-backed env: {:?}",
@@ -1942,13 +1891,7 @@ mod tests {
             zellij_ctx(),
             plain_screen_ctx(),
         ] {
-            let route = resolve_clipboard_route_with(
-                &ctx,
-                ClipboardRouteOpts {
-                    no_osc52: true,
-                    wrap_sink: false,
-                },
-            );
+            let route = resolve_clipboard_route_with(&ctx, true);
             assert!(
                 !route.osc52,
                 "OSC 52 must be off under kill switch for {:?}",
@@ -1963,13 +1906,7 @@ mod tests {
             assert!(route.native);
         }
         // tmux buffer still active when in tmux — only OSC 52 is killed.
-        let tmux = resolve_clipboard_route_with(
-            &plain_tmux_ctx(),
-            ClipboardRouteOpts {
-                no_osc52: true,
-                wrap_sink: false,
-            },
-        );
+        let tmux = resolve_clipboard_route_with(&plain_tmux_ctx(), true);
         assert!(tmux.tmux_buffer);
         assert!(!tmux.osc52);
     }
@@ -1977,51 +1914,15 @@ mod tests {
     #[test]
     fn clipboard_route_osc52_tmux_passthrough_truth_table() {
         // tmux + no editor: wrap (tmux is the immediate terminal).
-        assert!(
-            resolve_clipboard_route_with(
-                &plain_tmux_ctx(),
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false
-                }
-            )
-            .osc52_tmux_passthrough
-        );
+        assert!(resolve_clipboard_route_with(&plain_tmux_ctx(), false).osc52_tmux_passthrough);
         // tmux + embedded editor: don't wrap (libvterm is the immediate terminal).
         let mut tmux_in_editor = plain_tmux_ctx();
         tmux_in_editor.embedded_editor = Some(EmbeddedEditor::Neovim);
-        assert!(
-            !resolve_clipboard_route_with(
-                &tmux_in_editor,
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false
-                }
-            )
-            .osc52_tmux_passthrough
-        );
+        assert!(!resolve_clipboard_route_with(&tmux_in_editor, false).osc52_tmux_passthrough);
         // non-tmux: never wrap.
-        assert!(
-            !resolve_clipboard_route_with(
-                &plain_terminal_ctx(),
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false
-                }
-            )
-            .osc52_tmux_passthrough
-        );
+        assert!(!resolve_clipboard_route_with(&plain_terminal_ctx(), false).osc52_tmux_passthrough);
         // kill switch: never wrap even in plain tmux.
-        assert!(
-            !resolve_clipboard_route_with(
-                &plain_tmux_ctx(),
-                ClipboardRouteOpts {
-                    no_osc52: true,
-                    wrap_sink: false
-                }
-            )
-            .osc52_tmux_passthrough
-        );
+        assert!(!resolve_clipboard_route_with(&plain_tmux_ctx(), true).osc52_tmux_passthrough);
     }
 
     // =====================================================================
@@ -2080,13 +1981,7 @@ mod tests {
     #[test]
     fn clipboard_route_tmux_backed_all_three_legs() {
         for ctx in [plain_tmux_ctx(), byobu_tmux_ctx()] {
-            let route = resolve_clipboard_route_with(
-                &ctx,
-                ClipboardRouteOpts {
-                    no_osc52: false,
-                    wrap_sink: false,
-                },
-            );
+            let route = resolve_clipboard_route_with(&ctx, false);
             assert!(route.native, "native should be true");
             assert!(route.tmux_buffer, "tmux_buffer should be true");
             assert!(route.osc52, "osc52 should be true for tmux-backed");
@@ -2276,7 +2171,7 @@ mod tests {
     }
 
     /// Without `CHUTES_BUILD_COPY_FILE`, the default is `~/.chutes-build/last-copy.txt`
-    /// (Chutes Build home) — short and toast-friendly, unlike macOS's temp dir.
+    /// (chutes-build home) — short and toast-friendly, unlike macOS's temp dir.
     #[test]
     #[serial_test::serial(grok_copy_file)]
     fn default_copy_fallback_path_is_grok_home() {
@@ -2297,7 +2192,7 @@ mod tests {
     #[test]
     fn display_copy_path_abbreviates_home() {
         if std::env::var_os("CHUTES_BUILD_HOME").is_none() {
-            let home = xai_dirs::home_dir().expect("home resolves in tests");
+            let home = dirs::home_dir().expect("home resolves in tests");
             assert_eq!(
                 display_copy_path(&home.join(".chutes-build").join("last-copy.txt")),
                 "~/.chutes-build/last-copy.txt"
@@ -2400,7 +2295,7 @@ mod tests {
         };
         assert_eq!(
             unverified.toast_message(),
-            "Copy sent, saved to /tmp/grok-1/last-copy.txt"
+            "Copy sent — saved to /tmp/grok-1/last-copy.txt"
         );
         assert_eq!(unverified.toast_ticks(), 120);
 
@@ -2416,7 +2311,7 @@ mod tests {
         let file_only = CopyDelivery::File { path };
         assert_eq!(
             file_only.toast_message(),
-            "Clipboard unreachable: wrote /tmp/grok-1/last-copy.txt"
+            "Clipboard unreachable — wrote /tmp/grok-1/last-copy.txt"
         );
         assert_eq!(file_only.toast_ticks(), 120);
 

@@ -144,6 +144,15 @@ impl AgentKind {
     }
 }
 
+impl std::fmt::Display for AgentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Embedded => "the embedded agent",
+            Self::Leader => "the chutes-build leader",
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PhaseSnapshot {
     pub completed: Vec<(StartupPhase, Duration)>,
@@ -551,7 +560,7 @@ pub(crate) fn is_active() -> bool {
     !DONE.load(Ordering::Relaxed) && current().is_some()
 }
 
-fn clear() {
+pub fn clear() {
     DONE.store(true, Ordering::Relaxed);
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
@@ -664,7 +673,7 @@ pub fn mark_utility_process() {
 
 /// Records the startup total, at most once per process. A failure the user
 /// can retry records nothing, so the eventual success still counts.
-pub(crate) fn report_total(outcome: StartupOutcome) {
+pub fn report_total(outcome: StartupOutcome) {
     if DONE.swap(true, Ordering::Relaxed) {
         return;
     }

@@ -1,15 +1,19 @@
+//! Which render modes a slash command works in.
+
 use crate::app::ScreenMode;
 
 /// What to tell a user who typed a command the current mode cannot run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Remedy {
     SwitchMode {
-        /// Sentence fragment, parenthesized in the refusal: `"minimal is single-session"`.
+        /// Sentence fragment, parenthesized in the refusal:
+        /// `"minimal is single-session"`.
         why: &'static str,
     },
-    /// Imperative clause naming what to do in this mode instead.
-    /// Name arrows, `Tab`, or `Ctrl+<letter>`.
-    /// `Ctrl+G` is the external editor in minimal and the tasks pane everywhere else, and a bare letter resolves only under vim mode (off by default).
+    /// Imperative clause naming what to do in this mode instead. Two ways to
+    /// get this wrong: `Ctrl+G` is the external editor in minimal and the
+    /// tasks pane everywhere else, and a bare letter resolves only under vim
+    /// mode (off by default), so name arrows, `Tab`, or `Ctrl+<letter>`.
     UseInstead(&'static str),
     AlreadyInMode,
 }
@@ -46,7 +50,7 @@ impl ModeSupport {
                  Run {switch} to switch this session."
             ),
             Remedy::UseInstead(instead) => {
-                format!("/{token} isn't available in {current} mode: {instead}.")
+                format!("/{token} isn't available in {current} mode — {instead}.")
             }
             Remedy::AlreadyInMode => format!("You're already in {current} mode."),
         })

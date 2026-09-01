@@ -1,5 +1,8 @@
-//! Renders with a golden accent line.
-//! Collapsed (default) shows a single `/btw <question>` header line; expanded shows the full markdown response below the header.
+//! BtwBlock — scrollback entry for /btw side-question responses.
+//!
+//! Renders with a golden accent line. Collapsed (default) shows a
+//! single `/btw <question>` header line; expanded shows the full
+//! markdown response below the header.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -21,6 +24,7 @@ pub struct BtwBlock {
 }
 
 impl BtwBlock {
+    /// Create a btw block from the question and response text.
     pub fn new(question: impl Into<String>, response: impl Into<String>) -> Self {
         Self {
             question: question.into(),
@@ -28,6 +32,7 @@ impl BtwBlock {
         }
     }
 
+    /// Access the underlying markdown content.
     pub fn content(&self) -> &MarkdownContent {
         &self.content
     }
@@ -55,7 +60,7 @@ impl BlockContent for BtwBlock {
 
         let mut lines = vec![BlockLine::styled(header).with_selection_range(Some(0))];
 
-        // Collapsed: header only. Expanded: header, then separator, then markdown body.
+        // Collapsed: header only. Expanded: header + separator + markdown body.
         if !is_collapsed {
             lines.push(BlockLine::separator(Line::from("")));
             let body = self.content.output(ctx.width as usize);

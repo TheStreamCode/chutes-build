@@ -1,3 +1,5 @@
+//! Core types for pager v3.
+
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,18 +92,18 @@ pub struct BlockContext {
     pub is_running: bool,
     pub width: u16,
     pub raw: bool,
-    /// Optional row budget. When Some(n), the block must fit within n lines.
+    /// Optional row budget. When Some(n), block must fit within n lines.
     pub max_lines: Option<u16>,
     /// Appearance config (from ~/.chutes-build/pager.toml).
     pub appearance: AppearanceConfig,
     /// Whether this entry is currently selected in the scrollback.
     pub is_selected: bool,
-    /// Session/worktree cwd (`AgentSession.cwd`); with `None`, paths are never made relative.
+    /// Session/worktree cwd (`AgentSession.cwd`); `None` → no relativization.
     pub cwd: Option<PathBuf>,
 }
 
 impl BlockContext {
-    /// Width of the bullet prefix (the char plus its trailing space), or 0 if disabled.
+    /// Width of the bullet prefix (char + trailing space), or 0 if disabled.
     pub fn bullet_indent(&self) -> usize {
         self.appearance
             .scrollback
@@ -115,15 +117,18 @@ impl BlockContext {
 
     /// Effective content width after subtracting the bullet prefix (if enabled).
     ///
-    /// Blocks that render single-line collapsed content should use this instead of `self.width`.
-    /// Otherwise they overflow past the bullet character that `RenderBlock::output()` prepends.
+    /// Blocks that render single-line collapsed content should use this instead
+    /// of `self.width` to avoid overflowing past the bullet character that gets
+    /// prepended by `RenderBlock::output()`.
     pub fn content_width(&self) -> usize {
         (self.width as usize).saturating_sub(self.bullet_indent())
     }
 
     /// Whether a collapsed block should render with the muted style.
-    /// Selected blocks stay bright everywhere except legacy ConHost.
-    /// There the selected/unselected color gap reads as palette noise after 16-color quantization, and the selection box already indicates focus.
+    /// Keeps the "bright while selected" affordance everywhere except
+    /// legacy ConHost — where the selected/unselected color gap reads
+    /// as palette noise after 16-color quantization, and the selection
+    /// box already indicates focus.
     pub fn mute_when_collapsed(&self, muted_collapsed_enabled: bool) -> bool {
         if !muted_collapsed_enabled {
             return false;
@@ -137,17 +142,20 @@ impl BlockContext {
 pub struct BlockLine {
     pub content: Line<'static>,
     pub background: Option<Color>,
-    /// Whether [`background`](Self::background) is a decorative "panel" band rather than semantic shading.
-    /// Panel bands are the tool result preview boxes (Read/Search/Execute); semantic shading is diff insert/delete rows and code-block fill.
-    /// Panel bands are suppressed when the entry renders with a flat background (minimal mode) so previews blend with the terminal's own background.
-    /// Semantic shading always paints.
+    /// Whether [`background`](Self::background) is a decorative "panel" band
+    /// (tool result previews — Read/Search/Execute/… content boxes) rather than
+    /// semantic shading (diff insert/delete rows, markdown code-block fill).
+    /// Panel bands are suppressed when the entry renders with a flat
+    /// background (minimal mode) so previews blend with the terminal's own
+    /// background; semantic shading always paints.
     pub background_is_panel: bool,
-    /// Column where the background starts: 0 paints full width, a positive value paints from that column.
+    /// Column where background starts (0 = full width, >0 = partial background).
     pub bg_start_col: u16,
     pub wrap: WrapMode,
     pub selectable: Selectable,
-    /// Logical selection range id within this block output.
-    /// Ids count up from 0; `u16::MAX` is reserved for the synthetic group-header row the renderer adds (`render::GROUP_HEADER_RANGE_ID`).
+    /// Logical selection range id within this block output. Ids count up
+    /// from 0; `u16::MAX` is reserved for the render-level synthetic
+    /// labeled group-header row (`render::GROUP_HEADER_RANGE_ID`).
     pub selection_range: Option<u16>,
     /// Optional source-of-truth text for the selectable portion of this line.
     pub selection_text: Option<String>,
@@ -159,7 +167,7 @@ pub struct BlockLine {
     ///
     /// The first line of a block should always have `None`.
     pub joiner: Option<String>,
-    /// Link target for rows whose painted text cannot recover it (tool headers).
+    /// Semantic link target when paint text cannot recover it (tool headers).
     pub link_target: Option<crate::render::osc8::LinkTarget>,
 }
 
@@ -275,8 +283,8 @@ pub fn line_plain_text(line: &Line) -> String {
     out
 }
 
-/// Append a rendered line's plain text to `out`, reusing its capacity.
-/// Lets the per-frame highlight pass avoid a fresh allocation for every visible row.
+/// Append a rendered line's plain text to `out`, reusing its capacity. Lets the
+/// per-frame highlight pass avoid a fresh allocation for every visible row.
 pub fn line_plain_text_into(line: &Line, out: &mut String) {
     for span in &line.spans {
         out.push_str(span.content.as_ref());
@@ -291,9 +299,11 @@ pub fn derive_selection_text(line: &BlockLine) -> String {
     match &line.selectable {
         Selectable::None => String::new(),
         Selectable::All => {
-            // Table rows carry render-only trailing padding (added so the app owns every column); strip it so it never reaches the clipboard
-            // Every `Selectable::All` line is trimmed, matching conventional terminal/tmux copy behavior
-            // The canonical single-block `y` copy is unaffected; it uses the pre-wrap path
+            // Strip trailing whitespace so the render-only padding table rows
+            // carry (added so the app owns every column) never reaches the
+            // clipboard. Deliberately broadened to every `Selectable::All` line,
+            // matching conventional terminal/tmux copy behavior. The canonical
+            // single-block `y` copy is unaffected (it uses the pre-wrap path).
             let text = line_plain_text(&line.content);
             let trimmed = text.trim_end();
             if trimmed.len() == text.len() {
@@ -312,22 +322,8 @@ pub fn derive_selection_text(line: &BlockLine) -> String {
     }
 }
 
-/// The exact text painted in `line`'s selectable columns, in logical order.
-///
-/// This is the slice of the full painted line (`line.content`) that `set_line_safe_bidi` reorders within the selectable region.
-/// Selection maps visual drag columns 1:1 against it.
-/// Unlike [`derive_selection_text`] it never trims trailing padding or substitutes a copy override; those affect copy text, not the painted cells.
-/// Snapping and slicing therefore share one coordinate space with the drawn cells.
-pub fn painted_selectable_region(line: &BlockLine) -> String {
-    match selectable_cols(&line.content, &line.selectable) {
-        Some(cols) => slice_display_cols(&line_plain_text(&line.content), cols.start, cols.end),
-        None => String::new(),
-    }
-}
-
-/// Slice `text` to the graphemes overlapping the display-column range `[start, end)`.
-/// A wide grapheme is kept whole when the range covers any of its cells.
-/// Graphemes that only touch a boundary (start at `end` or end at `start`) stay excluded.
+/// Slice `text` to the graphemes overlapping the display-column range `[start, end)`. A wide grapheme is kept whole when the
+/// range covers any of its cells; graphemes that only touch a boundary (start at `end` or end at `start`) stay excluded.
 pub fn slice_display_cols(text: &str, start: u16, end: u16) -> String {
     if start >= end || text.is_empty() {
         return String::new();
@@ -381,12 +377,11 @@ pub fn grapheme_cells_at(text: &str, col: u16) -> Option<std::ops::Range<u16>> {
     None
 }
 
-/// Exclusive display column just past the grapheme occupying `col`, or the text's total painted width when `col` is past the last one.
+/// Exclusive display column just past the grapheme occupying `col`, or the text's total width when `col` is past the last one.
 pub fn col_past_grapheme(text: &str, col: u16) -> u16 {
     match grapheme_cells_at(text, col) {
         Some(cells) => cells.end,
-        // Per-grapheme total (matches `grapheme_cells_at`), so a ligature row's last cell isn't dropped when `col` snaps to the row end
-        None => u16::try_from(str_display_cells(text)).unwrap_or(u16::MAX),
+        None => u16::try_from(text.width()).unwrap_or(u16::MAX),
     }
 }
 
@@ -417,57 +412,23 @@ fn grapheme_width(grapheme: &str) -> usize {
     UnicodeWidthStr::width(grapheme)
 }
 
-/// Terminal cells `s` occupies when painted: the sum of its grapheme widths.
-/// This can exceed `UnicodeWidthStr::width(s)` for ligature-forming sequences (Arabic lam-alef `لا`), which measure narrower than the drawn cells.
-/// The selection path uses this single width measure so hit-testing and slicing match the painted cells.
-/// Otherwise the last cell of such a line can't be selected or copied.
-pub(crate) fn str_display_cells(s: &str) -> usize {
-    s.graphemes(true).map(grapheme_width).sum()
-}
-
-fn span_display_cells(span: &Span) -> usize {
-    str_display_cells(&span.content)
-}
-
 /// Complete output produced by a block for rendering.
 #[derive(Debug, Clone, Default)]
 pub struct BlockOutput {
     pub lines: Vec<BlockLine>,
 }
 
-/// Rare selection metadata: source bytes omitted from a visible row, and a way to reach a source row that paints blank but is not empty.
+/// Rare copy-only source bytes omitted from an Edit header's visible row.
 /// TODO: Copy the absolute Read/Edit target for a full painted-path drag; partial drags copy painted columns only to keep highlight and clipboard aligned.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SelectionBoundary {
     prefix: String,
     suffix: String,
-    has_empty_row_anchor: bool,
 }
 
 impl SelectionBoundary {
     pub(crate) fn new(prefix: String, suffix: String) -> Self {
-        Self {
-            prefix,
-            suffix,
-            has_empty_row_anchor: false,
-        }
-    }
-
-    /// Make an otherwise empty source row reachable through its first blank terminal cell without painting or copying a placeholder.
-    pub(crate) fn empty_row_anchor(prefix: String, suffix: String) -> Self {
-        Self {
-            prefix,
-            suffix,
-            has_empty_row_anchor: true,
-        }
-    }
-
-    pub(crate) fn anchored_cols(&self, cols: Range<u16>) -> Range<u16> {
-        if self.has_empty_row_anchor && cols.is_empty() {
-            cols.start..cols.start.saturating_add(1)
-        } else {
-            cols
-        }
+        Self { prefix, suffix }
     }
 
     pub(crate) fn apply(
@@ -498,7 +459,7 @@ pub(crate) struct SelectionBoundaryEntry {
     pub(crate) boundary: Arc<SelectionBoundary>,
 }
 
-/// Sparse immutable metadata stored beside the output, keyed to exact line indices.
+/// Sparse immutable sidecar keyed to exact output line indices.
 /// Ordinary outputs keep `None`; clones share the boundary payloads through `Arc`.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SelectionBoundaries(Option<Arc<[SelectionBoundaryEntry]>>);
@@ -569,7 +530,7 @@ impl BlockOutput {
         self.lines.len() as u16
     }
 
-    /// Wrap the first line with the prefix and the last line with the suffix.
+    /// Wrap first line with prefix, last line with suffix.
     /// Decorations are NOT selectable.
     pub fn with_decorations(
         mut self,
@@ -604,10 +565,11 @@ impl BlockOutput {
 
 /// Pre-wrap (logical source) line index for each post-wrap output row.
 ///
-/// A row whose `joiner` is `None` starts a new pre-wrap line; soft-wrap continuations (`Some(_)`) stay on the current one.
-/// The first row is always index 0.
-/// This is the single source of truth for mapping pre-wrap lines to post-wrap rows.
-/// Mermaid treatment-row insertion (the fallback caption and affordance rows) and the hyperlink overlay use it.
+/// A row whose `joiner` is `None` starts a new pre-wrap line; soft-wrap
+/// continuations (`Some(_)`) stay on the current one. The first row is always
+/// index 0. This is the single source of truth for the pre-wrap → post-wrap
+/// mapping used by Mermaid treatment-row insertion (fallback caption / affordance
+/// row) and the hyperlink overlay.
 pub(crate) fn prewrap_index_per_row(lines: &[BlockLine]) -> Vec<usize> {
     let mut indices = Vec::with_capacity(lines.len());
     let mut prewrap = 0usize;
@@ -620,15 +582,15 @@ pub(crate) fn prewrap_index_per_row(lines: &[BlockLine]) -> Vec<usize> {
     indices
 }
 
-/// Convert span indices to display columns without narrowing to terminal-sized `u16` coordinates.
+/// Convert span indices to display columns without terminal-coordinate narrowing.
 pub(crate) fn selectable_cols_usize(line: &Line, selectable: &Selectable) -> Option<Range<usize>> {
     match selectable {
         Selectable::None => None,
-        Selectable::All => Some(0..line.spans.iter().map(span_display_cells).sum()),
+        Selectable::All => Some(0..line.width()),
         sel @ Selectable::Spans(_) => {
             let r = sel.clamped_span_range(line.spans.len())?;
-            let start_col = line.spans[..r.start].iter().map(span_display_cells).sum();
-            let end_col = line.spans[..r.end].iter().map(span_display_cells).sum();
+            let start_col = line.spans[..r.start].iter().map(|s| s.width()).sum();
+            let end_col = line.spans[..r.end].iter().map(|s| s.width()).sum();
             Some(start_col..end_col)
         }
     }
@@ -638,40 +600,6 @@ pub(crate) fn selectable_cols_usize(line: &Line, selectable: &Selectable) -> Opt
 pub fn selectable_cols(line: &Line, selectable: &Selectable) -> Option<Range<u16>> {
     let cols = selectable_cols_usize(line, selectable)?;
     Some(u16::try_from(cols.start).ok()?..u16::try_from(cols.end).ok()?)
-}
-
-/// The selectable region's **visual** column span in the painted (reordered) row, for hit-testing.
-///
-/// [`selectable_cols`] returns the region's *logical* columns, but `set_line_safe_bidi` reorders the whole line.
-/// Non-selectable content outside the region (e.g. a trailing truncation ellipsis) reorders too.
-/// Under an RTL base that can shift the region's painted position.
-/// Mapping the logical window through the full painted line keeps the on-screen columns matched to the drawn cells.
-///
-/// Returns the logical columns unchanged when reordering is off or the row isn't reordered.
-/// The region maps to one contiguous visual block, so the envelope of the mapped ranges is the region's span.
-/// Outside content is only the left-anchored chrome prefix and the trailing suffix, never interleaved between the region's own runs.
-/// Reordering preserves width, so only the start offset can change.
-pub fn visual_selectable_cols(line: &BlockLine) -> Option<Range<u16>> {
-    let logical = selectable_cols(&line.content, &line.selectable)?;
-    if !crate::render::bidi::is_enabled() {
-        return Some(logical);
-    }
-    let plain = line_plain_text(&line.content);
-    let ranges = crate::render::bidi::logical_cols_to_visual(
-        &plain,
-        logical.start as usize,
-        logical.end as usize,
-    );
-    let mut it = ranges.into_iter();
-    let Some((first_start, first_end)) = it.next() else {
-        return Some(logical);
-    };
-    let (mut vstart, mut vend) = (first_start, first_end);
-    for (s, e) in it {
-        vstart = vstart.min(s);
-        vend = vend.max(e);
-    }
-    Some(u16::try_from(vstart).unwrap_or(logical.start)..u16::try_from(vend).unwrap_or(logical.end))
 }
 
 #[cfg(test)]
@@ -774,8 +702,8 @@ mod tests {
 
     #[test]
     fn test_derive_selection_text_trims_render_only_table_padding() {
-        // A table row padded to the content width (Selectable::All)
-        // The trailing padding spaces are render-only and must not reach the clipboard
+        // A table row padded to the content width (Selectable::All). The trailing
+        // padding spaces are render-only and must not reach the clipboard.
         let line = BlockLine::styled(Line::from(vec![
             Span::raw("│ a │ b │"),
             Span::raw("          "),
@@ -785,8 +713,9 @@ mod tests {
 
     #[test]
     fn test_derive_selection_text_trims_trailing_ws_for_all_selectable_lines() {
-        // Trailing whitespace is stripped from EVERY Selectable::All line's copy text, not just table rows (see the comment at the trim site)
-        // This matches conventional terminal/tmux copy behavior
+        // Intentional broadened scope (see comment at the trim site): trailing
+        // whitespace is stripped from EVERY Selectable::All line's copy text, not
+        // just table rows — matching conventional terminal/tmux copy behavior.
         let line = BlockLine::styled(Line::from(vec![Span::raw("stdout line   ")]));
         assert_eq!(derive_selection_text(&line), "stdout line");
     }

@@ -68,7 +68,7 @@
             &make_task_completed_notif("sess-park", "t10", "sleep 10", Some(0)),
             &mut app,
         );
-        // Duplicate completion for the same task: not a Running-to-Done edge
+        // Duplicate completion for the same task: not a Running→Done edge.
         handle_ext_notification(
             &make_task_completed_notif("sess-park", "t10", "sleep 10", Some(0)),
             &mut app,
@@ -151,8 +151,9 @@
 
     #[test]
     fn interjection_notification_pushes_block_to_matching_session() {
-        // Multi-client: an interjection typed in one pane is broadcast by the shell as chutes.ai/session/interjection
-        // EVERY attached pane (incl. the originator, which no longer pushes a local block) renders it.
+        // Multi-client fix: an interjection typed in one pane is broadcast by
+        // the shell as chutes.ai/session/interjection; EVERY attached pane (incl.
+        // the originator, which no longer pushes a local block) renders it.
         let mut app = make_app_with_agent("sess-view");
         let affected =
             handle_ext_notification(&interjection_ext("sess-view", "also add tests"), &mut app);
@@ -181,7 +182,8 @@
 
     #[test]
     fn interjection_notification_renders_for_a_viewer() {
-        // A viewer (attached_as_viewer) watching another client's session must also render interjections broadcast for that session
+        // A viewer (attached_as_viewer) watching another client's session must
+        // also render interjections broadcast for that session.
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let affected =
@@ -197,8 +199,9 @@
 
     #[test]
     fn interjection_notification_dedups_originators_own_echo() {
-        // The originator rendered an optimistic block in dispatch_interject and recorded the id
-        // Its own broadcast echo must be dropped (no dup) and the id forgotten
+        // The originator rendered an optimistic block in dispatch_interject and
+        // recorded the id; its own broadcast echo must be dropped (no dup) and
+        // the id forgotten.
         let mut app = make_app_with_agent("sess-view");
         app.agents
             .get_mut(&AgentId(0))
@@ -226,31 +229,9 @@
     }
 
     #[test]
-    fn goal_send_now_notification_claims_optimistic_prompt_block() {
-        let mut app = make_app_with_agent("sess-view");
-        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-        agent.note_self_originated_prompt("prompt-1");
-        let entry_id = agent
-            .scrollback
-            .push_block(RenderBlock::user_prompt("steer the goal".to_string()));
-        agent
-            .send_now_painted_blocks
-            .insert("prompt-1".to_string(), (entry_id, false));
-
-        let affected = handle_ext_notification(
-            &interjection_ext_with_id("sess-view", "steer the goal", Some("prompt-1")),
-            &mut app,
-        );
-        assert!(!affected, "the optimistic block already represents the message");
-        let agent = app.agents.get(&AgentId(0)).unwrap();
-        assert!(!agent.send_now_painted_blocks.contains_key("prompt-1"));
-        assert!(agent.expect_send_now_cancel.is_none());
-        assert_eq!(last_interjection_text(&agent.scrollback).as_deref(), Some("steer the goal"));
-    }
-
-    #[test]
     fn interjection_notification_with_foreign_id_renders() {
-        // A broadcast carrying an id this client did NOT mint (another pane's interjection) must render; only the originator dedups by its own id
+        // A broadcast carrying an id this client did NOT mint (another pane's
+        // interjection) must render — only the originator dedups by its own id.
         let mut app = make_app_with_agent("sess-view");
         let affected = handle_ext_notification(
             &interjection_ext_with_id("sess-view", "from another pane", Some("other-id")),

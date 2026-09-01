@@ -34,10 +34,12 @@ enum SessionsCommand {
 }
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
-    // Best-effort only: never force an interactive public login here
-    // Enterprise deployments may configure only a deployment_key and a custom xai_api_base_url
-    // If the user has previously run the interactive `chutes-build` TUI (which succeeds for these setups), any cached credential is used
-    // Otherwise we still proceed so the SessionRegistryClient can use the deployment_key when talking to the custom proxy
+    // Best-effort only. Do not force an interactive public login for enterprise
+    // deployments that only configure a deployment_key + custom xai_api_base_url.
+    // If the user has previously run the interactive `chutes-build` TUI (which succeeds
+    // for these setups), any cached credential will be used. Otherwise we still
+    // proceed so the SessionRegistryClient can use the deployment_key when
+    // talking to the custom proxy.
     let auth = try_ensure_fresh_auth(&agent_config.grok_com_config).await;
 
     let auth_manager = std::sync::Arc::new(AuthManager::new(
@@ -63,20 +65,17 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 xai_grok_shell::session::merge::CwdScope::WithSiblings,
                 None,
                 limit,
-                // The CLI listing is an inventory, not the resume picker.
-                xai_grok_shell::session::visibility::HeadlessPolicy::Include,
+                xai_grok_shell::session::visibility::HeadlessPolicy::Exclude,
             )
             .await;
             print_sessions_grouped(&sessions);
         }
         SessionsCommand::Search { query, limit } => {
-            use std::collections::HashSet;
-            use xai_grok_shell::session::merge::REMOTE_TIMEOUT;
             use xai_grok_shell::session::storage::search::{
                 IndexDecision, SessionSearchRequest, execute_search,
             };
 
-            // Search is the only subcommand that reads the index, so it is the only one to start one
+            // The only subcommand that reads the index, so the only one to start one.
             let search = xai_grok_shell::session::storage::search::start_if_enabled(agent_config);
 
             let req = SessionSearchRequest {
@@ -88,34 +87,10 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
             };
             let root = grok_home();
 
-            let remote_limit = (limit * 3).max(100) as i64;
-            let (local_resp, remote_results) = tokio::join!(
-                execute_search(IndexDecision::settled(&search), &root, &req),
-                async {
-                    tokio::time::timeout(
-                        REMOTE_TIMEOUT,
-                        client.search(Some(&req.query), remote_limit),
-                    )
-                    .await
-                    .unwrap_or_else(|_| {
-                        eprintln!("warning: remote session search timed out");
-                        Ok(Vec::new())
-                    })
-                    .unwrap_or_else(|e| {
-                        eprintln!("warning: remote session search failed: {e}");
-                        Vec::new()
-                    })
-                }
-            );
-
-            let resp = local_resp?;
-            if let Some(by) = search.off_reason() {
-                eprintln!(
-                    "warning: local session search is off ({by}); searched remote sessions only."
-                );
-            }
-            let local_ids: HashSet<&str> =
-                resp.results.iter().map(|r| r.session_id.as_str()).collect();
+            // Local-only by policy: sessions stay on this machine unless a
+            // documented feature explicitly needs a provider request, so
+            // search never ships the query to a remote registry.
+            let resp = execute_search(IndexDecision::settled(&search), &root, &req).await?;
 
             for hit in &resp.results {
                 let title = if hit.title.is_empty() {
@@ -140,53 +115,21 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 );
             }
 
-            let remaining = limit.saturating_sub(resp.results.len());
-            let mut remote_shown = 0usize;
-            for r in &remote_results {
-                if remote_shown >= remaining {
-                    break;
-                }
-                if local_ids.contains(r.session_id.as_str()) {
-                    continue;
-                }
-                let title = if r.summary.is_empty() {
-                    "(untitled)"
-                } else {
-                    &r.summary
-                };
-                let time = chrono::DateTime::parse_from_rfc3339(&r.updated_at)
-                    .map(|dt| {
-                        dt.with_timezone(&chrono::Local)
-                            .format("%b %d, %l:%M%P")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
-                let snippet: String = r
-                    .first_prompt
-                    .as_deref()
-                    .unwrap_or("")
-                    .chars()
-                    .take(80)
-                    .collect();
-                println!(
-                    "{} (remote)  {}\n  {}\n  {}",
-                    r.session_id, time, title, snippet
-                );
-                remote_shown += 1;
-            }
-
-            println!("\nTotal: {}", resp.results.len() + remote_shown);
+            println!("\nTotal: {}", resp.results.len());
         }
         SessionsCommand::Delete { id } => {
-            // Always attempt the remote delete when authenticated and not ZDR; `list` and `search` likewise query remote unconditionally
-            // Gating on storage mode is impossible here: the CLI builds config without remote settings
-            // The backend delete is idempotent (a `404` is treated as success), so local-only sessions with no remote copy are safe
+            // Always attempt the remote delete when authenticated and not
+            // ZDR — `list` / `search` likewise query remote unconditionally
+            // rather than gating on storage mode (which the CLI cannot
+            // resolve here: it builds config without remote settings). The
+            // backend delete is idempotent (a `404` is treated as success),
+            // so this is safe for local-only sessions with no remote copy.
             // ZDR teams never upload, so there is nothing remote to delete.
             let needs_remote = auth.as_ref().is_some_and(|a| !a.is_zdr_team());
 
-            // Pass `cwd = None` so the session is found by id regardless of which workspace it was created in
-            // The local delete still uses the resolved per-session cwd
-            // No search handle: the eviction inside prunes the row from another process's index, so a delete never needs one of its own
+            // Pass `cwd = None` so the session is found by id regardless of
+            // which workspace it was created in; the local delete still uses
+            // the resolved per-session cwd.
             let deletion = xai_grok_shell::session::persistence::delete_session_history(
                 &id,
                 None,
@@ -207,7 +150,8 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
     Ok(())
 }
 
-/// Print sessions grouped by worktree label, preserving the original table format with a `Label: <label>` header before each group.
+/// Print sessions grouped by worktree label, preserving the original table
+/// format with a `Label: <label>` header before each group.
 fn print_sessions_grouped(sessions: &[MergedSession]) {
     if sessions.is_empty() {
         println!("No sessions found.");

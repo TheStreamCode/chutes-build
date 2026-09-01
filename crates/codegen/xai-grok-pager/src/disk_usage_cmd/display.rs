@@ -1,5 +1,5 @@
-//! Pure renderer over [`DiskUsageReport`].
-//! `xai_grok_config::grok_home()`, whose first call creates the home, must stay out of this module.
+//! Pure renderer over [`DiskUsageReport`]. `xai_grok_config::grok_home()`,
+//! whose first call creates the home, must stay out of this module.
 
 use std::borrow::Cow;
 use std::io::Write;
@@ -188,13 +188,14 @@ pub fn print_report(
         }
     }
 
-    // gc's age pass needs `--max-age` and walks registry records, so neither half of the hint holds for both row kinds
+    // gc's age pass needs `--max-age` and walks registry records, so neither
+    // half of the hint holds for both row kinds.
     if report.worktrees_dominate() && !report.worktrees.is_empty() {
         writeln!(out)?;
         if report.worktrees.iter().any(WorktreeUsage::is_tracked) {
             writeln!(
                 out,
-                "To reclaim space, run `chutes-build worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one."
+                "To reclaim space, run `chutes-build worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing."
             )?;
         }
         if !report.worktrees.iter().all(WorktreeUsage::is_tracked) {

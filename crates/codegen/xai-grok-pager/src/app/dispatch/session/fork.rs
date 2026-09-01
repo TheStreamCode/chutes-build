@@ -1,12 +1,10 @@
 //! Fork dispatchers and fork placeholder builders.
 use super::lifecycle::{dispatch_new_session_inner_with_id, refuse_chat_mode_build_agent};
-use super::load::session_opens_as_chat;
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::Effect;
 use crate::app::agent::{AgentCommand, AgentId, AgentSession, AgentState};
 use crate::app::agent_view::AgentView;
 use crate::app::app_view::{ActiveView, AppView};
-use crate::app::cancel_latency::TurnEnd;
 use crate::app::dispatch::ctx::{SwitchCause, switch_to_agent};
 use crate::app::dispatch::modes::inherit_auto_mode;
 use crate::app::dispatch::prompt::supersede_open_reload_window;
@@ -15,23 +13,32 @@ use crate::scrollback::blocks::SessionEvent;
 use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
 use std::time::Instant;
-/// Top-level `/fork` dispatcher.
-/// An explicit `--worktree` / `--no-worktree` flag short-circuits the worktree decision to [`dispatch_fork_resolved`].
-/// When no flag is given and a persisted `fork_worktree_mode` (`Always` / `Never`) is set, the popup is skipped and that path is taken directly.
-/// The `Ask` default opens the [`open_fork_question`] modal so the user is asked.
+/// Top-level `/fork` dispatcher. Resolves the worktree decision: an
+/// explicit `--worktree` / `--no-worktree` flag short-circuits to
+/// [`dispatch_fork_resolved`]. When no flag is given and a persisted
+/// `fork_worktree_mode` preference is set (`Always` / `Never`), the
+/// popup is skipped and the corresponding path is taken directly. The
+/// `Ask` default opens the [`open_fork_question`] modal so the user is
+/// asked.
 ///
-/// When the parent session's cwd is not inside a git repository (no `git_head_changed` notification, so `current_branch` is `None`):
+/// When the parent session's working directory is **not** inside a git
+/// repository (indicated by the absence of a `git_head_changed`
+/// notification — `current_branch` is `None`):
 /// - `--worktree` is rejected with a toast (nothing to create a worktree from).
-/// - No flag (regardless of `fork_worktree_mode`): the worktree question is skipped and the fork proceeds with `worktree = false`.
+/// - No flag (regardless of `fork_worktree_mode`): the worktree question
+///   is skipped and the fork proceeds with `worktree = false`.
 ///
-/// If the notification has not arrived yet (the user forks before the shell sends `git_head_changed`), the `worktree = false` fallback is safe.
-/// The worktree can be created manually afterwards.
+/// Note: if the notification has not arrived yet (rare — user forks
+/// before the shell sends `git_head_changed`), the fallback to
+/// `worktree = false` is safe and the worktree can be created manually
+/// afterwards.
 ///
 /// Two failure surfaces:
 /// - Active view is not an agent: toast and return.
-/// - Active agent has no `session_id` (still being created): toast and return.
-///
-/// Both rejections are deliberate: queueing the fork until `SessionLoaded` would require persisting `ForkArgs` across the `TaskResult`.
+/// - Active agent has no `session_id` (still being created): toast and
+///   return. Both rejections are deliberate -- queueing the fork until
+///   `SessionLoaded` would require persisting `ForkArgs` across the
+///   `TaskResult` and is deferred to v2.
 pub(in crate::app::dispatch) fn dispatch_fork(
     app: &mut AppView,
     args: crate::slash::commands::fork::ForkArgs,
@@ -69,7 +76,9 @@ pub(in crate::app::dispatch) fn dispatch_fork(
         }
     }
 }
-/// If `persist_mode` is `Some`, write `mode` into `*field` and append a [`Effect::PersistWorktreeMode`] to `effects` with the given `config_key`.
+/// If `persist_mode` is `Some`, write `mode` into `*field` and append
+/// a [`Effect::PersistWorktreeMode`] to `effects` with the given
+/// `config_key`.
 pub(in crate::app::dispatch) fn apply_persist_worktree_mode(
     field: &mut crate::app::app_view::WorktreeMode,
     effects: &mut Vec<Effect>,
@@ -81,7 +90,8 @@ pub(in crate::app::dispatch) fn apply_persist_worktree_mode(
         effects.push(Effect::PersistWorktreeMode { mode, config_key });
     }
 }
-/// Build the two persistence options shared by the fork and new-session worktree question modals ("Always worktree" / "Never worktree").
+/// Build the two persistence options shared by the fork and new-session
+/// worktree question modals ("Always worktree" / "Never worktree").
 pub(super) fn worktree_persist_options()
 -> [xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption; 2] {
     use xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption;
@@ -100,8 +110,9 @@ pub(super) fn worktree_persist_options()
         },
     ]
 }
-/// Open the local worktree question modal on the active agent.
-/// Refuses with a toast if a question (ACP or local) is already on screen, so two questions never collide.
+/// Open the local worktree question modal on the active agent. Refuses
+/// if a question (ACP or local) is already on screen, surfacing a toast
+/// instead -- the modal-collision protocol.
 fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effect> {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
     use xai_grok_tools::implementations::grok_build::ask_user_question::{
@@ -150,10 +161,14 @@ fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effec
     agent.prompt.set_text("");
     vec![]
 }
-/// Construct the placeholder agent, push discoverability markers, flip the discovery gate, switch to the new agent, and emit the fork effect.
+/// Construct the placeholder agent, push discoverability markers, flip
+/// the discovery gate, switch to the new agent, and emit the appropriate
+/// fork effect (worktree or no-worktree path).
 ///
-/// `worktree == true` reuses the [`Effect::CreateWorktreeSession`] pipeline (with `load_session_id` set to the parent session id).
-/// `worktree == false` emits [`Effect::ForkSession`], which calls `chutes.ai/session/fork` directly.
+/// `worktree == true` reuses the existing
+/// [`Effect::CreateWorktreeSession`] pipeline (with `load_session_id`
+/// set to the parent session id). `worktree == false` emits the new
+/// [`Effect::ForkSession`] which calls `chutes.ai/session/fork` directly.
 pub(in crate::app::dispatch) fn dispatch_fork_resolved(
     app: &mut AppView,
     worktree: bool,
@@ -179,7 +194,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
         None => "Forked".to_string(),
     };
     let parent_chat_kind = parent.chat_kind || app.chat_mode;
-    let parent_conversation_entry = parent.conversation_entry;
     app.agents.insert(new_id, new_agent);
     {
         let agent = app
@@ -204,7 +218,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             &app.tier_restricted_commands,
         );
         agent.chat_kind = parent_chat_kind;
-        agent.conversation_entry = parent_conversation_entry;
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
         agent
             .prompt
@@ -236,7 +249,6 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             git_ref: None,
             // Fork resumes the parent session, which carries its own model.
             model_id: None,
-            permission_mode_override: None,
             preferred_session_id: None,
             chat_kind: parent_chat_kind,
         }]
@@ -250,8 +262,9 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
         }]
     }
 }
-/// Build the placeholder [`AgentView`] for a fork.
-/// Centralises the `AgentSession`/spinner construction shared by the worktree and no-worktree branches so the parallel struct literal does not drift.
+/// Build the placeholder [`AgentView`] for a fork. Centralises the
+/// `AgentSession`/spinner construction shared by both worktree and
+/// no-worktree branches so the parallel struct literal does not drift.
 fn build_fork_placeholder(
     app: &AppView,
     new_id: AgentId,
@@ -288,8 +301,6 @@ fn build_fork_placeholder(
             available_commands_generation: 1,
             available_tools: None,
             model_switch_pending: false,
-            hook_block_hold: false,
-            blocked_prompt: None,
             user_model_preference: None,
             deferred_model_switch: app.deferred_model_switch_from_cli(),
             bg_tasks: std::collections::BTreeMap::new(),
@@ -311,12 +322,16 @@ fn build_fork_placeholder(
     agent.turn_started_at = Some(Instant::now());
     agent
 }
-/// Build the discoverability banner for the child agent: the child's session id, the full parent session id, and optionally a session-switch tip.
-/// The tip appears when `switch_hint` names a command: `/dashboard` normally, `/resume` in minimal mode where the dashboard is refused.
-/// `switch_hint` comes from the caller's [`crate::views::dashboard::session_switch_hint_command`].
-/// The no-worktree case appends the dim continuation `(both agents share cwd)`.
+/// Build the discoverability banner for the child agent. Includes the
+/// child's session id, the full parent session id, and — when
+/// `switch_hint` names a command (the caller's
+/// [`crate::views::dashboard::session_switch_hint_command`]: `/dashboard`
+/// normally, `/resume` in minimal mode where the dashboard is refused) —
+/// a session-switch tip so the user knows how to switch back. No-worktree
+/// case appends the dim continuation `(both agents share cwd)`.
 ///
-/// Called in `TaskResult::SessionLoaded` (not at dispatch time) because the child's session id is not known until the backend responds.
+/// Called in `TaskResult::SessionLoaded` (not at dispatch time) because
+/// the child's session id is not known until the backend responds.
 pub(in crate::app::dispatch) fn build_child_fork_marker(
     session_id: &str,
     parent_sid: &str,
@@ -325,7 +340,7 @@ pub(in crate::app::dispatch) fn build_child_fork_marker(
 ) -> String {
     let header = if let Some(cmd) = switch_hint {
         format!(
-            "Session {session_id} (forked from {parent_sid}), use {cmd} to switch between sessions",
+            "Session {session_id} (forked from {parent_sid}) \u{2014} use {cmd} to switch between sessions",
         )
     } else {
         format!("Session {session_id} (forked from {parent_sid})")
@@ -385,10 +400,7 @@ pub(in crate::app::dispatch) fn handle_worktree_forked(
 ) -> Vec<Effect> {
     let session_id_str = session_id.0.to_string();
     let pending_entry = std::mem::take(&mut app.deferred_startup.pending_chat);
-    let agent_entry = app
-        .agents
-        .get(&agent_id)
-        .is_some_and(|a| a.conversation_entry);
+    let agent_entry = app.agents.get(&agent_id).is_some_and(|a| a.chat_kind);
     let conversation_entry = pending_entry || agent_entry;
     if crate::app::session_startup::chat_mode_refuses_local_build_load(
         app.chat_mode,
@@ -399,21 +411,16 @@ pub(in crate::app::dispatch) fn handle_worktree_forked(
         refuse_chat_mode_build_agent(app, agent_id);
         return vec![];
     }
-    let rename_entry = session_opens_as_chat(app, conversation_entry);
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         supersede_open_reload_window(agent, agent_id, "WorktreeForked");
         agent.session.finish_command();
-        agent.mark_turn_finished(TurnEnd::Aborted);
+        agent.mark_turn_finished();
         agent.bind_session_id(session_id);
         agent.scrollback.begin_batch();
         agent.begin_replay_window();
         agent.session.restore_degree = restore_degree;
         agent.session.cwd = session_cwd.clone();
         agent.session.is_worktree = true;
-        agent.current_branch = None;
-        agent.main_repo = None;
-        agent.is_worktree = true;
-        crate::git_info::populate_from_cwd_async(session_cwd.clone());
         app.restore_code = None;
         agent.prompt.file_search.retarget(&session_cwd);
         agent.scrollback.push_block(RenderBlock::system(format!(
@@ -435,7 +442,6 @@ pub(in crate::app::dispatch) fn handle_worktree_forked(
         }
         let effective_chat = conversation_entry || app.chat_mode;
         agent.chat_kind = effective_chat;
-        agent.conversation_entry = rename_entry;
         agent.apply_credit_balance(app.credit_balance.clone(), app.auto_topup.clone());
     } else {
         return vec![];
@@ -463,10 +469,7 @@ pub(in crate::app::dispatch) fn handle_fork_session_ready(
 ) -> Vec<Effect> {
     let session_id_str = new_session_id.0.to_string();
     let pending_entry = std::mem::take(&mut app.deferred_startup.pending_chat);
-    let agent_entry = app
-        .agents
-        .get(&agent_id)
-        .is_some_and(|a| a.conversation_entry);
+    let agent_entry = app.agents.get(&agent_id).is_some_and(|a| a.chat_kind);
     let conversation_entry = pending_entry || agent_entry;
     if crate::app::session_startup::chat_mode_refuses_local_build_load(
         app.chat_mode,
@@ -477,18 +480,16 @@ pub(in crate::app::dispatch) fn handle_fork_session_ready(
         refuse_chat_mode_build_agent(app, agent_id);
         return vec![];
     }
-    let rename_entry = session_opens_as_chat(app, conversation_entry);
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         supersede_open_reload_window(agent, agent_id, "ForkSessionReady");
         agent.session.finish_command();
-        agent.mark_turn_finished(TurnEnd::Aborted);
+        agent.mark_turn_finished();
         agent.bind_session_id(new_session_id);
         agent.scrollback.begin_batch();
         agent.begin_replay_window();
         agent.session.cwd = cwd.clone();
         let effective_chat = conversation_entry || app.chat_mode;
         agent.chat_kind = effective_chat;
-        agent.conversation_entry = rename_entry;
     } else {
         return vec![];
     }
@@ -514,7 +515,7 @@ pub(in crate::app::dispatch) fn handle_fork_session_failed(
         agent.pending_extensions_fetch = false;
         agent.session.finish_command();
         let elapsed = agent.turn_elapsed();
-        agent.mark_turn_finished(TurnEnd::Aborted);
+        agent.mark_turn_finished();
         agent.pending_first_prompt = None;
         agent.pending_fork_banner = None;
         agent

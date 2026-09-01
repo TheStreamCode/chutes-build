@@ -1,6 +1,9 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
+    /// The permission prompt must surface the payload an MCP call would
+    /// send — both `UseTool` (meta-dispatch) and `MCPTool` (natively
+    /// registered) raw_input shapes.
     #[test]
     fn mcp_args_lines_extracts_planned_tool_input() {
         for variant in ["UseTool", "MCPTool"] {
@@ -22,6 +25,8 @@
         }
     }
 
+    /// Non-MCP raw_input (bash, edit, gateway `{command}` shapes) must not
+    /// grow a JSON dump — those prompts have dedicated displays.
     #[test]
     fn mcp_args_lines_empty_for_non_mcp_shapes() {
         for raw in [
@@ -39,6 +44,8 @@
         }
     }
 
+    /// A `tool_input` that is missing or JSON null renders nothing rather
+    /// than a misleading `null`.
     #[test]
     fn mcp_args_lines_empty_for_missing_or_null_input() {
         for raw in [
@@ -50,6 +57,9 @@
         }
     }
 
+    /// A pathological single-line value (e.g. an embedded base64 blob) is
+    /// elided at `MCP_ARGS_MAX_LINE_CHARS` so per-frame wrap cost stays
+    /// bounded. Uses a multi-byte char to pin char (not byte) slicing.
     #[test]
     fn mcp_args_lines_caps_line_length() {
         let req = permission_req_with_raw_input(Some(serde_json::json!({
@@ -66,6 +76,8 @@
         assert!(long.ends_with('…'));
     }
 
+    /// Pathologically large payloads are capped in storage with an explicit
+    /// hidden-line count (the overlay clips further at render time).
     #[test]
     fn mcp_args_lines_caps_stored_lines() {
         let big: serde_json::Map<String, serde_json::Value> = (0..MCP_ARGS_MAX_LINES + 50)
@@ -85,80 +97,8 @@
         );
     }
 
-    fn hook_ask_permission_req(
-        raw_input: serde_json::Value,
-        title: &str,
-        options: Vec<acp::PermissionOption>,
-    ) -> acp::RequestPermissionRequest {
-        let ask = xai_grok_workspace::permission::HookAsk {
-            hook_name: "guard".to_owned(),
-            reason: Some("confirm this".to_owned()),
-        };
-        let mut meta = serde_json::Map::new();
-        meta.insert(
-            xai_grok_workspace::permission::HOOK_ASK_META_KEY.to_owned(),
-            serde_json::to_value(&ask).unwrap(),
-        );
-        let fields = acp::ToolCallUpdateFields::new()
-            .raw_input(Some(raw_input))
-            .title(Some(ask.prompt_header(title)));
-        acp::RequestPermissionRequest::new(
-            acp::SessionId::new(std::sync::Arc::from("s1")),
-            acp::ToolCallUpdate::new(acp::ToolCallId::new(std::sync::Arc::from("call-1")), fields),
-            options,
-        )
-        .meta(Some(meta))
-    }
-
-    fn allow_all_edits_option() -> acp::PermissionOption {
-        acp::PermissionOption::new(
-            acp::PermissionOptionId::new(std::sync::Arc::from("allow-edits-session")),
-            "Yes, allow all edits this session".to_string(),
-            acp::PermissionOptionKind::AllowAlways,
-        )
-    }
-
-    #[test]
-    fn hook_ask_is_the_first_description_line_on_every_prompt_shape() {
-        let ask_line = "hook 'guard' asks: confirm this";
-        for (raw_input, acp_title, options, expected_title, expected_command) in [
-            (
-                serde_json::json!({"command": "rm -rf /tmp/x", "description": "Clean tmp"}),
-                "Execute `rm -rf /tmp/x`",
-                vec![],
-                "Clean tmp",
-                Some("rm -rf /tmp/x"),
-            ),
-            (
-                serde_json::json!({"file_path": "/tmp/x.rs", "old_string": "a", "new_string": "b"}),
-                "Edit /tmp/x.rs",
-                vec![allow_all_edits_option()],
-                "Allow Edit to /tmp/x.rs?",
-                None,
-            ),
-            (
-                serde_json::json!({"target_file": "/tmp/x.rs"}),
-                "Read `/tmp/x.rs`",
-                vec![],
-                "Allow Read `/tmp/x.rs`?",
-                None,
-            ),
-            (
-                serde_json::json!({"cmd": "ls -la"}),
-                "Execute `ls -la`",
-                vec![],
-                "Allow Execute?",
-                Some("ls -la"),
-            ),
-        ] {
-            let req = hook_ask_permission_req(raw_input, acp_title, options);
-            let (title, description, command) = build_permission_display(&req, None, false);
-            assert_eq!(title, expected_title);
-            assert_eq!(command.as_deref(), expected_command);
-            assert_eq!(description.first().map(String::as_str), Some(ask_line));
-        }
-    }
-
+    /// Manual recap with an uncommitted in-flight spinner: filled in place
+    /// (no second block), animation stopped.
     #[test]
     fn recap_fills_uncommitted_spinner_in_place() {
         let mut agent = make_agent(Some("s1"));
@@ -177,6 +117,10 @@
         assert!(agent.pending_recap_entry.is_none());
     }
 
+    /// Regression (minimal mode): the spinner was already committed into
+    /// native scrollback (print-once) — an in-place fill would never reach the
+    /// terminal. The stale committed entry is dropped from state and the recap
+    /// appended as a fresh (uncommitted) block so the commit pass prints it.
     #[test]
     fn recap_reprints_fresh_block_when_spinner_already_committed() {
         let mut agent = make_agent(Some("s1"));
@@ -186,6 +130,7 @@
                 recap_block(""),
             ));
         agent.pending_recap_entry = Some(spinner);
+        // The minimal idle commit pass consumed the spinner.
         agent.scrollback.finish_running(spinner);
         agent.scrollback.mark_committed(0);
         agent.scrollback.set_commit_scan_cursor(1);
@@ -206,6 +151,8 @@
         );
     }
 
+    /// An automatic recap never consumes the manual loading slot — it always
+    /// appends its own block and leaves the pending spinner alone.
     #[test]
     fn auto_recap_appends_and_leaves_manual_spinner_pending() {
         let mut agent = make_agent(Some("s1"));
@@ -240,38 +187,6 @@
         assert!(
             !should_drop_late_auto_recap(true, true, &busy),
             "history replay rebuilds scrollback even mid-turn"
-        );
-    }
-
-    /// Wake turns (monitor exit, task/subagent completion) never adopt into `TurnRunning`; the pane stays idle while they stream.
-    /// Recap must not paint mid-wake-turn.
-    #[test]
-    fn late_auto_recap_dropped_while_wake_turn_streams() {
-        let mut agent = make_agent(Some("s1"));
-        agent.running_wake_turn = Some(crate::app::agent_view::RunningWakeTurn {
-            prompt_id: "task-completed-mon-1".into(),
-            cancel_sent: false,
-        });
-
-        assert!(
-            should_drop_late_auto_recap(true, false, &agent),
-            "streaming wake turn is not idle for recap"
-        );
-        assert!(
-            !should_drop_late_auto_recap(true, true, &agent),
-            "history replay rebuilds scrollback even mid-wake-turn"
-        );
-
-        agent.running_wake_turn.as_mut().unwrap().cancel_sent = true;
-        assert!(
-            should_drop_late_auto_recap(true, false, &agent),
-            "cancelling wake turn is still not idle"
-        );
-
-        agent.running_wake_turn = None;
-        assert!(
-            !should_drop_late_auto_recap(true, false, &agent),
-            "wake terminal landed: recap can paint again"
         );
     }
 

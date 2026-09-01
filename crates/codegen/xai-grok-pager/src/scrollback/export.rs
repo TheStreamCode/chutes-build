@@ -1,13 +1,16 @@
 //! Pure functions for exporting a conversation transcript as human-readable Markdown.
 //!
-//! Used by the `/export` slash command (and its dispatch handler).
-//! The converter walks `RenderBlock`s and produces `## User` / `## Assistant` / `## Tools` sections with compact one-line tool summaries.
-//! Non-conversation blocks (system chrome, thinking, subagent lifecycle, etc.) are skipped.
-//! The output stays useful for "continue elsewhere" or archival.
+//! Used by the `/export` slash command (and its dispatch handler). The converter walks
+//! `RenderBlock`s and produces `## User` / `## Assistant` / `## Tools` sections with
+//! compact one-line tool summaries. Non-conversation blocks (system chrome, thinking,
+//! subagent lifecycle, etc.) are intentionally skipped so the output is useful for
+//! "continue elsewhere" or archival.
 
 use super::{RenderBlock, ToolCallBlock};
 
-/// The output is a document meant for saving to a file or the clipboard:
+/// Convert an iterator of `RenderBlock` references into a Markdown transcript.
+///
+/// The output is a clean, readable document suitable for saving or clipboard:
 /// - `## User` for user prompts (raw text)
 /// - `## Assistant` for agent responses (prefers raw source Markdown via `copy_text(true)`)
 /// - `## Tools` section with one-line summaries for every tool call kind
@@ -15,7 +18,7 @@ use super::{RenderBlock, ToolCallBlock};
 /// Consecutive assistant messages are coalesced under a single header.
 /// Thinking / system / subagent / credit / etc. blocks are skipped.
 ///
-/// Pure function; unit tests feed it synthetic blocks (including `Stub`).
+/// This function is pure and easily unit-testable with synthetic blocks (including `Stub`).
 pub fn render_blocks_to_markdown<'a>(blocks: impl IntoIterator<Item = &'a RenderBlock>) -> String {
     let mut out = String::new();
     let mut last_was_agent = false;
@@ -56,8 +59,9 @@ pub fn render_blocks_to_markdown<'a>(blocks: impl IntoIterator<Item = &'a Render
                 out.push('\n');
                 last_was_agent = false;
             }
-            // Skip all non-conversation chrome: Thinking, System, SessionEvent, BgTask, Subagent, Btw, CreditLimit, Stub, etc
-            // A skipped Thinking block leaves `last_was_agent` set, so agent messages around it share one header
+            // Skip all non-conversation chrome: Thinking, System, SessionEvent, BgTask,
+            // Subagent, Btw, CreditLimit, Stub, etc. Thinking blocks are
+            // treated as intra-Assistant glue (no new header).
             _ => {}
         }
     }
@@ -91,7 +95,6 @@ fn tool_summary(tc: &ToolCallBlock) -> String {
         ToolCallBlock::UseTool(u) => format!("UseTool: {}", u.tool_name),
         ToolCallBlock::IntegrationSearch(_) => "IntegrationSearch (MCP tool discovery)".into(),
         ToolCallBlock::MemorySearch(_) => "MemorySearch".into(),
-        ToolCallBlock::SentMessage(message) => message.presentation.title().into(),
         ToolCallBlock::Skill(o) | ToolCallBlock::Other(o) => format!("Tool: {}", o.name),
         ToolCallBlock::Lifecycle(_) => "Lifecycle event".into(),
     }

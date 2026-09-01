@@ -547,6 +547,16 @@ pub struct SessionInfoData {
     pub context: ContextInfo,
 }
 
+/// Whether this model slug supports showing checkpoint identity (resolved model ID, fingerprint).
+pub(crate) fn is_coding_model_slug(model: &str) -> bool {
+    matches!(model, "grok-build" | "grok-4.5")
+}
+
+/// Display gate for the model fingerprint: server/catalog opt-in OR the built-in coding-slug default.
+pub fn should_show_model_fingerprint(catalog_flag: bool, model_slug: &str) -> bool {
+    catalog_flag || is_coding_model_slug(model_slug)
+}
+
 /// Calculate and format the model name for display.
 pub fn model_display_name(
     name: Option<&str>,

@@ -1,3 +1,5 @@
+//! Prompt component — renders the welcome screen prompt using PromptWidget.
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -9,7 +11,8 @@ pub fn prompt_inset(compact: bool) -> u16 {
     if compact { 0 } else { 2 }
 }
 
-/// Returns the cursor position and the post-flush output that carries terminal-overlay ownership.
+/// Render the welcome prompt using the shared PromptWidget.
+/// Returns the cursor position and ownership-bearing post-flush output.
 #[allow(clippy::too_many_arguments)]
 pub fn render_prompt(
     area: Rect,
@@ -38,7 +41,7 @@ pub fn render_prompt(
     };
 
     // Inset the prompt area so the selection box border sits over dark background.
-    // In compact mode `prompt_inset` returns 0, matching the session layout
+    // In compact mode, no inset (prompt_inset returns 0) to match session layout.
     let inset = prompt_inset(compact);
     let inset_area = Rect {
         x: area.x + inset,
@@ -101,7 +104,7 @@ mod tests {
             !crate::terminal::overlay::static_image(&png(), 20, 10, 0, 0, 71)
                 .unwrap()
                 .as_str()
-                .contains("a=T"),
+                .contains("a=t"),
             "constructing welcome output must not commit its clear"
         );
 
@@ -111,7 +114,7 @@ mod tests {
             crate::terminal::overlay::static_image(&png(), 20, 10, 0, 0, 71)
                 .unwrap()
                 .as_str()
-                .contains("a=T"),
+                .contains("a=t"),
             "writing welcome output must commit its clear"
         );
     }

@@ -19,6 +19,7 @@ async-openai = { workspace = true }
 jsonschema = { workspace = true }
 tokio-tungstenite = { workspace = true }
 xai-tty-utils = { workspace = true }
+xai-dirs = { workspace = true }
 xai-grok-auth = { workspace = true }
 xai-grok-config = { path = "../xai-grok-config" }
 xai-grok-extra-ca = { workspace = true }

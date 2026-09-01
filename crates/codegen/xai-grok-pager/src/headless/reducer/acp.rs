@@ -1,5 +1,5 @@
-//! The `streaming-json` reducer: native ACP session updates, one JSON object per line.
-//! It defines its own line shapes: [`AcpLine`], [`AcpUsageLine`], [`AcpEndLine`].
+//! The `streaming-json` reducer: native ACP session updates, one JSON object
+//! per line. Owns its own wire line shapes ([`AcpLine`] et al.).
 
 use serde::Serialize;
 use serde_json::Value;
@@ -131,7 +131,7 @@ impl Reducer for AcpReducer {
                 skills: _,
             } => AcpLine::AvailableCommands { tools, commands },
             StreamEvent::Lifecycle(l) => return vec![to_line(&acp_lifecycle_line(l))],
-            // Only the Messages reducer consumes these, for its `--include-partial-messages` framing
+            // These events feed only the Messages reducer's partial framing.
             StreamEvent::ResponseStarted { .. } | StreamEvent::ReasoningCompleted { .. } => {
                 return vec![];
             }

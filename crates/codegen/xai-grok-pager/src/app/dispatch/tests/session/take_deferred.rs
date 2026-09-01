@@ -67,8 +67,9 @@ fn effort_only_resolves_remapped_menu_id() {
 
 #[test]
 fn effort_only_unsupported_canonical_token_is_unsupported() {
-    // The support check runs first: a canonical token on a non-reasoning model reports Unsupported (matching `/effort` and headless)
-    // The alternative would silently apply an effort the server would drop
+    // Gate-first: a canonical token on a model that doesn't support reasoning
+    // effort surfaces Unsupported (matching `/effort` and headless) rather than
+    // silently applying an effort the server would drop.
     let models = models_with_current(false);
     assert_eq!(
         take_deferred_model_switch(None, &models, Some("high")),
@@ -172,7 +173,8 @@ fn stashed_model_keeps_model_when_token_unresolvable() {
 
 #[test]
 fn stashed_model_keeps_model_when_unsupported() {
-    // -m targets a non-reasoning model plus an effort token: keep the model switch, drop the effort, and report Unsupported
+    // -m targets a non-reasoning model plus an effort token: keep the model
+    // switch, drop the effort, and surface Unsupported.
     let mut models = models_with_current(true);
     let (plain, plain_info) = model_with_support("plain-model", false);
     models.available.insert(plain.clone(), plain_info);
@@ -214,7 +216,8 @@ fn effort_only_errors_without_active_model() {
     );
 }
 
-/// Stash/outcome with no rollback target (carrying `prev_model_id` through is covered by the router/lifecycle tests).
+/// Stash/outcome with no rollback target (prev threading is covered by the
+/// router/lifecycle tests).
 fn switch(model_id: acp::ModelId, effort: Option<ReasoningEffort>) -> DeferredModelSwitch {
     DeferredModelSwitch {
         model_id,

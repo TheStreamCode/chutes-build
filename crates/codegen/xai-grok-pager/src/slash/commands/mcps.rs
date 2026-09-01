@@ -1,13 +1,19 @@
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
 pub struct McpsCommand;
 
 impl SlashCommand for McpsCommand {
-    slash_meta! {
-        name: "mcps",
-        description: "Show MCP server status",
-        usage: "/mcps",
+    fn name(&self) -> &str {
+        "mcps"
+    }
+
+    fn description(&self) -> &str {
+        "Show MCP server status"
+    }
+
+    fn usage(&self) -> &str {
+        "/mcps"
     }
 
     fn run(&self, _ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {

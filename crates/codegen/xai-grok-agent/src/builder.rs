@@ -711,7 +711,28 @@ impl AgentBuilder {
         } else {
             std::collections::HashSet::new()
         };
-        let tool_bridge_builder = ToolBridge::get_builder();
+        let mut tool_bridge_builder = ToolBridge::get_builder();
+        {
+            // Chutes-native tools: registered up front so curated agent
+            // toolsets listing `ChutesBuild:*` ids resolve at finalize time.
+            use xai_grok_tools::implementations::chutes;
+            use xai_grok_tools::implementations::grok_build;
+            tool_bridge_builder.register::<chutes::Context7SearchTool>();
+            tool_bridge_builder.register::<chutes::Context7DocsTool>();
+            tool_bridge_builder.register::<chutes::GetChutesUsageTool>();
+            tool_bridge_builder.register::<chutes::ListMediaModelsTool>();
+            tool_bridge_builder.register::<chutes::DescribeMediaModelTool>();
+            tool_bridge_builder.register::<chutes::GenerateMediaTool>();
+            tool_bridge_builder.register::<chutes::BrowserTool>();
+            tool_bridge_builder.register::<chutes::OcrPageTool>();
+            tool_bridge_builder
+                .register::<grok_build::send_subagent_message::SendSubagentMessageTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerCreateTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerDeleteTool>();
+            tool_bridge_builder.register::<grok_build::SchedulerListTool>();
+            tool_bridge_builder.register::<grok_build::MonitorTool>();
+            tool_bridge_builder.register::<grok_build::update_goal::UpdateGoalTool>();
+        }
         let state_path = self.state_path.clone().unwrap_or_default();
         let mut tool_config = definition.tool_config.clone();
         if !definition.inject_default_tools && tool_config.tools.is_empty() {

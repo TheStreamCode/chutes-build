@@ -114,22 +114,15 @@ fn paint_pixels_with_path_returns_footer_and_exact_transmission() {
         text.contains("Path: /tmp/logo.png"),
         "rendered footer missing path: {text:?}",
     );
-    let esc = escapes.as_str();
+    assert!(escapes.as_str().starts_with(&format!(
+        "\x1b[{};{}H",
+        placement.y + 1,
+        placement.x + 1
+    )));
     assert!(
-        esc.contains("a=d,d=i"),
-        "first paint must delete id 1 before placing: {esc}"
-    );
-    assert!(
-        esc.contains(&format!("\x1b[{};{}H", placement.y + 1, placement.x + 1)),
-        "first paint must CUP to the placement cell: {esc}"
-    );
-    assert!(
-        esc.contains("a=T"),
-        "first paint must be one transmit+display: {esc}"
-    );
-    assert!(
-        esc.contains(&format!("c={},r={}", placement.cols, placement.rows)),
-        "placement geometry missing: {esc}"
+        escapes
+            .as_str()
+            .contains(&format!("c={},r={}", placement.cols, placement.rows))
     );
 }
 

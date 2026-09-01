@@ -1,14 +1,14 @@
 //! Minimal-mode welcome card.
 //!
 //! Minimal skips the full-screen welcome view entirely, so the start of a
-//! session is otherwise invisible ÔÇö you land straight at the prompt. To make a
+//! session is otherwise invisible — you land straight at the prompt. To make a
 //! fresh session obvious (and on `/new` / `Ctrl+N`), this commits a compact,
 //! rounded card once into native scrollback: the braille logo, the version, the
 //! cwd, the model, and a one-line hint. It mirrors the full-TUI hero box's style
 //! (rounded dim border + logo) without its menu/onboarding.
 //!
-//! It is printed via [`xai_ratatui_inline::Terminal::insert_before`] ÔÇö the same
-//! one-shot mechanism the commit pipeline uses ÔÇö gated on an `AppView` flag set
+//! It is printed via [`xai_ratatui_inline::Terminal::insert_before`] — the same
+//! one-shot mechanism the commit pipeline uses — gated on an `AppView` flag set
 //! at session creation, so it prints exactly once per session and re-prints when
 //! a new session starts.
 
@@ -30,19 +30,19 @@ pub fn maybe_commit_welcome(app: &mut AppView, terminal: &mut PagerTerminal) {
         return;
     }
     let width = terminal.viewport_area().width;
-    // Too narrow to draw a bordered card ÔÇö leave the flag set and retry next
+    // Too narrow to draw a bordered card — leave the flag set and retry next
     // frame (e.g. during an initial 0-width probe).
     if width < 8 {
         return;
     }
     // NB: the pending flag is cleared only after the `insert_before` at the
-    // bottom SUCCEEDS ÔÇö clearing it up front meant a failed insert silently
+    // bottom SUCCEEDS — clearing it up front meant a failed insert silently
     // dropped the card forever (bugbot). A failed frame retries next draw.
 
     // Reset the live viewport to the TOP of the screen and clear what's visible,
     // so the welcome card commits at row 0 and the app "owns" the window. The
     // viewport is not bottom-pinned, so subsequent commits flow downward from
-    // here. Pre-existing native scrollback is untouched ÔÇö scrolling up still
+    // here. Pre-existing native scrollback is untouched — scrolling up still
     // shows whatever was there before.
     let live_h = terminal.viewport_area().height;
     terminal.set_viewport_area(ratatui::layout::Rect {
@@ -84,7 +84,7 @@ pub fn maybe_commit_welcome(app: &mut AppView, terminal: &mut PagerTerminal) {
     }
     if let Some(model) = model {
         info.push(Line::from(Span::styled(
-            format!("Model ┬À {model}"),
+            format!("Model · {model}"),
             theme.muted(),
         )));
     }
@@ -132,7 +132,7 @@ pub fn maybe_commit_welcome(app: &mut AppView, terminal: &mut PagerTerminal) {
         }
     });
     if inserted.is_err() {
-        // Terminal write failed ÔÇö keep the flag pending so the card retries on
+        // Terminal write failed — keep the flag pending so the card retries on
         // the next frame instead of being dropped forever.
         return;
     }

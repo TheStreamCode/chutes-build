@@ -10,7 +10,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[cfg(all(feature = "jemalloc", feature = "release-dist", unix))]
 mod jemalloc_malloc_conf {
-    /// jemalloc looks up `extern const char *malloc_conf` ÔÇö a thin pointer,
+    /// jemalloc looks up `extern const char *malloc_conf` — a thin pointer,
     /// not a Rust `&[u8]` fat pointer.
     #[repr(transparent)]
     struct MallocConfPtr(*const u8);
@@ -26,6 +26,7 @@ mod jemalloc_malloc_conf {
     static MALLOC_CONF: MallocConfPtr = MallocConfPtr(CONF.as_ptr());
 }
 use anyhow::Result;
+use std::env;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use tokio_util::sync::CancellationToken;
@@ -45,79 +46,6 @@ use xai_grok_shell::leader::{
 use xai_grok_shell::leader::{
     ControlPayload, LeaderClient, LeaderEnvUrls, connect_or_spawn, socket_path_for_ws_url,
 };
-use xai_grok_telemetry::process_info::{
-    Entrypoint, Interactivity, ProcessIdentity, ReleaseChannel, set_identity, set_release_channel,
-};
-fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<ProcessIdentity> {
-    use xai_grok_telemetry::process_info::LeaderMode::Standalone;
-    let (entrypoint, interactivity) = match command {
-        Some(Command::Agent(_)) => return None,
-        Some(Command::Dashboard) => return None,
-        Some(Command::Login { .. }) => (Entrypoint::Cli, Interactivity::Interactive),
-        Some(
-            Command::Inspect { .. }
-            | Command::Doctor(_)
-            | Command::Leader(_)
-            | Command::Logout
-            | Command::Mcp(_)
-            | Command::Plugin(_)
-            | Command::Memory(_)
-            | Command::Models
-            | Command::Sessions(_)
-            | Command::Setup { .. }
-            | Command::Share(_)
-            | Command::Wrap(_)
-            | Command::Export(_)
-            | Command::Trace(_)
-            | Command::Update { .. }
-            | Command::Version { .. }
-            | Command::Completions { .. }
-            | Command::Worktree(_)
-            | Command::DiskUsage(_)
-            | Command::Workspace(_),
-        ) => (Entrypoint::Cli, Interactivity::Unattended),
-        None if is_interactive => return None,
-        None => (Entrypoint::Headless, Interactivity::Unattended),
-    };
-    Some(ProcessIdentity {
-        entrypoint,
-        leader: Standalone,
-        interactivity,
-    })
-}
-/// True when this command later boots an agent (`spawn_grok_shell` / agent
-/// subcommand) that heals managed policy after `apply_sandbox`.
-fn command_needs_pre_sandbox_policy_heal(command: Option<&Command>) -> bool {
-    match command {
-        None
-        | Some(Command::Agent(_))
-        | Some(Command::Dashboard)
-        | Some(Command::Models)
-        | Some(Command::Worktree(_)) => true,
-        Some(
-            Command::Inspect { .. }
-            | Command::Doctor(_)
-            | Command::Leader(_)
-            | Command::Logout
-            | Command::Login { .. }
-            | Command::Mcp(_)
-            | Command::Plugin(_)
-            | Command::Memory(_)
-            | Command::Sessions(_)
-            | Command::Setup { .. }
-            | Command::Share(_)
-            | Command::Wrap(_)
-            | Command::Export(_)
-            | Command::Trace(_)
-            | Command::Update { .. }
-            | Command::Version { .. }
-            | Command::Completions { .. }
-            | Command::DiskUsage(_)
-            | Command::Workspace(_),
-        ) => false,
-    }
-}
-use std::env;
 use xai_grok_update::{UpdateConfig, auto_update, enforce_version_policy_or_exit};
 /// Apply headless args to an existing config, only overriding values that are
 /// explicitly set. This allows environment defaults to be preserved when
@@ -160,17 +88,49 @@ fn resolve_agent_profile_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 /// Print startup information for the serve command.
+///
+/// The token is shown only when stderr is a terminal. An operator reading their own
+/// console needs it to connect; a redirected stderr — a systemd journal, a CI log,
+/// `2>serve.log` — would otherwise persist a live credential that grants code
+/// execution. When it is withheld, say where to get it instead.
+///
+/// A non-loopback bind also warns: the transport is `ws://` and the token travels
+/// as a query parameter, so a routable address puts it on the wire in cleartext.
 fn print_serve_startup_info(bind_addr: SocketAddr, secret: &str) {
+    use std::io::IsTerminal as _;
+    let interactive = std::io::stderr().is_terminal();
     eprintln!();
     eprintln!("   Chutes Build agent server starting...");
     eprintln!();
     eprintln!("   Address:  {}:{}", bind_addr.ip(), bind_addr.port());
-    eprintln!("   Secret:   {}", secret);
+    if interactive {
+        eprintln!("   Secret:   {}", secret);
+    } else {
+        eprintln!("   Secret:   <hidden: stderr is not a terminal>");
+        eprintln!("             Pass --secret, or set CHUTES_BUILD_AGENT_SECRET,");
+        eprintln!("             to choose it yourself.");
+    }
+    if !bind_addr.ip().is_loopback() {
+        eprintln!();
+        eprintln!(
+            "   WARNING: {} is not loopback. This server speaks ws:// and accepts",
+            bind_addr.ip()
+        );
+        eprintln!("            the key as a query parameter, so both travel unencrypted.");
+        eprintln!("            Put it behind a TLS terminator, or bind 127.0.0.1.");
+    }
     eprintln!();
-    eprintln!(
-        "   WebSocket URL: ws://{}/ws?server-key={}",
-        bind_addr, secret
-    );
+    if interactive {
+        eprintln!(
+            "   WebSocket URL: ws://{}/ws?server-key={}",
+            bind_addr, secret
+        );
+    } else {
+        eprintln!(
+            "   WebSocket URL: ws://{}/ws?server-key=<hidden>",
+            bind_addr
+        );
+    }
     eprintln!();
 }
 /// Entrypoint tag for `chutes-build -p`; keys the quiet stderr default in `init_tracing_simple`.
@@ -199,7 +159,6 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
     let registry = tracing_subscriber::registry()
         .with(fmt_layer.with_filter(env_filter))
         .with(xai_grok_telemetry::sampling_log::layer())
-        .with(xai_grok_telemetry::span_profile::layer(app_entrypoint))
         .with(xai_grok_telemetry::instrumentation::layer())
         .with(xai_grok_telemetry::hooks_log::layer())
         .with(xai_grok_telemetry::otel_layer::build_otel_layer(
@@ -224,7 +183,6 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
 }
 /// `chutes-build setup`: rendering + exit codes only; fetch logic lives in `xai_grok_shell::managed_config`.
 /// `json` prints the served configuration instead of installing it.
-#[tracing::instrument(level = "debug", skip_all)]
 async fn run_setup_command(json: bool) {
     use xai_grok_shell::managed_config::{self, SetupOutcome};
     if !managed_config::has_principal() {
@@ -289,7 +247,6 @@ async fn run_setup_command(json: bool) {
         }
     }
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn run_leader_mgmt(args: LeaderMgmtArgs) -> Result<()> {
     match args.command {
         LeaderMgmtCommand::Kill => kill_leaders().await,
@@ -328,7 +285,7 @@ async fn run_leader_mgmt(args: LeaderMgmtArgs) -> Result<()> {
             } else {
                 print_leader_descriptor(&descriptor);
                 eprintln!(
-                    "  (detailed info unavailable ÔÇö leader does not advertise control capabilities)"
+                    "  (detailed info unavailable — leader does not advertise control capabilities)"
                 );
             }
             client.cancel();
@@ -336,7 +293,6 @@ async fn run_leader_mgmt(args: LeaderMgmtArgs) -> Result<()> {
         }
     }
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn kill_leaders() -> Result<()> {
     let leaders = xai_grok_shell::leader::discover_leaders().await;
     if leaders.is_empty() {
@@ -382,7 +338,6 @@ fn resolve_target(args: &LeaderTargetArgs) -> LeaderTarget {
         None => LeaderTarget::Environment(xai_grok_shell::env::GrokBuildEnvironment::Production),
     }
 }
-#[tracing::instrument(skip_all)]
 async fn connect_to_leader(
     args: &LeaderTargetArgs,
 ) -> Result<(LeaderDescriptor, xai_grok_shell::leader::LeaderClient)> {
@@ -447,7 +402,7 @@ fn ensure_control_caps(reg: &LeaderRegistration) -> Result<&LeaderCapabilities> 
         .ok_or_else(|| anyhow::anyhow!("Leader does not advertise capabilities (legacy version)"))
 }
 /// Env override for the `grok workspace` gate: any truthy value enables the
-/// command locally, a falsy one disables it ÔÇö bypassing the remote settings flag.
+/// command locally, a falsy one disables it — bypassing the remote settings flag.
 const WORKSPACE_COMMAND_ENV: &str = "CHUTES_BUILD_WORKSPACE_COMMAND";
 /// Resolution of the `grok workspace` gate. `Unknown` is kept separate from
 /// `Disabled` so we don't tell the user the flag is off when the settings were
@@ -496,7 +451,6 @@ fn env_flag_enabled(value: &str) -> bool {
 fn fetch_remote_settings() -> Option<xai_grok_shell::util::config::RemoteSettings> {
     join_early_prefetch(xai_grok_shell::agent::models::start_early_prefetch(None))
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn run_workspace_mgmt(args: WorkspaceMgmtArgs) -> Result<()> {
     if matches!(
         &args.command,
@@ -559,13 +513,12 @@ fn ensure_workspace_caps(reg: &LeaderRegistration) -> Result<()> {
     let caps = ensure_control_caps(reg)?;
     if !caps.workspace_exposure {
         anyhow::bail!(
-            "the running leader does not support workspace exposure ÔÇö stop the \
+            "the running leader does not support workspace exposure — stop the \
              leader process and re-run to pick up the new version"
         );
     }
     Ok(())
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn connect_workspace_control(
     agent_config: &AgentConfig,
     target: &LeaderTargetArgs,
@@ -590,13 +543,14 @@ async fn connect_workspace_control(
         )
     })
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn workspace_control(
     target: &LeaderTargetArgs,
     json: bool,
     command: ControlCommand,
 ) -> Result<()> {
-    let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+    let raw_config = xai_grok_shell::config::load_effective_config_disk_only()
+        .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+    let agent_config = AgentConfig::new_from_toml_cfg(&raw_config)
         .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
     let client = connect_workspace_control(&agent_config, target).await?;
     ensure_workspace_caps(client.registration())?;
@@ -605,7 +559,6 @@ async fn workspace_control(
     client.cancel();
     Ok(())
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn workspace_start(
     args: WorkspaceStartArgs,
     restart: bool,
@@ -726,7 +679,7 @@ fn render_workspace_payload(payload: &ControlPayload, json: bool) {
 struct CachedSession {
     /// Verbatim `session/load` request JSON (preferred replay form: preserves
     /// the client's exact cwd / mcpServers / meta). `None` when the session
-    /// was only ever created via `session/new` ÔÇö the load is synthesized.
+    /// was only ever created via `session/new` — the load is synthesized.
     load_request_json: Option<String>,
     /// `cwd` captured from `session/new` / `session/load` params.
     cwd: Option<String>,
@@ -736,7 +689,7 @@ struct CachedSession {
 /// ACP state cached from the stdio stream for replay after leader reconnect.
 ///
 /// Tracks EVERY session the external client has open (IDE clients drive
-/// multiple sessions over one bridge), not just the most recent one ÔÇö a
+/// multiple sessions over one bridge), not just the most recent one — a
 /// leader crash must restore all of them or the others die with
 /// "unknown session id" on their next prompt.
 #[derive(Default, Clone)]
@@ -751,7 +704,7 @@ struct StdioReplayState {
     /// unconfirmed (the id is unknown; the client's own request died with the
     /// old leader and is its to retry).
     pending_new: Option<CachedSession>,
-    /// Most recently created/loaded session id ÔÇö reported in
+    /// Most recently created/loaded session id — reported in
     /// `chutes.ai/leader_reconnected` as the primary restored session.
     last_session_id: Option<String>,
 }
@@ -810,7 +763,7 @@ const CACHED_METHODS: &[&str] = &[
     "\"session/load\"",
     "\"session/resume\"",
     "\"session/close\"",
-    "\"chutes.ai/session/close\"",
+    "\"chutes.build/session/close\"",
     "\"_chutes.build/session/close\"",
 ];
 fn cache_outgoing_acp_state(msg: &str, state: &std::sync::Mutex<StdioReplayState>) {
@@ -865,7 +818,7 @@ fn cache_outgoing_acp_state(msg: &str, state: &std::sync::Mutex<StdioReplayState
                     .and_then(|m| serde_json::to_string(m).ok()),
             });
         }
-        "session/close" | "chutes.ai/session/close" | "_chutes.build/session/close" => {
+        "session/close" | "chutes.build/session/close" | "_chutes.build/session/close" => {
             if let Some(sid) = json
                 .get("params")
                 .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))
@@ -897,7 +850,7 @@ fn cache_incoming_session_id(msg: &str, state: &std::sync::Mutex<StdioReplayStat
 /// Synthetic JSON-RPC id for the `session/load` the bridge constructs itself
 /// (when the external client only ever sent `session/new`). A string id can
 /// never collide with a numeric id the external client may have in flight.
-const REPLAY_LOAD_REQUEST_ID: &str = "chutes.ai/leader-replay/session-load";
+const REPLAY_LOAD_REQUEST_ID: &str = "chutes.build/leader-replay/session-load";
 /// Max silence between two messages from the leader during a replayed request.
 /// A `session/load` streams replay notifications continuously once it starts,
 /// but the pre-replay phase (MCP resolution, session file reads) can be quiet
@@ -936,7 +889,7 @@ fn parse_replay_response(msg: &str, expected_id: &serde_json::Value) -> Option<R
 /// `session/load` emits the full replay stream (session/update notifications)
 /// BEFORE its response, so "wait for the next message" is not "wait for the
 /// response". Everything that is not the response itself is forwarded verbatim
-/// to the external client's stdout ÔÇö exactly what the pre-reconnect stream
+/// to the external client's stdout — exactly what the pre-reconnect stream
 /// would have carried. Only the response to the replayed request is swallowed
 /// (the external client already received a response for its original send and
 /// must not see a duplicate or unknown-id response).
@@ -945,7 +898,6 @@ fn parse_replay_response(msg: &str, expected_id: &serde_json::Value) -> Option<R
 /// "unknown session id" failures after a leader crash: the bridge declared
 /// the reconnect complete while the new leader was still loading the session,
 /// and the client's next `session/prompt` raced (and lost against) the load.
-#[tracing::instrument(level = "debug", skip_all)]
 async fn replay_request_until_response(
     tx: &tokio::sync::mpsc::UnboundedSender<String>,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
@@ -1031,14 +983,13 @@ fn replay_load_json(sid: &str, cached: &CachedSession) -> Option<String> {
 /// Replay cached `initialize` + every cached `session/load` to a freshly
 /// (re-)elected leader, blocking until the leader has actually finished
 /// loading EACH session (loads are sent strictly sequentially, each awaiting
-/// its response ÔÇö the synthesized-id reuse relies on this ordering).
+/// its response — the synthesized-id reuse relies on this ordering).
 ///
 /// Returns the primary restored session id (the most recently active one,
 /// falling back to any successfully restored session). `None` when there was
-/// nothing to replay or every restore failed ÔÇö callers emit
+/// nothing to replay or every restore failed — callers emit
 /// `chutes.ai/leader_reconnected` with empty params in that case, signalling the
 /// external client to re-establish state itself.
-#[tracing::instrument(skip_all)]
 async fn replay_acp_state_after_reconnect(
     tx: &tokio::sync::mpsc::UnboundedSender<String>,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
@@ -1097,22 +1048,15 @@ async fn replay_acp_state_after_reconnect(
 }
 /// Flush observability, then exit. Used by the agent/headless signal handler.
 ///
-/// Does NOT write terminal escape codes ÔÇö agent mode never enables TUI modes.
+/// Does NOT write terminal escape codes — agent mode never enables TUI modes.
 /// The TUI has its own signal handler (`app::signal_handler`) that does the
 /// full crossterm teardown.
 fn shutdown_and_flush_telemetry(exit_code: i32) -> ! {
     xai_grok_telemetry::sentry::flush_on_shutdown();
     xai_grok_telemetry::otel_layer::shutdown_otel();
     xai_grok_telemetry::debug_log::flush();
-    finalize_span_profile();
     std::process::exit(exit_code);
 }
-fn finalize_span_profile() {
-    if let Some(path) = xai_grok_telemetry::span_profile::finalize() {
-        eprintln!("chutes-build: span profile written to {}", path.display());
-    }
-}
-#[tracing::instrument(level = "debug", skip_all)]
 async fn forward_stdio_line_to_leader(
     line: Vec<u8>,
     leader_tx: &tokio::sync::Mutex<tokio::sync::mpsc::UnboundedSender<String>>,
@@ -1148,7 +1092,6 @@ async fn forward_stdio_line_to_leader(
 const PLUGIN_DIR_LEADER_WARNING: &str = "chutes-build: --plugin-dir is ignored in leader mode; run with --no-leader to \
      load per-process plugins";
 /// Run the `agent` subcommand, dispatching to the appropriate mode.
-#[tracing::instrument(level = "debug", skip_all)]
 async fn run_agent_command(
     agent_args: Box<xai_grok_pager::app::AgentArgs>,
     permission_mode_flag: Option<String>,
@@ -1185,7 +1128,7 @@ async fn run_agent_command(
     xai_grok_telemetry::instrumentation::install_panic_hook();
     if trust {
         match std::env::current_dir() {
-            Ok(cwd) => xai_grok_workspace::folder_trust::grant_folder_trust(&cwd),
+            Ok(cwd) => xai_grok_shell::agent::folder_trust::grant_folder_trust(&cwd),
             Err(e) => {
                 tracing::warn!(error = %e, "--trust: failed to resolve cwd; folder not trusted")
             }
@@ -1193,6 +1136,7 @@ async fn run_agent_command(
     }
     let early_prefetch = xai_grok_shell::agent::models::start_early_prefetch(None);
     xai_grok_shell::agent::mvp_agent::warm_async_http_client();
+    tokio::task::spawn_blocking(|| {});
     let is_stdio = matches!(agent_args.mode, Some(AgentCmd::Stdio));
     let is_leader = matches!(agent_args.mode, Some(AgentCmd::Leader(_)));
     if !is_stdio && !is_leader {
@@ -1293,21 +1237,6 @@ async fn run_agent_command(
     if let Some(profile) = disabled_by_confinement {
         warn_leader_disabled_by_sandbox(profile);
     }
-    use xai_grok_telemetry::process_info::LeaderMode::{Attached, Standalone};
-    set_identity(ProcessIdentity {
-        entrypoint: match &agent_args.mode {
-            Some(AgentCmd::Stdio) => Entrypoint::Embedded,
-            Some(AgentCmd::Leader(_)) => Entrypoint::Leader,
-            Some(AgentCmd::Serve(_)) => Entrypoint::Workspace,
-            Some(AgentCmd::Headless(_)) | None => Entrypoint::Headless,
-        },
-        leader: if use_leader || matches!(agent_args.mode, Some(AgentCmd::Leader(_))) {
-            Attached
-        } else {
-            Standalone
-        },
-        interactivity: Interactivity::Unattended,
-    });
     let managed_install = is_managed_install(
         std::env::current_exe().ok(),
         &xai_grok_shell::util::grok_home::grok_home(),
@@ -1359,10 +1288,10 @@ async fn run_agent_command(
             default_model,
             client_version: Some(PAGER_CLIENT_VERSION.to_string()),
             code_nav_enabled: false,
+            status_line: false,
             terminal: false,
             fs_read: false,
             fs_write: false,
-            status_line: false,
         };
         let conn = connect_or_spawn(&client_type, mode, &env_urls, capabilities.clone()).await?;
         let (tx, rx) = conn.into_channels();
@@ -1381,7 +1310,7 @@ async fn run_agent_command(
                     tracing::warn!(
                         %error,
                         "failed to bind to parent death; stdio bridge will not die \
-                         with its parent ÔÇö stdin EOF remains the only cleanup"
+                         with its parent — stdin EOF remains the only cleanup"
                     );
                 }
                 let replay_state = Arc::new(std::sync::Mutex::new(StdioReplayState::default()));
@@ -1459,7 +1388,7 @@ async fn run_agent_command(
                                             None => "{}".to_string(),
                                         };
                                         let notification = format!(
-                                            r#"{{"jsonrpc":"2.0","method":"chutes.ai/leader_reconnected","params":{params}}}"#
+                                            r#"{{"jsonrpc":"2.0","method":"chutes.build/leader_reconnected","params":{params}}}"#
                                         );
                                         let _ = stdout.write_all(notification.as_bytes()).await;
                                         let _ = stdout.write_all(b"\n").await;
@@ -1613,11 +1542,11 @@ async fn run_agent_command(
 ///
 /// Default soft limits (256 macOS, commonly 1024 Linux) are easily exceeded:
 /// each session thread's runtime costs ~3 fds, and a wide parallel subagent
-/// wave adds spawn-burst transients ÔÇö a 1024 limit fails with EMFILE under a
+/// wave adds spawn-burst transients — a 1024 limit fails with EMFILE under a
 /// ~100-session wave. Targets 65536 on Linux (hard limits typically >= 1M)
 /// and 8192 on macOS (`kern.maxfilesperproc` is often ~10k). No known
 /// in-tree `select(2)` users (Rust std/tokio use epoll/kqueue); residual
-/// third-party `FD_SETSIZE` risk is accepted ÔÇö the prior 8192 cap already
+/// third-party `FD_SETSIZE` risk is accepted — the prior 8192 cap already
 /// exceeded FD_SETSIZE.
 ///
 /// Best-effort: never blocks startup (containers/cgroups may pin limits).
@@ -1653,9 +1582,9 @@ fn raise_fd_limit() {}
 /// `chutes-build dashboard`, and clears `args.command` so the regular
 /// subcommand match doesn't try to handle it.
 ///
-/// The dashboard is independent of leader mode ÔÇö it renders local
+/// The dashboard is independent of leader mode — it renders local
 /// sessions and, when a leader happens to be present, additionally shows
-/// the leader roster ÔÇö so `chutes-build dashboard` does NOT force leader mode and
+/// the leader roster — so `chutes-build dashboard` does NOT force leader mode and
 /// is compatible with `--no-leader`.
 ///
 /// The only gate is the feature flag: a disabled dashboard
@@ -1777,8 +1706,8 @@ fn run_and_shutdown<F: std::future::Future>(
 ///
 /// `arena.<MALLCTL_ARENAS_ALL>.purge` madvises away all dirty/muzzy pages in
 /// every arena. The pager invokes this (via the `memory_release` seam) right
-/// after known memory cliffs ÔÇö e.g. dropping a session load's replay
-/// transient ÔÇö so a long-session resume doesn't leave hundreds of MB of dead
+/// after known memory cliffs — e.g. dropping a session load's replay
+/// transient — so a long-session resume doesn't leave hundreds of MB of dead
 /// pages counted against the process for its lifetime (macOS keeps
 /// `MADV_FREE`d pages in RSS until systemwide pressure).
 #[cfg(all(feature = "jemalloc", unix))]
@@ -1832,7 +1761,7 @@ fn jemalloc_allocator_stats() -> Option<xai_grok_pager::memory_trace::AllocatorS
 }
 /// Full jemalloc statistics dump for threshold snapshots
 /// (`malloc_stats_print` default human-readable format, arena detail
-/// included) ÔÇö the artifact the GCS memory-trace upload ships for offline
+/// included) — the artifact the GCS memory-trace upload ships for offline
 /// analysis. Raw `tikv_jemalloc_sys` because jemalloc-ctl has no
 /// callback-form stats_print.
 #[cfg(all(feature = "jemalloc", unix))]
@@ -1897,11 +1826,8 @@ fn install_heap_profile_hooks() {
 }
 fn version_text(channel_label: &str) -> String {
     format!(
-        "grok {}\n",
-        xai_grok_version::display_version_with_commit(
-            xai_grok_version::full_version(),
-            channel_label,
-        )
+        "chutes-build {}\n",
+        xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), channel_label,)
     )
 }
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
@@ -1931,7 +1857,6 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
-    xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -1939,9 +1864,6 @@ fn main() {
     if let Some(code) = xai_grok_pager::voice::maybe_run_capture_subprocess() {
         std::process::exit(code);
     }
-    set_release_channel(ReleaseChannel::from_label(
-        xai_grok_update::channel_name().unwrap_or_default(),
-    ));
     let args = PagerArgs::parse_cli();
     if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
         return;
@@ -2002,30 +1924,25 @@ fn main() {
         );
     }
     let workers = cli_worker_threads();
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
-    builder.worker_threads(workers.get()).enable_all();
-    let runtime =
-        xai_tty_utils::runtime::build_with_blocking_pool(&mut builder).unwrap_or_else(|e| {
-            eprintln!("chutes-build: failed to start tokio runtime: {e}");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers.get())
+        .enable_all()
+        .build()
+        .unwrap_or_else(|e| {
+            eprintln!("chutes-build: failed to start tokio runtime with {workers} workers: {e}");
             shutdown_and_flush_telemetry(1);
         });
     let result = run_and_shutdown(runtime, async_main(args), RUNTIME_SHUTDOWN_GRACE);
     xai_grok_telemetry::debug_log::flush();
     if let Err(e) = result {
         xai_tty_utils::restore_native_stderr();
-        finalize_span_profile();
-        match e.downcast_ref::<xai_grok_pager::app::StartupFailure>() {
-            Some(startup) => eprintln!("{}", startup.user_report()),
-            None => eprintln!("Error: {e:#}"),
-        }
+        eprintln!("Error: {e:#}");
         drop(_sentry_guard);
         std::process::exit(1);
     }
-    finalize_span_profile();
 }
-#[tracing::instrument(level = "debug", skip_all)]
 async fn async_main(args: PagerArgs) -> Result<()> {
-    xai_grok_extra_ca::ensure_default_crypto_provider();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let mut args = args.apply_cwd()?;
     if let Some(ref mode) = args.compaction_mode {
         unsafe { std::env::set_var("CHUTES_BUILD_COMPACTION_MODE", mode) };
@@ -2072,42 +1989,13 @@ async fn async_main(args: PagerArgs) -> Result<()> {
         xai_grok_pager::app::cli::SandboxStartup::Apply(profile) => profile,
         xai_grok_pager::app::cli::SandboxStartup::Conflict { requested, saved } => {
             eprintln!(
-                "error: cannot resume this session under sandbox profile '{requested}' ÔÇö \
+                "error: cannot resume this session under sandbox profile '{requested}' — \
                  it was created with '{saved}'. Omit --sandbox to resume with '{saved}', \
                  or start a new session to use '{requested}'."
             );
             std::process::exit(1);
         }
     };
-    if args.trust {
-        match std::env::current_dir() {
-            Ok(cwd) => xai_grok_workspace::folder_trust::grant_folder_trust(&cwd),
-            Err(e) => {
-                eprintln!("warning: --trust: failed to resolve cwd; folder not trusted: {e}");
-            }
-        }
-    }
-    if command_needs_pre_sandbox_policy_heal(args.command.as_ref()) {
-        match xai_grok_shell::config::load_agent_config_disk_only() {
-            Ok(agent_cfg) => {
-                let auth_manager = std::sync::Arc::new(xai_grok_shell::auth::AuthManager::new(
-                    &xai_grok_shell::util::grok_home::grok_home(),
-                    agent_cfg.grok_com_config.clone(),
-                ));
-                auth_manager.configure_refresher(
-                    agent_cfg.grok_com_config.auth_provider_command.clone(),
-                    None,
-                );
-                xai_grok_shell::managed_config::ensure_managed_policy_present(&auth_manager).await;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "managed policy: skipped session-start heal (disk config load failed)"
-                );
-            }
-        }
-    }
     xai_grok_shell::config::apply_sandbox(
         None,
         sandbox_profile_arg.as_deref(),
@@ -2123,9 +2011,6 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     } else {
         xai_grok_workspace::permission::ClientType::Generic
     });
-    if let Some(identity) = process_identity(args.command.as_ref(), is_interactive) {
-        set_identity(identity);
-    }
     let update_config = build_update_config();
     if let Some(command) = args.command.take() {
         match command {
@@ -2193,7 +2078,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Models => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::models::list_available_models(&agent_config).await;
             }
@@ -2205,7 +2092,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Worktree(worktree_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::worktree_cmd::run(worktree_args, &agent_config).await;
             }
@@ -2222,14 +2111,18 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Sessions(sessions_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::sessions_cmd::run(sessions_args, &agent_config).await;
             }
             Command::Share(ref share_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::share_cmd::run(share_args, &agent_config).await;
             }
@@ -2240,7 +2133,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Trace(trace_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::trace_cmd::run(trace_args, &agent_config).await;
             }
@@ -2255,20 +2150,16 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 alpha,
                 stable,
                 enterprise,
-                trigger,
-                auto,
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
                 let channel_switch = get_channel_switch(alpha, stable, enterprise);
-                let trigger = resolve_update_trigger(trigger.as_deref(), auto);
                 return run_update_command(
                     check,
                     json,
                     force_reinstall,
                     version,
                     channel_switch,
-                    trigger,
                     &update_config,
                 )
                 .await;
@@ -2281,7 +2172,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 xai_grok_shell::auth::run_cli_login(&config, oauth, device_auth, devbox).await?;
                 println!();
@@ -2289,7 +2182,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::Logout => {
                 init_tracing_simple("cli");
-                let config = xai_grok_shell::config::load_agent_config_disk_only()
+                let config = xai_grok_shell::config::load_effective_config_disk_only()
+                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+                let config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 xai_grok_shell::auth::run_cli_logout(&config)?;
                 xai_grok_shell::instrumentation::finalize_and_exit(0);
@@ -2413,12 +2308,11 @@ async fn async_main(args: PagerArgs) -> Result<()> {
 /// when an update path completed without a reported failure.
 ///
 /// Prefers awaiting the parked waiter for the background `chutes-build update` child
-/// spawned at startup ÔÇö the download is usually already done or in flight.
+/// spawned at startup — the download is usually already done or in flight.
 /// Only when there is no waiter (spawn failed, or no download was needed
 /// because the target was already on disk) or the child failed does this
 /// fall back to a fresh blocking `chutes-build update`, which itself resolves to
 /// "Already up to date" without downloading when the disk is current.
-#[tracing::instrument(level = "debug", skip_all)]
 async fn finish_update_on_exit(
     adopted: Option<tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
     update_config: &UpdateConfig,
@@ -2487,14 +2381,41 @@ fn build_update_config() -> UpdateConfig {
 /// Central gate for auto-update checks; add new suppression rules here,
 /// not at call sites.
 fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
-    if cfg!(debug_assertions) {
-        return false;
-    }
-    if no_auto_update_flag {
-        return false;
-    }
-    !std::env::var_os("CHUTES_BUILD_DISABLE_AUTOUPDATER")
-        .is_some_and(|v| env_flag_enabled(&v.to_string_lossy()))
+    // The product invariant first. `product::AUTOMATIC_SELF_UPDATE` documents
+    // that a running Chutes Build never downloads its own update, and until now
+    // nothing read it — the constant appeared exactly once in the tree, inside a
+    // comment. What actually held the line was the `internal` installer's base
+    // URLs being deadened to `127.0.0.1:9`.
+    //
+    // That is not the same promise. `get_installer()` honours
+    // `CHUTES_BUILD_INSTALLER=npm` and `[cli] installer` in config.toml, and the
+    // npm path shells out to `npm view` while gh-release calls the GitHub API —
+    // neither deadened. So a single line of user config turned the release
+    // binary into one that contacts a registry at startup and can spawn a
+    // download child, against a documented guarantee that it would not.
+    update_check_allowed(
+        chutes_build_core::product::AUTOMATIC_SELF_UPDATE,
+        cfg!(debug_assertions),
+        no_auto_update_flag,
+        std::env::var_os("CHUTES_BUILD_DISABLE_AUTOUPDATER")
+            .is_some_and(|v| env_flag_enabled(&v.to_string_lossy())),
+    )
+}
+
+/// The decision itself, with every input passed in.
+///
+/// Split out because the interesting case cannot be reached otherwise: a test
+/// binary is a debug build, so `should_check_for_updates` returns false there
+/// whatever the product switch says, and a test asserting *it* would pass just
+/// as happily with the switch flipped on. Here the switch can be set to `true`
+/// and the guarantee actually checked.
+fn update_check_allowed(
+    product_allows: bool,
+    debug_build: bool,
+    no_auto_update_flag: bool,
+    disabled_by_env: bool,
+) -> bool {
+    product_allows && !debug_build && !no_auto_update_flag && !disabled_by_env
 }
 /// Gate for the stdio agent's background auto-update: only the direct stdio
 /// agent, from the managed install. Other modes update in `run_agent_command`.
@@ -2537,30 +2458,12 @@ fn get_channel_switch(alpha: bool, stable: bool, enterprise: bool) -> Option<&'s
     }
 }
 /// Handle `grok-pager update [--check] [--json] [--force-reinstall] [--version X] [--alpha|--stable|--enterprise]`.
-/// --trigger is the one representation; --auto is the compat alias from
-/// older parents. Unknown values fall back to user_command (a human is the
-/// only caller that can produce them).
-fn resolve_update_trigger(flag: Option<&str>, auto: bool) -> auto_update::CliUpdateTrigger {
-    if let Some(flag) = flag {
-        match flag.parse() {
-            Ok(t) => return t,
-            Err(e) => tracing::warn!("{e}; recording user_command"),
-        }
-    }
-    if auto {
-        auto_update::CliUpdateTrigger::AutoBackground
-    } else {
-        auto_update::CliUpdateTrigger::UserCommand
-    }
-}
-#[tracing::instrument(level = "debug", skip_all)]
 async fn run_update_command(
     check: bool,
     json: bool,
     force_reinstall: bool,
     version: Option<String>,
     channel_switch: Option<&str>,
-    trigger: auto_update::CliUpdateTrigger,
     base_update_config: &UpdateConfig,
 ) -> Result<()> {
     if json && !check {
@@ -2584,32 +2487,17 @@ async fn run_update_command(
             v
         );
     }
-    let telemetry_cfg = xai_grok_shell::config::load_agent_config_disk_only()
-        .map_err(|e| {
-            tracing::warn!("chutes-build update: telemetry init skipped (agent config: {e})")
-        })
-        .ok();
-    if let Some(agent_cfg) = telemetry_cfg {
-        let auth_manager = std::sync::Arc::new(xai_grok_shell::auth::AuthManager::new(
-            &xai_grok_shell::util::grok_home::grok_home(),
-            agent_cfg.grok_com_config.clone(),
-        ));
-        xai_grok_shell::agent::init::update_telemetry_config(&agent_cfg, &auth_manager);
-    }
-    let result = auto_update::run_update(
+    let installed = auto_update::run_update(
         force_reinstall,
         version.as_deref(),
         channel_switch,
         &mut update_config,
-        trigger,
+        auto_update::CliUpdateTrigger::UserCommand,
     )
-    .await;
-    if let Ok(Some(installed_version)) = &result {
-        signal_leaders_to_relaunch(installed_version).await;
+    .await?;
+    if let Some(installed_version) = installed {
+        signal_leaders_to_relaunch(&installed_version).await;
     }
-    xai_grok_telemetry::session_ctx::drain_pending(xai_grok_telemetry::session_ctx::CLI_DRAIN)
-        .await;
-    result?;
     Ok(())
 }
 /// After a successful `chutes-build update`, ask any running leader on this machine that
@@ -2619,7 +2507,6 @@ async fn run_update_command(
 /// Best-effort and non-fatal: discovery/connect/control failures are logged and
 /// skipped. The leader re-checks the directional version guard authoritatively;
 /// the pager-side `live_info` check just avoids connecting to newer leaders.
-#[tracing::instrument(level = "debug", skip_all)]
 async fn signal_leaders_to_relaunch(installed_version: &str) {
     for d in xai_grok_shell::leader::discover_leaders().await {
         if d.classification != xai_grok_shell::leader::LeaderDiscoveryState::Reachable {
@@ -2662,9 +2549,7 @@ async fn signal_leaders_to_relaunch(installed_version: &str) {
                 to_version,
                 ..
             })) => {
-                eprintln!(
-                    "  Ôå╗ Relaunching shared session (leader {from_version} ÔåÆ {to_version})ÔÇª"
-                );
+                eprintln!("  ↻ Relaunching shared session (leader {from_version} → {to_version})…");
             }
             Ok(Ok(xai_grok_shell::leader::ControlPayload::RelaunchDeclined { reason })) => {
                 tracing::debug!(%reason, "Leader declined relaunch");
@@ -2683,37 +2568,33 @@ async fn signal_leaders_to_relaunch(installed_version: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The update check must be off because the product says so, not because
+    /// the `internal` installer's URLs happen to point at a discard port.
+    ///
+    /// Those are different promises: `get_installer()` honours
+    /// `CHUTES_BUILD_INSTALLER=npm` and `[cli] installer` in config.toml, and
+    /// the npm and gh-release paths are live — `npm view` and the GitHub API.
+    /// Before this, one line of user config was enough to make a release binary
+    /// contact a registry at startup and spawn a download child. This asserts
+    /// the switch is *read*: flip `AUTOMATIC_SELF_UPDATE` to `true` and it fails
+    /// here rather than silently shipping a phone-home.
     #[test]
-    fn embedded_agent_commands_heal_managed_policy_before_sandboxing() {
-        for args in [
-            vec!["grok"],
-            vec!["grok", "agent", "stdio"],
-            vec!["grok", "dashboard"],
-            vec!["grok", "models"],
-            vec!["grok", "worktree", "list"],
-        ] {
-            let args = PagerArgs::try_parse_from(args).unwrap();
-            assert!(
-                command_needs_pre_sandbox_policy_heal(args.command.as_ref()),
-                "{args:?}"
-            );
-        }
+    fn the_update_check_is_gated_on_the_product_switch() {
+        // The switch alone stops it, with every other input saying "go".
+        assert!(!update_check_allowed(false, false, false, false));
+        // And it is the *only* thing stopping it in that configuration — so
+        // this fails the moment someone removes the gate rather than passing
+        // for an unrelated reason.
+        assert!(update_check_allowed(true, false, false, false));
+        // The pre-existing gates still hold when the product allows it.
+        assert!(!update_check_allowed(true, true, false, false));
+        assert!(!update_check_allowed(true, false, true, false));
+        assert!(!update_check_allowed(true, false, false, true));
+        // What ships.
+        assert!(!should_check_for_updates(false));
     }
-    #[test]
-    fn utility_commands_skip_managed_policy_heal() {
-        for args in [
-            vec!["grok", "inspect"],
-            vec!["grok", "mcp", "list"],
-            vec!["grok", "sessions", "list"],
-            vec!["grok", "version"],
-        ] {
-            let args = PagerArgs::try_parse_from(args).unwrap();
-            assert!(
-                !command_needs_pre_sandbox_policy_heal(args.command.as_ref()),
-                "{args:?}"
-            );
-        }
-    }
+
     #[test]
     fn default_caps_the_core_count() {
         let nz = |n| NonZeroUsize::new(n).unwrap();
@@ -2796,7 +2677,6 @@ mod tests {
     }
     #[test]
     fn version_output_writer_preserves_channel_aware_contract() {
-        xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
         for (label, expected_suffix) in [
             (" [alpha]", " [alpha]\n"),
             (" [stable]", " [stable]\n"),
@@ -2805,7 +2685,7 @@ mod tests {
             let mut output = Vec::new();
             write_version(&mut output, label).unwrap();
             let output = String::from_utf8(output).unwrap();
-            assert!(output.starts_with("grok "));
+            assert!(output.starts_with("chutes-build "), "{output:?}");
             assert!(output.contains(env!("VERSION_WITH_COMMIT")));
             assert!(output.ends_with(expected_suffix), "{output:?}");
         }
@@ -3022,7 +2902,7 @@ mod tests {
         );
     }
     use clap::Parser as _;
-    /// `chutes-build dashboard` flags the startup hook without forcing leader mode ÔÇö
+    /// `chutes-build dashboard` flags the startup hook without forcing leader mode —
     /// the dashboard is independent of leader mode, so the launch keeps
     /// whatever leader setting the user (or config) chose.
     #[serial_test::serial(CHUTES_BUILD_AGENT_DASHBOARD)]
@@ -3043,7 +2923,7 @@ mod tests {
         );
         unsafe { std::env::remove_var("CHUTES_BUILD_OPEN_DASHBOARD_AT_STARTUP") };
     }
-    /// `chutes-build dashboard --no-leader` is allowed ÔÇö the dashboard does not
+    /// `chutes-build dashboard --no-leader` is allowed — the dashboard does not
     /// require a leader, so the combination launches into the dashboard in
     /// non-leader mode.
     #[serial_test::serial(CHUTES_BUILD_AGENT_DASHBOARD)]
@@ -3065,7 +2945,7 @@ mod tests {
         );
         unsafe { std::env::remove_var("CHUTES_BUILD_OPEN_DASHBOARD_AT_STARTUP") };
     }
-    /// `CHUTES_BUILD_AGENT_DASHBOARD=0` disables the feature ÔÇö the subcommand
+    /// `CHUTES_BUILD_AGENT_DASHBOARD=0` disables the feature — the subcommand
     /// must error visibly before the TUI starts.
     #[serial_test::serial(CHUTES_BUILD_AGENT_DASHBOARD)]
     #[test]
@@ -3250,7 +3130,7 @@ mod tests {
         );
     }
     /// An UNCONFIRMED `session/new` (leader died before its response) must not
-    /// be replayed ÔÇö its id was never assigned ÔÇö but previously loaded
+    /// be replayed — its id was never assigned — but previously loaded
     /// sessions still restore.
     #[tokio::test]
     async fn replay_after_unconfirmed_session_new_restores_prior_sessions() {
@@ -3297,7 +3177,7 @@ mod tests {
             mcp_servers_json: None,
         };
         let json = replay_load_json(r#"session"with"quotes"#, &cached)
-            .expect("cwd present ÔåÆ load synthesized");
+            .expect("cwd present → load synthesized");
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("fallback replay JSON must be valid");
         assert_eq!(
@@ -3478,7 +3358,7 @@ mod tests {
     ///
     /// `session/load` streams replay notifications BEFORE its response. The
     /// old drain logic consumed exactly one message per replayed request and
-    /// returned ÔÇö declaring the reconnect complete while the new leader was
+    /// returned — declaring the reconnect complete while the new leader was
     /// still loading the session. The replay must instead:
     ///   1. wait for the actual `session/load` RESPONSE (matched by id),
     ///   2. forward interleaved notifications to the client verbatim,
@@ -3501,7 +3381,7 @@ mod tests {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(
-                    r#"{"jsonrpc":"2.0","method":"chutes.ai/leader/version_mismatch","params":{}}"#
+                    r#"{"jsonrpc":"2.0","method":"chutes.build/leader/version_mismatch","params":{}}"#
                         .to_string(),
                 )
                 .unwrap();
@@ -3584,7 +3464,7 @@ mod tests {
     }
     /// The synthetic fallback `session/load` (client only ever sent
     /// `session/new`) uses a string request id that cannot collide with the
-    /// external client's numeric ids ÔÇö and the response matcher honors it.
+    /// external client's numeric ids — and the response matcher honors it.
     #[tokio::test]
     async fn replay_fallback_load_uses_reserved_string_id() {
         let (leader_tx, mut leader_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -3657,7 +3537,7 @@ mod tests {
         assert_eq!(out, 7, "must return the future's output");
         assert!(
             elapsed >= grace,
-            "returned in {elapsed:?}, before the {grace:?} grace ÔÇö timeout not exercised",
+            "returned in {elapsed:?}, before the {grace:?} grace — timeout not exercised",
         );
         assert!(
             elapsed < ceiling,

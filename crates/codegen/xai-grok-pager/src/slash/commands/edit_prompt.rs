@@ -1,19 +1,33 @@
-//! `/edit-prompt`: edit the composer in an external editor.
-//!
-//! In the full TUI this is the only route to the editor, because `Ctrl+G` belongs to the tasks pane there.
-//! In minimal mode it doubles as the fallback for terminals that reserve the `Ctrl+G` chord.
+//! `/edit-prompt` -- edit the minimal-mode composer in an external editor.
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
+use crate::slash::{ModeSupport, Remedy};
 
+/// Minimal-only fallback for terminals that reserve `Ctrl+G`.
 pub struct EditPromptCommand;
 
 impl SlashCommand for EditPromptCommand {
-    slash_meta! {
-        name: "edit-prompt",
-        description: "Open an external editor for an empty prompt; use the command palette to preserve a draft",
-        usage: "/edit-prompt",
-        session_scoped: true,
+    fn name(&self) -> &str {
+        "edit-prompt"
+    }
+
+    fn description(&self) -> &str {
+        "Open an external editor for an empty prompt; use the command palette to preserve a draft"
+    }
+
+    fn usage(&self) -> &str {
+        "/edit-prompt"
+    }
+
+    fn session_scoped(&self) -> bool {
+        true
+    }
+
+    fn mode_support(&self) -> ModeSupport {
+        ModeSupport::MinimalOnly(Remedy::SwitchMode {
+            why: "the full TUI has no external-editor path — Ctrl+G is the tasks pane there",
+        })
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {
@@ -49,21 +63,24 @@ mod tests {
     }
 
     #[test]
-    fn opens_the_external_editor_in_both_modes() {
+    fn opens_the_external_editor() {
         let command = EditPromptCommand;
         let models = ModelState::default();
         let bundle = BundleState::default();
         let session_id = agent_client_protocol::SessionId::from("session".to_owned());
 
-        for mode in [
-            crate::app::ScreenMode::Minimal,
-            crate::app::ScreenMode::Fullscreen,
-        ] {
-            assert!(matches!(
-                command.run(&mut exec_ctx(&models, &bundle, Some(&session_id), mode), ""),
-                CommandResult::Action(Action::EditPromptExternal)
-            ));
-        }
+        assert!(matches!(
+            command.run(
+                &mut exec_ctx(
+                    &models,
+                    &bundle,
+                    Some(&session_id),
+                    crate::app::ScreenMode::Minimal,
+                ),
+                "",
+            ),
+            CommandResult::Action(Action::EditPromptExternal)
+        ));
     }
 
     #[test]

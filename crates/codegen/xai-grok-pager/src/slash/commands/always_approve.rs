@@ -1,21 +1,29 @@
-//! `/always-approve`: toggle auto-approve (YOLO / `permission_mode`).
+//! `/always-approve` -- toggle auto-approve (YOLO / `permission_mode`).
 //!
-//! Dispatches `Action::SetYoloMode(!current)`.
-//! The dispatcher handles state mutation, permission_queue drain, persistence (with rollback on disk-write failure), and toast.
+//! Dispatches `Action::SetYoloMode(!current)`. The dispatcher handles
+//! state mutation, permission_queue drain, persistence (with rollback
+//! on disk-write failure), and toast.
 //!
-//! No scrollback turn; visible effects are the prompt-line chip and a toast (destructive-styled when enabling).
+//! No scrollback turn — visible effects are the prompt-line chip and
+//! a toast (destructive-styled when enabling).
 
 use crate::app::actions::Action;
-use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
 /// Toggle always-approve (YOLO / `permission_mode`).
 pub struct AlwaysApproveCommand;
 
 impl SlashCommand for AlwaysApproveCommand {
-    slash_meta! {
-        name: "always-approve",
-        description: "Toggle always-approve mode (skip all permission prompts)",
-        usage: "/always-approve",
+    fn name(&self) -> &str {
+        "always-approve"
+    }
+
+    fn description(&self) -> &str {
+        "Toggle always-approve mode (skip all permission prompts)"
+    }
+
+    fn usage(&self) -> &str {
+        "/always-approve"
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, _args: &str) -> CommandResult {

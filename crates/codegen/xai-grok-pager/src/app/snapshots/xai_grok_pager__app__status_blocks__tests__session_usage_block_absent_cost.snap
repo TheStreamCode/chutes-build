@@ -3,7 +3,8 @@ source: crates/codegen/xai-grok-pager/src/app/status_blocks.rs
 expression: text
 ---
 Session usage (since start or last resume):
-  Input tokens:   100 (0 cached)
+  Input tokens:   100 (0 cached, 0.0%)
+  Cache:          0 hit / 1 call
   Output tokens:  10 (0 reasoning)
   Total tokens:   110
   Model calls:    1 · API time: 1.0s

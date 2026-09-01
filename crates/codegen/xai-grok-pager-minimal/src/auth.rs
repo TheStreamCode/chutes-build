@@ -1,9 +1,9 @@
 //! Minimal-mode sign-in / folder-trust rendering for the live region.
 //!
 //! Before any agent session exists (unauthenticated / folder-trust pending) the
-//! minimal live region shows the sign-in flow itself ÔÇö device or external-command
+//! minimal live region shows the sign-in flow itself — device or external-command
 //! flow, a sign-in error, the folder-trust question, or a brief "starting"
-//! transient once both gates are open ÔÇö since minimal has no welcome screen.
+//! transient once both gates are open — since minimal has no welcome screen.
 //! [`draw_live`](super::live::draw_live) computes a [`MinimalAuthHint`] from the
 //! app's [`AuthState`] + [`TrustState`] and renders it via [`render_auth`].
 
@@ -22,7 +22,7 @@ use xai_grok_pager::theme::Theme;
 /// folder-trust question, or a brief "starting" transient once authenticated
 /// (and trusted). Computed before the draw closure so the closure can own it.
 pub(super) enum MinimalAuthHint {
-    /// Interactive sign-in underway ÔÇö show the URL (when known) and the device
+    /// Interactive sign-in underway — show the URL (when known) and the device
     /// code (when the URL carries one). Covers device flow and the external
     /// command flow (where the provider opens its own browser; `url` may be
     /// `None`).
@@ -32,11 +32,11 @@ pub(super) enum MinimalAuthHint {
     },
     /// The last sign-in attempt failed; show the error.
     Failed(String),
-    /// Authenticated, but the cwd has untrusted repo-local config ÔÇö ask before
+    /// Authenticated, but the cwd has untrusted repo-local config — ask before
     /// creating a session. Input (y/Enter trust, n/Esc quit) is handled by the
     /// welcome interceptor in `AppView::handle_input`; this is render-only.
     TrustFolder { workspace: PathBuf },
-    /// Authenticated (+ trusted) ÔÇö the session is being created (brief transient).
+    /// Authenticated (+ trusted) — the session is being created (brief transient).
     Starting,
 }
 
@@ -61,7 +61,7 @@ pub(super) fn minimal_auth_hint(
                 .map(str::to_owned),
         },
         AuthState::Pending { error: Some(err) } => MinimalAuthHint::Failed(err.clone()),
-        // Login is starting (auto-triggered at startup) ÔÇö the URL arrives via
+        // Login is starting (auto-triggered at startup) — the URL arrives via
         // AuthUrlReady, which flips us to `Authenticating`.
         AuthState::Pending { error: None } => MinimalAuthHint::SigningIn {
             url: None,
@@ -85,16 +85,16 @@ pub(super) fn minimal_auth_hint(
 /// instead of clipping to the idle prompt height.
 pub(super) fn auth_hint_rows(hint: &MinimalAuthHint, width: u16) -> u16 {
     match hint {
-        // header + blank + "Opening browserÔÇª"
+        // header + blank + "Opening browser…"
         MinimalAuthHint::SigningIn { url: None, code: _ } => 3,
         // header + blank + "Open this URL" + url rows + optional code block +
-        // blank + "WaitingÔÇª"
+        // blank + "Waiting…"
         MinimalAuthHint::SigningIn {
             url: Some(url),
             code,
         } => {
             let url_rows = wrapped_char_rows(url, width);
-            let code_rows = if code.is_some() { 2 } else { 0 }; // blank + "Code: ÔÇª"
+            let code_rows = if code.is_some() { 2 } else { 0 }; // blank + "Code: …"
             3 + url_rows + code_rows + 2
         }
         // "Sign-in failed" + blank + error
@@ -110,7 +110,7 @@ pub(super) fn auth_hint_rows(hint: &MinimalAuthHint, width: u16) -> u16 {
 }
 
 /// How many rows `text` needs when painted char-by-char at `width` (no
-/// wrap-inserted spaces) ÔÇö same layout as [`render_url`].
+/// wrap-inserted spaces) — same layout as [`render_url`].
 fn wrapped_char_rows(text: &str, width: u16) -> u16 {
     let width = width.max(1) as usize;
     let chars = text.chars().filter(|c| !c.is_control()).count();
@@ -145,7 +145,7 @@ fn put_line(buf: &mut Buffer, area: Rect, y: u16, bottom: u16, line: Line<'_>) -
 
 /// Write `url` character-by-character across as many rows as it needs (no
 /// wrap-inserted spaces), so the terminal's native selection copies it verbatim
-/// ÔÇö minimal has no mouse capture, so copy is the terminal's job. Returns the
+/// — minimal has no mouse capture, so copy is the terminal's job. Returns the
 /// next free row.
 fn render_url(
     buf: &mut Buffer,
@@ -395,7 +395,7 @@ mod tests {
 
         let trust_done = TrustState::Done;
 
-        // Device flow ÔåÆ SigningIn carrying the URL and the parsed code.
+        // Device flow → SigningIn carrying the URL and the parsed code.
         let st = AuthState::Authenticating {
             request_seq: 1,
             handle: None,
@@ -413,7 +413,7 @@ mod tests {
             _ => panic!("expected SigningIn"),
         }
 
-        // External command flow with no code ÔåÆ SigningIn, URL but no code.
+        // External command flow with no code → SigningIn, URL but no code.
         let st = AuthState::Authenticating {
             request_seq: 2,
             handle: None,

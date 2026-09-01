@@ -1,19 +1,25 @@
-//! Scroll-diagnostics HUD, the in-pager "scroll playground".
+//! Scroll-diagnostics HUD — the in-pager "scroll playground".
 //!
-//! A compact top-right overlay paints a per-frame snapshot of the scroll state machine ([`MouseScrollState::debug_snapshot`]).
-//! It also shows the active scrollback's viewport facts, inside a REAL session with the REAL event loop.
-//! Recipe: `CHUTES_BUILD_FPS=1 CHUTES_BUILD_SCROLL_DEBUG=1 chutes-build --resume <session>`.
-//! Then flip `scroll_mode`, `scroll_lines`, `invert_scroll`, or `scroll_speed` in `/settings` to compare variants live.
-//! This HUD samples once per frame; `CHUTES_BUILD_SCROLL_LOG=1` additionally records every event as JSONL (`input::scroll_log` in xai-grok-pager-render).
+//! A compact top-right overlay painting a per-frame snapshot of the scroll
+//! state machine ([`MouseScrollState::debug_snapshot`]) plus the active
+//! scrollback's viewport facts, inside a REAL session with the REAL event
+//! loop. Recipe: `CHUTES_BUILD_FPS=1 CHUTES_BUILD_SCROLL_DEBUG=1 chutes-build --resume <session>`,
+//! then flip `scroll_mode` / `scroll_lines` / `invert_scroll` /
+//! `scroll_speed` in `/settings` to compare variants live. For event-exact
+//! capture beyond this per-frame sampling, add `CHUTES_BUILD_SCROLL_LOG=1` — the
+//! JSONL flight recorder ([`crate::input::scroll_log`]).
 //!
-//! Invariant: the HUD must never affect scroll behavior. The snapshot is read-only (`&self`, caller-supplied `now`).
-//! It is taken in the draw path after all input/tick state updates for the frame, and rendering only paints buffer cells.
-//! When disabled, the HUD costs a single bool check per frame.
+//! Invariant: the HUD must never affect scroll behavior. The snapshot is
+//! read-only (`&self`, caller-supplied `now`), taken in the draw path after
+//! all input/tick state updates for the frame, and rendering only paints
+//! buffer cells. Disabled cost is a single bool check per frame.
 //!
-//! Unlike the FPS overlay (`render::frame_metrics`, debug/dev builds only), this HUD compiles into release builds behind its runtime gate.
-//! Hidden commands like `/gboom` already ship this way.
-//! Dev instrumentation alters the frame pipeline (phase timings through `draw_frame`), so a dev-only HUD could not probe the production render path.
-//! The pty e2e suite also runs against production-featured binaries.
+//! Unlike the FPS overlay (`render::frame_metrics`, debug/dev builds only), this
+//! compiles into release builds behind its runtime gate (the hidden-command
+//! precedent, e.g. `/gboom`): dev instrumentation alters the frame pipeline
+//! (phase timings through `draw_frame`), so a dev-only HUD could not probe
+//! the production render path — defeating the zero-fidelity-gap goal — and
+//! the pty e2e suite runs against production-featured binaries.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -23,9 +29,10 @@ use crate::input::mouse::ScrollDebugSnapshot;
 /// Panel width in cells; each line is padded/truncated to this.
 const PANEL_WIDTH: u16 = 46;
 
-/// Runtime on/off switch for the HUD, mirroring how `FrameMetrics` reads its env var.
-/// `CHUTES_BUILD_SCROLL_DEBUG` (nonempty and not `"0"`) enables it at startup, and the hidden `/scroll-debug` command toggles it live.
-/// Deliberately NOT a settings-registry entry: it is a diagnostic, not a preference to persist.
+/// Runtime enablement for the HUD. Mirrors `FrameMetrics`' env machinery:
+/// `CHUTES_BUILD_SCROLL_DEBUG` (nonempty and not `"0"`) enables at startup, and the
+/// hidden `/scroll-debug` command toggles it live. Deliberately NOT a
+/// settings-registry entry: it is a diagnostic, not a preference to persist.
 pub struct ScrollDebugHud {
     enabled: bool,
 }
@@ -43,17 +50,18 @@ impl ScrollDebugHud {
         Self { enabled: env_on }
     }
 
+    /// Whether the HUD is currently enabled.
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    /// The hidden `/scroll-debug` command flips this live.
+    /// `/scroll-debug` runtime toggle.
     pub fn toggle(&mut self) {
         self.enabled = !self.enabled;
     }
 }
 
-/// Facts from the scrollback for the HUD's `view:` row; `None` when the active view is not an agent view.
+/// Scrollback-side facts for the `view:` row (`None` off agent views).
 #[derive(Clone, Copy, Debug)]
 pub struct ViewportDebug {
     pub scroll_offset: usize,
@@ -63,18 +71,20 @@ pub struct ViewportDebug {
     pub at_bottom: bool,
 }
 
-/// Owned per-frame render params, assembled by `AppView::draw` BEFORE the frame closure and after all scroll-state updates.
-/// Building the params outside the closure keeps the closure free of `self.scroll_state`.
+/// Owned per-frame render params, assembled by `AppView::draw` BEFORE the
+/// frame closure (after all scroll-state updates; borrow-splitting keeps the
+/// closure free of `self.scroll_state`).
 pub struct ScrollDebugPanel {
     pub snapshot: ScrollDebugSnapshot,
     pub view: Option<ViewportDebug>,
-    /// Rows left free for FPS overlays stacked above (the dev `CHUTES_BUILD_FPS` line and/or the release-safe `/debug fps` HUD).
+    /// Rows left free for FPS overlays stacked above (the dev `CHUTES_BUILD_FPS`
+    /// line and/or the release-safe `/debug fps` HUD).
     pub top_offset: u16,
 }
 
 impl ScrollDebugPanel {
-    /// Paint the panel in the top-right corner of `area`.
-    /// Per-frame formatting is fine for a debug tool; nothing here outlives the frame.
+    /// Paint the panel in the top-right corner of `area`. Per-frame
+    /// formatting is fine for a debug tool; nothing here outlives the frame.
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         let s = &self.snapshot;
         let yn = |b: bool| if b { "y" } else { "n" };
@@ -175,14 +185,17 @@ mod tests {
         }
     }
 
-    /// The Oscura Midnight regression: the panel must paint the explicit debug chrome (bg black, white/yellow fg, no inherited modifiers).
-    /// It must cover EVERY cell of its rect, trailing padding included, regardless of the themed cells underneath.
+    /// The Oscura Midnight regression: the panel must paint the explicit
+    /// debug chrome — bg black, white/yellow fg, no inherited modifiers —
+    /// on EVERY cell of its rect, trailing padding included, regardless of
+    /// the themed cells underneath.
     #[test]
     fn panel_paints_theme_agnostic_style_over_every_cell() {
         let area = Rect::new(0, 0, 60, 14);
         let mut buf = Buffer::empty(area);
-        // Mimic a themed frame: near-black RGB bg (Oscura Midnight base is #030304), tinted fg, and a modifier on every cell
-        // The overlay must override all of it
+        // Mimic a themed frame: near-black RGB bg (Oscura Midnight base is
+        // #030304), tinted fg, and a modifier on every cell — everything
+        // the overlay must override.
         let theme = Style::default()
             .fg(Color::Rgb(228, 228, 228))
             .bg(Color::Rgb(3, 3, 4))
@@ -225,7 +238,7 @@ mod tests {
                 );
             }
         }
-        // The overlay stays inside its rect: cells outside it keep the theme
+        // The overlay is rect-scoped: cells outside it keep the theme.
         assert_eq!(buf[(0, 0)].bg, Color::Rgb(3, 3, 4));
         assert_eq!(buf[(x0 - 1, 3)].modifier, Modifier::ITALIC);
     }

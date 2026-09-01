@@ -1,5 +1,6 @@
-//! Emits the raw Messages API `stream_event` lines for `streaming-messages-json` when `--include-partial-messages` is on.
-//! [`PartialFraming`] tracks which message and content block are open.
+//! The `--include-partial-messages` stream framing for `streaming-messages-json`:
+//! the raw Messages API `stream_event` mechanics and their interaction with the
+//! typed [`PartialFraming`] state. Only reachable when partial messages are on.
 
 use serde_json::{Value, json};
 
@@ -23,8 +24,8 @@ impl MessagesReducer {
         }))
     }
 
-    /// Open the partial `message_start` on first use, carrying the real id, model, and input-side usage.
-    /// Absent values fall back to a synthesized id and zero usage.
+    /// Open the partial `message_start` on first use, carrying the real id, model,
+    /// and input-side usage (or a synthesized id and zero usage when absent).
     fn partial_open_message(&mut self, out: &mut Vec<Value>) {
         if self.framing.message_open() {
             return;
@@ -52,7 +53,8 @@ impl MessagesReducer {
         self.framing = PartialFraming::MessageOpen { block: None };
     }
 
-    /// Emit the partial framing for a text/thinking delta at `index`, opening the message and content block on first use.
+    /// Emit the partial framing for a text/thinking delta at `index`, opening the
+    /// message and content block on first use.
     pub(super) fn partial_delta(
         &mut self,
         out: &mut Vec<Value>,
@@ -77,7 +79,7 @@ impl MessagesReducer {
             self.framing = PartialFraming::MessageOpen { block: Some(block) };
             block
         });
-        // Target the open block's own index, not the caller's, so a delta always lands on the block that was opened
+        // Target the open block's own index, not the caller's, so a delta cannot drift.
         out.push(self.partial_wrap(StreamEventBody::ContentBlockDelta {
             index: open.index,
             delta,
@@ -137,7 +139,7 @@ impl MessagesReducer {
         out.push(self.partial_wrap(StreamEventBody::ContentBlockStop { index }));
     }
 
-    /// Emit the partial framing for a `web_search_tool_result` block (the hits go in `content_block_start`).
+    /// Emit the partial framing for a `web_search_tool_result` block (hits ride `content_block_start`).
     pub(super) fn partial_web_search_result(
         &mut self,
         out: &mut Vec<Value>,
@@ -156,8 +158,8 @@ impl MessagesReducer {
         out.push(self.partial_wrap(StreamEventBody::ContentBlockStop { index }));
     }
 
-    /// Emit the partial framing for a signature-only thinking block (start, `signature_delta`, stop).
-    /// The signature is cloned, not taken, so `finalize_open` can still build the same block for the final frame.
+    /// Emit the partial framing for a signature-only thinking block (start + `signature_delta` + stop).
+    /// The signature is cloned (not taken) so `finalize_open` materializes the same block once.
     pub(super) fn partial_signature_only_block(&mut self, out: &mut Vec<Value>) {
         if !self.include_partials()
             || self.open_kind.is_some()
@@ -184,8 +186,8 @@ impl MessagesReducer {
         out.push(self.partial_wrap(StreamEventBody::ContentBlockStop { index }));
     }
 
-    /// Close the open content block. A thinking block emits `signature_delta` first when its signature is known.
-    /// The signature is cloned, not taken, so `finalize_open` can reuse it.
+    /// Close the open content block. A thinking block emits `signature_delta` first
+    /// when its signature is known; cloned (not taken) so `finalize_open` can reuse it.
     pub(super) fn partial_close_block(&mut self, out: &mut Vec<Value>) {
         let Some(block) = self.framing.open_block() else {
             return;
@@ -207,8 +209,8 @@ impl MessagesReducer {
         self.framing = PartialFraming::MessageOpen { block: None };
     }
 
-    /// Close the open message framing before a frame is flushed.
-    /// `default_stop_reason` must match `flush_assistant`'s so the partial rebuild and the frame never disagree.
+    /// Close the open message framing before a frame is flushed. `default_stop_reason`
+    /// must match `flush_assistant`'s so the partial rebuild and frame never disagree.
     pub(super) fn partial_close_message(
         &mut self,
         out: &mut Vec<Value>,

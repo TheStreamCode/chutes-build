@@ -1,31 +1,55 @@
-//! `/model` (alias `/m`): switch the model and optionally its reasoning effort.
-//! Chained autocomplete: after picking a reasoning-supported model, the trailing space re-opens the dropdown into a `low|medium|high|xhigh` sub-menu.
+//! `/model` (alias `/m`) — switch model + (optionally) reasoning effort.
+//! Chained autocomplete: pick a reasoning-supported model → trailing space
+//! re-opens the dropdown into a `low|medium|high|xhigh` sub-menu.
 
 use agent_client_protocol as acp;
 use xai_grok_shell::sampling::types::supports_reasoning_effort_meta;
 
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
-use crate::slash::command::{
-    AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand, slash_meta,
-};
+use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
 use crate::slash::commands::effort_levels::build_effort_arg_items;
 
 /// Switch the active model (and optionally its reasoning effort).
 pub struct ModelCommand;
 
 impl SlashCommand for ModelCommand {
-    slash_meta! {
-        name: "model",
-        aliases: ["m"],
-        description: "Switch the active model",
-        usage: "/model <name> [effort]",
-        takes_args: true,
-        args_required: true,
-        session_scoped: true,
-        // The dashboard offers `/model` to pick the model for the next spawned agent (intercepted in `dispatch_dashboard_dispatch_slash`).
-        offered_when_session_less: true,
-        arg_placeholder: "<model> [effort]",
+    fn name(&self) -> &str {
+        "model"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["m"]
+    }
+
+    fn description(&self) -> &str {
+        "Switch the active model"
+    }
+
+    fn session_scoped(&self) -> bool {
+        true
+    }
+
+    fn offered_when_session_less(&self) -> bool {
+        // The dashboard offers `/model` to pick the model for the next
+        // spawned agent (intercepted in `dispatch_dashboard_dispatch_slash`).
+        true
+    }
+
+    fn usage(&self) -> &str {
+        "/model <name> [effort]"
+    }
+
+    fn takes_args(&self) -> bool {
+        true
+    }
+
+    fn args_required(&self) -> bool {
+        true
+    }
+
+    fn arg_placeholder(&self) -> Option<&str> {
+        Some("<model> [effort]")
     }
 
     fn suggest_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
@@ -46,15 +70,18 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Error("Usage: /model <name> [effort]".into());
         }
 
-        // Prefer an exact full-string catalog match first. Model display names often contain spaces ("Grok 4.5").
-        // If we split on the last token first, a shorter catalog entry ("Chutes Build") would steal the prefix and treat "4.5" as an effort level
+        // Prefer an exact full-string catalog match first. Model display names
+        // often contain spaces ("Grok 4.5"); if we split on the last token
+        // first, a shorter catalog entry ("Chutes Build") would steal the prefix and
+        // treat "4.5" as an effort level.
         if let Some(id) = ctx.models.resolve_by_name_or_id(trimmed) {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
 
-        // A trailing effort token on a reasoning model makes a session-scoped switch (not persisted as default)
-        // Resolve via the shared gate so a rejected level (e.g. `none` on grok-4.5) reports the effort error with the model's offered ids.
-        // Without it the fall-through reports "Unknown model: … none"
+        // Trailing effort token + reasoning model → session-scoped switch
+        // (not persisted as default). Resolve via the shared gate so a rejected
+        // level (e.g. `none` on grok-4.5) surfaces the effort error with the
+        // model's offered ids — not "Unknown model: … none".
         if let Some((prefix, token)) = split_trailing_token(trimmed)
             && let Some(id) = resolve_model(ctx.models, prefix)
             && ctx
@@ -87,8 +114,8 @@ fn supports_reasoning_effort(info: &acp::ModelInfo) -> bool {
 }
 
 /// Split `args` into `(prefix, last_token)` on the final whitespace run.
-/// Returns `None` when there is no interior whitespace to split on.
-/// The token is resolved to an effort against the picked model's options by the caller.
+/// Returns `None` when there is no interior whitespace to split on. The token is
+/// resolved to an effort against the picked model's options by the caller.
 fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
     let (prefix, last) = args.rsplit_once(char::is_whitespace)?;
     let prefix = prefix.trim_end();
@@ -99,7 +126,7 @@ fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
 }
 
 /// Returns the matched model id when `args_query` is `"<reasoning-model> ..."`.
-/// Candidates are tried longest name first to disambiguate names that share a prefix.
+/// Longest-name-first to disambiguate names that share a prefix.
 fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::ModelId> {
     let mut candidates: Vec<(&acp::ModelId, &str)> = models
         .available
@@ -121,9 +148,9 @@ fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::Mod
     None
 }
 
-/// One row per logical model.
-/// Reasoning models get a trailing space in `insert_text` so the prompt widget chains into the effort sub-menu.
-fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
+/// One row per logical model. Reasoning models get a trailing space in
+/// `insert_text` so the prompt widget chains into the effort sub-menu.
+pub(super) fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     for (id, info) in &models.available {
@@ -136,8 +163,9 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
             info.name.clone()
         };
 
-        // A trailing space on reasoning models signals "more input expected" to the prompt widget
-        // Enter then advances to the effort phase instead of submitting
+        // Trailing space on reasoning models: signals "more input
+        // expected" to the prompt widget so Enter advances to effort
+        // phase instead of submitting.
         let insert_text = if supports {
             format!("{} ", info.name)
         } else {
@@ -233,7 +261,7 @@ mod tests {
             split_trailing_token("reasoning-x  xhigh"),
             Some(("reasoning-x", "xhigh"))
         );
-        // No interior whitespace, so nothing to split off
+        // No interior whitespace → nothing to split off.
         assert!(split_trailing_token("reasoning-x-pro").is_none());
     }
 
@@ -253,23 +281,21 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
         let items = cmd.suggest_args(&ctx, "").unwrap();
         assert_eq!(items.len(), 2, "model phase: one row per logical model");
 
-        // A reasoning model has a trailing space in insert_text
-        // The prompt widget reads it to keep the dropdown open after Enter so the effort sub-menu can render
+        // Reasoning model has trailing space in insert_text -- this is the
+        // signal the prompt widget reads to keep the dropdown open after
+        // Enter so the effort sub-menu can render.
         let reasoning = items
             .iter()
             .find(|i| i.match_text == "Reasoning X")
             .unwrap();
         assert_eq!(reasoning.insert_text, "Reasoning X ");
 
-        // A plain model has no trailing space, so Enter commits immediately
+        // Plain model has no trailing space -- Enter commits immediately.
         let plain = items.iter().find(|i| i.match_text == "Grok 4.5").unwrap();
         assert_eq!(plain.insert_text, "Grok 4.5");
     }
@@ -288,13 +314,10 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
-        // The args query has a trailing space, so this is the effort phase
-        // Items come out ordered xhigh to low (strongest first) per EFFORT_LEVELS
+        // Args query has a trailing space -> effort phase. Items come out
+        // ordered xhigh -> low (strongest first) per EFFORT_LEVELS.
         let items = cmd.suggest_args(&ctx, "Reasoning X ").unwrap();
         assert_eq!(items.len(), 4);
         assert_eq!(items[0].insert_text, "Reasoning X xhigh");
@@ -303,7 +326,8 @@ mod tests {
         assert_eq!(items[3].insert_text, "Reasoning X low");
         // Display is just the level so the user sees a clean column.
         assert_eq!(items[0].display, "xhigh");
-        // match_text carries the sort-key prefix that forces the matcher's alphabetical tiebreak to render rows in EFFORT_LEVELS order
+        // match_text carries the sort-key prefix that forces the matcher's
+        // alphabetical tiebreak to render rows in EFFORT_LEVELS order.
         assert!(items[0].match_text.starts_with("a "));
         assert!(items[3].match_text.starts_with("d "));
     }
@@ -322,12 +346,9 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
-        // Still in effort phase; the matcher upstream narrows to high and xhigh
+        // Still in effort phase; matcher upstream narrows to high / xhigh.
         let items = cmd.suggest_args(&ctx, "Reasoning X h").unwrap();
         assert_eq!(items.len(), 4);
     }
@@ -346,12 +367,9 @@ mod tests {
             billing_surface_visible: true,
             usage_command_visible: true,
             workflows_available: true,
-            saved_workflows: &[],
-            workflow_runs: &[],
             screen_mode: crate::app::ScreenMode::Fullscreen,
-            current_title: None,
         };
-        // No trailing space: the user is still typing the model name
+        // No trailing space, user is still typing the model name.
         let items = cmd.suggest_args(&ctx, "Reason").unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].insert_text, "Reasoning X ");
@@ -375,7 +393,8 @@ mod tests {
 
     #[test]
     fn run_rejects_unoffered_effort_with_effort_error_not_unknown_model() {
-        // Regression: previously `resolve_effort_token_for` returned None and the handler fell through to `Unknown model: Reasoning X none`
+        // Regression: previously `resolve_effort_token_for` returned None and
+        // the handler fell through to `Unknown model: Reasoning X none`.
         let mut state = ModelState::default();
         let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
         state.available.insert(id, info);
@@ -407,8 +426,8 @@ mod tests {
 
     #[test]
     fn run_prefers_full_multi_word_model_name_over_prefix_plus_effort() {
-        // The catalog has both "Chutes Build" (reasoning) and "Grok 4.5"
-        // `/model Grok 4.5` must select the full name, not treat "4.5" as an effort on "Chutes Build"
+        // Catalog has both "Chutes Build" (reasoning) and "Grok 4.5". `/model Grok 4.5`
+        // must select the full name, not treat "4.5" as an effort on "Chutes Build".
         let mut state = ModelState::default();
         let (short_id, short_info) = model_with_reasoning("grok", "Chutes Build");
         let (long_id, long_info) = model_with_reasoning("grok-4.5", "Grok 4.5");
@@ -431,14 +450,20 @@ mod tests {
         state.available.insert(id, info);
         let mut ctx = dummy_exec_ctx(&state);
         let result = ModelCommand.run(&mut ctx, "Grok 4.5 high");
-        // Falls through to "is the whole string a model name?", which it isn't, so we get an Unknown error
+        // Falls through to "is the whole string a model name?" — which
+        // it isn't, so we get an Unknown error.
         assert!(matches!(result, CommandResult::Error(_)));
     }
 
-    /// The bare `/model <name>` form dispatches `Action::SetDefaultModel(<ModelId>)` instead of the legacy `Action::SwitchModel { effort: None }`.
-    /// The dispatcher routes it through both `Effect::SwitchModel` (session mutation) and `Effect::PersistSetting` (next-session default).
+    /// The bare `/model <name>` form dispatches
+    /// `Action::SetDefaultModel(<ModelId>)` instead of the legacy
+    /// `Action::SwitchModel { effort: None }`. The dispatcher routes
+    /// the typed setter through both `Effect::SwitchModel`
+    /// (session-level mutation) AND `Effect::PersistSetting`
+    /// (next-session default).
     ///
-    /// The payload is the typed `acp::ModelId` (resolved at the slash boundary), not a String.
+    /// The payload is the typed `acp::ModelId` (resolved at the slash
+    /// boundary), not a String.
     #[test]
     fn run_bare_model_name_dispatches_set_default_model() {
         let mut state = ModelState::default();
@@ -454,7 +479,8 @@ mod tests {
         }
     }
 
-    /// Case-insensitive matching against the catalog: `/model grok 4.5` resolves to the same `ModelId` as `/model Grok 4.5`.
+    /// Case-insensitive matching against the catalog: `/model grok 4.5`
+    /// resolves to the same `ModelId` as `/model Grok 4.5`.
     #[test]
     fn run_set_default_model_resolves_case_insensitively() {
         let mut state = ModelState::default();

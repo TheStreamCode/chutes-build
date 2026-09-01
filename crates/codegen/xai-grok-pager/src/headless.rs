@@ -1,7 +1,7 @@
 //! Headless single-turn mode (`chutes-build -p "prompt"`).
 //!
-//! Runs the agent in-process via `spawn_grok_shell` and drives the ACP lifecycle (init, auth, session, prompt).
-//! Streams to stdout and exits via `CancellationToken`.
+//! Runs the agent in-process via `spawn_grok_shell`, drives the ACP lifecycle
+//! (init, auth, session, prompt), streams to stdout, and exits via `CancellationToken`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,6 @@ use xai_grok_shell::sampling::types::{
     REASONING_EFFORT_META_KEY, parse_canonical_effort_token, reasoning_effort_meta_value,
 };
 use xai_grok_shell::util::config as cli_config;
-use xai_grok_telemetry::startup::PendingStartup;
 
 use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::acp::spawn::{AgentShutdownGuard, spawn_grok_shell};
@@ -34,7 +33,7 @@ use crate::headless::reducer::{
 
 mod ext_protocol;
 mod reducer;
-use ext_protocol::{ExtEvent, handle_ext_notification, reply_headless_ext_method};
+use ext_protocol::{ExtEvent, handle_ext_notification};
 
 mod cli;
 pub use cli::{HeadlessPrompt, OutputFormat, parse_json_schema, parse_permission_rules_lenient};
@@ -75,7 +74,7 @@ pub struct HeadlessOptions {
     pub reasoning_effort: Option<String>,
     /// Wait for background tasks to report `task_completed` before exiting (default true).
     pub wait_for_background: bool,
-    /// Max time to wait for background work to finish after the first turn ends.
+    /// Max time to wait for background quiescence after the first turn ends.
     pub background_wait_timeout: Duration,
 }
 
@@ -89,7 +88,7 @@ struct HeadlessEmitter {
     usage: Option<serde_json::Value>,
     /// Reducer for the streaming formats; `None` for `plain`/`json`.
     reducer: Option<Box<dyn Reducer>>,
-    /// Set when the prompt is sent; `result.duration_ms` on the terminal line is measured from it.
+    /// Set when the prompt is sent; the terminal `result.duration_ms` wall-clock.
     prompt_started: Option<Instant>,
     out: std::io::Stdout,
     /// Latched once stdout is unwritable so later writes are dropped instead of panicking.
@@ -542,7 +541,10 @@ async fn open_session(
                     let mut m = acp::Meta::new();
                     m.insert("noReplay".into(), serde_json::Value::Bool(true));
                     if let Some(rc) = restore_code {
-                        m.insert("chutes.ai/restore_code".into(), serde_json::Value::Bool(rc));
+                        m.insert(
+                            "chutes.build/restore_code".into(),
+                            serde_json::Value::Bool(rc),
+                        );
                     }
                     Some(m)
                 }),
@@ -560,14 +562,7 @@ async fn open_session(
     }
 
     let new_resp: acp::NewSessionResponse = acp_send(
-        acp::NewSessionRequest::new(cwd.to_path_buf())
-            .mcp_servers(mcp_servers)
-            // Fresh `-p` sessions persist as headless so `/resume` keeps them off its default pages; the load path above never restamps
-            .meta(
-                serde_json::json!({ "sessionKind": "headless" })
-                    .as_object()
-                    .cloned(),
-            ),
+        acp::NewSessionRequest::new(cwd.to_path_buf()).mcp_servers(mcp_servers),
         acp_tx,
     )
     .await?;
@@ -591,7 +586,7 @@ async fn open_session_with_id(
         acp::NewSessionRequest::new(cwd.to_path_buf())
             .mcp_servers(mcp_servers)
             .meta(
-                serde_json::json!({ "sessionId": session_id, "sessionKind": "headless" })
+                serde_json::json!({ "sessionId": session_id })
                     .as_object()
                     .cloned(),
             ),
@@ -625,13 +620,10 @@ async fn fork_then_open(
         ensure_session_id_available(nid, &new_cwd_str)?;
     }
     let parent_is_worktree = parent_session_is_worktree(parent_id, &write_cwd);
-    let mut payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
-    // Shared helper stamps `fork` for interactive `/fork`
-    // `-p` children must stay headless: the load path below never restamps
-    payload["sessionKind"] = serde_json::Value::String("headless".into());
+    let payload = fork_session_params(parent_id, &write_cwd, new_id, parent_is_worktree);
     let fork_params = serde_json::value::to_raw_value(&payload)
         .map_err(|e| anyhow::anyhow!("serialize fork params: {e}"))?;
-    let req = acp::ExtRequest::new("chutes.ai/session/fork", fork_params.into());
+    let req = acp::ExtRequest::new("chutes.build/session/fork", fork_params.into());
     let resp = acp_send(req, acp_tx).await?;
     if let Some(err) = fork_response_error(resp.0.get()) {
         anyhow::bail!("fork failed: {err}");
@@ -646,8 +638,8 @@ async fn fork_then_open(
     }
 }
 
-/// Apply `-m` / effort after session open.
-/// Effort is soft-ignored on a non-supporting model (still applying `-m`) but hard-fails on a genuinely unknown token.
+/// Apply `-m` / effort after session open. Effort is soft-ignored on a non-supporting
+/// model (still applying `-m`) but hard-fails on a genuinely unknown token.
 async fn apply_headless_model_and_effort(
     acp_tx: &AcpAgentTx,
     session_id: &acp::SessionId,
@@ -733,7 +725,8 @@ async fn apply_headless_model_and_effort(
 }
 
 /// Startup-materialization context for headless (`-p`) runs; never chat mode.
-/// `--worktree` is ignored here: headless never creates a worktree, so a remote miss must not take `DeferToWorktree`.
+/// `--worktree` is ignored here: headless never creates a worktree, so remote
+/// miss must not take `DeferToWorktree`.
 fn headless_materialize_ctx(
     resume_title_pinned: bool,
     restore_code: bool,
@@ -749,7 +742,6 @@ fn headless_materialize_ctx(
             crate::app::session_startup::TitleResolution::Allowed
         },
         restore_code,
-        recent_session_selection: crate::app::session_startup::RecentSessionSelection::Any,
         restore_progress_on_stdout: false,
     }
 }
@@ -784,7 +776,7 @@ pub async fn run_single_turn(
     let mut agent_config = AgentConfig::new_from_toml_cfg(&raw_config)
         .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
 
-    // Only canonical tokens are stamped early; remapped menu ids need the post-session catalog resolve below
+    // Canonical-only early stamp; remaps need the post-session catalog resolve below.
     if let Some(ref token) = options.reasoning_effort
         && let Some(effort) = parse_canonical_effort_token(token)
     {
@@ -840,21 +832,20 @@ pub async fn run_single_turn(
     };
 
     if options.trust {
-        xai_grok_workspace::folder_trust::grant_folder_trust(&cwd);
+        xai_grok_shell::agent::folder_trust::grant_folder_trust(&cwd);
     }
 
     let cancel = CancellationToken::new();
     let memory_config = agent_config.memory_config.clone();
-    let mut pending_startup = Some(PendingStartup::new());
     let timer = xai_grok_telemetry::startup::begin(crate::acp::Owner::Client);
-    let mut report_startup_failure = |timer: &crate::acp::StartupTimer| {
+    let report_startup_failure = |timer: &crate::acp::StartupTimer| {
         timer.emit_telemetry(
             crate::acp::AgentKind::Embedded,
             crate::acp::StartupOutcome::Error,
             None,
             false,
         );
-        PendingStartup::finish_held(&mut pending_startup, crate::acp::StartupOutcome::Error);
+        xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error);
     };
     let spawned = match spawn_grok_shell(agent_config, &cancel, memory_config).await {
         Ok(s) => s,
@@ -935,10 +926,7 @@ pub async fn run_single_turn(
         // Headless never creates a worktree from `-w`.
         has_worktree: false,
     })
-    .map_err(|e| anyhow::anyhow!("{e}"))
-    .inspect_err(|_| {
-        PendingStartup::finish_held(&mut pending_startup, crate::acp::StartupOutcome::Error);
-    })?;
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let cwd_str = cwd.to_string_lossy().to_string();
     let materialized = session_startup::materialize_startup_for_cwd(
@@ -948,7 +936,7 @@ pub async fn run_single_turn(
     )
     .await
     .inspect_err(|_| {
-        PendingStartup::finish_held(&mut pending_startup, crate::acp::StartupOutcome::Error);
+        xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error)
     })?;
 
     let restore_code = match &materialized {
@@ -1001,13 +989,13 @@ pub async fn run_single_turn(
     } = match opened {
         Ok(v) => v,
         Err(e) => {
-            PendingStartup::finish_held(&mut pending_startup, crate::acp::StartupOutcome::Error);
+            xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Error);
             let msg = format!("Couldn't create session: {e}");
             emitter.on_error(&msg, None);
             anyhow::bail!("{msg}");
         }
     };
-    PendingStartup::finish_held(&mut pending_startup, crate::acp::StartupOutcome::Ok);
+    xai_grok_telemetry::startup::report_total(crate::acp::StartupOutcome::Ok);
     tracing::debug!(
         elapsed_ms = t_session.elapsed().as_millis() as u64,
         session_id = %session_id.0,
@@ -1045,44 +1033,6 @@ pub async fn run_single_turn(
             context_window: session_models.get_context_window(),
         });
     }
-
-    // One bounded catalog read covers what the session catalog cannot resolve.
-    let effort_unresolved = |token: &str| {
-        if parse_canonical_effort_token(token).is_some() {
-            return false;
-        }
-        let target = options
-            .model
-            .as_deref()
-            .and_then(|m| session_models.resolve_by_name_or_id(m))
-            .or_else(|| session_models.current.clone());
-        match target {
-            Some(model_id) => matches!(
-                session_models.resolve_effort_for_model(&model_id, token),
-                Err(EffortTokenError::UnknownToken { .. } | EffortTokenError::NoActiveModel)
-            ),
-            None => true,
-        }
-    };
-    let needs_fresh_catalog = options
-        .model
-        .as_deref()
-        .is_some_and(|m| session_models.resolve_by_name_or_id(m).is_none())
-        || options
-            .reasoning_effort
-            .as_deref()
-            .is_some_and(effort_unresolved);
-    let session_models = if needs_fresh_catalog {
-        match xai_grok_shell::cli_models::fetch_model_state(&acp_tx).await {
-            Ok(state) => ModelState::from(Some(state)),
-            Err(e) => {
-                tracing::warn!(error = %e, "headless: model catalog refresh failed; using session state");
-                session_models
-            }
-        }
-    } else {
-        session_models
-    };
 
     if let Err(e) = apply_headless_model_and_effort(
         &acp_tx,
@@ -1123,7 +1073,7 @@ pub async fn run_single_turn(
     let mut prompt_result = None;
     // Tracked regardless of wait_for_background so the exit reaper always sees running work.
     let mut pending_bg: HashSet<BackgroundWork> = HashSet::new();
-    // Tombstone of completed ids so an out-of-order task_backgrounded or subagent_spawned never re-adds them to pending
+    // Tombstone of completed ids so an out-of-order backgrounded never re-arms them.
     let mut completed_bg: HashSet<BackgroundWork> = HashSet::new();
     let mut prompt_done_at: Option<Instant> = None;
     // On mid-turn channel close, break (not bail) so the exit path still drains and reaps.
@@ -1295,9 +1245,9 @@ pub async fn run_single_turn(
             let is_max_turns = resp
                 .meta
                 .as_ref()
-                .and_then(|m| m.get(crate::app::CANCELLATION_CATEGORY_KEY))
+                .and_then(|m| m.get("cancellationCategory"))
                 .and_then(|v| v.as_str())
-                == Some(xai_grok_shell::session::commands::MAX_TURNS_REACHED_CATEGORY);
+                == Some("max_turns_reached");
             if is_max_turns {
                 emitter.on_max_turns();
                 emitter.on_end(&stop_reason, sid, rid);
@@ -1357,13 +1307,13 @@ fn reap_request_for_work(
 ) -> serde_json::Result<acp::ExtRequest> {
     let (method, params) = match work {
         BackgroundWork::Subagent(id) => (
-            "chutes.ai/subagent/cancel",
+            "chutes.build/subagent/cancel",
             serde_json::value::to_raw_value(&CancelSubagentRequest {
                 subagent_id: id.clone(),
             })?,
         ),
         BackgroundWork::Task(id) => (
-            "chutes.ai/task/kill",
+            "chutes.build/task/kill",
             serde_json::value::to_raw_value(&KillTaskRequest {
                 session_id: session_id.0.to_string(),
                 task_id: id.clone(),
@@ -1403,7 +1353,8 @@ async fn reap_pending_background_tasks(
     }
 }
 
-/// `completed_bg` tombstones finished ids so a late or out-of-order task_backgrounded/subagent_spawned cannot resurrect them into `pending_bg`.
+/// Track a background lifecycle event. `completed_bg` tombstones finished ids so a late or
+/// out-of-order backgrounded/spawned cannot resurrect them into `pending_bg`.
 fn track_background_lifecycle(
     event: ExtEvent,
     pending_bg: &mut HashSet<BackgroundWork>,
@@ -1470,8 +1421,8 @@ fn track_background_lifecycle(
     }
 }
 
-/// Non-blocking drain-to-empty of `acp_rx`.
-/// Background work buffered around prompt completion is recorded in `pending_bg` before the empty-check decides whether to exit.
+/// Non-blocking drain-to-empty of `acp_rx`, so background work buffered around prompt
+/// completion is recorded in `pending_bg` before the empty-check decides whether to exit.
 #[allow(clippy::too_many_arguments)]
 fn drain_pending_acp_messages(
     acp_rx: &mut AcpClientRx,
@@ -1635,7 +1586,6 @@ fn handle_headless_acp_message(
                 )))
                 .ok();
         }
-        AcpClientMessageBox::ExtMethod(args) => reply_headless_ext_method(args),
         _ => {}
     }
 }

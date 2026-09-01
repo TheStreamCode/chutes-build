@@ -67,8 +67,11 @@ fn collect_report_joins_registry_and_flags_untracked() {
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
     let home = base.join("grok-home");
-    let tracked = home.join("worktrees/xai/wt-tracked");
-    let untracked = home.join("worktrees/xai/wt-untracked");
+    // Joined a segment at a time: the report walks the tree and reports native
+    // separators, so a single `join` holding `/` would only ever match on Unix.
+    let worktrees = home.join("worktrees").join("xai");
+    let tracked = worktrees.join("wt-tracked");
+    let untracked = worktrees.join("wt-untracked");
     let external = base.join("external-repo");
     std::fs::create_dir_all(&tracked).unwrap();
     std::fs::create_dir_all(&untracked).unwrap();
@@ -304,7 +307,8 @@ fn corrupt_registry_degrades_to_untracked_rows() {
     );
 }
 
-// The fallback must not re-measure an excluded row against its own volume: that printed bytes the total did not hold
+// The fallback must not re-measure an excluded row against its own volume:
+// that printed bytes the total did not hold.
 #[cfg(unix)]
 #[test]
 fn a_row_off_the_anchor_reports_no_size() {
@@ -372,7 +376,8 @@ fn every_open_outcome_maps_to_its_state() {
     }
 }
 
-// Deleting a registry that is merely unopenable loses every label, creation time, and session id in it
+// Deleting a registry that is merely unopenable loses every label,
+// creation time, and session id in it.
 #[test]
 fn unopenable_registry_is_not_reported_as_corrupt() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -393,7 +398,8 @@ fn unopenable_registry_is_not_reported_as_corrupt() {
     );
 }
 
-// A column showing only creation prints 40d beside a `--max-age 7d` hint for a worktree gc will not touch
+// A column showing only creation prints 40d beside a `--max-age 7d` hint
+// for a worktree gc will not touch.
 #[test]
 fn age_column_reads_what_gc_reads() {
     const DAY: i64 = 86_400;
@@ -433,7 +439,8 @@ fn walk_issues_convert_to_report_counters() {
     );
 }
 
-// Flipping Busy to Corrupt puts "damaged, remove it" in front of a user whose registry is only busy
+// Flipping Busy to Corrupt puts "damaged, remove it" in front of a user
+// whose registry is only busy.
 #[test]
 fn sqlite_failure_kinds_map_to_states() {
     let cases = [
@@ -446,8 +453,8 @@ fn sqlite_failure_kinds_map_to_states() {
     }
 }
 
-// A read-only WAL open leaves sidecars, so sizing runs first
-// Only their absence from the total proves the ordering
+// A read-only WAL open leaves sidecars, so sizing runs first. Only their
+// absence from the total proves the ordering.
 #[test]
 fn the_registry_open_lands_after_sizing() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -877,7 +884,8 @@ fn print_report_renders_registry_notices() {
     }
 }
 
-// Bare `gc` reclaims nothing: without `--max-age` the age pass is off, and the pass only walks registry records
+// Bare `gc` reclaims nothing: without `--max-age` the age pass is off, and
+// the pass only walks registry records.
 #[test]
 fn reclaim_hint_names_a_sequence_that_frees_space() {
     const AGE: &str = "run `chutes-build worktree gc --max-age 7d --dry-run`";
@@ -887,14 +895,14 @@ fn reclaim_hint_names_a_sequence_that_frees_space() {
     let text = render_report(&worktrees_report(vec![tracked], 100), 0);
     assert!(text.contains(AGE), "{text}");
     assert!(!text.contains(RM), "{text}");
-    assert!(
-        text.contains("keeps a worktree whose work it cannot find elsewhere"),
-        "the hint must say what gc will refuse to reclaim: {text}"
-    );
 
     let text = render_report(&worktrees_report(vec![untracked_row(60)], 100), 0);
     assert!(text.contains(RM), "{text}");
     assert!(!text.contains(AGE), "{text}");
+    assert!(
+        !text.contains("uncommitted"),
+        "gc makes no work-preserving promise on main: {text}"
+    );
 }
 
 #[cfg(unix)]
@@ -994,7 +1002,7 @@ fn symlinked_worktrees_dir_is_surfaced_not_silently_dropped() {
 #[cfg(unix)]
 #[test]
 #[serial_test::serial(CHUTES_BUILD_HOME)]
-// Serial keys are independent locks, so a test setting both must hold both
+// serial keys are independent locks, so a test setting both must hold both.
 #[serial_test::serial(HOME)]
 fn symlinked_default_home_keeps_home_label() {
     let tmp = tempfile::TempDir::new().unwrap();

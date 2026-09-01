@@ -20,9 +20,10 @@ pub async fn list_available_models(agent_config: &AgentConfig) -> Result<()> {
     println!();
 
     let cancel = CancellationToken::new();
-    xai_grok_telemetry::startup::mark_utility_process();
+    // A utility command is not a startup: latch so nothing records or mirrors.
+    xai_grok_telemetry::startup::clear();
     let spawned = crate::acp::spawn::spawn_grok_shell(agent_config.clone(), &cancel, None).await?;
-    // Cancel and join on every return path, including the `?` below
+    // Cancel + join on every return path, including the `?` below.
     let _agent_guard =
         crate::acp::spawn::AgentShutdownGuard::new(cancel.clone(), Some(spawned.thread_handle));
 

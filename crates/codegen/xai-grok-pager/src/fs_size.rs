@@ -1,6 +1,7 @@
-//! Sizes are physical (block-based) on Unix and logical `len()` elsewhere.
-//! Totals differ from du(1): clones and hard links cost their full size at every path.
-//! Walks never follow symlinks and stop at [`Volume`] boundaries, since descending into an unresponsive network mount blocks past any timeout.
+//! Physical (block-based) sizing on Unix, logical `len()` elsewhere. Totals
+//! differ from du(1): clones and hard links cost their full size at every
+//! path. Walks never follow symlinks and stop at [`Volume`] boundaries, since
+//! descending into an unresponsive network mount blocks past any timeout.
 
 use std::collections::HashMap;
 use std::fs::Metadata;
@@ -247,7 +248,8 @@ pub(crate) fn volume_bytes(path: &Path) -> Option<(u64, u64)> {
     if unsafe { libc::statfs(cpath.as_ptr(), &mut st) } != 0 {
         return None;
     }
-    // Linux's fundamental block is f_frsize (f_bsize is its transfer size, and f_frsize reads zero where unset); macOS's f_bsize already is one
+    // Linux's fundamental block is f_frsize (f_bsize is its transfer size,
+    // and f_frsize reads zero where unset); macOS's f_bsize already is one.
     #[cfg(target_os = "linux")]
     let block = widen(st.f_frsize)
         .filter(|&size| size != 0)

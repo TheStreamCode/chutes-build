@@ -1,5 +1,7 @@
-//! Synchronous state dispatch.
-//! It takes an [`Action`](crate::app::actions::Action), mutates application state, and returns [`Effect`](crate::app::actions::Effect)s.
+//! Synchronous state dispatch: [`Action`](crate::app::actions::Action) → state mutations + [`Effect`](crate::app::actions::Effect)s.
+//!
+//! This is the core business logic of the application.  It takes an action,
+//! mutates application state, and returns a list of async effects to execute.
 //!
 //! **Invariants:**
 //! - This module never touches the terminal, network, or filesystem.
@@ -7,7 +9,8 @@
 //! - Async work is described as [`Effect`](crate::app::actions::Effect) values, not executed.
 //! - This makes dispatch fully testable without tokio or a terminal.
 //!
-//! Imports in this tree use at most one `super::` hop (absolute `crate::` paths otherwise); tests/ shares a fixture prelude via `use super::*;`.
+//! Imports in this tree use at most one `super::` hop (absolute `crate::` paths
+//! otherwise); tests/ shares a fixture prelude via `use super::*;`.
 
 mod auth;
 mod billing;
@@ -20,7 +23,7 @@ mod import_claude;
 mod interject;
 mod jump;
 mod modes;
-pub(crate) mod notes;
+mod notes;
 mod permissions;
 mod prompt;
 mod queue;
@@ -40,7 +43,6 @@ pub(crate) use billing::{UPSELL_URL_PAYG, UPSELL_URL_UPGRADE, is_credit_limit_er
 pub(crate) use modes::{downgrade_displayed_auto_if_gated, effective_auto};
 #[cfg(test)]
 pub(crate) use notes::FEEDBACK_QUESTION_LABEL;
-pub(crate) use notes::FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS;
 pub(crate) use notes::{recap_unavailable_toast, scrollback_has_user_messages};
 pub(crate) use permissions::resolve_permission_queue_transition;
 pub(crate) use prompt::dispatch_initial_prompt;
@@ -55,7 +57,8 @@ pub(crate) use settings::ui::refresh_open_settings_modals;
 pub(crate) use status::commit_minimal_update_notice;
 pub(crate) use turn::{reconcile_overdue_cancels, reconcile_overdue_turn_ends};
 
-// Test-only consumers (cfg(test) mods elsewhere in the crate); a plain re-export trips -D unused-imports in the lib build
+// Test-only consumers (cfg(test) mods elsewhere in the crate); a plain
+// re-export trips -D unused-imports in the lib build.
 #[cfg(test)]
 pub(crate) use ctx::{SwitchCause, switch_to_agent};
 #[cfg(test)]

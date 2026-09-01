@@ -1,7 +1,8 @@
 //! Dropdown renderer for shell command completion suggestions.
 //!
-//! Mirrors the `slash_dropdown.rs` layout: aligned label column, description, selection highlight, and mouse hover.
-//! A scrollbar appears when items exceed `MAX_VISIBLE_ROWS`.
+//! Mirrors `slash_dropdown.rs` layout: aligned label column, description,
+//! selection highlight, mouse hover, and scrollbar when items exceed
+//! `MAX_VISIBLE_ROWS`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -15,11 +16,13 @@ use crate::render::scrollbar::render_scrollbar_styled;
 use crate::theme::Theme;
 use crate::views::suggestion_controller::{CompletionDropdownState, CompletionItemParsed};
 
+/// Maximum visible rows in the completion dropdown.
 pub const MAX_VISIBLE_ROWS: u16 = 6;
 
 /// Hard cap on label column width.
 const LABEL_CAP: usize = 40;
 
+/// Gap between label and description columns.
 const LABEL_DESC_GAP: usize = 2;
 
 /// Prefix width (`"❯ "` or `"  "`).
@@ -59,7 +62,7 @@ fn compute_label_column_w(items: &[CompletionItemParsed], content_w: usize) -> u
     max_w.min(budget)
 }
 
-/// Render completion dropdown items into `area`; the caller draws the borders.
+/// Render completion dropdown items into `area` (no borders — caller draws chrome).
 pub fn render_dropdown(
     buf: &mut Buffer,
     area: Rect,
@@ -266,7 +269,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(dropdown_height(&state), 3); // One separator row plus two item rows
+        assert_eq!(dropdown_height(&state), 3); // 1 separator + 2 items
     }
 
     #[test]
@@ -345,7 +348,8 @@ mod tests {
         assert!(state.accept().is_none());
     }
 
-    /// `accept` is independent of the `open` render flag: a single candidate is accepted instantly, consuming an item that was never shown.
+    /// `accept` is independent of the `open` render flag: the
+    /// single-candidate insta-accept consumes an item that was never shown.
     #[test]
     fn accept_works_on_closed_dropdown_with_items() {
         let mut state = CompletionDropdownState {
@@ -400,10 +404,10 @@ mod tests {
         assert!(!state.open);
         assert_eq!(state.selected, 0);
         assert!(state.hovered.is_none());
-        assert_eq!(state.generation, 5);
+        assert_eq!(state.generation, 5); // generation preserved
         assert!(state.items.is_empty());
-        // `request_text` and `request_cursor` stay; they are inert without items
-        // The next batch of results overwrites them atomically with the new items
+        // Anchor left in place (inert without items); the next landing
+        // overwrites it atomically with the new items.
         assert_eq!(state.request_text, "a");
         assert_eq!(state.request_cursor, 1);
     }

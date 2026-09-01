@@ -2,9 +2,10 @@
 #[allow(unused_imports)]
 use crate::common::*;
 
-/// The prompt is always focused in minimal mode, so Esc reaches the branch that cancels the running turn.
-/// Minimal enables the Esc-cancel gate regardless of vim mode.
-/// The cancellation marker is finalized and committed to native scrollback like any other block.
+/// Esc cancels a running turn in minimal mode (the prompt is always focused, so
+/// the turn-running Esc branch wins; minimal enables the Esc-cancel gate
+/// regardless of vim mode). The cancellation marker is finalized and committed
+/// to native scrollback like any other block.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn minimal_esc_cancels_running_turn() {
@@ -29,7 +30,8 @@ async fn minimal_esc_cancels_running_turn() {
 
     harness.inject_keys(keys::ESC).expect("press esc to cancel");
 
-    // Minimal commits the cancel marker to native scrollback and it may sit above the pinned viewport, so check the full text, not just the screen
+    // Full-text: minimal commits the cancel marker to native scrollback, so it
+    // may sit above the pinned viewport — check scrollback + screen.
     harness
         .wait_for_full_text("Turn cancelled by user", Duration::from_secs(15))
         .expect("cancellation marker committed to scrollback");

@@ -1,8 +1,9 @@
 //! PTY coverage for experimental minimal mode and its native-scrollback path.
 //!
-//! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps this process-heavy family at four concurrent libtest workers.
+//! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps this
+//! process-heavy family at four concurrent libtest workers.
 
-// common.rs is shared by every PTY test binary, so not every item is used here
+// Shared support intentionally serves all PTY family crates.
 #[allow(dead_code, unused_imports)]
 #[path = "pty_e2e/common.rs"]
 mod common;

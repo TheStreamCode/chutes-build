@@ -1,3 +1,5 @@
+//! SearchToolCallBlock — integration tool discovery results.
+
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use xai_grok_workspace::permission::mcp_titleize_segment;
@@ -20,12 +22,14 @@ pub struct DiscoveredTool {
     pub score: f64,
 }
 
-/// A search_tool call: discovers MCP integration tools by keyword.
+/// Search tool call — discovering MCP integration tools by keyword.
 #[derive(Debug, Clone)]
 pub struct SearchToolCallBlock {
+    /// The search query.
     pub query: String,
-    /// Limit parameter from the input; `None` means the default of 8.
+    /// Limit parameter from the input (None = default 8).
     pub limit: Option<u8>,
+    /// Number of results found.
     pub result_count: usize,
     /// Discovered tools (parsed from output).
     pub results: Vec<DiscoveredTool>,
@@ -33,6 +37,7 @@ pub struct SearchToolCallBlock {
     pub content: Option<String>,
     /// Error message if the tool call failed.
     pub error: Option<String>,
+    /// When the tool started running.
     pub started_at: Option<std::time::Instant>,
     /// Elapsed time in ms after completion.
     pub elapsed_ms: Option<i64>,
@@ -158,7 +163,7 @@ impl SearchToolCallBlock {
         }
     }
 
-    /// Header line with only the query span selectable.
+    /// Header line with only the query span selectable (exclude label/suffix).
     fn header_block_line(&self, line: Line<'static>) -> BlockLine {
         let query_end = 2.min(line.spans.len()).max(1);
         BlockLine {
@@ -218,8 +223,9 @@ impl BlockContent for SearchToolCallBlock {
                     for (i, tool) in self.results.iter().enumerate() {
                         let idx_span = Span::styled(format!("  {}. ", i + 1), theme.muted());
 
-                        // Strip the trusted server prefix from tool_name and title-case both halves
-                        // Show the action bold and the server name dimmed on the right
+                        // Strip the trusted server prefix from tool_name and
+                        // title-case both halves; show the action bold and
+                        // the server name ghosted on the right.
                         let action = mcp_titleize_segment(discovered_tool_action(tool));
                         let server_label = mcp_titleize_segment(&tool.server);
 

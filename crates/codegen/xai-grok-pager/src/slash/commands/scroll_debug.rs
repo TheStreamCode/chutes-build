@@ -1,23 +1,32 @@
-//! `/scroll-debug`: toggle the scroll-diagnostics HUD ([`crate::views::scroll_debug_hud`]).
+//! `/scroll-debug` — toggle the scroll-diagnostics HUD
+//! ([`crate::views::scroll_debug_hud`]).
 //!
-//! Hidden diagnostic (the `/gboom` pattern): typeable but never listed in the dropdown, and any argument passes through like an unknown command.
-//! Pairs with `CHUTES_BUILD_SCROLL_DEBUG=1`, which enables the HUD from startup; this command flips it live mid-session.
+//! Hidden diagnostic (the `/gboom` pattern): typeable but never listed in
+//! the dropdown, and any argument passes through like an unknown command.
+//! Pairs with `CHUTES_BUILD_SCROLL_DEBUG=1`, which enables the HUD from startup;
+//! this command flips it live mid-session.
 
 use crate::app::actions::Action;
-use crate::slash::command::{AppCtx, CommandExecCtx, CommandResult, SlashCommand, slash_meta};
+use crate::slash::command::{AppCtx, CommandExecCtx, CommandResult, SlashCommand};
 
 /// Hidden toggle for the scroll-debug HUD.
 pub struct ScrollDebugCommand;
 
 impl SlashCommand for ScrollDebugCommand {
-    slash_meta! {
-        name: "scroll-debug",
-        // Never shown: the command is hidden from the dropdown.
-        description: "Toggle the scroll-diagnostics HUD",
-        usage: "/scroll-debug",
+    fn name(&self) -> &str {
+        "scroll-debug"
     }
 
-    /// Diagnostic: typeable but never listed.
+    fn description(&self) -> &str {
+        // Never shown: the command is hidden from the dropdown.
+        "Toggle the scroll-diagnostics HUD"
+    }
+
+    fn usage(&self) -> &str {
+        "/scroll-debug"
+    }
+
+    /// Diagnostic: typeable, never listed.
     fn visible(&self, _ctx: &AppCtx) -> bool {
         false
     }

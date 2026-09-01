@@ -1,7 +1,8 @@
-//! VisibleLinkMap: per-frame map of clickable link regions on screen.
+//! VisibleLinkMap — per-frame map of clickable link regions on screen.
 //!
-//! Populated during the scrollback render pass from the `LinkOverlay` (markdown hyperlinks) and from web_search / web_fetch citation URLs.
-//! Used by the mouse handler for click-to-open.
+//! Populated during the scrollback render pass from the `LinkOverlay`
+//! (markdown hyperlinks) and citation URLs from web_search / web_fetch
+//! tool blocks. Used by the mouse handler for click-to-open.
 
 use ratatui::layout::Rect;
 
@@ -9,8 +10,8 @@ use crate::render::osc8::{LinkOverlay, LinkTarget};
 
 /// A clickable link region on screen.
 ///
-/// A single logical link may span multiple screen rows when word-wrap splits it.
-/// Each row segment is a separate `Rect` in `rects`.
+/// A single logical link may span multiple screen rows when word-wrap
+/// splits it. Each row segment is a separate `Rect` in `rects`.
 #[derive(Debug, Clone)]
 pub struct VisibleLink {
     pub rects: Vec<Rect>,
@@ -19,14 +20,16 @@ pub struct VisibleLink {
 }
 
 impl VisibleLink {
-    /// Check whether screen position `(col, row)` falls inside any of this link's row segments.
+    /// Check whether screen position `(col, row)` falls inside any of
+    /// this link's row segments.
     pub fn contains(&self, col: u16, row: u16) -> bool {
         self.rects
             .iter()
             .any(|r| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
     }
 
-    /// True when painted cell width equals the URL's display width (bare URL text on screen, not a short label or wide citation block).
+    /// True when painted cell width equals the URL's display width (bare URL
+    /// text on screen, not a short label or wide citation block).
     pub fn looks_like_bare_url_text(&self) -> bool {
         let LinkTarget::Url(url) = &self.target else {
             return false;
@@ -56,9 +59,9 @@ impl VisibleLinkMap {
 
     /// Rebuild the link map from a `LinkOverlay` and citation URLs.
     ///
-    /// Consecutive `OverlayLink`s with the same `id` **and** target are merged into one `VisibleLink` with multiple `rects`.
-    /// Matching entries are segments of a single link that word-wrapped across rows.
-    /// Same `id` alone is not enough: markdown ids restart per document, so two visible messages can both carry `id=0` for different URLs.
+    /// Consecutive `OverlayLink`s with the same `id` (e.g. a single link
+    /// that word-wrapped across rows) are merged into one `VisibleLink`
+    /// with multiple `rects`.
     pub fn rebuild(
         &mut self,
         generation: u64,
@@ -99,19 +102,23 @@ impl VisibleLinkMap {
 
     /// Append overlay links (e.g. `/btw`) without changing generation.
     ///
-    /// The same-id, same-target merge applies only *within this append*.
-    /// Markdown link ids are per-document, so they will not merge with anything appended earlier this frame.
-    /// Earlier entries are the scrollback prefix from [`Self::rebuild`] or a previous [`Self::append_from_overlay`] call from another overlay source.
-    /// Wrapped segments of the same logical link inside `overlay` still merge correctly.
+    /// Same-`id` merge applies only *within this append* — markdown link ids
+    /// are per-document, so they will not merge with anything appended
+    /// earlier this frame (whether that is the scrollback prefix from
+    /// [`Self::rebuild`] or a previous [`Self::append_from_overlay`] call
+    /// from another overlay source). Wrapped segments of the same logical
+    /// link inside `overlay` still merge correctly.
     ///
-    /// Callers that re-append the same source every frame must [`Self::truncate`] back to the desired prefix length first.
-    /// Otherwise each frame's links will accumulate.
+    /// Callers that re-append the same source every frame must
+    /// [`Self::truncate`] back to the desired prefix length first, otherwise
+    /// each frame's links will accumulate.
     pub fn append_from_overlay(&mut self, overlay: &LinkOverlay) {
         let start_len = self.links.len();
         self.push_overlay_links(overlay, start_len, crate::terminal::terminal_context());
     }
 
-    /// Push overlay segments, merging same-id, same-target links only with entries at indices `>= merge_from` (0 for rebuild; map length for append).
+    /// Push overlay segments, merging same-`id` only with entries at
+    /// indices `>= merge_from` (0 for rebuild; map length for append).
     fn push_overlay_links(
         &mut self,
         overlay: &LinkOverlay,
@@ -137,7 +144,6 @@ impl VisibleLinkMap {
                 && self.links.len() > merge_from
                 && let Some(prev) = self.links.last_mut()
                 && prev.id == Some(id)
-                && prev.target == target
             {
                 prev.rects.push(rect);
             } else {
@@ -150,11 +156,13 @@ impl VisibleLinkMap {
         }
     }
 
-    /// Truncate to the first `n` links (used to drop previously-appended overlay links before re-appending for the current frame).
+    /// Truncate to the first `n` links (used to drop previously-appended
+    /// overlay links before re-appending for the current frame).
     pub fn truncate(&mut self, n: usize) {
         self.links.truncate(n);
     }
 
+    /// Number of links currently in the map.
     pub fn len(&self) -> usize {
         self.links.len()
     }
@@ -228,9 +236,9 @@ mod tests {
 
     #[test]
     fn file_target_provenance_survives_overlay_to_visible_map() {
-        let path = Arc::<std::path::Path>::from(std::path::Path::new(
+        let path = Arc::<std::path::Path>::from(std::path::Path::new(&crate::test_util::abs_path(
             "/tmp/non-display-target/file name.rs",
-        ));
+        )));
         let mut overlay = LinkOverlay::new();
         overlay.push(OverlayLink {
             screen_row: 3,
@@ -249,7 +257,7 @@ mod tests {
         assert_eq!(resolved.open_target, Some(LinkTarget::File(path)));
         assert_eq!(
             resolved.osc8_url.unwrap().as_ref(),
-            "file:///tmp/non-display-target/file%20name.rs"
+            crate::test_util::file_url("/tmp/non-display-target/file%20name.rs")
         );
         assert!(!map.links()[0].looks_like_bare_url_text());
     }
@@ -500,7 +508,7 @@ mod tests {
         ]);
         map.rebuild(1, &overlay, vec![]);
 
-        // One logical link with 2 rects
+        // Should be 1 logical link with 2 rects
         assert_eq!(map.links().len(), 1);
         assert_eq!(map.links()[0].rects.len(), 2);
         assert_eq!(
@@ -529,43 +537,6 @@ mod tests {
         map.rebuild(1, &overlay, vec![]);
 
         assert_eq!(map.links().len(), 2);
-    }
-
-    #[test]
-    fn same_id_different_url_stays_separate() {
-        let mut map = VisibleLinkMap::default();
-        let overlay = make_overlay(vec![
-            (3, 0, 10, "https://first.com", Some(0)),
-            (4, 0, 10, "https://second.com", Some(0)),
-            (5, 0, 10, "https://third.com", Some(0)),
-        ]);
-        map.rebuild(1, &overlay, vec![]);
-
-        assert_eq!(map.links().len(), 3);
-        assert_eq!(
-            &*resolve_link_target(&map.link_at(5, 3).unwrap().target)
-                .unwrap()
-                .osc8_url
-                .unwrap(),
-            "https://first.com"
-        );
-        assert_eq!(
-            &*resolve_link_target(&map.link_at(5, 4).unwrap().target)
-                .unwrap()
-                .osc8_url
-                .unwrap(),
-            "https://second.com"
-        );
-        assert_eq!(
-            &*resolve_link_target(&map.link_at(5, 5).unwrap().target)
-                .unwrap()
-                .osc8_url
-                .unwrap(),
-            "https://third.com"
-        );
-        assert_eq!(map.links()[0].rects.len(), 1);
-        assert_eq!(map.links()[1].rects.len(), 1);
-        assert_eq!(map.links()[2].rects.len(), 1);
     }
 
     #[test]
