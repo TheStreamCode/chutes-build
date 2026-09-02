@@ -145,7 +145,7 @@ async fn provider_config_edit_invalidates_cached_token() {
     let edited = AuthProviderRef::new(
         "test-freshen".to_owned(),
         AuthProviderConfig {
-            command: "printf edited-token".to_owned(),
+            command: crate::auth::provider_fixture_command(&["print", "edited-token"]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -178,7 +178,7 @@ async fn provider_401_recovery_reminted_under_edited_config() {
     let edited = AuthProviderRef::new(
         "test-401-edited".to_owned(),
         AuthProviderConfig {
-            command: "printf new-config-token".to_owned(),
+            command: crate::auth::provider_fixture_command(&["print", "new-config-token"]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -204,7 +204,7 @@ async fn provider_timeout_edit_does_not_invalidate_token() {
         "test-timeout-edit".to_owned(),
         AuthProviderConfig {
             command: provider.config.command.clone(),
-            args: None,
+            args: provider.config.args.clone(),
             token_ttl_secs: Some(3600),
             timeout_secs: Some(5),
             cwd: None,
@@ -320,7 +320,12 @@ async fn provider_refresh_sets_expired_env() {
     let provider = AuthProviderRef::new(
         "test-expired-env".to_owned(),
         AuthProviderConfig {
-            command: "printf 'tok-%s' \"${CHUTES_BUILD_AUTH_EXPIRED:-0}\"".to_owned(),
+            command: crate::auth::provider_fixture_command(&[
+                "env",
+                "tok-",
+                "CHUTES_BUILD_AUTH_EXPIRED",
+                "0",
+            ]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -347,11 +352,16 @@ async fn provider_concurrent_mints_single_flight() {
     let provider = AuthProviderRef::new(
         "test-single-flight".to_owned(),
         AuthProviderConfig {
-            command: format!(
-                "sleep 0.3; echo run >> {c}; printf 'tok-%s' \"$(wc -l < {c} | tr -d ' ')\"",
-                c = counter.display()
-            ),
-            args: None,
+            command: crate::auth::provider_fixture_bin()
+                .to_string_lossy()
+                .into_owned(),
+            // 300ms hold: long enough for the second caller to arrive on the
+            // in-flight mint and adopt instead of re-running.
+            args: Some(vec![
+                "count".to_owned(),
+                counter.to_string_lossy().into_owned(),
+                "300".to_owned(),
+            ]),
             token_ttl_secs: Some(3600),
             timeout_secs: None,
             cwd: None,
@@ -383,6 +393,9 @@ async fn provider_expiry_source_precedence() {
         jwt_with_exp(chrono::Utc::now().timestamp() + 7200)
     }
     fn jwt_with_exp(exp: i64) -> String {
+        // Process-global and order-dependent otherwise: install explicitly so
+        // this test does not rely on a sibling having done it first.
+        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
         jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),
             &serde_json::json!({ "exp": exp }),
@@ -393,6 +406,7 @@ async fn provider_expiry_source_precedence() {
     async fn mints_after_first(
         name: &str,
         command: String,
+        args: Vec<String>,
         token_ttl_secs: Option<u64>,
         counter: &std::path::Path,
     ) -> usize {
@@ -400,7 +414,7 @@ async fn provider_expiry_source_precedence() {
             name.to_owned(),
             AuthProviderConfig {
                 command,
-                args: None,
+                args: Some(args),
                 token_ttl_secs,
                 timeout_secs: None,
                 cwd: None,
@@ -415,25 +429,48 @@ async fn provider_expiry_source_precedence() {
         std::fs::read_to_string(counter).unwrap().lines().count()
     }
 
+    // Direct-exec form (command + args): the payloads carry double quotes,
+    // and a shell would eat them — `sh -c` on Unix, differently but just as
+    // fatally under `cmd /C`. argv passes them through verbatim.
+    let fixture = crate::auth::provider_fixture_bin()
+        .to_string_lossy()
+        .into_owned();
     let dir = tempfile::tempdir().unwrap();
 
     // expires_in=10 (stale) wins over token_ttl_secs=3600 (fresh): re-mints.
     let c1 = dir.path().join("c1");
-    let cmd1 = format!(
-        "echo run >> {}; printf '{{\"access_token\":\"t1\",\"expires_in\":10}}'",
-        c1.display()
-    );
     assert_eq!(
-        mints_after_first("test-exp-expires-in", cmd1, Some(3600), &c1).await,
+        mints_after_first(
+            "test-exp-expires-in",
+            fixture.clone(),
+            vec![
+                "count-print".to_owned(),
+                c1.to_string_lossy().into_owned(),
+                r#"{"access_token":"t1","expires_in":10}"#.to_owned(),
+            ],
+            Some(3600),
+            &c1,
+        )
+        .await,
         2,
         "expires_in must win over token_ttl_secs"
     );
 
     // token_ttl_secs=1 (stale) wins over a 2h JWT exp (fresh): re-mints.
     let c2 = dir.path().join("c2");
-    let cmd2 = format!("echo run >> {}; printf '{}'", c2.display(), long_jwt());
     assert_eq!(
-        mints_after_first("test-exp-ttl", cmd2, Some(1), &c2).await,
+        mints_after_first(
+            "test-exp-ttl",
+            fixture.clone(),
+            vec![
+                "count-print".to_owned(),
+                c2.to_string_lossy().into_owned(),
+                long_jwt(),
+            ],
+            Some(1),
+            &c2,
+        )
+        .await,
         2,
         "token_ttl_secs must win over the JWT exp claim"
     );
@@ -441,9 +478,19 @@ async fn provider_expiry_source_precedence() {
     // JWT exp alone: a near-expiry claim (inside the skew) re-mints,
     // proving the claim is consumed when nothing else is configured.
     let c3 = dir.path().join("c3");
-    let cmd3 = format!("echo run >> {}; printf '{}'", c3.display(), short_jwt());
     assert_eq!(
-        mints_after_first("test-exp-jwt", cmd3, None, &c3).await,
+        mints_after_first(
+            "test-exp-jwt",
+            fixture,
+            vec![
+                "count-print".to_owned(),
+                c3.to_string_lossy().into_owned(),
+                short_jwt(),
+            ],
+            None,
+            &c3,
+        )
+        .await,
         2,
         "the JWT exp claim must apply when expires_in and token_ttl_secs are absent"
     );
@@ -454,11 +501,13 @@ async fn provider_unusable_expiry_still_mints() {
     let provider = AuthProviderRef::new(
         "test-overflow".to_owned(),
         AuthProviderConfig {
-            command: format!(
-                "printf '{{\"access_token\":\"t\",\"expires_in\":{}}}'",
-                u64::MAX
-            ),
-            args: None,
+            command: crate::auth::provider_fixture_bin()
+                .to_string_lossy()
+                .into_owned(),
+            args: Some(vec![
+                "print".to_owned(),
+                format!(r#"{{"access_token":"t","expires_in":{}}}"#, u64::MAX),
+            ]),
             token_ttl_secs: Some(u64::MAX),
             timeout_secs: None,
             cwd: None,
@@ -481,9 +530,11 @@ async fn provider_args_run_without_a_shell() {
     let provider = AuthProviderRef::new(
         "test-args".to_owned(),
         AuthProviderConfig {
-            command: "printf".to_owned(),
+            command: crate::auth::provider_fixture_bin()
+                .to_string_lossy()
+                .into_owned(),
             // Shell metacharacters stay literal under direct exec.
-            args: Some(vec!["tok-$HOME;42".to_owned()]),
+            args: Some(vec!["print".to_owned(), "tok-$HOME;42".to_owned()]),
             token_ttl_secs: Some(3600),
             timeout_secs: None,
             cwd: None,
@@ -500,7 +551,7 @@ async fn provider_command_times_out() {
     let provider = AuthProviderRef::new(
         "test-timeout".to_owned(),
         AuthProviderConfig {
-            command: "sleep 20; printf never".to_owned(),
+            command: crate::auth::provider_fixture_command(&["sleep", "20000"]),
             args: None,
             token_ttl_secs: None,
             timeout_secs: Some(1),
@@ -526,7 +577,7 @@ async fn provider_zero_timeout_clamps_to_one_second() {
     let fast = AuthProviderRef::new(
         "test-zero-timeout-fast".to_owned(),
         AuthProviderConfig {
-            command: "printf tok".to_owned(),
+            command: crate::auth::provider_fixture_command(&["print", "tok"]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: Some(0),
@@ -543,7 +594,7 @@ async fn provider_zero_timeout_clamps_to_one_second() {
     let slow = AuthProviderRef::new(
         "test-zero-timeout-slow".to_owned(),
         AuthProviderConfig {
-            command: "sleep 5; printf tok".to_owned(),
+            command: crate::auth::provider_fixture_command(&["sleep", "5000", "tok"]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: Some(0),
@@ -566,7 +617,7 @@ async fn mint_error_messages_distinguish_failure_modes() {
     let timed_out = AuthProviderRef::new(
         "test-classify-timeout".to_owned(),
         AuthProviderConfig {
-            command: "sleep 20".to_owned(),
+            command: crate::auth::provider_fixture_command(&["sleep", "20000"]),
             args: None,
             token_ttl_secs: None,
             timeout_secs: Some(1),
@@ -598,7 +649,7 @@ async fn mint_error_messages_distinguish_failure_modes() {
     let empty_output = AuthProviderRef::new(
         "test-classify-permanent".to_owned(),
         AuthProviderConfig {
-            command: "printf ''".to_owned(),
+            command: crate::auth::provider_fixture_command(&["exit", "0"]),
             args: None,
             token_ttl_secs: None,
             timeout_secs: Some(5),
@@ -620,8 +671,12 @@ async fn re_mint_hands_the_prior_token_back_to_the_command() {
     let provider = AuthProviderRef::new(
         "test-handback".to_owned(),
         AuthProviderConfig {
-            command: "printf 'seen-%s' \"${CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN:-none}\""
-                .to_owned(),
+            command: crate::auth::provider_fixture_command(&[
+                "env",
+                "seen-",
+                "CHUTES_BUILD_AUTH_PROVIDER_ACCESS_TOKEN",
+                "none",
+            ]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -653,11 +708,10 @@ async fn failed_401_remint_invalidates_the_cached_token() {
     let provider = AuthProviderRef::new(
         "test-401-invalidate".to_owned(),
         AuthProviderConfig {
-            command: format!(
-                "echo run >> {c}; n=$(wc -l < {c} | tr -d ' '); \
-                 [ \"$n\" = 1 ] && printf 'tok-1' || exit 1",
-                c = counter.display()
-            ),
+            command: crate::auth::provider_fixture_command(&[
+                "count-fail-after-first",
+                &counter.to_string_lossy(),
+            ]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -692,11 +746,10 @@ async fn failed_pre_turn_mint_does_not_serve_the_stale_token() {
     let provider = AuthProviderRef::new(
         "test-pre-turn-stale".to_owned(),
         AuthProviderConfig {
-            command: format!(
-                "echo run >> {c}; n=$(wc -l < {c} | tr -d ' '); \
-                 [ \"$n\" = 1 ] && printf 'tok-1' || exit 1",
-                c = counter.display()
-            ),
+            command: crate::auth::provider_fixture_command(&[
+                "count-fail-after-first",
+                &counter.to_string_lossy(),
+            ]),
             args: None,
             token_ttl_secs: Some(3600),
             timeout_secs: None,
@@ -728,7 +781,7 @@ async fn provider_output_over_cap_fails_closed() {
     let provider = AuthProviderRef::new(
         "test-stdout-cap".to_owned(),
         AuthProviderConfig {
-            command: format!("head -c {over} /dev/zero"),
+            command: crate::auth::provider_fixture_command(&["flood", &over.to_string()]),
             args: None,
             token_ttl_secs: None,
             timeout_secs: Some(5),
@@ -783,27 +836,23 @@ async fn provider_helper_env_scrubs_first_party_credentials() {
          credential a BYOK helper must not inherit, then update EXPECTED"
     );
 
-    // Echo each expected var back; the scrub must leave every one empty. A
-    // scrub-const entry that EXPECTED still lists but production stopped removing
-    // stays at its leak value and surfaces here.
-    let echo = EXPECTED
-        .iter()
-        .map(|v| format!("${{{v}-}}"))
-        .collect::<Vec<_>>()
-        .join("");
-    let mut cmd = tokio::process::Command::new("sh");
-    cmd.args(["-c", &format!("printf 'tok[%s]' \"{echo}\"")]);
+    // Report each expected var back through the fixture; the scrub must leave
+    // every one unset so the helper answers with its default instead of the
+    // leak value. A scrub-const entry that EXPECTED still lists but production
+    // stopped removing stays at its leak value and surfaces here.
     for var in EXPECTED {
+        let mut cmd = tokio::process::Command::new(crate::auth::provider_fixture_bin());
+        cmd.args(["env", "", var, "MISSING"]);
         cmd.env(var, "first-party-leak");
-    }
-    super::scrub_first_party_credentials(&mut cmd);
+        super::scrub_first_party_credentials(&mut cmd);
 
-    let output = cmd.output().await.expect("helper spawns");
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "tok[]",
-        "no first-party credential may survive into the helper env"
-    );
+        let output = cmd.output().await.expect("helper spawns");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "MISSING",
+            "first-party credential {var} must not survive into the helper env"
+        );
+    }
 }
 
 /// `resolve_program` branches: bare name via `PATH`, absolute as-is, relative

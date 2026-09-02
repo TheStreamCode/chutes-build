@@ -333,11 +333,11 @@ async fn discover_once(issuer_key: &str) -> anyhow::Result<Discovery> {
 pub(super) fn clear_discovery_cache() {
     DISCOVERY_CACHE.write().clear();
 }
-pub(in crate::auth) struct Pkce {
-    pub(in crate::auth) code_verifier: String,
-    pub(in crate::auth) code_challenge: String,
+pub(super) struct Pkce {
+    pub(super) code_verifier: String,
+    pub(super) code_challenge: String,
 }
-pub(in crate::auth) fn generate_pkce() -> Pkce {
+pub(super) fn generate_pkce() -> Pkce {
     let random_bytes: [u8; 32] = rand::random();
     let code_verifier = URL_SAFE_NO_PAD.encode(random_bytes);
     let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
@@ -781,6 +781,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["openid".into(), "profile".into()],
             audience: Some("api://grok".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://example.okta.com/authorize".into(),
@@ -829,6 +830,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.chutes.ai".into(),
@@ -837,6 +839,7 @@ mod tests {
             principal_type: Some("Team".into()),
             principal_id: Some("team-123".into()),
             referrer: Some("chutes-build".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.chutes.ai/authorize".into(),
@@ -873,6 +876,7 @@ mod tests {
             client_id: TEST_CLIENT_ID.into(),
             scopes: vec!["offline_access".into(), "grok-cli:access".into()],
             audience: None,
+            client_secret: None,
         };
         let oauth2 = OAuth2ProviderConfig {
             issuer: "https://auth.chutes.ai".into(),
@@ -881,6 +885,7 @@ mod tests {
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-desktop".into()),
+            client_secret: None,
         };
         let discovery = Discovery {
             authorization_endpoint: "https://auth.chutes.ai/authorize".into(),

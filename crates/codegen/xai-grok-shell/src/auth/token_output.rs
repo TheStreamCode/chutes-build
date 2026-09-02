@@ -114,11 +114,7 @@ mod tests {
     /// cannot carry; only JSON output does.
     #[test]
     fn parse_token_output_reads_refresh_token_from_json_only() {
-        let ok = |stdout: &str| std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: vec![],
-        };
+        let ok = |stdout: &str| crate::auth::fake_output(true, stdout);
 
         let parsed =
             parse_token_output(&ok(r#"{"access_token":"a","refresh_token":"r"}"#)).unwrap();
@@ -132,11 +128,7 @@ mod tests {
     /// error payload fails closed instead of going on the wire as a bearer.
     #[test]
     fn parse_token_output_rejects_invalid_json_payloads() {
-        let ok = |stdout: &str| std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: vec![],
-        };
+        let ok = |stdout: &str| crate::auth::fake_output(true, stdout);
 
         assert!(parse_token_output(&ok(r#"{"access_token":""}"#)).is_err());
         assert!(parse_token_output(&ok(r#"{"access_token":"   "}"#)).is_err());
