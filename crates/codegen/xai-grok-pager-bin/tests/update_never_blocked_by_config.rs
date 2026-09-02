@@ -77,16 +77,26 @@ fn spawn_pointer_server(body: Arc<Mutex<String>>) -> (std::net::TcpListener, Str
 fn run_update(base: &str, config_toml: &str, extra_args: &[&str]) -> std::process::Output {
     let home = tempfile::tempdir().unwrap();
     std::fs::write(home.path().join("config.toml"), config_toml).unwrap();
-    Command::new(pager_binary())
-        .arg("update")
+    let mut cmd = Command::new(pager_binary());
+    cmd.arg("update")
         .args(extra_args)
         .env_clear()
         .env("HOME", home.path())
         .env("CHUTES_BUILD_HOME", home.path())
         .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("CHUTES_BUILD_CLI_BASE_URL", base)
-        .output()
-        .expect("spawn chutes-build update")
+        .env("CHUTES_BUILD_CLI_BASE_URL", base);
+    // Windows: env_clear drops SystemRoot, and without it Winsock cannot
+    // initialize — every loopback HTTP request fails as a transport error
+    // regardless of the server. reqwest's default TLS/backend stack needs a
+    // usable winsock, so the child must keep the standard Windows environment.
+    if cfg!(windows) {
+        for var in ["SystemRoot", "SYSTEMROOT", "SystemDrive", "COMPUTERNAME"] {
+            if let Ok(value) = std::env::var(&var) {
+                cmd.env(var, value);
+            }
+        }
+    }
+    cmd.output().expect("spawn chutes-build update")
 }
 
 /// The valid run proves the environment resolves to success, so a nonzero
