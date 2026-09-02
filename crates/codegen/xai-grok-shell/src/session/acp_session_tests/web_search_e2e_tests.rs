@@ -80,6 +80,7 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
             description_override: None,
             behavior_version: None,
             kind: None,
+            compact_schema: false,
         }],
         behavior_preset: None,
     };
@@ -162,6 +163,7 @@ async fn web_search_errors_when_configured_model_cannot_be_resolved() {
             description_override: None,
             behavior_version: None,
             kind: None,
+            compact_schema: false,
         }],
         behavior_preset: None,
     };

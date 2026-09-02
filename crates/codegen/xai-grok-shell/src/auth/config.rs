@@ -10,34 +10,55 @@ fn default_oidc_scopes() -> Vec<String> {
         "api:access".into(),
     ]
 }
-/// Default scopes for the xAI OAuth2 provider. Includes `grok-cli:access`
-/// which authorizes the token for API proxy requests.
-fn default_oauth2_scopes() -> Vec<String> {
+/// Default scopes for "Sign in with Chutes".
+///
+/// Kept to the minimum the client uses: `account:read` backs the usage and quota
+/// indicator, `chutes:read` backs model and media discovery, `chutes:invoke`
+/// backs inference and media generation. Broader ones the IdP offers — `admin`,
+/// `*:write`, `*:delete`, `secrets:*` — are deliberately not requested.
+///
+/// `openid` is requested because Chutes' own "Sign in with Chutes" documentation
+/// lists it as required for every app, even though it does not appear in the
+/// IdP's advertised `scopes_supported`. `extract_user_info` in `oidc/protocol.rs`
+/// tolerates a login that returns no `id_token`, so asking costs nothing.
+///
+/// The 1.0.0 re-base replaced this list with upstream's — `grok-cli:access`,
+/// `api:access`, `conversations:*`, `workspaces:*` — none of which exist at
+/// `api.chutes.ai`. An authorization server rejects scopes it does not know, so
+/// "Sign in with Chutes" could not complete at all.
+///
+/// `profile`, `account:read`, `chutes:read` and `chutes:invoke` are each present
+/// in the live `scopes_supported` at
+/// `https://api.chutes.ai/.well-known/openid-configuration`. `openid` is not,
+/// and is kept deliberately: Chutes' own "Sign in with Chutes" documentation
+/// lists it, that discovery document advertises `userinfo_endpoint`,
+/// `subject_types_supported` and `claims_supported`, so this is an OIDC
+/// provider, and OIDC requires `openid` on the request for an ID token to be
+/// issued at all. Providers commonly omit it from `scopes_supported` even
+/// though the spec says to list it. If a flow ever fails with `invalid_scope`,
+/// this is the one to suspect first — drop it and the flow degrades to plain
+/// OAuth2 without an ID token.
+pub(crate) fn default_oauth2_scopes() -> Vec<String> {
     vec![
         "openid".into(),
         "profile".into(),
-        "email".into(),
-        "offline_access".into(),
-        "grok-cli:access".into(),
-        "api:access".into(),
-        "conversations:read".into(),
-        "conversations:write".into(),
-        "workspaces:read".into(),
-        "workspaces:write".into(),
+        "account:read".into(),
+        "chutes:read".into(),
+        "chutes:invoke".into(),
     ]
 }
+/// Scopes for a `Team` principal, which `api.chutes.ai` does not have.
+///
+/// Its `scopes_supported` is entirely user-level: there is no `team:*`,
+/// no `conversations:*`, no `workspaces:*`. This branch survives only for a
+/// non-standard deployment that defines a team principal of its own, and such a
+/// deployment must say what it wants through `CHUTES_BUILD_OAUTH2_SCOPES`. So
+/// the default is the user list rather than a guess — asking for scopes an
+/// authorization server has never heard of fails the whole flow, which is how
+/// upstream's list (`grok-cli:access`, `api:access`, `team:read`, …) made
+/// `CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE=Team` unusable against Chutes.
 fn default_team_oauth2_scopes() -> Vec<String> {
-    vec![
-        "profile".into(),
-        "offline_access".into(),
-        "grok-cli:access".into(),
-        "api:access".into(),
-        "team:read".into(),
-        "conversations:read".into(),
-        "conversations:write".into(),
-        "workspaces:read".into(),
-        "workspaces:write".into(),
-    ]
+    default_oauth2_scopes()
 }
 /// Pin automatic auth to one method via `[auth] preferred_method`. When set and
 /// the method is unavailable, auth fails with no fallthrough; unset keeps
@@ -45,7 +66,7 @@ fn default_team_oauth2_scopes() -> Vec<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreferredAuthMethod {
-    /// `CHUTES_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`chutes.api_key`).
+    /// `CHUTES_API_KEY` / auth.json `chutes::api_key` / per-model BYOK (`chutes.api_key`).
     ApiKey,
     /// OIDC / OAuth2 session (`cached_token`, interactive `grok.com` / `oidc`,
     /// including devbox-minted OIDC).
@@ -106,6 +127,13 @@ pub struct OidcAuthConfig {
     pub scopes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<String>,
+    /// Sent as a `client_secret` form field on token exchange and refresh when
+    /// set. The built-in "Sign in with Chutes" app is a secret-less public PKCE
+    /// client (`token_endpoint_auth_methods_supported: none`), so this is for a
+    /// deployment that registered a confidential client instead — see
+    /// `CHUTES_BUILD_OIDC_CLIENT_SECRET`. Never persisted to config.toml.
+    #[serde(skip)]
+    pub client_secret: Option<String>,
 }
 /// OAuth2 provider configuration (`CHUTES_BUILD_OAUTH2_ISSUER` / `CHUTES_BUILD_OAUTH2_CLIENT_ID`).
 ///
@@ -123,13 +151,23 @@ pub struct OAuth2ProviderConfig {
     /// Client-supplied referrer for OAuth usage-attribution analytics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
+    /// See [`OidcAuthConfig::client_secret`]. Never persisted to config.toml.
+    #[serde(skip)]
+    pub client_secret: Option<String>,
 }
-pub const XAI_OAUTH2_ISSUER: &str = "https://auth.x.ai";
-/// Production accounts-app origin allowlist. Its own const so the frozen
-/// contract test pins the production allowlist even when the non-production
-/// feature adds staging/local origins.
-const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://accounts.x.ai"];
-/// Production build: accepts only the production accounts app.
+/// Issuer for the built-in "Sign in with Chutes" OAuth app. Matches the
+/// `issuer` field in `https://idp.chutes.ai/.well-known/openid-configuration`
+/// — that document is served from `idp.chutes.ai`, but the issuer it declares,
+/// and the value the token/authorize endpoints validate against, is
+/// `api.chutes.ai`. Do not "fix" the hostname to match where it is hosted.
+pub const XAI_OAUTH2_ISSUER: &str = "https://api.chutes.ai";
+/// Production accounts-app origin allowlist — the only origins builds without
+/// non-production builds accept. Lives in its own const, referenced by both
+/// profiles below, so the frozen-contract test (monorepo CI compiles with
+/// that feature enabled) still pins this production-origin const.
+const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://chutes.ai"];
+/// See the opt-in non-production feature variant above — builds without
+/// the feature accept only the production accounts app.
 pub(crate) fn allowed_accounts_app_origins() -> Vec<String> {
     PROD_ACCOUNTS_APP_ORIGINS
         .iter()
@@ -172,15 +210,37 @@ pub fn xai_oauth2_issuer() -> &'static str {
         XAI_OAUTH2_ISSUER
     }
 }
-/// Whether `issuer` is a recognised xAI OAuth2 issuer (production or local-dev).
-/// Use this instead of comparing to [`XAI_OAUTH2_ISSUER`] so local-dev counts as
-/// first-party xAI auth.
+/// Returns `true` if `issuer` is a recognised xAI OAuth2 issuer
+/// (production **or** local-dev). Use this instead of comparing against
+/// [`XAI_OAUTH2_ISSUER`] directly so that local-dev sessions are still
+/// treated as first-party xAI auth.
+/// The `client_secret` to use when refreshing against `issuer`/`client_id`.
+///
+/// A refresh happens with an `Auth` loaded from disk, which stores neither the
+/// secret (`#[serde(skip)]`, deliberately) nor a reference to the config that
+/// held it. So resolve it from the environment, and only when both the issuer
+/// and the client id still match — otherwise a secret configured for one
+/// provider would be posted to another.
+pub(crate) fn refresh_client_secret(issuer: &str, client_id: &str) -> Option<String> {
+    let matches = |configured_issuer: &str, configured_client_id: &str| {
+        configured_issuer.trim_end_matches('/') == issuer.trim_end_matches('/')
+            && configured_client_id == client_id
+    };
+    if let Some(config) = OidcAuthConfig::from_env()
+        && matches(&config.issuer, &config.client_id)
+    {
+        return config.client_secret;
+    }
+    OAuth2ProviderConfig::from_env()
+        .filter(|config| matches(&config.issuer, &config.client_id))
+        .and_then(|config| config.client_secret)
+}
 pub fn is_xai_oauth2_issuer(issuer: &str) -> bool {
     issuer == XAI_OAUTH2_ISSUER || issuer == XAI_OAUTH2_LOCAL_ISSUER
 }
 /// auth.json scope key used by the pre-OIDC `chutes-build login --legacy` flow.
 /// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub(crate) const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
+pub(crate) const LEGACY_AUTH_SCOPE: &str = "disabled::legacy-auth";
 impl GrokComConfig {
     /// Whether `chutes.api_key` auth is disabled. Pinning a team
     /// (`force_login_team_uuid`) implies this: team membership can't be verified
@@ -205,7 +265,11 @@ impl GrokComConfig {
         } else if let Some(ref oauth2) = self.oauth2 {
             oauth2.auth_scope()
         } else {
-            unreachable!("oauth2 config is always present (xAI default or env override)")
+            // No enterprise OIDC and no registered OAuth app: the credential is an
+            // API key, and this is the auth.json key it is stored under. Upstream
+            // asserted `unreachable!` here because its OAuth client id is compiled
+            // in; ours is not, so on Chutes this is the ordinary case.
+            super::model::API_KEY_SCOPE.to_owned()
         }
     }
 }
@@ -213,9 +277,24 @@ impl OAuth2ProviderConfig {
     pub fn is_team_principal(&self) -> bool {
         self.principal_type.as_deref() == Some(TEAM_PRINCIPAL_TYPE)
     }
+    /// `None` unless `CHUTES_BUILD_OAUTH2_CLIENT_ID` names an app.
+    ///
+    /// OAuth on Chutes works only with an app the user registers in their own
+    /// account area, so there is no client id that could serve as a default — a
+    /// compiled-in one would offer a sign-in that fails for everyone but its
+    /// owner. The API key is the primary credential; without an app configured,
+    /// `login` says so rather than starting a flow that cannot complete.
+    ///
+    /// The issuer defaults to [`xai_oauth2_issuer`] because a registered app is
+    /// almost always on the standard Chutes IdP; override it only for a
+    /// non-standard deployment.
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("CHUTES_BUILD_OAUTH2_ISSUER").ok()?;
-        let client_id = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_ID").ok()?;
+        let client_id = std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_ID")
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())?;
+        let issuer = std::env::var("CHUTES_BUILD_OAUTH2_ISSUER")
+            .unwrap_or_else(|_| xai_oauth2_issuer().to_owned());
         let principal_type = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_TYPE").ok();
         let principal_id = std::env::var("CHUTES_BUILD_OAUTH2_PRINCIPAL_ID").ok();
         let default_scopes = match principal_type.as_deref() {
@@ -234,6 +313,7 @@ impl OAuth2ProviderConfig {
                 std::env::var("CHUTES_BUILD_OAUTH2_REFERRER")
                     .unwrap_or_else(|_| DEFAULT_OAUTH2_REFERRER.to_owned()),
             ),
+            client_secret: std::env::var("CHUTES_BUILD_OAUTH2_CLIENT_SECRET").ok(),
         })
     }
     /// Convert to [`OidcAuthConfig`] to reuse the OIDC login flow.
@@ -242,6 +322,7 @@ impl OAuth2ProviderConfig {
             issuer: self.issuer.clone(),
             client_id: self.client_id.clone(),
             scopes: self.scopes.clone(),
+            client_secret: self.client_secret.clone(),
             audience: None,
         }
     }
@@ -258,16 +339,9 @@ impl Default for GrokComConfig {
         let oauth2 = if oidc.is_some() {
             None
         } else {
-            Some(
-                OAuth2ProviderConfig::from_env().unwrap_or_else(|| OAuth2ProviderConfig {
-                    issuer: xai_oauth2_issuer().to_owned(),
-                    client_id: obfstr::obfstr!("b1a00492-073a-47ea-816f-4c329264a828").to_owned(),
-                    scopes: default_oauth2_scopes(),
-                    principal_type: None,
-                    principal_id: None,
-                    referrer: Some(DEFAULT_OAUTH2_REFERRER.to_owned()),
-                }),
-            )
+            // `None` when no app is configured: OAuth needs one the user
+            // registered, and offering a flow without it would fail at the IdP.
+            OAuth2ProviderConfig::from_env()
         };
         Self {
             grok_ws_origin: std::env::var("CHUTES_BUILD_WS_ORIGIN")
@@ -396,6 +470,7 @@ impl OidcAuthConfig {
                 .map(|s| s.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_else(|_| default_oidc_scopes()),
             audience: std::env::var("CHUTES_BUILD_OIDC_AUDIENCE").ok(),
+            client_secret: std::env::var("CHUTES_BUILD_OIDC_CLIENT_SECRET").ok(),
         })
     }
 }
@@ -405,14 +480,39 @@ mod tests {
     #[test]
     fn team_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: XAI_OAUTH2_ISSUER.into(),
             client_id: "client-123".into(),
             scopes: default_team_oauth2_scopes(),
             principal_type: Some("Team".into()),
             principal_id: Some("team-abc".into()),
             referrer: Some("chutes-build".into()),
+            client_secret: None,
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://api.chutes.ai::client-123");
+    }
+
+    #[test]
+    fn team_scopes_ask_for_nothing_chutes_does_not_have() {
+        // `api.chutes.ai` has no team principal: its `scopes_supported` is
+        // entirely user-level. A Team default that names `team:*`,
+        // `conversations:*` or `workspaces:*` cannot be granted by the only
+        // issuer this product ships with, so the flow fails before it starts.
+        let scopes = default_team_oauth2_scopes();
+        assert_eq!(scopes, default_oauth2_scopes());
+        for absent in [
+            "team:read",
+            "conversations:read",
+            "conversations:write",
+            "workspaces:read",
+            "workspaces:write",
+            "grok-cli:access",
+            "api:access",
+        ] {
+            assert!(
+                !scopes.iter().any(|scope| scope == absent),
+                "team scopes still request `{absent}`, which api.chutes.ai does not advertise"
+            );
+        }
     }
     #[test]
     fn env_flag_enabled_treats_falsy_spellings_as_off() {
@@ -432,18 +532,19 @@ mod tests {
             principal_type: None,
             principal_id: None,
             referrer: Some("chutes-build".into()),
+            client_secret: None,
         };
         assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
     }
     /// FROZEN loopback contract: the accounts-app origins the CLI's loopback
     /// callback server accepts cross-origin requests from. The consent page
-    /// (served from accounts.x.ai) delivers the code via `fetch(..., cors)`, so
-    /// removing an origin breaks loopback delivery for already-installed CLIs.
-    /// Keep in sync with the oauth2-provider / accounts-app deployments.
-    /// Non-production / local-dev origins are opt-in only.
+    /// delivers the code via `fetch(..., cors)`, so removing an origin breaks
+    /// loopback delivery for already-installed CLIs. For Chutes Build that page
+    /// is served from `chutes.ai`; upstream's `accounts.x.ai` would refuse every
+    /// handoff. Non-production / local-dev origins are opt-in only.
     #[test]
     fn allowed_accounts_app_origins_are_frozen() {
-        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://accounts.x.ai"]);
+        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://chutes.ai"]);
         assert_eq!(allowed_accounts_app_origins(), PROD_ACCOUNTS_APP_ORIGINS);
     }
     /// FROZEN client contract: the 10 scopes the xAI OAuth2 client requests.
@@ -453,19 +554,18 @@ mod tests {
     fn default_oauth2_scopes_are_frozen() {
         let scopes = default_oauth2_scopes();
         let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
+        // Every one of these exists in the IdP's advertised `scopes_supported`
+        // except `openid`, which Chutes' own documentation requires anyway. The
+        // list upstream ships — `grok-cli:access`, `conversations:*` — does not,
+        // and an authorization server rejects scopes it does not know.
         assert_eq!(
             scopes,
             [
                 "openid",
                 "profile",
-                "email",
-                "offline_access",
-                "grok-cli:access",
-                "api:access",
-                "conversations:read",
-                "conversations:write",
-                "workspaces:read",
-                "workspaces:write",
+                "account:read",
+                "chutes:read",
+                "chutes:invoke",
             ]
         );
     }

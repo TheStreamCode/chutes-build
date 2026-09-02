@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use xai_acp_lib::{AcpAgentGatewaySender, AcpClientMessage};
 use xai_grok_paths::AbsPathBuf;
 use xai_grok_workspace::permission::types::{
-    PatternMode, PermissionConfig, PermissionRule, RuleAction, ToolFilter,
+    PatternMode, PermissionConfig, PermissionRequest, PermissionRule, RuleAction, ToolFilter,
 };
 use xai_grok_workspace::permission::{
     AccessKind, ClientType, Decision, PermissionCommand, PermissionHandle, PermissionState,
@@ -155,13 +155,16 @@ impl FakeGateway {
 async fn request(handle: &PermissionHandle, access: AccessKind, id: &str) -> Decision {
     let (tx, rx) = oneshot::channel();
     let cmd = PermissionCommand::Request {
-        access,
-        tool_call_update: tool_call_update(id, "mcp"),
-        path_context: None,
+        request: PermissionRequest {
+            access,
+            tool_call_update: tool_call_update(id, "mcp"),
+            path_context: None,
+            session_id: None,
+            subagent_type: None,
+            subagent_description: None,
+            hook_ask: None,
+        },
         respond_to: tx,
-        session_id: None,
-        subagent_type: None,
-        subagent_description: None,
     };
     let PermissionHandle::Actor { cmd_tx, .. } = handle else {
         panic!("expected actor handle");

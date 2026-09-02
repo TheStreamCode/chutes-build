@@ -1167,8 +1167,8 @@ fn subagent_sampling_limit_env_override_beats_toml() {
 #[test]
 fn subagent_sampling_limit_defaults_to_resolved_subagents_max_concurrent() {
     let _lock = SUBAGENTS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let _env = crate::env::EnvVarGuard::remove(SubagentsConfig::ENV_SAMPLING_LIMIT)
-        .and_set(SubagentsConfig::ENV_MAX_CONCURRENT, "20");
+    let _env = crate::env::EnvVarGuard::remove(SubagentsConfig::ENV_SAMPLING_LIMIT);
+    let _max = crate::env::EnvVarGuard::set(SubagentsConfig::ENV_MAX_CONCURRENT, "20");
     let raw: toml::Value = toml::from_str("[subagents]\n").unwrap();
     let mut config = crate::agent::config::Config::new_from_toml_cfg(&raw).unwrap();
     config.resolve_subagents(false, &raw);

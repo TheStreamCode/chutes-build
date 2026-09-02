@@ -12,6 +12,7 @@ fn vision_ok_png_b64() -> String {
     let mut buf = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
         .expect("encode png");
+    use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(buf)
 }
 fn mcp_screenshot_result(payload_b64: &str) -> ToolRunResult {

@@ -704,6 +704,7 @@ pub(crate) fn read_and_edit_toolset() -> Vec<xai_grok_tools::registry::types::To
             description_override: None,
             behavior_version: None,
             kind: None,
+            compact_schema: false,
         },
     ]
 }

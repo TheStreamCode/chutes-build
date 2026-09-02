@@ -25,6 +25,7 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
                 description_override: None,
                 behavior_version: None,
                 kind: None,
+                compact_schema: false,
             },
             ToolConfig {
                 id: "ChutesBuild:search_replace".into(),
@@ -39,6 +40,7 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
                 description_override: None,
                 behavior_version: None,
                 kind: None,
+                compact_schema: false,
             },
         ],
         behavior_preset: None,
