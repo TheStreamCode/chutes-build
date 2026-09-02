@@ -507,6 +507,8 @@
                 stop_reason: "rate_limit".into(),
                 agent_result: Some(rate_limit_copy.into()),
                 usage: None,
+                error_kind: None,
+                elapsed_ms: None,
             },
             meta: Some(serde_json::json!({ "isReplay": false })),
         };

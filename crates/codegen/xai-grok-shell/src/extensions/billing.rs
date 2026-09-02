@@ -106,6 +106,9 @@ pub struct BillingConfig {
     pub billing_period_end: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<BillingPeriodUsage>,
+    /// Usage windows from the external OTLP config (our fork).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage_windows: Vec<serde_json::Value>,
 }
 
 /// Top-level response (primarily from `GET /rest/grok/credits` + auto-topup-rule).
@@ -440,6 +443,7 @@ mod tests {
                         total_used: Some(Cent { val: 1800 }),
                     },
                 ],
+                usage_windows: vec![],
             }),
             on_demand_enabled: Some(true),
             subscription_tier: Some("SuperGrok".into()),
@@ -483,6 +487,7 @@ mod tests {
                 on_demand_used: Some(Cent { val: 100 }),
                 total_used: Some(Cent { val: 4600 }),
             }],
+            usage_windows: vec![],
         };
         let resp = BillingConfigResponse {
             config: Some(config),
@@ -533,6 +538,7 @@ mod tests {
             billing_period_start: None,
             billing_period_end: None,
             history: vec![],
+            usage_windows: vec![],
         };
         let json = serde_json::to_value(&config).unwrap();
         assert!(json.get("monthlyLimit").is_some());

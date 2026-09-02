@@ -2453,6 +2453,8 @@ mod extensions_action_target_tests {
             timeout_ms: 0,
             source_dir: source_dir.into(),
             disabled,
+            pinned: false,
+            removable: true,
         }
     }
 
@@ -3007,6 +3009,8 @@ mod extensions_modal_confirmation_tests {
             timeout_ms: 0,
             source_dir: source_dir.into(),
             disabled: false,
+            pinned: false,
+            removable: true,
         }
     }
 

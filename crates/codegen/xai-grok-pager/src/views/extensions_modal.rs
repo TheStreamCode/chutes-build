@@ -5790,6 +5790,8 @@ mod tests {
             timeout_ms: 10_000,
             source_dir: source_dir.to_string(),
             disabled,
+            pinned: false,
+            removable: true,
         }
     }
 

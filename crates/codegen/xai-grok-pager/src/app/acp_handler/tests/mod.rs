@@ -982,6 +982,8 @@ pub(super) fn xai_turn_completed_notif(
             stop_reason: stop_reason.into(),
             agent_result: None,
             usage: None,
+            error_kind: None,
+            elapsed_ms: None,
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
@@ -1004,6 +1006,8 @@ pub(super) fn xai_turn_completed_notif_with_cancel_trigger(
             stop_reason: stop_reason.into(),
             agent_result: None,
             usage: None,
+            error_kind: None,
+            elapsed_ms: None,
         },
         meta: Some(
             serde_json::json!({
@@ -1035,6 +1039,8 @@ pub(super) fn xai_wake_turn_completed_notif(
             stop_reason: "end_turn".into(),
             agent_result: None,
             usage: None,
+            error_kind: None,
+            elapsed_ms: None,
         },
         meta: Some(meta),
     };

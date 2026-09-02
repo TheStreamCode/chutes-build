@@ -699,8 +699,7 @@ mod tests {
             .status(401)
             .body(None::<Vec<u8>>)
             .unwrap();
-        let err = anyhow::Error::from(WsError::Http(resp))
-            .context("WebSocket connection failed");
+        let err = anyhow::Error::from(WsError::Http(resp)).context("WebSocket connection failed");
         assert!(is_handshake_unauthorized(&err));
     }
     #[test]
@@ -710,8 +709,7 @@ mod tests {
             .status(403)
             .body(None::<Vec<u8>>)
             .unwrap();
-        let err = anyhow::Error::from(WsError::Http(resp))
-            .context("WebSocket connection failed");
+        let err = anyhow::Error::from(WsError::Http(resp)).context("WebSocket connection failed");
         assert!(!is_handshake_unauthorized(&err));
         let err = anyhow::anyhow!("some random error");
         assert!(!is_handshake_unauthorized(&err));
