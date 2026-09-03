@@ -55,7 +55,7 @@ use crate::extensions::mcp::{MANAGED_GATEWAY_ENTRY_PREFIX, McpServerSource};
 pub(crate) const COALESCE_WINDOW: Duration = Duration::from_millis(50);
 
 /// Method name for the ACP push.
-pub const SERVER_STATUS_METHOD: &str = "chutes.ai/mcp/server_status";
+pub const SERVER_STATUS_METHOD: &str = "chutes.build/mcp/server_status";
 
 /// JSON payload pushed over ACP. Fields written in camelCase per ACP
 /// convention.

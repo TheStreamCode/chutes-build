@@ -228,7 +228,7 @@ pub(crate) mod hydrate {
     }
 
     /// Replayable JSON-RPC methods (excludes metadata like `prompt_complete`).
-    const REPLAYABLE_METHODS: &[&str] = &["session/update", "_chutes.build/session/update"];
+    const REPLAYABLE_METHODS: &[&str] = &["session/update", "chutes.build/session/update"];
 
     fn is_session_update(json_rpc: &serde_json::Value) -> bool {
         json_rpc

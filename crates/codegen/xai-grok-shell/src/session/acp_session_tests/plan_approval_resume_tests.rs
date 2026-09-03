@@ -93,7 +93,7 @@ async fn request_plan_approval_issues_reverse_request_and_clears_flag() {
             );
 
             let (method, session_id) = responder.await.unwrap();
-            assert_eq!(method.as_deref(), Some("chutes.ai/exit_plan_mode"));
+            assert_eq!(method.as_deref(), Some("chutes.build/exit_plan_mode"));
             assert_eq!(
                 session_id.as_deref(),
                 Some("test-actor"),

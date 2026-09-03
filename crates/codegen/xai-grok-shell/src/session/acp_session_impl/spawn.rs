@@ -2067,7 +2067,7 @@ pub(crate) async fn spawn_session_actor(
                     "ask_user_question reverse-request must carry a non-empty sessionId (design §5.4)"
                 );
                 let ext_request = agent_client_protocol::ExtRequest::new(
-                    "chutes.ai/ask_user_question",
+                    "chutes.build/ask_user_question",
                     serde_json::value::to_raw_value(&ext_req)
                         .expect("AskUserQuestionExtRequest serialization should not fail")
                         .into(),

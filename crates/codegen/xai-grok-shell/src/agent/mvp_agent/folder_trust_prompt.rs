@@ -76,7 +76,7 @@ impl MvpAgent {
         init.client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("chutes.ai/folderTrust"))
+            .and_then(|m| m.get("chutes.build/folderTrust"))
             .and_then(|v| v.get("interactive"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
@@ -178,7 +178,7 @@ impl MvpAgent {
                     return;
                 }
             };
-            let ext_request = acp::ExtRequest::new("chutes.ai/folder_trust/request", raw_params.into());
+            let ext_request = acp::ExtRequest::new("chutes.build/folder_trust/request", raw_params.into());
 
             use agent_client_protocol::Client as _;
             let outcome = match tokio::time::timeout(
@@ -363,7 +363,7 @@ mod tests {
     fn parse_interactive_trust_capability_present_and_true() {
         let mut meta = serde_json::Map::new();
         meta.insert(
-            "chutes.ai/folderTrust".to_string(),
+            "chutes.build/folderTrust".to_string(),
             serde_json::json!({ "interactive": true }),
         );
         let init = init_with_meta(Some(serde_json::Value::Object(meta)));
@@ -380,7 +380,7 @@ mod tests {
     fn parse_interactive_trust_capability_false_returns_false() {
         let mut meta = serde_json::Map::new();
         meta.insert(
-            "chutes.ai/folderTrust".to_string(),
+            "chutes.build/folderTrust".to_string(),
             serde_json::json!({ "interactive": false }),
         );
         let init = init_with_meta(Some(serde_json::Value::Object(meta)));

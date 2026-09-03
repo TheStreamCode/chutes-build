@@ -26,7 +26,7 @@ async fn create_test_actor(
     gateway_tx: mpsc::UnboundedSender<xai_acp_lib::AcpClientMessage>,
     persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
 ) -> SessionActor {
-    let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+    let cwd = AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute");
     let fs = Arc::new(MockFs::new(cwd.to_path_buf()));
     let terminal = Arc::new(DummyTerminal {});
     let (hunk_tx, _hunk_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -245,7 +245,7 @@ async fn create_test_actor(
         hook_load_errors: std::cell::RefCell::new(Vec::new()),
         plugin_registry: std::cell::RefCell::new(None),
         plugin_registry_handle: None,
-        events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+        events: crate::session::events::EventTracker::new(std::env::temp_dir().as_path()),
         observability_bridge: noop_observability_bridge(),
         current_turn_number: std::cell::Cell::new(0),
         last_recap_main_turn: std::cell::Cell::new(0),
@@ -702,9 +702,37 @@ async fn spawn_status_body_server(status: u16, body: &'static str) -> String {
                 break;
             };
             tokio::spawn(async move {
-                use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                let mut buf = [0u8; 4096];
-                let _ = stream.read(&mut buf).await;
+                use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+                // Drain the full request before answering: on Windows a
+                // premature close aborts the client request with a transport
+                // error instead of delivering the status response.
+                let mut reader = BufReader::new(stream);
+                let mut header_line = Vec::new();
+                let mut content_length = 0usize;
+
+                loop {
+                    header_line.clear();
+                    let read = reader
+                        .read_until(b'\n', &mut header_line)
+                        .await
+                        .unwrap_or(0);
+                    if read == 0 || header_line == b"\r\n" || header_line == b"\n" {
+                        break;
+                    }
+                    let header = String::from_utf8_lossy(&header_line).to_ascii_lowercase();
+                    if let Some(value) = header.strip_prefix("content-length:")
+                        && let Ok(value) = value.trim().parse::<usize>()
+                    {
+                        content_length = value;
+                    }
+                }
+
+                let mut body_bytes = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body_bytes).await;
+                }
+                let mut stream = reader.into_inner();
+
                 let resp = format!(
                     "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len(),

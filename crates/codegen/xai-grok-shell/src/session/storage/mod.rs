@@ -673,7 +673,7 @@ impl Iterator for UpdatesIterator {
 const ACP_SESSION_UPDATE_METHOD: &str = "session/update";
 
 /// Method name for xAI extension session/update notifications.
-pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_chutes.build/session/update";
+pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "chutes.build/session/update";
 
 /// A unified session update that can be either an ACP notification or an xAI extension notification.
 /// This allows storing all session updates in chronological order.
@@ -733,7 +733,7 @@ pub(crate) struct SessionUpdateEnvelope {
     #[serde(default)]
     pub timestamp: u64,
     /// The method name identifying the update type.
-    /// Either "session/update" for ACP or "_chutes.build/session/update" for xAI extensions.
+    /// Either "session/update" for ACP or "chutes.build/session/update" for xAI extensions.
     pub method: String,
     /// The actual notification payload.
     pub params: serde_json::Value,
@@ -2595,7 +2595,7 @@ mod tests {
     /// Wrap a xAI notification as the envelope stored in updates.jsonl.
     fn xai_envelope(session_update_json: &str) -> String {
         format!(
-            r#"{{"timestamp":1,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
+            r#"{{"timestamp":1,"method":"chutes.build/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
         )
     }
 

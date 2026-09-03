@@ -85,7 +85,7 @@ fn client_sent_kind_filter(req: &ListReq) -> bool {
     let Some(kind) = req
         .meta
         .as_ref()
-        .and_then(|m| m.get("chutes.ai/facetFilters"))
+        .and_then(|m| m.get("chutes.build/facetFilters"))
         .and_then(|f| f.get("kind"))
     else {
         return false;
@@ -112,7 +112,7 @@ pub struct ListReq {
     /// Which directories the listing draws from. The wire carries the original
     /// `allowRelax` boolean; `Only` is reachable only in code (ACP
     /// `session/list`), so "exact" and "relax" cannot be requested together.
-    /// A relaxed response sets `_meta["chutes.ai/listScope"]`, re-evaluated per page.
+    /// A relaxed response sets `_meta["chutes.build/listScope"]`, re-evaluated per page.
     #[serde(
         default,
         rename = "allowRelax",
@@ -172,7 +172,7 @@ impl ParsedMeta {
             return Self::default();
         };
         let facet_filters = meta
-            .get("chutes.ai/facetFilters")
+            .get("chutes.build/facetFilters")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
@@ -181,11 +181,11 @@ impl ParsedMeta {
             })
             .unwrap_or_default();
         let query = meta
-            .get("chutes.ai/query")
+            .get("chutes.build/query")
             .and_then(|v| v.as_str())
             .map(str::to_owned);
         let limit = meta
-            .get("chutes.ai/limit")
+            .get("chutes.build/limit")
             .and_then(serde_json::Value::as_u64)
             .map(|n| n as usize);
         Self {
@@ -217,7 +217,7 @@ pub(crate) fn force_kind(req: &mut ListReq, kind: SessionKind) {
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
     };
-    let mut filters = match meta.remove("chutes.ai/facetFilters") {
+    let mut filters = match meta.remove("chutes.build/facetFilters") {
         Some(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
     };
@@ -226,7 +226,7 @@ pub(crate) fn force_kind(req: &mut ListReq, kind: SessionKind) {
         serde_json::json!([kind.as_str()]),
     );
     meta.insert(
-        "chutes.ai/facetFilters".to_owned(),
+        "chutes.build/facetFilters".to_owned(),
         serde_json::Value::Object(filters),
     );
     req.meta = Some(serde_json::Value::Object(meta));
@@ -536,13 +536,13 @@ pub(crate) struct ExtListResponse {
 }
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ExtListResponseMeta {
-    #[serde(rename = "chutes.ai/facets")]
+    #[serde(rename = "chutes.build/facets")]
     pub facets: FacetSummary,
-    #[serde(rename = "chutes.ai/partial")]
+    #[serde(rename = "chutes.build/partial")]
     pub partial: PartialInfo,
     /// Present only when the listing relaxed beyond the cwd.
     #[serde(
-        rename = "chutes.ai/listScope",
+        rename = "chutes.build/listScope",
         skip_serializing_if = "Option::is_none"
     )]
     pub list_scope: Option<&'static str>,
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(value["source"], "local");
         assert_eq!(value["numMessages"], 7);
         assert_eq!(value["title"], "a summary");
-        assert_eq!(value["_meta"]["chutes.ai/session"]["kind"], "build");
+        assert_eq!(value["_meta"]["chutes.build/session"]["kind"], "build");
         assert_eq!(value["gitRootDir"], "/Users/me/xai");
         assert_eq!(value["gitRemotes"][0], "git@github.com:example/repo.git");
         assert_eq!(value["sourceWorkspaceDir"], "/Users/me/xai-src");
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(value["sessionId"], "s1");
         assert_eq!(value["cwd"], "/Users/me/xai");
         assert_eq!(value["title"], "a summary");
-        assert_eq!(value["_meta"]["chutes.ai/session"]["kind"], "build");
+        assert_eq!(value["_meta"]["chutes.build/session"]["kind"], "build");
         assert!(value.get("summary").is_none());
         assert!(value.get("source").is_none());
     }
@@ -732,9 +732,9 @@ mod tests {
     #[test]
     fn parsed_meta_reads_facet_filters_query_and_limit() {
         let meta = serde_json::json!({
-            "chutes.ai/facetFilters": { "kind": ["build"], "starred": true },
-            "chutes.ai/query": "antelope",
-            "chutes.ai/limit": 5,
+            "chutes.build/facetFilters": { "kind": ["build"], "starred": true },
+            "chutes.build/query": "antelope",
+            "chutes.build/limit": 5,
         });
         let parsed = ParsedMeta::parse(Some(&meta));
         assert_eq!(parsed.query.as_deref(), Some("antelope"));
@@ -796,7 +796,7 @@ mod tests {
     fn forced_kind_replaces_client_build_filter() {
         let mut req = ListReq {
             meta: Some(serde_json::json!({
-                "chutes.ai/facetFilters": { "kind": ["build"] },
+                "chutes.build/facetFilters": { "kind": ["build"] },
             })),
             ..ListReq::default()
         };
@@ -817,9 +817,9 @@ mod tests {
     fn forced_kind_preserves_other_facets() {
         let mut req = ListReq {
             meta: Some(serde_json::json!({
-                "chutes.ai/facetFilters": { "kind": ["build"], "starred": [true], "workspace": ["w1"] },
-                "chutes.ai/query": "antelope",
-                "chutes.ai/limit": 5,
+                "chutes.build/facetFilters": { "kind": ["build"], "starred": [true], "workspace": ["w1"] },
+                "chutes.build/query": "antelope",
+                "chutes.build/limit": 5,
             })),
             ..ListReq::default()
         };
@@ -910,7 +910,7 @@ mod tests {
         let client = ConversationsClient::new(xai_auth_manager(home.path()));
         let mut req = ListReq {
             meta: Some(serde_json::json!({
-                "chutes.ai/facetFilters": { "kind": ["build"] },
+                "chutes.build/facetFilters": { "kind": ["build"] },
             })),
             ..ListReq::default()
         };
@@ -1021,61 +1021,67 @@ mod tests {
     /// process chat mode is on; otherwise the client request is untouched.
     #[test]
     #[serial_test::serial]
-    fn parse_list_req_forces_kind_under_process_chat_mode_only() {
+    fn parse_list_req_never_rewrites_kind_in_this_fork() {
+        // Upstream's process chat mode is hard-off in Chutes Build
+        // (`chat_modes::process_chat_mode_enabled()` returns a constant
+        // false), so `parse_list_req` is a pure passthrough and the env is
+        // inert. Whatever the client sends as `kind` is preserved verbatim
+        // (parsed through `value_list`: scalars become single-element lists,
+        // arrays stay arrays, `null` becomes `[null]`); forcing a lane this
+        // fork does not have would be a silent behavior change.
         use crate::agent::chat_modes::CHUTES_BUILD_CHAT_MODE_ENV;
-        let raw = serde_json::json!({
-            "_meta": { "chutes.ai/facetFilters": { "kind": ["build"], "starred": [true] } },
-        })
-        .to_string();
-        {
-            let _off = xai_grok_test_support::EnvGuard::unset(CHUTES_BUILD_CHAT_MODE_ENV);
-            let req = parse_list_req(&raw).expect("parse");
-            let parsed = ParsedMeta::parse(req.meta.as_ref());
-            assert_eq!(
-                parsed.facet_filters.get(KIND_FACET_KEY),
-                Some(&vec![serde_json::json!("build")]),
-                "non-chat: client kind filter untouched"
-            );
-        }
-        {
-            let _on = xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, "1");
-            let req = parse_list_req(&raw).expect("parse");
-            let parsed = ParsedMeta::parse(req.meta.as_ref());
-            let expected_build = if cfg!(feature = "local-workspace") {
-                Some(&vec![serde_json::json!("build")])
-            } else {
-                Some(&vec![serde_json::json!("build")])
-            };
-            assert_eq!(
-                parsed.facet_filters.get(KIND_FACET_KEY),
-                expected_build,
-                "client kind=build under process chat mode"
-            );
-            assert_eq!(
-                parsed.facet_filters.get("starred"),
-                Some(&vec![serde_json::json!(true)]),
-                "other facets pass through"
-            );
-            let req = parse_list_req("{}").expect("parse");
-            let parsed = ParsedMeta::parse(req.meta.as_ref());
-            let expected = None;
-            assert_eq!(
-                parsed.facet_filters.get(KIND_FACET_KEY),
-                expected,
-                "absent client kind still forces chat under process chat mode"
-            );
-            for bad in [
-                serde_json::json!({ "_meta": { "chutes.ai/facetFilters": { "kind": [] } } }),
-                serde_json::json!({ "_meta": { "chutes.ai/facetFilters": { "kind": null } } }),
-                serde_json::json!({ "_meta": { "chutes.ai/facetFilters": { "kind": ["other"] } } }),
-            ] {
-                let req = parse_list_req(&bad.to_string()).expect("parse");
+        let json = |v: serde_json::Value| v.to_string();
+        let cases: Vec<(&str, String, Option<Vec<serde_json::Value>>)> = vec![
+            ("no meta", "{}".into(), None),
+            (
+                "kind=build",
+                json(serde_json::json!({
+                    "_meta": { "chutes.build/facetFilters": { "kind": ["build"], "starred": [true] } }
+                })),
+                Some(vec![serde_json::json!("build")]),
+            ),
+            (
+                "empty kind",
+                json(serde_json::json!({
+                    "_meta": { "chutes.build/facetFilters": { "kind": [] } }
+                })),
+                Some(vec![]),
+            ),
+            (
+                "null kind",
+                json(serde_json::json!({
+                    "_meta": { "chutes.build/facetFilters": { "kind": null } }
+                })),
+                Some(vec![serde_json::Value::Null]),
+            ),
+            (
+                "unknown kind",
+                json(serde_json::json!({
+                    "_meta": { "chutes.build/facetFilters": { "kind": ["other"] } }
+                })),
+                Some(vec![serde_json::json!("other")]),
+            ),
+        ];
+        for chat_env in [None, Some("1")] {
+            // The env must not change anything while the fork keeps the mode
+            // hard-off - the loop pins that.
+            let _guard = chat_env
+                .map(|v| xai_grok_test_support::EnvGuard::set(CHUTES_BUILD_CHAT_MODE_ENV, v));
+            for (label, raw, expected) in &cases {
+                let req = parse_list_req(raw).expect("parse");
                 let parsed = ParsedMeta::parse(req.meta.as_ref());
                 assert_eq!(
                     parsed.facet_filters.get(KIND_FACET_KEY),
-                    expected,
-                    "empty/null/unknown kind must still force chat: {bad}"
+                    expected.as_ref(),
+                    "{label}: kind must pass through untouched under env {chat_env:?}"
                 );
+                if *label == "kind=build" {
+                    assert_eq!(
+                        parsed.facet_filters.get("starred"),
+                        Some(&vec![serde_json::json!(true)]),
+                        "other facets pass through"
+                    );
+                }
             }
         }
     }
@@ -1098,7 +1104,7 @@ mod tests {
             }))
             .expect("serialize");
             assert_eq!(
-                value["_meta"]["chutes.ai/partial"],
+                value["_meta"]["chutes.build/partial"],
                 serde_json::json!({ "conversations": true, "reason": wire })
             );
         }
@@ -1111,7 +1117,7 @@ mod tests {
         }))
         .expect("serialize");
         assert_eq!(
-            healthy["_meta"]["chutes.ai/partial"],
+            healthy["_meta"]["chutes.build/partial"],
             serde_json::json!({ "conversations": false })
         );
     }
@@ -1306,11 +1312,11 @@ mod tests {
         let with =
             serde_json::to_value(ext_list_response(result(ListScope::Repo))).expect("serialize");
         assert_eq!(
-            with["_meta"]["chutes.ai/listScope"],
+            with["_meta"]["chutes.build/listScope"],
             serde_json::json!("repo")
         );
         let without =
             serde_json::to_value(ext_list_response(result(ListScope::Cwd))).expect("serialize");
-        assert!(without["_meta"].get("chutes.ai/listScope").is_none());
+        assert!(without["_meta"].get("chutes.build/listScope").is_none());
     }
 }

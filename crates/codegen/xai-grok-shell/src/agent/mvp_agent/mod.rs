@@ -111,7 +111,7 @@ pub(crate) const DIRECT_HUB_CLOUD_REMOVED_MSG: &str = "Direct hub cloud removed;
 pub(crate) fn reject_direct_hub_cloud_meta(
     session_meta: Option<&acp::Meta>,
 ) -> Result<(), acp::Error> {
-    if session_meta.and_then(|m| m.get("chutes.ai/cloud_server_id")).is_some() {
+    if session_meta.and_then(|m| m.get("chutes.build/cloud_server_id")).is_some() {
         return Err(acp::Error::invalid_params().data(DIRECT_HUB_CLOUD_REMOVED_MSG));
     }
     Ok(())
@@ -189,7 +189,7 @@ pub(crate) fn jwt_claim_matches_user_subscription_tier(
 }
 /// ACP `_meta` key for chat+local workspace intent (pager stamps on chat create).
 #[cfg(feature = "local-workspace")]
-const LOCAL_WORKSPACE_META_KEY: &str = "chutes.ai/local_workspace";
+const LOCAL_WORKSPACE_META_KEY: &str = "chutes.build/local_workspace";
 /// True when `_meta` carries a valid chat+local intent object
 /// (`mode` is `"own"` or `"attach"`).
 #[cfg(feature = "local-workspace")]
@@ -296,13 +296,13 @@ impl BridgeAttach {
         !matches!(self, Self::NotAttached)
     }
 }
-/// `_meta["chutes.ai/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
+/// `_meta["chutes.build/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
 fn parse_session_kind(
     meta: Option<&acp::Meta>,
 ) -> crate::session::unified_list::SessionKind {
     use crate::session::unified_list::SessionKind;
     use serde::Deserialize;
-    meta.and_then(|m| m.get("chutes.ai/session"))
+    meta.and_then(|m| m.get("chutes.build/session"))
         .and_then(|s| s.get("kind"))
         .and_then(|k| SessionKind::deserialize(k).ok())
         .unwrap_or(SessionKind::Build)
@@ -377,7 +377,7 @@ fn chat_new_session_model_state(
 /// `session/new` / `session/load` `_meta` key carrying per-session plugin roots.
 pub(crate) const SESSION_PLUGIN_DIRS_META_KEY: &str = "pluginDirs";
 /// `initialize` response `_meta` key advertising [`SESSION_PLUGIN_DIRS_META_KEY`] support.
-pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "chutes.ai/pluginDirs";
+pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "chutes.build/pluginDirs";
 /// Per-session plugin roots from `session/new` / `session/load` `_meta.pluginDirs`,
 /// loaded at CliOverride scope (always trusted) into this session's registry only.
 /// Paths must be absolute (the SDKs resolve before sending); anything else is
@@ -474,7 +474,7 @@ fn mark_as_replay(
     let obj = meta.get_or_insert_with(acp::Meta::new);
     obj.insert("isReplay".to_string(), is_replay);
     if let Some(persist) = persist_data {
-        obj.insert("chutes.ai/persist".to_string(), persist.clone());
+        obj.insert("chutes.build/persist".to_string(), persist.clone());
     }
 }
 /// Resolve a session's REQUESTED auto flag from `_meta`: an explicit `autoMode`
@@ -1647,7 +1647,7 @@ impl MvpAgent {
                             .gateway
                             .forward_with_completion(
                                 acp::ExtNotification::new(
-                                    "chutes.ai/task_completed",
+                                    "chutes.build/task_completed",
                                     params.into_inner().into(),
                                 ),
                             ),
@@ -2152,7 +2152,7 @@ impl MvpAgent {
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {
             self.gateway
                 .forward_fire_and_forget(
-                    acp::ExtNotification::new("chutes.ai/settings/update", params.into()),
+                    acp::ExtNotification::new("chutes.build/settings/update", params.into()),
                 );
         }
     }

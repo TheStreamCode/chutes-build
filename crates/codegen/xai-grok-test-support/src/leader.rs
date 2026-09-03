@@ -99,17 +99,17 @@ impl acp::Client for LeaderAcpClient {
 
     async fn ext_notification(&self, args: acp::ExtNotification) -> acp::Result<()> {
         match &*args.method {
-            "chutes.ai/leader_reconnected" => {
+            "chutes.build/leader_reconnected" => {
                 self.capture
                     .reconnected_count
                     .fetch_add(1, Ordering::SeqCst);
             }
-            "chutes.ai/models/update" => {
+            "chutes.build/models/update" => {
                 self.capture
                     .models_update_count
                     .fetch_add(1, Ordering::SeqCst);
             }
-            "chutes.ai/settings/update" => {
+            "chutes.build/settings/update" => {
                 self.capture
                     .settings_update_count
                     .fetch_add(1, Ordering::SeqCst);

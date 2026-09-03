@@ -33,21 +33,21 @@ use super::{ExtResult, parse_params, to_ext_response};
 /// same string literal across dispatch and notification send sites.
 pub mod mcp_methods {
     /// Shared prefix that routes every MCP ext method to this module's dispatcher.
-    pub const PREFIX: &str = "chutes.ai/mcp/";
+    pub const PREFIX: &str = "chutes.build/mcp/";
 
-    pub const LIST: &str = "chutes.ai/mcp/list";
-    pub const READ_RESOURCE: &str = "chutes.ai/mcp/read_resource";
-    pub const AUTH_STATUS: &str = "chutes.ai/mcp/auth_status";
-    pub const AUTH_TRIGGER: &str = "chutes.ai/mcp/auth_trigger";
-    pub const SETUP: &str = "chutes.ai/mcp/setup";
-    pub const TOGGLE: &str = "chutes.ai/mcp/toggle";
-    pub const TOGGLE_TOOL: &str = "chutes.ai/mcp/toggle_tool";
-    pub const UPSERT: &str = "chutes.ai/mcp/upsert";
-    pub const DELETE: &str = "chutes.ai/mcp/delete";
+    pub const LIST: &str = "chutes.build/mcp/list";
+    pub const READ_RESOURCE: &str = "chutes.build/mcp/read_resource";
+    pub const AUTH_STATUS: &str = "chutes.build/mcp/auth_status";
+    pub const AUTH_TRIGGER: &str = "chutes.build/mcp/auth_trigger";
+    pub const SETUP: &str = "chutes.build/mcp/setup";
+    pub const TOGGLE: &str = "chutes.build/mcp/toggle";
+    pub const TOGGLE_TOOL: &str = "chutes.build/mcp/toggle_tool";
+    pub const UPSERT: &str = "chutes.build/mcp/upsert";
+    pub const DELETE: &str = "chutes.build/mcp/delete";
 
-    pub const SERVERS_UPDATED: &str = "chutes.ai/mcp/servers_updated";
-    pub const TOOLS_CHANGED: &str = "chutes.ai/mcp/tools_changed";
-    pub const INIT_PROGRESS: &str = "chutes.ai/mcp/init_progress";
+    pub const SERVERS_UPDATED: &str = "chutes.build/mcp/servers_updated";
+    pub const TOOLS_CHANGED: &str = "chutes.build/mcp/tools_changed";
+    pub const INIT_PROGRESS: &str = "chutes.build/mcp/init_progress";
 }
 use crate::agent::MvpAgent;
 use crate::session::mcp_servers::{MCP_TOOL_NAME_DELIMITER, McpClient, McpState};

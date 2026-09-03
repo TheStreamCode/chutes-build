@@ -15,8 +15,8 @@ use crate::extensions::hooks::{
 };
 use crate::sampling::types::ToolCallResponse;
 
-const HOOK_EVENT_METHOD: &str = "chutes.ai/hooks/event";
-const HOOK_RUN_METHOD: &str = "chutes.ai/hooks/run";
+const HOOK_EVENT_METHOD: &str = "chutes.build/hooks/event";
+const HOOK_RUN_METHOD: &str = "chutes.build/hooks/run";
 
 const CLIENT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 

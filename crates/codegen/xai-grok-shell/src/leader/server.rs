@@ -347,7 +347,7 @@ fn is_session_attach_request(json: &serde_json::Value) -> bool {
         .is_some_and(|m| m == "session/load" || m == "session/resume")
 }
 /// Extract the leader unicast target `ClientId` from a notification's
-/// `params._meta["chutes.ai/leaderClientId"]`.
+/// `params._meta["chutes.build/leaderClientId"]`.
 ///
 /// The agent stamps this onto every `session/load` replay notification (echoing
 /// the id the leader injected into the load request) so the replay can be routed
@@ -357,12 +357,12 @@ fn extract_target_client_id(json: &serde_json::Value) -> Option<ClientId> {
     let params = json.get("params")?;
     params
         .get("_meta")
-        .and_then(|m| m.get("chutes.ai/leaderClientId"))
+        .and_then(|m| m.get("chutes.build/leaderClientId"))
         .or_else(|| {
             params
                 .get("params")
                 .and_then(|inner| inner.get("_meta"))
-                .and_then(|m| m.get("chutes.ai/leaderClientId"))
+                .and_then(|m| m.get("chutes.build/leaderClientId"))
         })
         .and_then(|v| v.as_u64())
         .map(ClientId)
@@ -420,10 +420,10 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
         Some(
-            "chutes.ai/sessions/changed"
-                | "chutes.ai/models/update"
-                | "chutes.ai/mcp/servers_updated"
-                | "chutes.ai/announcements/update"
+            "chutes.build/sessions/changed"
+                | "chutes.build/models/update"
+                | "chutes.build/mcp/servers_updated"
+                | "chutes.build/announcements/update"
         )
     )
 }
@@ -439,8 +439,8 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
 /// `session/update` deltas, exactly like any other turn the driver runs.
 /// The namespaced method a leader payload carries, normalizing the two ext wire
 /// forms the gateway produces:
-///   - direct:  `{"method":"chutes.ai/foo", ...}`                                 -> `chutes.ai/foo`
-///   - wrapped: `{"method":"_chutes.build/foo","params":{"method":"chutes.ai/foo",...}}`  -> `chutes.ai/foo`
+///   - direct:  `{"method":"chutes.build/foo", ...}`                                 -> `chutes.ai/foo`
+///   - wrapped: `{"method":"chutes.build/foo","params":{"method":"chutes.build/foo",...}}`  -> `chutes.ai/foo`
 ///
 /// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`
 /// — e.g. `ask_user_question`, `exit_plan_mode`, `scheduled_task_inject_prompt`,
@@ -486,7 +486,7 @@ fn interaction_inner_params(json: &serde_json::Value) -> Option<&serde_json::Val
 /// turns). The other clients render the resulting turn from the broadcast
 /// `session/update` deltas, exactly like any other turn the driver runs.
 fn is_scheduled_task_inject_prompt(json: &serde_json::Value) -> bool {
-    method_of(json) == Some("chutes.ai/scheduled_task_inject_prompt")
+    method_of(json) == Some("chutes.build/scheduled_task_inject_prompt")
 }
 /// Whether a payload is a blocking *interaction* reverse-request — a tool
 /// permission, `ask_user_question`, or plan-approval. Unlike other
@@ -498,9 +498,9 @@ fn is_interaction_request(json: &serde_json::Value) -> bool {
         method_of(json),
         Some(
             "session/request_permission"
-                | "chutes.ai/ask_user_question"
-                | "chutes.ai/exit_plan_mode"
-                | "chutes.ai/mcp/elicit",
+                | "chutes.build/ask_user_question"
+                | "chutes.build/exit_plan_mode"
+                | "chutes.build/mcp/elicit",
         )
     )
 }
@@ -532,7 +532,7 @@ fn extract_interaction_tool_call_id(json: &serde_json::Value) -> Option<String> 
 /// the cached interaction request (first-answer-wins). Tolerant of the gateway
 /// wrapper and camel/snake spelling for the inner field.
 fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option<String> {
-    if method_of(json) != Some("chutes.ai/session_notification") {
+    if method_of(json) != Some("chutes.build/session_notification") {
         return None;
     }
     let update = interaction_inner_params(json)?.get("update")?;
@@ -548,7 +548,7 @@ fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option
 /// Extract session_id from a prompt-complete notification.
 fn extract_session_id_from_prompt_complete(json: &serde_json::Value) -> Option<String> {
     let method = json.get("method")?.as_str()?;
-    if method != "chutes.ai/session/prompt_complete" {
+    if method != "chutes.build/session/prompt_complete" {
         return None;
     }
     json.get("params")?
@@ -734,9 +734,9 @@ fn inject_session_request_context(
                     serde_json::json!(client_type),
                 );
             }
-            if !meta_obj.contains_key("chutes.ai/leaderClientId") {
+            if !meta_obj.contains_key("chutes.build/leaderClientId") {
                 meta_obj.insert(
-                    "chutes.ai/leaderClientId".to_string(),
+                    "chutes.build/leaderClientId".to_string(),
                     serde_json::json!(client_id.0),
                 );
             }
@@ -821,7 +821,7 @@ fn inject_client_identity_into_initialize(
 /// Returns Some(yolo_mode) if this is a yolo mode change notification.
 fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "chutes.ai/yolo_mode_changed" {
+    if method != "chutes.build/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
@@ -834,7 +834,7 @@ fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
 /// out. Returns `None` when the notification doesn't change auto state.
 fn extract_auto_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "chutes.ai/yolo_mode_changed" {
+    if method != "chutes.build/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
@@ -865,7 +865,7 @@ fn inject_client_identity_into_yolo_notification(
     let is_yolo = json
         .get("method")
         .and_then(|m| m.as_str())
-        .is_some_and(|m| m == "chutes.ai/yolo_mode_changed");
+        .is_some_and(|m| m == "chutes.build/yolo_mode_changed");
     if !is_yolo {
         return false;
     }
@@ -1494,7 +1494,7 @@ fn make_version_mismatch_notification(
     Some(
         serde_json::json!({
             "jsonrpc": "2.0",
-            "method": "chutes.ai/leader/version_mismatch",
+            "method": "chutes.build/leader/version_mismatch",
             "params": {
                 "clientVersion": client_version,
                 "leaderVersion": leader_version,

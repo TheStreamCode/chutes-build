@@ -88,7 +88,7 @@ async fn client_hooks_fire_without_file_registry() {
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                 panic!("expected an chutes.ai/hooks/event ext notification");
             };
-            assert_eq!(args.request.method.as_ref(), "chutes.ai/hooks/event");
+            assert_eq!(args.request.method.as_ref(), "chutes.build/hooks/event");
             let params: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).unwrap();
             assert_eq!(params["hookCallbackId"], "cb_0");
@@ -380,7 +380,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
                     let mut events = Vec::new();
                     while let Ok(msg) = rx.try_recv() {
                         if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                            && args.request.method.as_ref() == "chutes.ai/hooks/event"
+                            && args.request.method.as_ref() == "chutes.build/hooks/event"
                         {
                             let params: serde_json::Value =
                                 serde_json::from_str(args.request.params.get()).unwrap();
@@ -755,7 +755,7 @@ async fn file_force_stop_skips_client_gate_but_notifies() {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "chutes.ai/hooks/run" {
+                            if args.request.method.as_ref() == "chutes.build/hooks/run" {
                                 runs.set(runs.get() + 1);
                             }
                             let empty: Arc<serde_json::value::RawValue> =
@@ -765,7 +765,7 @@ async fn file_force_stop_skips_client_gate_but_notifies() {
                             let _ = args.response_tx.send(Ok(acp::ExtResponse::new(empty)));
                         }
                         xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
-                            if args.request.method.as_ref() == "chutes.ai/hooks/event" {
+                            if args.request.method.as_ref() == "chutes.build/hooks/event" {
                                 observes.set(observes.get() + 1);
                             }
                         }

@@ -283,7 +283,7 @@ pub async fn handle(
     compat: CompatConfig,
 ) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.ai/skills/add" => {
+        "chutes.build/skills/add" => {
             let req: SkillsAddRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -341,7 +341,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.ai/skills/remove" => {
+        "chutes.build/skills/remove" => {
             let req: SkillsRemoveRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -381,7 +381,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.ai/skills/reset" => {
+        "chutes.build/skills/reset" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -402,13 +402,13 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsResetResponse { skills, message }))
         }
 
-        "chutes.ai/skills/list" => {
+        "chutes.build/skills/list" => {
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
             super::to_ext_response(Ok(SkillsListResponse { skills }))
         }
 
-        "chutes.ai/workflows/list" => {
+        "chutes.build/workflows/list" => {
             let req: WorkflowsListRequest = serde_json::from_str(args.params.get())?;
             let Some(handle) = agent.session_handle_waiting_for_load(&req.session_id).await else {
                 return super::to_ext_response(Err::<serde_json::Value, _>(anyhow::anyhow!(
@@ -427,7 +427,7 @@ pub async fn handle(
             super::to_ext_response(Ok(serde_json::json!({ "workflows": workflows })))
         }
 
-        "chutes.ai/skills/config" => {
+        "chutes.build/skills/config" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -490,7 +490,7 @@ pub async fn handle(
             }))
         }
 
-        "chutes.ai/skills/toggle" => {
+        "chutes.build/skills/toggle" => {
             let req: SkillsToggleRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 

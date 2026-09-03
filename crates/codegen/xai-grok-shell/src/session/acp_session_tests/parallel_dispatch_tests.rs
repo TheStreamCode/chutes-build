@@ -438,10 +438,11 @@ fn lock_path_for_args_matches_grok_build_file_path() {
         "old_string": "foo",
         "new_string": "bar",
     });
-    assert_eq!(
-        lock_path_for_args(&args, Path::new("/cwd")),
-        Some("/repo/src/main.rs".to_owned())
+    let expected = lock_path_for_args(
+        &serde_json::json!({ "file_path": "/repo/src/main.rs" }),
+        Path::new("/cwd"),
     );
+    assert_eq!(lock_path_for_args(&args, Path::new("/cwd")), expected);
 }
 
 #[test]
@@ -452,8 +453,11 @@ fn lock_path_for_args_normalizes_relative_aliases() {
     let parent = serde_json::json!({ "file_path": "src/tmp/../main.rs" });
     let absolute = serde_json::json!({ "file_path": "/repo/src/main.rs" });
 
-    let expected = Some("/repo/src/main.rs".to_owned());
-    assert_eq!(lock_path_for_args(&direct, cwd), expected);
+    // The aliasing contract is that all four shapes bucket to the SAME lock,
+    // whatever the platform's absolute-path shape is (drive-relative POSIX
+    // roots resolve differently on Windows).
+    let expected = lock_path_for_args(&direct, cwd);
+    assert!(expected.is_some(), "a file path must produce a lock key");
     assert_eq!(lock_path_for_args(&dotted, cwd), expected);
     assert_eq!(lock_path_for_args(&parent, cwd), expected);
     assert_eq!(lock_path_for_args(&absolute, cwd), expected);
@@ -490,10 +494,11 @@ fn lock_path_for_args_matches_path_arg() {
         "old_string": "foo",
         "new_string": "bar",
     });
-    assert_eq!(
-        lock_path_for_args(&args, Path::new("/cwd")),
-        Some("/repo/src/main.rs".to_owned())
+    let expected = lock_path_for_args(
+        &serde_json::json!({ "file_path": "/repo/src/main.rs" }),
+        Path::new("/cwd"),
     );
+    assert_eq!(lock_path_for_args(&args, Path::new("/cwd")), expected);
 }
 
 #[test]
@@ -502,10 +507,11 @@ fn lock_path_for_args_matches_grok_build_target_file() {
     let args = serde_json::json!({
         "target_file": "/repo/src/main.rs",
     });
-    assert_eq!(
-        lock_path_for_args(&args, Path::new("/cwd")),
-        Some("/repo/src/main.rs".to_owned())
+    let expected = lock_path_for_args(
+        &serde_json::json!({ "file_path": "/repo/src/main.rs" }),
+        Path::new("/cwd"),
     );
+    assert_eq!(lock_path_for_args(&args, Path::new("/cwd")), expected);
 }
 
 #[test]
@@ -559,9 +565,15 @@ fn lock_path_for_args_buckets_parallel_compat_strreplace_to_same_lock() {
         lock_path_for_args(&call_a, Path::new("/cwd")),
         lock_path_for_args(&call_b, Path::new("/cwd"))
     );
+    // The lock key is the platform's own absolute shape; pin it to what the
+    // same input yields through the canonical fixture path rather than a
+    // hard-coded POSIX string.
     assert_eq!(
         lock_path_for_args(&call_a, Path::new("/cwd")),
-        Some("/repo/src/main.rs".to_owned())
+        lock_path_for_args(
+            &serde_json::json!({ "file_path": "/repo/src/main.rs" }),
+            Path::new("/cwd")
+        )
     );
 
     // Cross-file calls must bucket independently so they keep running

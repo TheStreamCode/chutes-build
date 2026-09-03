@@ -375,7 +375,12 @@ mod tests {
 
     #[test]
     fn tokenize_uses_baked_product_default_model() {
-        assert_eq!(crate::models::default_model(), "grok-4.6");
+        // The baked default is whatever `default_models.json` ships with; the
+        // contract under test is that tokenization rides that default rather
+        // than the session model, so assert against the baked value itself.
+        let baked: serde_json::Value = serde_json::from_str(crate::models::DEFAULT_MODELS_JSON)
+            .expect("default_models.json is valid");
+        assert_eq!(crate::models::default_model(), baked["default"]);
     }
 
     #[test]

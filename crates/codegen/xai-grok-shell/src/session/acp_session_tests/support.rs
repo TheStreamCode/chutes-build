@@ -1,5 +1,10 @@
 #![allow(dead_code)]
 use super::*;
+/// Mutex to serialize tests that touch the process-wide follow-up Steer
+/// cache (`set_follow_up_steer_cache` / `follow_up_steer_enabled`). The
+/// cache is process-global state keyed on config.toml mtime, so parallel
+/// tests overwrite each other's pinned value between the set and the drain.
+pub(crate) static STEER_CACHE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub(crate) fn test_auth_method_id(id: &str) -> crate::agent::auth_method::SharedAuthMethodId {
     crate::agent::auth_method::new_shared_auth_method_id(Some(acp::AuthMethodId::new(id)))
 }
@@ -117,7 +122,13 @@ async fn test_agent_from_config(
         subagent: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        state_path: std::path::PathBuf::from("/tmp/tool_state.json"),
+        // Per-fixture state directory: `state_path.parent()` is where the tool
+        // registry writes `resources_state.json`, so a bare unique file name
+        // is NOT enough - every actor needs its own directory, or the next
+        // test inherits `ReportedTaskCompletions` from the previous one.
+        state_path: std::env::temp_dir()
+            .join(format!("chutes-build-test-state-{}", uuid::Uuid::new_v4()))
+            .join("tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
         web_fetch_config: Default::default(),
@@ -195,7 +206,7 @@ pub(crate) async fn create_test_actor_with_terminal(
     SessionActor,
     tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
 ) {
-    let cwd = xai_grok_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+    let cwd = xai_grok_paths::AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute");
     let fs = Arc::new(xai_grok_workspace::file_system::MockFs::new(
         cwd.to_path_buf(),
     ));
@@ -360,18 +371,18 @@ pub(crate) async fn create_test_actor_with_terminal(
         turn_start_prompt_mode: parking_lot::Mutex::new(PromptMode::Agent),
         turn_prompt_mode: Arc::new(parking_lot::Mutex::new(PromptMode::Agent)),
         plan_mode: Arc::new(parking_lot::Mutex::new(
-            crate::session::plan_mode::PlanModeTracker::new(std::path::PathBuf::from(
-                "/tmp/test-session",
-            )),
+            crate::session::plan_mode::PlanModeTracker::new(
+                std::env::temp_dir().join("test-session"),
+            ),
         )),
         goal_enabled: false,
         background_workflows_enabled: false,
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(false),
         goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
         goal_tracker: Arc::new(parking_lot::Mutex::new(
-            crate::session::goal_tracker::GoalTracker::new(std::path::PathBuf::from(
-                "/tmp/test-session",
-            )),
+            crate::session::goal_tracker::GoalTracker::new(
+                std::env::temp_dir().join("test-session"),
+            ),
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
@@ -419,7 +430,7 @@ pub(crate) async fn create_test_actor_with_terminal(
         hook_load_errors: std::cell::RefCell::new(Vec::new()),
         plugin_registry: std::cell::RefCell::new(None),
         plugin_registry_handle: None,
-        events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+        events: crate::session::events::EventTracker::new(std::env::temp_dir().as_path()),
         observability_bridge: noop_observability_bridge(),
         current_turn_number: std::cell::Cell::new(0),
         last_recap_main_turn: std::cell::Cell::new(0),
@@ -641,7 +652,7 @@ pub(crate) fn install_permission_manager(
     use xai_grok_paths::AbsPathBuf;
     use xai_grok_workspace::permission::{ClientType, spawn_permission_manager};
     let cwd = AbsPathBuf::new(std::path::PathBuf::from(actor.session_info.cwd.clone()))
-        .unwrap_or_else(|_| AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap());
+        .unwrap_or_else(|_| AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute"));
     let (handle, _ev) = spawn_permission_manager(
         actor.session_info.id.clone(),
         gateway,
@@ -814,12 +825,12 @@ pub(crate) fn spawn_gateway_loop_counting_prompt_hooks(
                     let params: serde_json::Value =
                         serde_json::from_str(args.request.params.get()).unwrap_or_default();
                     match args.request.method.as_ref() {
-                        "x.ai/hooks/event" => {
+                        "chutes.build/hooks/event" => {
                             if params["notificationType"] == "permission_prompt" {
                                 permission_prompt_hooks.fetch_add(1, Ordering::SeqCst);
                             }
                         }
-                        "x.ai/session_notification" => {
+                        "chutes.build/session_notification" => {
                             captured.lock().unwrap().push(params["update"].clone());
                         }
                         _ => {}

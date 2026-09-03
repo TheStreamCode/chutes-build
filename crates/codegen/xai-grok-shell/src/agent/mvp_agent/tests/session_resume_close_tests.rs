@@ -88,7 +88,7 @@ fn attach_policy_gives_resume_no_replay_and_no_unasked_checkout() {
     assert_eq!(
         policy(
             AttachOperation::Resume,
-            json!({ "x.ai/restore_code": true }),
+            json!({ "chutes.build/restore_code": true }),
             false
         ),
         expect(true, false),
@@ -103,7 +103,7 @@ fn attach_policy_gives_resume_no_replay_and_no_unasked_checkout() {
     assert_eq!(
         policy(
             AttachOperation::Load,
-            json!({ "noReplay": true, "x.ai/restore_code": false }),
+            json!({ "noReplay": true, "chutes.build/restore_code": false }),
             true
         ),
         expect(true, false),
@@ -116,9 +116,9 @@ fn attach_policy_gives_resume_no_replay_and_no_unasked_checkout() {
 fn resume_translation_does_not_rewrite_client_meta() {
     assert_eq!(
         load_request_for_resume(resume_request(
-            json!({ "noReplay": false, "x.ai/restore_code": true })
+            json!({ "noReplay": false, "chutes.build/restore_code": true })
         )),
-        expected_load(json!({ "noReplay": false, "x.ai/restore_code": true })),
+        expected_load(json!({ "noReplay": false, "chutes.build/restore_code": true })),
     );
 }
 /// A chat load rebuilds the session under the same id, so a close waiting on
@@ -391,7 +391,7 @@ fn close_reports_its_outcome_in_response_meta() {
             response
                 .meta
                 .as_ref()
-                .and_then(|m| m.get("x.ai/closeOutcome")),
+                .and_then(|m| m.get("chutes.build/closeOutcome")),
             Some(&json!("notResident")),
             "the outcome must reach the client, not just the log line"
         );
@@ -430,7 +430,7 @@ fn close_orders_behind_prompt_intake() {
             response
                 .meta
                 .as_ref()
-                .and_then(|m| m.get("x.ai/closeOutcome")),
+                .and_then(|m| m.get("chutes.build/closeOutcome")),
             Some(&json!("closed")),
             "a genuine close must report itself as one"
         );

@@ -19,7 +19,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
         .run_until(async {
             let tmp = tempfile::TempDir::new().unwrap();
             let session_dir = tmp.path().join("session");
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute");
             let fs = Arc::new(xai_grok_workspace::file_system::MockFs::new(
                 cwd.to_path_buf(),
             ));
@@ -295,7 +295,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 hook_load_errors: std::cell::RefCell::new(Vec::new()),
                 plugin_registry: std::cell::RefCell::new(None),
                 plugin_registry_handle: None,
-                events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+                events: crate::session::events::EventTracker::new(std::env::temp_dir().as_path()),
                 observability_bridge: noop_observability_bridge(),
                 current_turn_number: std::cell::Cell::new(0),
                 last_recap_main_turn: std::cell::Cell::new(0),
@@ -869,7 +869,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 hook_load_errors: std::cell::RefCell::new(Vec::new()),
                 plugin_registry: std::cell::RefCell::new(None),
                 plugin_registry_handle: None,
-                events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+                events: crate::session::events::EventTracker::new(std::env::temp_dir().as_path()),
                 observability_bridge: noop_observability_bridge(),
                 current_turn_number: std::cell::Cell::new(0),
                 last_recap_main_turn: std::cell::Cell::new(0),
@@ -945,7 +945,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
             let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel::<
                 PersistenceMsg,
             >();
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute");
             let fs = Arc::new(
                 xai_grok_workspace::file_system::MockFs::new(cwd.to_path_buf()),
             );
@@ -2548,7 +2548,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
             let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel::<
                 PersistenceMsg,
             >();
-            let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute");
             let fs = Arc::new(
                 xai_grok_workspace::file_system::MockFs::new(cwd.to_path_buf()),
             );

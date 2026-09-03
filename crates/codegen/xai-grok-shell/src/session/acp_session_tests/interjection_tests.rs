@@ -215,7 +215,7 @@ mod interjection_broadcast_tests {
                 let mut payload = None;
                 while let Ok(msg) = gateway_rx.try_recv() {
                     if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                        && args.request.method.as_ref() == "chutes.ai/session/interjection"
+                        && args.request.method.as_ref() == "chutes.build/session/interjection"
                     {
                         payload =
                             serde_json::from_str::<serde_json::Value>(args.request.params.get())

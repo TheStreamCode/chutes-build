@@ -169,7 +169,7 @@ impl SessionActor {
             self.notifications
                 .gateway
                 .forward_fire_and_forget(acp::ExtNotification::new(
-                    "chutes.ai/session/interjection",
+                    "chutes.build/session/interjection",
                     params.into(),
                 ));
         }

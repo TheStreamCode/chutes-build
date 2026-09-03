@@ -1651,7 +1651,7 @@ fn rewind_metric_helpers_record_observable_effects() {
 async fn client_ext_sink_receives_emitted_notification() {
     let handle = make_handle();
     assert!(!handle.has_client_ext_sink());
-    handle.emit_client_ext("x.ai/noop".to_string(), serde_json::json!({}));
+    handle.emit_client_ext("chutes.build/noop".to_string(), serde_json::json!({}));
     let captured = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink_captured = captured.clone();
     handle.set_client_ext_sink(Arc::new(move |method, params| {
@@ -1659,12 +1659,12 @@ async fn client_ext_sink_receives_emitted_notification() {
     }));
     assert!(handle.has_client_ext_sink());
     handle.emit_client_ext(
-        "x.ai/search/fuzzy/status".to_string(),
+        "chutes.build/search/fuzzy/status".to_string(),
         serde_json::json!({"a": 1}),
     );
     let got = captured.lock();
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].0, "x.ai/search/fuzzy/status");
+    assert_eq!(got[0].0, "chutes.build/search/fuzzy/status");
     assert_eq!(got[0].1, serde_json::json!({"a": 1}));
 }
 /// End-to-end local streaming: open + change a fuzzy search over real files,
@@ -1680,7 +1680,7 @@ async fn fuzzy_change_streams_status_through_sink() {
     let captured = Arc::new(parking_lot::Mutex::new(Vec::<serde_json::Value>::new()));
     let sink_captured = captured.clone();
     handle.set_client_ext_sink(Arc::new(move |method, params| {
-        if method == "x.ai/search/fuzzy/status" {
+        if method == "chutes.build/search/fuzzy/status" {
             sink_captured.lock().push(params);
         }
     }));

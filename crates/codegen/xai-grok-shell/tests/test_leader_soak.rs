@@ -85,7 +85,7 @@ async fn registry_counts(client: &mut LeaderClient, id: u64) -> serde_json::Valu
     let resp = rpc(
         client,
         format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"method":"_chutes.build/debug/agent","params":{{}}}}"#
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"chutes.build/debug/agent","params":{{}}}}"#
         ),
         id,
         "chutes.build/debug/agent",
@@ -261,7 +261,7 @@ async fn leader_soak_churning_clients_no_leaks_no_zombies() {
                         rpc(
                             client,
                             format!(
-                                r#"{{"jsonrpc":"2.0","id":{close_id},"method":"_chutes.build/session/close","params":{{"sessionId":"{sid}"}}}}"#
+                                r#"{{"jsonrpc":"2.0","id":{close_id},"method":"chutes.build/session/close","params":{{"sessionId":"{sid}"}}}}"#
                             ),
                             close_id,
                             "chutes.build/session/close",

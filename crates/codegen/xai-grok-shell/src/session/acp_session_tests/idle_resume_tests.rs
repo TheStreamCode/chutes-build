@@ -74,7 +74,8 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let cwd = xai_grok_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = xai_grok_paths::AbsPathBuf::new(std::env::temp_dir())
+                .expect("temp dir is absolute");
             let fs = Arc::new(xai_grok_workspace::file_system::MockFs::new(
                 cwd.to_path_buf(),
             ));
@@ -320,7 +321,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 hook_load_errors: std::cell::RefCell::new(Vec::new()),
                 plugin_registry: std::cell::RefCell::new(None),
                 plugin_registry_handle: None,
-                events: crate::session::events::EventTracker::new(std::path::Path::new("/tmp")),
+                events: crate::session::events::EventTracker::new(std::env::temp_dir().as_path()),
                 observability_bridge: noop_observability_bridge(),
                 current_turn_number: std::cell::Cell::new(0),
                 last_recap_main_turn: std::cell::Cell::new(0),

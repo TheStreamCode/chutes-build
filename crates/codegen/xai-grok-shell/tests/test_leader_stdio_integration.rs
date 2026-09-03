@@ -1611,14 +1611,14 @@ async fn test_extension_method_roundtrip() {
     .unwrap();
 
     // Send an extension method call (e.g., fuzzy search open)
-    let ext_call = r#"{"jsonrpc":"2.0","id":50,"method":"_chutes.build/search/fuzzy/open","params":{"sessionId":"sess-123","hidden":false}}"#;
+    let ext_call = r#"{"jsonrpc":"2.0","id":50,"method":"chutes.build/search/fuzzy/open","params":{"sessionId":"sess-123","hidden":false}}"#;
     client.send(ext_call.to_string()).unwrap();
 
     let received = acp_rx.recv().await.unwrap();
     let json: serde_json::Value = serde_json::from_str(&received).unwrap();
 
     // Method should be preserved, ID should be namespaced
-    assert_eq!(json["method"], "_chutes.build/search/fuzzy/open");
+    assert_eq!(json["method"], "chutes.build/search/fuzzy/open");
     let namespaced_id = json["id"].as_str().unwrap();
     assert!(namespaced_id.contains(ID_NAMESPACE_SEP));
     assert!(namespaced_id.ends_with("|50"));
@@ -1798,7 +1798,7 @@ async fn test_session_ownership_cleanup_on_disconnect() {
     let eviction_json: serde_json::Value = serde_json::from_str(&eviction).unwrap();
     assert_eq!(
         eviction_json["method"],
-        "_chutes.build/internal/evict_sessions"
+        "chutes.build/internal/evict_sessions"
     );
 
     // Connect a NEW client — server should still be running
@@ -3219,10 +3219,7 @@ async fn test_sever_mid_rpc_orphans_response_and_replay_recovers() {
     // signal that the server processed the disconnect.
     let evict = acp_rx.recv().await.unwrap();
     let evict_json: serde_json::Value = serde_json::from_str(&evict).unwrap();
-    assert_eq!(
-        evict_json["method"],
-        "_chutes.build/internal/evict_sessions"
-    );
+    assert_eq!(evict_json["method"], "chutes.build/internal/evict_sessions");
 
     // The agent completes the turn anyway: durable terminal notification plus
     // the RPC response addressed to the dead client.

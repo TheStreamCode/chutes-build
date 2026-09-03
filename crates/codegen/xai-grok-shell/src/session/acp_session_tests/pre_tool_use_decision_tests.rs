@@ -39,6 +39,17 @@ async fn actor_with_pre_tool_use_hook(
     .await
 }
 
+/// The fixture's plan file lives under the process temp dir (see
+/// `support.rs`'s tracker); the gate compares the tool path against it, so
+/// the test target must agree on every platform.
+fn fixture_plan_file_path() -> String {
+    std::env::temp_dir()
+        .join("test-session")
+        .join("plan.md")
+        .to_string_lossy()
+        .into_owned()
+}
+
 async fn hook_annotations(updates: &std::sync::Mutex<Vec<serde_json::Value>>) -> Vec<String> {
     drain_gateway_turns().await;
     updates
@@ -554,7 +565,7 @@ async fn pre_tool_use_ask_on_a_plan_file_edit_forces_a_prompt() {
 
             let result = prepare_call(
                 &actor,
-                search_replace_call_at("call_plan_file_ask", "/tmp/test-session/plan.md"),
+                search_replace_call_at("call_plan_file_ask", &fixture_plan_file_path()),
             )
             .await;
             assert!(

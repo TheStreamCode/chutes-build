@@ -151,11 +151,11 @@ pub struct GetAutoTopupRuleResponse {
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.ai/billing" => {
+        "chutes.build/billing" => {
             tracing::info!("handling billing config request");
             handle_get_billing(agent).await
         }
-        "chutes.ai/auto-topup-rule" => {
+        "chutes.build/auto-topup-rule" => {
             tracing::info!("handling auto top-up rule request");
             handle_get_auto_topup_rule(agent).await
         }

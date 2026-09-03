@@ -764,7 +764,7 @@ const CACHED_METHODS: &[&str] = &[
     "\"session/resume\"",
     "\"session/close\"",
     "\"chutes.build/session/close\"",
-    "\"_chutes.build/session/close\"",
+    "\"chutes.build/session/close\"",
 ];
 fn cache_outgoing_acp_state(msg: &str, state: &std::sync::Mutex<StdioReplayState>) {
     if !CACHED_METHODS.iter().any(|m| msg.contains(m)) {
@@ -818,7 +818,7 @@ fn cache_outgoing_acp_state(msg: &str, state: &std::sync::Mutex<StdioReplayState
                     .and_then(|m| serde_json::to_string(m).ok()),
             });
         }
-        "session/close" | "chutes.build/session/close" | "_chutes.build/session/close" => {
+        "session/close" | "chutes.build/session/close" | "chutes.build/session/close" => {
             if let Some(sid) = json
                 .get("params")
                 .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))
@@ -3066,7 +3066,7 @@ mod tests {
             &state,
         );
         cache_outgoing_acp_state(
-            r#"{"jsonrpc":"2.0","id":3,"method":"_chutes.build/session/close","params":{"sessionId":"s1"}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"chutes.build/session/close","params":{"sessionId":"s1"}}"#,
             &state,
         );
         let s = state.lock().unwrap();

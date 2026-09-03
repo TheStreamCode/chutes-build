@@ -78,7 +78,7 @@ pub struct SearchSessionHit {
 /// Route `chutes.ai/session/search` extension method calls.
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.ai/session/search" => {
+        "chutes.build/session/search" => {
             let req: SearchSessionsRequest = super::parse_params(args)?;
             let headless = HeadlessPolicy::from_wire(req.headless.as_deref());
             let SearchSessionsRequest {

@@ -788,7 +788,7 @@ impl ModelsManager {
                 acp::SessionModelState::new(current, available.values().cloned().collect());
             if let Ok(params) = serde_json::value::to_raw_value(&model_state) {
                 gw.forward_fire_and_forget(acp::ExtNotification::new(
-                    "x.ai/models/update",
+                    "chutes.build/models/update",
                     params.into(),
                 ));
             }

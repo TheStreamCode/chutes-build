@@ -128,7 +128,7 @@ pub(crate) struct ClientHookResponse {
 pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     let mut hooks = ClientHooks::new();
     let Some(map) = meta
-        .and_then(|m| m.get("chutes.ai/hooks"))
+        .and_then(|m| m.get("chutes.build/hooks"))
         .and_then(|h| h.as_object())
     else {
         return hooks;
@@ -155,7 +155,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
 }
 
 pub(crate) fn reconnect_client_hooks(meta: Option<&acp::Meta>) -> Option<ClientHooks> {
-    meta.and_then(|m| m.get("chutes.ai/hooks"))
+    meta.and_then(|m| m.get("chutes.build/hooks"))
         .map(|_| parse_client_hooks(meta))
 }
 
@@ -208,7 +208,7 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.ai/hooks/list" => {
+        "chutes.build/hooks/list" => {
             let req: ListRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -218,7 +218,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .ok_or_else(|| anyhow::anyhow!("session not found"));
             super::to_ext_response(result)
         }
-        "chutes.ai/hooks/action" => {
+        "chutes.build/hooks/action" => {
             let req: xai_hooks_plugins_types::HooksActionRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn parse_client_hooks_parses_valid_groups() {
         let meta = serde_json::json!({
-            "chutes.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "matcher": "run_terminal_command", "hookCallbackIds": ["cb_0"] },
                     { "matcher": null, "hookCallbackIds": ["cb_1"] },
@@ -344,7 +344,7 @@ mod tests {
 
         let meta = serde_json::json!({
             "NotARealEvent": [{ "hookCallbackIds": ["x"] }],
-            "chutes.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "matcher": "[invalid", "hookCallbackIds": ["bad_regex"] },
                     { "matcher": "run_terminal_command", "hookCallbackIds": [] },
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn parse_client_hooks_reads_group_timeout() {
         let meta = serde_json::json!({
-            "chutes.ai/hooks": {
+            "chutes.build/hooks": {
                 "PreToolUse": [
                     { "hookCallbackIds": ["a"], "timeout": 5.0 },
                     { "hookCallbackIds": ["b"], "timeout": 0 },
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn parse_client_hooks_canonicalizes_subagent_alias() {
         let meta = serde_json::json!({
-            "chutes.ai/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
+            "chutes.build/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
         });
         let hooks = parse_client_hooks(meta.as_object());
         assert!(hooks.contains_key(&HookEventName::SubagentStop));
@@ -392,12 +392,12 @@ mod tests {
         assert!(reconnect_client_hooks(serde_json::json!({ "other": true }).as_object()).is_none());
 
         let cleared =
-            reconnect_client_hooks(serde_json::json!({ "chutes.ai/hooks": {} }).as_object());
+            reconnect_client_hooks(serde_json::json!({ "chutes.build/hooks": {} }).as_object());
         assert!(cleared.is_some_and(|h| h.is_empty()));
 
         let set = reconnect_client_hooks(
             serde_json::json!({
-                "chutes.ai/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
+                "chutes.build/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
             })
             .as_object(),
         );

@@ -54,7 +54,7 @@ fn capture_hook_events(
                     let _ = args.response_tx.send(Ok(()));
                 }
                 xai_acp_lib::AcpClientMessage::ExtNotification(args)
-                    if args.request.method.as_ref() == "x.ai/hooks/event" =>
+                    if args.request.method.as_ref() == "chutes.build/hooks/event" =>
                 {
                     sink.borrow_mut()
                         .push(serde_json::from_str(args.request.params.get()).unwrap());

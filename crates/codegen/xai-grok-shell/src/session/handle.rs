@@ -39,7 +39,7 @@ pub(crate) enum SessionLiveState {
 /// `_meta` key carrying [`SessionHandle::scheduler_background_loops`] on the
 /// `session/new` and `session/load` responses. Defined here so the shell that
 /// publishes it and the clients that read it share one spelling.
-pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.ai/schedulerBackgroundLoops";
+pub const SCHEDULER_BACKGROUND_LOOPS_META_KEY: &str = "chutes.build/schedulerBackgroundLoops";
 /// Handle for interacting with a session actor.
 /// Note: Permission event receivers are returned separately from `spawn_session_actor`
 /// and should be stored/managed by the caller.

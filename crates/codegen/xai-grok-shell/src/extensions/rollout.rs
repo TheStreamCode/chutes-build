@@ -13,7 +13,7 @@ use xai_grok_telemetry::session_ctx::log_event;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(_agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.ai/rollout/survey" => {
+        "chutes.build/rollout/survey" => {
             let req: RolloutSurveyRequest = parse_params(args)?;
 
             tracing::info_span!(

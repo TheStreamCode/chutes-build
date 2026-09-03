@@ -1599,7 +1599,7 @@ pub(super) async fn run_session(
                                         tools: Vec::new(),
                                     };
                                     if let Ok(params) = serde_json::value::to_raw_value(&payload) {
-                                        notifications.forward_fire_and_forget(acp::ExtNotification::new("chutes.ai/mcp/tools_changed", params.into()));
+                                        notifications.forward_fire_and_forget(acp::ExtNotification::new("chutes.build/mcp/tools_changed", params.into()));
                                     }
                                     let _ = respond_to.send(Ok(()));
                                 });

@@ -113,10 +113,10 @@ fn stamp_scheduler_meta(
     stamp_event_id(config, meta);
     let meta = meta.get_or_insert_with(acp::Meta::new);
     meta.insert(
-        "chutes.ai/schedulerGeneration".to_owned(),
+        "chutes.build/schedulerGeneration".to_owned(),
         generation.into(),
     );
-    meta.insert("chutes.ai/schedulerRevision".to_owned(), revision.into());
+    meta.insert("chutes.build/schedulerRevision".to_owned(), revision.into());
 }
 fn durable_append_landed(result: Result<(), DurableAppendError>) -> Result<(), String> {
     match result {
@@ -174,7 +174,7 @@ async fn handle_scheduled_task_removed(
             config
                 .gateway
                 .forward_fire_and_forget(acp::ExtNotification::new(
-                    "chutes.ai/scheduled_task_deleted",
+                    "chutes.build/scheduled_task_deleted",
                     params.into(),
                 ));
             Ok(())
@@ -349,7 +349,7 @@ async fn handle_notification(
                 .ok();
             if let Some(params) = params {
                 let ext_notification =
-                    acp::ExtNotification::new("chutes.ai/task_backgrounded", params.into());
+                    acp::ExtNotification::new("chutes.build/task_backgrounded", params.into());
                 config.gateway.forward_fire_and_forget(ext_notification);
             }
         }
@@ -709,7 +709,7 @@ async fn handle_notification(
                     config
                         .gateway
                         .forward_fire_and_forget(acp::ExtNotification::new(
-                            "chutes.ai/scheduled_task_inject_prompt",
+                            "chutes.build/scheduled_task_inject_prompt",
                             params.into(),
                         ));
                 }
@@ -733,7 +733,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/scheduled_task_fired",
+                        "chutes.build/scheduled_task_fired",
                         params.into(),
                     ));
             }
@@ -773,7 +773,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/monitor_event",
+                        "chutes.build/monitor_event",
                         params.into(),
                     ));
             }
@@ -827,7 +827,7 @@ async fn handle_notification(
                 config
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/scheduled_task_created",
+                        "chutes.build/scheduled_task_created",
                         params.into(),
                     ));
             }

@@ -78,7 +78,7 @@ pub async fn list_models(
 pub async fn fetch_model_state(acp_tx: &AcpAgentTx) -> Result<acp::SessionModelState> {
     let params = serde_json::value::to_raw_value(&serde_json::json!({}))?;
     let resp: acp::ExtResponse = acp_send(
-        acp::ExtRequest::new("x.ai/models/list", params.into()),
+        acp::ExtRequest::new("chutes.build/models/list", params.into()),
         acp_tx,
     )
     .await?;

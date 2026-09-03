@@ -346,7 +346,13 @@ fn backdate_edit_hold(
     age: std::time::Duration,
 ) {
     if let Some(since) = holds.get_mut(id) {
-        *since = std::time::Instant::now() - age;
+        // Windows `Instant` counts from boot: on a freshly rebooted host the
+        // uptime can be shorter than the requested age, and `Sub<Duration>`
+        // panics on underflow in the test profile. Saturate at the epoch
+        // instead — the hold only needs to be older than the TTL.
+        *since = std::time::Instant::now()
+            .checked_sub(age)
+            .unwrap_or(std::time::Instant::now() - std::time::Duration::from_secs(1).min(age));
     }
 }
 /// Task scheduling state — the only fields that remain behind `TokioMutex`.
@@ -1115,7 +1121,7 @@ pub(crate) struct SessionActor {
     /// Set once by [`turn_end_hooks::TurnEndQueue::spawn`]; `None` before the loop starts.
     pub(crate) turn_end_tx:
         std::cell::RefCell<Option<tokio::sync::mpsc::UnboundedSender<turn_end_hooks::QueueItem>>>,
-    /// Client hooks from `session/new` `_meta["chutes.ai/hooks"]`; gated in
+    /// Client hooks from `session/new` `_meta["chutes.build/hooks"]`; gated in
     /// [`crate::session::acp_session::hooks`]. `RefCell` so `load_session` reconnect can
     /// replace the set on the live actor (see `SessionCommand::SetClientHooks`).
     pub(crate) client_hooks: std::cell::RefCell<crate::extensions::hooks::ClientHooks>,
@@ -2002,7 +2008,7 @@ mod tool_meta_stamp_tests {
                 let t = tool_meta(early.as_ref()).expect("early ToolCall carries chutes.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
-                assert_eq!(t["namespace"], "grok_build");
+                assert_eq!(t["namespace"], "chutes_build");
                 assert!(t.get("input").is_none(), "identity-only before parse");
                 let refined = refined.expect("refinement ToolCallUpdate emitted");
                 let t = tool_meta(refined.as_ref()).expect("refinement carries chutes.ai/tool");

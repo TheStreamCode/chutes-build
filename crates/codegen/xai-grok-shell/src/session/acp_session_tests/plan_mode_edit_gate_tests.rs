@@ -1,5 +1,8 @@
 use super::support::*;
 use super::*;
+/// Build an actor whose toolset parses grok `search_replace` plus the plan
+/// tools (so `${{ tools.by_kind.exit_plan }}` resolves in the rejection
+/// message), with a gateway drain answering session notifications.
 async fn build_gate_actor() -> SessionActor {
     use xai_grok_tools::implementations::grok_build::enter_plan_mode::EnterPlanModeTool;
     use xai_grok_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeTool;
@@ -24,6 +27,39 @@ async fn build_gate_actor() -> SessionActor {
         }
     });
     actor
+}
+/// Flip the fixture's tracker to Active (plan file lives under the process
+/// temp dir; see `plan_file_path`).
+fn activate_plan_mode(actor: &SessionActor) {
+    let mut tracker = actor.plan_mode.lock();
+    assert!(tracker.enter_pending());
+    assert!(tracker.activate());
+}
+/// The fixture's plan file lives under the process temp dir; the gate names
+/// it in the rejection message and the allow test targets it, so both must
+/// agree with `support.rs`'s tracker path on every platform.
+fn plan_file_path() -> String {
+    std::env::temp_dir()
+        .join("test-session")
+        .join("plan.md")
+        .to_string_lossy()
+        .into_owned()
+}
+/// JSON-escape helper: Windows paths carry backslashes that would break the
+/// embedded JSON document.
+fn json_path(path: &str) -> String {
+    path.replace('\\', "\\\\")
+}
+fn search_replace_call_at(id: &str, path: &str) -> ToolCallResponse {
+    let path = json_path(path);
+    ToolCallResponse {
+        id: id.to_string(),
+        kind: "function".to_string(),
+        function: crate::sampling::types::ToolCallFunction::new(
+            "search_replace",
+            format!(r#"{{"file_path":"{path}","old_string":"a","new_string":"b"}}"#),
+        ),
+    }
 }
 async fn prepare(
     actor: &SessionActor,
@@ -56,7 +92,7 @@ async fn plan_mode_rejects_grok_edit_outside_plan_file_despite_allow_all_permiss
             );
             let text = tool_result_text(&actor, "call_gate").await;
             assert!(
-                text.contains("/tmp/test-session/plan.md"),
+                text.contains(&plan_file_path()),
                 "must name the plan file so the model knows the one editable path: {text}"
             );
         })
@@ -71,7 +107,7 @@ async fn plan_mode_allows_plan_file_edit() {
             activate_plan_mode(&actor);
             let result = prepare(
                 &actor,
-                search_replace_call_at("call_plan_file", "/tmp/test-session/plan.md"),
+                search_replace_call_at("call_plan_file", &plan_file_path()),
             )
             .await;
             assert!(
@@ -118,7 +154,7 @@ async fn plan_gate_sees_hook_rewritten_path() {
             activate_plan_mode(&actor);
             let result = prepare(
                     &actor,
-                    search_replace_call_at("call_hook_gate", "/tmp/test-session/plan.md"),
+                    search_replace_call_at("call_hook_gate", &plan_file_path()),
                 )
                 .await;
             assert!(

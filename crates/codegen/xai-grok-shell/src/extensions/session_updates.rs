@@ -30,7 +30,7 @@
 //! Each element in the `updates` array is the full JSONL storage envelope
 //! (with `timestamp`, `method`, and `params` wrapper), not just the inner
 //! notification params. Clients should parse the `method` field to determine
-//! the update type (`"session/update"` for ACP, `"_chutes.build/session/update"` for
+//! the update type (`"session/update"` for ACP, `"chutes.build/session/update"` for
 //! xAI extensions) and extract the notification payload from `params`.
 //!
 //! Metadata columns and cross-host import live in [`crate::extensions::session_state`].
@@ -319,7 +319,7 @@ fn send_streamed_chunks<T: AsRef<str>>(
 
         if let Ok(raw) = serde_json::value::to_raw_value(&params) {
             gateway.forward_fire_and_forget(acp::ExtNotification::new(
-                "chutes.ai/session/updates/chunk",
+                "chutes.build/session/updates/chunk",
                 std::sync::Arc::from(raw),
             ));
         }
@@ -528,7 +528,7 @@ mod tests {
         }
 
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
     }
 
     #[tokio::test]
@@ -588,7 +588,7 @@ mod tests {
                 r#"{"timestamp":2,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"resp1"}}}}"#,
                 r#"{"timestamp":3,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"dead-branch"}}}}"#,
                 r#"{"timestamp":4,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"dead-resp"}}}}"#,
-                r#"{"timestamp":5,"method":"_chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"rewind_marker","target_prompt_index":1}}}"#,
+                r#"{"timestamp":5,"method":"chutes.build/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"rewind_marker","target_prompt_index":1}}}"#,
                 r#"{"timestamp":6,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"replacement"}}}}"#,
                 r#"{"timestamp":7,"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"replacement-resp"}}}}"#,
             ]
@@ -695,7 +695,7 @@ mod tests {
             map.insert("offset".into(), serde_json::json!(off));
         }
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
     }
 
     fn extract_chunk_params(
@@ -804,7 +804,7 @@ mod tests {
             map.insert("limit".into(), serde_json::json!(lim));
         }
         let raw = serde_json::value::to_raw_value(&serde_json::Value::Object(map)).unwrap();
-        acp::ExtRequest::new("chutes.ai/session/updates", std::sync::Arc::from(raw))
+        acp::ExtRequest::new("chutes.build/session/updates", std::sync::Arc::from(raw))
     }
 
     fn user_chunk(text: &str) -> String {
@@ -821,7 +821,7 @@ mod tests {
 
     fn xai_rewind(target: usize) -> String {
         format!(
-            r#"{{"timestamp":0,"method":"_chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"rewind_marker","target_prompt_index":{target}}}}}}}"#
+            r#"{{"timestamp":0,"method":"chutes.build/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"rewind_marker","target_prompt_index":{target}}}}}}}"#
         )
     }
 

@@ -2436,7 +2436,7 @@ impl WorkspaceHandle {
                     "targetClientId": serde_json::to_value(&target_client_id).unwrap_or_default(),
                 });
             }
-            self.emit_client_ext("chutes.ai/search/fuzzy/status".to_string(), params);
+            self.emit_client_ext("chutes.build/search/fuzzy/status".to_string(), params);
             if data.done {
                 break;
             }
@@ -2462,7 +2462,7 @@ impl WorkspaceHandle {
                 "done": batch.done,
                 "truncated": batch.truncated,
             });
-            handle.emit_client_ext("chutes.ai/search/content/status".to_string(), params);
+            handle.emit_client_ext("chutes.build/search/content/status".to_string(), params);
         })
         .await
         .map_err(|e| WorkspaceError::HubError(e.to_string()))

@@ -130,7 +130,8 @@ impl SessionActor {
             main_repo,
         };
         if let Ok(raw) = serde_json::value::to_raw_value(&params) {
-            let notification = acp::ExtNotification::new("chutes.ai/git_head_changed", raw.into());
+            let notification =
+                acp::ExtNotification::new("chutes.build/git_head_changed", raw.into());
             self.notifications
                 .gateway
                 .forward_fire_and_forget(notification);

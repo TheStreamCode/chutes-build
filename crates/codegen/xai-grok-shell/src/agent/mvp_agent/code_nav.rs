@@ -10,7 +10,7 @@ impl MvpAgent {
         init.client_capabilities
             .meta
             .as_ref()
-            .and_then(|m| m.get("chutes.ai/codeNavigation"))
+            .and_then(|m| m.get("chutes.build/codeNavigation"))
             .and_then(|v| v.get("enabled"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)

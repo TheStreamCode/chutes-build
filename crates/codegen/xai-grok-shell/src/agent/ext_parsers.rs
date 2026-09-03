@@ -18,7 +18,7 @@ pub(super) fn parse_queue_edit_command(
     owner: Option<String>,
 ) -> Option<SessionCommand> {
     match method {
-        "chutes.ai/queue/remove" => {
+        "chutes.build/queue/remove" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             // The client supplies the version it last saw; the handler removes
             // only on an exact match (stale = benign no-op + rebroadcast).
@@ -33,7 +33,7 @@ pub(super) fn parse_queue_edit_command(
                 owner,
             })
         }
-        "chutes.ai/queue/reorder" => {
+        "chutes.build/queue/reorder" => {
             let ordered_ids = params
                 .get("orderedIds")
                 .and_then(|v| v.as_array())
@@ -45,8 +45,8 @@ pub(super) fn parse_queue_edit_command(
                 .unwrap_or_default();
             Some(SessionCommand::ReorderQueue { ordered_ids })
         }
-        "chutes.ai/queue/clear" => Some(SessionCommand::ClearQueue { owner }),
-        "chutes.ai/queue/interject" => {
+        "chutes.build/queue/clear" => Some(SessionCommand::ClearQueue { owner }),
+        "chutes.build/queue/interject" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             // The client supplies the version it last saw; the handler acts
             // only on an exact match (stale = benign no-op + rebroadcast).
@@ -69,7 +69,7 @@ pub(super) fn parse_queue_edit_command(
                 new_text,
             })
         }
-        "chutes.ai/queue/edit" => {
+        "chutes.build/queue/edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             let new_text = params.get("newText").and_then(|v| v.as_str())?.to_string();
             // `owner` is the resolved attribution; for edit it represents the
@@ -81,11 +81,11 @@ pub(super) fn parse_queue_edit_command(
                 editor: owner,
             })
         }
-        "chutes.ai/queue/hold_edit" => {
+        "chutes.build/queue/hold_edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             Some(SessionCommand::HoldEdit { id })
         }
-        "chutes.ai/queue/release_edit" => {
+        "chutes.build/queue/release_edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             Some(SessionCommand::ReleaseEdit { id })
         }
@@ -105,7 +105,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p7", "expectedVersion": 3
         });
-        match parse_queue_edit_command("chutes.ai/queue/remove", &p, Some("grok-tui".into())) {
+        match parse_queue_edit_command("chutes.build/queue/remove", &p, Some("grok-tui".into())) {
             Some(SessionCommand::RemoveQueuedPrompt {
                 id,
                 expected_version,
@@ -120,7 +120,7 @@ mod tests {
 
         // remove without expectedVersion defaults to 0.
         let p = serde_json::json!({ "sessionId": "s1", "id": "p8" });
-        match parse_queue_edit_command("chutes.ai/queue/remove", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/remove", &p, None) {
             Some(SessionCommand::RemoveQueuedPrompt {
                 expected_version, ..
             }) => assert_eq!(expected_version, 0),
@@ -129,7 +129,7 @@ mod tests {
 
         // reorder: orderedIds array.
         let p = serde_json::json!({ "sessionId": "s1", "orderedIds": ["a", "b", "c"] });
-        match parse_queue_edit_command("chutes.ai/queue/reorder", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/reorder", &p, None) {
             Some(SessionCommand::ReorderQueue { ordered_ids }) => {
                 assert_eq!(ordered_ids, vec!["a", "b", "c"]);
             }
@@ -138,7 +138,7 @@ mod tests {
 
         // clear: owner-scoped.
         match parse_queue_edit_command(
-            "chutes.ai/queue/clear",
+            "chutes.build/queue/clear",
             &serde_json::json!({ "sessionId": "s1" }),
             Some("grok-tui".into()),
         ) {
@@ -152,7 +152,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p9", "newText": "replacement text"
         });
-        match parse_queue_edit_command("chutes.ai/queue/edit", &p, Some("grok-vscode".into())) {
+        match parse_queue_edit_command("chutes.build/queue/edit", &p, Some("grok-vscode".into())) {
             Some(SessionCommand::EditQueuedPrompt {
                 id,
                 new_text,
@@ -167,7 +167,7 @@ mod tests {
 
         // edit without editor (no owner/clientIdentifier) → editor: None.
         match parse_queue_edit_command(
-            "chutes.ai/queue/edit",
+            "chutes.build/queue/edit",
             &serde_json::json!({ "sessionId": "s1", "id": "p9", "newText": "x" }),
             None,
         ) {
@@ -180,7 +180,7 @@ mod tests {
         // edit without newText → None (can't replace text we don't have).
         assert!(
             parse_queue_edit_command(
-                "chutes.ai/queue/edit",
+                "chutes.build/queue/edit",
                 &serde_json::json!({ "sessionId": "s1", "id": "p9" }),
                 None,
             )
@@ -190,7 +190,7 @@ mod tests {
         // edit without id → None (can't target an entry).
         assert!(
             parse_queue_edit_command(
-                "chutes.ai/queue/edit",
+                "chutes.build/queue/edit",
                 &serde_json::json!({ "sessionId": "s1", "newText": "x" }),
                 None,
             )
@@ -201,7 +201,8 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2
         });
-        match parse_queue_edit_command("chutes.ai/queue/interject", &p, Some("grok-tui".into())) {
+        match parse_queue_edit_command("chutes.build/queue/interject", &p, Some("grok-tui".into()))
+        {
             Some(SessionCommand::InterjectQueuedPrompt {
                 id,
                 expected_version,
@@ -220,7 +221,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2, "newText": "edited"
         });
-        match parse_queue_edit_command("chutes.ai/queue/interject", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/interject", &p, None) {
             Some(SessionCommand::InterjectQueuedPrompt { new_text, .. }) => {
                 assert_eq!(new_text.as_deref(), Some("edited"));
             }
@@ -231,7 +232,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2, "newText": "   "
         });
-        match parse_queue_edit_command("chutes.ai/queue/interject", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/interject", &p, None) {
             Some(SessionCommand::InterjectQueuedPrompt { new_text, .. }) => {
                 assert_eq!(new_text, None, "blank override must be dropped");
             }
@@ -240,7 +241,7 @@ mod tests {
 
         // interject without expectedVersion defaults to 0.
         match parse_queue_edit_command(
-            "chutes.ai/queue/interject",
+            "chutes.build/queue/interject",
             &serde_json::json!({ "sessionId": "s1", "id": "p11" }),
             None,
         ) {
@@ -252,40 +253,44 @@ mod tests {
 
         // interject without id → None (can't target an entry).
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/interject", &serde_json::json!({}), None)
+            parse_queue_edit_command("chutes.build/queue/interject", &serde_json::json!({}), None)
                 .is_none()
         );
 
         // hold_edit / release_edit: id only (combine-hold while the client edits).
         let p = serde_json::json!({ "sessionId": "s1", "id": "p12" });
-        match parse_queue_edit_command("chutes.ai/queue/hold_edit", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/hold_edit", &p, None) {
             Some(SessionCommand::HoldEdit { id }) => assert_eq!(id, "p12"),
             _ => panic!("expected HoldEdit"),
         }
-        match parse_queue_edit_command("chutes.ai/queue/release_edit", &p, None) {
+        match parse_queue_edit_command("chutes.build/queue/release_edit", &p, None) {
             Some(SessionCommand::ReleaseEdit { id }) => assert_eq!(id, "p12"),
             _ => panic!("expected ReleaseEdit"),
         }
 
         // hold_edit / release_edit without id → None (can't target an entry).
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/hold_edit", &serde_json::json!({}), None)
+            parse_queue_edit_command("chutes.build/queue/hold_edit", &serde_json::json!({}), None)
                 .is_none()
         );
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/release_edit", &serde_json::json!({}), None)
-                .is_none()
+            parse_queue_edit_command(
+                "chutes.build/queue/release_edit",
+                &serde_json::json!({}),
+                None
+            )
+            .is_none()
         );
 
         // unknown method → None. Outbound `changed` is the other production
         // `chutes.ai/queue/*` method and must not parse as an edit command.
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/bogus", &serde_json::json!({}), None)
+            parse_queue_edit_command("chutes.build/queue/bogus", &serde_json::json!({}), None)
                 .is_none()
         );
         assert!(
             parse_queue_edit_command(
-                "chutes.ai/queue/changed",
+                "chutes.build/queue/changed",
                 &serde_json::json!({
                     "sessionId": "s1",
                     "entries": [{
@@ -302,7 +307,7 @@ mod tests {
         );
         // remove without id → None (can't target an entry).
         assert!(
-            parse_queue_edit_command("chutes.ai/queue/remove", &serde_json::json!({}), None)
+            parse_queue_edit_command("chutes.build/queue/remove", &serde_json::json!({}), None)
                 .is_none()
         );
     }

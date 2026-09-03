@@ -1192,7 +1192,7 @@ async fn turn_summary_generate_persists_and_broadcasts() {
                 let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
                     continue;
                 };
-                if args.request.method.as_ref() != "chutes.ai/session_notification" {
+                if args.request.method.as_ref() != "chutes.build/session_notification" {
                     continue;
                 }
                 let value: serde_json::Value =

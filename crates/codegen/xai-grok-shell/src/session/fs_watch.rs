@@ -343,7 +343,7 @@ impl ClientNotify {
                 if let Ok(raw) = to_raw_value(&params) {
                     self.gateway
                         .forward_fire_and_forget(acp::ExtNotification::new(
-                            "chutes.ai/fs_notify",
+                            "chutes.build/fs_notify",
                             raw.into(),
                         ));
                 }
@@ -369,7 +369,7 @@ impl ClientNotify {
                 if let Ok(raw) = to_raw_value(&params) {
                     self.gateway
                         .forward_fire_and_forget(acp::ExtNotification::new(
-                            "chutes.ai/fs/index/delta",
+                            "chutes.build/fs/index/delta",
                             raw.into(),
                         ));
                 }
@@ -429,7 +429,7 @@ impl ClientNotify {
                 if let Ok(raw) = serde_json::value::to_raw_value(&params) {
                     self.gateway
                         .forward_fire_and_forget(acp::ExtNotification::new(
-                            "chutes.ai/fs/index",
+                            "chutes.build/fs/index",
                             raw.into(),
                         ));
                 }
@@ -536,7 +536,7 @@ impl GitHead {
             if let Ok(raw) = serde_json::value::to_raw_value(&params) {
                 self.gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/git_head_changed",
+                        "chutes.build/git_head_changed",
                         raw.into(),
                     ));
             }

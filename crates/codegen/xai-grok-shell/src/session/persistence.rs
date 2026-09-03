@@ -1588,7 +1588,7 @@ impl SessionPersistence {
         };
         if let Ok(params) = serde_json::value::to_raw_value(&notification) {
             gateway.forward_fire_and_forget(acp::ExtNotification::new(
-                "chutes.ai/session_notification",
+                "chutes.build/session_notification",
                 params.into(),
             ));
         }
@@ -2363,6 +2363,9 @@ fn collect_session_files_recursive(base: &Path, dir: &Path, files: &mut Vec<Copi
             let Some(name) = rel_path.to_str() else {
                 continue;
             };
+            // Archive paths use `/` per the zip convention regardless of the
+            // host separator, so a Windows-built archive unpacks cleanly.
+            let name = name.replace(std::path::MAIN_SEPARATOR, "/");
             let data = match std::fs::read(&path) {
                 Ok(c) => c,
                 Err(e) => {

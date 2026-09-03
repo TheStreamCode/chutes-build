@@ -1324,7 +1324,7 @@ pub async fn run_leader(
                             info!("UI config change detected by watcher");
                             let notification = serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "method": "x.ai/config_changed",
+                                "method": "chutes.build/config_changed",
                                 "params": {
                                     "section": "ui",
                                     "changes": {
@@ -1783,7 +1783,7 @@ mod tests {
         assert!(line.ends_with('\n'), "must be a newline-terminated line");
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
-            msg["method"], "_chutes.build/internal/reload_models",
+            msg["method"], "chutes.build/internal/reload_models",
             "wire method must carry the `_` ext prefix or the ACP decoder \
              rejects it with method_not_found"
         );
@@ -1802,7 +1802,7 @@ mod tests {
             serde_json::json!({}),
         );
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        assert_eq!(msg["method"], "_chutes.build/internal/auth_cleared");
+        assert_eq!(msg["method"], "chutes.build/internal/auth_cleared");
     }
     #[tokio::test]
     #[tracing::instrument(level = "debug", skip_all)]

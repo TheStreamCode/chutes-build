@@ -1256,7 +1256,7 @@ impl SessionActor {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/mcp_initialized",
+                        "chutes.build/mcp_initialized",
                         params.into(),
                     ));
             }
@@ -1328,7 +1328,7 @@ impl SessionActor {
                 self.notifications
                     .gateway
                     .forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/mcp_initialized",
+                        "chutes.build/mcp_initialized",
                         params.into(),
                     ));
             }
@@ -2029,7 +2029,7 @@ impl SessionActor {
                     "elapsedMs": elapsed.as_millis() as u64,
                 })) {
                     gateway.forward_fire_and_forget(acp::ExtNotification::new(
-                        "chutes.ai/mcp_initialized",
+                        "chutes.build/mcp_initialized",
                         params.into(),
                     ));
                 }

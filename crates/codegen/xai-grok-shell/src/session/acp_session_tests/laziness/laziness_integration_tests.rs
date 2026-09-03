@@ -1,9 +1,8 @@
 //! End-to-end tests for `maybe_fire_laziness_check`. Drive the
-//! actor against a non-listening `http://localhost` base URL —
-//! the unified path now uses `prepare_chat_completion().conversation_collect()`,
-//! which surfaces the connection failure as the
-//! `ClassifierError` abort. Observe state mutations + the
-//! per-test `events.jsonl`.
+//! actor against a local 401 base URL — the unified path now uses
+//! `prepare_chat_completion().conversation_collect()`, which
+//! surfaces the unauthorized response as the `ClassifierError`
+//! abort. Observe state mutations + the per-test `events.jsonl`.
 //!
 //! Tests that depend on a *successful* classifier response are
 //! out of scope here — they'd require a real `SamplerActor`
@@ -46,9 +45,9 @@ fn detector_entry(
 /// Construct a test actor with the events.jsonl rerouted into a
 /// tempdir and `current_model_id` pointing at a per-model config
 /// supplied by the caller. The actor's sampling config uses a
-/// `http://localhost` base URL with nothing listening, so
+/// local 401 base URL, so
 /// `prepare_chat_completion().conversation_collect()` fails with
-/// a connect error — sufficient to exercise every abort/idle path.
+/// an unauthorized error — sufficient to exercise every abort/idle path.
 /// Returns the actor wrapped in `Arc` and the owned tempdir (so
 /// the file outlives the actor).
 async fn make_laziness_actor(
@@ -77,6 +76,56 @@ async fn make_laziness_actor(
 
 fn events_log(tmp: &tempfile::TempDir) -> String {
     std::fs::read_to_string(tmp.path().join("events.jsonl")).unwrap_or_default()
+}
+
+async fn spawn_unauthorized_laziness_server() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("laziness test HTTP server must bind");
+    let addr = listener.local_addr().expect("laziness server addr");
+    tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stream);
+                let mut header_line = Vec::new();
+                let mut content_length = 0usize;
+                loop {
+                    header_line.clear();
+                    let read = reader
+                        .read_until(b'\n', &mut header_line)
+                        .await
+                        .unwrap_or(0);
+                    if read == 0 || header_line == b"\r\n" || header_line == b"\n" {
+                        break;
+                    }
+                    let header = String::from_utf8_lossy(&header_line).to_ascii_lowercase();
+                    if let Some(value) = header.strip_prefix("content-length:")
+                        && let Ok(value) = value.trim().parse::<usize>()
+                    {
+                        content_length = value;
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body).await;
+                }
+                let mut stream = reader.into_inner();
+                let response = "{\"error\":{\"type\":\"authentication_error\",\"message\":\"Unauthorized (401)\"}}";
+                let header = format!(
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    response.len()
+                );
+                let _ = stream.write_all(header.as_bytes()).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://{addr}")
 }
 
 fn has_event_with(log: &str, ty: &str, predicate: impl Fn(&serde_json::Value) -> bool) -> bool {
@@ -551,6 +600,17 @@ async fn make_debug_actor(
     let (persistence_tx, _persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
     let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    // Same as `make_laziness_actor`: Windows stalls a non-listening loopback
+    // connect, but a local 401 endpoint gives the classifier abort a fast,
+    // deterministic sampler failure.
+    let base_url = spawn_unauthorized_laziness_server().await;
+    let mut cfg = actor
+        .chat_state_handle
+        .get_sampling_config()
+        .await
+        .expect("test actor must have sampling config");
+    cfg.base_url = base_url;
+    actor.chat_state_handle.update_sampling_config(cfg);
     actor.events = crate::session::events::EventTracker::new(tmp.path());
     let mut entry = detector_entry(false, 0, None);
     entry.info.laziness_detector = detector;

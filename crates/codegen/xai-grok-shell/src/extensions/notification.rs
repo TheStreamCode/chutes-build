@@ -37,7 +37,7 @@ pub struct WorkflowAgentInfo {
 
 /// `_meta` key on rename fan-out (`SessionSummaryGenerated` + ACP
 /// `SessionInfoUpdate`). Old clients ignore unknown meta.
-pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.ai/titleIsManual";
+pub const TITLE_IS_MANUAL_META_KEY: &str = "chutes.build/titleIsManual";
 
 /// `_meta` object carried on a manual-rename fan-out.
 pub fn title_is_manual_meta() -> serde_json::Value {

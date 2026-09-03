@@ -1720,6 +1720,7 @@ async fn drain_at_safe_point_with_steer_off_does_not_promote_held_row() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            let _steer_guard = STEER_CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             crate::util::config::set_follow_up_steer_cache(false);
             let (actor, _rx) = build_actor().await;
             {
@@ -1753,6 +1754,7 @@ async fn drain_at_safe_point_with_steer_on_promotes_and_drains_held_row() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            let _steer_guard = STEER_CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             crate::util::config::set_follow_up_steer_cache(true);
             let (actor, _rx) = build_actor().await;
             {
@@ -1990,6 +1992,7 @@ async fn drain_at_safe_point_with_steer_on_leaves_protected_row_queued() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            let _steer_guard = STEER_CACHE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             crate::util::config::set_follow_up_steer_cache(true);
             let (actor, _rx) = build_actor().await;
             {

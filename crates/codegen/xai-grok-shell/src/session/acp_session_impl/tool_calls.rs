@@ -1902,7 +1902,7 @@ impl SessionActor {
             "exit_plan_mode reverse-request must carry a non-empty sessionId (design §5.4)"
         );
         let ext_request = acp::ExtRequest::new(
-            "chutes.ai/exit_plan_mode",
+            "chutes.build/exit_plan_mode",
             serde_json::value::to_raw_value(&ext_req)
                 .expect("ExitPlanModeExtRequest serialization should not fail")
                 .into(),

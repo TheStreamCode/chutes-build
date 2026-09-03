@@ -81,7 +81,7 @@ impl MvpAgent {
     /// Dispatches by on-disk method name:
     /// - ACP updates (`"session/update"`) → typed `SessionNotification` for correct
     ///   TUI dispatch (direct dispatch preserves Rust types, not method strings).
-    /// - xAI updates (`"_chutes.build/session/update"`) → `ExtNotification`.
+    /// - xAI updates (`"chutes.build/session/update"`) → `ExtNotification`.
     ///
     /// When `mark_replay` is true, the notification is tagged with
     /// `_meta.isReplay: true` so the client knows it's historical data.
@@ -111,7 +111,7 @@ impl MvpAgent {
             tracing::debug!("replay: skipping JSONL line with no params");
             return None;
         };
-        let is_xai = method == "_chutes.build/session/update";
+        let is_xai = method == "chutes.build/session/update";
 
         if is_xai {
             // The fast-path forwards raw params with no `_meta` round-trip, so it
@@ -126,7 +126,7 @@ impl MvpAgent {
                     return Some(
                         self.gateway
                             .forward_with_completion(acp::ExtNotification::new(
-                                "x.ai/session/update",
+                                "chutes.build/session/update",
                                 std::sync::Arc::from(owned),
                             )),
                     );
@@ -146,10 +146,10 @@ impl MvpAgent {
                         m.insert("isReplay".to_string(), serde_json::json!(true));
                     }
                     if let Some(pd) = persist_data {
-                        m.insert("x.ai/persist".to_string(), pd.clone());
+                        m.insert("chutes.build/persist".to_string(), pd.clone());
                     }
                     if let Some(tid) = target_client_id {
-                        m.insert("x.ai/leaderClientId".to_string(), tid.clone());
+                        m.insert("chutes.build/leaderClientId".to_string(), tid.clone());
                     }
                 }
             }
@@ -159,7 +159,7 @@ impl MvpAgent {
                 return Some(
                     self.gateway
                         .forward_with_completion(acp::ExtNotification::new(
-                            "x.ai/session/update",
+                            "chutes.build/session/update",
                             std::sync::Arc::from(raw_val),
                         )),
                 );
@@ -188,7 +188,7 @@ impl MvpAgent {
         // leader routes both historical and post-cursor live deltas only to
         // the loading client.
         if let Some(tid) = target_client_id {
-            stamp_meta_value(&mut notification.meta, "x.ai/leaderClientId", tid);
+            stamp_meta_value(&mut notification.meta, "chutes.build/leaderClientId", tid);
         }
         Some(self.gateway.forward_with_completion(notification))
     }

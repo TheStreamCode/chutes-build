@@ -451,15 +451,15 @@ impl acp::Agent for MvpAgent {
                         .load_session(true)
                         .meta(
                             serde_json::json!({
-                    "chutes.ai/fs_notify": true,
+                    "chutes.build/fs_notify": true,
                     // Advertised so SDKs can warn when a registration depends on
                     // hook behavior this agent doesn't honor.
-                    "chutes.ai/hooks": {
+                    "chutes.build/hooks": {
                         "blockingEvents": crate::extensions::hooks::ADVERTISED_BLOCKING_EVENTS,
                         "decisions": crate::extensions::hooks::ADVERTISED_DECISIONS,
                         "stopSignals": crate::extensions::hooks::ADVERTISED_STOP_SIGNALS,
                     },
-                    "chutes.ai/capabilities": {
+                    "chutes.build/capabilities": {
                         "toolOverrides": tool_overrides_capability(),
                     },
                 })
@@ -1453,7 +1453,7 @@ impl acp::Agent for MvpAgent {
                 self.gateway
                     .forward_fire_and_forget(
                         acp::ExtNotification::new(
-                            "chutes.ai/session/prompt_complete",
+                            "chutes.build/session/prompt_complete",
                             params.into(),
                         ),
                     );
@@ -2280,67 +2280,67 @@ impl acp::Agent for MvpAgent {
         let mut backend_no_bridge_err: Option<acp::Error> = None;
         let method = args.method.clone();
         let result = match method.as_ref() {
-            "chutes.ai/getApiKey" | "chutes.ai/setApiKey" => {
+            "chutes.build/getApiKey" | "chutes.build/setApiKey" => {
                 crate::extensions::auth::handle(self, &args).await
             }
-            "chutes.ai/session/info" | "chutes.ai/session/close" | "chutes.ai/session/list"
-            | "chutes.ai/sessions/list" => {
+            "chutes.build/session/info" | "chutes.build/session/close" | "chutes.build/session/list"
+            | "chutes.build/sessions/list" => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
-            "chutes.ai/workspaces/list" => {
+            "chutes.build/workspaces/list" => {
                 crate::agent::handlers::workspaces::handle(self, &args).await
             }
-            "chutes.ai/models/list" => {
+            "chutes.build/models/list" => {
                 crate::agent::handlers::models::handle(self, &args).await
             }
-            "chutes.ai/session/updates" => {
+            "chutes.build/session/updates" => {
                 crate::extensions::session_updates::handle(&args, &self.gateway).await
             }
-            "chutes.ai/session/state" => {
+            "chutes.build/session/state" => {
                 crate::extensions::session_state::handle_state(&args).await
             }
-            "chutes.ai/session/import" => {
+            "chutes.build/session/import" => {
                 crate::extensions::session_state::handle_import(&args).await
             }
-            "chutes.ai/session/load_history" => {
+            "chutes.build/session/load_history" => {
                 crate::extensions::chat_conversation_history::handle(self, &args).await
             }
-            "chutes.ai/session/search" => {
+            "chutes.build/session/search" => {
                 crate::extensions::session_search::handle(self, &args).await
             }
-            "chutes.ai/session/resolve_local_for_worktree_resume"
-            | "chutes.ai/session/rehydrate" => {
+            "chutes.build/session/resolve_local_for_worktree_resume"
+            | "chutes.build/session/rehydrate" => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::worktree::handle(self, &ops, &args).await
             }
             #[cfg(feature = "local-workspace")]
-            "chutes.ai/session/add_local_workspace" => {
+            "chutes.build/session/add_local_workspace" => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
-            "chutes.ai/session/rename" | "chutes.ai/session/delete"
-            | "chutes.ai/session/update_mcp_servers" | "chutes.ai/session/fork"
-            | "chutes.ai/plugins/reload" | "chutes.ai/commands/list" => {
+            "chutes.build/session/rename" | "chutes.build/session/delete"
+            | "chutes.build/session/update_mcp_servers" | "chutes.build/session/fork"
+            | "chutes.build/plugins/reload" | "chutes.build/commands/list" => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
             m if InternalMethod::from_name(m).is_some() => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
-            "chutes.ai/session/repair" => crate::extensions::repair::handle(self, &args).await,
-            "chutes.ai/session/usage" => crate::extensions::usage::handle(self, &args).await,
-            "chutes.ai/memory/flush" | "chutes.ai/memory/rewrite" => {
+            "chutes.build/session/repair" => crate::extensions::repair::handle(self, &args).await,
+            "chutes.build/session/usage" => crate::extensions::usage::handle(self, &args).await,
+            "chutes.build/memory/flush" | "chutes.build/memory/rewrite" => {
                 crate::extensions::memory::handle(self, &args).await
             }
-            "chutes.ai/skills/refresh-baseline" => {
+            "chutes.build/skills/refresh-baseline" => {
                 self.refresh_skill_baseline_for_all_sessions();
                 crate::extensions::to_ext_response(
                     Ok(serde_json::json!({"ok": true})),
                 )
             }
-            "chutes.ai/interject" => crate::extensions::interject::handle(self, &args).await,
-            "chutes.ai/feedback" | "chutes.ai/feedback/dismiss" | "chutes.ai/feedback/upload-trace"
-            | "chutes.ai/btw" => crate::extensions::feedback::handle(self, &args).await,
-            "chutes.ai/recap" => crate::extensions::recap::handle(self, &args).await,
-            "chutes.ai/cloud/terminate" => {
+            "chutes.build/interject" => crate::extensions::interject::handle(self, &args).await,
+            "chutes.build/feedback" | "chutes.build/feedback/dismiss" | "chutes.build/feedback/upload-trace"
+            | "chutes.build/btw" => crate::extensions::feedback::handle(self, &args).await,
+            "chutes.build/recap" => crate::extensions::recap::handle(self, &args).await,
+            "chutes.build/cloud/terminate" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2372,7 +2372,7 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
-            "chutes.ai/cloud/env/list" => {
+            "chutes.build/cloud/env/list" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2397,7 +2397,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "chutes.ai/cloud/env/create" => {
+            "chutes.build/cloud/env/create" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2454,7 +2454,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "chutes.ai/cloud/env/update" => {
+            "chutes.build/cloud/env/update" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2514,7 +2514,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "chutes.ai/cloud/env/delete" => {
+            "chutes.build/cloud/env/delete" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2541,87 +2541,87 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
-            "chutes.ai/billing" => crate::extensions::billing::handle(self, &args).await,
-            "chutes.ai/auto-topup-rule" => {
+            "chutes.build/billing" => crate::extensions::billing::handle(self, &args).await,
+            "chutes.build/auto-topup-rule" => {
                 crate::extensions::billing::handle(self, &args).await
             }
-            "chutes.ai/share_session" => crate::extensions::share::handle(self, &args).await,
-            "chutes.ai/privacy/setCodingDataRetention" => {
+            "chutes.build/share_session" => crate::extensions::share::handle(self, &args).await,
+            "chutes.build/privacy/setCodingDataRetention" => {
                 crate::extensions::privacy::handle(self, &args).await
             }
-            "chutes.ai/consent/record" => {
+            "chutes.build/consent/record" => {
                 crate::extensions::consent::handle(self, &args).await
             }
-            "chutes.ai/rollout/survey" => {
+            "chutes.build/rollout/survey" => {
                 crate::extensions::rollout::handle(self, &args).await
             }
-            "chutes.ai/prompt_history" => {
+            "chutes.build/prompt_history" => {
                 crate::extensions::prompt_history::handle(self, &args).await
             }
-            "chutes.ai/suggest" => crate::extensions::suggest::handle(self, &args).await,
-            "chutes.ai/suggestPrompt" => crate::extensions::suggest::handle(self, &args).await,
-            s if s.starts_with("chutes.ai/auth/") => {
+            "chutes.build/suggest" => crate::extensions::suggest::handle(self, &args).await,
+            "chutes.build/suggestPrompt" => crate::extensions::suggest::handle(self, &args).await,
+            s if s.starts_with("chutes.build/auth/") => {
                 crate::extensions::auth::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/session_summaries/") => {
+            s if s.starts_with("chutes.build/session_summaries/") => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/git/worktree/") => {
+            s if s.starts_with("chutes.build/git/worktree/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::worktree::handle(self, &ops, &args).await
             }
-            s if s.starts_with("chutes.ai/git/") => {
+            s if s.starts_with("chutes.build/git/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::git::handle(self, &ops, &args).await
             }
-            s if s.starts_with("chutes.ai/compact_conversation") => {
+            s if s.starts_with("chutes.build/compact_conversation") => {
                 crate::extensions::memory::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/plugins/") => {
+            s if s.starts_with("chutes.build/plugins/") => {
                 crate::extensions::plugins::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/marketplace/") => {
+            s if s.starts_with("chutes.build/marketplace/") => {
                 crate::extensions::marketplace::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/hooks/") => {
+            s if s.starts_with("chutes.build/hooks/") => {
                 crate::extensions::hooks::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/hunk-tracker/") => {
+            s if s.starts_with("chutes.build/hunk-tracker/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::hunk_tracker::handle(self, &ops, &args).await
             }
-            s if s.starts_with("chutes.ai/pr/") => {
+            s if s.starts_with("chutes.build/pr/") => {
                 crate::extensions::pr::handle(self, &args).await
             }
             s if s.starts_with(crate::extensions::mcp::mcp_methods::PREFIX) => {
                 crate::extensions::mcp::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/task/") => {
+            s if s.starts_with("chutes.build/task/") => {
                 crate::extensions::task::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/scheduler/") => {
+            s if s.starts_with("chutes.build/scheduler/") => {
                 crate::extensions::task::handle_scheduler(self, &args).await
             }
-            s if s.starts_with("chutes.ai/subagent/") => {
+            s if s.starts_with("chutes.build/subagent/") => {
                 crate::extensions::task::handle_subagent(self, &args).await
             }
-            s if s.starts_with("chutes.ai/terminal/") => {
+            s if s.starts_with("chutes.build/terminal/") => {
                 crate::extensions::terminal::handle(self, &args).await
             }
             s if crate::extensions::fs::is_fs_method(s) => {
                 crate::extensions::fs::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/search/") => {
+            s if s.starts_with("chutes.build/search/") => {
                 crate::extensions::search::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/bundle/") => {
+            s if s.starts_with("chutes.build/bundle/") => {
                 crate::extensions::bundle::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/code/") => {
+            s if s.starts_with("chutes.build/code/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::code_nav::handle(self, &ops, &args).await
             }
-            s if s.starts_with("chutes.ai/skills/") || s == "chutes.ai/workflows/list" => {
+            s if s.starts_with("chutes.build/skills/") || s == "chutes.build/workflows/list" => {
                 let compat = self.cfg.borrow().compat_resolved;
                 crate::extensions::skills::handle(
                         self,
@@ -2631,13 +2631,13 @@ impl acp::Agent for MvpAgent {
                     )
                     .await
             }
-            s if s.starts_with("chutes.ai/review") => {
+            s if s.starts_with("chutes.build/review") => {
                 crate::extensions::feedback::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/debug/") => {
+            s if s.starts_with("chutes.build/debug/") => {
                 crate::extensions::debug::handle(self, &args).await
             }
-            s if s.starts_with("chutes.ai/rewind") => {
+            s if s.starts_with("chutes.build/rewind") => {
                 crate::extensions::rewind::handle(self, &args).await
             }
             other => {
@@ -2659,7 +2659,7 @@ impl acp::Agent for MvpAgent {
         args: acp::ExtNotification,
     ) -> Result<(), acp::Error> {
         tracing::info!("Received extension notification: method={}", args.method);
-        if args.method.as_ref() == "chutes.ai/yolo_mode_changed"
+        if args.method.as_ref() == "chutes.build/yolo_mode_changed"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2732,7 +2732,7 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        if args.method.as_ref() == "chutes.ai/permissions/reset" {
+        if args.method.as_ref() == "chutes.build/permissions/reset" {
             let mut updated = 0;
             self.session_registry
                 .for_each_resident(|_, h| {
@@ -2753,7 +2753,7 @@ impl acp::Agent for MvpAgent {
         if args.method.as_ref() == InternalMethod::EvictSessions.name() {
             self.handle_evict_sessions(&args.params).await;
         }
-        if args.method.as_ref() == "chutes.ai/toggle_plan_mode"
+        if args.method.as_ref() == "chutes.build/toggle_plan_mode"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2790,7 +2790,7 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        if args.method.as_ref().starts_with("chutes.ai/queue/")
+        if args.method.as_ref().starts_with("chutes.build/queue/")
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2828,14 +2828,14 @@ impl acp::Agent for MvpAgent {
                 }
             }
         }
-        if args.method.as_ref() == "chutes.ai/terminal/pty/input"
+        if args.method.as_ref() == "chutes.build/terminal/pty/input"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
         {
             crate::extensions::terminal::handle_pty_input(&params).await;
         }
-        if args.method.as_ref() == "_chutes.build/session/update" {
+        if args.method.as_ref() == "chutes.build/session/update" {
             if let Ok(notification) = serde_json::from_str::<
                 SessionNotification,
             >(args.params.get()) {
@@ -2859,7 +2859,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse xAI session notification params");
             }
         }
-        if args.method.as_ref() == "chutes.ai/telemetry/non_git_decision" {
+        if args.method.as_ref() == "chutes.build/telemetry/non_git_decision" {
             #[derive(serde::Deserialize)]
             struct NonGitDecisionParams {
                 decision: String,
@@ -2885,7 +2885,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse non_git_decision telemetry params");
             }
         }
-        if args.method.as_ref() == "chutes.ai/telemetry/multi_agent_followup" {
+        if args.method.as_ref() == "chutes.build/telemetry/multi_agent_followup" {
             #[derive(serde::Deserialize)]
             struct MultiAgentFollowupParams {
                 preferred_agent_label: char,
@@ -2921,7 +2921,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse multi-agent followup telemetry params");
             }
         }
-        if args.method.as_ref() == "chutes.ai/telemetry/multi_agent_apply" {
+        if args.method.as_ref() == "chutes.build/telemetry/multi_agent_apply" {
             #[derive(serde::Deserialize)]
             struct MultiAgentApplyParams {
                 applied_agent_label: char,
@@ -2957,7 +2957,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse multi-agent apply telemetry params");
             }
         }
-        if args.method.as_ref() == "chutes.ai/telemetry/multi_agent_discard" {
+        if args.method.as_ref() == "chutes.build/telemetry/multi_agent_discard" {
             #[derive(serde::Deserialize)]
             struct MultiAgentDiscardParams {
                 /// (label, session_id, model_id)
