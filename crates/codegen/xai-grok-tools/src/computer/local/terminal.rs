@@ -3234,8 +3234,14 @@ fn spawn_shell_command(
         // Landlock/Seatbelt sandbox — no action needed here for FS.
         #[cfg(target_os = "linux")]
         if xai_grok_sandbox::should_restrict_child_network() {
+            // The filter is built once in the parent: a pre_exec closure must
+            // not allocate (fork in a multi-threaded process can deadlock the
+            // child on the allocator lock).
+            let filter = xai_grok_sandbox::child_net::prebuilt_child_network_filter();
             unsafe {
-                cmd.pre_exec(|| xai_grok_sandbox::child_net::install_child_network_filter());
+                cmd.pre_exec(move || {
+                    xai_grok_sandbox::child_net::install_child_network_filter(filter)
+                });
             }
         }
         cmd

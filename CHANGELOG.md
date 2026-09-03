@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-03
+
 ### Changed
 
 - **The runtime is synced to upstream `1.0.12` (`bc7f02ed`).** Ported by hand on `sync/upstream-1.0.12-wip`, one area per commit: 1,578 files of delta, 989 of them mechanical takes. New upstream features carried: active subagent messaging (`send_subagent_message`), hook HTTP runners with prompt/defer decisions, checkpoint remount after path virtualization, worktree detach/salvage rework, the `xai-grok-shell-terminal`/`xai-grok-gboom`/`xai-grok-pager-diff`/`xai-grok-dashboard-store`/`xai-dirs`/`xai-message-delivery-core` crates, and the dashboard/session-picker TUI. The Chutes identity layer (prompt, wordmark, themes, `ChutesBuild` namespace, cache-effectiveness usage, compact tool schemas) is preserved.

@@ -915,12 +915,14 @@ fn spawn_with_argv(
 
             #[cfg(target_os = "linux")]
             if xai_grok_sandbox::should_restrict_child_network() {
-                // SAFETY: single prctl syscall (async-signal-safe).
+                // The filter is built once in the parent: a pre_exec closure
+                // must not allocate (fork in a multi-threaded process can
+                // deadlock the child on the allocator lock).
+                let filter = xai_grok_sandbox::child_net::prebuilt_child_network_filter();
+                // SAFETY: two prctl syscalls (async-signal-safe).
                 unsafe {
-                    cmd.pre_exec(|| {
-                        xai_grok_sandbox::child_net::install_child_network_filter(
-                            xai_grok_sandbox::child_net::prebuilt_child_network_filter(),
-                        )
+                    cmd.pre_exec(move || {
+                        xai_grok_sandbox::child_net::install_child_network_filter(filter)
                     });
                 }
             }
