@@ -2,11 +2,11 @@
 //!
 //! Hermetic: a local server serves the binary's own version as the channel
 //! pointer, so a healthy run exits 0 ("already up to date") and a corrupt
-//! config must too ÔÇö reintroducing a config `?` fails exactly that run.
+//! config must too — reintroducing a config `?` fails exactly that run.
 //! The pointer must equal the current version: the installer converges in
 //! both directions, so an older pointer triggers a downgrade attempt.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -91,7 +91,7 @@ fn run_update(base: &str, config_toml: &str, extra_args: &[&str]) -> std::proces
     // usable winsock, so the child must keep the standard Windows environment.
     if cfg!(windows) {
         for var in ["SystemRoot", "SYSTEMROOT", "SystemDrive", "COMPUTERNAME"] {
-            if let Ok(value) = std::env::var(&var) {
+            if let Ok(value) = std::env::var(var) {
                 cmd.env(var, value);
             }
         }

@@ -25,7 +25,7 @@ impl fmt::Display for LineSegment<'_> {
 
 /// The parse events `split_into_line_segments` distinguishes. Everything the
 /// splitter cares about: printable characters (visual width), CR, LF; every
-/// other action (SGR colors, cursor moves, OSC, ÔÇª) merely extends the current
+/// other action (SGR colors, cursor moves, OSC, …) merely extends the current
 /// segment byte range.
 enum SegmentEvent {
     Print(char),
@@ -113,7 +113,7 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
     for (index, byte) in input.bytes().enumerate() {
         parser.advance(&mut performer, byte);
         let Some(event) = performer.event.take() else {
-            // Mid-sequence byte (escape params, UTF-8 continuation, ÔÇª): the
+            // Mid-sequence byte (escape params, UTF-8 continuation, …): the
             // action it belongs to is dispatched on the sequence's final byte
             // and its bytes are claimed then.
             continue;
@@ -124,7 +124,7 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
         match event {
             SegmentEvent::LineFeed => {
                 // Emit current segment but strip \r if the segment ended with it.
-                // Note: `segment_end` (not `index`) is deliberate ÔÇö a LF can
+                // Note: `segment_end` (not `index`) is deliberate — a LF can
                 // fire mid-escape-sequence ("\x1b[3\n1m"), and the pending
                 // escape bytes must not leak into the emitted segment.
                 push_segment!(segment_end - usize::from(prev_is_cr), true);
@@ -279,11 +279,11 @@ mod tests {
     #[test]
     fn test_edge_case_char_wider_than_terminal() {
         // Emoji is 2 wide, terminal is 1 wide
-        let input = "­ƒÿè";
+        let input = "😊";
         let segments = split_into_line_segments(input, 1);
         // Should still create one segment even though it exceeds width
         assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].content, "­ƒÿè");
+        assert_eq!(segments[0].content, "😊");
     }
 
     #[test]
@@ -361,10 +361,10 @@ mod tests {
 
     #[test]
     fn test_visual_width_calculation_with_unicode() {
-        // "õ¢áÕÑ¢" is 4 visual width (2 per character)
-        let input = "hello õ¢áÕÑ¢";
+        // "你好" is 4 visual width (2 per character)
+        let input = "hello 你好";
         let segments = split_into_line_segments(input, 10);
-        assert_eq!(segments.len(), 1); // "hello õ¢áÕÑ¢" = 6 + 4 = 10, exactly fits
+        assert_eq!(segments.len(), 1); // "hello 你好" = 6 + 4 = 10, exactly fits
 
         let segments2 = split_into_line_segments(input, 9);
         assert_eq!(segments2.len(), 2); // Doesn't fit, must wrap

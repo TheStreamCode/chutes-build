@@ -60,7 +60,7 @@ pub trait AsyncFileSystem: Send + Sync {
     /// its contents. `Ok(false)` means a definitive not-found; other probe
     /// failures surface as `Err`.
     ///
-    /// The default errs with `ErrorKind::Unsupported` ÔÇö callers must treat
+    /// The default errs with `ErrorKind::Unsupported` — callers must treat
     /// `Err` as "unknown" and fail closed. Backends opt in by overriding
     /// with a cheap stat/lookup; a full-content read is never an acceptable
     /// probe (the target may be arbitrarily large or remote).
@@ -91,7 +91,7 @@ pub struct TerminalRunRequest {
     /// Notification handle for streaming output chunks during execution.
     /// The backend sends `BashOutputChunk` notifications every ~100ms.
     /// Callers that don't need streaming pass `ToolNotificationHandle::noop()`
-    /// ÔÇö messages are silently dropped. No `Option` wrapper needed.
+    /// — messages are silently dropped. No `Option` wrapper needed.
     pub notification_handle: ToolNotificationHandle,
 
     /// Tool call ID for correlating notifications with the tool invocation.
@@ -114,9 +114,9 @@ pub struct TerminalRunRequest {
     /// command may block the turn before being moved to the background (process
     /// keeps running). Independent of [`Self::timeout`].
     ///
-    /// - `None` ÔåÆ use the terminal backend default (typically 15s).
-    /// - `Some(Duration::MAX)` ÔåÆ no short budget; auto-bg only when `timeout` elapses.
-    /// - `Some(d)` ÔåÆ auto-bg after `d` if still running.
+    /// - `None` → use the terminal backend default (typically 15s).
+    /// - `Some(Duration::MAX)` → no short budget; auto-bg only when `timeout` elapses.
+    /// - `Some(d)` → auto-bg after `d` if still running.
     pub foreground_block_budget: Option<Duration>,
 
     /// Task kind for distinguishing monitor tasks from regular bash tasks.
@@ -124,7 +124,7 @@ pub struct TerminalRunRequest {
 
     /// Session that owns this process. Used to scope kill operations so
     /// `kill_all_background_tasks_by_owner` only targets the requesting
-    /// session's processes ÔÇö not the parent's or sibling's.
+    /// session's processes — not the parent's or sibling's.
     pub owner_session_id: Option<String>,
     /// Model-supplied label for task UI / snapshots.
     pub description: Option<String>,
@@ -147,7 +147,7 @@ pub enum TaskKind {
     /// Regular bash command.
     #[default]
     Bash,
-    /// Monitor tool ÔÇö streams stdout events with rate limiting.
+    /// Monitor tool — streams stdout events with rate limiting.
     Monitor,
 }
 
@@ -174,7 +174,7 @@ pub struct TerminalRunResult {
     pub pid: Option<u32>,
 }
 
-/// Returned by `TerminalBackend::run_background` ÔÇö gives the caller the task_id
+/// Returned by `TerminalBackend::run_background` — gives the caller the task_id
 /// to use for subsequent queries via `get_task`, `kill_task`, `wait_for_completion`.
 pub struct BackgroundHandle {
     pub task_id: String,
@@ -257,7 +257,7 @@ impl TaskSnapshot {
             .unwrap_or(0.0)
     }
 
-    /// True iff the task has NOT yet completed ÔÇö covers bash AND
+    /// True iff the task has NOT yet completed — covers bash AND
     /// monitor task kinds (the `kind` field doesn't change this
     /// predicate; the runtime turn-end TodoGate counts both as
     /// backing work).
@@ -271,7 +271,7 @@ impl TaskSnapshot {
         crate::util::truncate::PartialOutput::part_of(&self.output, self.output_total_bytes)
     }
 
-    /// Incomplete and backgrounded ÔÇö tray/`tasks_snapshot` predicate (not FG in-flight).
+    /// Incomplete and backgrounded — tray/`tasks_snapshot` predicate (not FG in-flight).
     pub fn is_outstanding_background(&self) -> bool {
         !self.completed && self.is_backgrounded
     }
@@ -374,7 +374,7 @@ pub trait TerminalBackend: Send + Sync {
 
     /// Kill all running background tasks owned by a specific session.
     /// Used during subagent teardown on a shared terminal backend so
-    /// only the subagent's own tasks are killed ÔÇö not the parent's.
+    /// only the subagent's own tasks are killed — not the parent's.
     async fn kill_all_background_tasks_by_owner(&self, _owner_session_id: &str) {}
 
     async fn warm_shell(&self, _cwd: &std::path::Path) {}

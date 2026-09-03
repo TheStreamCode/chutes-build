@@ -28,8 +28,8 @@ fn server_id_startup_error(id: &str) -> Option<String> {
         .map(|e| format!("{INVALID_SERVER_ID_MARKER} {id:?}: {e}"))
 }
 /// Classify hub-connect Display strings for `/ready` error_class.
-/// Auth needles ÔåÆ `hub_auth`; other hub-connect path failures ÔåÆ `hub_connect`;
-/// pre-hub workspace setup messages ÔåÆ `unknown` (still retryable alongside hub_connect).
+/// Auth needles → `hub_auth`; other hub-connect path failures → `hub_connect`;
+/// pre-hub workspace setup messages → `unknown` (still retryable alongside hub_connect).
 fn classify_hub_connect_failure(err_msg: &str) -> ErrorClass {
     if err_msg.contains("handshake auth failed") || err_msg.contains("auth error:") {
         ErrorClass::HubAuth
@@ -145,7 +145,7 @@ struct Args {
     /// and process group (escaping the launcher's process-group reap),
     /// redirect stdio to a log file, and hold a single-instance pidfile lock.
     ///
-    /// Off by default ÔÇö opt-in, passed by the launcher in the supervised
+    /// Off by default — opt-in, passed by the launcher in the supervised
     /// deployment mode. With the flag absent, startup is unchanged.
     #[arg(long)]
     daemonize: bool,
@@ -168,7 +168,7 @@ struct Args {
 }
 /// Preview-proxy supervision flags. Forwarded 1:1 to the
 /// `/usr/local/bin/xai-grok-preview-proxy` child (see `cli.rs` for the proxy's
-/// flag names). Off by default ÔÇö when `--preview-enabled` is absent the
+/// flag names). Off by default — when `--preview-enabled` is absent the
 /// supervisor is never started and startup is byte-for-byte the non-preview
 /// path.
 #[derive(clap::Args, Debug)]
@@ -177,13 +177,13 @@ struct PreviewCliArgs {
     /// this only when the proxy binary was mounted into this container.
     #[arg(long)]
     preview_enabled: bool,
-    /// Proxy `--preview-port` (externally exposed listener). Absent ÔçÆ proxy default.
+    /// Proxy `--preview-port` (externally exposed listener). Absent ⇒ proxy default.
     #[arg(long)]
     preview_port: Option<u16>,
-    /// Proxy `--control-port` (loopback control). Absent ÔçÆ proxy default.
+    /// Proxy `--control-port` (loopback control). Absent ⇒ proxy default.
     #[arg(long)]
     preview_control_port: Option<u16>,
-    /// Proxy `--visibility` (`owner` | `public`). Absent ÔçÆ proxy default.
+    /// Proxy `--visibility` (`owner` | `public`). Absent ⇒ proxy default.
     /// Validated here so a bad value fails fast instead of crash-looping the proxy.
     #[arg(long, value_enum)]
     preview_visibility: Option<PreviewVisibility>,
@@ -454,7 +454,7 @@ async fn run(
     };
     tracing::info!(
         cwd = %cwd_display,
-        "Workspace server starting ÔÇö sessions created dynamically via server bind"
+        "Workspace server starting — sessions created dynamically via server bind"
     );
     let server_id = args.server_id.clone();
     let preview_shutdown = if args.preview.preview_enabled {

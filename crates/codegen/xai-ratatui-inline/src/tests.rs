@@ -262,7 +262,7 @@ mod links {
     /// genuine grow would be misread as a shrink: the grow-time `scroll_up`
     /// would be skipped and the viewport's top would not move up, so the taller
     /// viewport would run off the bottom of the screen (dropdown items rendered
-    /// off-screen ÔÇö the "empty dropdown over a full screen" bug).
+    /// off-screen — the "empty dropdown over a full screen" bug).
     #[test]
     fn grow_after_out_of_band_area_shrink_still_scrolls() {
         let mut t = Terminal::with_options(
@@ -275,7 +275,7 @@ mod links {
         )
         .unwrap();
         // Out-of-band shrink to a 3-row viewport pinned at the bottom of the
-        // 24-row screen ÔÇö as the commit path does. This does NOT update the
+        // 24-row screen — as the commit path does. This does NOT update the
         // stored Inline height (still 21), creating the drift.
         t.set_viewport_area(Rect::new(0, 21, 80, 3));
 
@@ -309,7 +309,7 @@ mod links {
         let _ = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
         // Same glyphs, but the link is gone: the cells must be rewritten (so the
         // terminal's hyperlink clears) and carry no OSC 8. This is the `/new`
-        // regression ÔÇö clearing is driven purely by the diff.
+        // regression — clearing is driven purely by the diff.
         let out = frame(&mut t, "AB", &[]);
         assert!(out.contains("AB"), "cells should be redrawn: {out:?}");
         assert!(!out.contains("\x1b]8;"), "stale OSC8 leaked: {out:?}");
@@ -319,7 +319,7 @@ mod links {
     fn unchanged_link_and_content_emits_nothing() {
         let mut t = term(20, 3);
         let _ = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
-        // Identical glyphs AND identical link ÔåÆ empty diff ÔåÆ no output at all.
+        // Identical glyphs AND identical link → empty diff → no output at all.
         let out = frame(&mut t, "AB", &[span(0, 2, "https://chutes.ai", None)]);
         assert!(out.is_empty(), "expected empty diff, got: {out:?}");
     }
@@ -435,7 +435,7 @@ mod links {
     #[test]
     fn distinct_links_split_into_separate_runs() {
         let mut t = term(20, 3);
-        // "AxB": AÔåÆa, gap x (no link), BÔåÆb.
+        // "AxB": A→a, gap x (no link), B→b.
         let out = frame(
             &mut t,
             "AxB",
@@ -457,16 +457,16 @@ mod links {
         let mut t = term(20, 3);
         // A width-2 char occupies two cells; only the lead cell is drawn, and
         // the OSC 8 wraps it.
-        let out = frame(&mut t, "õ©û", &[span(0, 2, "https://chutes.ai", None)]);
+        let out = frame(&mut t, "世", &[span(0, 2, "https://chutes.ai", None)]);
         assert!(
-            out.contains("\x1b]8;;https://chutes.ai\x07õ©û\x1b]8;;\x07"),
+            out.contains("\x1b]8;;https://chutes.ai\x07世\x1b]8;;\x07"),
             "wide-char run: {out:?}"
         );
     }
 
     #[test]
     fn nonzero_origin_viewport_maps_links() {
-        // The screenÔåÆcell mapping subtracts the viewport offset; verify a link
+        // The screen→cell mapping subtracts the viewport offset; verify a link
         // at an absolute (row, col) inside a non-origin viewport wraps the right
         // cells (regression guard for `(y - area.y)` / `(x - area.x)`).
         let area = Rect::new(2, 5, 20, 4);

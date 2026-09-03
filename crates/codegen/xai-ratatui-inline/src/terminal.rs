@@ -1,5 +1,5 @@
 // Derived from ratatui's Terminal implementation (MIT / Apache-2.0 dual license).
-// Upstream: https://github.com/ratatui/ratatui ÔÇö Copyright (c) The Ratatui Developers.
+// Upstream: https://github.com/ratatui/ratatui — Copyright (c) The Ratatui Developers.
 // Modified for inline viewport support. See ../NOTICE and repository THIRD-PARTY-NOTICES.
 //
 #![allow(clippy::collapsible_if)]
@@ -405,7 +405,7 @@ where
     /// by the current link layer (see [`set_frame_links`](Self::set_frame_links)).
     ///
     /// A cell is rewritten when its content/style changed **or** its link
-    /// changed, so links are cleared automatically when they disappear ÔÇö no
+    /// changed, so links are cleared automatically when they disappear — no
     /// out-of-band repaint. Contiguous runs of cells sharing the same link are
     /// wrapped in a single OSC 8 open/close around the upstream cell draw.
     pub fn flush_with_links(&mut self) -> io::Result<bool>
@@ -417,7 +417,7 @@ where
 
         // Fast path: no hyperlinks in either the current or previous frame. The
         // link layer can't affect the diff or emission, so fall back to the
-        // plain cell diff + draw ÔÇö byte-for-byte identical to `flush` with zero
+        // plain cell diff + draw — byte-for-byte identical to `flush` with zero
         // per-cell link resolution. This keeps the overwhelmingly common
         // link-free frame (streaming output, etc.) as cheap as before.
         if self.link_tables[cur].is_empty() && self.link_tables[prev].is_empty() {
@@ -464,7 +464,7 @@ where
             // inline viewport anchored near the cursor and is wrong here in two
             // ways: (1) it clamps the height to the fixed `Viewport::Inline(height)`
             // captured at startup, so enlarging the terminal never grows the
-            // viewport ÔÇö the UI ends up truncated at the bottom even though the
+            // viewport — the UI ends up truncated at the bottom even though the
             // width tracks the resize; and (2) on shrink it can reposition the
             // viewport partly or fully off-screen. Filling the new area avoids both.
             Viewport::Inline(_)
@@ -895,7 +895,7 @@ where
         // `set_viewport_area` (minimal mode's content-anchored commit path
         // shrinks the viewport that way before `insert_before`). Comparing
         // against a stale stored height made a genuine grow read as a shrink,
-        // skipping the grow-time `scroll_up` below ÔÇö so the viewport's top never
+        // skipping the grow-time `scroll_up` below — so the viewport's top never
         // moved up and the taller region ran off the bottom of the screen (an
         // opened dropdown's items landed off-screen). Keep the stored height in
         // lockstep with the area height on the way out so `resize`
@@ -1255,7 +1255,7 @@ fn diff_large_with_links<'a>(
 /// upstream [`Backend::draw`] is reused per run (so all SGR / wide-char / cursor
 /// handling is unchanged); each linked run is wrapped in one OSC 8 open/close.
 /// Keeping a link open across `draw`'s internal cursor moves is correct because
-/// OSC 8 is a sticky terminal mode ÔÇö only the written cells inherit it, and
+/// OSC 8 is a sticky terminal mode — only the written cells inherit it, and
 /// unchanged cells in any gap keep whatever link they already had.
 fn emit_frame_with_links<B: Backend + Write>(
     backend: &mut B,
@@ -1359,7 +1359,7 @@ impl<B: Backend> Terminal<B> {
     /// Switch the viewport kind in place, keeping the backend alive.
     ///
     /// `Viewport::Inline` issues a cursor-position query (caller must be the
-    /// only stdin reader), and both buffers reset ÔÇö follow with a full redraw.
+    /// only stdin reader), and both buffers reset — follow with a full redraw.
     pub fn set_viewport(&mut self, viewport: Viewport) -> io::Result<()> {
         let area = match viewport {
             Viewport::Fullscreen | Viewport::Inline(_) => {
@@ -1497,7 +1497,7 @@ mod inline_resize_tests {
             .unwrap();
     }
 
-    /// Growth after a shrink must expand again ÔÇö the viewport tracks the live
+    /// Growth after a shrink must expand again — the viewport tracks the live
     /// terminal size in both directions, repeatedly.
     #[test]
     fn inline_full_height_tracks_across_shrink_then_grow() {
@@ -1513,7 +1513,7 @@ mod inline_resize_tests {
     }
 
     /// A *small* inline viewport (height < terminal height, anchored near the
-    /// bottom) must NOT be forced to full height ÔÇö it keeps the standard
+    /// bottom) must NOT be forced to full height — it keeps the standard
     /// `compute_inline_size` behavior, so the full-height special-case does not
     /// over-apply.
     #[test]
@@ -1534,7 +1534,7 @@ mod inline_resize_tests {
         // The full-height special-case keys off the viewport spanning the whole
         // terminal (height >= terminal height). A small inline viewport does not,
         // so its height stays clamped to the small inline target while the width
-        // tracks the resize ÔÇö i.e. it keeps the standard `compute_inline_size`
+        // tracks the resize — i.e. it keeps the standard `compute_inline_size`
         // behavior and is not ballooned to full height.
         assert_eq!(terminal.viewport_area().height, 3);
         assert_eq!(terminal.viewport_area().width, 120);

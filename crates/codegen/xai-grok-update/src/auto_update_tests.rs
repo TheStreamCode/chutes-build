@@ -97,7 +97,7 @@ async fn test_atomic_symlink_swap_creates_new_symlink() {
     std::fs::write(&target, "v1").unwrap();
 
     let link = dir.path().join("grok");
-    // No existing symlink ÔÇö should create one.
+    // No existing symlink — should create one.
     atomic_symlink_swap(&target, &link).await.unwrap();
 
     assert!(link.is_symlink());
@@ -144,7 +144,7 @@ async fn test_atomic_symlink_swap_preserves_old_target() {
     // Swap to v2.
     atomic_symlink_swap(&target_v2, &link).await.unwrap();
 
-    // The old target file must still exist on disk ÔÇö this is the key
+    // The old target file must still exist on disk — this is the key
     // property that prevents SIGKILL on macOS.  Running processes that
     // have binary-v1 mmap'd can continue to page-fault from it.
     assert!(target_v1.exists(), "old binary must not be deleted");
@@ -370,7 +370,7 @@ async fn test_sweep_stale_tmp_links_removes_stale_keeps_fresh_and_active() {
     assert!(!leftover_old.exists() && !leftover_new.exists());
     assert!(link.is_symlink(), "active link must be preserved");
 
-    // A fresh leftover under a real max_age is preserved ÔÇö it could be a
+    // A fresh leftover under a real max_age is preserved — it could be a
     // concurrent racer's in-flight link.
     let fresh = dir.path().join("grok.999-9.tmp-link");
     std::os::unix::fs::symlink(&target, &fresh).unwrap();
@@ -411,7 +411,7 @@ async fn test_atomic_symlink_swap_multiple_sequential_swaps() {
 #[cfg(unix)]
 #[tokio::test]
 async fn test_atomic_symlink_swap_with_absolute_target() {
-    // atomic_symlink_swap stores whatever path is given ÔÇö if absolute,
+    // atomic_symlink_swap stores whatever path is given — if absolute,
     // readlink returns the absolute path.
     let dir = tempfile::tempdir().unwrap();
 
@@ -478,7 +478,7 @@ fn test_relative_symlink_target_same_dir() {
 #[test]
 fn test_relative_symlink_target_cross_tree_stays_absolute() {
     // /usr/local/bin/grok -> /home/alice/.chutes-build/downloads/grok-0.1.203
-    // Different grandparents ÔÇö should stay absolute.
+    // Different grandparents — should stay absolute.
     let target = std::path::Path::new("/home/alice/.chutes-build/downloads/grok-0.1.203");
     let link = std::path::Path::new("/usr/local/bin/grok");
     let result = relative_symlink_target(target, link);
@@ -544,7 +544,7 @@ async fn test_atomic_symlink_swap_broken_symlink_target() {
     let dir = tempfile::tempdir().unwrap();
 
     let link = dir.path().join("grok");
-    // Create a broken symlink ÔÇö points to a file that doesn't exist.
+    // Create a broken symlink — points to a file that doesn't exist.
     std::os::unix::fs::symlink(dir.path().join("deleted-binary"), &link).unwrap();
     assert!(link.is_symlink());
     assert!(!link.exists(), "broken symlink should not 'exist'");
@@ -562,7 +562,7 @@ async fn test_atomic_symlink_swap_broken_symlink_target() {
 
 #[test]
 fn test_needs_update_prerelease_to_stable_forces_install() {
-    // Inadmissible current (pre-release on stable channel) ÔåÆ install even
+    // Inadmissible current (pre-release on stable channel) → install even
     // if the candidate is semver-lower.
     assert_eq!(
         needs_update("0.1.149-alpha.1", "0.1.148", "stable", false),
@@ -598,7 +598,7 @@ fn test_needs_update_stable_channel_never_gets_prerelease() {
 
 #[test]
 fn test_needs_update_valid_current_only_upgrades() {
-    // Admissible current on the target channel ÔåÆ pure semver (allow_downgrade=false).
+    // Admissible current on the target channel → pure semver (allow_downgrade=false).
     assert_eq!(
         needs_update("0.1.140", "0.1.141", "stable", false),
         Some(true)
@@ -615,12 +615,12 @@ fn test_needs_update_valid_current_only_upgrades() {
         needs_update("0.1.140", "0.1.139-alpha.5", "alpha", false),
         Some(false)
     );
-    // Alpha ÔåÆ newer alpha: upgrade.
+    // Alpha → newer alpha: upgrade.
     assert_eq!(
         needs_update("0.1.148-alpha.1", "0.1.148-alpha.3", "alpha", false),
         Some(true)
     );
-    // Alpha ÔåÆ older alpha: no downgrade (allow_downgrade=false).
+    // Alpha → older alpha: no downgrade (allow_downgrade=false).
     assert_eq!(
         needs_update("0.1.148-alpha.3", "0.1.148-alpha.2", "alpha", false),
         Some(false)
@@ -694,7 +694,7 @@ async fn test_cleanup_old_downloads_does_not_touch_other_binaries() {
     std::fs::write(d.join("grok-pager-0.1.140-macos-aarch64"), "old-pager").unwrap();
     std::fs::write(d.join("grok-pager-0.1.141-macos-aarch64"), "current-pager").unwrap();
 
-    // Cleanup only grok ÔÇö pager files must be untouched.
+    // Cleanup only grok — pager files must be untouched.
     make_all_stale(d);
 
     cleanup_old_downloads(d, "grok", "0.1.141").await;
@@ -738,10 +738,10 @@ async fn test_cleanup_old_downloads_removes_stale_tmp_keeps_fresh_tmp() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
 
-    // Stale tmp: abandoned by a crashed updater ÔÇö swept.
+    // Stale tmp: abandoned by a crashed updater — swept.
     std::fs::write(d.join("grok-0.1.140-macos-aarch64.tmp"), "partial").unwrap();
     make_stale(&d.join("grok-0.1.140-macos-aarch64.tmp"));
-    // Fresh tmp: a concurrent updater's in-flight download ÔÇö kept, or
+    // Fresh tmp: a concurrent updater's in-flight download — kept, or
     // its atomic rename would fail with ENOENT.
     std::fs::write(d.join("grok-0.1.142-macos-aarch64.77-0.tmp"), "inflight").unwrap();
     std::fs::write(d.join("grok-0.1.141-macos-aarch64"), "current").unwrap();
@@ -766,7 +766,7 @@ async fn test_cleanup_old_downloads_removes_stale_tmp_keeps_fresh_tmp() {
 async fn test_cleanup_old_downloads_keeps_fresh_versioned_binary() {
     // A versioned binary written moments ago may be a concurrent
     // installer's just-renamed download whose symlink swap hasn't
-    // happened yet ÔÇö even when the retention policy would otherwise
+    // happened yet — even when the retention policy would otherwise
     // delete it, it must survive until it ages.
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
@@ -777,7 +777,7 @@ async fn test_cleanup_old_downloads_keeps_fresh_versioned_binary() {
     }
     std::fs::write(d.join("grok-0.1.141-macos-aarch64"), "current").unwrap();
     make_all_stale(d);
-    // .138 is re-written NOW ÔÇö simulating a racer that just renamed its
+    // .138 is re-written NOW — simulating a racer that just renamed its
     // download into place (e.g. a rollback install racing an upgrade).
     std::fs::write(d.join("grok-0.1.138-macos-aarch64"), "in-flight").unwrap();
 
@@ -801,7 +801,7 @@ async fn test_cleanup_old_downloads_skips_symlinks() {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
 
-    // grok-latest is a symlink ÔÇö must be skipped.
+    // grok-latest is a symlink — must be skipped.
     let target = d.join("grok-0.1.141-macos-aarch64");
     std::fs::write(&target, "current").unwrap();
     std::os::unix::fs::symlink(&target, d.join("grok-latest")).unwrap();
@@ -982,9 +982,9 @@ async fn test_cleanup_old_downloads_mixed_stable_and_alpha() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 // reinstall_hint
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_reinstall_hint_npm_mentions_npm_command() {
@@ -1158,9 +1158,9 @@ fn test_classify_install_error() {
     }
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 // UpdateStatus serialization (camelCase contract for --json clients)
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 fn make_status() -> UpdateStatus {
     UpdateStatus {
@@ -1269,11 +1269,11 @@ fn test_update_status_json_is_valid_single_object() {
     assert!(!json.contains('\n'), "must be single line: {json}");
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// print_update_status ÔÇö exercise both code paths via JSON serialization
+// ──────────────────────────────────────────────────────────────────────
+// print_update_status — exercise both code paths via JSON serialization
 // (the human path writes to stdout/stderr which is hard to capture
 //  without altering the function signature).
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_print_update_status_json_returns_ok() {
@@ -1331,9 +1331,9 @@ fn test_print_update_status_human_returns_ok_when_up_to_date() {
     print_update_status(&s, false).unwrap();
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// needs_update ÔÇö additional edge cases
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// needs_update — additional edge cases
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_needs_update_empty_current_returns_none() {
@@ -1347,14 +1347,14 @@ fn test_needs_update_empty_latest_returns_none() {
 
 #[test]
 fn test_needs_update_whitespace_returns_none() {
-    // Leading/trailing whitespace is not stripped ÔÇö semver::parse rejects.
+    // Leading/trailing whitespace is not stripped — semver::parse rejects.
     assert_eq!(needs_update("  0.1.141", "0.1.142", "stable", false), None);
     assert_eq!(needs_update("0.1.141", "0.1.142  ", "stable", false), None);
 }
 
 #[test]
 fn test_needs_update_channel_is_case_sensitive() {
-    // "STABLE", "Stable", "ENTERPRISE" etc. are not recognized ÔÇö must be exact lowercase.
+    // "STABLE", "Stable", "ENTERPRISE" etc. are not recognized — must be exact lowercase.
     assert_eq!(needs_update("0.1.140", "0.1.141", "STABLE", false), None);
     assert_eq!(needs_update("0.1.140", "0.1.141", "Stable", false), None);
     assert_eq!(needs_update("0.1.140", "0.1.141", "ALPHA", false), None);
@@ -1429,7 +1429,7 @@ fn test_needs_update_with_build_metadata_uses_semver_crate_ordering() {
     // This means CI publishers MUST NOT publish multiple builds of the
     // same version differing only in build metadata, or auto-update will
     // bounce users between them. Today our pipeline doesn't, so this is
-    // latent ÔÇö but the test locks in the surprising behavior so it can't
+    // latent — but the test locks in the surprising behavior so it can't
     // change silently.
     assert_eq!(
         needs_update("0.1.141+abc", "0.1.141+xyz", "stable", false),
@@ -1478,20 +1478,20 @@ fn test_needs_update_stable_does_not_install_when_pre_and_pre() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// needs_update ÔÇö allow_downgrade=true (rollback support)
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// needs_update — allow_downgrade=true (rollback support)
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_needs_update_downgrade_stable_when_allowed() {
-    // Rollback scenario: stable pointer moved from 0.2.7 ÔåÆ 0.2.5.
-    // GCS/internal installer: allow_downgrade=true ÔåÆ triggers update.
+    // Rollback scenario: stable pointer moved from 0.2.7 → 0.2.5.
+    // GCS/internal installer: allow_downgrade=true → triggers update.
     assert_eq!(needs_update("0.2.7", "0.2.5", "stable", true), Some(true));
 }
 
 #[test]
 fn test_needs_update_downgrade_stable_blocked_when_disallowed() {
-    // Same rollback scenario but npm installer: allow_downgrade=false ÔåÆ no update.
+    // Same rollback scenario but npm installer: allow_downgrade=false → no update.
     assert_eq!(needs_update("0.2.7", "0.2.5", "stable", false), Some(false));
 }
 
@@ -1516,7 +1516,7 @@ fn test_needs_update_downgrade_enterprise_when_allowed() {
 
 #[test]
 fn test_needs_update_same_version_unaffected_by_allow_downgrade() {
-    // Same version ÔåÆ no update regardless of allow_downgrade setting.
+    // Same version → no update regardless of allow_downgrade setting.
     assert_eq!(needs_update("0.2.5", "0.2.5", "stable", true), Some(false));
     assert_eq!(needs_update("0.2.5", "0.2.5", "stable", false), Some(false));
     assert_eq!(needs_update("0.2.5", "0.2.5", "alpha", true), Some(false));
@@ -1533,7 +1533,7 @@ fn test_needs_update_upgrade_unaffected_by_allow_downgrade() {
 
 #[test]
 fn test_needs_update_downgrade_major_version_when_allowed() {
-    // Major version downgrade (e.g. v2 ÔåÆ v1 rollback).
+    // Major version downgrade (e.g. v2 → v1 rollback).
     assert_eq!(needs_update("2.0.0", "1.99.99", "stable", true), Some(true));
 }
 
@@ -1553,7 +1553,7 @@ fn test_needs_update_downgrade_prerelease_still_rejected_on_stable() {
 
 #[test]
 fn test_needs_update_prerelease_current_forces_install_regardless_of_allow_downgrade() {
-    // Pre-release current on stable channel ÔåÆ force-install, independent
+    // Pre-release current on stable channel → force-install, independent
     // of allow_downgrade.
     assert_eq!(
         needs_update("0.1.149-alpha.1", "0.1.148", "stable", true),
@@ -1565,9 +1565,9 @@ fn test_needs_update_prerelease_current_forces_install_regardless_of_allow_downg
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 // installer_allows_downgrade
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_installer_allows_downgrade_internal() {
@@ -1581,7 +1581,7 @@ fn test_installer_allows_downgrade_gh_release() {
 
 #[test]
 fn test_installer_allows_downgrade_npm_blocked() {
-    // npm registries can return stale/misconfigured versions ÔÇö no downgrade.
+    // npm registries can return stale/misconfigured versions — no downgrade.
     assert!(!installer_allows_downgrade("npm"));
 }
 
@@ -1592,9 +1592,9 @@ fn test_installer_allows_downgrade_unknown_blocked() {
     assert!(!installer_allows_downgrade("homebrew"));
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 // detect_platform
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -1647,9 +1647,9 @@ fn test_corrected_arch() {
     assert_eq!(corrected_arch("windows", "x86_64", true), "x86_64");
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// cleanup_old_downloads ÔÇö additional edge cases
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// cleanup_old_downloads — additional edge cases
+// ──────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_cleanup_old_downloads_invalid_current_version_is_no_op() {
@@ -1658,7 +1658,7 @@ async fn test_cleanup_old_downloads_invalid_current_version_is_no_op() {
     std::fs::write(d.join("grok-0.1.140-macos-aarch64"), "v140").unwrap();
     std::fs::write(d.join("grok-0.1.141-macos-aarch64"), "v141").unwrap();
 
-    // Invalid version string ÔåÆ cleanup must early-return without deleting.
+    // Invalid version string → cleanup must early-return without deleting.
     make_all_stale(d);
 
     cleanup_old_downloads(d, "grok", "not-a-version").await;
@@ -1738,7 +1738,7 @@ async fn test_cleanup_old_downloads_only_one_old_keeps_it() {
 
     cleanup_old_downloads(d, "grok", "0.1.141").await;
 
-    // Only one old version ÔåÆ keep it as N-1.
+    // Only one old version → keep it as N-1.
     assert!(d.join("grok-0.1.140-macos-aarch64").exists(), "N-1 kept");
     assert!(d.join("grok-0.1.141-macos-aarch64").exists(), "current");
 }
@@ -1831,7 +1831,7 @@ async fn test_cleanup_old_downloads_three_olds_keeps_only_newest() {
 
 #[tokio::test]
 async fn test_cleanup_old_downloads_darwin_platform_recognized() {
-    // The `darwin` alias for macOS is in PLATFORM_OS ÔÇö versions on
+    // The `darwin` alias for macOS is in PLATFORM_OS — versions on
     // grok-X.Y.Z-darwin-* layouts must split correctly.
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
@@ -1846,10 +1846,10 @@ async fn test_cleanup_old_downloads_darwin_platform_recognized() {
     assert!(d.join("grok-0.1.140-darwin-arm64").exists(), "N-1");
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
 // UpdateRunMode
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_update_run_mode_is_copy_clone_debug() {
@@ -1865,9 +1865,9 @@ fn test_update_run_mode_is_copy_clone_debug() {
     let _ = format!("{:?}", UpdateRunMode::NonBlocking);
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// Constants ÔÇö lock them in so silent renames are caught.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// Constants — lock them in so silent renames are caught.
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_user_facing_constants_are_stable() {
@@ -1882,16 +1882,16 @@ fn test_user_facing_constants_are_stable() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// env_installer ÔÇö env-var based, must run serially.
+// ──────────────────────────────────────────────────────────────────────
+// env_installer — env-var based, must run serially.
 //
 // Resolution order (matches function body):
 //   1. CHUTES_BUILD_INSTALLER (npm | internal | gh-release | gh)
-//   2. CHUTES_BUILD_MANAGED_BY_NPM       ÔåÆ npm
-//   3. CHUTES_BUILD_MANAGED_BY_INTERNAL  ÔåÆ internal
-//   4. npm_config_user_agent      ÔåÆ npm
+//   2. CHUTES_BUILD_MANAGED_BY_NPM       → npm
+//   3. CHUTES_BUILD_MANAGED_BY_INTERNAL  → internal
+//   4. npm_config_user_agent      → npm
 //   5. None
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
 
 /// Snapshot every installer-related env var so the test can clear them
 /// at start and restore them at end. Without this, a parent shell that
@@ -2021,7 +2021,7 @@ fn test_env_installer_managed_by_npm() {
 #[test]
 #[serial_test::serial]
 fn test_env_installer_managed_by_npm_any_value() {
-    // The check is `is_some` ÔÇö any value (including empty) wins.
+    // The check is `is_some` — any value (including empty) wins.
     let _g = InstallerEnvGuard::isolate();
     unsafe { std::env::set_var("CHUTES_BUILD_MANAGED_BY_NPM", "") };
     assert_eq!(env_installer(), Some("npm"));
@@ -2054,7 +2054,7 @@ fn test_env_installer_npm_config_user_agent_implies_npm() {
 #[serial_test::serial]
 fn test_env_installer_managed_by_npm_wins_over_npm_config_user_agent() {
     // Both set: the order in env_installer is MANAGED_BY_NPM checked first,
-    // so MANAGED_BY_NPM wins. (Result is the same ÔÇö both ÔåÆ npm ÔÇö but the
+    // so MANAGED_BY_NPM wins. (Result is the same — both → npm — but the
     // resolution path matters for future maintainers.)
     let _g = InstallerEnvGuard::isolate();
     unsafe {
@@ -2076,9 +2076,9 @@ fn test_env_installer_explicit_internal_wins_over_npm_managed() {
     assert_eq!(env_installer(), Some("internal"));
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// create_temp_npmrc ÔÇö also env-var based (NPM_TOKEN), must run serially.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// create_temp_npmrc — also env-var based (NPM_TOKEN), must run serially.
+// ──────────────────────────────────────────────────────────────────────
 
 #[test]
 #[serial_test::serial]
@@ -2091,7 +2091,7 @@ fn test_create_temp_npmrc_no_token_returns_none() {
 #[test]
 #[serial_test::serial]
 fn test_create_temp_npmrc_empty_token_returns_none() {
-    // An empty token is not a real token ÔÇö must not write a file.
+    // An empty token is not a real token — must not write a file.
     let _g = InstallerEnvGuard::isolate();
     unsafe { std::env::set_var("NPM_TOKEN", "") };
     let result = create_temp_npmrc(None).unwrap();
@@ -2203,7 +2203,7 @@ fn test_create_temp_npmrc_invalid_registry_url_falls_back_to_default() {
 #[test]
 #[serial_test::serial]
 fn test_create_temp_npmrc_file_perms_are_0600() {
-    // The file contains an auth token ÔÇö must be readable only by owner.
+    // The file contains an auth token — must be readable only by owner.
     use std::os::unix::fs::PermissionsExt;
     let _g = InstallerEnvGuard::isolate();
     unsafe { std::env::set_var("NPM_TOKEN", "secret") };
@@ -2236,9 +2236,9 @@ fn test_create_temp_npmrc_unique_path_per_pid() {
     let _ = std::fs::remove_file(&path);
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// windows_replace_exe ÔÇö runs only on Windows CI
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────
+// windows_replace_exe — runs only on Windows CI
+// ──────────────────────────────────────────────────────────────────────
 
 #[cfg(windows)]
 #[tokio::test]
@@ -2533,7 +2533,7 @@ async fn test_windows_replace_exe_rollback_restores_from_diverted_aside() {
 #[tokio::test]
 async fn test_windows_replace_exe_sweeps_accumulated_asides() {
     // Asides pile up while superseded sessions keep running; a later
-    // update must collect the no-longer-locked ones ÔÇö but never another
+    // update must collect the no-longer-locked ones — but never another
     // executable's leftovers.
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("new.exe");

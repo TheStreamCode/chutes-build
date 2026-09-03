@@ -59,7 +59,7 @@ pub fn apply_blocking_pool(builder: &mut tokio::runtime::Builder) -> &mut tokio:
 /// Apply the blocking-pool policy, build, and pre-warm the full pool.
 ///
 /// Process-lifetime runtimes only. Per-session runtimes should
-/// [`apply_blocking_pool`] ÔÇö a 16-wide pre-warm races `pthread_create`
+/// [`apply_blocking_pool`] — a 16-wide pre-warm races `pthread_create`
 /// across a subagent wave.
 ///
 /// # Errors

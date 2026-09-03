@@ -109,7 +109,7 @@ impl MediaGenOutput {
     pub fn prompt_text(&self, action: &str) -> String {
         if let Some(url) = &self.uploaded_url {
             return format!(
-                "{action} and uploaded to {url}. The file is not available locally ÔÇö reference it by this URL. Do not read or re-display it, and do not describe how it appears to the user."
+                "{action} and uploaded to {url}. The file is not available locally — reference it by this URL. Do not read or re-display it, and do not describe how it appears to the user."
             );
         }
         let path = self.path.to_string_lossy().to_string();
@@ -200,18 +200,18 @@ use crate::util::truncate::{DEFAULT_SOFT_WRAP_WIDTH, soft_wrap_lines};
 /// Result of running a tool through the ToolRunner pipeline.
 ///
 /// This is the **single return type** from `ToolRunner::run()`. It carries:
-/// 1. Clean `output` ÔÇö never mutated by layers; for JSON serialization, protocol translation.
-/// 2. `prompt_text` ÔÇö rendered with system reminders appended; for model prompt.
+/// 1. Clean `output` — never mutated by layers; for JSON serialization, protocol translation.
+/// 2. `prompt_text` — rendered with system reminders appended; for model prompt.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolRunResult {
-    /// Clean tool output ÔÇö never mutated by layers.
+    /// Clean tool output — never mutated by layers.
     /// Consumers use this for: JSON serialization, protocol translation, hunk tracking.
     pub output: ToolOutput,
-    /// Prompt-ready text ÔÇö layers can append system reminders, etc.
+    /// Prompt-ready text — layers can append system reminders, etc.
     /// Consumers use this for: model prompt (ConversationItem::tool_result).
     pub prompt_text: String,
     /// When a meta-tool dispatches to a different underlying tool (for example
-    /// `use_tool` ÔåÆ `linear__save_issue`), this carries the effective tool name.
+    /// `use_tool` → `linear__save_issue`), this carries the effective tool name.
     /// `None` means the requested tool and executed tool are the same.
     pub effective_tool_name: Option<String>,
 }
@@ -403,7 +403,7 @@ pub struct SearchReplaceEditDetail {
     #[serde(default)]
     pub line_prefix: String,
 }
-/// Output of the codex `grep_files` tool ÔÇö file paths matching a regex.
+/// Output of the codex `grep_files` tool — file paths matching a regex.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum CodexGrepFilesOutput {
     /// Matching file paths, one per line.
@@ -724,7 +724,7 @@ pub enum ToolOutput {
     Dynamic(DynamicOutput),
     /// Generic text output for tools that produce simple formatted text
     /// (e.g., memory_search, memory_get). The string is the pre-formatted
-    /// prompt text ÔÇö no additional rendering is needed.
+    /// prompt text — no additional rendering is needed.
     Text(TextOutput),
     #[from(skip)]
     ImageGen(MediaGenOutput),
@@ -1107,7 +1107,7 @@ pub enum TodoWriteOutput {
     /// Duplicate todo ID found in the input.
     DuplicateId(String),
     /// Argument validation failed (model-facing message is returned verbatim).
-    /// Used so missing-field errors surface as the terse `Invalid argument: ÔÇª`
+    /// Used so missing-field errors surface as the terse `Invalid argument: …`
     /// line, instead of the framework's wrapper around a `ToolError`.
     InvalidArgument(String),
 }
@@ -1207,7 +1207,7 @@ impl EnterPlanModeToolHints {
 }
 /// Output from the `AskUserQuestion` tool.
 ///
-/// This is a thin signal ÔÇö the tool sends the questions to the client via
+/// This is a thin signal — the tool sends the questions to the client via
 /// a notification and returns a confirmation. The actual answers come back
 /// from the client as the tool result (handled by the orchestration layer).
 ///
@@ -1243,7 +1243,7 @@ pub enum AskUserQuestionOutput {
 /// the user for approval and determining the exit outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ExitPlanModeOutput {
-    /// Plan file had content ÔÇö surfaced for approval.
+    /// Plan file had content — surfaced for approval.
     PlanReady {
         /// Confirmation message for the model.
         message: String,
@@ -1582,9 +1582,9 @@ mod tests {
     #[test]
     fn read_non_empty_content_renders_verbatim() {
         let mut fc = empty_file_content(None, 3);
-        fc.content = "1ÔåÆa\nb\nc".to_string();
+        fc.content = "1→a\nb\nc".to_string();
         let output = ToolOutput::ReadFile(ReadFileOutput::FileContent(fc));
-        assert_eq!(output.to_prompt_format(), "1ÔåÆa\nb\nc");
+        assert_eq!(output.to_prompt_format(), "1→a\nb\nc");
     }
     #[test]
     fn text_output_to_prompt_format_omits_consumed_completion_task_id() {
@@ -2051,7 +2051,7 @@ mod tests {
             raw_output_bytes,
         }
     }
-    /// Identical status + raw_output_bytes ÔåÆ same signature.
+    /// Identical status + raw_output_bytes → same signature.
     #[test]
     fn progress_signature_same_when_no_progress() {
         let a = make_result("running", 1000);

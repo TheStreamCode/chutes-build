@@ -46,17 +46,17 @@ pub const WORKSPACE_CLIENT_EXT_NOTIFICATIONS_TOOL_ID: &str = "workspace_client_e
 /// the idle-hibernation activity tracker.
 ///
 /// `Mutation` marks client-driven writes (file writes, git commits, hunk
-/// actions, ÔÇª): evidence a person is working through the workspace API, so
+/// actions, …): evidence a person is working through the workspace API, so
 /// the sandbox must not be idle-hibernated underneath them. `Read` covers
-/// everything else ÔÇö reads, polls, discovery ÔÇö plus deliberate exceptions
+/// everything else — reads, polls, discovery — plus deliberate exceptions
 /// that do mutate but must never hold a sandbox alive: teardown
 /// (`drop_session`), maintenance (`worktree_gc`, db rebuilds), and
 /// agent-turn boundaries already tracked through `turn_active`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RpcActivityClass {
-    /// A client-driven write ÔÇö counts as workspace activity.
+    /// A client-driven write — counts as workspace activity.
     Mutation,
-    /// Reads, polls, and non-activity mutations ÔÇö never counts.
+    /// Reads, polls, and non-activity mutations — never counts.
     Read,
 }
 

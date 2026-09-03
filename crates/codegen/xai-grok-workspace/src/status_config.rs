@@ -8,7 +8,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-// ÔöÇÔöÇ Default timing/threshold values ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── Default timing/threshold values ──────────────────────────────────────
 // Single source of truth for the `StatusConfig::default()` values and the
 // documented fallbacks for each `CHUTES_BUILD_WORKSPACE_*` env var.
 
@@ -89,7 +89,7 @@ const DEFAULT_OIDC_SAFETY_MARGIN_SECS: u64 = 120;
 /// `safety_margin` so a healthy short-TTL token does not hot-loop the IdP.
 const DEFAULT_OIDC_MIN_REFRESH_INTERVAL_SECS: u64 = 60;
 /// Smallest allowed success-path spacing. Zero would reschedule immediately
-/// when TTL Ôëñ `safety_margin`.
+/// when TTL ≤ `safety_margin`.
 const MIN_OIDC_MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 /// Ceiling on OIDC timing knobs so an env typo cannot overflow date math.
 const MAX_OIDC_DURATION: Duration = Duration::from_secs(24 * 3600);
@@ -274,7 +274,7 @@ pub struct StatusConfig {
     /// Timeout for establishing an agent connection.
     pub agent_connect_timeout: Duration,
     /// Opt-in foreground-only idle (`CHUTES_BUILD_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS`);
-    /// requires the literal `"true"` ÔÇö other spellings fall back to this default.
+    /// requires the literal `"true"` — other spellings fall back to this default.
     pub idle_ignores_background: bool,
     /// Recent preview-proxy traffic withholds idle for this window
     /// (`CHUTES_BUILD_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS`).
@@ -288,7 +288,7 @@ pub struct StatusConfig {
     /// `MAX_RPC_ACTIVITY_WINDOW_MS` by [`validate`](Self::validate).
     pub rpc_activity_window: Duration,
     /// Presence-keepalive kill-switch
-    /// (`CHUTES_BUILD_WORKSPACE_PRESENCE_KEEPALIVE_ENABLED`, default OFF). Off ÔçÆ the
+    /// (`CHUTES_BUILD_WORKSPACE_PRESENCE_KEEPALIVE_ENABLED`, default OFF). Off ⇒ the
     /// `ClientPresence` tier is wired with a zero window.
     pub presence_keepalive_enabled: bool,
     /// A visible client-presence note withholds idle for this window
@@ -316,7 +316,7 @@ pub struct StatusConfig {
     /// by [`validate`](Self::validate).
     pub preview_discovery_refresh: Duration,
     /// Proxy loopback control port from the `--preview-control-port` CLI flag
-    /// (set by `workspace_server`, not env); `None` ÔçÆ the proxy default.
+    /// (set by `workspace_server`, not env); `None` ⇒ the proxy default.
     pub preview_control_port: Option<u16>,
     /// True when this container booted via the sandbox restore path, which
     /// injects `CHUTES_BUILD_SESSION_RESTORED=true`; a first boot never does.
@@ -630,8 +630,8 @@ fn secs_or(var: &str, default: Duration) -> Duration {
     Duration::from_secs(parse_or(var, default.as_secs()))
 }
 
-/// Parse `var` as an `f64`. Unset ÔåÆ `default`. Unparseable, non-finite, or
-/// outside `in_range` ÔåÆ warn + `default`.
+/// Parse `var` as an `f64`. Unset → `default`. Unparseable, non-finite, or
+/// outside `in_range` → warn + `default`.
 fn frac_or(var: &str, default: f64, in_range: impl Fn(f64) -> bool) -> f64 {
     match std::env::var(var) {
         Err(_) => default,
@@ -657,7 +657,7 @@ fn frac_or(var: &str, default: f64, in_range: impl Fn(f64) -> bool) -> f64 {
     }
 }
 
-/// Parse `var` as optional seconds. Unset or unparseable ÔåÆ `None`.
+/// Parse `var` as optional seconds. Unset or unparseable → `None`.
 fn optional_secs(var: &str) -> Option<Duration> {
     match std::env::var(var) {
         Err(_) => None,
@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(
             StatusConfig::from_env().preview_state_wait,
             Duration::ZERO,
-            "unset ÔçÆ long-poll disabled"
+            "unset ⇒ long-poll disabled"
         );
 
         unsafe { std::env::set_var(var, "10") };
@@ -850,7 +850,7 @@ mod tests {
         assert_eq!(
             StatusConfig::from_env().preview_discovery_refresh_ms(),
             None,
-            "unset ÔçÆ the supervisor omits --discovery-refresh-ms"
+            "unset ⇒ the supervisor omits --discovery-refresh-ms"
         );
 
         unsafe { std::env::set_var(var, "0") };
@@ -1200,7 +1200,7 @@ mod tests {
         }
     }
 
-    /// Values past the cap are repaired; `0` ÔÇö the kill switch ÔÇö never is.
+    /// Values past the cap are repaired; `0` — the kill switch — never is.
     #[test]
     fn validate_clamps_rpc_activity_window_but_spares_the_kill_switch() {
         for (window_ms, expected_ms) in [(0u64, 0u64), (60_000, 60_000), (86_400_000, 600_000)] {

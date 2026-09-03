@@ -31,7 +31,7 @@ Run `chutes-build inspect` or `chutes-build inspect --json` to see which files a
 
 User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.chutes-build/config.toml`; Windows `%USERPROFILE%\.chutes-build\config.toml`). Project-scoped overrides live in `.chutes-build/config.toml` and only contribute `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
 
-**Requirements** marks whether the same key can be set in `requirements.toml`: `pin` cannot be overridden (including env and CLI where the resolver honors the pin); `yes` is accepted in that file; `ÔÇö` is not read from `requirements.toml`. **Managed** marks whether a fleet `managed_config.toml` value stands (`fleet`) or the user's file wins (`user`).
+**Requirements** marks whether the same key can be set in `requirements.toml`: `pin` cannot be overridden (including env and CLI where the resolver honors the pin); `yes` is accepted in that file; `—` is not read from `requirements.toml`. **Managed** marks whether a fleet `managed_config.toml` value stands (`fleet`) or the user's file wins (`user`).
 
 ### `agent`
 
@@ -45,7 +45,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `announcements` | `array of tables` | `ÔÇö` | `user` | Remote announcement payloads consumed at load. Not a user-authored table. |
+| `announcements` | `array of tables` | `—` | `user` | Remote announcement payloads consumed at load. Not a user-authored table. |
 
 ### `auth`
 
@@ -98,7 +98,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | --- | --- | --- | --- | --- |
 | `cli.auto_update` | `boolean` | `pin` | `user` | Check for CLI updates on launch. Also CHUTES_BUILD_DISABLE_AUTOUPDATER to suppress. |
 | `cli.channel` | `stable / alpha` | `pin` | `user` | Release channel preference. |
-| `cli.installer` | `string` | `ÔÇö` | `user` | Which installer last set up this CLI, used to pick the update path. |
+| `cli.installer` | `string` | `—` | `user` | Which installer last set up this CLI, used to pick the update path. |
 | `cli.maximum_version` | `string` | `pin` | `user` | Highest CLI version that still runs without a hard block. Also CHUTES_BUILD_MAXIMUM_VERSION. |
 | `cli.minimum_version` | `string` | `pin` | `user` | Lowest CLI version that still runs without a hard block. Also CHUTES_BUILD_MINIMUM_VERSION. |
 | `cli.npm_registry` | `string` | `yes` | `user` | npm registry used by the auto-updater. |
@@ -215,7 +215,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `features.mcp_push_server_status` | `boolean` | `yes` | `user` | Pager subscribes to MCP server_status push. Process env CHUTES_BUILD_MCP_PUSH_SERVER_STATUS wins at launch. |
 | `features.mcp_recursive_config_watch` | `boolean` | `yes` | `user` | Watch `<cwd>/` and `<cwd>/.chutes-build/` for project MCP config edits. Name is a misnomer; watches are non-recursive. |
 | `features.non_git_warning` | `boolean` | `yes` | `user` | Show a blocking warning when Chutes Build starts outside a Git repository. |
-| `features.remember_mode` | `boolean` | `ÔÇö` | `ÔÇö` | Remember the last permission mode across sessions. Read from user `config.toml` only. |
+| `features.remember_mode` | `boolean` | `—` | `—` | Remember the last permission mode across sessions. Read from user `config.toml` only. |
 | `features.remote_fetch` | `boolean` | `pin` | `fleet` | Pin remote model-catalog and asset fetch. Managed wins over the user file when both set. |
 | `features.session_recap` | `boolean` | `pin` | `user` | Enable or disable `session_recap`. Default true. Also `CHUTES_BUILD_SESSION_RECAP`. |
 | `features.session_search` | `boolean` | `pin` | `user` | Enable or disable `session_search`. Default true. Also `CHUTES_BUILD_SESSION_SEARCH`. |
@@ -445,7 +445,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `privacy.privacy_banner_acked` | `string` | `ÔÇö` | `ÔÇö` | RFC 3339 UTC timestamp when the local privacy banner was dismissed. The pager reads user `config.toml` only. |
+| `privacy.privacy_banner_acked` | `string` | `—` | `—` | RFC 3339 UTC timestamp when the local privacy banner was dismissed. The pager reads user `config.toml` only. |
 
 ### `relay`
 
@@ -464,7 +464,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 
 | Key | Type / Values | Requirements | Managed | Details |
 | --- | --- | --- | --- | --- |
-| `session.auto_compact_threshold_percent` | `integer` | `yes` | `user` | Auto-compact when context usage reaches this percent (0ÔÇô100). |
+| `session.auto_compact_threshold_percent` | `integer` | `yes` | `user` | Auto-compact when context usage reaches this percent (0–100). |
 | `session.load_envrc` | `boolean` | `yes` | `user` | Inject `.envrc` variables into bash. |
 
 ### `shell_environment_policy`
@@ -562,7 +562,7 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `ui.hunk_tracker_mode` | `agent_only / all_dirty / off` | `yes` | `user` | File-change hunk tracking. Also CHUTES_BUILD_HUNK_TRACKER and `--hunk-tracker-mode`. |
 | `ui.invert_scroll` | `boolean` | `yes` | `user` | Reverse vertical scroll direction. Also CHUTES_BUILD_INVERT_SCROLL. |
 | `ui.keep_text_selection` | `flash / hold / word_select` | `yes` | `user` | In-app selection: brief flash, hold, or double-click word select. |
-| `ui.max_thoughts_width` | `number` | `yes` | `user` | Column width for the thoughts panel (40ÔÇô500). |
+| `ui.max_thoughts_width` | `number` | `yes` | `user` | Column width for the thoughts panel (40–500). |
 | `ui.mouse_reporting_toggle` | `boolean` | `yes` | `user` | Ctrl+R in scrollback toggles terminal mouse capture. Also CHUTES_BUILD_MOUSE_REPORTING_TOGGLE. |
 | `ui.page_flip_on_send` | `boolean` | `yes` | `user` | Snap the sent prompt to the top of the viewport. |
 | `ui.permission_mode` | `default / ask / auto / always-approve` | `yes` | `user` | Default tool-permission behavior. Enterprise locks use requirements.toml. |
@@ -570,9 +570,9 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `ui.remember_tool_approvals` | `boolean` | `yes` | `user` | Show per-tool Always allow options. Also CHUTES_BUILD_REMEMBER_TOOL_APPROVALS. |
 | `ui.render_mermaid` | `auto / on / off` | `yes` | `user` | How mermaid fences render: clickable open row or raw source. |
 | `ui.screen_mode` | `fullscreen / minimal` | `yes` | `user` | Default render mode for plain `grok`. Restart required. |
-| `ui.scroll_lines` | `integer` | `yes` | `user` | Lines per scroll tick (1ÔÇô10). Also CHUTES_BUILD_SCROLL_LINES. |
+| `ui.scroll_lines` | `integer` | `yes` | `user` | Lines per scroll tick (1–10). Also CHUTES_BUILD_SCROLL_LINES. |
 | `ui.scroll_mode` | `auto / wheel / trackpad` | `yes` | `user` | Scroll input classification. Also CHUTES_BUILD_SCROLL_MODE. |
-| `ui.scroll_speed` | `integer` | `yes` | `user` | Mouse/trackpad scroll speed multiplier (1ÔÇô100). Also CHUTES_BUILD_SCROLL_SPEED. |
+| `ui.scroll_speed` | `integer` | `yes` | `user` | Mouse/trackpad scroll speed multiplier (1–100). Also CHUTES_BUILD_SCROLL_SPEED. |
 | `ui.show_thinking_blocks` | `boolean` | `yes` | `user` | Show thinking/reasoning blocks while streaming. Also CHUTES_BUILD_SHOW_THINKING_BLOCKS. |
 | `ui.show_timeline` | `boolean` | `yes` | `user` | Per-turn tick rail instead of the scrollbar. |
 | `ui.show_timestamps` | `boolean` | `yes` | `user` | Clock time next to messages. Also `/timestamps`. |
@@ -625,7 +625,7 @@ One exception to that rule:
 
 Chutes Build reads `/etc/grok/managed_config.toml` first, then `$CHUTES_BUILD_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
 
-The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins, `ÔÇö` means this file is ignored.
+The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins, `—` means this file is ignored.
 
 ## requirements.toml
 
@@ -636,8 +636,8 @@ These keys exist only in `requirements.toml`:
 | Key | Type / Values | Default | Details |
 | --- | --- | --- | --- |
 | `fail_closed` | `boolean` | `false` | Refuse to start when signed requirements or version_overrides cannot be applied; default false. |
-| `features.image_edit` | `boolean` | ÔÇö | Pin image_edit availability. Requirements only; a user-file entry is unrecognized and unset leaves the remotely configured default. |
-| `ui.disable_bypass_permissions_mode` | `boolean` | ÔÇö | Lock always-approve off. The lock is enforced only from a requirements layer; true in user or managed files is ignored. |
+| `features.image_edit` | `boolean` | — | Pin image_edit availability. Requirements only; a user-file entry is unrecognized and unset leaves the remotely configured default. |
+| `ui.disable_bypass_permissions_mode` | `boolean` | — | Lock always-approve off. The lock is enforced only from a requirements layer; true in user or managed files is ignored. |
 
 ## What happens when a setting is refused
 

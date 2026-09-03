@@ -6,9 +6,9 @@
 //! would send an orphaned reasoning item the API rejects. A turn that called a
 //! tool is therefore dropped whole and the retry carries the reminder alone.
 //!
-//! What the wire delivered as a completed item ÔÇö the terminal `output` list,
+//! What the wire delivered as a completed item — the terminal `output` list,
 //! or a `response.output_item.done` when the attempt is aborted before its
-//! terminal frame ÔÇö is authoritative for both content and order. Streamed
+//! terminal frame — is authoritative for both content and order. Streamed
 //! deltas only stand in for an item the wire never completed, so the replay
 //! keeps `encrypted_content` and the model's own item ids instead of
 //! synthesising plaintext copies. Reading the raw items also keeps the
@@ -38,7 +38,7 @@ const MAX_RECOVERY_TEXT_BYTES: usize = 4 * 1024;
 
 /// Marks the point where the cap cut the failed turn, so the model (and
 /// anyone reading the request) can tell replay from a complete turn.
-const TRUNCATION_MARKER: &str = " [ÔÇªtruncated]";
+const TRUNCATION_MARKER: &str = " […truncated]";
 
 /// Byte budget for one channel (reasoning or visible text) of one failed
 /// turn. Once the cap is reached the budget is spent: later text in that
@@ -123,7 +123,7 @@ struct CapturedTurn {
     /// Completed wire items in `output_index` order.
     typed: Vec<CapturedItem>,
     /// Whether the turn reached its terminal frame, whose `output` list is
-    /// complete ÔÇö nothing may be added to it from the deltas.
+    /// complete — nothing may be added to it from the deltas.
     terminal_seen: bool,
     /// Streamed reasoning text per item id, for items the wire never
     /// completed.
@@ -180,7 +180,7 @@ impl FailedResponseCapture {
     }
 
     /// Run `f` against the capture. Returns `None` when the capture is
-    /// disarmed or its lock is poisoned ÔÇö a failed capture degrades to a
+    /// disarmed or its lock is poisoned — a failed capture degrades to a
     /// reminder-only retry rather than failing the request.
     fn with<R>(&self, f: impl FnOnce(&mut CapturedResponse) -> R) -> Option<R> {
         let mut captured = self.inner.as_ref()?.lock().ok()?;
@@ -345,8 +345,8 @@ impl FailedResponseCapture {
     }
 
     /// Record one completed wire item. Only messages and reasoning can be
-    /// replayed; everything else ÔÇö the MCP calls the conversation form drops
-    /// and the opaque compaction checkpoint alike ÔÇö vetoes the whole replay.
+    /// replayed; everything else — the MCP calls the conversation form drops
+    /// and the opaque compaction checkpoint alike — vetoes the whole replay.
     pub(crate) fn record_output_item(&self, output_index: u32, item: &rs::OutputItem) {
         self.with(|captured| match item {
             rs::OutputItem::Reasoning(reasoning) => {

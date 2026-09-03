@@ -4,7 +4,7 @@
 //! composite key derived from the server name and URL. This keeps MCP OAuth
 //! tokens isolated from the user's xAI auth (`auth.json`).
 //!
-//! Stores rmcp's `StoredCredentials` type directly ÔÇö the same type that
+//! Stores rmcp's `StoredCredentials` type directly — the same type that
 //! rmcp's `AuthorizationManager` uses internally.
 
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ use crate::rmcp;
 /// Ensure credential paths are owner-only (Unix `0o600`).
 ///
 /// Local helper (not shell-base): `xai-grok-mcp` sits below `config-types` in the
-/// dep graph, and shell-base pulls sharedÔåÆconfig-typesÔåÆmcp ÔÇö a cycle if linked.
+/// dep graph, and shell-base pulls shared→config-types→mcp — a cycle if linked.
 /// Windows ACL tightening stays on auth via shell-base; MCP is Unix-first here.
 fn ensure_owner_only_permissions(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
@@ -147,7 +147,7 @@ impl McpCredentialStore {
 
     /// Locked insert ([`Self::locked_mutate_and_save`]) with a freshness
     /// guard: skipped when the disk entry is strictly newer by
-    /// `token_received_at` (see [`disk_entry_is_newer`]) ÔÇö otherwise a slow
+    /// `token_received_at` (see [`disk_entry_is_newer`]) — otherwise a slow
     /// writer (canonically a refresh suspended across system sleep that
     /// completes after wake) rolls the stored refresh token back to a
     /// rotated-out value (`invalid_grant` on its next use).
@@ -206,9 +206,9 @@ impl McpCredentialStore {
     }
 
     /// Remove a server's credentials and persist, under the cross-process
-    /// file lock (reload-merge ÔåÆ remove ÔåÆ atomic save). The locked
+    /// file lock (reload-merge → remove → atomic save). The locked
     /// counterpart of [`Self::remove`] + [`Self::save_default`] for callers
-    /// that persist the removal ÔÇö an unlocked whole-file rewrite can drop
+    /// that persist the removal — an unlocked whole-file rewrite can drop
     /// other processes' concurrent writes for unrelated servers.
     pub fn remove_and_save(&mut self, server_name: &str, server_url: &Url) -> Result<()> {
         let key = Self::key(server_name, server_url);
@@ -237,7 +237,7 @@ impl McpCredentialStore {
 }
 
 /// `true` when the on-disk `existing` entry is strictly newer than the
-/// `incoming` credentials by `token_received_at` ÔÇö the [`Self::insert_and_save`]
+/// `incoming` credentials by `token_received_at` — the [`Self::insert_and_save`]
 /// freshness guard. Missing timestamps on either side compare as "not newer"
 /// (the write proceeds), preserving pre-guard behavior for expiry-less tokens.
 fn disk_entry_is_newer(
@@ -453,7 +453,7 @@ mod tests {
     /// Raw JSON fixture in the exact shape rmcp 0.17 persisted to
     /// `$CHUTES_BUILD_HOME/mcp_credentials.json`. Existing credential files must keep
     /// loading across rmcp upgrades (2.1's `OAuthTokenResponse` gained vendor
-    /// extra token fields), so this must be a string literal ÔÇö never JSON
+    /// extra token fields), so this must be a string literal — never JSON
     /// serialized by the current code.
     #[test]
     fn legacy_on_disk_fixture_still_deserializes() {
@@ -574,19 +574,19 @@ mod tests {
 
         assert!(
             disk_entry_is_newer(Some(&newer), &older),
-            "older incoming vs newer disk ÔåÆ skip the write"
+            "older incoming vs newer disk → skip the write"
         );
         assert!(
             !disk_entry_is_newer(Some(&older), &newer),
-            "newer incoming vs older disk ÔåÆ write proceeds"
+            "newer incoming vs older disk → write proceeds"
         );
         assert!(
             !disk_entry_is_newer(Some(&older), &older),
-            "equal timestamps ÔåÆ write proceeds (idempotent re-save)"
+            "equal timestamps → write proceeds (idempotent re-save)"
         );
         assert!(
             !disk_entry_is_newer(None, &older),
-            "no disk entry ÔåÆ write proceeds"
+            "no disk entry → write proceeds"
         );
         assert!(
             !disk_entry_is_newer(Some(&newer), &no_ts),
@@ -599,8 +599,8 @@ mod tests {
     }
 
     /// The refresh-failure classifier that gates browser escalation
-    /// (`force_reauth`): network-level failures ÔÇö the `oauth2` crate's
-    /// `Display` for request/parse errors ÔÇö are transient; IdP rejections and
+    /// (`force_reauth`): network-level failures — the `oauth2` crate's
+    /// `Display` for request/parse errors — are transient; IdP rejections and
     /// missing-credential states stay terminal (escalate, as before).
     #[test]
     fn refresh_failure_transient_classification() {
@@ -616,17 +616,17 @@ mod tests {
             &AuthError::TokenRefreshFailed("Failed to parse server response".into())
         ));
 
-        // IdP rejections carry the RFC 6749 code ÔåÆ terminal.
+        // IdP rejections carry the RFC 6749 code → terminal.
         assert!(!mcp_refresh_failure_is_transient(
             &AuthError::TokenRefreshFailed(
                 "Server returned error response: invalid_grant: token revoked".into()
             )
         ));
-        // No refresh token at all ÔåÆ only the browser flow can help.
+        // No refresh token at all → only the browser flow can help.
         assert!(!mcp_refresh_failure_is_transient(
             &AuthError::TokenRefreshFailed("No refresh token available".into())
         ));
-        // Empty credential store ÔåÆ interactive auth required.
+        // Empty credential store → interactive auth required.
         assert!(!mcp_refresh_failure_is_transient(
             &AuthError::AuthorizationRequired
         ));

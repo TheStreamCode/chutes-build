@@ -1,10 +1,10 @@
-//! End-to-end tests for `install_internal` ÔÇö the GCS-bucket installer used
+//! End-to-end tests for `install_internal` — the GCS-bucket installer used
 //! when `installer = "internal"` is configured.
 //!
 //! Wires together a wiremock-mocked GCS bucket + an isolated `CHUTES_BUILD_HOME`
 //! tempdir so we can verify the full install pipeline:
-//!   fetch version ÔåÆ download grok binary ÔåÆ chmod ÔåÆ atomic symlink ÔåÆ
-//!   cleanup_old_downloads ÔåÆ persist installer config.
+//!   fetch version → download grok binary → chmod → atomic symlink →
+//!   cleanup_old_downloads → persist installer config.
 //!
 //! The function reads `grok_home()` (a process-wide `OnceLock`), so all
 //! tests in this binary share a single `CHUTES_BUILD_HOME` and run serially via
@@ -75,9 +75,9 @@ async fn mount_gcs(version: &str, platform: &str) -> MockServer {
     server
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Happy-path
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -107,7 +107,7 @@ async fn install_internal_pinned_version_writes_binary_and_symlink() {
         format!("grok-0.1.181-{platform}").as_str()
     );
 
-    // `grok` and `agent` move together ÔÇö see `swap_managed_bin_links`.
+    // `grok` and `agent` move together — see `swap_managed_bin_links`.
     let agent_link = home.join("bin").join("agent");
     assert!(agent_link.is_symlink(), "agent symlink created");
     let agent_target = std::fs::read_link(&agent_link).unwrap();
@@ -175,7 +175,7 @@ async fn install_internal_rolls_back_grok_when_agent_swap_fails() {
         .join(format!("grok-0.1.180-{platform}"));
     std::os::unix::fs::symlink(&rel_old, bin_dir.join("grok")).unwrap();
 
-    // Sabotage the agent swap: non-empty directory ÔåÆ rename fails with EISDIR.
+    // Sabotage the agent swap: non-empty directory → rename fails with EISDIR.
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -210,7 +210,7 @@ async fn install_internal_rollback_removes_absent_prior_grok_link() {
     let bin_dir = home.join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
 
-    // No prior `grok`. Sabotage `agent` swap: non-empty directory ÔåÆ EISDIR.
+    // No prior `grok`. Sabotage `agent` swap: non-empty directory → EISDIR.
     let agent_dir = bin_dir.join("agent");
     std::fs::create_dir(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("blocker"), b"x").unwrap();
@@ -314,7 +314,7 @@ async fn install_internal_resolves_version_via_channel_pointer_when_no_target() 
     let server = mount_gcs("0.1.181", &platform).await;
     let cfg = make_config("stable");
 
-    // No pinned version ÔåÆ must fetch /stable pointer to resolve.
+    // No pinned version → must fetch /stable pointer to resolve.
     install_internal_from_base(None, &cfg, &server.uri())
         .await
         .unwrap();
@@ -336,7 +336,7 @@ async fn install_internal_alpha_channel_resolves_max_of_alpha_and_stable() {
     let platform = host_platform();
     let server = MockServer::start().await;
 
-    // Stable points to 0.1.181, alpha points to 0.1.180-alpha.5 ÔÇö stable wins.
+    // Stable points to 0.1.181, alpha points to 0.1.180-alpha.5 — stable wins.
     Mock::given(method("GET"))
         .and(path("/stable"))
         .respond_with(ResponseTemplate::new(200).set_body_string("0.1.181"))
@@ -366,9 +366,9 @@ async fn install_internal_alpha_channel_resolves_max_of_alpha_and_stable() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Failure paths
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -383,7 +383,7 @@ async fn install_internal_fails_on_grok_binary_404() {
         .respond_with(ResponseTemplate::new(200).set_body_string("0.1.181"))
         .mount(&server)
         .await;
-    // Main binary returns 404 ÔÇö must propagate as error.
+    // Main binary returns 404 — must propagate as error.
     Mock::given(method("GET"))
         .and(path(format!("/grok-0.1.181-{platform}")))
         .respond_with(ResponseTemplate::new(404))
@@ -415,9 +415,9 @@ async fn install_internal_rejects_invalid_pinned_version() {
     assert!(msg.contains("invalid version format"), "msg: {msg}");
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Cleanup integration: install v1, then v2, verify N-1 retention.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -524,10 +524,10 @@ async fn install_internal_creates_grok_home_subdirs_if_missing() {
     assert!(test_home().join("downloads").is_dir());
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Multi-base URL fallback: install_internal_from_bases tries each base in
 // preference order, falling through to the next on failure.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -618,7 +618,7 @@ async fn install_internal_from_bases_does_not_fallback_on_smoke_failure() {
 async fn install_internal_from_bases_uses_primary_when_it_works() {
     // Both bases work; the install must use the primary (first one) and
     // never touch the fallback. Verified by tearing down the fallback
-    // server immediately after configuration ÔÇö if the install reached for
+    // server immediately after configuration — if the install reached for
     // it, the request would fail.
     let _ = test_home();
     reset_home();
@@ -646,7 +646,7 @@ async fn install_internal_from_bases_uses_primary_when_it_works() {
 #[tokio::test]
 #[serial]
 async fn install_internal_from_bases_propagates_last_error_when_all_fail() {
-    // Every base returns 500 ÔÇö the install must fail, surfacing the final
+    // Every base returns 500 — the install must fail, surfacing the final
     // base's error rather than silently succeeding.
     let _ = test_home();
     reset_home();
@@ -676,7 +676,7 @@ async fn install_internal_from_bases_propagates_last_error_when_all_fail() {
 }
 
 /// Regression: a local failure after a successful download (sabotaged
-/// `agent` swap) must fail the install immediately ÔÇö the fallback base must
+/// `agent` swap) must fail the install immediately — the fallback base must
 /// never be contacted for a pointless re-download.
 #[tokio::test]
 #[serial]

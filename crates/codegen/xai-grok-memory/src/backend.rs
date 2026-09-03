@@ -121,14 +121,14 @@ impl EndpointScopedCredentials {
 
 /// All configuration needed to build a fully-wired [`MemoryBackendImpl`] for a live session.
 ///
-/// Grouping these in one struct ensures every call site ÔÇö ToolBridge, first-turn
-/// injection, and post-compaction recovery ÔÇö shares identical config.  Without it,
+/// Grouping these in one struct ensures every call site — ToolBridge, first-turn
+/// injection, and post-compaction recovery — shares identical config.  Without it,
 /// different paths silently fell back to FTS-only search and ignored
 /// `[memory.search]` config because no single place applied all builder methods.
 #[derive(Clone)]
 pub struct MemoryBackendParams {
     pub session_id: String,
-    /// Embedding provider config ÔÇö `None` forces FTS-only fallback everywhere.
+    /// Embedding provider config — `None` forces FTS-only fallback everywhere.
     pub embed_config: Option<xai_grok_config_types::MemoryEmbeddingConfig>,
     /// Base URL for embedding API calls (CLI proxy). Must match the endpoint
     /// `embedding_credentials` was scoped to; mismatch fails closed.
@@ -137,7 +137,7 @@ pub struct MemoryBackendParams {
     pub embed_api_key: Option<String>,
     /// Hybrid search scoring config (weights, thresholds, decay, MMR).
     pub search_config: xai_grok_config_types::MemorySearchConfig,
-    /// File watcher for sync-on-search ÔÇö `None` disables external-edit detection.
+    /// File watcher for sync-on-search — `None` disables external-edit detection.
     pub watcher: Option<Arc<MemoryFileWatcher>>,
     /// Seconds before a stale reindex claim is forcibly released.
     pub stale_claim_secs: i64,
@@ -208,7 +208,7 @@ async fn build_embedding_provider(
 pub struct MemoryBackendImpl {
     db_path: PathBuf,
     storage: MemoryStorage,
-    /// Embedding config ÔÇö `None` disables vector search (FTS-only fallback).
+    /// Embedding config — `None` disables vector search (FTS-only fallback).
     embed_config: Option<xai_grok_config_types::MemoryEmbeddingConfig>,
     /// API base URL for embedding requests (cli-chat-proxy).
     embed_base_url: String,
@@ -223,7 +223,7 @@ pub struct MemoryBackendImpl {
     session_id: String,
     search_source: MemorySearchSource,
     observation_sink: Arc<dyn MemoryObservationSink>,
-    /// Shared search counter ÔÇö read by session summary telemetry.
+    /// Shared search counter — read by session summary telemetry.
     ///
     /// Only the ToolBridge backend's counter is shared back to the session actor;
     /// injection and compaction-recovery backends use their own local counters.
@@ -374,7 +374,7 @@ impl MemoryBackend for MemoryBackendImpl {
             }
         };
 
-        // ÔöÇÔöÇ Sync phase 1: reindex dirty files, collect chunks needing embeddings ÔöÇÔöÇ
+        // ── Sync phase 1: reindex dirty files, collect chunks needing embeddings ──
         let mut reindex_chunks: Vec<(String, String)> = Vec::new();
         let mut needs_release = false;
         // Watcher-sync telemetry data (populated inside the claim guard below).
@@ -395,13 +395,13 @@ impl MemoryBackend for MemoryBackendImpl {
             let mut changed_chunk_count: usize = 0;
             for file in &dirty_files {
                 if file.exists() {
-                    // File was created or modified ÔÇö reindex it.
+                    // File was created or modified — reindex it.
                     let source = self.storage.classify_source(file);
                     if let Ok(stats) = index.reindex_file(file, source) {
                         changed_chunk_count += stats.added + stats.updated + stats.removed;
                     }
                 } else {
-                    // File was deleted ÔÇö remove its stale chunks from the index so
+                    // File was deleted — remove its stale chunks from the index so
                     // they are no longer searchable.  Without this call, reindex_file
                     // returns early when the file is unreadable and leaves orphaned
                     // chunks behind indefinitely.
@@ -416,7 +416,7 @@ impl MemoryBackend for MemoryBackendImpl {
             watcher_sync_stats = Some((dirty_count, changed_chunk_count, sync_start));
         }
 
-        // ÔöÇÔöÇ Async phase: embed missing chunks (no &index borrow) ÔöÇÔöÇ
+        // ── Async phase: embed missing chunks (no &index borrow) ──
         let provider = self.make_embedding_provider().await;
         let mut embedded_count: usize = 0;
         if !reindex_chunks.is_empty()
@@ -460,7 +460,7 @@ impl MemoryBackend for MemoryBackendImpl {
             }
         }
 
-        // ÔöÇÔöÇ Sync phase 2: FTS search ÔöÇÔöÇ
+        // ── Sync phase 2: FTS search ──
         let mut search_config = self.search_config.clone();
         search_config.max_results = max_results;
         search_config.min_score = min_score as f32;
@@ -476,7 +476,7 @@ impl MemoryBackend for MemoryBackendImpl {
             index.search_fts_by_sources(query, candidate_limit, &["global", "workspace"]),
         );
 
-        // ÔöÇÔöÇ Async phase: embed query for vector search (no &index borrow) ÔöÇÔöÇ
+        // ── Async phase: embed query for vector search (no &index borrow) ──
         let query_embedding = super::search::resolve_query_embedding(
             provider
                 .as_ref()
@@ -486,7 +486,7 @@ impl MemoryBackend for MemoryBackendImpl {
         )
         .await;
 
-        // ÔöÇÔöÇ Sync phase 3: vector search + scoring + merge (borrows &index) ÔöÇÔöÇ
+        // ── Sync phase 3: vector search + scoring + merge (borrows &index) ──
         let merged = super::search::hybrid_search_merge(
             &index,
             fts_results,
@@ -674,7 +674,7 @@ mod factory_tests {
     /// Direct assertion via the `#[cfg(test)]` accessor proves the factory
     /// propagated the config into the backend rather than discarding it.
     /// `max_results` is verified because the `search()` method overrides it
-    /// with the caller's argument ÔÇö so checking the *stored* value is the only
+    /// with the caller's argument — so checking the *stored* value is the only
     /// way to confirm the factory wired it correctly.
     #[tokio::test]
     async fn test_factory_wires_search_config() {
@@ -743,7 +743,7 @@ mod factory_tests {
         let backend = MemoryBackendImpl::from_session_params(storage, &params);
         let stored = backend.search_config_for_test();
 
-        // None of these are overridden by the caller in search() ÔÇö they must
+        // None of these are overridden by the caller in search() — they must
         // survive the factory path unchanged.
         assert_eq!(stored.max_results, 7);
         assert!(stored.mmr.enabled, "MMR enabled must be stored");
@@ -816,7 +816,7 @@ mod factory_tests {
     fn test_params_watcher_started_reflects_runtime() {
         let tmp = TempDir::new().unwrap();
 
-        // Success path: directory exists ÔåÆ watcher starts.
+        // Success path: directory exists → watcher starts.
         let watch_dir = tmp.path().join("memory");
         std::fs::create_dir_all(&watch_dir).unwrap();
         let watcher = crate::watcher::MemoryFileWatcher::start(&watch_dir);
@@ -828,7 +828,7 @@ mod factory_tests {
         // (On environments without inotify/FSEvents this may be None; skip rather than fail.)
         let _ = params_with_watcher.watcher.is_some(); // just verify it compiles
 
-        // Failure path: non-existent directory ÔåÆ watcher must return None.
+        // Failure path: non-existent directory → watcher must return None.
         let missing = tmp.path().join("does_not_exist");
         let no_watcher = crate::watcher::MemoryFileWatcher::start(&missing);
         assert!(
@@ -946,7 +946,7 @@ mod factory_tests {
         let params = MemoryBackendParams {
             embed_config: Some(MemoryEmbeddingConfig::default()),
             embed_base_url: "http://localhost".to_string(),
-            embed_api_key: None, // no key ÔåÆ provider cannot be created
+            embed_api_key: None, // no key → provider cannot be created
             ..make_params_fts_only("test-embed-no-key")
         };
         let backend = MemoryBackendImpl::from_session_params(storage, &params);
@@ -1051,7 +1051,7 @@ mod factory_tests {
 
         // Watcher now succeeds because the directory exists.
         // (Allowed to return None in environments without inotify/kqueue
-        //  support ÔÇö e.g. some CI containers ÔÇö but must not error-panic.)
+        //  support — e.g. some CI containers — but must not error-panic.)
         let watcher_after_init = crate::watcher::MemoryFileWatcher::start(&global);
         // If a watcher was returned we can confirm it is usable (not dirty yet).
         if let Some(w) = watcher_after_init {
@@ -1060,7 +1060,7 @@ mod factory_tests {
                 "freshly started watcher must report no dirty files"
             );
         }
-        // If None, the test environment does not support file-watching ÔÇö
+        // If None, the test environment does not support file-watching —
         // that is acceptable; the directories themselves are what matter here.
     }
 
@@ -1075,7 +1075,7 @@ mod factory_tests {
     ///      `delete_path()` because the file no longer exists
     ///   6. content is no longer returned
     ///
-    /// This test guards against regressions in the `file.exists() ÔåÆ else
+    /// This test guards against regressions in the `file.exists() → else
     /// delete_path()` branch that would be invisible to the `delete_path`
     /// unit tests alone.
     #[tokio::test]
@@ -1141,13 +1141,13 @@ mod factory_tests {
             "content must be found before file is deleted"
         );
 
-        // Step 4: Delete the file ÔÇö the OS will fire a Remove event.
+        // Step 4: Delete the file — the OS will fire a Remove event.
         std::fs::remove_file(&file).unwrap();
 
         // Poll until the watcher detects the event (more reliable than a fixed
         // sleep on macOS where FSEvents delivery time varies considerably).
         // Give up after 2 s and skip the timing-sensitive assertion rather than
-        // flake ÔÇö delete_path unit tests cover the underlying logic.
+        // flake — delete_path unit tests cover the underlying logic.
         let mut event_delivered = false;
         for _ in 0..20 {
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1157,7 +1157,7 @@ mod factory_tests {
             }
         }
         if !event_delivered {
-            // FSEvents not delivered within 2 s ÔÇö environment is too slow.
+            // FSEvents not delivered within 2 s — environment is too slow.
             // Skip silently; the logic is covered by delete_path unit tests.
             return;
         }
@@ -1244,7 +1244,7 @@ mod factory_tests {
         assert_eq!(
             sync_calls.load(Ordering::SeqCst),
             0,
-            "sync current_api_key must NOT be called ÔÇö the async path is the contract"
+            "sync current_api_key must NOT be called — the async path is the contract"
         );
     }
 }
@@ -1436,7 +1436,7 @@ mod tests {
         let (db_path, storage) = setup_index(&tmp);
         let backend = MemoryBackendImpl::new(db_path, storage);
 
-        // Raw user message with punctuation ÔÇö should not crash FTS5
+        // Raw user message with punctuation — should not crash FTS5
         let results = backend
             .search("what is rust? how to use it!", 10, 0.0)
             .await
@@ -1453,7 +1453,7 @@ mod tests {
         let (db_path, storage) = setup_index(&tmp);
         let backend = MemoryBackendImpl::new(db_path, storage);
 
-        // Query with only special chars ÔÇö should return empty, not error
+        // Query with only special chars — should return empty, not error
         let results = backend.search("???!!!", 10, 0.0).await.unwrap();
         assert!(
             results.is_empty(),
@@ -1591,7 +1591,7 @@ mod index_embedding_tests {
         .unwrap();
 
         if !idx.vec_available() {
-            // sqlite-vec not available ÔÇö chunks_without_embeddings returns empty
+            // sqlite-vec not available — chunks_without_embeddings returns empty
             let missing = idx.chunks_without_embeddings().unwrap();
             assert!(missing.is_empty(), "no-vec: should return empty");
             return;

@@ -611,7 +611,7 @@ fn parse_blocking_result(
                     tracing::warn!(
                         hook_name,
                         exit_code,
-                        "JSON decision is 'deny' but exit code is not 0 or 2 ÔÇö using JSON decision"
+                        "JSON decision is 'deny' but exit code is not 0 or 2 — using JSON decision"
                     );
                 }
                 return (
@@ -625,13 +625,13 @@ fn parse_blocking_result(
             GateOutcome::Allow { .. } | GateOutcome::Ask { .. } if exit_code == GATE_EXIT_CODE => {
                 tracing::warn!(
                     hook_name,
-                    "JSON decision is 'allow' or 'ask' but exit code is 2 ÔÇö denying (stdout is ignored on exit 2)"
+                    "JSON decision is 'allow' or 'ask' but exit code is 2 — denying (stdout is ignored on exit 2)"
                 );
             }
             GateOutcome::Defer if exit_code == GATE_EXIT_CODE => {
                 tracing::warn!(
                     hook_name,
-                    "JSON decision is 'defer' but exit code is 2 ÔÇö denying (stdout is ignored on exit 2)"
+                    "JSON decision is 'defer' but exit code is 2 — denying (stdout is ignored on exit 2)"
                 );
             }
             GateOutcome::Allow {
@@ -1053,7 +1053,7 @@ mod tests {
             HookRunnerResult::Deny { reason, .. } => {
                 assert_eq!(
                     reason,
-                    format!("{}ÔÇª [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
+                    format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
                 );
             }
             other => panic!("expected Deny, got {other:?}"),
@@ -1064,7 +1064,7 @@ mod tests {
             HookRunnerResult::Ask { reason, .. } => {
                 assert_eq!(
                     reason,
-                    Some(format!("{}ÔÇª [+50 chars]", "├®".repeat(MAX_REASON_CHARS)))
+                    Some(format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS)))
                 );
             }
             other => panic!("expected Ask, got {other:?}"),
@@ -1114,7 +1114,7 @@ mod tests {
             } => assert_eq!(
                 additional_context,
                 Some(format!(
-                    "{}ÔÇª [+50 chars]",
+                    "{}… [+50 chars]",
                     "├®".repeat(MAX_HOOK_FEEDBACK_CHARS)
                 ))
             ),
@@ -1126,7 +1126,7 @@ mod tests {
         assert_eq!(
             stop_outcome(result).additional_context,
             Some(format!(
-                "{}ÔÇª [+50 chars]",
+                "{}… [+50 chars]",
                 "├®".repeat(MAX_HOOK_FEEDBACK_CHARS)
             ))
         );
@@ -1264,7 +1264,7 @@ mod tests {
     #[test]
     fn deny_reason_and_stderr_excerpt_are_capped() {
         let long = "├®".repeat(MAX_REASON_CHARS + 50);
-        let capped = format!("{}ÔÇª [+50 chars]", "├®".repeat(MAX_REASON_CHARS));
+        let capped = format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS));
 
         let json = serde_json::json!({ "decision": "deny", "reason": long }).to_string();
         match parse(&json) {
@@ -1350,7 +1350,7 @@ mod tests {
         match deny {
             HookRunnerResult::Deny { reason, .. } => assert_eq!(
                 reason,
-                format!("{}ÔÇª [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
+                format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
             ),
             other => panic!("expected Deny, got {other:?}"),
         }

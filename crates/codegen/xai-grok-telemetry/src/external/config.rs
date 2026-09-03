@@ -1,6 +1,6 @@
 //! Configuration resolution for the external OTEL stream.
 //!
-//! Pure resolution ÔÇö no I/O besides reading env vars. The shell resolves the
+//! Pure resolution — no I/O besides reading env vars. The shell resolves the
 //! startup value once (layering the `[telemetry]` `otel_*` config keys under
 //! the env vars) and passes the resolved struct to [`crate::external::init`].
 //!
@@ -49,7 +49,7 @@ pub const ENV_MASTER_SWITCH: &str = "CHUTES_BUILD_EXTERNAL_OTEL";
 /// `OTEL_LOGS_EXPORTER`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExporterSelection {
-    /// No exporter ÔÇö the signal is not produced.
+    /// No exporter — the signal is not produced.
     #[default]
     None,
     /// OTLP to the configured endpoint using [`OtlpTransport`].
@@ -76,7 +76,7 @@ impl ExporterSelection {
 }
 
 /// Content gates (additive opt-ins; default off). May only **tighten**
-/// post-init ÔÇö a remote policy can force them off, never on.
+/// post-init — a remote policy can force them off, never on.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ContentGates {
     /// `OTEL_LOG_USER_PROMPTS=1`: prompt text on `grok_code.user_prompt`
@@ -100,11 +100,11 @@ pub enum TemporalityPreference {
 /// attributes. Filled by the caller (pager/shell) at init.
 #[derive(Debug, Clone, Default)]
 pub struct ExternalClientInfo {
-    /// Engine build (version + commit) ÔåÆ `service.version`.
+    /// Engine build (version + commit) → `service.version`.
     pub service_version: String,
-    /// Front-end client version ÔåÆ `client.version`.
+    /// Front-end client version → `client.version`.
     pub client_version: String,
-    /// How the session was launched (`cli`/`headless`/`agent`) ÔåÆ
+    /// How the session was launched (`cli`/`headless`/`agent`) →
     /// `app.entrypoint`.
     pub app_entrypoint: String,
 }
@@ -112,7 +112,7 @@ pub struct ExternalClientInfo {
 /// Config-file layer for the external stream, built by the shell from the
 /// `otel_*` keys of the `[telemetry]` table and layered *under* env vars
 /// during resolution. (Field names here are the internal carrier; the
-/// user-facing keys are `otel_enabled`, `otel_metrics_exporter`, ÔÇª ÔÇö see
+/// user-facing keys are `otel_enabled`, `otel_metrics_exporter`, … — see
 /// [`crate::config::TelemetryConfig`].)
 ///
 /// There is deliberately **no `headers` key** (user decision, RQ4): collector
@@ -150,9 +150,9 @@ pub struct ExternalOtelConfig {
     pub logs_exporter: ExporterSelection,
     pub logs_transport: OtlpTransport,
     pub metrics_transport: OtlpTransport,
-    /// Resolved logs endpoint (full `ÔÇª/v1/logs` for HTTP; collector origin for gRPC).
+    /// Resolved logs endpoint (full `…/v1/logs` for HTTP; collector origin for gRPC).
     pub logs_endpoint: String,
-    /// Resolved metrics endpoint (full `ÔÇª/v1/metrics` for HTTP; collector origin for gRPC).
+    /// Resolved metrics endpoint (full `…/v1/metrics` for HTTP; collector origin for gRPC).
     pub metrics_endpoint: String,
     /// Customer collector headers for log exports, parsed from
     /// `OTEL_EXPORTER_OTLP_HEADERS` plus `OTEL_EXPORTER_OTLP_LOGS_HEADERS`.
@@ -192,7 +192,7 @@ pub struct ExternalOtelConfig {
     pub client: ExternalClientInfo,
     /// Set by the shell when the **internal** firehose resolved its
     /// endpoint/headers from `OTEL_EXPORTER_OTLP_*` (the deprecated
-    /// fallback). [`crate::external::init`] refuses to activate when true ÔÇö
+    /// fallback). [`crate::external::init`] refuses to activate when true —
     /// the no-double-send invariant is enforced in code, not release
     /// discipline.
     pub internal_pipeline_consumed_otel_vars: bool,
@@ -506,7 +506,7 @@ impl ExternalOtelConfig {
             metrics_transport,
         );
 
-        // Headers: env only (RQ4) ÔÇö never from the config file. Resolve them
+        // Headers: env only (RQ4) — never from the config file. Resolve them
         // per signal so signal-specific overrides never bleed across streams.
         let base_headers = parse_header_list(
             getenv("OTEL_EXPORTER_OTLP_HEADERS")
@@ -616,7 +616,7 @@ impl ExternalOtelConfig {
             .as_deref()
         {
             Some("cumulative") => TemporalityPreference::Cumulative,
-            // `delta`, `lowmemory`, unset, or unrecognized ÔåÆ Delta default.
+            // `delta`, `lowmemory`, unset, or unrecognized → Delta default.
             _ => TemporalityPreference::Delta,
         };
 

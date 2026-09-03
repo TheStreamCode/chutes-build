@@ -1201,11 +1201,11 @@ fn test_import_shared_clients_skips_config_collisions() {
 
     assert!(
         !state.shared_clients.contains_key("github"),
-        "github should be skipped ÔÇö collides with child config"
+        "github should be skipped — collides with child config"
     );
     assert!(
         state.shared_clients.contains_key("linear"),
-        "linear should be imported ÔÇö no collision"
+        "linear should be imported — no collision"
     );
 }
 
@@ -3320,7 +3320,7 @@ async fn session_spawn_sends_zero_network_requests() {
     )
     .await
     .expect("plain HTTP client");
-    assert!(!client.has_auth(), "no stored creds ÔåÆ plain HTTP client");
+    assert!(!client.has_auth(), "no stored creds → plain HTTP client");
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -3503,9 +3503,9 @@ async fn spawn_into_a_closed_scope_fails_fast() {
     );
 }
 
-// ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+// ═══════════════════════════════════════════════════════════════════════════
 // Unreachable-spawn retry (McpError::Unreachable + McpState cooldown gating)
-// ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+// ═══════════════════════════════════════════════════════════════════════════
 
 /// `Unreachable` is a connectivity verdict: never auth, always retryable,
 /// still attributable to its server for failure recording.
@@ -3637,7 +3637,7 @@ fn unreachable_schedule_cleared_on_config_updates() {
 }
 
 /// A fresh init attempt (`mark_servers_initializing`) supersedes any pending
-/// unreachable-respawn schedule ÔÇö the attempt itself re-records on failure ÔÇö
+/// unreachable-respawn schedule — the attempt itself re-records on failure —
 /// so a server recovered by a full re-init cannot be respawned over later.
 #[test]
 fn fresh_init_attempt_clears_unreachable_schedule() {
@@ -3666,7 +3666,7 @@ fn unreachable_attempt_lease_reclaims_cancelled_attempts() {
             .is_empty()
     );
 
-    // Past the lease the server is handed out again with a new tokenÔÇª
+    // Past the lease the server is handed out again with a new token…
     let later = now + McpState::UNREACHABLE_ATTEMPT_LEASE + std::time::Duration::from_secs(1);
     let taken = state.take_unreachable_retry_candidates_at(later);
     assert_eq!(taken.len(), 1);
@@ -3674,7 +3674,7 @@ fn unreachable_attempt_lease_reclaims_cancelled_attempts() {
     assert_eq!(name, "srv");
     assert_ne!(new_token, old_token);
 
-    // ÔÇªand the zombie attempt's token is dead: it cannot install or settle.
+    // …and the zombie attempt's token is dead: it cannot install or settle.
     assert!(!state.finish_unreachable_attempt("srv", old_token));
     state.settle_unreachable_attempt_failed("srv", old_token, "stale".to_string());
     // Still owned by the new attempt (settle with the new token works).

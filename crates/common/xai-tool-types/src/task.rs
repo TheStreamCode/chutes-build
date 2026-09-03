@@ -4,11 +4,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `task` (spawn) tool ÔÇö Input
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ───────────────────────────────────────────────────────────────────────────
+// `task` (spawn) tool — Input
+// ───────────────────────────────────────────────────────────────────────────
 
-/// Input for the `task` tool ÔÇö launches a subagent to handle a task
+/// Input for the `task` tool — launches a subagent to handle a task
 /// autonomously.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TaskToolInput {
@@ -81,7 +81,7 @@ pub struct TaskToolInput {
     /// Explicit working directory for the subagent. When set, the child
     /// session operates in this directory instead of the parent's cwd.
     /// Mutually exclusive with `isolation: "worktree"` (both set the
-    /// effective cwd ÔÇö setting both is ambiguous).
+    /// effective cwd — setting both is ambiguous).
     /// Path validation (exists, is a directory) happens at subagent launch
     /// time, not here.
     #[schemars(
@@ -201,9 +201,9 @@ impl SubagentIsolationMode {
     }
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `task` (spawn) tool ÔÇö Output
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ───────────────────────────────────────────────────────────────────────────
+// `task` (spawn) tool — Output
+// ───────────────────────────────────────────────────────────────────────────
 
 /// Structured completion output from a subagent (`task` tool).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,7 +219,7 @@ pub struct SubagentCompletedOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
     /// The `subagent_id` to pass as `resume_from` to continue this subagent.
-    /// Always equals `subagent_id` ÔÇö provided as a convenience so programmatic
+    /// Always equals `subagent_id` — provided as a convenience so programmatic
     /// consumers can extract the resume handle without parsing text.
     pub resume_from_hint: String,
     /// If the subagent used a persona, the persona name to pass when resuming.
@@ -269,13 +269,13 @@ const PRIOR_EXEC_LOOKBACK: usize = 2;
 
 /// Whether background-spawn text should tell the parent to keep its own work.
 ///
-/// `user_asks` are recent parent user texts (oldest ÔåÆ newest), not including
+/// `user_asks` are recent parent user texts (oldest → newest), not including
 /// this spawn's tool call. `child_description` / `child_prompt` are the spawn
 /// being acknowledged.
 ///
 /// Returns true only when the latest ask (or either of the two before it)
 /// shows unfinished parent exec work besides the delegated child job.
-/// No user asks ÔåÆ false.
+/// No user asks → false.
 pub fn should_continue_parent_work(
     user_asks: &[String],
     child_description: &str,
@@ -296,7 +296,7 @@ pub fn should_continue_parent_work(
     if blob_has_exec(last) && !blob_is_delegate(last) {
         return true;
     }
-    // "while waiting, spawn ÔÇª" ÔÇö parent still has the waiting work.
+    // "while waiting, spawn …" — parent still has the waiting work.
     let last_l = last.to_ascii_lowercase();
     if last_l.contains("while waiting") || last_l.contains("whilst waiting") {
         return true;
@@ -447,7 +447,7 @@ pub fn format_subagent_auto_backgrounded(
     continue_parent_work: bool,
 ) -> String {
     let notify_clause = if notified_on_completion {
-        " ÔÇö you will be notified when it completes"
+        " — you will be notified when it completes"
     } else {
         ""
     };
@@ -519,7 +519,7 @@ pub const MAX_MULTI_WAIT_IDS: usize = 20;
 pub struct TaskOutputToolInput {
     /// Task IDs to query. Pass one or more; a single task is a one-element list.
     ///
-    /// Lenient on the wire (invisible to the advertised schema ÔÇö schemars
+    /// Lenient on the wire (invisible to the advertised schema — schemars
     /// ignores serde aliases and custom deserializers): also accepts the
     /// singular `task_id` key and a bare string/number instead of an array.
     /// Models frequently mirror `kill_task`'s singular `task_id` here (in
@@ -539,7 +539,7 @@ pub struct TaskOutputToolInput {
     /// When set and positive, wait up to this many milliseconds; omit or `0` polls.
     ///
     /// `{max_wait_ms}` is resolved at finalize from the session's wait ceiling,
-    /// which also pins it as the schema `maximum` ÔÇö the tool description cannot
+    /// which also pins it as the schema `maximum` — the tool description cannot
     /// carry the bound alone, since randomization may replace it wholesale.
     #[schemars(
         description = "Max wait time in milliseconds, up to {max_wait_ms}. A positive value waits for completion; omit or pass 0 for a non-blocking status poll."
@@ -549,7 +549,7 @@ pub struct TaskOutputToolInput {
 }
 
 /// Trimmed, de-duplicated task IDs preserving first-seen order. Single source
-/// of truth for how `task_ids` args resolve ÔÇö used by tool execution and by
+/// of truth for how `task_ids` args resolve — used by tool execution and by
 /// the tool-usage-card mapping so displayed IDs match what actually runs.
 pub fn resolve_task_ids(ids: &[String]) -> Vec<String> {
     let mut out = Vec::new();
@@ -590,7 +590,7 @@ pub const MAX_WAIT_BLOCK_MS_DEFAULT: u64 = 600_000;
 /// The blocking-wait ceiling in effect, honoring `CHUTES_BUILD_MAX_WAIT_BLOCK_MS`.
 ///
 /// A host whose transport deadline is shorter than the default sets the env var
-/// so the server enforces ÔÇö and the tool descriptions advertise ÔÇö the same
+/// so the server enforces — and the tool descriptions advertise — the same
 /// number the caller will actually wait for. Without that, a model believing the
 /// default asks for a wait its own client will abandon first.
 pub fn max_wait_block_ms() -> u64 {
@@ -695,7 +695,7 @@ impl TaskOutputResult {
     /// Compute a progress signature from the semantically meaningful output
     /// fields of a `get_task_output` result.
     ///
-    /// Two results with the same signature are considered stagnant ÔÇö the task
+    /// Two results with the same signature are considered stagnant — the task
     /// state has not changed between polls.  Used by the doom-loop detector to
     /// distinguish legitimate waiting (progress) from a true polling stall.
     ///
@@ -719,9 +719,9 @@ impl TaskOutputResult {
     }
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `wait_tasks` tool ÔÇö Input
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ───────────────────────────────────────────────────────────────────────────
+// `wait_tasks` tool — Input
+// ───────────────────────────────────────────────────────────────────────────
 
 /// How a multi-wait (`wait_tasks`) request should resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -731,7 +731,7 @@ pub enum WaitMode {
     WaitAll,
 }
 
-/// Input for the `wait_tasks` tool ÔÇö blocks until multiple background tasks /
+/// Input for the `wait_tasks` tool — blocks until multiple background tasks /
 /// sub-agents reach a terminal state.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WaitTasksToolInput {
@@ -750,11 +750,11 @@ pub struct WaitTasksToolInput {
     pub timeout_ms: Option<u64>,
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `kill_task` (cancel) tool ÔÇö Input / Output
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ───────────────────────────────────────────────────────────────────────────
+// `kill_task` (cancel) tool — Input / Output
+// ───────────────────────────────────────────────────────────────────────────
 
-/// Input for the `kill_task` tool ÔÇö terminates a running background task,
+/// Input for the `kill_task` tool — terminates a running background task,
 /// monitor, or subagent by id.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct KillTaskToolInput {
@@ -1123,7 +1123,7 @@ pub fn build_task_description(subagents: &[SubagentDescriptor], naming: &TaskToo
          - When using the {task_tool} tool, you must specify a {subagent_type_param} parameter to select which agent type to use.\n\
          - When launching independent subagents, you MUST incorporate the results into the task based on requirements BEFORE concluding.\n\n\
          Resuming a previous agent (resume_from):\n\
-         - Use {resume_from_param} to continue a previously completed subagent's conversation. Pass the subagent_id returned by a prior {task_tool} call. A resumed agent keeps its full transcript and tool state, so you only need to describe what changed since the last run ÔÇö don't re-explain the original task.\n\
+         - Use {resume_from_param} to continue a previously completed subagent's conversation. Pass the subagent_id returned by a prior {task_tool} call. A resumed agent keeps its full transcript and tool state, so you only need to describe what changed since the last run — don't re-explain the original task.\n\
          - The resumed agent must use the same subagent_type as the source.\n\n\
          Isolation mode:\n\
          - Use {isolation_param} to control the child's execution environment. With \"worktree\", the child runs in an isolated git worktree whose edits don't affect the parent workspace; the worktree is preserved after completion and its path is returned in the output."
@@ -1145,7 +1145,7 @@ fn lifecycle_target_suffix(monitor_present: bool, subagent_present: bool) -> &'s
 
 /// Optional "(a monitor's {id_name} is returned by {monitor})" clause.
 ///
-/// `id_name` is the model-facing singular id name ÔÇö kill_task's `task_id`
+/// `id_name` is the model-facing singular id name — kill_task's `task_id`
 /// input (tracks renames). get_task_output's `task_ids` array is plural and
 /// must not be used here; both tools share this wording so randomization
 /// cannot disagree across kill vs get-output docs.
@@ -1231,7 +1231,7 @@ pub struct TaskOutputToolNaming<'a> {
     pub task_ids_param: &'a str,
     /// Model-facing name of the `timeout_ms` input (tracks param renames).
     pub timeout_ms_param: &'a str,
-    /// Singular monitor-id name for the monitor aside ÔÇö kill_task's `task_id`
+    /// Singular monitor-id name for the monitor aside — kill_task's `task_id`
     /// (tracks renames). Not get_task_output's plural `task_ids`.
     pub task_id_param: &'a str,
 }
@@ -1280,7 +1280,7 @@ pub fn build_task_output_description(naming: &TaskOutputToolNaming) -> String {
 /// Naming/feature inputs for [`build_wait_tasks_description`].
 #[derive(Clone, Copy, Debug)]
 pub struct WaitTasksToolNaming<'a> {
-    /// The preferred retrieval tool name shown in the "Prefer ÔÇª" line.
+    /// The preferred retrieval tool name shown in the "Prefer …" line.
     pub background_retrieval_tool: &'a str,
     /// The bash `is_background` param name, when a bash/`execute` tool is present.
     pub bash_background_param: Option<&'a str>,
@@ -1437,7 +1437,7 @@ mod tests {
             serde_json::from_str(r#"{"task_ids": ["a", "b"]}"#).unwrap();
         assert_eq!(input.resolved_task_ids(), vec!["a", "b"]);
 
-        // Singular key with a bare string ÔÇö the shape models organically send
+        // Singular key with a bare string — the shape models organically send
         // (mirroring kill_task's singular task_id).
         let input: TaskOutputToolInput =
             serde_json::from_str(r#"{"task_id": "abc-123", "timeout_ms": 0}"#).unwrap();
@@ -1698,7 +1698,7 @@ mod tests {
         let subagents = vec![SubagentDescriptor {
             name: "explore".into(),
             description: "Explore.".into(),
-            tools: Some("Read-only ÔÇö has access to: ${{ tools.by_kind.read }}.".into()),
+            tools: Some("Read-only — has access to: ${{ tools.by_kind.read }}.".into()),
         }];
         let desc = build_task_description(
             &subagents,
@@ -1719,7 +1719,7 @@ mod tests {
         assert!(desc.contains("Use ${{ params.task.isolation }} to control"));
     }
 
-    // ÔöÇÔöÇ Lifecycle tool descriptions ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── Lifecycle tool descriptions ──────────────────────────────────────
     //
     // These lock the exact model-facing text. The "cli_default" cases must
     // match what the grok-shell MiniJinja templates render for the default
@@ -2051,7 +2051,7 @@ mod tests {
             "3 agent review",
             "review the diff",
         ));
-        // Exec two asks ago still counts (check bugs ÔåÆ nudge ÔåÆ review spawn).
+        // Exec two asks ago still counts (check bugs → nudge → review spawn).
         assert!(should_continue_parent_work(
             &[
                 "kan je is de recente signal bug's checken?".into(),

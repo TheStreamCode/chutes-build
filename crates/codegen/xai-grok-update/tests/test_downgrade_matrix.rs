@@ -86,13 +86,13 @@ async fn mount_gcs_with_channels(
     server
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// Scenario matrix: GCS internal installer ÔÇö downgrade via install
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario matrix: GCS internal installer — downgrade via install
 //
 // Each test simulates a user on version X, with the stable/alpha pointer
 // now pointing to version Y. The internal installer should install Y
 // regardless of whether Y < X (rollback) or Y > X (upgrade).
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -144,7 +144,7 @@ async fn internal_install_stable_upgrade_0_2_5_to_0_2_7() {
 #[tokio::test]
 #[serial]
 async fn internal_install_rollback_then_upgrade_sequence() {
-    // Simulates: install 0.2.7 ÔåÆ rollback to 0.2.5 ÔåÆ fix ships as 0.2.8.
+    // Simulates: install 0.2.7 → rollback to 0.2.5 → fix ships as 0.2.8.
     // All three installs must succeed sequentially.
     let _ = test_home();
     reset_home();
@@ -267,14 +267,14 @@ async fn internal_install_alpha_user_gets_newer_stable_after_stable_passes_alpha
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Scenario matrix: check_update_status across installer ├ù version direction
 //
 // Uses check_update_status end-to-end with fake npm/gh binaries.
 // The internal (GCS) path can't be end-to-end tested via check_update_status
 // (hardcoded URLs), so its update-detection logic is covered by the
 // needs_update unit tests and the install tests above.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 fn setup_npm(current_version: &str) -> FakeBinGuard {
     let _ = test_home();
@@ -294,7 +294,7 @@ fn setup_gh(current_version: &str) -> FakeBinGuard {
     FakeBinGuard::install_gh()
 }
 
-// ÔöÇÔöÇ npm: never downgrades ÔöÇÔöÇ
+// ── npm: never downgrades ──
 
 #[tokio::test]
 #[serial]
@@ -320,8 +320,8 @@ async fn npm_same_version_no_update() {
 #[tokio::test]
 #[serial]
 async fn npm_rollback_does_not_report_update() {
-    // Stable pointer rolled back 0.2.7 ÔåÆ 0.2.5. npm user on 0.2.7 must NOT
-    // see an update ÔÇö stale registries make this path unsafe.
+    // Stable pointer rolled back 0.2.7 → 0.2.5. npm user on 0.2.7 must NOT
+    // see an update — stale registries make this path unsafe.
     let g = setup_npm("0.2.7");
     g.set_stdout("\"0.2.5\"");
 
@@ -344,7 +344,7 @@ async fn npm_drastically_old_registry_does_not_report_update() {
     assert!(!status.update_available);
 }
 
-// ÔöÇÔöÇ gh-release: --check is upgrade-only; rollback handled by auto-install ÔöÇÔöÇ
+// ── gh-release: --check is upgrade-only; rollback handled by auto-install ──
 
 #[tokio::test]
 #[serial]
@@ -384,14 +384,14 @@ async fn gh_release_same_version_no_update() {
     assert!(!status.update_available);
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // auto_update_target: the leader/background auto-install decision
 //
 // Unlike the upgrade-only `check_update_status` report, this is the
 // downgrade-aware convergence decision. It gates on the installer, so
 // authoritative installers (gh-release/internal) follow a rolled-back pointer
 // while npm never downgrades. `fetch_latest_version` keeps these hermetic.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -430,7 +430,7 @@ async fn auto_update_target_gh_release_same_version_returns_none() {
 #[tokio::test]
 #[serial]
 async fn auto_update_target_npm_rollback_returns_none() {
-    // npm registries can serve stale versions ÔÇö never downgrade npm installs.
+    // npm registries can serve stale versions — never downgrade npm installs.
     let g = setup_npm("0.2.26");
     g.set_stdout("\"0.2.22\"");
 
@@ -441,15 +441,15 @@ async fn auto_update_target_npm_rollback_returns_none() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Disk-aware convergence: ensure_latest_on_disk + installed_on_disk_version
 //
 // Concurrent updaters (TUI background download, leader hourly checker,
 // explicit `chutes-build update`) must decide staleness from the on-disk install, not
-// their own compiled-in version ÔÇö a binary another process already installed
+// their own compiled-in version — a binary another process already installed
 // is never downloaded a second time, but a stale running process still gets
 // the relaunch signal.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Lay down a managed-install layout in the test CHUTES_BUILD_HOME:
 /// `bin/grok -> ../downloads/grok-<version>-<platform>` (what
@@ -516,7 +516,7 @@ async fn ensure_latest_noop_when_running_and_disk_current() {
 async fn ensure_latest_relaunches_onto_rolled_back_disk() {
     // Pointer rolled back to 0.2.22 and the disk already converged; a running
     // 0.2.26 leader must relaunch onto the older binary (gh-release is an
-    // authoritative installer ÔåÆ downgrades allowed).
+    // authoritative installer → downgrades allowed).
     let g = setup_gh("0.2.26");
     g.set_stable_only_stdout("v0.2.22\n");
     fake_managed_install("0.2.22");
@@ -526,14 +526,14 @@ async fn ensure_latest_relaunches_onto_rolled_back_disk() {
     assert!(outcome.relaunch_needed, "downgrade relaunch expected");
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Pointer-flip timing scenarios
 //
 // These test the race between a user opening grok (which caches the version)
 // and a pointer flip happening. The 30-min TTL means the user won't see the
 // new pointer until the cache expires, but once it does, the correct behavior
 // must kick in.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
@@ -582,14 +582,14 @@ async fn npm_alpha_user_upgrade_after_stable_surpasses_alpha() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Double-rollback scenario
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 #[serial]
 async fn internal_install_double_rollback() {
-    // Ship 0.2.7 ÔåÆ rollback to 0.2.5 ÔåÆ rollback further to 0.2.3.
+    // Ship 0.2.7 → rollback to 0.2.5 → rollback further to 0.2.3.
     // The installer must handle multiple sequential downgrades.
     let _ = test_home();
     reset_home();

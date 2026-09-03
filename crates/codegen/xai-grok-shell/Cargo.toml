@@ -284,7 +284,7 @@ required-features = ["test-support"]
 [lints]
 workspace = true
 [build-dependencies]
-# build.rs only downloads ripgrep ÔÇö no rmcp involvement. Workspace reqwest
+# build.rs only downloads ripgrep — no rmcp involvement. Workspace reqwest
 # (0.12) is plenty.
 reqwest = { workspace = true, features = ["blocking"] }
 flate2 = { workspace = true }

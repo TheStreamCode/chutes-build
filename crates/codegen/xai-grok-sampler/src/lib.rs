@@ -32,7 +32,7 @@ mod shared_http;
 pub mod stream;
 pub mod types;
 
-// Public re-exports ÔÇö the API surface consumers see.
+// Public re-exports — the API surface consumers see.
 pub use actor::SamplerActor;
 pub use actor::request_task::CompletionResult;
 pub use attribution::{

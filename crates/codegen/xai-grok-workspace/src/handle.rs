@@ -50,7 +50,7 @@ static PRODUCER_SPAWNED_AFTER_DRAIN_TOTAL: std::sync::LazyLock<IntCounter> =
     std::sync::LazyLock::new(|| {
         register_int_counter!(
             "grok_workspace_producer_spawned_after_drain_total",
-            "Artifact producers spawned after a drain started ÔÇö still tracked, but \
+            "Artifact producers spawned after a drain started — still tracked, but \
              their artifacts may miss the drain's queue flush (expected 0)"
         )
         .unwrap()
@@ -153,11 +153,11 @@ static WORKSPACE_BIND_ADVERTISED_TOOLS: std::sync::LazyLock<Histogram> =
     });
 /// Tripwire, expected 0 in production. `path="swap"`: a toolset swap found
 /// the outgoing toolset's `Terminal` resource pointing at a backend other
-/// than the session-owned one ÔÇö a resolve path bypassed the session-owned
+/// than the session-owned one — a resolve path bypassed the session-owned
 /// backend, and that backend's background tasks die with the old toolset.
 /// Non-zero means background tasks were (or are about to be) killed by a
-/// toolset swap: page the owning team. (`path="actor"` ÔÇö actor-loop
-/// channel-closure detection ÔÇö is not emitted yet.)
+/// toolset swap: page the owning team. (`path="actor"` — actor-loop
+/// channel-closure detection — is not emitted yet.)
 pub(crate) static WORKSPACE_TERMINAL_BACKEND_ORPHANED_TOTAL: std::sync::LazyLock<IntCounterVec> =
     std::sync::LazyLock::new(|| {
         register_int_counter_vec!(
@@ -393,24 +393,24 @@ pub(crate) fn init_metrics() {
 /// (see [`WorkspaceHandle::rebind_existing_hub_session`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RebindOutcome {
-    /// Same (or no) explicit toolset ÔÇö session reused untouched.
+    /// Same (or no) explicit toolset — session reused untouched.
     Reused,
-    /// Changed explicit toolset ÔÇö re-resolved and swapped in.
+    /// Changed explicit toolset — re-resolved and swapped in.
     Reresolved,
     /// Changed explicit toolset, but the re-resolve failed; existing kept.
     ReresolveFailed,
     /// Changed explicit toolset, but the session's toolset is externally
-    /// owned (local-bind shape) ÔÇö nothing was resolved or swapped; the
+    /// owned (local-bind shape) — nothing was resolved or swapped; the
     /// existing toolset (and fingerprint) kept. Reused-semantics for the
     /// bind reply: advertise the KEPT toolset, drop any unserved set from
     /// the unapplied resolve.
     KeptExternallyOwned,
     /// Changed explicit toolset while the session had tool calls in flight
-    /// (`explicit ÔåÆ different-explicit` transition only) ÔÇö existing kept;
+    /// (`explicit → different-explicit` transition only) — existing kept;
     /// a later rebind with no calls in flight applies the correction.
     ReresolveDeferredInFlight,
 }
-/// What [`WorkspaceHandle::resolve_and_swap_session_toolset`] actually did ÔÇö
+/// What [`WorkspaceHandle::resolve_and_swap_session_toolset`] actually did —
 /// so no caller can mistake a deliberate skip for an installed swap (the
 /// skip leaves toolset AND fingerprint untouched).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,7 +449,7 @@ pub(crate) struct ClientFsBase {
 }
 impl WorkspaceHandle {
     /// `None` when not connected. Never hands out an owned
-    /// `ToolServer` ÔÇö a clone-drop begins server teardown.
+    /// `ToolServer` — a clone-drop begins server teardown.
     pub async fn trace_donation_reporter(
         &self,
         service_name: &str,
@@ -469,7 +469,7 @@ impl WorkspaceHandle {
     /// (the layer stays inert). On
     /// `Some`, yields a [`LogDonationSender`] to swap into the
     /// already-installed inert `DonatingLogLayer` plus a drain handle.
-    /// Never hands out an owned `ToolServer` ÔÇö a clone-drop begins server
+    /// Never hands out an owned `ToolServer` — a clone-drop begins server
     /// teardown.
     ///
     /// [`LogDonationSender`]: xai_computer_hub_sdk::LogDonationSender
@@ -490,9 +490,9 @@ impl WorkspaceHandle {
     /// Post-connect entry point for metric export, the analogue of
     /// [`Self::trace_donation_reporter`]. Returns `None` when not connected
     /// (no reporter is spawned). On
-    /// `Some`, spawns the periodic Prometheus-registry gather ÔåÆ OTLP ÔåÆ
+    /// `Some`, spawns the periodic Prometheus-registry gather → OTLP →
     /// export pump and yields a drain handle. Never hands out an owned
-    /// `ToolServer` ÔÇö a clone-drop begins server teardown.
+    /// `ToolServer` — a clone-drop begins server teardown.
     pub async fn metric_donation_reporter(
         &self,
         service_name: &str,
@@ -507,7 +507,7 @@ impl WorkspaceHandle {
     /// Construct a handle with zero sessions.
     ///
     /// Sessions are created explicitly via [`Self::create_session`] or
-    /// [`Self::fork_session`]. There is no implicit "main" session ÔÇö
+    /// [`Self::fork_session`]. There is no implicit "main" session —
     /// callers (TUI, workspace-server binary) create their first
     /// session after construction.
     ///
@@ -752,7 +752,7 @@ impl WorkspaceHandle {
     /// Create a new top-level session from the workspace's default config.
     ///
     /// Unlike [`fork_session`](Self::fork_session), this does not inherit
-    /// from a parent ÔÇö it creates a fresh session with
+    /// from a parent — it creates a fresh session with
     /// `CapabilityMode::All` and the workspace's `root_cwd`. Both the
     /// TUI and server use this as the primary session creation path.
     ///
@@ -1008,7 +1008,7 @@ impl WorkspaceHandle {
                 tracing::debug!(
                     session_id = %session_id,
                     trigger = trigger.metric_label(),
-                    "toolset config identical to the stored bind fingerprint ÔÇö \
+                    "toolset config identical to the stored bind fingerprint — \
                      reused untouched"
                 );
                 Ok(SwapOutcome::Reused)
@@ -1038,7 +1038,7 @@ impl WorkspaceHandle {
                 tracing::info!(
                     session_id = %session_id,
                     trigger = trigger.metric_label(),
-                    "toolset mutation rejected: turn active ÔÇö retry at the turn boundary"
+                    "toolset mutation rejected: turn active — retry at the turn boundary"
                 );
                 Err(crate::error::WorkspaceError::TurnActive(
                     session_id.to_owned(),
@@ -1153,7 +1153,7 @@ impl WorkspaceHandle {
                         session_id = %session_id,
                         trigger = trigger.metric_label(),
                         "toolset mutation rejected post-resolve: a turn started during \
-                         the re-resolve ÔÇö resolved toolset discarded; retry at the \
+                         the re-resolve — resolved toolset discarded; retry at the \
                          turn boundary"
                     );
                     return Err(crate::error::WorkspaceError::TurnActive(session_id));
@@ -1213,7 +1213,7 @@ impl WorkspaceHandle {
                         session_id = %session_id,
                         in_flight = snapshot.in_flight_calls(),
                         "session.bind: rebind swap (changed explicit toolset or stale-heal \
-                         re-apply) deferred: tool calls in flight ÔÇö keeping the existing \
+                         re-apply) deferred: tool calls in flight — keeping the existing \
                          toolset"
                     );
                     RebindOutcome::ReresolveDeferredInFlight
@@ -1228,7 +1228,7 @@ impl WorkspaceHandle {
                     tracing::warn!(
                         session_id = %session_id,
                         "session.bind: rebind carried a changed toolset config, but the \
-                         session's toolset is externally owned (local bind) ÔÇö keeping the \
+                         session's toolset is externally owned (local bind) — keeping the \
                          existing toolset; the new config did NOT take effect"
                     );
                     RebindOutcome::KeptExternallyOwned
@@ -1246,7 +1246,7 @@ impl WorkspaceHandle {
                         Ok(SwapOutcome::Swapped) => {
                             tracing::info!(
                                 session_id = %session_id,
-                                "session.bind: rebind carried a changed toolset config ÔÇö re-resolved \
+                                "session.bind: rebind carried a changed toolset config — re-resolved \
                                  and swapped"
                             );
                             RebindOutcome::Reresolved
@@ -1256,7 +1256,7 @@ impl WorkspaceHandle {
                             tracing::warn!(
                                 session_id = %session_id,
                                 "session.bind: rebind carried a changed toolset config, but the \
-                                 session's toolset is externally owned (local bind) ÔÇö keeping the \
+                                 session's toolset is externally owned (local bind) — keeping the \
                                  existing toolset; the new config did NOT take effect"
                             );
                             RebindOutcome::KeptExternallyOwned
@@ -1270,7 +1270,7 @@ impl WorkspaceHandle {
                             );
                             tracing::warn!(
                                 session_id = %session_id, error = %e,
-                                "session.bind: rebind toolset re-resolve failed ÔÇö keeping the \
+                                "session.bind: rebind toolset re-resolve failed — keeping the \
                                  existing toolset"
                             );
                             RebindOutcome::ReresolveFailed
@@ -1369,7 +1369,7 @@ impl WorkspaceHandle {
             .map(|(_, handle)| handle);
         (before_handle, after_handle)
     }
-    /// Answer a request/response `turn_hook` (sampler/shell ÔåÆ workspace).
+    /// Answer a request/response `turn_hook` (sampler/shell → workspace).
     ///
     /// Both phases run the same turn-boundary work as their fire-and-forget
     /// hook counterparts (the server-side sampler signals turns ONLY through
@@ -1380,8 +1380,8 @@ impl WorkspaceHandle {
     /// (which MUST undercut the requester's hook timeout), and returns the
     /// artifact ack on `HookReply::after_turn_ack`.
     ///
-    /// Each phase must be signalled through exactly ONE channel per client ÔÇö
-    /// fire-and-forget hook or request ÔÇö otherwise its work runs twice.
+    /// Each phase must be signalled through exactly ONE channel per client —
+    /// fire-and-forget hook or request — otherwise its work runs twice.
     pub async fn compute_turn_injections(
         &self,
         session_id: &str,
@@ -1450,7 +1450,7 @@ impl WorkspaceHandle {
     /// so status counts it and the durability idle gate withholds `idle_since_ms`
     /// while it runs; pokes status on start and completion. (The graceful drain
     /// added in the next PR awaits these tasks in phase 1.5 before flushing the
-    /// queue ÔÇö this PR only wires the tracking + idle-withholding.) Spawns after
+    /// queue — this PR only wires the tracking + idle-withholding.) Spawns after
     /// drain start stay tracked (the idle gate must not go blind) but are warned
     /// + counted as at-risk of missing the queue flush.
     pub(crate) fn spawn_producer<F>(&self, fut: F) -> tokio::task::JoinHandle<F::Output>
@@ -1460,7 +1460,7 @@ impl WorkspaceHandle {
     {
         if self.shared.activity_tracker.drain_started() {
             tracing::warn!(
-                "producer spawned after drain start ÔÇö artifact may miss the queue flush"
+                "producer spawned after drain start — artifact may miss the queue flush"
             );
             PRODUCER_SPAWNED_AFTER_DRAIN_TOTAL.inc();
         }
@@ -1478,7 +1478,7 @@ impl WorkspaceHandle {
     /// `{session_id}/turn_{N}/tool_state.json`. No-op when
     /// `CHUTES_BUILD_WORKSPACE_TOOL_STATE_ENABLED` is off, opted out,
     /// there is no upload queue (local/test mode), or the
-    /// session is unknown ÔÇö legacy behavior unchanged.
+    /// session is unknown — legacy behavior unchanged.
     fn spawn_tool_state_upload(&self, session_id: &str, turn_number: u64) {
         if !crate::session::tool_config::tool_state_enabled() {
             return;
@@ -1494,7 +1494,7 @@ impl WorkspaceHandle {
                 phase = "tool_state",
                 outcome = "skipped",
                 skip_reason = "no_upload_queue",
-                "workspace: tool_state upload skipped ÔÇö no upload queue"
+                "workspace: tool_state upload skipped — no upload queue"
             );
             crate::upload::record_upload_outcome("tool_state", "skipped");
             crate::upload::record_upload_skipped("tool_state", "no_upload_queue");
@@ -1508,7 +1508,7 @@ impl WorkspaceHandle {
                 phase = "tool_state",
                 outcome = "skipped",
                 skip_reason = "no_session",
-                "workspace: tool_state upload skipped ÔÇö no bound session"
+                "workspace: tool_state upload skipped — no bound session"
             );
             crate::upload::record_upload_outcome("tool_state", "skipped");
             crate::upload::record_upload_skipped("tool_state", "no_session");
@@ -1552,12 +1552,12 @@ impl WorkspaceHandle {
     /// session-root path `{session_id}/workspace_tool_definitions.json`.
     ///
     /// This is the WORKSPACE-side subset; the shell's `tool_definitions.json`
-    /// remains the source of truth for the full set the model sees ÔÇö consumers
+    /// remains the source of truth for the full set the model sees — consumers
     /// union the two on `session_id`. Ordering is best-effort: the bind
     /// emission bypasses the 5s debounce (so it can't suppress the immediate
     /// post-bind `ToolsChanged` re-emit), and queue dispatch has no per-path
     /// ordering, so a stale baseline-only write may rarely clobber a fresher
-    /// baseline+MCP snapshot ÔÇö accepted as telemetry-only.
+    /// baseline+MCP snapshot — accepted as telemetry-only.
     ///
     /// No-op when the `CHUTES_BUILD_WORKSPACE_TOOL_DEFS_ENABLED` flag is off, no upload
     /// queue is wired, or the session is unknown.
@@ -1611,8 +1611,8 @@ impl WorkspaceHandle {
     /// `phase*_budget` helpers). Shared by the SIGTERM and server-evict triggers so
     /// they can't diverge.
     ///
-    /// The preStop drain marker is (re)written at every phase boundary ÔÇö not
-    /// just once at the start ÔÇö with the live total of outstanding durability
+    /// The preStop drain marker is (re)written at every phase boundary — not
+    /// just once at the start — with the live total of outstanding durability
     /// work: active tool calls + background tasks (phase 1), in-flight artifact
     /// producers that have not yet enqueued (phase 1.5), and queued uploads
     /// (phase 2). This keeps a preStop hook from reading `0` while a tool call
@@ -1620,7 +1620,7 @@ impl WorkspaceHandle {
     /// have yet to flush newly-produced work.
     ///
     /// Returns that same outstanding total after the deadline, so `0` means a
-    /// fully clean drain ÔÇö consistent with the final marker and
+    /// fully clean drain — consistent with the final marker and
     /// [`DrainOutcome::Full`]; a wedged producer or tool call keeps it non-zero.
     pub async fn two_phase_drain(
         &self,
@@ -1658,7 +1658,7 @@ impl WorkspaceHandle {
         if !tools_idle {
             tracing::warn!(
                 active = tracker.total_active(),
-                "drain phase 1 deadline exceeded ÔÇö tool calls still in flight"
+                "drain phase 1 deadline exceeded — tool calls still in flight"
             );
         }
         write_draining_marker(&drain_file, self.outstanding_drain_work());
@@ -1670,7 +1670,7 @@ impl WorkspaceHandle {
         if !producers_done {
             tracing::warn!(
                 producers = self.shared.producer_tasks.len(),
-                "drain phase 1.5 deadline exceeded ÔÇö artifact producers still in flight"
+                "drain phase 1.5 deadline exceeded — artifact producers still in flight"
             );
         }
         write_draining_marker(&drain_file, self.outstanding_drain_work());
@@ -1730,7 +1730,7 @@ impl WorkspaceHandle {
     }
     /// Bookkeeping for a cancelled in-flight tool call: marks it as
     /// completed in the activity tracker. Does **not** abort execution
-    /// of the tool ÔÇö that requires `CancellationToken` plumbing (future work).
+    /// of the tool — that requires `CancellationToken` plumbing (future work).
     pub fn cancel_tool_call(&self, session_id: &str, call_id: &str) {
         self.shared.activity_tracker.tool_call_completed(
             call_id,
@@ -1749,7 +1749,7 @@ impl WorkspaceHandle {
         tracing::info!(%session_id, count, "cancel_all_tool_calls: marked all as completed");
     }
     /// Clean up workspace state for a session that has ended.
-    /// Does **not** drop the session ÔÇö that is handled by the server's
+    /// Does **not** drop the session — that is handled by the server's
     /// `unbind_session` lifecycle.
     pub fn on_session_ended(&self, session_id: &str) {
         self.shared.activity_tracker.session_ended(session_id);
@@ -2543,7 +2543,7 @@ impl WorkspaceHandle {
     /// reclassifications does not churn the file. Returns `None` (no task, no
     /// broadcast subscriber) when the feature flag is off; exits when the
     /// broadcast channel closes. The returned handle is tracked on `HubHandle`
-    /// so shutdown aborts it ÔÇö a reconnect must not stack a second subscriber.
+    /// so shutdown aborts it — a reconnect must not stack a second subscriber.
     fn spawn_tool_definitions_event_forwarder(&self) -> Option<tokio::task::JoinHandle<()>> {
         if !self.shared.tool_defs_enabled {
             return None;
@@ -2577,14 +2577,14 @@ impl WorkspaceHandle {
     /// Post-creation session setup (browser service seeding, etc.).
     ///
     /// When the optional browser backend is enabled, seeds a fresh per-session `BrowserService`
-    /// into the toolset unless one is already present (idempotent ÔÇö safe
+    /// into the toolset unless one is already present (idempotent — safe
     /// against double-finalize on concurrent on-demand session creation).
     /// Toolset rebuilds carry the handle forward via
     /// [`WorkspaceSession::replace_carrying_browser_service`](crate::session::WorkspaceSession::replace_carrying_browser_service).
     ///
     /// Holds the session's `update_lock` for the whole read-check-insert so
     /// it cannot interleave with a concurrent toolset rebuild (which swaps
-    /// in a fresh `FinalizedToolset` under the same lock) ÔÇö otherwise the
+    /// in a fresh `FinalizedToolset` under the same lock) — otherwise the
     /// seed could land in a just-replaced, stale toolset and the live one
     /// would miss the browser service.
     ///
@@ -3242,21 +3242,21 @@ impl WorkspaceHandle {
                             if bind_config.rpc_only {
                                 tracing::info!(
                                     session_id = %sid_str,
-                                    "session.bind: rpc_only bind with no toolset ÔÇö \
+                                    "session.bind: rpc_only bind with no toolset — \
                                      failing closed with an empty toolset"
                                 );
                             } else {
                                 tracing::warn!(
                                     session_id = %sid_str,
                                     "session.bind: no explicit tool configuration passed and this \
-                                     workspace requires one ÔÇö failing closed with an empty toolset"
+                                     workspace requires one — failing closed with an empty toolset"
                                 );
                             }
                             resolve_zero_reason = Some("missing_tool_config");
                             resolve_error = Some(
                                 format!(
                                 "missing_tool_config: no usable explicit tool configuration \
-                                 on session.bind (absent, or dropped as malformed ÔÇö see \
+                                 on session.bind (absent, or dropped as malformed — see \
                                  server logs) and this workspace requires one (presets are \
                                  not supported; server version {})",
                                 xai_grok_version::VERSION
@@ -3267,7 +3267,7 @@ impl WorkspaceHandle {
                         crate::config::ResolvedToolset::InvalidToolConfig(err) => {
                             tracing::warn!(
                                 session_id = %sid_str, error = %err,
-                                "session.bind: invalid tool config entry ÔÇö failing closed with an empty toolset"
+                                "session.bind: invalid tool config entry — failing closed with an empty toolset"
                             );
                             resolve_zero_reason = Some("invalid_tool_config");
                             resolve_error = Some(
@@ -3516,7 +3516,7 @@ impl WorkspaceHandle {
     /// tool changes.
     pub async fn connect_hub(&self) -> WorkspaceResult<()> {
         use crate::hub::{HubHandle, HubWsTiming, apply_tools_changed, hub_result};
-        tracing::info!("WorkspaceHandle::connect_hub ÔÇö starting");
+        tracing::info!("WorkspaceHandle::connect_hub — starting");
         let connect_hub_started = std::time::Instant::now();
         let hub_config = match &self.shared.hub_config {
             Some(c) => {
@@ -3525,7 +3525,7 @@ impl WorkspaceHandle {
                 cfg
             }
             None => {
-                tracing::info!("WorkspaceHandle::connect_hub ÔÇö no hub config, skipping");
+                tracing::info!("WorkspaceHandle::connect_hub — no hub config, skipping");
                 return Ok(());
             }
         };
@@ -3533,7 +3533,7 @@ impl WorkspaceHandle {
         if hub_guard.is_some() {
             return Ok(());
         }
-        tracing::info!(url = %hub_config.url, "WorkspaceHandle::connect_hub ÔÇö connecting to hub");
+        tracing::info!(url = %hub_config.url, "WorkspaceHandle::connect_hub — connecting to hub");
         let catalog_started = std::time::Instant::now();
         let catalog_result = (|| -> WorkspaceResult<_> {
             let session_env = Arc::new(std::collections::HashMap::new());
@@ -3614,7 +3614,7 @@ impl WorkspaceHandle {
             tool_catalog_secs,
             hub_ws_connect_secs,
             connect_hub_secs,
-            "WorkspaceHandle::connect_hub ÔÇö connected, starting server + listeners"
+            "WorkspaceHandle::connect_hub — connected, starting server + listeners"
         );
         let (activity_notify_handle, activity_notify_rx) =
             xai_grok_tools::notification::types::ToolNotificationHandle::channel();
@@ -3964,7 +3964,7 @@ pub(crate) fn apply_background_task_notification(
         _ => {}
     }
 }
-/// Tracker-only drain of the session tool-notification stream ÔÇö not a network
+/// Tracker-only drain of the session tool-notification stream — not a network
 /// send, so the hibernation decrement isn't delayed by send backoff and
 /// notifications aren't misattributed across sessions.
 pub(crate) async fn run_activity_feed(
@@ -3982,7 +3982,7 @@ fn sha256_hex(data: &[u8]) -> String {
     use sha2::Digest;
     format!("{:x}", sha2::Sha256::digest(data))
 }
-/// What triggered a [`WorkspaceHandle::two_phase_drain`] ÔÇö the metric label.
+/// What triggered a [`WorkspaceHandle::two_phase_drain`] — the metric label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrainReason {
     /// Process received SIGTERM / Ctrl-C (standalone `workspace_server`).
@@ -3999,7 +3999,7 @@ impl DrainReason {
         }
     }
 }
-/// Terminal classification of a two-phase drain ÔÇö the metric label.
+/// Terminal classification of a two-phase drain — the metric label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrainOutcome {
     /// Tools, producers, and the upload queue all finished within budget.
@@ -4053,7 +4053,7 @@ async fn wait_for_producers_idle(
 /// clean (`Full`). `producers_unfinished` is the final producer count after
 /// phase 2 (a producer can be spawned *during* phase 2, after `producers_done`
 /// was latched in phase 1.5); it is checked so `Full` and the drain marker
-/// agree ÔÇö `Full` requires that no producer work remains, matching the marker /
+/// agree — `Full` requires that no producer work remains, matching the marker /
 /// return total (active tool calls + producers + queue), which is `0` only when
 /// `tools_idle`, no producers remain, and the queue is empty.
 fn classify_drain_outcome(
@@ -4312,7 +4312,7 @@ pub async fn connect_local_workspace(
     connect_result?;
     Ok(ws_handle)
 }
-/// Resolve `$CHUTES_BUILD_WORKSPACE_HOME` ÔÇö the workspace-owned on-disk state root.
+/// Resolve `$CHUTES_BUILD_WORKSPACE_HOME` — the workspace-owned on-disk state root.
 ///
 /// Precedence:
 /// 1. `$CHUTES_BUILD_WORKSPACE_HOME` (operator override).
@@ -4369,7 +4369,7 @@ fn bundled_allowlist_ignore_dirs(dir: &str, allowlist: Option<&str>) -> Vec<Stri
     dirs
 }
 /// Whether per-session `events.jsonl` recording is enabled
-/// (`CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED=true`). Any other value ÔÇö including unset ÔÇö
+/// (`CHUTES_BUILD_WORKSPACE_EVENTS_ENABLED=true`). Any other value — including unset —
 /// keeps the legacy behaviour: [`WorkspaceShared::session_event_writer`] hands
 /// back [`EventWriter::noop()`](xai_grok_session_events::EventWriter::noop)
 /// and no `events.jsonl` is ever opened.
@@ -4518,7 +4518,7 @@ fn decode_cancellation_category(s: Option<&str>) -> Option<CancellationCategory>
 }
 /// Await both per-phase enqueue handles and reduce them to the wire ack triple
 /// `(status, artifact_count, error_message)`. No handles at all means nothing
-/// is on disk ÔåÆ `Skipped` with `no_handle_skip_reason` as the diagnostic.
+/// is on disk → `Skipped` with `no_handle_skip_reason` as the diagnostic.
 async fn resolve_after_turn_ack(
     before_handle: Option<tokio::task::JoinHandle<EnqueueOutcome>>,
     after_handle: Option<tokio::task::JoinHandle<EnqueueOutcome>>,
@@ -4540,7 +4540,7 @@ async fn resolve_after_turn_ack(
 }
 /// Await one enqueue handle under a watchdog, mapping every failure mode
 /// (missing handle, join error, timeout) to [`EnqueueOutcome::Failed`]. On
-/// timeout the task is detached, not aborted ÔÇö we only stop blocking the ack.
+/// timeout the task is detached, not aborted — we only stop blocking the ack.
 async fn await_enqueue_outcome(
     handle: Option<tokio::task::JoinHandle<EnqueueOutcome>>,
     watchdog: std::time::Duration,
@@ -4586,8 +4586,8 @@ fn reduce_enqueue_outcomes(
     }
 }
 /// Per-process ephemeral workspace home for handles constructed without a
-/// backing upload queue (tests, local mode). Never the real Chutes Build home ÔÇö
-/// only [`connect_local_workspace`] resolves `$CHUTES_BUILD_WORKSPACE_HOME` ÔÇö so the
+/// backing upload queue (tests, local mode). Never the real Chutes Build home —
+/// only [`connect_local_workspace`] resolves `$CHUTES_BUILD_WORKSPACE_HOME` — so the
 /// queue-less default path can never collide with a real workspace's state dir.
 fn ephemeral_workspace_home() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("grok-workspace-ephemeral-{}", std::process::id()))
@@ -4774,7 +4774,7 @@ impl WorkspaceHandle {
     /// Create a local-only [`ToolHarness`] backed by this workspace's
     /// session toolset.
     ///
-    /// Tools are dispatched in-process via a [`LocalRegistry`] ÔÇö no hub
+    /// Tools are dispatched in-process via a [`LocalRegistry`] — no hub
     /// connection needed. Each tool is resolved dynamically from the
     /// session's live [`FinalizedToolset`] at call time, so tool config
     /// hot-reloads (via `update_tool_config()`) take effect automatically.

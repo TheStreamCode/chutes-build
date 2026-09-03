@@ -196,16 +196,16 @@ fn split_qualified_name_works() {
 fn search_underscore_joined_identifier_components() {
     let tools = vec![
         ToolMetadata {
-            qualified_name: "grok_com_chronosphere__query_prometheus_range".into(),
-            server_name: "grok_com_chronosphere".into(),
+            qualified_name: "chutes_com_chronosphere__query_prometheus_range".into(),
+            server_name: "chutes_com_chronosphere".into(),
             tool_name: "query_prometheus_range".into(),
             description: "Run a range query".into(),
             parameters: vec!["start".into(), "end".into()],
             input_schema: serde_json::json!({}),
         },
         ToolMetadata {
-            qualified_name: "grok_com_chronosphere__list_metrics".into(),
-            server_name: "grok_com_chronosphere".into(),
+            qualified_name: "chutes_com_chronosphere__list_metrics".into(),
+            server_name: "chutes_com_chronosphere".into(),
             tool_name: "list_metrics".into(),
             description: "List available metrics".into(),
             parameters: vec![],
@@ -224,14 +224,14 @@ fn search_underscore_joined_identifier_components() {
     let snap = index.search_snapshot("chronosphere", 5);
     assert_eq!(snap.results.len(), 2);
     let names: Vec<&str> = snap.results.iter().map(|r| r.tool_name.as_str()).collect();
-    assert!(names.contains(&"grok_com_chronosphere__query_prometheus_range"));
-    assert!(names.contains(&"grok_com_chronosphere__list_metrics"));
+    assert!(names.contains(&"chutes_com_chronosphere__query_prometheus_range"));
+    assert!(names.contains(&"chutes_com_chronosphere__list_metrics"));
 
     let snap_exact = index.search_snapshot("query_prometheus_range", 3);
     assert_eq!(snap_exact.results.len(), 1);
     assert_eq!(
         snap_exact.results[0].tool_name,
-        "grok_com_chronosphere__query_prometheus_range"
+        "chutes_com_chronosphere__query_prometheus_range"
     );
 }
 
@@ -907,8 +907,8 @@ fn split_numbers_in_identifiers() {
 #[test]
 fn split_mixed_formats() {
     assert_eq!(
-        split_identifier("grok_com_slack__slack_send_message"),
-        vec!["grok", "com", "slack", "slack", "send", "message"]
+        split_identifier("chutes_com_slack__slack_send_message"),
+        vec!["chutes", "com", "slack", "slack", "send", "message"]
     );
 }
 
@@ -987,7 +987,7 @@ fn normalize_hyphenated_english_harmless() {
 //
 //   Server formats:  simple        ("linear")
 //                    kebab-case    ("grafana-ai")
-//                    snake_case    ("grok_com_slack")
+//                    snake_case    ("chutes_com_slack")
 //
 //   Tool formats:    snake_case    ("save_issue")
 //                    PascalCase    ("SearchDashboards")
@@ -1028,8 +1028,8 @@ fn mcp_format_tools() -> Vec<ToolMetadata> {
         },
         // snake_case server + snake_case tool
         ToolMetadata {
-            qualified_name: "grok_com_slack__slack_send_message".into(),
-            server_name: "grok_com_slack".into(),
+            qualified_name: "chutes_com_slack__slack_send_message".into(),
+            server_name: "chutes_com_slack".into(),
             tool_name: "slack_send_message".into(),
             description: "Send a message in a Slack channel".into(),
             parameters: vec!["channel_id".into(), "text".into()],
@@ -1037,8 +1037,8 @@ fn mcp_format_tools() -> Vec<ToolMetadata> {
         },
         // snake_case server + PascalCase tool
         ToolMetadata {
-            qualified_name: "grok_com_chronosphere__QueryPrometheusRange".into(),
-            server_name: "grok_com_chronosphere".into(),
+            qualified_name: "chutes_com_chronosphere__QueryPrometheusRange".into(),
+            server_name: "chutes_com_chronosphere".into(),
             tool_name: "QueryPrometheusRange".into(),
             description: "Run a Prometheus range query".into(),
             parameters: vec!["query".into(), "start".into(), "end".into()],
@@ -1116,11 +1116,11 @@ fn fmt_exact_kebab_pascal() {
 fn fmt_exact_snake_server_snake_tool() {
     // snake_case__snake_case
     let index = Bm25ToolSearchIndex::new(make_snapshot(mcp_format_tools()));
-    let snap = index.search_snapshot("grok_com_slack__slack_send_message", 5);
+    let snap = index.search_snapshot("chutes_com_slack__slack_send_message", 5);
     assert_eq!(snap.results.len(), 1);
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_slack__slack_send_message"
+        "chutes_com_slack__slack_send_message"
     );
 }
 
@@ -1128,11 +1128,11 @@ fn fmt_exact_snake_server_snake_tool() {
 fn fmt_exact_snake_server_pascal_tool() {
     // snake_case__PascalCase
     let index = Bm25ToolSearchIndex::new(make_snapshot(mcp_format_tools()));
-    let snap = index.search_snapshot("grok_com_chronosphere__QueryPrometheusRange", 5);
+    let snap = index.search_snapshot("chutes_com_chronosphere__QueryPrometheusRange", 5);
     assert_eq!(snap.results.len(), 1);
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_chronosphere__QueryPrometheusRange"
+        "chutes_com_chronosphere__QueryPrometheusRange"
     );
 }
 
@@ -1227,11 +1227,11 @@ fn fmt_case_insensitive_qualified_kebab_pascal() {
 #[test]
 fn fmt_case_insensitive_qualified_snake_snake() {
     let index = Bm25ToolSearchIndex::new(make_snapshot(mcp_format_tools()));
-    let snap = index.search_snapshot("GROK_COM_SLACK__SLACK_SEND_MESSAGE", 5);
+    let snap = index.search_snapshot("CHUTES_COM_SLACK__SLACK_SEND_MESSAGE", 5);
     assert_eq!(snap.results.len(), 1);
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_slack__slack_send_message"
+        "chutes_com_slack__slack_send_message"
     );
 }
 
@@ -1293,10 +1293,10 @@ fn fmt_kebab_server_only_falls_through() {
 #[test]
 fn fmt_snake_server_only_falls_through() {
     let index = Bm25ToolSearchIndex::new(make_snapshot(mcp_format_tools()));
-    let snap = index.search_snapshot("grok_com_slack", 5);
+    let snap = index.search_snapshot("chutes_com_slack", 5);
     for r in &snap.results {
         assert_ne!(
-            r.tool_name, "grok_com_slack",
+            r.tool_name, "chutes_com_slack",
             "should not match a bare server name as a tool"
         );
     }
@@ -1347,122 +1347,122 @@ fn production_haystack() -> Vec<ToolMetadata> {
     };
 
     vec![
-        // ── grok_com_slack (17 tools) ───────────────────────────
+        // ── chutes_com_slack (17 tools) ───────────────────────────
         tool(
-            "grok_com_slack__slack_create_canvas",
-            "grok_com_slack",
+            "chutes_com_slack__slack_create_canvas",
+            "chutes_com_slack",
             "slack_create_canvas",
             "Create a new Slack canvas in a channel",
             &["channel_id", "content"],
         ),
         tool(
-            "grok_com_slack__slack_get_reactions",
-            "grok_com_slack",
+            "chutes_com_slack__slack_get_reactions",
+            "chutes_com_slack",
             "slack_get_reactions",
             "Retrieves all reactions (emoji) on a specific Slack message",
             &["channel_id", "message_ts"],
         ),
         tool(
-            "grok_com_slack__slack_list_channel_members",
-            "grok_com_slack",
+            "chutes_com_slack__slack_list_channel_members",
+            "chutes_com_slack",
             "slack_list_channel_members",
             "List members of a Slack channel",
             &["channel_id"],
         ),
         tool(
-            "grok_com_slack__slack_read_canvas",
-            "grok_com_slack",
+            "chutes_com_slack__slack_read_canvas",
+            "chutes_com_slack",
             "slack_read_canvas",
             "Read a Slack canvas by ID",
             &["canvas_id"],
         ),
         tool(
-            "grok_com_slack__slack_read_channel",
-            "grok_com_slack",
+            "chutes_com_slack__slack_read_channel",
+            "chutes_com_slack",
             "slack_read_channel",
             "Reads messages from a Slack channel in reverse chronological order",
             &["channel_id", "limit"],
         ),
         tool(
-            "grok_com_slack__slack_read_file",
-            "grok_com_slack",
+            "chutes_com_slack__slack_read_file",
+            "chutes_com_slack",
             "slack_read_file",
             "Reads a Slack file's content by file ID",
             &["file_id"],
         ),
         tool(
-            "grok_com_slack__slack_read_thread",
-            "grok_com_slack",
+            "chutes_com_slack__slack_read_thread",
+            "chutes_com_slack",
             "slack_read_thread",
             "Reads messages from a specific Slack thread (parent message + all replies)",
             &["channel_id", "message_ts"],
         ),
         tool(
-            "grok_com_slack__slack_read_user_profile",
-            "grok_com_slack",
+            "chutes_com_slack__slack_read_user_profile",
+            "chutes_com_slack",
             "slack_read_user_profile",
             "Read a Slack user's profile information",
             &["user_id"],
         ),
         tool(
-            "grok_com_slack__slack_schedule_message",
-            "grok_com_slack",
+            "chutes_com_slack__slack_schedule_message",
+            "chutes_com_slack",
             "slack_schedule_message",
             "Schedule a message to be sent at a specific time",
             &["channel_id", "text", "post_at"],
         ),
         tool(
-            "grok_com_slack__slack_search_channels",
-            "grok_com_slack",
+            "chutes_com_slack__slack_search_channels",
+            "chutes_com_slack",
             "slack_search_channels",
             "Search for Slack channels by name or topic",
             &["query"],
         ),
         tool(
-            "grok_com_slack__slack_search_emojis",
-            "grok_com_slack",
+            "chutes_com_slack__slack_search_emojis",
+            "chutes_com_slack",
             "slack_search_emojis",
             "Search for custom emoji in the Slack workspace",
             &["query"],
         ),
         tool(
-            "grok_com_slack__slack_search_public",
-            "grok_com_slack",
+            "chutes_com_slack__slack_search_public",
+            "chutes_com_slack",
             "slack_search_public",
             "Searches for messages and files in public Slack channels only",
             &["query", "sort", "sort_dir"],
         ),
         tool(
-            "grok_com_slack__slack_search_public_and_private",
-            "grok_com_slack",
+            "chutes_com_slack__slack_search_public_and_private",
+            "chutes_com_slack",
             "slack_search_public_and_private",
             "Searches for messages and files in both public and private Slack channels",
             &["query", "sort", "sort_dir"],
         ),
         tool(
-            "grok_com_slack__slack_search_users",
-            "grok_com_slack",
+            "chutes_com_slack__slack_search_users",
+            "chutes_com_slack",
             "slack_search_users",
             "Search for users in the Slack workspace by name or email",
             &["query"],
         ),
         tool(
-            "grok_com_slack__slack_send_message",
-            "grok_com_slack",
+            "chutes_com_slack__slack_send_message",
+            "chutes_com_slack",
             "slack_send_message",
             "Send a message in a Slack channel or thread",
             &["channel_id", "text", "thread_ts"],
         ),
         tool(
-            "grok_com_slack__slack_send_message_draft",
-            "grok_com_slack",
+            "chutes_com_slack__slack_send_message_draft",
+            "chutes_com_slack",
             "slack_send_message_draft",
             "Create a draft message for user review before sending",
             &["channel_id", "text"],
         ),
         tool(
-            "grok_com_slack__slack_update_canvas",
-            "grok_com_slack",
+            "chutes_com_slack__slack_update_canvas",
+            "chutes_com_slack",
             "slack_update_canvas",
             "Update the content of an existing Slack canvas",
             &["canvas_id", "content"],
@@ -1759,11 +1759,11 @@ fn assert_top_n(snap: &SearchSnapshot, expected_tool: &str, n: usize, query: &st
 #[test]
 fn haystack_exact_qualified_name() {
     let index = Bm25ToolSearchIndex::new(make_snapshot(production_haystack()));
-    let snap = index.search_snapshot("grok_com_slack__slack_search_public", 5);
+    let snap = index.search_snapshot("chutes_com_slack__slack_search_public", 5);
     assert_eq!(snap.results.len(), 1);
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_slack__slack_search_public"
+        "chutes_com_slack__slack_search_public"
     );
 }
 
@@ -1774,7 +1774,7 @@ fn haystack_exact_bare_name() {
     assert_eq!(snap.results.len(), 1);
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_slack__slack_search_public"
+        "chutes_com_slack__slack_search_public"
     );
 }
 
@@ -1803,7 +1803,7 @@ fn haystack_bm25_search_slack_public() {
     let snap = index.search_snapshot("search public slack messages", 5);
     assert_top_n(
         &snap,
-        "grok_com_slack__slack_search_public",
+        "chutes_com_slack__slack_search_public",
         3,
         "search public slack messages",
     );
@@ -1815,7 +1815,7 @@ fn haystack_bm25_send_slack_message() {
     let snap = index.search_snapshot("send a message in slack", 5);
     assert_top_n(
         &snap,
-        "grok_com_slack__slack_send_message",
+        "chutes_com_slack__slack_send_message",
         3,
         "send a message in slack",
     );
@@ -1827,7 +1827,7 @@ fn haystack_bm25_read_slack_thread() {
     let snap = index.search_snapshot("read thread replies slack", 5);
     assert_top_n(
         &snap,
-        "grok_com_slack__slack_read_thread",
+        "chutes_com_slack__slack_read_thread",
         3,
         "read thread replies slack",
     );
@@ -1917,10 +1917,10 @@ fn haystack_disambiguate_search_public_vs_private() {
     let names: Vec<&str> = snap.results.iter().map(|r| r.tool_name.as_str()).collect();
     let pub_pos = names
         .iter()
-        .position(|n| *n == "grok_com_slack__slack_search_public");
+        .position(|n| *n == "chutes_com_slack__slack_search_public");
     let priv_pos = names
         .iter()
-        .position(|n| *n == "grok_com_slack__slack_search_public_and_private");
+        .position(|n| *n == "chutes_com_slack__slack_search_public_and_private");
     assert!(
         pub_pos.is_some(),
         "slack_search_public should appear for 'search public channels only', got {names:?}"
@@ -1981,7 +1981,7 @@ fn haystack_partial_snake_case_query() {
     let snap = index.search_snapshot("search_public", 5);
     assert_top_n(
         &snap,
-        "grok_com_slack__slack_search_public",
+        "chutes_com_slack__slack_search_public",
         3,
         "search_public",
     );
@@ -2008,7 +2008,7 @@ fn haystack_qualified_name_typo_server() {
     let snap = index.search_snapshot("slack__slack_read_thread", 5);
     assert_top_n(
         &snap,
-        "grok_com_slack__slack_read_thread",
+        "chutes_com_slack__slack_read_thread",
         3,
         "slack__slack_read_thread",
     );
@@ -2022,7 +2022,7 @@ fn haystack_underscore_joined_natural_query() {
     // Exact match on bare tool name catches this
     assert_eq!(
         snap.results[0].tool_name,
-        "grok_com_slack__slack_send_message"
+        "chutes_com_slack__slack_send_message"
     );
 }
 
@@ -2158,12 +2158,12 @@ fn score_comparison_query_normalization() {
             "grafana-ai__SearchDashboards",
         ),
         // partial snake_case — "search_public" adds "search public"
-        ("search_public", "grok_com_slack__slack_search_public"),
+        ("search_public", "chutes_com_slack__slack_search_public"),
         // wrong server prefix — "slack__slack_read_thread" adds
         // "slack slack read thread"
         (
             "slack__slack_read_thread",
-            "grok_com_slack__slack_read_thread",
+            "chutes_com_slack__slack_read_thread",
         ),
         // kebab query — "notion-create" adds "notion create"
         ("notion-create", "notion__notion-create-pages"),
@@ -2200,7 +2200,7 @@ fn score_comparison_combined_best() {
         ),
         (
             "slack__slack_read_thread",
-            "grok_com_slack__slack_read_thread",
+            "chutes_com_slack__slack_read_thread",
         ),
         ("notion-create", "notion__notion-create-pages"),
     ];

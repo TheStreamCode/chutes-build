@@ -4,14 +4,14 @@
 //! garbage body, and asserts the same invariant as the Rust blitz:
 //!
 //! > After any install attempt, `$BIN_DIR/grok` resolves to a binary that runs,
-//! > OR is still the previous-good binary ÔÇö never a partial/garbage binary.
+//! > OR is still the previous-good binary — never a partial/garbage binary.
 //!
 //! Also covers shell-rc rewrite: stowed/symlinked `~/.bashrc` etc. must survive
 //! reinstall without being replaced by a plain file.
 //!
 //! The installer lives in the sibling `xai-grok-pager` crate; it is resolved by
 //! relative path. If it cannot be found (e.g. a sandbox that does not vendor it)
-//! the test skips rather than fail ÔÇö under the repo's `cargo nextest` workflow
+//! the test skips rather than fail — under the repo's `cargo nextest` workflow
 //! the path resolves and the installer is exercised end to end.
 
 #![cfg(unix)]
@@ -190,7 +190,7 @@ enum RcLayout {
     Plain,
     StowAbsolute,
     StowRelative,
-    /// `$root/user/.bashrc` ÔåÆ `../packages/bash/bashrc` (physical relative arm).
+    /// `$root/user/.bashrc` → `../packages/bash/bashrc` (physical relative arm).
     StowRelativeDotDot,
 }
 

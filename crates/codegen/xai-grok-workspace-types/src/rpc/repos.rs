@@ -2,7 +2,7 @@
 //! in-sandbox manifest contract (`{workspace}/.chutes-build/repos.json`).
 //!
 //! The sandbox provisioner writes this manifest; the workspace list op
-//! reads it. Field names are the frontend/integration API ÔÇö add optional
+//! reads it. Field names are the frontend/integration API — add optional
 //! fields with `#[serde(default)]` rather than renaming existing ones.
 
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub const REPOS_MANIFEST_RELATIVE_PATH: &str = ".chutes-build/repos.json";
 /// Current on-disk / wire manifest version.
 pub const REPOS_MANIFEST_VERSION: u32 = 1;
 
-/// `workspace.repos_list` ÔÇö list repos materialized into this workspace.
+/// `workspace.repos_list` — list repos materialized into this workspace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReposListReq {}
 

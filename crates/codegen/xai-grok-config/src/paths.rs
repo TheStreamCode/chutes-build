@@ -144,13 +144,13 @@ pub fn create_dir_all_owner_only(dir: &std::path::Path) -> std::io::Result<()> {
 /// Build the CWD-level session directory path:
 /// `grok_home()/sessions/{encode_cwd_dirname(cwd)}`.
 ///
-/// Does **not** create the directory on disk ÔÇö use [`ensure_sessions_cwd_dir`]
+/// Does **not** create the directory on disk — use [`ensure_sessions_cwd_dir`]
 /// when the directory must exist.
 pub fn sessions_cwd_dir(cwd: &str) -> PathBuf {
     sessions_cwd_dir_in(&grok_home(), cwd)
 }
 
-/// [`sessions_cwd_dir`] with an injectable Chutes Build home ÔÇö the single source of
+/// [`sessions_cwd_dir`] with an injectable Chutes Build home — the single source of
 /// truth for the `sessions/<encoded-cwd>` path shape.
 pub fn sessions_cwd_dir_in(grok_home: &std::path::Path, cwd: &str) -> PathBuf {
     grok_home.join("sessions").join(encode_cwd_dirname(cwd))
@@ -220,15 +220,15 @@ mod tests {
 
     /// Realistic CWDs that trigger the bug (URL-encoded > 255 bytes).
     const LONG_CWDS: &[&str] = &[
-        "/Users/dev/Documents/ÚûïþÖ║ÒâùÒâ¡Òé©ÒéºÒé»Òâê/µ®ƒÞâ¢Þ┐¢Õèá/ÒâåÒé╣ÒâêþÆ░Õóâ/Òé¢Òâ╝Òé╣Òé│Òâ╝Òâë/main-branch",
-        "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/Úí╣þø«µûçõ╗Â/µÀ▒Õ▒éÕÁîÕÑùþø«Õ¢ò/µø┤µÀ▒Õ▒éµ¼íþÜä/ÕÀÑõ¢£Õî║Õƒƒ/project",
-        "/Users/user/Library/CloudStorage/OneDrive-ÙîÇÝò£Ù»╝ÛÁ¡ÝÜîýé¼/ÝöäÙí£ýáØÝè©/Û░£Ù░£ÝÖÿÛ▓¢/ýåîýèñý¢öÙô£/Ù░▒ýùöÙô£/ýä£Ù╣äýèñ/my-app",
-        "/Users/user/Documents/ÕÀÑõ¢£µûçõ╗ÂÕñ╣/õ║îÚøÂõ║îÕà¡Õ╣┤Úí╣þø«/Õ¡Éþø«Õ¢òõ©Ç/Õ¡Éþø«Õ¢òõ║î/Õ¡Éþø«Õ¢òõ©ë/µ║Éõ╗úþáü/code",
+        "/Users/dev/Documents/開発プロジェクト/機能追加/テスト環境/ソースコード/main-branch",
+        "/Users/user/Library/Mobile Documents/com~apple~CloudDocs/项目文件/深层嵌套目录/更深层次的/工作区域/project",
+        "/Users/user/Library/CloudStorage/OneDrive-대한민국회사/프로젝트/개발환경/소스코드/백엔드/서비스/my-app",
+        "/Users/user/Documents/工作文件夹/二零二六年项目/子目录一/子目录二/子目录三/源代码/code",
     ];
 
     #[test]
     fn long_cwd_uses_hash_fallback_within_name_max() {
-        let long_cwd = format!("/Users/test/{}", "õ©¡".repeat(30));
+        let long_cwd = format!("/Users/test/{}", "中".repeat(30));
         let encoded = encode_cwd_dirname(&long_cwd);
         assert!(encoded.len() <= MAX_DIRNAME_BYTES);
         assert!(!encoded.starts_with("%2F"));
@@ -236,8 +236,8 @@ mod tests {
 
     #[test]
     fn different_long_paths_produce_different_hashes() {
-        let a = format!("/Users/test/{}", "õ©¡".repeat(30));
-        let b = format!("/Users/test/{}", "µùÑ".repeat(30));
+        let a = format!("/Users/test/{}", "中".repeat(30));
+        let b = format!("/Users/test/{}", "日".repeat(30));
         assert_ne!(encode_cwd_dirname(&a), encode_cwd_dirname(&b));
     }
 
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn cwd_file_write_is_idempotent_via_excl() {
         let tmp = TempDir::new().unwrap();
-        let long_cwd = format!("/Users/test/{}", "õ©¡".repeat(30));
+        let long_cwd = format!("/Users/test/{}", "中".repeat(30));
         let dir = tmp.path().join(encode_cwd_dirname(&long_cwd));
         std::fs::create_dir_all(&dir).unwrap();
         let cwd_file = dir.join(".cwd");
@@ -302,7 +302,7 @@ mod tests {
         for cwd in [
             "/Users/foo/project",
             "/tmp",
-            "/Users/user/Documents/project-ÕÉìÕëì",
+            "/Users/user/Documents/project-名前",
         ] {
             let encoded = encode_cwd_dirname(cwd);
             assert_eq!(encoded, urlencoding::encode(cwd).into_owned());
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn set_dir_owner_only_is_best_effort_on_missing_path() {
-        // Must not panic or error ÔÇö chmod failures are intentionally ignored.
+        // Must not panic or error — chmod failures are intentionally ignored.
         set_dir_owner_only(std::path::Path::new("/nonexistent/definitely/not/here"));
     }
 
@@ -402,7 +402,7 @@ mod tests {
     #[cfg(unix)]
     fn ensure_sessions_cwd_dir_hash_encoded_writes_cwd_file_and_owner_only() {
         let home = TempDir::new().unwrap();
-        let long_cwd = format!("/Users/test/{}", "õ©¡".repeat(30));
+        let long_cwd = format!("/Users/test/{}", "中".repeat(30));
         let dir = ensure_sessions_cwd_dir_in(home.path(), &long_cwd).unwrap();
         assert_eq!(unix_mode(&dir), 0o700);
         assert_eq!(std::fs::read_to_string(dir.join(".cwd")).unwrap(), long_cwd);
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn slugify_cjk_produces_empty() {
-        assert_eq!(slugify("µÀ▒Õ▒éþø«Õ¢ò", 40), "");
+        assert_eq!(slugify("深层目录", 40), "");
     }
 
     #[test]

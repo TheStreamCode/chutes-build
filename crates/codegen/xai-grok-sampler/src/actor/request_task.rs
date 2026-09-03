@@ -510,7 +510,7 @@ async fn apply_retry_decision(
         }
         RetryDecision::Fatal(fatal_err) => {
             // Emit only on true budget exhaustion (hit the retry / rate-limit
-            // cap), mirroring `classify_error`'s Fatal conditions ÔÇö NOT on a
+            // cap), mirroring `classify_error`'s Fatal conditions — NOT on a
             // server `x-should-retry: false` or a non-retryable error, which
             // are also Fatal but are not "exhausted".
             let next_attempt = *retry_count + 1;
@@ -762,7 +762,7 @@ async fn drive_l2(
                         };
                     // A content-filtered turn (Anthropic refusal, OpenAI
                     // content_filter stop reason) is legitimately content-less and
-                    // deterministic ÔÇö resampling it would retry-storm.
+                    // deterministic — resampling it would retry-storm.
                     let content_filtered = response.stop_reason
                         == Some(xai_grok_sampling_types::StopReason::ContentFilter);
                     if !content_filtered && let Some(reason) = response.empty_reason() {
@@ -1239,7 +1239,7 @@ mod tests {
         event
     }
 
-    /// Argument-truncated tool calls never execute ÔÇö both salvaging
+    /// Argument-truncated tool calls never execute — both salvaging
     /// policies still fail them.
     #[tokio::test]
     async fn length_policy_truncated_tool_call_arguments_still_fail() {

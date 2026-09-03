@@ -115,7 +115,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
                 // Strip tools that async_openai's rs::Tool can't deserialize
                 // (e.g., xAI-specific "x_search"). Instead of maintaining a
-                // hardcoded allowlist, try deserializing each tool entry ÔÇö
+                // hardcoded allowlist, try deserializing each tool entry —
                 // if it fails, drop it.
                 if let Some(tools) = value
                     .pointer_mut("/response/tools")
@@ -149,7 +149,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
 /// threshold, and `meta.totalTokens` on persisted sessions. Under
 /// server-side multi-turn loops (e.g. `web_search`, `x_search`) the
 /// wire's cumulative total inflates as the loop runs; `context_details`
-/// reports the final turn's prompt + output tokens ÔÇö the real live
+/// reports the final turn's prompt + output tokens — the real live
 /// context the model is sitting in. Billing fields
 /// (`input_tokens`, `output_tokens`, `input_tokens_details.cached_tokens`,
 /// `output_tokens_details.reasoning_tokens`) stay on the cumulative
@@ -160,7 +160,7 @@ fn deserialize_response_event(data: &str) -> Result<rs::ResponseStreamEvent> {
 /// - `response.usage` is `None`,
 /// - `context_details` is absent (older backends / non-loop responses),
 /// - or either of `context_details.{input_tokens, output_tokens}` is
-///   missing ÔÇö we don't guess the missing half.
+///   missing — we don't guess the missing half.
 fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &str) {
     let response = match event {
         rs::ResponseStreamEvent::ResponseCompleted(e) => &mut e.response,
@@ -252,7 +252,7 @@ fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
             } else if s.eq_ignore_ascii_case("false") {
                 Some(false)
             } else {
-                None // unknown value ÔÇö treat as absent
+                None // unknown value — treat as absent
             }
         })
 }
@@ -545,8 +545,8 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
 /// A request builder coupled to the credential state it was built with, so
 /// a 401 arm cannot classify from anything but the build-time capture. The
 /// wire default (`SentCredential::Unknown`, which charges the retry budget)
-/// stays the fail-closed one; only an explicit `sent_bearer: None` ÔÇö a send
-/// the builder provably stamped no credential onto ÔÇö reaches the uncharged
+/// stays the fail-closed one; only an explicit `sent_bearer: None` — a send
+/// the builder provably stamped no credential onto — reaches the uncharged
 /// lane via [`auth_rejected`].
 struct SentRequest {
     builder: reqwest::RequestBuilder,
@@ -735,7 +735,7 @@ impl SamplingClient {
 
     /// POST with default headers, returning the builder coupled to the tail
     /// fragment of the credential actually placed in its headers (`None` =
-    /// no credential) ÔÇö captured at build time because a record-time
+    /// no credential) — captured at build time because a record-time
     /// re-read races with the recovery a 401 triggers.
     ///
     /// A wired bearer_resolver is the sole auth source: a missing live
@@ -794,8 +794,8 @@ impl SamplingClient {
         }
     }
 
-    /// Tail fragment of the credential in `headers` ÔÇö `x-api-key`
-    /// (Messages-API scheme) or `Authorization` ÔÇö per
+    /// Tail fragment of the credential in `headers` — `x-api-key`
+    /// (Messages-API scheme) or `Authorization` — per
     /// [`crate::attribution::BEARER_SUFFIX_LEN`].
     fn sent_fragment_from_headers(headers: &HeaderMap, scheme: &AuthScheme) -> Option<String> {
         let raw = match scheme {
@@ -812,7 +812,7 @@ impl SamplingClient {
 
     /// Best-effort *build-time* view of what the next request would carry
     /// (resolver-authoritative). For request-start diagnostics
-    /// ([`Self::auth_info`]) only ÔÇö 401 attribution must use the fragment
+    /// ([`Self::auth_info`]) only — 401 attribution must use the fragment
     /// captured by [`Self::post`] instead, which cannot race a recovery.
     fn current_sent_bearer_suffix(&self) -> Option<String> {
         if self.bearer_resolver.is_some() {
@@ -1347,7 +1347,7 @@ impl SamplingClient {
     /// - `response.completed` - Final response with all output
     ///
     /// The third tuple element is a per-request doom-loop signal collector,
-    /// `Some` only when `SamplerConfig::doom_loop_recovery` is set ÔÇö the same
+    /// `Some` only when `SamplerConfig::doom_loop_recovery` is set — the same
     /// gate that adds the opt-in `x-grok-doom-loop-check` request header, so
     /// header and parse protection cannot drift apart. It is filled by the
     /// SSE decoder as the server reports triggers and is meant to be handed
@@ -2958,7 +2958,7 @@ mod tests {
         assert!(request.headers().get(AUTHORIZATION).is_none());
     }
 
-    /// The callback receives the `post()`-captured fragment only ÔÇö the
+    /// The callback receives the `post()`-captured fragment only — the
     /// full bearer never crosses the crate boundary.
     #[test]
     fn record_401_attribution_invokes_callback_with_captured_bearer() {
@@ -3148,7 +3148,7 @@ mod tests {
             panic!("expected ResponseCompleted");
         };
         let usage = e.response.usage.expect("usage present");
-        // Billing fields stay cumulative ÔÇö unchanged by context_details.
+        // Billing fields stay cumulative — unchanged by context_details.
         assert_eq!(usage.input_tokens, 6003);
         assert_eq!(usage.output_tokens, 711);
         assert_eq!(usage.input_tokens_details.cached_tokens, 1984);

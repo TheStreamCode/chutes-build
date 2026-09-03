@@ -139,7 +139,7 @@ fn semver_max(a: &str, b: &str) -> Result<String> {
 
 /// Fetch the latest version from npm registry using `npm view`.
 /// For alpha channel, fetches both `@alpha` and `@latest` dist-tags and
-/// returns the semver-greater ÔÇö prevents alpha users getting stuck when a
+/// returns the semver-greater — prevents alpha users getting stuck when a
 /// newer stable ships without updating the alpha dist-tag.
 async fn fetch_npm_version(channel: &str, npm_registry: Option<&str>) -> Result<String> {
     if channel == "alpha" {
@@ -207,7 +207,7 @@ async fn fetch_npm_tag(tag: &str, npm_registry: Option<&str>) -> Result<String> 
 
 /// Fetch the latest version from GitHub Releases using `gh release list`.
 /// For alpha channel, fetches both pre-release and stable-only, returns the
-/// semver-greater ÔÇö `gh release list --limit 1` orders by publication date,
+/// semver-greater — `gh release list --limit 1` orders by publication date,
 /// not semver, so we need both to guarantee correctness.
 #[doc(hidden)]
 pub async fn fetch_gh_release_version(channel: &str) -> Result<String> {
@@ -261,7 +261,7 @@ async fn fetch_gh_release_latest(exclude_pre: bool) -> Result<String> {
 /// Fetch the latest version from a public CLI channel pointer.
 ///
 /// Reads `{base}/{channel}` which contains a plain-text semver string
-/// (e.g. `0.1.181`). No auth required ÔÇö the upstream bucket is public.
+/// (e.g. `0.1.181`). No auth required — the upstream bucket is public.
 ///
 /// For the alpha channel, fetches both `alpha` and `stable` pointers and
 /// returns the semver-greater, matching the behavior of the npm and
@@ -424,11 +424,11 @@ pub async fn write_version_cache(version: &str, stable_version: Option<&str>) {
 
 /// Fetch the latest version for the given installer type and cache it.
 ///
-/// Each installer is fully independent ÔÇö no cross-installer fallback.
+/// Each installer is fully independent — no cross-installer fallback.
 ///
-/// - `"npm"` ÔÇö uses `npm view` against the public registry.
-/// - `"internal"` ÔÇö reads the channel pointer from the public GCS bucket.
-/// - `"gh-release"` ÔÇö uses `gh release list` against GitHub Releases.
+/// - `"npm"` — uses `npm view` against the public registry.
+/// - `"internal"` — reads the channel pointer from the public GCS bucket.
+/// - `"gh-release"` — uses `gh release list` against GitHub Releases.
 pub async fn get_latest_version(installer: &str, config: &UpdateConfig) -> Result<String> {
     let version = fetch_latest_version(installer, config).await?;
     let stable_ptr = try_fetch_stable_pointer().await;
@@ -461,12 +461,12 @@ pub use xai_grok_version::installed as get_installed_grok_version;
 /// never downloaded a second time.
 ///
 /// Returns `None` when there is no parseable managed symlink (Windows
-/// copy-based installs, dev builds) or when the symlink is DANGLING ÔÇö a
+/// copy-based installs, dev builds) or when the symlink is DANGLING — a
 /// link whose target binary was deleted (e.g. manual `~/.chutes-build/downloads`
 /// cleanup) must not report an installed version, or every updater would
 /// claim "already up to date" forever while no runnable binary exists.
 /// NOTE: the symlink existing does not prove the *active installer*
-/// maintains it ÔÇö npm manages its own global install and a leftover symlink
+/// maintains it — npm manages its own global install and a leftover symlink
 /// from a previous internal install would lie about the npm install's
 /// version. Callers must gate on the installer (see
 /// `disk_version_for_installer` in `auto_update`).
@@ -489,7 +489,7 @@ pub fn installed_on_disk_version() -> Option<String> {
 /// Extract the `<version>` portion of a versioned binary file name.
 ///
 /// Handles the internal layout (`grok-0.1.150-macos-aarch64`, including
-/// pre-releases: `grok-0.1.150-alpha.1-linux-x86_64` ÔåÆ `0.1.150-alpha.1`)
+/// pre-releases: `grok-0.1.150-alpha.1-linux-x86_64` → `0.1.150-alpha.1`)
 /// and the npm layout without a platform suffix (`grok-0.1.150`,
 /// `grok-0.1.150-alpha.1`): everything between the `{bin_prefix}-` prefix
 /// and the first platform-OS component is the version, validated as semver
@@ -497,7 +497,7 @@ pub fn installed_on_disk_version() -> Option<String> {
 /// `grok`) return `None` instead of garbage.
 ///
 /// Shared by the disk-version probe above and `cleanup_old_downloads` in
-/// `auto_update` ÔÇö keep it the single place that understands this naming.
+/// `auto_update` — keep it the single place that understands this naming.
 pub(crate) fn version_from_versioned_binary_name(name: &str, bin_prefix: &str) -> Option<String> {
     const PLATFORM_OS: &[&str] = &["macos", "linux", "darwin", "windows"];
     let suffix = name.strip_prefix(bin_prefix)?.strip_prefix('-')?;
@@ -519,7 +519,7 @@ pub(crate) fn version_from_versioned_binary_name(name: &str, bin_prefix: &str) -
 /// until the next successful fetch).
 ///
 /// The entire operation is capped at 500 ms. The stable pointer is only used
-/// to derive the `[alpha]`/`[stable]` channel label ÔÇö it is never required
+/// to derive the `[alpha]`/`[stable]` channel label — it is never required
 /// for correctness. On slow or unreachable networks the timeout fires and we
 /// return `None`; the label will populate on the next successful TTL check
 /// (~30 min). This keeps startup and post-install paths fast.
@@ -642,9 +642,9 @@ mod tests {
             ("grok-0.2.46-darwin-arm64", Some("0.2.46")),
             ("grok-0.1.220-linux-x86_64", Some("0.1.220")),
             ("grok-0.2.5-windows-x86_64.exe", Some("0.2.5")),
-            // Pre-releases must round-trip whole ÔÇö truncating to "0.1.220"
+            // Pre-releases must round-trip whole — truncating to "0.1.220"
             // would make an alpha install masquerade as the release and
-            // mask alpha ÔåÆ stable updates.
+            // mask alpha → stable updates.
             ("grok-0.1.220-alpha.4-linux-x86_64", Some("0.1.220-alpha.4")),
             ("grok-0.1.220-alpha.4", Some("0.1.220-alpha.4")), // npm layout
             ("grok-pager-0.1.5-darwin-arm64", None),           // "pager" is not a version
@@ -672,32 +672,32 @@ mod tests {
         );
     }
 
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-    // derive_channel ÔÇö invariant matrix
+    // ──────────────────────────────────────────────────────────────────────
+    // derive_channel — invariant matrix
     //
     // Tests the pure comparison logic that determines [alpha] vs [stable].
     // Covers current 0.1.X-alpha.N, future 0.2.X, edge cases, and errors.
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_derive_channel_matrix() {
         // (current, stable_pointer, expected_channel)
         let cases: &[(&str, &str, Option<&str>)] = &[
-            // ÔöÇÔöÇ Current 0.1.X workflow ÔöÇÔöÇ
+            // ── Current 0.1.X workflow ──
             ("0.1.220-alpha.2", "0.1.219", Some("alpha")), // alpha ahead of stable
             ("0.1.219", "0.1.219", Some("stable")),        // stable user on latest
             ("0.1.218", "0.1.219", Some("stable")),        // stable user behind latest
             ("0.1.220-alpha.2", "0.1.220-alpha.2", Some("stable")), // pointer matches exactly
             ("0.1.220-alpha.2", "0.1.220", Some("stable")), // semver: release > pre-release
-            // ÔöÇÔöÇ Future 0.2.X workflow ÔöÇÔöÇ
+            // ── Future 0.2.X workflow ──
             ("0.2.5", "0.2.3", Some("alpha")), // alpha ahead of stable
             ("0.2.5", "0.2.5", Some("stable")), // promoted to stable
             ("0.2.3", "0.2.5", Some("stable")), // behind stable
             ("0.2.0", "0.2.0", Some("stable")), // first release, both 0.2.0
-            // ÔöÇÔöÇ Cross-regime upgrade ÔöÇÔöÇ
+            // ── Cross-regime upgrade ──
             ("0.2.0", "0.1.219", Some("alpha")), // new regime ahead of old stable
             ("0.1.220-alpha.2", "0.2.0", Some("stable")), // old pre-release < new stable
-            // ÔöÇÔöÇ Error cases ÔöÇÔöÇ
+            // ── Error cases ──
             ("garbage", "0.1.219", None), // unparseable current
             ("0.1.219", "garbage", None), // unparseable stable
             ("", "0.1.219", None),        // empty current
@@ -714,9 +714,9 @@ mod tests {
         }
     }
 
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-    // semver_max ÔÇö invariant matrix
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
+    // semver_max — invariant matrix
+    // ──────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_semver_max_matrix() {
@@ -751,13 +751,13 @@ mod tests {
         assert!(semver_max("foo", "bar").is_err());
     }
 
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-    // GrokVersion JSON shape ÔÇö backward compatibility invariants
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
+    // GrokVersion JSON shape — backward compatibility invariants
+    // ──────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_version_json_backward_compat() {
-        // Old format (no stable_version) must parse ÔÇö serde(default) fills None.
+        // Old format (no stable_version) must parse — serde(default) fills None.
         let old = r#"{"version":"0.1.180","checked_at":"2026-04-22T10:30:00Z"}"#;
         let v: GrokVersion = serde_json::from_str(old).unwrap();
         assert_eq!(v.version, "0.1.180");
@@ -789,29 +789,29 @@ mod tests {
         assert!(serde_json::from_str::<GrokVersion>(missing).is_err());
     }
 
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-    // is_fresh ÔÇö TTL boundary invariants
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
+    // is_fresh — TTL boundary invariants
+    // ──────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_is_fresh_ttl_boundaries() {
         let now = time::OffsetDateTime::now_utc();
         let v = GrokVersion::new("0.1.200".to_string(), None, now);
 
-        // Within TTL ÔåÆ fresh
+        // Within TTL → fresh
         assert!(v.is_fresh(now, Duration::from_secs(60)));
         assert!(v.is_fresh(now + Duration::from_secs(29), Duration::from_secs(30)));
 
-        // At TTL boundary ÔåÆ NOT fresh (strict <)
+        // At TTL boundary → NOT fresh (strict <)
         assert!(!v.is_fresh(now + Duration::from_secs(30), Duration::from_secs(30)));
 
-        // Past TTL ÔåÆ not fresh
+        // Past TTL → not fresh
         assert!(!v.is_fresh(now + Duration::from_secs(31), Duration::from_secs(30)));
 
-        // Zero TTL ÔåÆ never fresh
+        // Zero TTL → never fresh
         assert!(!v.is_fresh(now, Duration::ZERO));
 
-        // Malformed timestamp ÔåÆ not fresh
+        // Malformed timestamp → not fresh
         let bad = GrokVersion {
             version: "0.1.200".to_string(),
             stable_version: None,
@@ -820,9 +820,9 @@ mod tests {
         assert!(!bad.is_fresh(now, Duration::from_secs(60)));
     }
 
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
     // UpdateConfig defaults
-    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ──────────────────────────────────────────────────────────────────────
 
     #[test]
     fn test_update_config_default_channel_is_stable() {

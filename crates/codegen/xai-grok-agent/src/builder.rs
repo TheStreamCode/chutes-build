@@ -1,4 +1,4 @@
-//! AgentBuilder ÔÇö fluent construction API for building Agents.
+//! AgentBuilder — fluent construction API for building Agents.
 use crate::agent::Agent;
 use crate::compaction::CompactionPolicy;
 use crate::config::{AGENT_TASK_CLASSIFIER_RE, short_tool_name, tool_id_eq, tool_id_matches};
@@ -56,7 +56,7 @@ pub struct AgentBuilder {
     owner_session_id: Option<String>,
     parent_scheduler_handle:
         Option<xai_grok_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
-    /// The agent definition ÔÇö set via from_definition() or built up
+    /// The agent definition — set via from_definition() or built up
     /// via individual with_*() calls.
     definition: Option<AgentDefinition>,
     /// Pre-rendered persona IO summaries for the task tool description.
@@ -119,7 +119,7 @@ pub struct AgentBuilder {
     /// into the toolset's `TruncationCfg` resource after finalize, where the
     /// MCP truncation path consults it before the process-global cap. The
     /// shell passes the winning repo-level `[mcp] max_output_bytes` here (and
-    /// only when that tier wins the precedence stack ÔÇö see
+    /// only when that tier wins the precedence stack — see
     /// `resolve_max_mcp_output_bytes_for_cwd` in xai-grok-shell).
     mcp_max_output_bytes: Option<usize>,
     /// System-reminder tag name for tool result text. Defaults to `"system-reminder"`.
@@ -387,7 +387,7 @@ impl AgentBuilder {
     ///
     /// `Some(v)` is seeded into the toolset's `TruncationCfg` resource after
     /// finalize, so the MCP truncation path uses `v` instead of the
-    /// process-global cap. `None` (default) seeds nothing ÔÇö MCP truncation
+    /// process-global cap. `None` (default) seeds nothing — MCP truncation
     /// falls through to the process-global resolution.
     pub fn with_mcp_max_output_bytes(mut self, bytes: Option<usize>) -> Self {
         self.mcp_max_output_bytes = bytes;
@@ -603,7 +603,7 @@ impl AgentBuilder {
     }
     /// Set the skills config (custom paths, ignore globs) from config.toml.
     /// Without this, only auto-discovered skills (cwd/.chutes-build/skills, ~/.chutes-build/skills)
-    /// are included ÔÇö custom paths added via `chutes.ai/skills/add` would be ignored.
+    /// are included — custom paths added via `chutes.ai/skills/add` would be ignored.
     pub fn with_skills_config(mut self, config: crate::prompt::skills::SkillsConfig) -> Self {
         self.skills_config = config;
         self
@@ -1291,7 +1291,7 @@ const TASK_TOOL_NAMING: xai_tool_types::TaskToolNaming<'static> = xai_tool_types
     isolation_param: "${{ params.task.isolation }}",
 };
 /// Concise task-tool description for child sessions. Delegation from a child
-/// is possible but discouraged ÔÇö prefer doing the work directly.
+/// is possible but discouraged — prefer doing the work directly.
 ///
 /// NOTE: This hardcodes the built-in agent type names ("general-purpose",
 /// "explore", "plan"). If custom child-visible subagent types become common,
@@ -1362,7 +1362,7 @@ fn task_model_guidance(model_slugs: &[String]) -> String {
 /// [`xai_tool_types::build_task_description`] so the CLI and the prod chat
 /// stack share one builder. Built-in (unshadowed) entries carry the hardcoded
 /// tool-name fragment; user-defined entries carry `None` so their raw
-/// `description` is used verbatim (markdown is fine ÔÇö it's model-facing text).
+/// `description` is used verbatim (markdown is fine — it's model-facing text).
 pub(crate) fn build_task_description(
     subagents: &[SubagentEntry],
     model_slugs: &[String],
@@ -1704,8 +1704,8 @@ mod tests {
         );
     }
     /// The bridge's full-discovery snapshot must record every discovered
-    /// skill name ÔÇö including `paths:`-gated and preloaded skills that the
-    /// listing baseline (`slash_skills`) holds back ÔÇö so session-start
+    /// skill name — including `paths:`-gated and preloaded skills that the
+    /// listing baseline (`slash_skills`) holds back — so session-start
     /// telemetry can reuse it instead of re-walking the disk.
     #[tokio::test]
     async fn discovery_snapshot_records_gated_and_preloaded_skills() {
@@ -2169,7 +2169,7 @@ mod tests {
             .collect()
     }
     /// The session clamp and the agent's own allowlist both bind the effective
-    /// toolset (intersection), and a disjoint pair yields deny-all ÔÇö never the
+    /// toolset (intersection), and a disjoint pair yields deny-all — never the
     /// "empty list == inherit all" collapse.
     #[tokio::test]
     async fn session_clamp_intersects_own_allowlist() {
@@ -2344,7 +2344,7 @@ mod tests {
         );
     }
     /// Compat allowlist names (`Read`, `Bash`, `Grep`) map to their Chutes Build
-    /// equivalents by `ToolKind` ÔÇö a real restricted toolset, not zero tools.
+    /// equivalents by `ToolKind` — a real restricted toolset, not zero tools.
     #[tokio::test]
     async fn claude_tool_names_map_to_grok_equivalents() {
         let tools = vec!["Read".into(), "Bash".into(), "Grep".into()];
@@ -2357,15 +2357,15 @@ mod tests {
             .collect();
         assert!(
             names.contains(&"read_file".to_string()),
-            "ReadÔåÆread_file; got: {names:?}"
+            "Read→read_file; got: {names:?}"
         );
         assert!(
             names.contains(&"run_terminal_command".to_string()),
-            "BashÔåÆrun_terminal_command; got: {names:?}"
+            "Bash→run_terminal_command; got: {names:?}"
         );
         assert!(
             names.contains(&"grep".to_string()),
-            "GrepÔåÆgrep; got: {names:?}"
+            "Grep→grep; got: {names:?}"
         );
         assert!(
             !names.contains(&"search_replace".to_string()),
@@ -2465,15 +2465,15 @@ mod tests {
             .collect();
         assert!(
             names.contains(&"read_file".to_string()),
-            "ReadÔåÆread_file; got: {names:?}"
+            "Read→read_file; got: {names:?}"
         );
         assert!(
             names.contains(&"run_terminal_command".to_string()),
-            "BashÔåÆrun_terminal_command; got: {names:?}"
+            "Bash→run_terminal_command; got: {names:?}"
         );
         assert!(
             names.contains(&"grep".to_string()),
-            "GrepÔåÆgrep; got: {names:?}"
+            "Grep→grep; got: {names:?}"
         );
         assert!(
             !names.contains(&"search_replace".to_string()),
@@ -2494,7 +2494,7 @@ mod tests {
             .collect();
         assert!(
             names.contains(&"read_file".to_string()),
-            "ReadÔåÆread_file; got: {names:?}"
+            "Read→read_file; got: {names:?}"
         );
         assert!(
             names.contains(&"search_tool".to_string()) && names.contains(&"use_tool".to_string()),
@@ -2579,8 +2579,8 @@ mod tests {
             assert!(!names.contains(&excluded.to_string()), "got: {names:?}");
         }
     }
-    /// grok-build toolsets have no Skill tool ÔÇö skills are read from
-    /// `SKILL.md` via `read_file` ÔÇö so a compat `Skill` allowlist entry grants
+    /// grok-build toolsets have no Skill tool — skills are read from
+    /// `SKILL.md` via `read_file` — so a compat `Skill` allowlist entry grants
     /// toolset.
     #[tokio::test]
     async fn skill_allowlist_maps_to_read() {
@@ -2593,7 +2593,7 @@ mod tests {
             .collect();
         assert!(
             names.contains(&"read_file".to_string()),
-            "SkillÔåÆread_file; got: {names:?}"
+            "Skill→read_file; got: {names:?}"
         );
         assert!(
             names.contains(&"search_tool".to_string()) && names.contains(&"use_tool".to_string()),
@@ -2602,7 +2602,7 @@ mod tests {
         assert!(
             !names.contains(&"search_replace".to_string())
                 && !names.contains(&"run_terminal_command".to_string()),
-            "no full-toolset fallback ÔÇö unlisted tools must be excluded; got: {names:?}"
+            "no full-toolset fallback — unlisted tools must be excluded; got: {names:?}"
         );
     }
     /// `Read` and `Skill` both map to `ToolKind::Read`, but the allowlist phase
@@ -2646,11 +2646,11 @@ mod tests {
         assert!(
             !names.contains(&"search_replace".to_string())
                 && !names.contains(&"run_terminal_command".to_string()),
-            "no full-toolset fallback ÔÇö unlisted tools must be excluded; got: {names:?}"
+            "no full-toolset fallback — unlisted tools must be excluded; got: {names:?}"
         );
     }
     /// Compat `ToolSearch` meta-tool maps to grok's `search_tool` (MCP
-    /// is a filter (`retain`) over a `HashSet` of kinds, not an inserter ÔÇö so the
+    /// is a filter (`retain`) over a `HashSet` of kinds, not an inserter — so the
     /// falling back to the full toolset.
     #[tokio::test]
     async fn tool_search_allowlist_maps_to_search_tool() {
@@ -2663,11 +2663,11 @@ mod tests {
             .collect();
         assert!(
             names.contains(&"search_tool".to_string()),
-            "ToolSearchÔåÆsearch_tool; got: {names:?}"
+            "ToolSearch→search_tool; got: {names:?}"
         );
         assert!(
             !names.contains(&"search_replace".to_string()),
-            "no full-toolset fallback ÔÇö Edit must be excluded; got: {names:?}"
+            "no full-toolset fallback — Edit must be excluded; got: {names:?}"
         );
     }
     async fn build_with_web_search(

@@ -184,12 +184,12 @@ pub struct GitCommitReq {
     /// Stage everything (`git add -A`, honoring `.gitignore` and
     /// `info/exclude`) before committing. With this set, a tree with nothing
     /// to commit is a result (`CommitOutcome::clean`), not an error, and the
-    /// push step still runs ÔÇö so a retry can deliver an earlier unpushed
+    /// push step still runs — so a retry can deliver an earlier unpushed
     /// commit. Without it, committing with nothing staged is an error.
     #[serde(default)]
     pub stage_all: bool,
     /// Seed the local-only default excludes (`.env`, `node_modules/`, build
-    /// output, ÔÇª) into `info/exclude` before staging, so `stage_all` can
+    /// output, …) into `info/exclude` before staging, so `stage_all` can
     /// never sweep them in. Idempotent: guarded by a marker line, shared
     /// with environments that pre-seed the same block.
     #[serde(default)]
@@ -208,13 +208,13 @@ impl WorkspaceRpc for GitCommitReq {
 }
 
 /// Merge the base branch into the current (conversation) branch. Merge,
-/// never rebase ÔÇö conv-branch history must not be rewritten. On conflicts
+/// never rebase — conv-branch history must not be rewritten. On conflicts
 /// the merge is left in progress so an agent can resolve and commit it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitSyncBaseReq {
     #[serde(default)]
     pub git_root: Option<std::path::PathBuf>,
-    /// Ref on `origin` to merge in. `None` ÔçÆ the remote's default branch
+    /// Ref on `origin` to merge in. `None` ⇒ the remote's default branch
     /// (`git fetch origin HEAD`).
     #[serde(default)]
     pub base_ref: Option<String>,
@@ -270,10 +270,10 @@ impl WorkspaceRpc for GitCheckoutReq {
     type Response = ();
 }
 
-// Explicit-git-surface ops (control plane ÔåÆ sandbox). Git mutates only through
+// Explicit-git-surface ops (control plane → sandbox). Git mutates only through
 // these platform ops; there is no autonomous agent commit/push/merge.
 
-/// `EnsureBinding` ÔÇö ensure the conversation branch (`conv/<id>`) exists and is
+/// `EnsureBinding` — ensure the conversation branch (`conv/<id>`) exists and is
 /// checked out, forking it off `base_ref` if absent (never writing the base).
 /// Idempotent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -303,7 +303,7 @@ pub struct GitEnsureBindingResult {
     pub head_sha: Option<String>,
 }
 
-/// `MergeToMain` ÔÇö merge the conversation branch into its target branch (the
+/// `MergeToMain` — merge the conversation branch into its target branch (the
 /// publish path, or an explicit "Merge" button). Merge, never rebase; never
 /// force. On conflicts the implementer aborts and restores `session_branch`
 /// (no `MERGE_HEAD` left on the integration branch).
@@ -315,7 +315,7 @@ pub struct GitMergeToMainReq {
     /// [`super::super::binding::ResolvedRepoSource::session_branch`].
     pub session_branch: String,
     /// Integration branch from the binding resolver
-    /// (`ResolvedRepoSource.merge_target`). `None` or empty is a hard error ÔÇö
+    /// (`ResolvedRepoSource.merge_target`). `None` or empty is a hard error —
     /// do not serde-default to `main` (BYO remotes use `master`/`trunk`).
     #[serde(default)]
     pub target_branch: Option<String>,
@@ -359,14 +359,14 @@ pub enum GitMergeToMainOutcome {
     Conflicts { files: Vec<String> },
 }
 
-/// `Push` ÔÇö push a branch to `origin` after a commit, classifying the outcome.
+/// `Push` — push a branch to `origin` after a commit, classifying the outcome.
 /// Never forces (a non-fast-forward on a single-writer conv branch is a
 /// conflict to surface, not to overwrite).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitPushReq {
     #[serde(default)]
     pub git_root: Option<std::path::PathBuf>,
-    /// Branch to push. `None` ÔçÆ current `HEAD`.
+    /// Branch to push. `None` ⇒ current `HEAD`.
     #[serde(default)]
     pub branch: Option<String>,
 }
@@ -607,7 +607,7 @@ pub struct CommitOutcome {
 
 /// Push-step classification for [`CommitOutcome`]. A non-fast-forward
 /// rejection on a single-writer conversation branch means the remote
-/// diverged and needs resolution ÔÇö the op never forces.
+/// diverged and needs resolution — the op never forces.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PushStatus {
@@ -689,8 +689,8 @@ pub struct GitStatusData {
 /// which field to use.
 ///
 /// `Deserialize` is implemented manually (see below) so that a legacy flat
-/// `GitStatusData` payload ÔÇö returned by an older workspace server during a
-/// version skew ÔÇö is recognized and wrapped as `format: Structured` rather than
+/// `GitStatusData` payload — returned by an older workspace server during a
+/// version skew — is recognized and wrapped as `format: Structured` rather than
 /// silently parsed as empty.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GitStatusExtResponse {

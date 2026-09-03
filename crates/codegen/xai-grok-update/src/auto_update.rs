@@ -30,7 +30,7 @@ pub enum UpdateRunMode {
 const PROMPT_UPDATE_NOW: &str = "Update now? [Y/n/d]";
 const MSG_AUTO_UPDATE_BACKGROUND: &str = "Auto-update running in background.";
 const MSG_RUN_UPDATE_MANUAL: &str = "Run `chutes-build update` to get the latest version.";
-/// An empty or `"stable"` channel means stable ÔÇö the installers' default
+/// An empty or `"stable"` channel means stable — the installers' default
 /// (`CHANNEL="${CHUTES_BUILD_CHANNEL:-stable}"` in install.sh).
 fn is_stable_channel(channel: &str) -> bool {
     channel.is_empty() || channel == "stable"
@@ -39,7 +39,7 @@ fn is_stable_channel(channel: &str) -> bool {
 /// Manual-install one-liner for this platform's bootstrap installer.
 ///
 /// On Unix the variable must prefix `bash` (which runs install.sh), not
-/// `curl`: in `VAR=x curl ÔÇª | bash` the assignment applies to `curl` only
+/// `curl`: in `VAR=x curl … | bash` the assignment applies to `curl` only
 /// and install.sh would fall back to stable.
 fn manual_install_cmd(channel: &str) -> String {
     // Only interpolate a well-formed channel ([A-Za-z0-9._-]) into the
@@ -86,12 +86,12 @@ fn reinstall_hint(installer: &str, channel: &str) -> String {
 }
 
 /// True when this process is an x86_64 build translated by Rosetta on an
-/// Apple Silicon host. `hw.optional.arm64` is 1 on Apple Silicon ÔÇö including
+/// Apple Silicon host. `hw.optional.arm64` is 1 on Apple Silicon — including
 /// from a translated process, where the compile-time arch says x86_64.
 ///
 /// Read in-process via `sysctlbyname`: no spawn, no stdout parse, and no
 /// dependence on the `sysctl` binary being on PATH. A missing key (genuine
-/// Intel Mac) or any error means not Apple Silicon ÔÇö the probe fails open
+/// Intel Mac) or any error means not Apple Silicon — the probe fails open
 /// to the compile-time arch. Cached: fixed host property, read from async
 /// paths via [`detect_platform`].
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -154,7 +154,7 @@ enum InstallPhaseError {
     Activate(anyhow::Error),
 }
 
-/// Smoke failures stay unwrapped ÔÇö already typed, and the base-retry abort
+/// Smoke failures stay unwrapped — already typed, and the base-retry abort
 /// in [`install_internal_from_bases`] must still downcast them.
 fn wrap_download_err(e: anyhow::Error) -> anyhow::Error {
     if e.is::<SmokeTestFailure>() {
@@ -367,7 +367,7 @@ async fn fetch_update_plan(
 /// Installer + version the leader/background path should converge to: an
 /// upgrade OR an authoritative-installer rollback. `None` means stay put. Gates
 /// on the installer (via `installer_allows_downgrade`) so npm is never
-/// downgraded ÔÇö the decision depends on the installer, never the caller.
+/// downgraded — the decision depends on the installer, never the caller.
 pub async fn auto_update_target(update_config: &UpdateConfig) -> Option<(&'static str, String)> {
     let installer = get_installer().await?;
     let current = get_installed_grok_version();
@@ -395,7 +395,7 @@ pub struct EnsureLatestOutcome {
     /// already current (or there was no installer).
     pub installed: Option<String>,
     /// The running process differs from what is now on disk in the channel's
-    /// update direction ÔÇö the caller should relaunch onto the on-disk binary.
+    /// update direction — the caller should relaunch onto the on-disk binary.
     pub relaunch_needed: bool,
 }
 
@@ -404,14 +404,14 @@ pub struct EnsureLatestOutcome {
 /// report whether the running process should relaunch onto the on-disk binary.
 ///
 /// Unlike [`run_update`] this never uses the compiled-in version for the
-/// download decision ÔÇö a binary already installed by another process (TUI
+/// download decision — a binary already installed by another process (TUI
 /// background download, explicit `chutes-build update`) is reused as-is. This both
 /// removes the duplicate download in leader mode and stops the pre-fix
 /// hourly re-download while a busy leader keeps deferring its relaunch.
 ///
 /// When the disk version is unknowable ([`disk_version_for_installer`]:
 /// npm-managed installs, Windows copy-based installs, dev builds), this
-/// degrades to the pre-fix behavior ÔÇö download when the *running* process is
+/// degrades to the pre-fix behavior — download when the *running* process is
 /// stale, relaunch only after a download this pass actually installed
 /// something. Note the Windows consequence: the hourly busy-leader
 /// re-download is NOT fixed there; only the symlink layout can prove the
@@ -459,7 +459,7 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
     }
 
     // Relaunch when the running binary differs from what's on disk in the
-    // channel's update direction ÔÇö covers binaries installed by other
+    // channel's update direction — covers binaries installed by other
     // processes, not just the install above.
     let running = get_installed_grok_version();
     if let Some(disk_now) =
@@ -478,7 +478,7 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
 /// Only the internal (install.sh / CDN) and gh-release installers write that
 /// symlink. npm manages its own global install, so for npm a symlink left
 /// over from a previous internal install would LIE about the npm install's
-/// version ÔÇö in the worst direction, a leftover symlink "newer" than the npm
+/// version — in the worst direction, a leftover symlink "newer" than the npm
 /// registry would make every updater report "already up to date" and
 /// silently suppress npm updates forever. Unknown installers are treated
 /// like npm (no trustworthy disk version).
@@ -576,7 +576,7 @@ pub struct UpdateAvailable {
 
 /// Outcome of [`check_update_background`].
 pub struct BackgroundUpdateCheck {
-    /// `Some` when the *running* binary is older than the channel pointer ÔÇö
+    /// `Some` when the *running* binary is older than the channel pointer —
     /// drives the in-TUI restart hint regardless of who downloads the binary.
     pub update: Option<UpdateAvailable>,
     /// Handle to the background `chutes-build update` child, `Some` only when a
@@ -603,7 +603,7 @@ impl BackgroundUpdateCheck {
 /// (spawns `chutes-build update` as a detached child process) so the new binary is
 /// ready when the user quits and relaunches. When another process (an earlier
 /// TUI, the leader's hourly checker) already put the target version on disk,
-/// no download is started ÔÇö only the restart hint is surfaced.
+/// no download is started — only the restart hint is surfaced.
 pub async fn check_update_background(update_config: &UpdateConfig) -> BackgroundUpdateCheck {
     let Some(installer) = get_installer().await else {
         return BackgroundUpdateCheck::none();
@@ -647,7 +647,7 @@ pub async fn check_update_background(update_config: &UpdateConfig) -> Background
     // running process being stale (checked above) just means "show the
     // restart hint". The quit-for-update path's `chutes-build update` child resolves
     // to "Already up to date" against the same disk state. Gated on the
-    // installer maintaining the managed symlink ÔÇö for npm a leftover symlink
+    // installer maintaining the managed symlink — for npm a leftover symlink
     // would wrongly suppress the download (see `disk_version_for_installer`).
     let disk_needs_download = match disk_version_for_installer(installer) {
         Some(disk) => needs_update(
@@ -837,7 +837,7 @@ async fn run_update_subcommand(
     cmd.arg(format!("--trigger={}", trigger.as_str()));
     // Hand the resolved telemetry mode to the child, which cannot see the
     // remote-settings layer (requirement pins still beat env). None at the
-    // startup spawns ÔÇö they run before the settings prefetch, when this
+    // startup spawns — they run before the settings prefetch, when this
     // process knows no more than the child; waiting would let telemetry
     // delay an update.
     if let Some(mode) = xai_grok_telemetry::client::current_mode() {
@@ -849,7 +849,7 @@ async fn run_update_subcommand(
             // pipes, so if the child writes more than the OS pipe buffer
             // (~16 KB macOS / ~64 KB Linux) to stderr (e.g. download
             // progress bars), the child blocks on the write while the
-            // parent blocks on waitpid ÔÇö deadlocking both processes.
+            // parent blocks on waitpid — deadlocking both processes.
             // With `panic = "abort"`, the blocked child eventually
             // receives SIGABRT.
             cmd.stdin(Stdio::null())
@@ -857,8 +857,8 @@ async fn run_update_subcommand(
                 // inherit, not piped: the TUI is already restored so the
                 // parent's stderr fd is a normal terminal. inherit lets
                 // the child's diagnostic output reach the user. piped +
-                // status() would immediately close the read end ÔåÆ EPIPE
-                // ÔåÆ panic ÔåÆ SIGABRT (signal 6) under panic=abort.
+                // status() would immediately close the read end → EPIPE
+                // → panic → SIGABRT (signal 6) under panic=abort.
                 .stderr(Stdio::inherit());
             // No detach: the child must stay in the foreground process group so Ctrl+C cancels it with the parent; the atomic install protocol makes mid-download kills safe.
             let status = cmd.status().await?;
@@ -991,9 +991,9 @@ pub async fn run_install_script(
 /// Detect the platform (os, arch) to download binaries for.
 ///
 /// Arch is the compile-time arch with one correction: an x86_64 build on an
-/// Apple Silicon host (Rosetta) selects `aarch64`, so every update path ÔÇö
+/// Apple Silicon host (Rosetta) selects `aarch64`, so every update path —
 /// interactive `chutes-build update`, background `--auto` children, the leader's
-/// hourly converge, and forced minimum-version installs ÔÇö converges to the
+/// hourly converge, and forced minimum-version installs — converges to the
 /// native build instead of perpetuating the translated one. This mirrors
 /// install.sh's `hw.optional.arm64` probe; without it, a lingering x86_64
 /// process would reinstall x86_64 right over a fresh native install.
@@ -1042,11 +1042,11 @@ fn download_client() -> reqwest::Result<reqwest::Client> {
 ///
 /// Appends `.{pid}-{seq}.tmp` to the FULL file name instead of using
 /// `Path::with_extension`, which treats everything after the last dot of the
-/// versioned name as the extension (`grok-0.1.181-linux-x86_64` ÔåÆ
+/// versioned name as the extension (`grok-0.1.181-linux-x86_64` →
 /// `grok-0.1.tmp`) and therefore collides for every `0.1.x` version. The PID
-/// plus a per-process counter makes the name unique per download attempt ÔÇö
+/// plus a per-process counter makes the name unique per download attempt —
 /// across processes (two updaters racing in the same instant, the accepted
-/// lock-free residual race) and within one process ÔÇö so no racer can ever
+/// lock-free residual race) and within one process — so no racer can ever
 /// rename another's half-written temp file into place. Leftovers older than
 /// [`STALE_TMP_AGE`] are swept by `cleanup_old_downloads`.
 fn tmp_download_path(dest: &std::path::Path) -> std::path::PathBuf {
@@ -1129,7 +1129,7 @@ async fn try_parallel_download(
             ProgressStyle::default_bar()
                 .template("  {bar:30.cyan/dim} {bytes}/{total_bytes} ({eta})")
                 .unwrap()
-                .progress_chars("ÔöüÔò©ÔöÇ"),
+                .progress_chars("━╸─"),
         );
         Some(pb)
     } else {
@@ -1252,7 +1252,7 @@ pub async fn download_with_progress(url: &str, dest: &std::path::Path) -> Result
             ProgressStyle::default_bar()
                 .template("  {bar:30.cyan/dim} {bytes}/{total_bytes} ({eta})")
                 .unwrap()
-                .progress_chars("ÔöüÔò©ÔöÇ"),
+                .progress_chars("━╸─"),
         );
         pb
     } else {
@@ -1459,9 +1459,9 @@ async fn install_internal(target: Option<&str>, update_config: &UpdateConfig) ->
 /// Download-phase side effects (download dir creation, binary fetch) are
 /// idempotent, so retrying with a different base after a partial failure is
 /// safe. Smoke-test failures ([`SmokeTestFailure`]) are a property of the
-/// published artifact, not the CDN ÔÇö retrying another base will not help.
+/// published artifact, not the CDN — retrying another base will not help.
 /// Local activation ([`activate_verified_download`]: link swap, cleanup,
-/// config persist) runs once after the first successful download ÔÇö its
+/// config persist) runs once after the first successful download — its
 /// failures are not base-dependent, so they abort the install instead of
 /// triggering a pointless re-download from the next base.
 #[doc(hidden)]
@@ -1480,7 +1480,7 @@ pub async fn install_internal_from_bases(
                     .map_err(|e| InstallPhaseError::Activate(e).into());
             }
             Err(e) if e.is::<SmokeTestFailure>() => {
-                // Same published artifact on every base ÔÇö retrying will not
+                // Same published artifact on every base — retrying will not
                 // change a --version timeout or crash. Left unwrapped so
                 // telemetry classification sees the typed failure.
                 return Err(e);
@@ -1508,7 +1508,7 @@ const SMOKE_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 /// Retry budget for exec attempts refused with ETXTBSY. The failure window
 /// is normally the microseconds another spawn in this process sits between
 /// fork and exec (see [`smoke_test_binary`]), but on a heavily loaded
-/// machine that window can stretch, so the budget errs generous ÔÇö a false
+/// machine that window can stretch, so the budget errs generous — a false
 /// "failed to run" both aborts this install and deletes the binary.
 const SMOKE_TEST_ETXTBSY_ATTEMPTS: u32 = 8;
 const SMOKE_TEST_ETXTBSY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(25);
@@ -1558,7 +1558,7 @@ fn nonzero_message(status: &str, stderr: &str) -> String {
 async fn smoke_test_binary(binary_path: &std::path::Path) -> Result<(), SmokeTestFailure> {
     // ETXTBSY race: while a concurrent updater in this process is between
     // fork and exec (pre_exec in detach_command forces the fork/exec path),
-    // its child briefly holds every open fd ÔÇö including the write-side fd of
+    // its child briefly holds every open fd — including the write-side fd of
     // a download that has just been renamed onto `binary_path`. Exec'ing a
     // binary whose inode is still open for write fails with ETXTBSY even
     // though the file is complete and healthy, so retry instead of failing
@@ -1627,7 +1627,7 @@ struct VerifiedDownload {
 /// Base-dependent install phase: resolve the version (per base when no
 /// target is pinned), download the binary, and smoke-test it. Network /
 /// fetch failures here are worth retrying against another base URL.
-/// [`SmokeTestFailure`] is not ÔÇö see [`install_internal_from_bases`].
+/// [`SmokeTestFailure`] is not — see [`install_internal_from_bases`].
 async fn download_verified_from_base(
     target: Option<&str>,
     update_config: &UpdateConfig,
@@ -1711,10 +1711,10 @@ async fn activate_verified_download(download: &VerifiedDownload) -> Result<()> {
 ///
 /// Spawns the newly-installed binary with `completions <shell>` for each
 /// supported shell and writes the output to the standard completion paths.
-/// Failures are silently ignored ÔÇö completions are a nice-to-have, not a
+/// Failures are silently ignored — completions are a nice-to-have, not a
 /// requirement for a successful update.
 async fn regenerate_completions(binary: &std::path::Path, grok_home: &std::path::Path) {
-    // Derive $HOME independently ÔÇö grok_home may be overridden via CHUTES_BUILD_HOME
+    // Derive $HOME independently — grok_home may be overridden via CHUTES_BUILD_HOME
     // env var, so grok_home.parent() isn't necessarily the user's home dir.
     let user_home = xai_dirs::home_dir().unwrap_or_default();
 
@@ -1759,13 +1759,13 @@ fn relative_symlink_target(target: &std::path::Path, link: &std::path::Path) -> 
     let (Some(target_parent), Some(link_parent)) = (target.parent(), link.parent()) else {
         return target.to_path_buf();
     };
-    // Same directory ÔÇö just the filename (e.g. grok-latest -> grok-0.1.203-ÔÇª)
+    // Same directory — just the filename (e.g. grok-latest -> grok-0.1.203-…)
     if target_parent == link_parent
         && let Some(name) = target.file_name()
     {
         return std::path::PathBuf::from(name);
     }
-    // Sibling directories ÔÇö ../target_dir/filename (e.g. bin/grok -> ../downloads/grok-ÔÇª)
+    // Sibling directories — ../target_dir/filename (e.g. bin/grok -> ../downloads/grok-…)
     if let (Some(tp), Some(lp)) = (target_parent.parent(), link_parent.parent())
         && tp == lp
         && let (Some(dir_name), Some(file_name)) = (target_parent.file_name(), target.file_name())
@@ -1780,7 +1780,7 @@ fn relative_symlink_target(target: &std::path::Path, link: &std::path::Path) -> 
 ///
 /// `grok` and `agent` are first-class entry points that the bootstrap
 /// installers (`install.sh`, `install.ps1`, `install-enterprise.sh`)
-/// maintain in lockstep, and so must the updater ÔÇö otherwise `chutes-build update`
+/// maintain in lockstep, and so must the updater — otherwise `chutes-build update`
 /// leaves `agent` pinned at the previous version.
 ///
 /// Unix: atomic symlink swap with relative target (survives Docker
@@ -1789,7 +1789,7 @@ fn relative_symlink_target(target: &std::path::Path, link: &std::path::Path) -> 
 /// **All-or-nothing.** Each link's prior state is captured (Unix: prior
 /// symlink target; Windows: `.rollback.bak`; or `Absent` marker via
 /// `symlink_metadata`) before the swap, and any earlier successful swaps
-/// are rolled back if a later one fails ÔÇö including *removing* a link that
+/// are rolled back if a later one fails — including *removing* a link that
 /// didn't exist before. Restore failures go to `tracing::warn!`; the swap
 /// error itself propagates unwrapped so the caller's `reinstall_hint` wrap
 /// stays the user-visible message.
@@ -1945,7 +1945,7 @@ impl LinkRollback {
         }
     }
 
-    /// Path to the on-disk backup (Windows only ÔÇö Unix is in-memory).
+    /// Path to the on-disk backup (Windows only — Unix is in-memory).
     #[cfg(windows)]
     fn backup_path(&self) -> Option<&std::path::Path> {
         match self {
@@ -2015,13 +2015,13 @@ impl LinkRollback {
 ///
 /// Creates a temporary symlink next to `link_path`, then renames it over the
 /// old symlink.  This avoids the remove-then-create race where the path
-/// briefly doesn't exist, and ÔÇö crucially ÔÇö never deletes the old target
+/// briefly doesn't exist, and — crucially — never deletes the old target
 /// file.  On macOS (especially Apple Silicon), deleting a binary that a
 /// running process has mmap'd causes SIGKILL because the kernel can no longer
 /// verify the code signature of the executable pages.
 #[cfg(unix)]
 async fn atomic_symlink_swap(target: &std::path::Path, link_path: &std::path::Path) -> Result<()> {
-    // Per-racer temp name: a shared one makes remove_file ÔåÆ symlink racy
+    // Per-racer temp name: a shared one makes remove_file → symlink racy
     // (EEXIST, or ENOENT when another racer renames the link away).
     sweep_stale_tmp_links(link_path, STALE_TMP_AGE).await;
     let tmp_link = unique_temp_sibling(link_path, "tmp-link");
@@ -2193,7 +2193,7 @@ async fn sweep_old_exe_backups(old: &std::path::Path) {
 ///
 /// Mirrors the npm `cleanupOldVersions()` policy: keeps the current version
 /// plus one previous version (in case a process is still running the old binary
-/// and hasn't fully loaded all pages yet ÔÇö deleting it on macOS causes SIGKILL
+/// and hasn't fully loaded all pages yet — deleting it on macOS causes SIGKILL
 /// because the kernel can no longer verify the code signature).
 ///
 /// `bin_prefix` is the binary name prefix, e.g. `"grok"` or `"grok-pager"`.
@@ -2202,8 +2202,8 @@ async fn sweep_old_exe_backups(old: &std::path::Path) {
 ///
 /// Temporary/partial files (containing `.tmp`) are deleted only once they
 /// are **stale** (mtime older than [`STALE_TMP_AGE`]). A fresh `.tmp` may be
-/// a concurrent updater's in-flight download ÔÇö the same-instant race the
-/// lock-free design accepts ÔÇö and deleting it out from under that updater
+/// a concurrent updater's in-flight download — the same-instant race the
+/// lock-free design accepts — and deleting it out from under that updater
 /// would make its atomic rename fail.
 async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_version: &str) {
     let prefix = format!("{}-", bin_prefix);
@@ -2239,14 +2239,14 @@ async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_
             continue;
         }
         // Temp/partial files: sweep only STALE ones. A fresh `.tmp` may be a
-        // concurrent updater's in-flight download ÔÇö deleting it would make
+        // concurrent updater's in-flight download — deleting it would make
         // that updater's atomic rename fail with ENOENT.
         if name.contains(".tmp") {
             let stale = match entry.metadata().await.and_then(|m| m.modified()) {
                 Ok(modified) => std::time::SystemTime::now()
                     .duration_since(modified)
                     .map(|age| age > STALE_TMP_AGE)
-                    // Future mtime (clock skew): can't tell ÔÇö leave it.
+                    // Future mtime (clock skew): can't tell — leave it.
                     .unwrap_or(false),
                 // Unknown mtime: leave it; it is swept once readable+old.
                 Err(_) => false,
@@ -2270,13 +2270,13 @@ async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_
         }
         // Extract the version portion via the shared parser (handles the
         // internal `grok-0.1.150-macos-aarch64`, pre-release, and npm
-        // `grok-0.1.150` layouts ÔÇö see `version_from_versioned_binary_name`).
+        // `grok-0.1.150` layouts — see `version_from_versioned_binary_name`).
         let Some(ver_str) = crate::version::version_from_versioned_binary_name(&name, bin_prefix)
         else {
             continue;
         };
         if let Ok(v) = semver::Version::parse(&ver_str) {
-            // Skip the current version ÔÇö never delete it.
+            // Skip the current version — never delete it.
             if v == current_semver {
                 continue;
             }
@@ -2293,7 +2293,7 @@ async fn cleanup_old_downloads(dir: &std::path::Path, bin_prefix: &str, current_
         let path = dir.join(name);
         // Same freshness guard as the `.tmp` sweep: a versioned binary
         // written moments ago is likely a concurrent installer's
-        // just-renamed download (its symlink swap hasn't happened yet) ÔÇö
+        // just-renamed download (its symlink swap hasn't happened yet) —
         // deleting it would leave that installer's swap pointing at
         // nothing. Old binaries from previous releases are days old.
         let fresh = tokio::fs::metadata(&path)
@@ -2508,7 +2508,7 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
     }
 
     // Also update /usr/local/bin/{grok,agent} if either points directly into
-    // ~/.chutes-build/downloads/ (legacy layout ÔÇö skips the grok-latest indirection).
+    // ~/.chutes-build/downloads/ (legacy layout — skips the grok-latest indirection).
     // Permission errors ignored.
     #[cfg(unix)]
     for name in ["grok", "agent"] {
@@ -2599,7 +2599,7 @@ fn warn_if_other_grok_processes_running() {
             .collect();
         if !other_pids.is_empty() {
             eprintln!(
-                "  ÔÜá Warning: {} other grok process(es) detected.",
+                "  ⚠ Warning: {} other grok process(es) detected.",
                 other_pids.len()
             );
             eprintln!("    Processes running from the npm vendored binary path may be");
@@ -2670,7 +2670,7 @@ fn install_npm(target: Option<&str>, channel: &str, npm_registry: Option<&str>) 
 
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        // inherit, not piped ÔÇö same rationale as run_update_subcommand.
+        // inherit, not piped — same rationale as run_update_subcommand.
         .stderr(Stdio::inherit());
     xai_grok_tools::util::detach_std_command(&mut cmd);
     let status = cmd.status()?;
@@ -2704,11 +2704,11 @@ pub async fn apply_channel_switch(channel_switch: Option<&str>, update_config: &
 }
 
 /// Run the `chutes-build update` command. Returns `Ok(Some(version))` when the target
-/// version is present on disk afterwards ÔÇö either installed by this call or
+/// version is present on disk afterwards — either installed by this call or
 /// found already installed (e.g. by a concurrent background download); returns
 /// `Ok(None)` when there is no installer or no applicable target. Callers use
 /// the returned version to signal a running leader to relaunch onto the new
-/// binary (see the pager's post-update leader relaunch) ÔÇö that signal must
+/// binary (see the pager's post-update leader relaunch) — that signal must
 /// fire even when the download itself was skipped, so a stale leader still
 /// picks up a binary someone else installed.
 pub async fn run_update(
@@ -2759,7 +2759,7 @@ pub async fn run_update(
         {
             tracing::warn!("Failed to persist auto_update=false for pinned install: {e}");
         }
-        eprintln!("  Ô£ô grok v{} installed successfully!", version);
+        eprintln!("  ✓ grok v{} installed successfully!", version);
         eprintln!("  Please restart Chutes Build.");
         return Ok(Some(version.to_string()));
     }
@@ -2805,7 +2805,7 @@ pub async fn run_update(
     // concurrent or earlier updater (TUI background download, leader hourly
     // checker) may already have installed the target, in which case there is
     // nothing to download. Gated on the installer maintaining the managed
-    // symlink ÔÇö for npm a leftover symlink would lie (see
+    // symlink — for npm a leftover symlink would lie (see
     // `disk_version_for_installer`).
     let effective_current =
         disk_version_for_installer(installer).unwrap_or_else(|| current_version.clone());
@@ -2832,7 +2832,7 @@ pub async fn run_update(
                     // Retry if a prior sync failed.
                     refresh_deployment_config().await;
                     // The target is on disk even though this call installed
-                    // nothing ÔÇö report it so the caller still signals stale
+                    // nothing — report it so the caller still signals stale
                     // leaders to relaunch onto it (signalling is directional
                     // and skips leaders already at/after this version).
                     return Ok(Some(install_target));
@@ -2878,7 +2878,7 @@ pub async fn run_update(
         &effective_current
     } else {
         eprintln!(
-            "Updating Chutes Build {} ÔåÆ {}",
+            "Updating Chutes Build {} → {}",
             effective_current, install_target
         );
         &install_target
@@ -2892,7 +2892,7 @@ pub async fn run_update(
     let stable_ptr = try_fetch_stable_pointer().await;
     write_version_cache(target_version, stable_ptr.as_deref()).await;
     refresh_deployment_config().await;
-    eprintln!("  Ô£ô grok v{} installed successfully!", target_version);
+    eprintln!("  ✓ grok v{} installed successfully!", target_version);
 
     if !force && std::env::var_os("CHUTES_BUILD_AUTO_UPDATE").is_none() {
         eprintln!("  Please restart Chutes Build.");

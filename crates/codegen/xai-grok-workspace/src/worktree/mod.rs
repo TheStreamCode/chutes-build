@@ -831,7 +831,7 @@ pub fn resolve_label_collision(base_dir: &Path, label: &str) -> String {
 // Worktree Base Directory Resolution
 // ============================================================================
 
-/// Chutes Build home for worktree paths ÔÇö the same resolver as `worktrees.db`, with a
+/// Chutes Build home for worktree paths — the same resolver as `worktrees.db`, with a
 /// `temp_dir()/.grok` last resort (not grok-config's cwd-relative `.grok`:
 /// worktree paths need an absolute, always-writable anchor that does not move
 /// with the process cwd).
@@ -2673,7 +2673,7 @@ pub fn clean_artifacts_mgmt(id_or_path: &str) -> Result<xai_fast_worktree::Clean
     }
 }
 
-/// Map settings ÔåÆ resolve layer (shared by shell + workspace).
+/// Map settings → resolve layer (shared by shell + workspace).
 pub fn worktree_auto_gc_layer_from_settings(
     s: &xai_grok_config_types::WorktreeAutoGcSettings,
 ) -> WorktreeAutoGcLayer {
@@ -2760,7 +2760,7 @@ fn resolve_worktree_auto_gc_local() -> Option<xai_fast_worktree::ResolvedWorktre
 fn local_auto_gc_policy(
     local: Option<&xai_grok_config_types::WorktreeAutoGcSettings>,
 ) -> Option<xai_fast_worktree::ResolvedWorktreeAutoGc> {
-    // No explicit local opt-in ÔçÆ let the remote-aware shell pass own GC.
+    // No explicit local opt-in ⇒ let the remote-aware shell pass own GC.
     if !local.and_then(|s| s.enabled).unwrap_or(false) {
         return None;
     }
@@ -2920,10 +2920,10 @@ mod tests {
     fn local_auto_gc_policy_opts_in_only_when_enabled() {
         use xai_grok_config_types::WorktreeAutoGcSettings;
 
-        assert!(local_auto_gc_policy(None).is_none(), "no config ÔçÆ skip");
+        assert!(local_auto_gc_policy(None).is_none(), "no config ⇒ skip");
         assert!(
             local_auto_gc_policy(Some(&WorktreeAutoGcSettings::default())).is_none(),
-            "enabled unset ÔçÆ skip"
+            "enabled unset ⇒ skip"
         );
         assert!(
             local_auto_gc_policy(Some(&WorktreeAutoGcSettings {
@@ -2931,13 +2931,13 @@ mod tests {
                 ..Default::default()
             }))
             .is_none(),
-            "enabled=false ÔçÆ skip"
+            "enabled=false ⇒ skip"
         );
         let policy = local_auto_gc_policy(Some(&WorktreeAutoGcSettings {
             enabled: Some(true),
             ..Default::default()
         }))
-        .expect("enabled=true ÔçÆ run");
+        .expect("enabled=true ⇒ run");
         assert!(
             !policy.dry_run,
             "an explicit local opt-in runs a real pass, not a forced dry-run"
@@ -3233,7 +3233,7 @@ mod tests {
         std::fs::write(repo.join("tracked.txt"), "original").unwrap();
         git_commit_all(&repo, "initial");
 
-        // Unique basename ÔåÆ unique DB id, so a concurrent open_default writer
+        // Unique basename → unique DB id, so a concurrent open_default writer
         // can't clobber this row (GrokHomeFixture is not visible across crates).
         let wt = temp.path().join("fork-cancel-wt");
         WorktreeBuilder::new(&repo, &wt).create().unwrap();
@@ -3281,7 +3281,7 @@ mod tests {
         // Unique session id so this test's marker can't collide with others
         // sharing the process under `cargo test`.
         let session_id = format!("no-strand-{}", std::process::id());
-        // dest does not exist yet ÔåÆ prepare reaches the spawn_task=true branch.
+        // dest does not exist yet → prepare reaches the spawn_task=true branch.
         let dest = temp.path().join("new-wt");
         let req = CreateWorktreeRequest {
             session_id: session_id.clone(),

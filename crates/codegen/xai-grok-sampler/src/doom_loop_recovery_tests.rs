@@ -135,7 +135,7 @@ fn a_budget_spent_raw_event_keeps_the_summary() {
 }
 
 /// The exact-cap edge: a summary that lands precisely on the budget leaves no
-/// room for a later raw delta, which must record nothing at all ÔÇö not a bare
+/// room for a later raw delta, which must record nothing at all — not a bare
 /// truncation marker that would read as retained raw text and displace the
 /// summary.
 #[test]
@@ -202,7 +202,7 @@ fn terminal_recovery_drops_a_turn_that_called_a_tool() {
 }
 
 /// The veto reads the raw wire items, so it also catches the tool calls the
-/// conversation form drops on the floor ÔÇö an MCP call among them.
+/// conversation form drops on the floor — an MCP call among them.
 #[test]
 fn terminal_recovery_drops_a_turn_that_called_an_mcp_tool() {
     let capture = armed_with_terminal(vec![
@@ -413,7 +413,7 @@ fn terminal_content_wins_over_streamed_text() {
 }
 
 /// A runaway thought is capped and marked, so repeated recovery attempts
-/// cannot inflate the retry prompt without bound ÔÇö and the separate text
+/// cannot inflate the retry prompt without bound — and the separate text
 /// budget keeps the answer the turn did produce.
 #[test]
 fn a_runaway_thought_is_capped_without_eliding_the_answer() {

@@ -6,9 +6,9 @@
 //!
 //! ## Design
 //!
-//! - `ToolInput` ÔÇö one variant per built-in tool + `Dynamic(Value)`.
+//! - `ToolInput` — one variant per built-in tool + `Dynamic(Value)`.
 //!   `TryInto` derive generates `TryFrom<ToolInput>` for each inner type.
-//! - `ToolOutput` ÔÇö one variant per built-in tool + `Dynamic(Value)`.
+//! - `ToolOutput` — one variant per built-in tool + `Dynamic(Value)`.
 //!   `From` derive generates `From<TypedOutput>` for each inner type.
 use crate::implementations::BashToolInput;
 use crate::implementations::codex::apply_patch::tool::ApplyPatchInput;
@@ -47,7 +47,7 @@ pub struct MCPToolInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
 }
-/// Typed tool input ÔÇö one variant per built-in tool, plus `Dynamic` for
+/// Typed tool input — one variant per built-in tool, plus `Dynamic` for
 /// MCP/runtime-registered tools.
 ///
 /// Each variant wraps the tool's existing input struct. The new `Tool` trait

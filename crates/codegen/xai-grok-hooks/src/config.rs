@@ -199,7 +199,7 @@ pub struct HookSpec {
     pub timeout_ms: u64,
     pub source_dir: PathBuf,
     /// Env injected into the hook process, and consulted by load-time `command`/
-    /// `url` expansion. Precedence lowÔåÆhigh: user `env` (reserved keys stripped) <
+    /// `url` expansion. Precedence low→high: user `env` (reserved keys stripped) <
     /// plugin-injected < runner-injected at spawn (authentic identity always wins).
     pub extra_env: std::collections::HashMap<String, String>,
     /// The hook's origin and single source of truth for classification: `File`
@@ -286,7 +286,7 @@ pub fn hook_origin(spec: &HookSpec) -> HookOrigin {
 
 /// User-facing hook name for blocked-prompt copy: drops the stamped
 /// `:{event}[i].hooks[j]` tail, then renders config-tier sources as tier
-/// copy ÔÇö split by [`HookProvenance::is_managed_policy`] (who controls the
+/// copy — split by [`HookProvenance::is_managed_policy`] (who controls the
 /// hook), not [`HookOrigin`]'s modal grouping. Real names (`global/lint`),
 /// agent identities (`agent:<name>`), and `client:<id>` pass through.
 pub fn hook_display_name(qualified: &str) -> &str {
@@ -299,7 +299,7 @@ pub fn hook_display_name(qualified: &str) -> &str {
     }
 }
 
-/// `{source}:{event}[i].hooks[j]` ÔåÆ `{source}`; anything else unchanged.
+/// `{source}:{event}[i].hooks[j]` → `{source}`; anything else unchanged.
 fn strip_spec_path(qualified: &str) -> &str {
     match qualified.rsplit_once(':') {
         Some((source, tail)) if !source.is_empty() && is_spec_path(tail) => source,

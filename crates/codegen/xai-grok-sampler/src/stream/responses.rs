@@ -109,7 +109,7 @@ pub(crate) fn responses_event_may_have_output(event: &rs::ResponseStreamEvent) -
 ///
 /// This is the single observation point: it runs for every frame *before* the
 /// abort gate, so the frame a confident signal aborts on is observed exactly
-/// like any other. Two things matter ÔÇö a completed item is the authoritative
+/// like any other. Two things matter — a completed item is the authoritative
 /// copy of what the deltas approximated, and any frame that names tool
 /// activity or compaction state vetoes the replay, since reasoning must never
 /// be retried without the item it is bound to.
@@ -409,8 +409,8 @@ pub(crate) fn stream_responses_tracked<'a>(
                     }
                 }
 
-                // Start of a Responses FunctionCall ÔÇö emit initial id+name
-                // and remember the output_index ÔåÆ tool_index mapping.
+                // Start of a Responses FunctionCall — emit initial id+name
+                // and remember the output_index → tool_index mapping.
                 ResponseStreamEvent::ResponseOutputItemAdded(added_event) => {
                     if let rs::OutputItem::FunctionCall(fc) = added_event.item {
                         let tool_index = next_tool_index;
@@ -504,7 +504,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                     return;
                 }
 
-                // ÔöÇÔöÇ Backend-hosted tool lifecycle events ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+                // ── Backend-hosted tool lifecycle events ────────────
                 // These tools are executed server-side by the agentic
                 // sampler. We emit progress events so the shell/pager
                 // can show status to the user.
@@ -517,7 +517,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                         name: "web_search".to_string(),
                     };
                 }
-                // Completed/Searching carry no data ÔÇö the real payload
+                // Completed/Searching carry no data — the real payload
                 // arrives via ResponseOutputItemDone(WebSearchCall) below.
                 ResponseStreamEvent::ResponseWebSearchCallCompleted(_)
                 | ResponseStreamEvent::ResponseWebSearchCallSearching(_) => {}
@@ -536,7 +536,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                         name: "code_interpreter".to_string(),
                     };
                 }
-                // Interpreting/Completed carry no payload ÔÇö the result arrives
+                // Interpreting/Completed carry no payload — the result arrives
                 // via ResponseOutputItemDone(CodeInterpreterCall) below.
                 ResponseStreamEvent::ResponseCodeInterpreterCallInterpreting(_)
                 | ResponseStreamEvent::ResponseCodeInterpreterCallCompleted(_) => {}
@@ -597,7 +597,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                 }
 
                 // All other events (intermediate progress, annotations,
-                // image gen, file search, etc.) ÔÇö no action needed.
+                // image gen, file search, etc.) — no action needed.
                 _ => {}
             }
 
@@ -619,7 +619,7 @@ pub(crate) fn stream_responses_tracked<'a>(
             }
         }
 
-        // ÔöÇÔöÇ Build the final response ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+        // ── Build the final response ─────────────────────────────────
         let mut response = match final_response {
             Some(r) => r,
             None => {
@@ -644,7 +644,7 @@ pub(crate) fn stream_responses_tracked<'a>(
 
         // Billing fields (`prompt_tokens`, `completion_tokens`,
         // `cached_prompt_tokens`, `reasoning_tokens`) are the cumulative
-        // wire values ÔÇö they sum across every server-side turn of the
+        // wire values — they sum across every server-side turn of the
         // agent loop and are what we bill on / log to telemetry.
         //
         // `total_tokens` is the live context length used to drive the
@@ -693,7 +693,7 @@ pub(crate) fn stream_responses_tracked<'a>(
         // [`StopReason`] plus the typed raw reason carried to consumers. The
         // Responses wire strings never leave this module; the raw reason
         // reuses the Messages wire strings so the shell speaks one vocabulary
-        // (same strings, not backend parity ÔÇö the xAI Messages surface itself
+        // (same strings, not backend parity — the xAI Messages surface itself
         // reports a context cut as `max_tokens`, only this mapping splits it).
         let incomplete_classification: Option<(StopReason, Option<messages_types::StopReason>)> =
             if matches!(status, Status::Incomplete) {
@@ -735,7 +735,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                 None
             };
 
-        // NOTE: tool calls win even over an Incomplete status ÔÇö opposite
+        // NOTE: tool calls win even over an Incomplete status — opposite
         // precedence from the Messages backend, where Length wins so the
         // `LengthPolicy` gate can refuse a possibly argument-truncated
         // trailing call. Load-bearing; don't "fix" here.
@@ -766,7 +766,7 @@ pub(crate) fn stream_responses_tracked<'a>(
             InferenceLatencyStats::from_timestamps(stream_start, &chunk_timestamps, stream_end);
 
         // Warn-only for now: surface the server-reported triggers once per
-        // request (raw labels only ÔÇö ZDR-safe) and attach them for callers.
+        // request (raw labels only — ZDR-safe) and attach them for callers.
         let doom_loop_signals = doom_loop
             .as_ref()
             .map(|collector| collector.take())
@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     /// Context-window exhaustion ("max_prompt_tokens", the xAI extension)
-    /// is also a Length cut, not the unknown-reason fallback ÔÇö but keeps its
+    /// is also a Length cut, not the unknown-reason fallback — but keeps its
     /// wire distinction in `raw_stop_reason`, in the Messages vocabulary.
     #[tokio::test]
     async fn incomplete_max_prompt_tokens_maps_to_length() {
@@ -1056,7 +1056,7 @@ mod tests {
         );
     }
 
-    /// A missing `incomplete_details` still maps to Length ÔÇö an Incomplete
+    /// A missing `incomplete_details` still maps to Length — an Incomplete
     /// response must never look like a clean Stop.
     #[tokio::test]
     async fn incomplete_without_details_maps_to_length() {
@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     /// Pins the tool-calls-beat-Incomplete precedence: a truncated response
-    /// that still carries a function call surfaces as ToolCalls, not Length ÔÇö
+    /// that still carries a function call surfaces as ToolCalls, not Length —
     /// and the pair stays coherent: no raw length reason rides along, so the
     /// headless output keeps reporting `tool_use` for tool-bearing turns.
     #[tokio::test]
@@ -1198,7 +1198,7 @@ mod tests {
                 assert_eq!(error.kind, crate::events::SamplingErrorKind::Api);
                 assert_eq!(error.status_code, Some(500));
                 assert!(error.message.contains("boom"));
-                // The wire code passes through verbatim ÔÇö dropping it here
+                // The wire code passes through verbatim — dropping it here
                 // would disable strip recovery for coded Responses failures.
                 assert_eq!(
                     error.error_code,
@@ -1211,7 +1211,7 @@ mod tests {
         }
     }
 
-    /// A coded `error` event must carry its code into the Failed info ÔÇö
+    /// A coded `error` event must carry its code into the Failed info —
     /// this is the whole mid-stream strip-recovery chain for the Responses
     /// backend (the synthesized 500 + code classifies as an image error).
     #[tokio::test]
@@ -1389,7 +1389,7 @@ mod tests {
 
     /// A server-side code-interpreter run surfaces as a generic backend tool
     /// call (started on InProgress, completed on OutputItemDone) named
-    /// "code_interpreter" ÔÇö the same shape as x_search ÔÇö so it is no longer
+    /// "code_interpreter" — the same shape as x_search — so it is no longer
     /// silently dropped from the event stream.
     #[tokio::test]
     async fn code_interpreter_forwards_backend_tool_call() {
@@ -1534,7 +1534,7 @@ mod tests {
     #[tokio::test]
     async fn function_call_args_delta_without_added_event_is_dropped() {
         // ArgumentsDelta with no preceding OutputItemAdded has no
-        // output_index ÔåÆ tool_index mapping; drop silently.
+        // output_index → tool_index mapping; drop silently.
         let events: Vec<Result<rs::ResponseStreamEvent, SamplingError>> = vec![
             Ok(function_call_args_delta_event(7, "{\"oops\":1}")),
             Ok(completed_event()),

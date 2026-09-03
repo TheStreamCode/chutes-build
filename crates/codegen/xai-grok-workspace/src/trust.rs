@@ -14,11 +14,11 @@
 //!
 //! A recorded grant covers that workspace key and descendants that still
 //! resolve to the same git root ([`workspace_key`]). A nearer recorded
-//! decision wins. Other workspace keys under the path ÔÇö including nested git
-//! roots ÔÇö are not covered. The persisted file is written atomically with
+//! decision wins. Other workspace keys under the path — including nested git
+//! roots — are not covered. The persisted file is written atomically with
 //! owner-only (`0600`) permissions.
 //!
-//! The store is rooted at [`xai_grok_config::user_grok_home`] ÔÇö the **Option**
+//! The store is rooted at [`xai_grok_config::user_grok_home`] — the **Option**
 //! home that resolves to `None` (rather than a cwd-relative `./.grok`) when
 //! neither `$CHUTES_BUILD_HOME` nor a home directory is set (e.g. a minimal container /
 //! CI). In that no-home environment [`TrustStore::load`] yields an **empty,
@@ -64,7 +64,7 @@ struct TrustDocument {
 #[derive(Debug, Clone)]
 pub struct TrustStore {
     doc: TrustDocument,
-    /// Backing file, or `None` when no user home resolves ÔÇö a trust-nothing,
+    /// Backing file, or `None` when no user home resolves — a trust-nothing,
     /// persist-nothing store. Never a cwd-relative path.
     path: Option<PathBuf>,
 }
@@ -106,7 +106,7 @@ impl TrustStore {
     ///
     /// Resolves via [`xai_grok_config::user_grok_home`], never
     /// [`xai_grok_config::grok_home`], so it never falls back to a cwd-relative
-    /// `./.grok` ÔÇö that fallback would let an untrusted cloned repo's `.grok`
+    /// `./.grok` — that fallback would let an untrusted cloned repo's `.grok`
     /// masquerade as the user-global store and self-trust the checkout.
     pub fn default_path() -> Option<PathBuf> {
         Self::default_path_in(xai_grok_config::user_grok_home())
@@ -173,13 +173,13 @@ impl TrustStore {
     /// Record `workspace_key` as **trusted** and persist to disk.
     ///
     /// The key is canonicalized before storage so alias spellings (symlinks,
-    /// `/tmp` vs `/private/tmp`, ÔÇª) still match later lookups, which canonicalize
+    /// `/tmp` vs `/private/tmp`, …) still match later lookups, which canonicalize
     /// too. Keys are stored as UTF-8 strings (via `to_string_lossy`); a non-UTF-8
     /// path (rare on Unix) is stored lossily and therefore fails closed (it
     /// simply won't match on lookup) rather than over-trusting.
     ///
     /// **Over-broad roots are refused:** if the canonical key is non-absolute,
-    /// the filesystem root, or the user's home directory it is rejected ÔÇö
+    /// the filesystem root, or the user's home directory it is rejected —
     /// nothing is recorded (neither in memory nor on disk) and `Ok(())` is
     /// returned, so `is_trusted` stays `false` for it on both read and write.
     /// A later [`Self::set_untrusted`] on the same folder flips the stored
@@ -212,7 +212,7 @@ impl TrustStore {
     }
 
     /// Whether `workspace_key` has an EXACT recorded decision (trusted OR
-    /// untrusted) ÔÇö not cascade-aware. Used by the legacy-hook-trust migration to
+    /// untrusted) — not cascade-aware. Used by the legacy-hook-trust migration to
     /// avoid overriding a folder the user has already decided on.
     pub fn has_decision(&self, workspace_key: &Path) -> bool {
         let canonical = canonicalize_or_owned(workspace_key);
@@ -221,12 +221,12 @@ impl TrustStore {
             .contains_key(canonical.to_string_lossy().as_ref())
     }
 
-    // ÔöÇÔöÇ Internal ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── Internal ──────────────────────────────────────────────────────
 
     /// Shared write path for [`Self::set_trusted`] / [`Self::set_untrusted`].
     ///
     /// Canonicalizes the key, refuses over-broad roots (non-absolute /
-    /// filesystem root / home dir ÔåÆ `warn!` + `Ok(())` recording nothing), and
+    /// filesystem root / home dir → `warn!` + `Ok(())` recording nothing), and
     /// is a `warn!` + `Ok(())` no-op when there is no backing path (no-home
     /// environment), so it never writes a cwd-relative file. Otherwise it
     /// performs a locked read-modify-write-commit:
@@ -236,7 +236,7 @@ impl TrustStore {
     /// 2. re-read the current on-disk document so a peer's decisions are merged
     ///    rather than clobbered (lost-update fix);
     /// 3. insert the record and persist atomically;
-    /// 4. only on success commit the new document to memory ÔÇö on any
+    /// 4. only on success commit the new document to memory — on any
     ///    lock/persist error `self.doc` is left unchanged.
     fn record_decision(&mut self, workspace_key: &Path, trusted: bool) -> io::Result<()> {
         let canonical = canonicalize_or_owned(workspace_key);
@@ -249,7 +249,7 @@ impl TrustStore {
             return Ok(());
         }
 
-        // No backing file (no-home env) ÔåÆ record nothing, return `Ok` so
+        // No backing file (no-home env) → record nothing, return `Ok` so
         // callers treat "no home" like "nothing to persist" (see fn doc).
         let Some(path) = self.path.as_deref() else {
             tracing::warn!(
@@ -357,14 +357,14 @@ impl TrustStore {
 ///
 /// A grok-managed worktree first collapses onto its recorded source repo's git
 /// ROOT (via the `~/.chutes-build/worktrees.db` registry), so every `chutes-build -w` worktree
-/// shares one trust key regardless of creation mode ÔÇö including standalone clones
-/// that git can't link back to their source ÔÇö and regardless of the subdir
+/// shares one trust key regardless of creation mode — including standalone clones
+/// that git can't link back to their source — and regardless of the subdir
 /// `chutes-build -w` was launched from (the recorded source repo may be a repo subdir).
 /// Non-registry git worktrees fall through to the git-topology collapse below.
 ///
 /// A linked git worktree collapses onto its MAIN checkout's root so every
 /// `chutes-build -w` worktree of a repo shares one trust key. The collapse fires ONLY
-/// for the conventional `<workdir>/.git` layout ÔÇö i.e. the common gitdir
+/// for the conventional `<workdir>/.git` layout — i.e. the common gitdir
 /// resolves back to `<main_workdir>/.git`. For bare or `--separate-git-dir`
 /// repos (where the common gitdir's inferred workdir would be the gitdir's
 /// parent, broader than the real checkout) the key instead falls back to the
@@ -375,7 +375,7 @@ impl TrustStore {
 /// `$HOME` is itself a git repo (dotfiles-in-home) the up-walk would otherwise
 /// land on the home dir, so [`is_unsafe_trust_root`] re-scopes the key to the
 /// cwd (keeping trust bound to the working dir, not the whole home subtree). A
-/// cwd that IS home is out of scope ÔÇö no narrower safe fallback exists.
+/// cwd that IS home is out of scope — no narrower safe fallback exists.
 pub fn workspace_key(cwd: &Path) -> PathBuf {
     let key = git_derived_workspace_key(cwd);
     if is_unsafe_trust_root(&key) {
@@ -424,13 +424,13 @@ pub fn is_home_dir(path: &Path) -> bool {
     canonicalize_or_owned(path) == canonicalize_or_owned(&home)
 }
 
-/// Whether `key` is too broad to ever be a safe trust root ÔÇö refused on write
+/// Whether `key` is too broad to ever be a safe trust root — refused on write
 /// and ignored on read (fail closed).
 ///
 /// Also consumed by [`crate::folder_trust`] as the "key can never be recorded"
 /// signal: such a key can't be durably gated, so it resolves Trusted instead of
 /// prompting on a decision that could never persist. Public because the shell's
-/// revoke path refuses the same roots symmetrically ÔÇö an in-process cache deny
+/// revoke path refuses the same roots symmetrically — an in-process cache deny
 /// for a key the store can never grant would be unliftable.
 pub fn is_unsafe_trust_root(key: &Path) -> bool {
     !key.is_absolute() || key.parent().is_none() || is_home_dir(key)
@@ -556,7 +556,7 @@ fn migrate_legacy_hook_trust_in(legacy_file: &Path, store: &mut TrustStore) -> u
         }
     }
     // Rename so the legacy file is consumed exactly once, reached only after a
-    // SUCCESSFUL read AND with every grant seeded ÔÇö a seeding write error leaves
+    // SUCCESSFUL read AND with every grant seeded — a seeding write error leaves
     // the file in place for a future run (mirrors the read-error bail). Idempotent:
     // skipped when already migrated/absent.
     if had_seed_error {
@@ -657,7 +657,7 @@ mod tests {
     fn migrate_legacy_hook_trust_leaves_unreadable_file_in_place() {
         // A legacy file that EXISTS but can't be read must not be consumed: a
         // transient read error would otherwise rename it and permanently drop
-        // every grant. Use a directory at the legacy path ÔÇö it `exists()` but
+        // every grant. Use a directory at the legacy path — it `exists()` but
         // `read_to_string` errors (non-NotFound), portably simulating the failure.
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
@@ -722,7 +722,7 @@ mod tests {
             Some(home.join(TRUST_FILE_NAME))
         );
 
-        // With NO resolvable home the path is `None` ÔÇö never a synthesized
+        // With NO resolvable home the path is `None` — never a synthesized
         // fallback. This is the regression guard that keeps the store off the
         // cwd-relative `./.grok` that grok_home() would invent, which is exactly
         // how a cloned repo's own `<repo>/.chutes-build/trusted_folders.toml` could
@@ -745,7 +745,7 @@ mod tests {
     fn no_home_store_trusts_nothing_and_persists_nothing() {
         // Simulate the no-home environment where `default_path()` is `None`:
         // `load()` yields `empty()`, a store with no backing path. It must
-        // trust nothing and silently no-op on writes ÔÇö never touching a
+        // trust nothing and silently no-op on writes — never touching a
         // cwd-relative `./.grok`.
         let mut store = TrustStore::empty();
         assert!(store.is_empty());
@@ -844,8 +844,8 @@ mod tests {
         let sibling = canonicalize_or_owned(tmp.path()).join("other-repo");
         assert!(!store.is_trusted(&sibling));
         // A sibling that *string*-prefixes the trusted root must NOT be trusted:
-        // the cascade is component-wise (`Path::starts_with`), so `ÔÇª/repo` must
-        // not trust `ÔÇª/repo-sibling` or `ÔÇª/repository`.
+        // the cascade is component-wise (`Path::starts_with`), so `…/repo` must
+        // not trust `…/repo-sibling` or `…/repository`.
         let prefix_sibling = canonicalize_or_owned(tmp.path()).join("repo-sibling");
         assert!(
             !store.is_trusted(&prefix_sibling),
@@ -1072,7 +1072,7 @@ mod tests {
     #[test]
     fn workspace_key_ignores_home_git_repo_for_subdir() {
         // Home-is-a-git-repo (dotfiles in $HOME): a subdir launched from under
-        // home must key trust on the SUBDIR, not on $HOME ÔÇö even though the git
+        // home must key trust on the SUBDIR, not on $HOME — even though the git
         // up-walk discovers home as the repo root. Pin HOME and USERPROFILE:
         // xai_dirs::home_dir reads USERPROFILE on Windows.
         let _lock = crate::ENV_TEST_LOCK
@@ -1196,7 +1196,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         // A hand-edited / migrated `[folders."<home>"]` record must not trust
-        // repos under $HOME ÔÇö the read side ignores it, matching set_trusted.
+        // repos under $HOME — the read side ignores it, matching set_trusted.
         let Some(home) = xai_dirs::home_dir() else {
             return; // no home dir in this environment; nothing to assert
         };
@@ -1275,7 +1275,7 @@ mod tests {
         assert!(!store.is_trusted(&key), "untrust flips the stored bool");
         store.set_trusted(&key).unwrap();
         assert!(store.is_trusted(&key), "re-trust flips it back");
-        // The insert overwrites ÔÇö one record per folder, no duplicates.
+        // The insert overwrites — one record per folder, no duplicates.
         assert_eq!(store.len(), 1);
 
         let reloaded = TrustStore::load_from(store_path);
@@ -1443,7 +1443,7 @@ mod tests {
         // common gitdir's INFERRED workdir is the PARENT of the relocated gitdir,
         // not the checkout. The layout guard (`<workdir>/.git` must equal the
         // common gitdir) rejects that, so the key falls back to the worktree's
-        // own dir ÔÇö never widening to the gitdir's parent.
+        // own dir — never widening to the gitdir's parent.
         let dir = tempfile::tempdir().unwrap();
         let checkout = dir.path().join("checkout");
         let gitdir = dir.path().join("gitstore");
@@ -1502,7 +1502,7 @@ mod tests {
         );
     }
 
-    // ÔöÇÔöÇ workspace_key registry collapse (grok-managed worktrees) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    // ── workspace_key registry collapse (grok-managed worktrees) ─────────
 
     // Crate-shared env lock + env guards bundled as ONE value so the env restores
     // before the lock releases by struct field order (see lib.rs), regardless of
@@ -1511,8 +1511,8 @@ mod tests {
 
     /// Point `CHUTES_BUILD_HOME` at an isolated tempdir and register one grok-managed
     /// worktree at `<home>/worktrees/repo/<name>` recording `source_repo` and
-    /// `creation_mode`. The worktree dir is a PLAIN directory ÔÇö NOT a git linked
-    /// worktree ÔÇö so only the registry can collapse it. Returns `(env, worktree
+    /// `creation_mode`. The worktree dir is a PLAIN directory — NOT a git linked
+    /// worktree — so only the registry can collapse it. Returns `(env, worktree
     /// dir)`; the [`LockedTestEnv`] holds the lock and restores `CHUTES_BUILD_HOME` on
     /// drop (before releasing the lock), so the caller may bind it any way.
     fn register_grok_worktree(
@@ -1560,8 +1560,8 @@ mod tests {
         // A standalone worktree is a full clone with its OWN `.git`, so git
         // topology can't link it to its source; the registry (worktrees.db) must
         // collapse it onto the recorded source repo so trust is shared. The
-        // worktree dir is a plain dir (no git), proving the REGISTRY path ÔÇö not
-        // git topology ÔÇö does the collapse. `source_repo` is a real git repo (as
+        // worktree dir is a plain dir (no git), proving the REGISTRY path — not
+        // git topology — does the collapse. `source_repo` is a real git repo (as
         // in production), so the git-root normalization is deterministic
         // regardless of where `$TMPDIR` lives.
         let temp = tempfile::TempDir::new().unwrap();
@@ -1620,7 +1620,7 @@ mod tests {
         // populated with a real git source repo that WOULD be returned for a
         // worktree cwd, and `outside` is its OWN git repo (under grok HOME but not
         // under its `worktrees/`) so the fallback is deterministic (no conditional
-        // skip) ÔÇö we assert the key is `outside`'s own root, never the source repo.
+        // skip) — we assert the key is `outside`'s own root, never the source repo.
         let temp = tempfile::TempDir::new().unwrap();
         let root = dunce::canonicalize(temp.path()).unwrap();
         let source_repo = root.join("source-repo");

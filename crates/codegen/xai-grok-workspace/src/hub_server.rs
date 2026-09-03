@@ -30,8 +30,8 @@ use xai_tool_runtime::{
 };
 use xai_tool_types::ToolDescription;
 /// Deprecation monitor for the self-attested `caller_session_id` param:
-/// `kind="param_mismatch"` ÔÇö the param disagreed with the server-bound envelope
-/// session (envelope trusted); `kind="envelope_absent"` ÔÇö no envelope
+/// `kind="param_mismatch"` — the param disagreed with the server-bound envelope
+/// session (envelope trusted); `kind="envelope_absent"` — no envelope
 /// session, the param was used as a compat fallback. Enforcement
 /// (envelope-only identity) waits for this to be flat zero.
 static WORKSPACE_RPC_CALLER_MISMATCH_TOTAL: std::sync::LazyLock<IntCounterVec> =
@@ -62,7 +62,7 @@ static WORKSPACE_RPC_REQUESTS_TOTAL: std::sync::LazyLock<IntCounterVec> =
         register_int_counter_vec!(
             "grok_workspace_rpc_requests_total",
             "Workspace RPC dispatches, by method and result. Donated per-sandbox \
-             series inflate absolute volume ÔÇö SLOs must use ratios \
+             series inflate absolute volume — SLOs must use ratios \
              (error/total), not increase() counts.",
             &["method", "result"]
         )
@@ -75,7 +75,7 @@ static WORKSPACE_RPC_ERRORS_TOTAL: std::sync::LazyLock<IntCounterVec> =
         register_int_counter_vec!(
             "grok_workspace_rpc_errors_total",
             "Failed workspace RPC dispatches, by method and error kind. \
-             Donated per-sandbox series inflate absolute volume ÔÇö compare \
+             Donated per-sandbox series inflate absolute volume — compare \
              error_kind shares or error/total ratios, not raw counts.",
             &["method", "error_kind"]
         )
@@ -175,7 +175,7 @@ impl crate::worktree::WorktreeNotificationSender for NoOpNotifier {
 ///
 /// Default **on**; setting `WORKSPACE_CLIENT_FS_QUERIES=0` (or `false`)
 /// disables the ops with a graceful `HubError` that the remote caller
-/// maps to a fallback. Read per call ÔÇö flipping the variable needs no
+/// maps to a fallback. Read per call — flipping the variable needs no
 /// process restart and tests can toggle it under a lock.
 fn client_fs_queries_enabled() -> bool {
     !matches!(
@@ -1244,7 +1244,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
     }
     /// Hub-issued `tool_server.evict`. Always tears the evicted session down
     /// (MCP bridges + activity/writer state, like the `SessionEnded` hook), then
-    /// runs the global two-phase drain **only** when no other session survives ÔÇö
+    /// runs the global two-phase drain **only** when no other session survives —
     /// a global drain shuts down the *shared* upload queue, which must not happen
     /// while another session is live. Idempotent across fan-out and safe for an
     /// already-gone session id.
@@ -1283,13 +1283,13 @@ impl ToolServerHandler for WorkspaceRpcHandler {
                 tracing::info!(
                     session = %params.session_id,
                     reason = %params.reason,
-                    "workspace: hub evict ÔÇö already draining/shutting down; dropped session only"
+                    "workspace: hub evict — already draining/shutting down; dropped session only"
                 );
             } else {
                 tracing::info!(
                     session = %params.session_id,
                     reason = %params.reason,
-                    "workspace: hub evict ÔÇö other sessions live; dropped session only"
+                    "workspace: hub evict — other sessions live; dropped session only"
                 );
             }
             return;
@@ -1299,7 +1299,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             session = %params.session_id,
             reason = %params.reason,
             grace_period_ms = params.grace_period_ms,
-            "workspace: hub evict ÔÇö last session; commencing two-phase drain"
+            "workspace: hub evict — last session; commencing two-phase drain"
         );
         let unfinished = self
             .workspace

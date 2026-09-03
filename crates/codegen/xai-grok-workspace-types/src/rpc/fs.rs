@@ -149,7 +149,7 @@ pub struct GetFilesRes {
 // Filesystem extension ops (`workspace.fs_*`)
 // =========================================================================
 
-// Response types ÔÇö serde shapes match the shell's `session::file_system`
+// Response types — serde shapes match the shell's `session::file_system`
 // types byte-for-byte so the ACP wire contract is unchanged.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,7 +259,7 @@ pub struct FsReadFileReq {
     #[serde(default)]
     pub offset: Option<u64>,
     /// Bytes to read (absent means "to EOF"). Only consulted for ranged
-    /// reads, and always capped at `max_bytes` and the server's hard limit ÔÇö
+    /// reads, and always capped at `max_bytes` and the server's hard limit —
     /// so an unset `length` still returns at most `max_bytes`. Detect "more
     /// data" by comparing the returned bytes (from `offset`) against `size`.
     #[serde(default)]
@@ -320,7 +320,7 @@ impl WorkspaceRpc for FsDeleteFileReq {
 // with a post-sort `offset`, and reads are binary-safe (base64 chunks).
 // camelCase wire format with fixed-width integers only, so both the
 // workspace server (`xai-grok-workspace`) and the grok.com backend
-// compile against the same structs ÔÇö a field rename breaks both sides.
+// compile against the same structs — a field rename breaks both sides.
 //
 // The method names use a `client_fs` segment (not `fs`) because the
 // `workspace.fs_*` ops above already serve the shell's `chutes.ai/fs/*`
@@ -453,7 +453,7 @@ pub struct ClientFsListRes {
     pub truncated: bool,
 }
 
-/// Stat request ÔÇö existence, metadata, and a content hash for one path.
+/// Stat request — existence, metadata, and a content hash for one path.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsStatReq {
@@ -467,8 +467,8 @@ impl WorkspaceRpc for ClientFsStatReq {
     type Response = ClientFsStatRes;
 }
 
-/// Response for [`ClientFsStatReq`]. A missing path ÔÇö including one whose
-/// intermediate component is a file rather than a directory ÔÇö is
+/// Response for [`ClientFsStatReq`]. A missing path — including one whose
+/// intermediate component is a file rather than a directory — is
 /// `exists: false` with all other fields absent (not an RPC error).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -484,14 +484,14 @@ pub struct ClientFsStatRes {
     /// Modification time as epoch milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtime_ms: Option<i64>,
-    /// SHA-256 hex digest of the full content (files only) ÔÇö keys the
+    /// SHA-256 hex digest of the full content (files only) — keys the
     /// backend's content-addressed write-through cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
 }
 
 /// Binary-safe chunked read request. Unlike `workspace.get_files`, byte
-/// ranges need no UTF-8 alignment ÔÇö chunks transfer as base64.
+/// ranges need no UTF-8 alignment — chunks transfer as base64.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsReadFileReq {
@@ -501,7 +501,7 @@ pub struct ClientFsReadFileReq {
     #[serde(default)]
     pub offset: Option<u64>,
     /// Bytes to read (absent means "to EOF"), always capped at `max_bytes`
-    /// and the server's hard limit ÔÇö so an unset `length` still returns at
+    /// and the server's hard limit — so an unset `length` still returns at
     /// most `max_bytes`. Detect "more data" by comparing the returned bytes
     /// (from `offset`) against `size`.
     #[serde(default)]
@@ -524,8 +524,8 @@ impl WorkspaceRpc for ClientFsReadFileReq {
 }
 
 /// Response for [`ClientFsReadFileReq`]. Exactly one of `content` /
-/// `contentBase64` is populated, matching `type`: `text` ÔçÆ `content`
-/// (unless base64 was requested), `binary` ÔçÆ `contentBase64`.
+/// `contentBase64` is populated, matching `type`: `text` ⇒ `content`
+/// (unless base64 was requested), `binary` ⇒ `contentBase64`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsReadFileRes {
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     fn fs_read_file_req_defaults_are_legacy_full_read() {
-        // Absent offset/length/encoding ÔçÆ whole-file read with the
+        // Absent offset/length/encoding ⇒ whole-file read with the
         // unchanged wire contract; max_bytes defaults to 1 MiB and is
         // only consulted on ranged reads.
         let req: FsReadFileReq =

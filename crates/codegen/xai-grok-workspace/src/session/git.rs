@@ -198,7 +198,7 @@ pub enum GitDiscoveryResult {
     NotARepo,
     /// libgit2 failed for a reason other than "not found" (e.g. permissions,
     /// unsupported extensions, corrupt repo). The user may or may not be in a
-    /// git repo ÔÇö we can't tell.
+    /// git repo — we can't tell.
     DiscoveryFailed(anyhow::Error),
 }
 /// Discover whether `path` is inside a git repository.
@@ -243,8 +243,8 @@ pub(crate) fn strip_url_credentials(url_str: &str) -> String {
 /// Scrub credentials from any URL embedded in free-form git output before it is
 /// returned to a caller or logged. A `github` remote may carry
 /// `https://x-access-token:TOKEN@host/...`, and git echoes the remote URL in
-/// push/fetch errors ÔÇö so the token would otherwise leak to the FE and logs.
-/// Rewrites `scheme://<userinfo>@` ÔåÆ `scheme://` in place, preserving the rest
+/// push/fetch errors — so the token would otherwise leak to the FE and logs.
+/// Rewrites `scheme://<userinfo>@` → `scheme://` in place, preserving the rest
 /// (line structure, quotes, trailing punctuation) so diagnostics stay readable.
 pub(crate) fn scrub_git_output(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
@@ -305,7 +305,7 @@ pub fn normalize_repo_url(url: &str) -> Option<String> {
     }
     None
 }
-/// `git@host:path` or `host:path` ÔåÆ `host/path`
+/// `git@host:path` or `host:path` → `host/path`
 fn normalize_scp_url(url: &str) -> Option<String> {
     let after_user = match url.find('@') {
         Some(pos) => &url[pos + 1..],
@@ -324,7 +324,7 @@ fn normalize_scp_url(url: &str) -> Option<String> {
     }
     Some(format!("{}/{}", host.to_ascii_lowercase(), path))
 }
-/// Standard URL (`https://`, `ssh://`, `git://`, `http://`) ÔåÆ `host/path`
+/// Standard URL (`https://`, `ssh://`, `git://`, `http://`) → `host/path`
 fn normalize_parsed_url(parsed: &Url) -> Option<String> {
     if parsed.scheme() == "file" {
         return None;
@@ -572,7 +572,12 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
             }
         }
         let linked_main = (repo.path() != repo.commondir())
-            .then(|| repo.commondir().parent().map(display))
+            .then(|| {
+                // git2 returns git-style (forward-slash) paths; re-assemble with
+                // native components so the display string matches local paths.
+                let commondir = repo.commondir().components().collect::<PathBuf>();
+                commondir.parent().map(display)
+            })
             .flatten();
         let main_repo = marker_main.or(db_main).or(linked_main);
         let is_worktree = main_repo.is_some() || db_label.is_some();
@@ -635,7 +640,7 @@ fn compute_ahead_behind(repo: &Repository) -> Option<(usize, usize)> {
 /// are logged and also `None`.
 ///
 /// Never peel to the commit: on a huge or corrupt pack that read can hang,
-/// allocating until the process dies ÔÇö it hung session startup, and the file
+/// allocating until the process dies — it hung session startup, and the file
 /// watcher hits this on every git event.
 fn head_reference(repo: &Repository) -> Option<Reference<'_>> {
     match repo.head() {
@@ -903,7 +908,7 @@ pub struct GitHeadChanged {
     pub main_repo: Option<String>,
 }
 /// Discover the git root, current branch, and remote URLs.
-/// Uses `git2` ÔÇö no subprocess.
+/// Uses `git2` — no subprocess.
 pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
     let cwd = cwd.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -968,7 +973,7 @@ fn detect_remote_default_branch(repo: &Repository) -> Option<String> {
         .map(|b| b.to_string())
 }
 /// List all local + remote branches.
-/// Uses `git2` ÔÇö no subprocess, no `git status`.
+/// Uses `git2` — no subprocess, no `git status`.
 pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
     let root = git_root.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -1045,7 +1050,7 @@ fn change_type_from_porcelain(ch: char, staged: bool) -> ChangeType {
         _ => ChangeType::Edit,
     }
 }
-/// Parse `git diff --numstat` output into a map of path ÔåÆ (additions, deletions).
+/// Parse `git diff --numstat` output into a map of path → (additions, deletions).
 ///
 /// We intentionally omit `-M` from our `git diff --numstat` invocations, so rename
 /// entries won't appear in practice. The format is simply `ADDS\tDELS\tPATH`
@@ -1190,11 +1195,11 @@ fn parse_porcelain_v2(
     }
     (staged, unstaged)
 }
-/// Full git-status via CLI only ÔÇö used as fallback when libgit2 cannot read the
+/// Full git-status via CLI only — used as fallback when libgit2 cannot read the
 /// index (e.g. split-index `link` extension).
 ///
 /// **Limitation:** patch content (`patch`, `patch_bytes`, `patch_lines`) is not
-/// populated ÔÇö all entries return `None` for these fields. Currently no caller
+/// populated — all entries return `None` for these fields. Currently no caller
 /// passes `include_patches=true` via the extension API. If that changes, add
 /// `git diff --cached -p` / `git diff -p` parsing here.
 async fn status_via_cli(
@@ -1892,7 +1897,7 @@ pub fn warn_registry_disabled_restore(session_id: &str) {
     tracing::warn!(
         target: RESTORE_CODE_LOG,
         session_id,
-        "session registry disabled ÔÇö staged/unstaged/untracked will not be restored"
+        "session registry disabled — staged/unstaged/untracked will not be restored"
     );
 }
 /// Gate for [`warn_registry_disabled_restore`]: the warn should fire
@@ -1906,7 +1911,7 @@ pub fn should_warn_registry_disabled(is_jj: bool, registry_present: bool) -> boo
 /// Outcome of a [`checkout_session_commit`] call.
 ///
 /// `checked_out: true` means HEAD is at the requested commit after this
-/// call returned ÔÇö including the no-op early-return where HEAD was
+/// call returned — including the no-op early-return where HEAD was
 /// already at the target.
 #[derive(Debug, Default, Clone)]
 pub struct CheckoutSessionOutcome {
@@ -1920,7 +1925,7 @@ pub struct CheckoutSessionOutcome {
 /// Result of attempting to stash dirty working-tree state.
 #[derive(Debug, Clone)]
 pub enum StashOutcome {
-    /// Working tree was already clean ÔÇö no stash needed.
+    /// Working tree was already clean — no stash needed.
     Clean,
     /// Stash created; carries the captured stash ref (commit SHA).
     Stashed(String),
@@ -1939,7 +1944,7 @@ fn in_progress_state_reason(git_root: &Path) -> Option<String> {
     for name in IN_PROGRESS_STATE_FILES {
         if git_dir.join(name).exists() {
             return Some(format!(
-                "in-progress {} ÔÇö refusing to stash to preserve operation state",
+                "in-progress {} — refusing to stash to preserve operation state",
                 name
             ));
         }
@@ -1957,7 +1962,7 @@ fn in_progress_state_reason(git_root: &Path) -> Option<String> {
 /// `stash push` + `rev-parse stash@{0}` is mostly atomic in practice (the
 /// only racer is another concurrent stash in the same repo). The truly
 /// atomic `git stash create + stash store` flow is not viable here
-/// because `git stash create` does not support `--include-untracked` ÔÇö
+/// because `git stash create` does not support `--include-untracked` —
 /// using it would silently lose untracked files from the snapshot. On
 /// `rev-parse` failure we return `Skipped` rather than a misleading
 /// `stash@{0}` literal.
@@ -2334,11 +2339,11 @@ async fn pop_checkout_auto_stash(
 ///    These are disposable snapshots that exist precisely to carry a
 ///    detached session HEAD.
 /// 2. `supplied_cwd` is exactly the cwd the session was persisted with
-///    (`persisted_cwd`) ÔÇö the original "same-directory restore" intent.
+///    (`persisted_cwd`) — the original "same-directory restore" intent.
 ///
-/// In every other case ÔÇö notably a forked-worktree session that was
+/// In every other case — notably a forked-worktree session that was
 /// persisted with `git_ref = origin/main` but is later loaded with
-/// `cwd = <source repo>` ÔÇö running the checkout would silently detach the
+/// `cwd = <source repo>` — running the checkout would silently detach the
 /// user's real repository and leave their active branch behind, so we
 /// refuse.
 pub fn restore_code_checkout_allowed(supplied_cwd: &Path, persisted_cwd: Option<&str>) -> bool {
@@ -2375,7 +2380,7 @@ pub fn git_rewind_enabled() -> bool {
 pub struct GitStateRef {
     /// HEAD commit SHA at capture time.
     pub head: String,
-    /// Repo-root-relative paths with staged (HEADÔåÆindex) changes at capture time.
+    /// Repo-root-relative paths with staged (HEAD→index) changes at capture time.
     pub staged: Vec<PathBuf>,
 }
 /// Per-prompt, in-memory store of captured [`GitStateRef`]s keyed by
@@ -2414,7 +2419,7 @@ impl GitCheckpointStore {
         self.by_prompt.lock().await.get(&prompt_index).cloned()
     }
     /// Whether a git state is recorded for `prompt_index`. Cheaper than
-    /// [`get`](Self::get) ÔÇö no clone of the `GitStateRef`.
+    /// [`get`](Self::get) — no clone of the `GitStateRef`.
     pub async fn contains(&self, prompt_index: usize) -> bool {
         self.by_prompt.lock().await.contains_key(&prompt_index)
     }
@@ -2448,14 +2453,14 @@ impl GitCheckpointStore {
 /// Capture the current git state (HEAD + staged paths) for a rewind checkpoint.
 /// `cwd` may be a subdirectory; the repo root is resolved so staged paths are
 /// repo-root-relative (matching restore's root-anchored `git add`). Best-effort:
-/// `None` outside a repo or with an unresolvable `HEAD` ÔÇö capture must never fail a turn.
+/// `None` outside a repo or with an unresolvable `HEAD` — capture must never fail a turn.
 pub async fn capture_git_state(cwd: &Path) -> Option<GitStateRef> {
     let git_root = resolve_git_root(cwd).await?;
     let head = get_current_commit(&git_root).await?;
     let staged = staged_paths(&git_root).await?;
     Some(GitStateRef { head, staged })
 }
-/// Real git commit at a turn boundary. Best-effort ÔÇö never fails the turn.
+/// Real git commit at a turn boundary. Best-effort — never fails the turn.
 /// Stages the worktree and commits on the current branch with `turn {n}`.
 pub async fn commit_turn_if_dirty(cwd: &Path, turn_number: u64) -> Option<String> {
     let git_root = resolve_git_root(cwd).await?;
@@ -2554,13 +2559,13 @@ pub async fn commit_turn_if_dirty(cwd: &Path, turn_number: u64) -> Option<String
 }
 /// Resolve the worktree root for `cwd` via `git rev-parse --show-toplevel`.
 /// Path-sensitive index ops must run from the root so repo-root-relative paths
-/// are consistent ÔÇö a session `cwd` may be a subdirectory.
+/// are consistent — a session `cwd` may be a subdirectory.
 async fn resolve_git_root(cwd: &Path) -> Option<PathBuf> {
     let out = git_cli(cwd, &["rev-parse", "--show-toplevel"]).await.ok()?;
     let root = out.trim();
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
-/// List repo-root-relative paths with staged (HEADÔåÆindex) changes via
+/// List repo-root-relative paths with staged (HEAD→index) changes via
 /// `git diff --cached --name-only -z`. `Some(empty)` means nothing staged;
 /// `None` means the diff failed, so callers can tell that apart from "nothing
 /// staged" instead of recording a lossy empty set. `git_root` must be the worktree root.
@@ -2625,7 +2630,7 @@ pub async fn soft_restore_git_state(
         tracing::warn!(
             path = %cwd.display(),
             session_id,
-            "soft_restore_git_state: aborting ÔÇö could not resolve git repo root"
+            "soft_restore_git_state: aborting — could not resolve git repo root"
         );
         return GitRestoreOutcome {
             restored: false,
@@ -2642,7 +2647,7 @@ pub async fn soft_restore_git_state(
                 path = %git_root.display(),
                 session_id,
                 reason = %reason,
-                "soft_restore_git_state: aborting ÔÇö dirty tree could not be stashed"
+                "soft_restore_git_state: aborting — dirty tree could not be stashed"
             );
             return GitRestoreOutcome {
                 restored: false,
@@ -2712,7 +2717,7 @@ pub async fn soft_restore_git_state(
         stash_ref,
     }
 }
-/// Re-stage the recorded staged path set ÔÇö phase 2 of a soft git rewind, run
+/// Re-stage the recorded staged path set — phase 2 of a soft git rewind, run
 /// AFTER the FS revert (phase 1 is [`soft_restore_git_state`]) so blobs reflect
 /// the reverted tree. Per-path best-effort: a path removed during the turn is
 /// skipped, not fatal. Never errors; returns `true` when the full set was
@@ -2828,7 +2833,7 @@ async fn git_cli_raw_mut(cwd: &Path, args: &[&str]) -> Result<(bool, String)> {
 /// the same block at provision time under this marker; whichever side seeds
 /// first wins and the other becomes a no-op.
 const DEFAULT_EXCLUDES_MARKER: &str = "grok default excludes";
-/// Local-only default excludes (`.git/info/exclude` ÔÇö never enters the repo's
+/// Local-only default excludes (`.git/info/exclude` — never enters the repo's
 /// history) so `stage_all` can't sweep in dependency trees, build output, or
 /// env files. `git add -f` still overrides.
 const DEFAULT_EXCLUDES_BLOCK: &str = "\
@@ -3124,9 +3129,9 @@ async fn seed_default_gitignore(git_root: &Path) -> Result<()> {
     Ok(())
 }
 /// `EnsureBinding` (`workspace.git_ensure_binding`): make the conversation
-/// branch exist and be checked out. Resolution order: already-current ÔåÆ local
-/// branch ÔåÆ remote `conv/<id>` (resume in a fresh sandbox: check it out, do not
-/// re-fork) ÔåÆ fork off `base_ref`. The base is never written directly. On a
+/// branch exist and be checked out. Resolution order: already-current → local
+/// branch → remote `conv/<id>` (resume in a fresh sandbox: check it out, do not
+/// re-fork) → fork off `base_ref`. The base is never written directly. On a
 /// genuine fresh fork a committed `.gitignore` is seeded if absent.
 pub async fn ensure_binding(
     git_root: &Path,
@@ -3431,7 +3436,7 @@ pub enum GitRepoResponse {
     GitRepo(GitRepoPathResponse),
 }
 /// Strip `root` from `child`, canonicalizing both sides to handle symlinks
-/// (e.g. `/tmp` ÔåÆ `/private/tmp` on macOS). Falls back through partial and
+/// (e.g. `/tmp` → `/private/tmp` on macOS). Falls back through partial and
 /// raw `strip_prefix` when one side can't be resolved (deleted files, etc.).
 ///
 /// Returns `None` when `child` is not under `root` or they are the same path.
@@ -3608,25 +3613,25 @@ pub fn short_sha(sha: &str) -> &str {
 /// Depth of a `--restore-code` restoration.
 ///
 /// Serialised to `"full"` / `"head_only"` on the wire (camelCase /
-/// snake_case agnostic ÔÇö the variants are themselves snake_case-style).
+/// snake_case agnostic — the variants are themselves snake_case-style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestoreDegree {
     /// HEAD checkout + staged/unstaged/untracked applied from GCS archive.
     Full,
-    /// HEAD checkout only ÔÇö no archive applied.
+    /// HEAD checkout only — no archive applied.
     HeadOnly,
 }
-/// Why a restore decision is being made ÔÇö drives the summary string and
+/// Why a restore decision is being made — drives the summary string and
 /// degree. Shared by the non-worktree (`mvp_agent.rs`) and worktree
 /// (`session/worktree.rs`) call sites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RestoreKind {
-    /// Local `git checkout` failed ÔÇö archive must not be applied; caller
+    /// Local `git checkout` failed — archive must not be applied; caller
     /// should pass this variant directly rather than relying on the
     /// `!outcome.checked_out` short-circuit so the intent is explicit.
     CheckoutFailed,
-    /// Session registry disabled ÔÇö only HEAD was checked out. Also used
+    /// Session registry disabled — only HEAD was checked out. Also used
     /// when repository-snapshot restore is unavailable in this build.
     RegistryOff,
 }
@@ -3647,7 +3652,7 @@ pub struct RestoreDecision {
     pub degree: Option<RestoreDegree>,
 }
 /// Build a [`RestoreDecision`] from the checkout outcome and the policy
-/// kind. Pure function ÔÇö no I/O. The single source of truth shared by
+/// kind. Pure function — no I/O. The single source of truth shared by
 /// the agent (`build_code_restore_meta`) and worktree
 /// (`build_worktree_restore_outcome`) wire-format adapters.
 ///
@@ -3675,7 +3680,7 @@ pub fn build_restore_decision(
         RestoreKind::CheckoutFailed => unreachable!("handled by short-circuit above"),
         RestoreKind::RegistryOff => (
             format!(
-                "checked out {short} (session registry disabled ÔÇö staged/unstaged/untracked not restored)"
+                "checked out {short} (session registry disabled — staged/unstaged/untracked not restored)"
             ),
             RestoreDegree::HeadOnly,
         ),

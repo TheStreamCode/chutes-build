@@ -818,7 +818,7 @@ fn cache_outgoing_acp_state(msg: &str, state: &std::sync::Mutex<StdioReplayState
                     .and_then(|m| serde_json::to_string(m).ok()),
             });
         }
-        "session/close" | "chutes.build/session/close" | "chutes.build/session/close" => {
+        "session/close" | "chutes.build/session/close" => {
             if let Some(sid) = json
                 .get("params")
                 .and_then(|p| p.get("sessionId").or_else(|| p.get("session_id")))

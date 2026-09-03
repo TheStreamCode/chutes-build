@@ -29,7 +29,7 @@ use xai_tool_types::TaskOutputOutput;
 /// Default tool name used in auto-wake completion messages.
 pub const DEFAULT_TASK_OUTPUT_TOOL: &str = "get_task_output";
 /// UI/Stop kill with no live waiter: tell the model not to relaunch the task.
-const USER_KILLED_NOTICE: &str = "This task was killed by the user ÔÇö do not restart it.\n";
+const USER_KILLED_NOTICE: &str = "This task was killed by the user — do not restart it.\n";
 fn user_killed_notice(task: &TaskSnapshot) -> &'static str {
     if task.explicitly_killed && !task.kill_result_delivered {
         USER_KILLED_NOTICE
@@ -225,7 +225,7 @@ fn format_running_tasks_warning(running: &[&TaskSnapshot], kill_task_name: Optio
     );
     buf
 }
-/// Split a pre-wrapped `<monitor-event description="ÔÇª" task_id="ÔÇª">ÔÇª</monitor-event>`
+/// Split a pre-wrapped `<monitor-event description="…" task_id="…">…</monitor-event>`
 /// into `(description, inner_text)`. `wrap_monitor_event` is the single
 /// writer with fixed attribute order; the `rfind` of `" task_id="`
 /// tolerates quotes inside the model-supplied description. `None` =>
@@ -240,7 +240,7 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
     Some((description, inner))
 }
 /// Format drained [`MonitorEventNotification`]s for the turn loop's hidden
-/// synthetic user message. Model-facing only ÔÇö the pager renders monitor
+/// synthetic user message. Model-facing only — the pager renders monitor
 /// events from the structured `chutes.ai/monitor_event` notification, never by
 /// parsing this text.
 ///
@@ -248,18 +248,18 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
 /// event per loop-top pass) renders the lean form:
 ///
 /// ```text
-/// <monitor-event task_id="0199ÔÇª">
+/// <monitor-event task_id="0199…">
 /// [heartbeat] beat 1
 /// </monitor-event>
 /// ```
 ///
 /// Multiple events batch under one count preamble, grouped per monitor
-/// (first-seen order, within-monitor order kept). Identity ÔÇö description
-/// AND task id ÔÇö is stated once on the group tag; tick lines carry only
+/// (first-seen order, within-monitor order kept). Identity — description
+/// AND task id — is stated once on the group tag; tick lines carry only
 /// ordinals (a 100-tick monitor must not repeat its description 100├ù):
 ///
 /// ```text
-/// <monitor description="heartbeat" task_id="0199ÔÇª">
+/// <monitor description="heartbeat" task_id="0199…">
 /// [1] beat 1
 /// [2] beat 2
 /// </monitor>
@@ -421,7 +421,7 @@ pub async fn resolve_scheduler_delete_tool_name(bridge: &ToolBridge) -> Option<S
 /// the model will see it (no disk-backed output file exists for subagents).
 ///
 /// KEEP IN SYNC: the exact wording of this message is a compatibility
-/// surface ÔÇö downstream mirrors reproduce it verbatim (grep for
+/// surface — downstream mirrors reproduce it verbatim (grep for
 /// `format_subagent_completion_reminder`). Update them when changing it.
 pub fn format_subagent_completion(
     c: &SubagentCompletionSummary,
@@ -576,7 +576,7 @@ pub fn format_between_turn_bash_completions(
 /// forces every new `ToolOutput` variant to opt in or out at compile
 /// time.
 ///
-/// Returns borrowed `&str` slices (no allocation) ÔÇö the strings live in
+/// Returns borrowed `&str` slices (no allocation) — the strings live in
 /// `output` for the duration of the call.
 /// Extract the subagent UUID from the body of a Task-tool-formatted
 /// text output. The shape is exactly:
@@ -910,7 +910,7 @@ mod tests {
         };
         let msg = format_bash_completion(&task, Some("get_command_or_subagent_output"), None);
         assert!(
-            msg.contains("killed by the user ÔÇö do not restart it"),
+            msg.contains("killed by the user — do not restart it"),
             "UI-kill wake must include the do-not-restart line: {msg}"
         );
         task.kill_result_delivered = true;
@@ -1013,7 +1013,7 @@ mod tests {
         };
         let msg = format_monitor_completion(&task, None);
         assert!(
-            msg.contains("\nThis task was killed by the user ÔÇö do not restart it.\n"),
+            msg.contains("\nThis task was killed by the user — do not restart it.\n"),
             "UI-killed monitor notice must be on its own line: {msg}"
         );
         task.kill_result_delivered = true;
@@ -1163,7 +1163,7 @@ mod tests {
         );
     }
     /// Short-duration tasks that exited cleanly (no signal) are normal
-    /// (`true`, `:`, etc.) ÔÇö the hint must NOT fire.
+    /// (`true`, `:`, etc.) — the hint must NOT fire.
     #[test]
     fn format_bash_completion_no_signal_short_duration_no_hint() {
         let now = std::time::SystemTime::now();
@@ -1449,7 +1449,7 @@ mod tests {
     /// Bash completions are scoped to the session that OWNS the task. A
     /// subagent shares the parent's terminal backend, so `list_tasks()` returns
     /// the parent's (and sibling subagents') tasks too; only this session's
-    /// (and unowned) tasks may surface. Regression guard for the parent ÔåÆ
+    /// (and unowned) tasks may surface. Regression guard for the parent →
     /// subagent background-task completion leak.
     #[tokio::test]
     async fn bash_completions_scoped_to_owning_session() {
@@ -2032,7 +2032,7 @@ mod tests {
         );
         assert!(!msg.contains("[Output truncated"));
     }
-    /// The reminder pipeline ignores `MonitorEventBuffer` ÔÇö the turn loop
+    /// The reminder pipeline ignores `MonitorEventBuffer` — the turn loop
     /// owns the drain. Guards against the tool-result append path being
     /// reintroduced.
     #[tokio::test]
@@ -2190,14 +2190,14 @@ mod tests {
             None,
             "missing description attribute must not parse"
         );
-        let multibyte = "<monitor-event description=\"µùÑµ£¼Þ¬×Òâ¡Òé░ þøæÞºå ­ƒÜ¿\" task_id=\"t-utf8\">\nÞ¡ªÕæè: Òâ®ÒéñÒâ│Ôæá\nõ║îÞíîþø« ÔÇö ├╝rgent ­ƒÜ¿\n</monitor-event>";
+        let multibyte = "<monitor-event description=\"日本語ログ 监视 🚨\" task_id=\"t-utf8\">\n警告: ライン①\n二行目 — ├╝rgent 🚨\n</monitor-event>";
         let (desc, inner) = split_wrapped_monitor_event(multibyte).expect("multibyte parses");
-        assert_eq!(desc, "µùÑµ£¼Þ¬×Òâ¡Òé░ þøæÞºå ­ƒÜ¿");
-        assert_eq!(inner, "Þ¡ªÕæè: Òâ®ÒéñÒâ│Ôæá\nõ║îÞíîþø« ÔÇö ├╝rgent ­ƒÜ¿");
+        assert_eq!(desc, "日本語ログ 监视 🚨");
+        assert_eq!(inner, "警告: ライン①\n二行目 — ├╝rgent 🚨");
     }
-    /// WriterÔåöparser round-trip through the REAL `wrap_monitor_event`,
+    /// Writer↔parser round-trip through the REAL `wrap_monitor_event`,
     /// including a hostile description (quotes + newline + `">\n` sequence).
-    /// The writer sanitizes, so the parser always recovers cleanly ÔÇö if the
+    /// The writer sanitizes, so the parser always recovers cleanly — if the
     /// writer's shape ever drifts from the parser, this fails loudly.
     #[test]
     fn wrap_monitor_event_round_trips_through_split() {
@@ -2222,28 +2222,19 @@ mod tests {
             ),
             owner_session_id: None,
         };
-        let single = format_monitor_events(
-            &[event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû1 Ô£ô")],
-            None,
-        )
-        .expect("single formats");
-        assert!(
-            single.contains("[ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿] ÐüÐéÐÇð¥ð║ð░ Ôäû1 Ô£ô"),
-            "{single}"
-        );
+        let single = format_monitor_events(&[event("t-1", "журнал 🚨", "строка №1 ✓")], None)
+            .expect("single formats");
+        assert!(single.contains("[журнал 🚨] строка №1 ✓"), "{single}");
         let batched = format_monitor_events(
             &[
-                event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû1"),
-                event("t-1", "ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿", "ÐüÐéÐÇð¥ð║ð░ Ôäû2"),
+                event("t-1", "журнал 🚨", "строка №1"),
+                event("t-1", "журнал 🚨", "строка №2"),
             ],
             None,
         )
         .expect("batch formats");
-        assert!(
-            batched.contains("description=\"ðÂÐâÐÇð¢ð░ð╗ ­ƒÜ¿\""),
-            "{batched}"
-        );
-        assert!(batched.contains("[1] ÐüÐéÐÇð¥ð║ð░ Ôäû1"), "{batched}");
-        assert!(batched.contains("[2] ÐüÐéÐÇð¥ð║ð░ Ôäû2"), "{batched}");
+        assert!(batched.contains("description=\"журнал 🚨\""), "{batched}");
+        assert!(batched.contains("[1] строка №1"), "{batched}");
+        assert!(batched.contains("[2] строка №2"), "{batched}");
     }
 }
