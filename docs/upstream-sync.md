@@ -1521,3 +1521,33 @@ it compiled, passed the gate, and only changed characters.
   subcommand help swept for `grok`/`xai`/`x.ai` (zero hits); `models` lists
   the Chutes catalogue with `Qwen/Qwen3.8-27B-TEE` default; `du` renders;
   writes stay inside `~/.chutes-build`.
+
+## Porting pause: 1.0.16 (2026-09-03)
+
+The Upstream watch found 1.0.12 → 1.0.16 (`bc7f02ed` → `72a61251`, 1542
+files, +93,951/−99,824) the same day 1.4.0 published. The port started on
+`sync/upstream-1.0.16-wip` and reached a **converging, not compiling-clean
+state**: `port_assist --apply` wrote 1030 of 1510 files; the identity seams
+(env_overlay, bot_tools, the whole deadened telemetry crate, the MCP
+credential/OAuth fork files, the workspace hub layer) were restored
+byte-for-byte from the fork tree and the workspace compiled. The remaining
+work was call-site reconciliation in two areas: the upstream `fetch.rs`
+model-prefetch architecture (`startup_prefetch` needs upstream's
+`ModelsCacheWrite`/`SettingsCacheWrite` shape, the fork has its own
+early-prefetch feature in the same file) and the `ScheduledLoop`/
+`WorkflowRun` reminder summaries upstream added while the fork's reminder
+deliberately dropped them in 1.0.12.
+
+The session is **paused here by maintainer decision**: chasing upstream
+releases is consuming more than it returns while Chutes Build has no
+upside signal yet, so the fork holds on 1.0.12 (this tree, released as
+1.4.0) and does not track 1.0.16 for now. The work is preserved — commit
+`09754d55` on the parked branch `stash/sync-1.0.16-wip` (unpushed) — and
+`.github/upstream.json` still names `bc7f02ed`/1.0.12, which remains true:
+that IS the upstream this tree is.
+
+Resuming the port later means: `git checkout stash/sync-1.0.16-wip`, read
+the errors from the top of this record, and continue the per-area
+reconciliation — the `fetch.rs` split (fork early-prefetch vs upstream
+startup-prefetch) is the first judgement call, the reminder loops/workflows
+the second. No fork-owned surface was left modified on `main`.
