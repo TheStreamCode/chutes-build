@@ -8,11 +8,15 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **The runtime is syncing to upstream `1.0.12` (`bc7f02ed`).** Ported by hand on `sync/upstream-1.0.12-wip`, one area per commit: 1,578 files of delta, 989 of them mechanical takes. New upstream features carried so far: active subagent messaging (`send_subagent_message`), hook HTTP runners with prompt/defer decisions, checkpoint remount after path virtualization, worktree detach/salvage rework, `xai-grok-shell-terminal`/`xai-grok-gboom`/`xai-grok-pager-diff`/`xai-grok-dashboard-store`/`xai-dirs`/`xai-message-delivery-core` crates, and the dashboard/session-picker TUI. The Chutes identity layer (prompt, wordmark, themes, `ChutesBuild` namespace, cache-effectiveness usage, compact tool schemas) is preserved; the branch awaits the full gate before landing.
+- **The runtime is synced to upstream `1.0.12` (`bc7f02ed`).** Ported by hand on `sync/upstream-1.0.12-wip`, one area per commit: 1,578 files of delta, 989 of them mechanical takes. New upstream features carried: active subagent messaging (`send_subagent_message`), hook HTTP runners with prompt/defer decisions, checkpoint remount after path virtualization, worktree detach/salvage rework, the `xai-grok-shell-terminal`/`xai-grok-gboom`/`xai-grok-pager-diff`/`xai-grok-dashboard-store`/`xai-dirs`/`xai-message-delivery-core` crates, and the dashboard/session-picker TUI. The Chutes identity layer (prompt, wordmark, themes, `ChutesBuild` namespace, cache-effectiveness usage, compact tool schemas) is preserved.
 
 ### Fixed
 
 - **The Windows dev build no longer overflows its stack on startup.** The 1 MiB main-thread reserve was too small for the opt-level-0 profile; the linker now reserves 8 MiB. The shipped release binaries were never affected.
+- **Mojibake baked into source since 1.0.1 is repaired.** A post-re-base commit read source files through PowerShell text redirection on a legacy console, re-encoding every multi-byte character through CP850 (`—` became `ÔÇ—`, `→` became `Ôåö`, CJK test fixtures became byte noise); the corruption shipped in 1.2.x and 1.3.1 and spread with the 1.0.12 take. Every affected byte run now decodes back to the original UTF-8 across 68 files; doc comments read as written again.
+- **The plan-mode edit gate names the plan file correctly on Windows.** The upstream take hardcoded POSIX paths in the rejection message test and the fixture trackers; both now compose the expected path the way the implementation does.
+- **Worktree detection keeps native path separators.** git2 reports the common dir with forward slashes; the display name is re-assembled from native components so `~`-collapsed output matches local paths.
+- **`rtrb` bumped to 0.3.5** closing RUSTSEC-2026-0274 (double free in `ReadChunk::commit`); a patched release existed, so no advisory ignore was needed.
 
 ## [1.3.1] - 2026-08-30
 

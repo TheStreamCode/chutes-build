@@ -1440,3 +1440,84 @@ pinned in the tree:
 3. `.github/upstream.json` advance — deliberately not done until the gate
    passes.
 4. `CHANGELOG.md` entry for the 1.0.12 sync.
+
+## Review record: 2026-09-03 — full sync to `bc7f02ed` (1.0.12)
+
+All the "still open" items above are closed on this date. The branch landed
+its gates green and advanced `.github/upstream.json` to `bc7f02ed` / 1.0.12.
+
+### Ported (one area per commit)
+
+- `d2903b65`/`f173ac6e`/`2fd2d701`/`0dbeaa1c` — mechanical take + pager fork
+  layer restoration and boundary reconciliation (the four lessons below).
+- `18e7d27f`/`a3a612ea` — pager-bin boundary API and update test; docs.
+- `b76d0d78` — dead-module reconciliation: 43 files unreachable under `mod`,
+  reduced to zero; the fork's `tool_text_recovery`, model-switch hooks, and
+  plan/build models came back from `main`.
+- `c5e005ff` — update test kept the Windows system environment after
+  `env_clear` (Winsock does not initialize without `SystemRoot`, so every
+  fetch failed as a transport error; reproduced standalone against a local
+  pointer server before fixing).
+- `ec34d510`/`13aafad8` — auth: the mechanical take had replaced the Chutes
+  OAuth config with upstream's (`auth.x.ai` issuer, `client_secret` field,
+  the "Sign in to Grok Build" browser page). Restored byte-for-byte from the
+  fork; upstream's backend seam survives as a small `auth/backend` module
+  with `ActiveAuthBackend` so the six ported call sites compile against it.
+- `7ba97800` — pager/shell test shapes (`HookInfo` fields,
+  `SessionUpdate::TurnCompleted` fields, `usage_windows`,
+  `PAGER_COMMAND_KEYS`), the Chutes endpoint seams
+  (`CLI_CHAT_PROXY_BASE_URL_DEFAULT` back to `https://llm.chutes.ai/v1`).
+- `c96095a3` — wire namespace: the take left method strings as
+  `chutes.ai/*` (its rebrand of upstream's bare `x.ai/...`); the fork speaks
+  `chutes.build/*`, so 119 files were swept. Plus four Windows fixture
+  repairs (request-body drain, local-401 laziness endpoint, per-actor state
+  directory, `temp_dir` plan trackers) and two pre-existing flakes pinned
+  (`backdate_edit_hold` boot-clock saturation, steer-cache test mutex).
+- `d1c28802` — CP850 mojibake repair (below) and `rtrb` → 0.3.5 for
+  RUSTSEC-2026-0274.
+
+### Not ported, by decision
+
+- **The sandbox hardening** (sentinel, runtime-socket deny, `/data`
+  write-deny) — observed, not ported, pending a security review. The
+  sandbox crate stays on the fork tree; only `child_net.rs` came across.
+- **Upstream's auth surface** — identity-critical, byte-for-byte fork.
+- **`registered_features_are_documented`** — upstream-only: it
+  `include_str!`s docs that exist only inside their Bazel tree, so it does
+  not compile under cargo even upstream.
+
+### The take carried CP850 mojibake, and so did `main`
+
+The single largest find of this session. Since commit `0a376065` (just
+after the 1.0.0 re-base), source files on `main` were re-read through
+PowerShell text redirection on this workspace's legacy console, and every
+multi-byte character re-encoded through CP850 (`—` → `ÔÇ—`, `→` → `Ôåö`,
+whole CJK fixtures to byte noise). The 1.3.1 release shipped it; the 1.0.12
+take then restored the corrupted bytes from `main` and re-spread them. The
+repair (commit `d1c28802`) decodes each byte run back through CP850 —
+`s.encode('cp850').decode('utf-8')` — across 68 files, character-only
+except four verified hunk-by-hunk. The lesson in AGENTS.md ("never read
+pager/src files through PowerShell text redirection") now has a repair
+tool's worth of precedent: the corruption survived three releases because
+it compiled, passed the gate, and only changed characters.
+
+### Verification
+
+- Gate: `cargo fmt --all -- --check` green; clippy `-D warnings` on the
+  gate trio green; core 63/63; chutes-build 35/35 + update test 1/1;
+  `session::` 3046/3046 (was 555 failing at take); `auth::` 387/387;
+  `builtin::` 6/6; agent 589/589; tools-chutes 47/47; pager lib 8263
+  passing with only the 4 recorded hook failures (Windows runner now also
+  green); settings_e2e 274/274.
+- Fork gates: `rebrand.py --check` clean (the `grok_com_slack` fixture
+  renamed `chutes_com_slack`); `seam_sweep.py --base v1.3.1` 0/0 in both
+  modes; `dead_modules.py` — 2,433 files, all reachable; `known_failures`
+  deltas explained (`get_worktree_info_db_record_without_marker` fails on
+  `main` too in this environment).
+- `cargo deny` online: RUSTSEC-2026-0274 (`rtrb`) closed by bumping to
+  0.3.5 rather than an ignore entry — a patched release existed.
+- Behaviour on the built binary: `--version`
+  `chutes-build 1.3.1 (d1c28802) [alpha]`; full `--help` and every
+  subcommand help swept for `grok`/`xai`/`x.ai` (zero hits); `models` lists
+  the Chutes catalogue with `Qwen/Qwen3.8-27B-TEE` default; `du` renders;
+  writes stay inside `~/.chutes-build`.
