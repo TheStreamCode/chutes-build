@@ -17,6 +17,7 @@ embedded in editors via the Agent Client Protocol (ACP).
 [Documentation](#documentation) ·
 [Repository layout](#repository-layout) ·
 [Development](#development) ·
+[Troubleshooting](#troubleshooting) ·
 [Contributing](#contributing) ·
 [License](#license)
 
@@ -144,8 +145,50 @@ MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 cargo check -p <crate>        # always target specific crates; full-workspace builds are slow
 cargo test -p xai-grok-config # per-crate tests
 cargo clippy -p <crate>       # lint config: clippy.toml at the repo root
-cargo fmt --all               # rustfmt.toml at the repo root
 ```
+
+## Troubleshooting
+
+### Missing `CHUTES_API_KEY`
+
+On first launch `chutes-build` asks for a Chutes API key (created at
+[chutes.ai/app/api](https://chutes.ai/app/api)); it is also readable from the
+`CHUTES_API_KEY` environment variable. If requests fail with authentication
+errors, check that the variable is exported in the launching shell — Chutes
+Build reads the process environment and does not load `.env` files
+automatically (see [`docs/configuration.md`](docs/configuration.md)).
+Never commit a real key; use your shell, CI platform, or secret manager to
+provide it, and run `chutes-build inspect --json` to verify the effective
+non-secret configuration.
+
+### Model-pool routing errors
+
+The default model route is Chutes' native routing: the saved `default` pool
+(managed at chutes.ai/app → Model Routing), or an inline pool via
+`CHUTES_ROUTING_POOL` (comma-separated catalogue ids sent as one `model`
+value, e.g. `modelA,modelB,modelC`). If the `default` alias cannot resolve
+and no dashboard pool is saved, the built-in fallback chain steps down to a
+live inline pool from the current catalogue; a saved dashboard pool, once
+configured, takes priority. Common fixes: save a pool on the dashboard, set
+`CHUTES_ROUTING_POOL` explicitly, check `CHUTES_FALLBACK_MODELS` ordering (or
+`CHUTES_STRICT_MODEL=1`, which disables automatic fallback), and pick a
+strategy with `CHUTES_ROUTING_STRATEGY` (`sequential` default, `latency`, or
+`throughput`). Full reference: [`docs/configuration.md`](docs/configuration.md)
+("Native model routing").
+
+### Windows console shows wrong glyphs
+
+The TUI degrades decorative glyphs on the legacy Windows console (ConHost
+`cmd.exe` / `powershell.exe`, Consolas/Lucida Console raster font, no font
+fallback): arrows, checkmarks, diamonds, and spinners fall back to ASCII or
+CP437-safe stand-ins (see
+[`crates/codegen/xai-grok-pager-render/src/glyphs.rs`](crates/codegen/xai-grok-pager-render/src/glyphs.rs)).
+This is expected on legacy ConHost — for the full rendering use Windows
+Terminal, VS Code's terminal, or another modern emulator. Note that CI forces
+the modern-glyph path with `CHUTES_BUILD_FORCE_LEGACY_CONSOLE=0` (see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)), so screenshots and
+test rendering may look richer than a legacy local console.
+
 
 ## Contributing
 
