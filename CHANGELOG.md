@@ -6,6 +6,49 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The runtime is re-based onto upstream `1.0.45` (`2bdd1d6a`).** The 1.0.12 tree
+  is replaced by the upstream 1.0.45 tree with the Chutes layer re-applied on
+  top (OAuth to the Chutes IdP, Chutes endpoints, prompt identity, tool
+  namespace, themes, wordmark). New upstream features carried: strict-harness
+  agent profiles, the `send_feedback` adjudication tool, hashline file tools,
+  concise tool variants, skill/plugin registries with trust stores, and the
+  memory-v2 filesystem knowledge base.
+- **The Chutes ecosystem is now native to the agent.** New agent-callable tools:
+  document extraction from PDF/images (DocuExtract), speech transcription
+  (AudioDojo STT), and text embeddings (Qwen3-Embedding-8B), joining image,
+  video, music, image-edit, OCR, usage, browser, and Context7 tools. Text-only
+  models automatically delegate image reads to a multimodal model, and every
+  capability fails over to an equivalent chute when its primary is unavailable
+  — with an honest error note when no fallback exists at all.
+- **Token efficiency re-baselined.** The fixed system prompt is pinned at 2,161
+  estimated tokens (ceiling 2,175) after compressing the Chutes sources block,
+  and the per-turn tool catalog is pinned at 12,784 tokens across 30 tools
+  (ceiling 12,820) by a re-ported census test. See
+  `docs/token-efficiency-plan.md`.
+- **Reasoning registry refreshed against the live catalog.** Qwen3.8 joins the
+  verified `enable_thinking` toggle family; Kimi-K3, DeepSeek-V4-Flash, and
+  Nemotron-3-Nano stay fail-closed (`Unknown`, no reasoning keys sent) until a
+  chat-template switch is verified for them.
+
+### Fixed
+
+- **Chutes-native tools now resolve in every agent build.** The tool-pack
+  registration ran after the registry snapshot was taken, so curated toolsets
+  listing `ChutesBuild:*` ids failed at finalize time; registration now happens
+  before the builder snapshots the packs.
+- **Pre-rebrand preset names keep resolving.** `grok-build`, `grok-computer`,
+  and their concise/plan variants work as aliases of the `chutes-*` canonical
+  presets, so existing configs and upstream tests continue to work.
+
+### Removed
+
+- **The unused static model scorer is gone.** `routing::TaskClass`,
+  `ModelCapabilities`, `ModelCandidate`, and `select_capable_model` had no
+  callers; equivalent-model selection lives in
+  `catalog::find_equivalent_chat_model`, which ranks the live catalog.
+
 ## [1.4.0] - 2026-09-03
 
 ### Changed

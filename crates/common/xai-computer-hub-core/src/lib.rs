@@ -17,7 +17,8 @@ pub mod resolver;
 pub mod transport;
 
 pub use bot_tools::{
-    CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS, grok_bot_tool_description,
+    CHUTES_BUILD_BOT_DEFAULT_TOOL_IDS, CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS,
+    grok_bot_tool_arguments_schema, grok_bot_tool_description, is_grok_bot_default_tool,
     is_grok_bot_tool,
 };
 pub use inner::InnerDispatchForResolver;

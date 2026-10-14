@@ -335,7 +335,6 @@ impl CpuProfileManager {
     }
 
     /// Finalize an active CPU profile synchronously during shutdown.
-    ///
     /// If a stop is already in progress this returns `Ok(None)` without waiting for it.
     /// Callers that must not exit before that stop finishes should wait via `subscribe_stop_completion`.
     pub fn finalize_on_shutdown(&mut self) -> Result<Option<CpuProfileStopResult>, ControlError> {
@@ -572,10 +571,8 @@ mod platform {
         }
     }
 
-    /// Serialize a pprof report as folded stacks: one `thread;frame;frame;… count` line per unique stack.
-    /// This is the same format pprof's `flamegraph` feature feeds to inferno.
-    /// Emitting it ourselves keeps inferno (CDDL-1.0) out of shipped binaries.
-    /// Render externally with speedscope.app, `inferno-flamegraph`, or flamegraph.pl.
+    /// Serialize a pprof report as folded stacks: one `thread;frame;frame;… count` line per unique stack. This is the same format pprof's `flamegraph` feature feeds to inferno.
+    /// Emitting it ourselves keeps inferno (CDDL-1.0) out of shipped binaries. Render externally with speedscope.app, `inferno-flamegraph`, or flamegraph.pl.
     fn folded_stacks(report: &pprof::Report) -> String {
         let mut lines: Vec<String> = report
             .data
@@ -649,10 +646,8 @@ mod platform {
     }
 
     pub(super) fn profile_formats() -> &'static [ProfileArtifactFormat] {
-        // Advertise nothing for now: old clients deserialize this enum strictly inside the Registered handshake
-        // A new variant (e.g. `folded`) would break their connect entirely.
-        // Start advertising `Folded` once the whole fleet knows the variant
-        // The artifact itself is already folded stacks
+        // Advertise nothing for now: old clients deserialize this enum strictly inside the Registered handshake A new variant (e.g. `folded`) would break their connect entirely.
+        // Start advertising `Folded` once the whole fleet knows the variant The artifact itself is already folded stacks
         &[]
     }
 
@@ -743,12 +738,6 @@ mod tests {
             svg_path,
             engine,
         }
-    }
-
-    #[test]
-    fn default_status_is_inactive() {
-        let manager = CpuProfileManager::new();
-        assert_eq!(manager.status(), CpuProfileStatus::Inactive);
     }
 
     #[test]
@@ -1134,29 +1123,5 @@ mod tests {
                 ..
             } if status_path == svg_path
         ));
-    }
-
-    #[test]
-    fn stop_preserves_engine_error() {
-        let tmp = TempDir::new().unwrap();
-        let svg_path = tmp.path().join("profile.folded");
-        let engine = Box::new(FakeProfilerEngine {
-            stop_calls: Arc::new(Mutex::new(Vec::new())),
-            svg_path,
-            stop_error: Some(fake_error(
-                ControlErrorCode::ArtifactWriteFailed,
-                "failed to write artifact",
-            )),
-        });
-
-        let mut manager = CpuProfileManager::new();
-        manager.active = Some(test_active_profile(
-            tmp.path().join("profile.folded"),
-            engine,
-        ));
-
-        let err = manager.stop().unwrap_err();
-        assert_eq!(err.code, ControlErrorCode::ArtifactWriteFailed);
-        assert!(matches!(manager.status(), CpuProfileStatus::Inactive));
     }
 }

@@ -14,13 +14,14 @@ You know enough to be productive. When you want more:
 ## Good habits
 
 - Sessions save automatically. Resume the latest with `chutes-build -c`, or pick
-  one with `/resume` (`Ctrl+S`).
+  one with `/resume` (`Ctrl+R`).
 - Long session getting slow? `/compact` frees context; `/context` shows
   where it's going.
 - Automate anything: `chutes-build -p "summarize new TODOs" --output-format json`
   runs headless — great for scripts and CI.
-- Stay current by reinstalling from npm — Chutes Build does not update itself; see what changed with `/release-notes`.
-- Something feel off? `/feedback` goes straight to the team.
+- Stay current with `chutes-build update`; see what changed with `/release-notes`.
+- Something feel off? `/feedback <text>` goes straight to the team, and bare
+  `/feedback` opens a form with your saved drafts.
 
 ## Reopen this tutorial
 

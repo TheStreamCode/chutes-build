@@ -1,7 +1,5 @@
-//! Smoke test for sandbox enforcement.
-//!
-//! This binary applies a sandbox profile and then attempts various operations
-//! to verify kernel enforcement. Run it directly to test:
+//! This binary applies a sandbox profile and then attempts various operations to verify kernel enforcement.
+//! Run it directly to test:
 //!
 //! ```bash
 //! # Test workspace profile (should allow writes to CWD, block ~/Desktop)
@@ -14,21 +12,9 @@
 //! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- read-only
 //! ```
 
-/// Sandbox enforcement is Unix-only: `libc` is a `cfg(unix)` dependency and
-/// `SandboxManager::support_info` does not exist elsewhere, so on Windows this
-/// example cannot compile — which is why `cargo check --all-targets` fails on a
-/// tree that is otherwise clean.
-#[cfg(not(unix))]
-fn main() {
-    eprintln!("sandbox enforcement is Unix-only; nothing to smoke-test on this platform");
-}
-
-#[cfg(unix)]
 use std::path::Path;
-#[cfg(unix)]
 use xai_grok_sandbox::{ProfileName, SandboxManager};
 
-#[cfg(unix)]
 fn main() {
     // Parse profile from args (default: workspace).
     let profile_name = std::env::args()
@@ -90,14 +76,13 @@ fn main() {
     test_read("Read /tmp", Path::new("/tmp"));
 
     // Test 3: Read home directory (should work for workspace/read-only, blocked for strict)
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = xai_dirs::home_dir() {
         test_read("Read ~/", &home);
     }
 
     // Test 4: Write to CWD (should work for workspace/strict, blocked for read-only)
     let test_file = workspace.join(".sandbox-test-write");
     test_write("Write to CWD", &test_file);
-    // Clean up
     let _ = std::fs::remove_file(&test_file);
 
     // Test 5: Write to /tmp (should work for workspace/strict, blocked for read-only)
@@ -106,14 +91,14 @@ fn main() {
     let _ = std::fs::remove_file(tmp_test);
 
     // Test 6: Write outside workspace (should be blocked for all active profiles)
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = xai_dirs::home_dir() {
         let outside = home.join(".sandbox-test-blocked");
         test_write("Write to ~/", &outside);
         let _ = std::fs::remove_file(&outside);
     }
 
     // Test 7: Read ~/.ssh (a custom profile's `deny` list could block this)
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = xai_dirs::home_dir() {
         let ssh = home.join(".ssh");
         if ssh.exists() {
             test_read("Read ~/.ssh/", &ssh);
@@ -136,7 +121,6 @@ fn main() {
     println!("\n✅ Smoke test complete");
 }
 
-#[cfg(unix)]
 fn test_read(label: &str, path: &Path) {
     if path.is_file() {
         match std::fs::read(path) {
@@ -166,7 +150,6 @@ fn test_read(label: &str, path: &Path) {
     }
 }
 
-#[cfg(unix)]
 fn test_write(label: &str, path: &Path) {
     match std::fs::write(path, b"sandbox-test") {
         Ok(()) => {

@@ -227,10 +227,7 @@ fn invalid_inputs_and_all_marker_shapes_are_refused() {
         vec![b'x'; super::source::MAX_CONFIG_BYTES as usize + 1],
     )
     .unwrap();
-    // Not `nul`: on Windows that name is the null device wherever it appears, so the
-    // write goes nowhere, the file reads back empty, and the NUL-byte refusal this
-    // case exists to prove is never reached.
-    let nul = temp.path().join("nul-bytes");
+    let nul = temp.path().join("nul");
     fs::write(&nul, b"a\0b").unwrap();
     let non_utf8 = temp.path().join("non-utf8");
     fs::write(&non_utf8, [0xff]).unwrap();
@@ -274,7 +271,7 @@ fn symlink_resolution_depth_cycles_and_parent_symlinks_are_refused() {
     let plan = ManagedConfig::plan(request(&relative, &[("item", "body")])).unwrap();
     assert_eq!(
         plan.target_path(),
-        fs::canonicalize(&physical).unwrap().as_path()
+        dunce::canonicalize(&physical).unwrap().as_path()
     );
     ManagedConfig::apply(plan).unwrap();
     assert!(
@@ -307,7 +304,7 @@ fn symlink_resolution_depth_cycles_and_parent_symlinks_are_refused() {
         ManagedConfig::plan(request(&linked_parent.join("rc"), &[("item", "body")])).unwrap();
     assert_eq!(
         plan.target_path().parent(),
-        Some(fs::canonicalize(&real_parent).unwrap().as_path())
+        Some(dunce::canonicalize(&real_parent).unwrap().as_path())
     );
 }
 

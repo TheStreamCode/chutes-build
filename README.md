@@ -28,7 +28,7 @@ embedded in editors via the Agent Client Protocol (ACP).
 ## What this is, and what it is built on
 
 Chutes Build is a fork of [`xai-org/grok-build`](https://github.com/xai-org/grok-build)
-— SpaceXAI's Grok Build — re-based onto upstream 1.0.0 and adapted to run on
+— SpaceXAI's Grok Build — re-based onto upstream 1.0.45 and adapted to run on
 Chutes. Upstream wrote most of the code in this tree and it is used here under
 Apache-2.0; the project is not affiliated with or endorsed by SpaceXAI.
 
@@ -42,9 +42,12 @@ What the fork changes:
   sharing, remote workspace exposure and self-update are off at compile time and
   their endpoints are deadened, not merely unused. See
   [`PRIVACY.md`](PRIVACY.md).
-- **A few exclusive features**: Chutes media generation and editing, OCR, voice
-  input through a Chutes STT endpoint, Context7 documentation lookup, and an
-  isolated browser tool.
+- **A few exclusive features**: native Chutes ecosystem tools the agent calls
+  by itself — image generation and editing, video and music generation,
+  speech-to-text and text-to-speech, PDF/document extraction, OCR, text
+  embeddings, and Context7 documentation lookup — plus an isolated browser
+  tool, automatic vision delegation for text-only models, and automatic
+  equivalent-model fallback when a chute is unavailable.
 
 Everything else is meant to track upstream closely, so their fixes arrive by
 merge rather than by hand. [`docs/upstream-sync.md`](docs/upstream-sync.md)
@@ -94,14 +97,14 @@ Requirements:
 - **protoc** — proto codegen resolves [`bin/protoc`](bin/protoc) via DotSlash,
   or falls back to a `protoc` on `PATH` / `$PROTOC`.
 - Windows, macOS and Linux all build. Windows is where this tree is developed and
-  gated, and it needs the vendored `protoc` fallback carried here — upstream 1.0.0
+  gated, and it needs the vendored `protoc` fallback carried here — upstream
   does not build on Windows at all, because `bin/protoc` is a DotSlash wrapper the
   platform cannot execute from a build script.
 
 ```sh
-cargo run -p chutes-build              # build + launch the TUI
-cargo build -p chutes-build --release  # release binary: target/release/chutes-build
-cargo check -p chutes-build            # fast validation
+cargo run -p xai-grok-pager-bin              # build + launch the TUI
+cargo build -p xai-grok-pager-bin --release  # release binary: target/release/xai-grok-pager
+cargo check --workspace                      # fast validation
 ```
 
 The binary artifact is named `xai-grok-pager`; official installs ship it as
@@ -125,7 +128,7 @@ MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 
 | Path | Contents |
 |------|----------|
-| `crates/codegen/xai-grok-pager-bin` | Composition-root package `chutes-build`; builds the `chutes-build` binary |
+| `crates/codegen/xai-grok-pager-bin` | Composition-root package `xai-grok-pager-bin`; builds the `xai-grok-pager` binary (shipped as `chutes-build`) |
 | `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
 | `crates/codegen/xai-grok-shell` | Agent runtime + leader/stdio/headless entry points |
 | `crates/codegen/xai-grok-tools` | Tool implementations (terminal, file edit, search, ...) |

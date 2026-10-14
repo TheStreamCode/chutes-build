@@ -9,8 +9,9 @@ use crate::result::{HttpInfo, StopHookOutcome};
 
 use super::command::MAX_OUTPUT_BYTES;
 use super::{
-    GateKind, GateOutcome, HookHealth, HookRunOutput, HookRunnerResult, PromptHookJson, RunContext,
-    StopHookJson, extract_system_message, prompt_json_to_block, stop_json_to_outcome,
+    GateKind, GateOutcome, HookHealth, HookRunOutput, HookRunnerResult, PostToolUseHookJson,
+    PromptHookJson, RunContext, StopHookJson, extract_system_message,
+    post_tool_use_json_to_outcome, prompt_json_to_block, stop_json_to_outcome,
 };
 
 const RESPONSE_PREVIEW_MAX: usize = 200;
@@ -22,7 +23,9 @@ async fn read_body_capped(mut response: reqwest::Response) -> reqwest::Result<St
             break;
         };
         let take = chunk.len().min(MAX_OUTPUT_BYTES - buf.len());
-        buf.extend_from_slice(&chunk[..take]);
+        if let Some(part) = chunk.get(..take) {
+            buf.extend_from_slice(part);
+        }
         if take < chunk.len() {
             break;
         }
@@ -153,16 +156,10 @@ pub async fn run_http_hook(
 
     let mut url_env = spec.extra_env.clone();
     for (k, v) in [
-        (
-            "CHUTES_BUILD_HOOK_EVENT",
-            envelope.hook_event_name.to_string(),
-        ),
+        ("CHUTES_BUILD_HOOK_EVENT", envelope.hook_event_name.to_string()),
         ("CHUTES_BUILD_HOOK_NAME", spec.name.clone()),
         ("CHUTES_BUILD_SESSION_ID", ctx.session_id.to_string()),
-        (
-            "CHUTES_BUILD_WORKSPACE_ROOT",
-            ctx.workspace_root.to_string(),
-        ),
+        ("CHUTES_BUILD_WORKSPACE_ROOT", ctx.workspace_root.to_string()),
         ("CLAUDE_PROJECT_DIR", ctx.workspace_root.to_string()),
     ] {
         url_env.insert(k.to_string(), v);
@@ -285,6 +282,7 @@ pub async fn run_http_hook(
     let result = match mode {
         GateKind::Tool => parse_http_blocking_result(&response_text, status, &spec.name),
         GateKind::Stop => parse_http_stop_result(&response_text, status, &spec.name),
+        GateKind::PostTool => parse_http_post_tool_use_result(&response_text, status, &spec.name),
         GateKind::Prompt => parse_http_prompt_result(&response_text, status, &spec.name),
         GateKind::Observe if status.is_success() => HookRunnerResult::Success,
         GateKind::Observe => HookRunnerResult::Failed(format!("HTTP status {status}")),
@@ -316,6 +314,41 @@ fn parse_http_stop_result(
                 "could not parse HTTP stop hook response JSON, treating as allow-stop"
             );
             HookRunnerResult::Stop(StopHookOutcome::default())
+        }
+    }
+}
+
+fn parse_http_post_tool_use_result(
+    response_text: &str,
+    status: reqwest::StatusCode,
+    hook_name: &str,
+) -> HookRunnerResult {
+    if !status.is_success() {
+        return HookRunnerResult::Failed(format!("HTTP status {status}"));
+    }
+    let no_signal = HookRunnerResult::PostToolUse {
+        outcome: Default::default(),
+        failure: None,
+    };
+    let trimmed = response_text.trim();
+    if trimmed.is_empty() {
+        return no_signal;
+    }
+    match serde_json::from_str::<PostToolUseHookJson>(trimmed) {
+        Ok(json) => {
+            let parsed = post_tool_use_json_to_outcome(json, hook_name, HookHealth::Healthy);
+            HookRunnerResult::PostToolUse {
+                outcome: parsed.outcome,
+                failure: parsed.failure,
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                hook_name,
+                error = %e,
+                "could not parse HTTP post_tool_use hook response JSON; carrying no signal"
+            );
+            no_signal
         }
     }
 }
@@ -430,7 +463,10 @@ fn truncate_preview(s: &str) -> String {
             .last()
             .map(|(i, _)| i)
             .unwrap_or(0);
-        let mut preview = trimmed[..boundary].to_string();
+        let Some(prefix) = trimmed.get(..boundary) else {
+            return trimmed.to_string();
+        };
+        let mut preview = prefix.to_string();
         preview.push_str("...");
         preview
     }
@@ -452,7 +488,10 @@ mod tests {
             HookRunnerResult::Allow {
                 updated_input: Some(rewrite),
                 ..
-            } => assert_eq!(rewrite["command"], "echo hi"),
+            } => assert_eq!(
+                rewrite.get("command").and_then(|v| v.as_str()),
+                Some("echo hi")
+            ),
             other => panic!("expected Allow with updatedInput, got {other:?}"),
         }
     }
@@ -520,7 +559,10 @@ mod tests {
                 ..
             } => {
                 assert_eq!(reason.as_deref(), Some("confirm"));
-                assert_eq!(rewrite["command"], "echo hi");
+                assert_eq!(
+                    rewrite.get("command").and_then(|v| v.as_str()),
+                    Some("echo hi")
+                );
             }
             other => panic!("expected Ask with rewrite, got {other:?}"),
         }
@@ -683,12 +725,13 @@ mod tests {
         assert!(matches!(result, HookRunnerResult::Failed(_)));
     }
 
+    /// The error names the bad value only; `HookRunResult::Failed.hook_name` carries the attribution.
     #[test]
     fn http_unknown_decision_is_failed() {
         match parse_http_blocking_result(r#"{"decision":"maybe"}"#, StatusCode::OK, "test-hook") {
             HookRunnerResult::Failed(msg) => {
                 assert!(
-                    msg.contains("maybe") && msg.contains("test-hook"),
+                    msg.contains("maybe") && !msg.contains("test-hook"),
                     "got: {msg}"
                 )
             }
@@ -759,6 +802,53 @@ mod tests {
             ),
             HookRunnerResult::Failed(_)
         ));
+    }
+
+    #[test]
+    fn http_post_tool_use_status_and_body_handling() {
+        match parse_http_post_tool_use_result(
+            r#"{"decision":"block","reason":"needs review","hookSpecificOutput":{"updatedToolOutput":{"stdout":"clean"}}}"#,
+            StatusCode::OK,
+            "p",
+        ) {
+            HookRunnerResult::PostToolUse { outcome, failure } => {
+                assert!(failure.is_none());
+                assert_eq!(outcome.block_reason.as_deref(), Some("needs review"));
+                match outcome.output_replacement {
+                    Some(crate::result::OutputReplacement {
+                        kind: crate::result::ReplacementKind::Builtin,
+                        value,
+                        ..
+                    }) => {
+                        assert_eq!(value, serde_json::json!({"stdout":"clean"}));
+                    }
+                    other => panic!("expected a builtin replacement, got {other:?}"),
+                }
+            }
+            other => panic!("expected PostToolUse, got {other:?}"),
+        }
+
+        assert!(
+            matches!(
+                parse_http_post_tool_use_result(
+                    r#"{"decision":"block","reason":"x"}"#,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "p",
+                ),
+                HookRunnerResult::Failed(_)
+            ),
+            "a non-2xx must fail"
+        );
+
+        for body in ["", "   \n  ", "not json at all"] {
+            match parse_http_post_tool_use_result(body, StatusCode::OK, "p") {
+                HookRunnerResult::PostToolUse { outcome, failure } => {
+                    assert!(failure.is_none(), "for {body:?}");
+                    assert!(outcome.is_empty(), "for {body:?}: {outcome:?}");
+                }
+                other => panic!("expected no-signal PostToolUse for {body:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -931,6 +1021,7 @@ mod tests {
             session_id: "test",
             workspace_root: "/tmp",
             process_scope: None,
+            disabled: Default::default(),
         }
     }
 

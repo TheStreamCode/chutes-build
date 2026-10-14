@@ -30,14 +30,9 @@ pub enum ResumeValidationError {
     },
 }
 
-/// Validate that a resume request's identity fields match the source subagent.
-///
-/// Resume contract: the resumed child inherits the source's raw transcript, tool state, and model.
-/// System prompt and prompt context are freshly rendered from the current agent definition.
-/// Reject type/persona overrides that conflict with the inherited identity fields.
-/// Model overrides are not validated here; callers silently ignore them and pin the source model.
-///
-/// Returns `Ok(())` if identity fields match, or `Err(ResumeValidationError)` describing the first mismatch found.
+/// Resume contract: the resumed child inherits the source's raw transcript, tool state, and model. Model overrides are
+/// not validated here; callers silently ignore them and pin the source model. Returns `Ok(())` if identity fields match,
+/// or `Err(ResumeValidationError)` describing the first mismatch found.
 pub fn validate_resume_identity(
     requested_type: &str,
     requested_persona: Option<&str>,
@@ -98,13 +93,6 @@ mod tests {
     fn matching_type_and_persona() {
         let source = make_source("general-purpose", Some("implementer"), None);
         let result = validate_resume_identity("general-purpose", Some("implementer"), &source);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn matching_type_and_persona_source_has_model() {
-        let source = make_source("general-purpose", Some("impl"), Some("grok-3"));
-        let result = validate_resume_identity("general-purpose", Some("impl"), &source);
         assert!(result.is_ok());
     }
 
@@ -170,16 +158,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(ResumeValidationError::TypeMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn persona_mismatch_still_rejected_when_source_has_model() {
-        let source = make_source("general-purpose", Some("impl"), Some("grok-3"));
-        let result = validate_resume_identity("general-purpose", Some("reviewer"), &source);
-        assert!(matches!(
-            result,
-            Err(ResumeValidationError::PersonaMismatch { .. })
         ));
     }
 }

@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use xai_grok_tools::types::template_renderer::TemplateRenderer;
 use xai_grok_tools::types::tool::ToolKind;
 
-use super::agents_md::{AgentConfigFile, format_agents_md_section};
+use super::agents_md::{AgentConfigFile, InstructionSource, format_agents_md_section};
 use super::template::{apply_patch_template, base_template, subagent_template};
 
 /// Paragraphs that are intentionally identical across sources. Key: the
@@ -137,6 +137,7 @@ fn fixed_prompt_sources_have_no_repeated_policy_paragraphs() {
         file_name: "AGENTS.md".into(),
         file_path: "C:/repo/AGENTS.md".into(),
         content: "Sample project instruction body long enough to count as a paragraph.".into(),
+        source: InstructionSource::Project,
     }];
     if let Some(section) = format_agents_md_section(&configs) {
         census.add("agents_md_section", &section);
@@ -175,17 +176,27 @@ fn intentional_duplicates_list_stays_sorted_and_normalized() {
 
 #[test]
 fn standard_primary_fixed_prompt_stays_under_the_token_ceiling() {
-    // Baseline 2026-08-26, standard primary render (workstream 1): 1297
-    // estimated tokens. The ceiling pins it so policy text cannot silently
-    // re-bloat; re-derive and RAISE it only when a change genuinely needs
-    // the room, and shrink it when workstream 1/2 remove fixed tokens.
+    // Baseline 2026-10-14, standard primary render after the upstream 1.0.45
+    // rebase: 2236 estimated tokens, cut to 2161 by the workstream 1
+    // official_chutes_sources compression (same policy coverage, one tight
+    // paragraph instead of two loose ones). Growth decomposition from the
+    // 2026-08-26 baseline (1297):
+    //   +678 upstream 1.0.45 template (dangerous_actions, work_policy,
+    //         memory, scratch_files, communication, browser_verification),
+    //         measured at 1975 before re-applying the fork additions;
+    //   +186 fork additions (compressed official_chutes_sources block +
+    //         Chutes identity line).
+    // The ceiling pins it so policy text cannot silently re-bloat;
+    // re-derive and RAISE it only when a change genuinely needs the room
+    // (e.g. the Phase 2 ecosystem-tool sections), and shrink it when
+    // workstream 1/2 remove fixed tokens.
     let renderer = default_renderer();
     let base = render_non_interactive(&renderer, false);
     let tokens = xai_token_estimation::estimate_tokens(&base);
     assert!(
-        tokens <= 1300,
+        tokens <= 2175,
         "fixed system prompt grew to {tokens} estimated tokens \
-         (ceiling 1300, baseline 1297) — deduplicate or justify the growth"
+         (ceiling 2175, baseline 2161) — deduplicate or justify the growth"
     );
 }
 
@@ -196,4 +207,24 @@ fn render_non_interactive(renderer: &TemplateRenderer, is_non_interactive: bool)
             &serde_json::json!({ "is_non_interactive": is_non_interactive }),
         )
         .expect("template renders")
+}
+
+#[test]
+fn base_prompt_renders_the_chutes_sources_block() {
+    // Pin the fork additions against rebase loss: the 1.0.45 rebase
+    // silently dropped `official_chutes_sources` (upstream has no such
+    // section) and reverted the identity line to "released by xAI".
+    let rendered = render_non_interactive(&default_renderer(), false);
+    assert!(
+        rendered.contains("<official_chutes_sources>"),
+        "base prompt lost the Chutes sources block"
+    );
+    assert!(
+        rendered.contains("optimized for the Chutes ecosystem"),
+        "base prompt lost the Chutes identity line"
+    );
+    assert!(
+        !rendered.contains("released by xAI"),
+        "base prompt regressed to the upstream xAI identity"
+    );
 }

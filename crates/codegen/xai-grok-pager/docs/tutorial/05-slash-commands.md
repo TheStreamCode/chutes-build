@@ -13,11 +13,11 @@ A few worth knowing on day one:
 | `/btw` | Send Chutes Build an aside *without* interrupting its current task |
 | `/rewind` (alias `/undo`) | Rewind the conversation to an earlier turn |
 | `/docs` | Full How-to Guides, in the TUI or on the web |
-| `/feedback` | Send feedback to the team, inline or in a pane |
+| `/feedback` | Send feedback to the team |
 
 Two of those deserve a second look:
 
-- **`/compact`** takes an optional hint: `/compact keep the auth details`.
+- **`/compact`** compresses the conversation history to free up context.
   Check context usage anytime with `/context` — Chutes Build also auto-compacts
   when the window fills up.
 - **`/rewind`** (or **`/undo`**) rewinds the conversation to an earlier

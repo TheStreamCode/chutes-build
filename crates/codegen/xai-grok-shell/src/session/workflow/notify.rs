@@ -86,7 +86,7 @@ impl WorkflowNotifySender {
         }
         if let Some(raw) = raw {
             let ext = agent_client_protocol::ExtNotification::new(
-                "chutes.build/session_notification",
+                "x.ai/session_notification",
                 raw.into(),
             );
             self.gateway.forward_fire_and_forget(ext);
@@ -156,7 +156,7 @@ pub(crate) fn build_workflow_updated(
         revision: state.revision,
         name: state.name.clone(),
         objective: state.objective.clone(),
-        status: state.status.as_str().to_string(),
+        status: state.status.as_ref().to_string(),
         foreground: false,
         phases,
         current_phase: state.current_phase.clone(),

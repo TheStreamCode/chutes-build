@@ -1,3 +1,4 @@
+pub(crate) mod config_option;
 pub(crate) mod mode_model_switch;
 pub(crate) mod model_switch;
 pub(crate) mod models;

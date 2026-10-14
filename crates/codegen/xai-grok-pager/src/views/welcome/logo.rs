@@ -21,6 +21,50 @@ const SMALL_LOGO_MIN_HEIGHT: u16 = 22;
 /// Height at or above which the full logo is shown.
 const FULL_LOGO_MIN_HEIGHT: u16 = 26;
 
+/// Which logo art the stacked column shows.
+/// The terminal height picks the tier; the stacked layout steps it down only while the column would not fit beside the draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoTier {
+    Full,
+    Compact,
+    Hidden,
+}
+
+impl LogoTier {
+    /// Pure tier selection so tests can drive it directly. Height is the only
+    /// input: no terminal detection may suppress the wordmark.
+    pub fn for_height(window_height: u16) -> Self {
+        if window_height < SMALL_LOGO_MIN_HEIGHT {
+            Self::Hidden
+        } else if window_height < FULL_LOGO_MIN_HEIGHT {
+            Self::Compact
+        } else {
+            Self::Full
+        }
+    }
+
+    fn art(self) -> Option<&'static str> {
+        match self {
+            Self::Full => Some(LOGO),
+            Self::Compact => Some(LOGO_SMALL),
+            Self::Hidden => None,
+        }
+    }
+
+    pub fn rows(self) -> u16 {
+        self.art().map_or(0, count_lines)
+    }
+
+    /// The next smaller tier; `None` once hidden.
+    pub fn step_down(self) -> Option<Self> {
+        match self {
+            Self::Full => Some(Self::Compact),
+            Self::Compact => Some(Self::Hidden),
+            Self::Hidden => None,
+        }
+    }
+}
+
 fn pick_logo(window_height: u16) -> Option<&'static str> {
     pick_logo_for(window_height)
 }
@@ -28,13 +72,7 @@ fn pick_logo(window_height: u16) -> Option<&'static str> {
 /// Pure tier selection so tests can drive it directly. Height is the only
 /// input: no terminal detection may suppress the wordmark.
 fn pick_logo_for(window_height: u16) -> Option<&'static str> {
-    if window_height < SMALL_LOGO_MIN_HEIGHT {
-        None
-    } else if window_height < FULL_LOGO_MIN_HEIGHT {
-        Some(LOGO_SMALL)
-    } else {
-        Some(LOGO)
-    }
+    LogoTier::for_height(window_height).art()
 }
 
 fn non_empty_lines(logo: &str) -> impl Iterator<Item = &str> {
@@ -52,8 +90,8 @@ fn visual_width(logo: &str) -> u16 {
         .unwrap_or(24) as u16
 }
 
-/// Animation phase in seconds since the first render. Wall-clock based so the
-/// shimmer speed is independent of the frame rate.
+/// Animation phase in seconds since the first render.
+/// The phase is wall-clock based so the shimmer speed is independent of the frame rate.
 fn anim_phase_secs() -> f32 {
     use std::sync::OnceLock;
     use std::time::Instant;
@@ -61,9 +99,8 @@ fn anim_phase_secs() -> f32 {
     START.get_or_init(Instant::now).elapsed().as_secs_f32()
 }
 
-/// Shimmer redraw cadence in frames per second. The sweep is slow, so a few fps
-/// looks smooth while sparing the long-lived welcome screen from full-rate
-/// repaints.
+/// Shimmer redraw cadence in frames per second.
+/// The sweep is slow, so a few fps looks smooth while sparing the long-lived welcome screen from full-rate repaints.
 const SHIMMER_FPS: f32 = 12.0;
 
 /// Quantized shimmer frame for the current wall-clock phase. The welcome screen
@@ -130,8 +167,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
             let mut run = String::new();
             let mut run_color: Option<Color> = None;
             for (col, ch) in line.chars().enumerate() {
-                // Sweep along the bottom-left → top-right diagonal: the
-                // coordinate grows as col increases and row decreases.
+                // Sweep along the diagonal from bottom-left to top-right: the coordinate grows as col increases and row decreases
                 let diag = (col as f32 + (rows - 1.0 - row as f32)) / (cols + rows);
                 let color = blend_color(base, hilite, shine_opacity(diag, secs)).unwrap_or(base);
                 if run_color != Some(color) {
@@ -164,6 +200,13 @@ pub fn logo_visual_width(window_height: u16) -> u16 {
 
 pub fn render_logo(area: Rect, buf: &mut Buffer, theme: &Theme, window_height: u16) {
     if let Some(logo) = pick_logo(window_height) {
+        render_into(area, buf, theme, logo);
+    }
+}
+
+/// Paint the tier the layout reserved rows for, so the art can never outgrow its slot.
+pub fn render_logo_tier(area: Rect, buf: &mut Buffer, theme: &Theme, tier: LogoTier) {
+    if let Some(logo) = tier.art() {
         render_into(area, buf, theme, logo);
     }
 }
@@ -236,6 +279,22 @@ mod tests {
         assert_eq!(pick_logo_for(SMALL_LOGO_MIN_HEIGHT), Some(LOGO_SMALL));
         assert_eq!(pick_logo_for(FULL_LOGO_MIN_HEIGHT - 1), Some(LOGO_SMALL));
         assert_eq!(pick_logo_for(FULL_LOGO_MIN_HEIGHT), Some(LOGO));
+    }
+
+    #[test]
+    fn tier_api_matches_height_tiers() {
+        // The LogoTier API the stacked layout uses must agree with the
+        // height-based selection, and step down Full -> Compact -> Hidden.
+        assert_eq!(LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT - 1), LogoTier::Hidden);
+        assert_eq!(LogoTier::for_height(SMALL_LOGO_MIN_HEIGHT), LogoTier::Compact);
+        assert_eq!(LogoTier::for_height(FULL_LOGO_MIN_HEIGHT - 1), LogoTier::Compact);
+        assert_eq!(LogoTier::for_height(FULL_LOGO_MIN_HEIGHT), LogoTier::Full);
+        assert_eq!(LogoTier::Full.step_down(), Some(LogoTier::Compact));
+        assert_eq!(LogoTier::Compact.step_down(), Some(LogoTier::Hidden));
+        assert_eq!(LogoTier::Hidden.step_down(), None);
+        assert_eq!(LogoTier::Full.rows(), count_lines(LOGO));
+        assert_eq!(LogoTier::Compact.rows(), count_lines(LOGO_SMALL));
+        assert_eq!(LogoTier::Hidden.rows(), 0);
     }
 
     #[test]

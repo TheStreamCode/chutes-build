@@ -24,6 +24,7 @@ use crate::implementations::grok_build::image_gen::ImageGenInput;
 use crate::implementations::grok_build::list_dir::ListDirInput;
 use crate::implementations::grok_build::read_file::ReadFileInput;
 use crate::implementations::grok_build::search_replace::SearchReplaceInput;
+use crate::implementations::grok_build::send_feedback::SendFeedbackInput;
 use crate::implementations::grok_build::send_subagent_message::SendSubagentMessageInput;
 use crate::implementations::grok_build::todo::TodoWriteInput;
 use crate::implementations::grok_build::update_goal::UpdateGoalInput;
@@ -47,15 +48,9 @@ pub struct MCPToolInput {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
 }
-/// Typed tool input — one variant per built-in tool, plus `Dynamic` for
-/// MCP/runtime-registered tools.
-///
-/// Each variant wraps the tool's existing input struct. The new `Tool` trait
-/// will use `TryFrom<ToolInput>` to extract the typed input.
-///
-/// `derive_more::TryInto` generates `TryFrom<ToolInput> for T` for each
-/// inner type, so e.g. `ReadFileInput::try_from(input)` extracts the `ReadFileInput`
-/// variant or returns an error.
+/// Typed tool input — one variant per built-in tool, plus `Dynamic` for MCP/runtime-registered
+/// tools. Each variant wraps the tool's existing input struct. The new `Tool` trait will use
+/// `TryFrom<ToolInput>` to extract the typed input.
 #[derive(Debug, Clone, Serialize, Deserialize, derive_more::TryInto, derive_more::From)]
 #[serde(tag = "variant")]
 pub enum ToolInput {
@@ -92,6 +87,7 @@ pub enum ToolInput {
     AskUserQuestion(AskUserQuestionInput),
     #[serde(alias = "SendAgentMessage")]
     SendSubagentMessage(SendSubagentMessageInput),
+    SendFeedback(SendFeedbackInput),
     Lsp(LspToolInput),
     Monitor(crate::implementations::grok_build::monitor::types::MonitorInput),
     SchedulerCreate(crate::implementations::grok_build::scheduler::create::SchedulerCreateInput),
@@ -99,26 +95,16 @@ pub enum ToolInput {
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListInput),
     UpdateGoal(UpdateGoalInput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolInput),
-    Context7Search(crate::implementations::chutes::context7::Context7SearchInput),
-    Context7Docs(crate::implementations::chutes::context7::Context7DocsInput),
-    GetChutesUsage(crate::implementations::chutes::account::GetChutesUsageInput),
-    ListMediaModels(crate::implementations::chutes::media::ListMediaModelsInput),
-    DescribeMediaModel(crate::implementations::chutes::media::DescribeMediaModelInput),
-    GenerateMedia(crate::implementations::chutes::media::GenerateMediaInput),
-    Browser(crate::implementations::chutes::browser::BrowserInput),
-    OcrPage(crate::implementations::chutes::ocr::OcrPageInput),
     /// Dynamic input for runtime-registered tools (MCP, etc.)
     Dynamic(serde_json::Value),
 }
 impl ToolInput {
-    /// The real target tool for *meta-dispatch* tools whose wire `function.name`
-    /// is only the wrapper (`use_tool`), or `None` for
-    /// ordinary tools (already named by `function.name`). Single source of truth
-    /// for hook matching / telemetry; callers fall back to `function.name` on
-    /// `None`. Add any new dispatcher here.
+    /// The real target tool for *meta-dispatch* tools whose wire `function.name` is only the wrapper (`use_tool`), or
+    /// `None` for ordinary tools (already named by `function.name`). Single source of truth for hook matching / telemetry;
+    /// callers fall back to `function.name` on `None`. Add any new dispatcher here.
     pub fn dispatch_target_name(&self) -> Option<String> {
         match self {
-            ToolInput::UseTool(input) => Some(input.tool_name.clone()),
+            ToolInput::UseTool(input) => input.target_name().map(str::to_owned),
             _ => None,
         }
     }
@@ -151,10 +137,12 @@ mod tests {
     }
     #[test]
     fn dispatch_target_name_resolves_meta_dispatch_tools() {
-        let use_tool = ToolInput::UseTool(UseToolInput {
-            tool_name: "linear__save_issue".to_string(),
-            tool_input: serde_json::json!({}),
-        });
+        let use_tool = ToolInput::UseTool(UseToolInput::Inline(
+            crate::implementations::use_tool::InlineMcpInvocation {
+                tool_name: "linear__save_issue".to_string(),
+                tool_input: serde_json::json!({}),
+            },
+        ));
         assert_eq!(
             use_tool.dispatch_target_name().as_deref(),
             Some("linear__save_issue")
@@ -188,6 +176,7 @@ mod tests {
             timeout: None,
             description: "list files".into(),
             is_background: false,
+            block_until_ms: None,
         })
         .try_into();
         assert_eq!(bash.unwrap().command, "ls");
@@ -223,7 +212,7 @@ mod tests {
         let input = ToolInput::Dynamic(serde_json::json!({"custom": "data"}));
         match input {
             ToolInput::Dynamic(v) => {
-                assert_eq!(v["custom"], "data");
+                assert_eq!(v.get("custom").and_then(|x| x.as_str()), Some("data"));
             }
             _ => panic!("Expected Dynamic variant"),
         }

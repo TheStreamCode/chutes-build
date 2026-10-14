@@ -13,19 +13,17 @@ use xai_grok_telemetry::session_ctx::log_event;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(_agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/rollout/survey" => {
+        "chutes.ai/rollout/survey" => {
             let req: RolloutSurveyRequest = parse_params(args)?;
 
-            tracing::info_span!(
+            xai_grok_telemetry::event_span!(
                 "feedback.survey",
                 survey_type = "rollout",
                 event_type = "responded",
                 has_feedback_text = !req.feedback.is_empty(),
                 preference_count = req.preferences.len() as i64,
-            )
-            .in_scope(|| {});
+            );
 
-            // Log the survey via telemetry (this will go to Mixpanel and BigQuery)
             log_event(RolloutSurvey {
                 session_id: req.session_id.clone(),
                 preferences: req.preferences.clone(),

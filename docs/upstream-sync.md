@@ -1551,3 +1551,59 @@ the errors from the top of this record, and continue the per-area
 reconciliation — the `fetch.rs` split (fork early-prefetch vs upstream
 startup-prefetch) is the first judgement call, the reminder loops/workflows
 the second. No fork-owned surface was left modified on `main`.
+
+---
+
+## 1.0.45 rebase (2026-10-14, `rebase/upstream-1.0.45`)
+
+The 1.0.16 port was superseded: instead of resuming the per-area
+reconciliation from 1.0.12, the tree was re-based directly onto upstream
+`2bdd1d6a` (pager-bin 1.0.45, fetched as `upstream/1.0.45`) with the Chutes
+layer re-applied on top. Roughly 3,600 files changed; 116 Chutes-only files
+were kept, the rest taken from upstream and re-branded
+(`scripts/rebrand.py --check` reports no forbidden token).
+
+Re-applied fork seams, all verified by the suites named:
+
+- OAuth to the Chutes IdP (issuer `https://api.chutes.ai`, live discovery
+  document fetched 2026-10-14; no compiled-in client id;
+  `xai-grok-login --lib`: 435 passed, 26 failed — the failures are upstream
+  tests spawning `sh`/`printf` on Windows, not fork logic).
+- Prompt fusion: upstream 1.0.45 template plus the fork's
+  `official_chutes_sources` block and Chutes identity
+  (`prompt_contract`: 4 passed, including the pinning test).
+- `/apikey` rewritten as an instructions message (upstream removed
+  `AuthMode::ApiKeyEntry`).
+- Chutes tool pack registration moved before the registry snapshot so
+  curated `ChutesBuild:*` toolsets resolve (`xai-grok-agent --lib`:
+  581 passed, 4 failed — the failures are upstream tests assuming
+  Unix paths/messages on Windows).
+- Pre-rebrand preset aliases (`grok-build`, `grok-computer`, concise/plan
+  variants) so existing configs keep resolving.
+- Chutes ecosystem tools: document extraction, speech transcription,
+  embeddings, image/video/music generation, image edit, OCR, usage,
+  browser, Context7 (`xai-grok-tools --lib -- chutes`: 50 passed).
+- Single-shot equivalent-model fallback in the sampler plus media fallback,
+  with an honest error note when nothing can serve
+  (`xai-grok-sampler --lib`: 252 passed; `chutes-build-core --lib`: 80 passed).
+- Reasoning registry refreshed against the 14-model live catalog; Qwen3.8
+  verified (`enable_thinking`), Kimi-K3 / DeepSeek-V4-Flash /
+  Nemotron-3-Nano fail closed.
+- Token budgets re-pinned: fixed prompt 2,161 (ceiling 2,175), tool catalog
+  12,784 across 30 tools (ceiling 12,820; census re-ported after its loss
+  in the 1.0.12 sync). See `docs/token-efficiency-plan.md`.
+- Pruned the caller-less static model scorer from `chutes-build-core`.
+
+Behavioral gates: `cargo check --workspace` green, `dead_modules.py` all
+reachable (3,148 files), release build of `xai-grok-pager-bin` green with a
+`--help` smoke test exiting 0 as `Chutes Build TUI`. The debug-build CLI
+stack overflow (clap `parse_from` over 1 MiB frames in opt-level-0) is
+documented at the `parse_cli` call site; release binaries are unaffected.
+
+`.github/upstream.json` now names `2bdd1d6a`/1.0.45. `SOURCE_REV` is
+unchanged: upstream's published tree still carries `559751fd`, which
+already matched. Known partial-sync risk: versions 1.0.46–1.0.52 exist as
+changelog entries only and were not ported; the next sync starts from this
+record, not from the parked 1.0.16 branch (which is now obsolete — its
+per-area work was absorbed by this rebase, and it should be deleted after
+this branch lands).

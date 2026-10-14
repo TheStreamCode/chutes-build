@@ -3,7 +3,8 @@
 use agent_client_protocol as acp;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 
-use crate::agent::mvp_agent::MvpAgent;
+use crate::extensions::agent_runtime::AgentRuntime;
+use crate::extensions::worktree_seed;
 use crate::session::ExtMethodResult;
 use crate::session::persistence::LocalSessionResolutionKind;
 use crate::session::worktree::{
@@ -13,10 +14,13 @@ use crate::session::worktree::{
     create_jj_workspace, create_worktree_async, create_worktree_from_worktree_async,
     rehydrate_session_in_worktree, resolve_session_repo_wide, resume_session_in_worktree,
 };
+use xai_grok_telemetry::instrument_task;
+use xai_grok_telemetry::region::Parent;
+use xai_grok_telemetry::session_ctx::spawn_local_in_session_ctx;
 
 type ExtResult = Result<acp::ExtResponse, acp::Error>;
 
-const WORKTREE_EXT_LOG: &str = "xai_worktree";
+pub(super) const WORKTREE_EXT_LOG: &str = "xai_worktree";
 
 /// Wrapper to send worktree progress notifications via gateway.
 #[derive(Clone)]
@@ -34,8 +38,7 @@ impl WorktreeNotificationSender for GatewayWorktreeNotifier {
                 return;
             }
         };
-        let notification =
-            acp::ExtNotification::new("chutes.build/git/worktree/status", params.into());
+        let notification = acp::ExtNotification::new("chutes.ai/git/worktree/status", params.into());
         if let Err(e) = self.gateway.send(notification).await {
             tracing::warn!("Failed to send worktree progress notification: {}", e);
         }
@@ -48,10 +51,15 @@ fn to_response<T: serde::Serialize>(result: anyhow::Result<T>) -> ExtResult {
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Extract the worktree path from a `Creating` response for pinning.
-fn extract_creating_path(resp: &anyhow::Result<CreateWorktreeResponse>) -> Option<String> {
-    if let Ok(CreateWorktreeResponse::Creating { worktree_path, .. }) = resp {
-        Some(worktree_path.clone())
+/// `resolved_source_git_root` is `serde(skip)`; copy it in-process from Creating.
+fn extract_creating(resp: &CreateWorktreeResponse) -> Option<(String, Option<String>)> {
+    if let CreateWorktreeResponse::Creating {
+        worktree_path,
+        source_git_root,
+        ..
+    } = resp
+    {
+        Some((worktree_path.clone(), source_git_root.clone()))
     } else {
         None
     }
@@ -92,6 +100,16 @@ pub(crate) struct GcWorktreeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDbPathResponse {
     pub path: String,
+}
+
+/// `create_from_worktree_sync` response plus the optional branch step.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SeededForkResponse {
+    #[serde(flatten)]
+    pub created: xai_grok_workspace::worktree::CreateWorktreeFromWorktreeResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<worktree_seed::BranchOutcome>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -149,24 +167,25 @@ fn log_effective_worktree_type(
 }
 #[tracing::instrument(name = "ext.worktree", skip_all, fields(method = %args.method))]
 pub async fn handle(
-    agent: &MvpAgent,
+    agent: &dyn AgentRuntime,
     ops: &xai_grok_workspace::WorkspaceOps,
     args: &acp::ExtRequest,
 ) -> ExtResult {
-    let worktree_type_default = agent.worktree_type;
-    let restore_code_default = agent.restore_code;
+    let worktree_type_default = agent.worktree_type();
+    let restore_code_default = agent.restore_code();
 
     match args.method.as_ref() {
-        "chutes.build/git/worktree/create" => {
+        "chutes.ai/git/worktree/create" => {
             let mut req = serde_json::from_str::<CreateWorktreeRequest>(args.params.get())?;
             // Pre-dispatch: apply worktree_type default
             let request_worktree_type = req.worktree_type;
             if req.worktree_type.is_none() {
                 req.worktree_type = Some(worktree_type_default.into());
             }
-            apply_grove_worktree_flag(agent, &mut req.grove_worktree);
+            req.grove_gate_source =
+                Some(apply_grove_worktree_flag(agent, &mut req.grove_worktree).into());
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create",
+                "chutes.ai/git/worktree/create",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
@@ -177,20 +196,25 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             // Post-dispatch: spawn async task for Creating variant.
             if let Ok(resp) = serde_json::from_value::<CreateWorktreeResponse>(result.clone())
-                && matches!(&resp, CreateWorktreeResponse::Creating { .. })
+                && let Some((path, source_git_root)) = extract_creating(&resp)
             {
-                req.worktree_path = extract_creating_path(&Ok(resp));
+                req.worktree_path = Some(path);
+                req.resolved_source_git_root = source_git_root;
                 let notifier = GatewayWorktreeNotifier {
-                    gateway: agent.gateway.clone(),
+                    gateway: agent.gateway().clone(),
                 };
                 let copy_context = agent.background_copy_context();
-                tokio::task::spawn_local(async move {
-                    create_worktree_async(req, notifier, copy_context).await;
-                });
+                spawn_local_in_session_ctx(instrument_task!(
+                    "worktree.create",
+                    Parent::Root,
+                    async move {
+                        create_worktree_async(req, notifier, copy_context).await;
+                    }
+                ));
             }
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/remove" => {
+        "chutes.ai/git/worktree/remove" => {
             let req = serde_json::from_str::<RemoveWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -198,7 +222,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/apply" => {
+        "chutes.ai/git/worktree/apply" => {
             let req = serde_json::from_str::<ApplyWorktreeRequest>(args.params.get())?;
             let result = ops
                 .dispatch(&req, None)
@@ -207,22 +231,21 @@ pub async fn handle(
             to_response(Ok(result))
         }
         // Create a worktree from an existing worktree (used during session fork)
-        "chutes.build/git/worktree/create_from_worktree" => {
+        "chutes.ai/git/worktree/create_from_worktree" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
             let request_worktree_type = req.worktree_type;
-            // Apply default if not explicitly set in request
             if req.worktree_type.is_none() {
                 req.worktree_type = Some(worktree_type_default.into());
             }
-            apply_grove_worktree_flag(agent, &mut req.grove_worktree);
+            req.grove_gate_source =
+                Some(apply_grove_worktree_flag(agent, &mut req.grove_worktree).into());
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create_from_worktree",
+                "chutes.ai/git/worktree/create_from_worktree",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
             );
-            // Dispatch prepare through workspace
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::PrepareWorktreeFromWorktreeReq {
@@ -245,65 +268,62 @@ pub async fn handle(
                 })?;
 
             if result.spawn_task {
-                // Pin the resolved path so the async task reuses it instead of
-                // generating a new UUID via auto_label().
-                req.resolved_dest_path = extract_creating_path(&Ok(response.clone()));
+                if let Some((path, source_git_root)) = extract_creating(&response) {
+                    req.resolved_dest_path = Some(path);
+                    req.resolved_source_git_root = source_git_root;
+                }
                 let notifier = GatewayWorktreeNotifier {
-                    gateway: agent.gateway.clone(),
+                    gateway: agent.gateway().clone(),
                 };
-                tokio::task::spawn_local(async move {
-                    create_worktree_from_worktree_async(req, notifier).await;
-                });
+                spawn_local_in_session_ctx(instrument_task!(
+                    "worktree.create",
+                    Parent::Root,
+                    async move {
+                        create_worktree_from_worktree_async(req, notifier).await;
+                    }
+                ));
             }
 
             to_response(Ok(response))
         }
-        // Synchronous variant - waits for worktree creation to complete
-        "chutes.build/git/worktree/create_from_worktree_sync" => {
+        // Synchronous variant: waits for worktree creation to complete
+        "chutes.ai/git/worktree/create_from_worktree_sync" => {
             let mut req =
                 serde_json::from_str::<CreateWorktreeFromWorktreeRequest>(args.params.get())?;
-
-            // For jj repos, use jj workspace add instead of git worktree
-            let source_path = std::path::Path::new(&req.source_worktree_path);
-            let resolved_root = ops
-                .dispatch(
-                    &xai_grok_workspace::workspace_ops::GitResolveRootReq {
-                        cwd: source_path.to_path_buf(),
-                    },
-                    None,
-                )
-                .await
-                .ok()
-                .flatten();
-            if let Some(git_root) = resolved_root {
-                let vcs_kind = ops
-                    .dispatch(
-                        &xai_grok_workspace::workspace_ops::DetectVcsKindReq {
-                            path: git_root.clone(),
-                        },
-                        None,
-                    )
-                    .await
-                    .unwrap_or(xai_grok_workspace::session::git::VcsKind::Git);
-                if vcs_kind.is_jj() {
-                    tracing::info!("using jj workspace for subagent isolation");
-                    return to_response(create_jj_workspace(&req).await);
-                }
-            }
+            let seed = serde_json::from_str::<worktree_seed::SeedOptions>(args.params.get())?;
+            seed.validate()
+                .map_err(|e| acp::Error::invalid_params().data(e))?;
 
             let request_worktree_type = req.worktree_type;
-            // Apply default if not explicitly set in request
             if req.worktree_type.is_none() {
                 req.worktree_type = Some(worktree_type_default.into());
             }
-            apply_grove_worktree_flag(agent, &mut req.grove_worktree);
+            req.grove_gate_source =
+                Some(apply_grove_worktree_flag(agent, &mut req.grove_worktree).into());
+
+            // Nested clones keep libgit2; Grove dest is the fallback on partialclone.
+            let source_path = std::path::Path::new(&req.source_worktree_path);
+            if xai_grok_workspace::worktree::git_or_grove_is_jj_async(
+                source_path,
+                req.grove_worktree == Some(true),
+            )
+            .await
+            {
+                tracing::info!("using jj workspace for subagent isolation");
+                return to_response(create_jj_workspace(&req).await);
+            }
+
             log_effective_worktree_type(
-                "chutes.build/git/worktree/create_from_worktree_sync",
+                "chutes.ai/git/worktree/create_from_worktree_sync",
                 request_worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
             );
-            let result = ops
+            // Fetch in the source so linked and standalone copies both see the ref.
+            if let Some(base_ref) = seed.base_ref.as_deref() {
+                worktree_seed::fetch_base_ref(source_path, base_ref).await;
+            }
+            let mut result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::CreateWorktreeFromWorktreeSyncReq {
                         inner: req.into_wire(),
@@ -312,19 +332,48 @@ pub async fn handle(
                 )
                 .await
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
-            to_response(Ok(result))
+            // `checkout -B` on a `status: exists` tree would reset work already there.
+            let branch = match seed.branch.as_deref() {
+                Some(branch) if result.status == "created" => {
+                    worktree_seed::checkout_branch(
+                        std::path::Path::new(&result.worktree_path),
+                        branch,
+                        seed.base_ref.as_deref(),
+                    )
+                    .await
+                }
+                Some(branch) => {
+                    tracing::info!(
+                        target: WORKTREE_EXT_LOG,
+                        branch,
+                        status = %result.status,
+                        worktree = %result.worktree_path,
+                        "worktree seed: branch step skipped, worktree was not created by this call"
+                    );
+                    None
+                }
+                None => None,
+            };
+            if let Some(branch) = &branch {
+                result.commit = Some(branch.commit.clone());
+            }
+            to_response(Ok(SeededForkResponse {
+                created: result,
+                branch,
+            }))
         }
         // Resume a session in a fresh worktree.
-        "chutes.build/git/worktree/resume_session" => {
+        "chutes.ai/git/worktree/resume_session" => {
             let req = serde_json::from_str::<ResumeSessionInWorktreeRequest>(args.params.get())?;
             log_effective_worktree_type(
-                "chutes.build/git/worktree/resume_session",
+                "chutes.ai/git/worktree/resume_session",
                 req.worktree_type,
                 worktree_type_default,
                 req.worktree_type.unwrap_or(worktree_type_default.into()),
             );
             let mut grove_worktree = None;
-            apply_grove_worktree_flag(agent, &mut grove_worktree);
+            let grove_gate_source = apply_grove_worktree_flag(agent, &mut grove_worktree);
+            let grove_worktree = grove_worktree.unwrap_or(false);
             let registry_client = agent.session_registry_client();
             let agent_id = xai_grok_telemetry::id::agent_id();
 
@@ -335,15 +384,16 @@ pub async fn handle(
                     worktree_type_default,
                     restore_code_default,
                     registry_client.as_ref(),
-                    Some(agent.auth_manager.clone()),
+                    Some(agent.auth_manager().clone()),
                     &agent_id,
                     grove_worktree,
+                    grove_gate_source,
                 )
                 .await,
             )
         }
         // ── Repo-wide session resolution ─────────────────────────────────
-        "chutes.build/session/resolve_local_for_worktree_resume" => {
+        "chutes.ai/session/resolve_local_for_worktree_resume" => {
             let req =
                 serde_json::from_str::<ResolveLocalForWorktreeResumeRequest>(args.params.get())?;
             let result = resolve_session_repo_wide(&req.session_id, std::path::Path::new(&req.cwd));
@@ -367,14 +417,25 @@ pub async fn handle(
             }
         }
         // ── Session rehydration (devbox recovery) ─────────────────────────
-        "chutes.build/session/rehydrate" => {
+        "chutes.ai/session/rehydrate" => {
             let req = serde_json::from_str::<RehydrateSessionRequest>(args.params.get())?;
             let registry_client = agent.session_registry_client();
+            let (grove_worktree, grove_gate_source) =
+                crate::util::config::grove_worktree_gate(agent.remote_settings().as_ref());
 
-            to_response(rehydrate_session_in_worktree(&req, ops, registry_client.as_ref()).await)
+            to_response(
+                rehydrate_session_in_worktree(
+                    &req,
+                    ops,
+                    registry_client.as_ref(),
+                    grove_worktree,
+                    grove_gate_source,
+                )
+                .await,
+            )
         }
         // ── Worktree management methods ──────────────────────────────────
-        "chutes.build/git/worktree/list" => {
+        "chutes.ai/git/worktree/list" => {
             let req: xai_grok_workspace::workspace_ops::WorktreeListReq =
                 serde_json::from_str(args.params.get())
                     .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
@@ -384,7 +445,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/show" => {
+        "chutes.ai/git/worktree/show" => {
             let req = serde_json::from_str::<ShowWorktreeRequest>(args.params.get())?;
             let op = xai_grok_workspace::workspace_ops::WorktreeShowReq {
                 id_or_path: req.id_or_path,
@@ -395,7 +456,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/gc" => {
+        "chutes.ai/git/worktree/gc" => {
             let req = serde_json::from_str::<GcWorktreeRequest>(args.params.get())?;
             let max_age_secs = req.max_age.as_deref().map(parse_duration).transpose()?;
             let op = xai_grok_workspace::workspace_ops::WorktreeGcReq {
@@ -409,7 +470,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/stats" => {
+        "chutes.ai/git/worktree/db/stats" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbStatsReq {},
@@ -419,7 +480,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/rebuild" => {
+        "chutes.ai/git/worktree/db/rebuild" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbRebuildReq {},
@@ -429,7 +490,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/db/path" => {
+        "chutes.ai/git/worktree/db/path" => {
             let result = ops
                 .dispatch(
                     &xai_grok_workspace::workspace_ops::WorktreeDbPathReq {},
@@ -439,7 +500,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/detach" => {
+        "chutes.ai/git/worktree/detach" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct DetachReq {
@@ -460,7 +521,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/salvage" => {
+        "chutes.ai/git/worktree/salvage" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct SalvageReq {
@@ -480,7 +541,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_response(Ok(result))
         }
-        "chutes.build/git/worktree/clean-artifacts" => {
+        "chutes.ai/git/worktree/clean-artifacts" => {
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct CleanReq {
@@ -502,19 +563,18 @@ pub async fn handle(
     }
 }
 
-fn apply_grove_worktree_flag(agent: &MvpAgent, slot: &mut Option<bool>) {
+fn apply_grove_worktree_flag(agent: &dyn AgentRuntime, slot: &mut Option<bool>) -> &'static str {
     let root = crate::config::load_effective_config()
         .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
-    let cfg = agent.cfg.borrow();
-    apply_grove_worktree_gate(slot, &root, cfg.remote_settings.as_ref());
+    apply_grove_worktree_gate(slot, &root, agent.remote_settings().as_ref())
 }
 
-/// Always run the grove gate, even when `slot` is already `Some`. Kill switch last.
+/// Always run the grove gate, even when `slot` is already `Some`; the kill switch applies last.
 pub(crate) fn apply_grove_worktree_gate(
     slot: &mut Option<bool>,
     root: &toml::Value,
     remote: Option<&crate::util::config::RemoteSettings>,
-) {
+) -> &'static str {
     let (enabled, src) = crate::util::config::gate_grove_worktree(*slot, root, remote);
     tracing::info!(
         target: WORKTREE_EXT_LOG,
@@ -523,11 +583,13 @@ pub(crate) fn apply_grove_worktree_gate(
         "WORKTREE_REQUEST_SHELL: resolved grove materialize strategy"
     );
     *slot = Some(enabled);
+    src
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn list_request_all_defaults() {
@@ -562,6 +624,13 @@ mod tests {
     }
 
     #[test]
+    fn gc_rejects_a_malformed_max_age() {
+        let err = parse_duration("7x").unwrap_err().to_string();
+        assert!(err.contains("invalid duration: 7x"), "{err}");
+        assert_eq!(parse_duration("7d").unwrap(), 7 * 86_400);
+    }
+
+    #[test]
     fn gc_request_with_all_fields() {
         let json = r#"{"dryRun": true, "maxAge": "7d", "force": true}"#;
         let req: GcWorktreeRequest = serde_json::from_str(json).unwrap();
@@ -588,60 +657,63 @@ mod tests {
         apply_grove_worktree_gate(&mut slot, &root, None);
         assert_eq!(
             slot,
-            Some(false),
-            "ACP wrapper must fail closed when remote settings are unavailable"
+            Some(true),
+            "ACP wrapper must keep request Grove when remote settings are unavailable"
+        );
+    }
+
+    fn clear_grove_env() {
+        // SAFETY: callers are `#[serial]`; no concurrent env mutation.
+        unsafe {
+            std::env::remove_var(crate::util::config::ENV_WORKTREE_TYPE);
+            std::env::remove_var(crate::util::config::ENV_GROVE);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn inherit_grove_gate_attaches_opts_when_local_toml_is_on() {
+        clear_grove_env();
+        let root: toml::Value = toml::from_str("[cli]\ngrove_worktree = true").unwrap();
+        let mut slot = None;
+        let src = apply_grove_worktree_gate(&mut slot, &root, None);
+        assert_eq!(src, "local");
+        assert_eq!(slot, Some(true));
+        assert!(
+            crate::util::config::grove_worktree_opts_if_enabled(slot.unwrap_or(false))
+                .is_some_and(|opts| opts.enabled)
         );
     }
 
     #[test]
-    #[serial_test::serial]
-    fn apply_grove_worktree_gate_resume_parity_with_create() {
-        use crate::util::config::ENV_WORKTREE_TYPE;
+    #[serial]
+    fn inherit_grove_gate_skips_opts_when_default_off() {
+        clear_grove_env();
+        let root = toml::Value::Table(toml::map::Map::new());
+        let mut slot = None;
+        let src = apply_grove_worktree_gate(&mut slot, &root, None);
+        assert_eq!(src, "default");
+        assert_eq!(slot, Some(false));
+        assert!(
+            crate::util::config::grove_worktree_opts_if_enabled(slot.unwrap_or(false)).is_none()
+        );
+    }
 
-        unsafe { std::env::remove_var(ENV_WORKTREE_TYPE) };
-        let local_grove: toml::Value = toml::from_str("[cli]\ngrove_worktree = true").unwrap();
-        let empty: toml::Value = toml::from_str("[cli]\nauto_update = true").unwrap();
-        let remote_unset = crate::util::config::RemoteSettings {
-            grove_worktree: None,
-            ..Default::default()
-        };
-        let remote_kill = crate::util::config::RemoteSettings {
+    #[test]
+    #[serial]
+    fn inherit_grove_gate_skips_opts_on_remote_kill() {
+        clear_grove_env();
+        let root: toml::Value = toml::from_str("[cli]\ngrove_worktree = true").unwrap();
+        let remote = crate::util::config::RemoteSettings {
             grove_worktree: Some(false),
-            ..Default::default()
+            ..crate::util::config::RemoteSettings::default()
         };
-
         let mut slot = None;
-        apply_grove_worktree_gate(&mut slot, &local_grove, Some(&remote_unset));
-        assert_eq!(
-            slot,
-            Some(true),
-            "remote Some(unset) + local grove must enable, same as create"
-        );
-
-        unsafe { std::env::set_var(ENV_WORKTREE_TYPE, "grove") };
-        let mut slot = None;
-        apply_grove_worktree_gate(&mut slot, &empty, Some(&remote_unset));
-        assert_eq!(
-            slot,
-            Some(true),
-            "remote Some(unset) + env grove must enable, same as create"
-        );
-
-        let mut slot = None;
-        apply_grove_worktree_gate(&mut slot, &empty, Some(&remote_kill));
-        assert_eq!(
-            slot,
-            Some(false),
-            "remote kill must disable even when env asked for grove"
-        );
-
-        let mut slot = None;
-        apply_grove_worktree_gate(&mut slot, &empty, None);
-        unsafe { std::env::remove_var(ENV_WORKTREE_TYPE) };
-        assert_eq!(
-            slot,
-            Some(false),
-            "true unavailability (remote = None) must fail-close even if env asked for grove"
+        let src = apply_grove_worktree_gate(&mut slot, &root, Some(&remote));
+        assert_eq!(src, "remote_kill");
+        assert_eq!(slot, Some(false));
+        assert!(
+            crate::util::config::grove_worktree_opts_if_enabled(slot.unwrap_or(false)).is_none()
         );
     }
 
@@ -721,8 +793,7 @@ mod tests {
 
     #[test]
     fn db_rebuild_response_carries_report_not_null() {
-        // Regression: forwarding `()` instead of the report yields `result: null`,
-        // which the CLI rejects with "ACP response missing result field".
+        // Regression: forwarding `()` instead of the report yields `result: null`, which the CLI rejects with "ACP response missing result field"
         let report = serde_json::json!({
             "discovered": 5,
             "registered": 3,
@@ -735,10 +806,10 @@ mod tests {
             .get("result")
             .expect("envelope must carry a result field");
         assert!(!result.is_null(), "rebuild result must not be null");
-        assert_eq!(result["discovered"], 5);
-        assert_eq!(result["registered"], 3);
-        assert_eq!(result["already_tracked"], 2);
-        assert!(wire.get("error").is_none() || wire["error"].is_null());
+        assert_eq!(result.get("discovered"), Some(&serde_json::json!(5)));
+        assert_eq!(result.get("registered"), Some(&serde_json::json!(3)));
+        assert_eq!(result.get("already_tracked"), Some(&serde_json::json!(2)));
+        assert!(wire.get("error").is_none_or(|e| e.is_null()));
     }
 
     // === Tests for repo-wide session resolution ACP types ===

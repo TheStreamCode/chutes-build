@@ -1,10 +1,10 @@
-//! MCP HTTP client wrapper that throttles SSE reconnects with exponential
-//! backoff, working around rmcp's zero-backoff reconnect loop: when an
-//! established SSE stream errors, rmcp re-issues the `GET` immediately with
-//! its retry counter reset to 0, never consulting its `SseRetryPolicy`
-//! (only connect failures and graceful EOF consult it). We ship rmcp 2.1;
-//! still unfixed upstream as of rmcp 2.1.0:
-//! <https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v2.1.0/crates/rmcp/src/transport/common/client_side_sse.rs#L250-L261>
+//! MCP HTTP client wrapper that throttles SSE reconnects with exponential backoff, working around rmcp's zero-backoff reconnect loop.
+//! When an established SSE stream errors, rmcp re-issues the `GET` immediately with its retry counter reset to 0.
+//! It never consults its `SseRetryPolicy`; only connect failures and graceful EOF consult it.
+//! We ship rmcp 3.2; still unfixed upstream as of rmcp 3.2.0 (an errored stream
+//! re-enters `Retrying { retry_times: 0 }` immediately, bypassing the retry policy):
+//! <https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.2.0/crates/rmcp/src/transport/common/client_side_sse.rs>
+//! The wrapper also supplies each request's bearer token from a `bearer_token_file` when the server has one.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,15 +18,14 @@ use rmcp::transport::streamable_http_client::{
 };
 use sse_stream::{Error as SseError, Sse};
 
-/// A stream that survived this long is healthy and resets the backoff. Flood
-/// lifetimes are sub-millisecond; healthy proxies/LBs recycle idle streams no
-/// faster than ~25s.
+use crate::bearer_token_file::BearerTokenFile;
+
+/// A stream that survived this long is healthy and resets the backoff.
+/// Flood lifetimes are sub-millisecond; healthy proxies/LBs recycle idle streams no faster than ~25s.
 const STABLE_STREAM_THRESHOLD: Duration = Duration::from_secs(2);
-/// Delay for the n-th consecutive rapid death: `BASE_DELAY * 2^(n-2)`
-/// (the first reconnects immediately), capped at [`MAX_DELAY`].
+/// Delay for the n-th consecutive rapid death: `BASE_DELAY * 2^(n-2)` (the first reconnects immediately), capped at [`MAX_DELAY`].
 const BASE_DELAY: Duration = Duration::from_millis(500);
-/// Caps a broken server's cost at ~2 attempts/min; a healed server gets its
-/// stream back within 30s.
+/// Caps a broken server's cost at ~2 attempts/min; a healed server gets its stream back within 30s.
 const MAX_DELAY: Duration = Duration::from_secs(30);
 const WARN_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
@@ -45,15 +44,13 @@ struct BackoffPlan {
     log: ReconnectLog,
 }
 
-/// Hold one per `McpClient`; clones share state, so transport rebuilds keep
-/// the limit.
+/// Hold one per `McpClient`; clones share state, so transport rebuilds keep the limit.
 #[derive(Debug, Clone, Default)]
 pub struct WarnBudget(Arc<parking_lot::Mutex<Option<Instant>>>);
 
 impl WarnBudget {
-    /// Latches `now` and returns true when no warn fired within
-    /// `WARN_COOLDOWN`. Never acquire a `ThrottleState` lock while holding
-    /// this one.
+    /// Latches `now` and returns true when no warn fired within `WARN_COOLDOWN`.
+    /// Never acquire a `ThrottleState` lock while holding this one.
     fn try_consume(&self, now: Instant) -> bool {
         let mut last_warn_at = self.0.lock();
         let available = last_warn_at.is_none_or(|t| now.duration_since(t) >= WARN_COOLDOWN);
@@ -71,8 +68,7 @@ impl WarnBudget {
 
 #[derive(Debug, Default)]
 struct ThrottleState {
-    /// Age at the next `get_stream` approximates the previous stream's
-    /// lifetime, since reconnects follow deaths within a round trip.
+    /// Age at the next `get_stream` approximates the previous stream's lifetime, since reconnects follow deaths within a round trip.
     last_established: Option<Instant>,
     consecutive_rapid: u32,
     warn_budget: WarnBudget,
@@ -129,17 +125,16 @@ impl ThrottleState {
     }
 }
 
-/// Wraps any [`StreamableHttpClient`] and backs off `get_stream` reconnects;
-/// `post_message` / `delete_session` delegate untouched. Clones share the
-/// throttle state (rmcp clones the client per stream task / reconnect).
-///
-/// Backoff and episode state are per instance; the [`WarnBudget`] is the
-/// caller's, so a rebuilt client does not warn again within the cooldown.
+/// Wraps any [`StreamableHttpClient`] and backs off `get_stream` reconnects.
+/// With a [`BearerTokenFile`], every request's bearer token is read from it; otherwise requests delegate untouched.
+/// Clones share the throttle state (rmcp clones the client per stream task / reconnect).
+/// Backoff and episode state are per instance; the [`WarnBudget`] is the caller's, so a rebuilt client does not warn again within the cooldown.
 #[derive(Clone)]
 pub struct McpHttpClient<C> {
     inner: C,
     server_name: Arc<str>,
     state: Arc<parking_lot::Mutex<ThrottleState>>,
+    bearer_token_file: Option<BearerTokenFile>,
 }
 // No `Debug` derive: rmcp's `AuthClient` (an inner type) is not `Debug`.
 
@@ -151,13 +146,29 @@ impl<C> McpHttpClient<C> {
             state: Arc::new(parking_lot::Mutex::new(ThrottleState::with_budget(
                 warn_budget,
             ))),
+            bearer_token_file: None,
+        }
+    }
+
+    pub(crate) fn with_bearer_token_file(mut self, file: Option<BearerTokenFile>) -> Self {
+        self.bearer_token_file = file;
+        self
+    }
+
+    /// The token file, when configured, replaces the token rmcp passes (none for non-OAuth clients).
+    async fn resolve_auth_token<E: std::error::Error + Send + Sync + 'static>(
+        &self,
+        auth_token: Option<String>,
+    ) -> Result<Option<String>, StreamableHttpError<E>> {
+        match &self.bearer_token_file {
+            Some(file) => Ok(Some(file.read().await?)),
+            None => Ok(auth_token),
         }
     }
 }
 
-/// The system clock in production; the paused clock under `start_paused`
-/// tests. Use this for all throttle timing so timing tests stay
-/// deterministic.
+/// The system clock in production; the paused clock under `start_paused` tests.
+/// Use this for all throttle timing so timing tests stay deterministic.
 fn now() -> Instant {
     tokio::time::Instant::now().into_std()
 }
@@ -169,7 +180,7 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
     async fn get_stream(
         &self,
         uri: Arc<str>,
-        session_id: Arc<str>,
+        session_id: Option<Arc<str>>,
         last_event_id: Option<String>,
         auth_token: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
@@ -207,6 +218,7 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
             tokio::time::sleep(plan.delay).await;
         }
 
+        let auth_token = self.resolve_auth_token(auth_token).await?;
         let result = self
             .inner
             .get_stream(uri, session_id, last_event_id, auth_token, custom_headers)
@@ -225,6 +237,7 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
         auth_token: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        let auth_token = self.resolve_auth_token(auth_token).await?;
         self.inner
             .post_message(uri, message, session_id, auth_token, custom_headers)
             .await
@@ -237,6 +250,7 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
         auth_token: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> Result<(), StreamableHttpError<Self::Error>> {
+        let auth_token = self.resolve_auth_token(auth_token).await?;
         self.inner
             .delete_session(uri, session_id, auth_token, custom_headers)
             .await
@@ -247,8 +261,8 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
 mod tests {
     use super::*;
 
-    /// Simulates rapid stream deaths starting at `start` until the throttle
-    /// engages (attempt 2). Returns the throttle-entry time and its plan.
+    /// Simulates rapid stream deaths starting at `start` until the throttle engages (attempt 2).
+    /// Returns the throttle-entry time and its plan.
     fn drive_to_first_throttle(st: &mut ThrottleState, start: Instant) -> (Instant, BackoffPlan) {
         assert!(st.plan_on_get_stream(start).is_none());
         st.mark_established(start);
@@ -277,14 +291,12 @@ mod tests {
         assert_eq!(p3.log, ReconnectLog::Debug);
         st.mark_established(t2 + Duration::from_millis(10));
 
-        // Stable recovery, then a new outage inside the cooldown: the
-        // episode reset must not reset the cooldown, so entry is suppressed.
+        // Stable recovery, then a new outage inside the cooldown: the episode reset must not reset the cooldown, so entry is suppressed
         let (mut t, p_entry) = drive_to_first_throttle(&mut st, t2 + Duration::from_secs(30 * 60));
         assert_eq!(p_entry.log, ReconnectLog::SuppressedWarn);
         st.mark_established(t);
 
-        // The outage continues: every attempt is suppressed until the
-        // cooldown expires, then the episode's one warn fires late.
+        // The outage continues: every attempt is suppressed until the cooldown expires, then the episode's one warn fires late
         let step = STABLE_STREAM_THRESHOLD - Duration::from_millis(1);
         let rearm_at = first_warn_at + WARN_COOLDOWN;
         let late_warn_at = loop {
@@ -304,8 +316,7 @@ mod tests {
             }
         };
 
-        // Same outage, another full cooldown: elapsed time alone must not
-        // produce more warns.
+        // Same outage, another full cooldown: elapsed time alone must not produce more warns
         let past_next_cooldown = late_warn_at + WARN_COOLDOWN + Duration::from_secs(1);
         let mut attempts = 0u32;
         while t < past_next_cooldown {
@@ -334,16 +345,14 @@ mod tests {
         assert_eq!(p_ep2.log, ReconnectLog::SuppressedWarn);
         st.mark_established(t_ep2);
 
-        // Land the third episode's throttle entry exactly on the cooldown
-        // boundary, which is inclusive.
+        // Land the third episode's throttle entry exactly on the cooldown boundary, which is inclusive
         let rearm_at = first_warn_at + WARN_COOLDOWN;
         let (entry, p_ep3) = drive_to_first_throttle(&mut st, rearm_at - Duration::from_millis(20));
         assert_eq!(entry, rearm_at);
         assert_eq!(p_ep3.log, ReconnectLog::Warn);
     }
 
-    /// A rebuilt client for the same server shares the warn budget, so it
-    /// does not warn again within the cooldown.
+    /// A rebuilt client for the same server shares the warn budget, so it does not warn again within the cooldown.
     #[test]
     fn rebuilt_client_shares_the_server_warn_budget() {
         let budget = WarnBudget::default();
@@ -356,8 +365,7 @@ mod tests {
         assert_eq!(p_rebuilt.log, ReconnectLog::SuppressedWarn);
     }
 
-    /// Inner client whose streams always succeed and end immediately,
-    /// simulating rapid stream deaths.
+    /// Inner client whose streams always succeed and end immediately, simulating rapid stream deaths.
     #[derive(Clone)]
     struct MockInner;
 
@@ -367,7 +375,7 @@ mod tests {
         async fn get_stream(
             &self,
             _uri: Arc<str>,
-            _session_id: Arc<str>,
+            _session_id: Option<Arc<str>>,
             _last_event_id: Option<String>,
             _auth_token: Option<String>,
             _custom_headers: HashMap<HeaderName, HeaderValue>,
@@ -398,8 +406,7 @@ mod tests {
         }
     }
 
-    /// Counts this module's warn events and records each debug event's
-    /// `suppressed_warn` field.
+    /// Counts this module's warn events and records each debug event's `suppressed_warn` field.
     #[derive(Clone, Default)]
     struct LogCapture {
         warns: Arc<std::sync::atomic::AtomicUsize>,
@@ -446,7 +453,7 @@ mod tests {
         let stream = client
             .get_stream(
                 "http://mock".into(),
-                "session".into(),
+                Some("session".into()),
                 None,
                 None,
                 HashMap::new(),
@@ -456,8 +463,7 @@ mod tests {
         drop(stream);
     }
 
-    // Paused tokio time drives both the backoff sleeps and the throttle
-    // clock.
+    // Paused tokio time drives both the backoff sleeps and the throttle clock
     #[tokio::test(start_paused = true)]
     async fn get_stream_maps_warn_debug_and_suppressed_severities() {
         use std::sync::atomic::Ordering;
@@ -477,8 +483,7 @@ mod tests {
             "in-episode debug is not a suppressed warning"
         );
 
-        // A stable gap resets the episode; the next throttled attempt is a
-        // suppressed warning and must also log at debug, not warn.
+        // A stable gap resets the episode; the next throttled attempt is a suppressed warning and must also log at debug, not warn
         tokio::time::advance(STABLE_STREAM_THRESHOLD + Duration::from_millis(1)).await;
         for _ in 0..3 {
             drive_once(&client).await;

@@ -42,7 +42,7 @@ src/
 | `Ctrl+P` or `?` | Agent screen | Open command palette |
 | `Ctrl+L` | Any (non–VS Code family) | Open plugins/hooks modal; on VS Code / Cursor / Windsurf / Zed use `/plugins` or `/hooks` (`Ctrl+L` is mid-turn interject) |
 | `Tab` | Prompt | Switch to scrollback |
-| `Esc` | Turn running | Cancel — in minimal mode or with vim scrollback mode off (the default). Fullscreen vim mode: no-op (use `Ctrl+C`) |
+| `Esc` | Turn running | Esc never cancels a turn. Mid-turn it shows a reminder to use `Ctrl+C`. |
 | `Esc` `Esc` | Idle, non-empty prompt | Clear prompt (within 800ms; first press shows hint) |
 | `Esc` `Esc` | Idle, empty prompt + messages | Open rewind picker (silent first press) |
 | `Ctrl+M` | Prompt | Toggle multiline mode |
@@ -63,4 +63,4 @@ src/
 - [Custom Hooks Guide](docs/custom-hooks.md) — creating, configuring, and writing your own hooks
 - [Hook Examples](../xai-grok-hooks/examples/README.md) — sample hooks for common workflows
 - [Hooks Crate (`xai-grok-hooks`)](../xai-grok-hooks/) — hook runtime, event types, and execution engine
-- [Plugin Marketplace Crate (`xai-chutes-build-plugin-marketplace`)](../xai-chutes-build-plugin-marketplace/) — marketplace source loading, scanning, and install
+- [Plugin Marketplace Crate (`xai-grok-plugin-marketplace`)](../xai-grok-plugin-marketplace/) — marketplace source loading, scanning, and install

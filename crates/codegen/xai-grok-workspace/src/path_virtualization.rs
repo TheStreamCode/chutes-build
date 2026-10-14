@@ -1,9 +1,8 @@
 //! Per-session guest path virtualization and bind-time mount hooks.
 //!
-//! The model sees [`VISIBLE_ROOT`]; the guest tree is `real_root`
-//! (`/workspace/<conversation_id>`). Inbound also accepts today's
-//! [`ARTIFACTS_ALIAS`]. A `..` walk out of `/workspace`, the artifacts
-//! alias, or the already-guest real root is clipped to `real_root`.
+//! The model sees [`VISIBLE_ROOT`]; the guest tree is `real_root` (`/workspace/<conversation_id>`).
+//! Inbound also accepts [`ARTIFACTS_ALIAS`].
+//! A `..` walk out of `/workspace`, the artifacts alias, or the already-guest real root is clipped to `real_root`.
 //! True non-workspace absolutes (`/tmp`, `/home`) are left unchanged.
 
 use std::borrow::Cow;
@@ -20,23 +19,41 @@ pub const VISIBLE_ROOT: &str = "/workspace";
 /// Legacy model cwd; inbound alias of the session root.
 pub const ARTIFACTS_ALIAS: &str = "/workspace/artifacts";
 
-/// `visible_root` ↔ `real_root` mapping for one hub session.
+/// Two-way mapping between `visible_root` and `real_root` for one hub session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathVirtualization {
     visible_root: String,
     real_root: String,
+    /// Extra inbound spelling of `visible_root`; `None` for mappings that have no legacy alias.
+    alias: Option<&'static str>,
 }
 
 impl PathVirtualization {
     /// Build a mapping if `session_root` is a usable absolute guest path.
-    ///
-    /// Returns `None` for empty, relative, or `.`/`..` paths so a malformed
-    /// bind field cannot enable a broken rewrite.
+    /// Returns `None` for empty, relative, or `.`/`..` paths so a malformed bind field cannot enable a broken rewrite.
     pub fn try_from_session_root(session_root: impl AsRef<Path>) -> Option<Self> {
         let real = normalize_session_root(session_root.as_ref().to_str()?)?;
         Some(Self {
             visible_root: VISIBLE_ROOT.to_owned(),
             real_root: real,
+            alias: Some(ARTIFACTS_ALIAS),
+        })
+    }
+
+    /// Build a mapping between two arbitrary absolute roots with no alias.
+    /// Returns `None` when either root is not a usable absolute path, or when
+    /// `real_root` is `visible_root` or lies under it: a real tree inside its
+    /// own visible tree would make [`Self::to_guest`] map paths back onto themselves.
+    pub fn try_new(visible_root: impl AsRef<Path>, real_root: impl AsRef<Path>) -> Option<Self> {
+        let visible = normalize_session_root(visible_root.as_ref().to_str()?)?;
+        let real = normalize_session_root(real_root.as_ref().to_str()?)?;
+        if path_prefix_match(&real, &visible).is_some() {
+            return None;
+        }
+        Some(Self {
+            visible_root: visible,
+            real_root: real,
+            alias: None,
         })
     }
 
@@ -52,21 +69,18 @@ impl PathVirtualization {
         PathBuf::from(&self.real_root)
     }
 
-    /// Outbound: guest path → model-visible path. Unrelated paths unchanged.
+    /// Outbound: rewrites a guest path to the model-visible path; unrelated paths are unchanged.
     pub fn to_model_visible<'a>(&self, path: &'a str) -> Cow<'a, str> {
         replace_path_prefix(path, &self.real_root, &self.visible_root)
     }
 
-    /// Inbound: model path → guest path. `/workspace` and `/workspace/artifacts`
-    /// both map to `real_root`. Already-guest paths under `real_root` stay put.
-    ///
-    /// A `..` walk that would leave `real_root` is clipped to `real_root`.
-    /// Passing the original through would still resolve on the kernel to a
-    /// sibling tree. Absolute escapes such as `/tmp` and `/home` are left as-is.
+    /// Inbound: rewrite a model path to the guest path. `visible_root` and the alias (when set) map to `real_root`; paths already under it stay put.
+    /// A `..` walk that would leave `real_root` is clipped there; absolute escapes such as `/tmp` are left as-is.
     pub fn to_guest<'a>(&self, path: &'a str) -> Cow<'a, str> {
+        let alias_rest = self.alias.and_then(|alias| path_prefix_match(path, alias));
         let mapped = if path_prefix_match(path, &self.real_root).is_some() {
             Cow::Borrowed(path)
-        } else if let Some(rest) = path_prefix_match(path, ARTIFACTS_ALIAS) {
+        } else if let Some(rest) = alias_rest {
             Cow::Owned(join_root_suffix(&self.real_root, rest))
         } else if let Some(rest) = path_prefix_match(path, &self.visible_root) {
             Cow::Owned(join_root_suffix(&self.real_root, rest))
@@ -136,8 +150,8 @@ impl PathVirtualization {
     }
 }
 
-/// Guest POSIX root: absolute, ≥1 segment, no `.`/`..`. Trailing `/` and
-/// empty segments (`//`) are dropped so prefix match cannot miss.
+/// Guest POSIX root: absolute, at least one segment, no `.`/`..`.
+/// Trailing `/` and empty segments (`//`) are dropped so prefix match cannot miss.
 fn normalize_session_root(path: &str) -> Option<String> {
     if !path.starts_with('/') {
         return None;
@@ -158,8 +172,7 @@ fn normalize_session_root(path: &str) -> Option<String> {
     Some(format!("/{}", parts.join("/")))
 }
 
-/// Collapse `.` / `..` without touching the filesystem. `None` if `..`
-/// walks above `/`.
+/// Collapse `.` / `..` without touching the filesystem. `None` if `..` walks above `/`.
 fn lexically_normalize(path: &str) -> Option<String> {
     if !path.starts_with('/') {
         return None;
@@ -232,12 +245,13 @@ fn replace_path_prefix_in_text<'a>(text: &'a str, from: &str, to: &str) -> Cow<'
     let mut out: Option<String> = None;
     let mut i = 0;
     while i < bytes.len() {
-        if text[i..].starts_with(from) {
+        if text.get(i..).is_some_and(|rest| rest.starts_with(from)) {
             let end = i + from.len();
-            let ok_before = i == 0 || !is_path_token_char(bytes[i - 1]);
-            let ok_after = end == bytes.len() || !is_path_token_char(bytes[end]);
+            let ok_before = i == 0 || bytes.get(i - 1).is_none_or(|b| !is_path_token_char(*b));
+            let ok_after =
+                end == bytes.len() || bytes.get(end).is_none_or(|b| !is_path_token_char(*b));
             if ok_before && ok_after {
-                let buf = out.get_or_insert_with(|| text[..i].to_owned());
+                let buf = out.get_or_insert_with(|| text.get(..i).unwrap_or("").to_owned());
                 buf.push_str(to);
                 i = end;
                 continue;
@@ -255,8 +269,7 @@ fn replace_path_prefix_in_text<'a>(text: &'a str, from: &str, to: &str) -> Cow<'
     }
 }
 
-/// Rewrite each absolute path token through [`PathVirtualization::to_guest`]
-/// so a `..` walk-out inside prose is clipped the same way as a lone path.
+/// Rewrite each absolute path token through [`PathVirtualization::to_guest`] so a `..` walk-out inside prose is clipped the same way as a lone path.
 fn rewrite_text_inbound<'a>(virt: &PathVirtualization, text: &'a str) -> Cow<'a, str> {
     if !text.contains('/') {
         return Cow::Borrowed(text);
@@ -265,9 +278,13 @@ fn rewrite_text_inbound<'a>(virt: &PathVirtualization, text: &'a str) -> Cow<'a,
     let mut out: Option<String> = None;
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'/' && (i == 0 || !is_path_token_char(bytes[i - 1])) {
+        if bytes.get(i) == Some(&b'/')
+            && (i == 0 || bytes.get(i - 1).is_none_or(|b| !is_path_token_char(*b)))
+        {
             let end = path_token_end(bytes, i);
-            let token = &text[i..end];
+            let Some(token) = text.get(i..end) else {
+                break;
+            };
             match virt.to_guest(token) {
                 Cow::Borrowed(_) => {
                     if let Some(buf) = &mut out {
@@ -275,7 +292,7 @@ fn rewrite_text_inbound<'a>(virt: &PathVirtualization, text: &'a str) -> Cow<'a,
                     }
                 }
                 Cow::Owned(mapped) => {
-                    out.get_or_insert_with(|| text[..i].to_owned())
+                    out.get_or_insert_with(|| text.get(..i).unwrap_or("").to_owned())
                         .push_str(&mapped);
                 }
             }
@@ -294,8 +311,7 @@ fn rewrite_text_inbound<'a>(virt: &PathVirtualization, text: &'a str) -> Cow<'a,
     }
 }
 
-/// Advance one UTF-8 scalar at `i`. `i` is a char boundary because the
-/// scanners start at 0 and step by `char::len_utf8`.
+/// Advance one UTF-8 scalar at `i`. `i` is a char boundary because the scanners start at 0 and step by `char::len_utf8`.
 fn push_char_at(text: &str, i: usize, buf: Option<&mut String>) -> usize {
     let Some(ch) = text.get(i..).and_then(|s| s.chars().next()) else {
         return 1;
@@ -308,7 +324,10 @@ fn push_char_at(text: &str, i: usize, buf: Option<&mut String>) -> usize {
 
 fn path_token_end(bytes: &[u8], start: usize) -> usize {
     let mut end = start + 1;
-    while end < bytes.len() && (bytes[end] == b'/' || is_path_token_char(bytes[end])) {
+    while bytes
+        .get(end)
+        .is_some_and(|b| *b == b'/' || is_path_token_char(*b))
+    {
         end += 1;
     }
     end
@@ -335,11 +354,9 @@ fn rewrite_json_strings(value: Value, rewrite: &dyn Fn(&str) -> Cow<str>) -> Val
     }
 }
 
-/// Write/edit bodies and search/monitor regexes mention `/workspace` as
-/// file content, not as a path argument. Rewriting them would persist the
-/// guest root on disk, break `search_replace` against the original bytes,
-/// and make grep / `notify_on_output` miss on-disk text that still uses
-/// the visible root.
+/// Write/edit bodies and search/monitor regexes mention `/workspace` as file content, not as a path argument.
+/// Rewriting them would persist the guest root on disk and break `search_replace` against the original bytes.
+/// grep and `notify_on_output` would miss on-disk text that still uses the visible root.
 fn is_content_like_json_key(key: &str) -> bool {
     matches!(
         key,
@@ -440,9 +457,7 @@ fn rewrite_chat_completion_output(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Bind-time mount hook (probe-then-mount; unbind must not unmount)
-// ---------------------------------------------------------------------------
 
 /// Context passed to bind/unbind lifecycle hooks.
 #[derive(Debug, Clone, Copy)]
@@ -467,8 +482,8 @@ type ProbeFn = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
 type MountFn = Arc<dyn Fn(&Path) -> Result<(), BindMountError> + Send + Sync>;
 type UnbindFn = Arc<dyn Fn(&str, &Path) + Send + Sync>;
 
-/// Probe-then-mount seam. Default is a no-op until a command is configured;
-/// `on_unbind` must not unmount (the guest mount outlives the hub session).
+/// Probe-then-mount hook, a no-op until a command is configured.
+/// `on_unbind` must not unmount: the mount outlives the hub session.
 pub struct BindMountHook {
     probe: Option<ProbeFn>,
     mount: Option<MountFn>,
@@ -499,6 +514,31 @@ impl BindMountHook {
             mount: None,
             on_unbind: None,
         }
+    }
+
+    /// StartSession env: non-empty value is the dest-less remount command.
+    pub const BIND_REMOUNT_ENV: &str = xai_grok_workspace_types::ARTIFACTS_BIND_REMOUNT_ENV;
+
+    /// Wire remount when the terminal set [`Self::BIND_REMOUNT_ENV`] to a command.
+    pub fn from_env() -> Self {
+        Self::maybe_grok_files_remount(std::env::var(Self::BIND_REMOUNT_ENV).ok().as_deref())
+    }
+
+    pub fn maybe_grok_files_remount(command: Option<&str>) -> Self {
+        match command {
+            Some(cmd) if !cmd.is_empty() => Self::grok_files_probe_then_mount(cmd.to_owned()),
+            _ => Self::noop(),
+        }
+    }
+
+    /// Probe-then-mount of the configured remount command.
+    /// Dest is `real_root` (conversation / parent id), not the dest baked
+    /// into `mount_command` at hook install. Unbind does not unmount.
+    /// `on_bind` fails if dest is not FUSE.
+    pub fn grok_files_probe_then_mount(mount_command: String) -> Self {
+        Self::probe_then_mount(grok_files_mount_live, move |root| {
+            grok_files_remount(root, &mount_command)
+        })
     }
 
     /// Probe-then-mount. `probe` true means a live mount (skip `mount`).
@@ -542,6 +582,164 @@ impl BindMountHook {
         if let Some(cb) = &self.on_unbind {
             cb(ctx.session_id, ctx.real_root);
         }
+    }
+}
+
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+pub(crate) fn grok_files_detached_mount_cmd(mount_command: &str) -> String {
+    format!(
+        "setsid nohup {mount_command} </dev/null >> /tmp/grok-files.out 2>> /tmp/grok-files.err &"
+    )
+}
+
+/// 120 polls [`FUSE_READY_POLL_INTERVAL`] apart: a 12s budget without a
+/// whole-second sleep per miss.
+const FUSE_READY_POLL_ATTEMPTS: u32 = 120;
+/// Rendered as fractional seconds; GNU and busybox `sleep` both accept `0.1`.
+const FUSE_READY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+pub(crate) fn grok_files_ready_probe(mountpoint: &str) -> String {
+    let mp = shell_quote(mountpoint);
+    format!(
+        "i=0; while :; do \
+           if mountpoint -q {mp} 2>/dev/null; then exit 0; fi; \
+           if awk -v p={mp} '$2==p && $3 ~ /^fuse/ {{ found=1 }} END {{ exit found?0:1 }}' /proc/mounts; then exit 0; fi; \
+           i=$((i+1)); \
+           [ \"$i\" -ge {attempts} ] && exit 1; \
+           sleep {sleep_secs}; \
+         done",
+        attempts = FUSE_READY_POLL_ATTEMPTS,
+        sleep_secs = FUSE_READY_POLL_INTERVAL.as_secs_f64(),
+    )
+}
+
+pub(crate) fn grok_files_live_check(mountpoint: &str) -> String {
+    let mp = shell_quote(mountpoint);
+    // Any FUSE at dest counts: custom `mount_command` binaries do not
+    // appear as source `grok-files` after a successful remount.
+    format!(
+        "awk -v p={mp} '$2==p && $3 ~ /^fuse/ {{ found=1 }} END {{ exit found?0:1 }}' /proc/mounts \
+         && test -d {mp}"
+    )
+}
+
+const CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const CHUTES_BUILD_FILES_REMOUNT_SPAWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const CHUTES_BUILD_FILES_MKDIR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn grok_files_sh(
+    script: &str,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::ExitStatus> {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(script);
+    cmd.stdin(std::process::Stdio::null());
+    xai_tty_utils::detach_std_command(&mut cmd);
+    // Waited-on probe; kill only if the timeout fires.
+    #[allow(clippy::disallowed_methods)]
+    let mut child = cmd.spawn()?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait()? {
+            Some(status) => return Ok(status),
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                // A stale FUSE dest can leave the child in D-state; unbounded
+                // wait() would pin this spawn_blocking worker past bind timeout.
+                let reap = std::time::Instant::now() + std::time::Duration::from_millis(200);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) if std::time::Instant::now() >= reap => break,
+                        Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                    }
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "grok-files probe timed out",
+                ));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+}
+
+fn grok_files_mount_live(root: &Path) -> bool {
+    let Some(mp) = root.to_str() else {
+        return false;
+    };
+    grok_files_sh(&grok_files_live_check(mp), CHUTES_BUILD_FILES_LIVE_CHECK_TIMEOUT)
+        .is_ok_and(|s| s.success())
+}
+
+/// Bind dest replaces any dest baked into `mount_command`, or is inserted
+/// after the files source, and the dest's conversation token file is
+/// appended. Two conversations must share neither dest nor credential.
+/// `dest` and `jwt_file` are shell-quoted by the caller.
+pub(crate) fn grok_files_command_at(mount_command: &str, dest: &str, jwt_file: &str) -> String {
+    xai_grok_workspace_types::with_grok_files_jwt_file(
+        &xai_grok_workspace_types::rewrite_grok_files_mount_dest(mount_command, dest),
+        jwt_file,
+    )
+}
+
+/// Token file for the remount at `root`, derived from the same conversation
+/// id as the dest (its last segment) so it matches that conversation's
+/// published token file.
+pub(crate) fn grok_files_jwt_file_for(root: &Path) -> Result<String, BindMountError> {
+    let conversation_id = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            BindMountError(format!(
+                "session_root has no conversation segment: {}",
+                root.display()
+            ))
+        })?;
+    Ok(xai_grok_workspace_types::grok_files_conversation_jwt_path(
+        conversation_id,
+    ))
+}
+
+fn grok_files_remount(root: &Path, mount_command: &str) -> Result<(), BindMountError> {
+    let mp = root
+        .to_str()
+        .ok_or_else(|| BindMountError(format!("non-utf8 session_root: {}", root.display())))?;
+    let jwt_file = grok_files_jwt_file_for(root)?;
+    // The FUSE dest is `session_root` itself, which may not exist yet; a stale
+    // FUSE mountpoint can hang `stat`, so create it through the timed shell.
+    let mkdir = format!("mkdir -p '{}'", mp.replace('\'', "'\\''"));
+    let status = grok_files_sh(&mkdir, CHUTES_BUILD_FILES_MKDIR_TIMEOUT)
+        .map_err(|e| BindMountError(format!("mkdir remount dest: {e}")))?;
+    if !status.success() {
+        return Err(BindMountError(format!(
+            "mkdir remount dest exited {status} at {mp}"
+        )));
+    }
+    // Quote dest so metacharacters cannot split `setsid nohup {cmd}`.
+    let mount_command =
+        grok_files_command_at(mount_command, &shell_quote(mp), &shell_quote(&jwt_file));
+    let launch = grok_files_detached_mount_cmd(&mount_command);
+    let status = grok_files_sh(&launch, CHUTES_BUILD_FILES_REMOUNT_SPAWN_TIMEOUT)
+        .map_err(|e| BindMountError(format!("grok-files remount spawn: {e}")))?;
+    if !status.success() {
+        return Err(BindMountError(format!(
+            "grok-files remount exited {status} at {mp}"
+        )));
+    }
+    let ready = grok_files_sh(&grok_files_ready_probe(mp), CHUTES_BUILD_FILES_READY_PROBE_TIMEOUT)
+        .map_err(|e| BindMountError(format!("grok-files ready probe: {e}")))?;
+    if ready.success() {
+        Ok(())
+    } else {
+        Err(BindMountError(format!(
+            "artifacts remount dest is not FUSE at {mp}"
+        )))
     }
 }
 

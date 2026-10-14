@@ -1,4 +1,4 @@
-//! Automatic smoke checks for Rhai workflows authored through file tools.
+//! When a write or edit tool touches a project `.chutes-build/workflows/*.rhai` script, run the workflow validator on it and warn the model on failure.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use xai_grok_tools::types::tool::ToolKind;
 
-/// Canonical path fields on write/edit tools. Client-facing names come from
-/// `${{ params.<kind>.<param> }}` via [`path_param_names_for_kind`].
+/// Canonical path fields on write and edit tools.
+/// Client-facing names come from `${{ params.<kind>.<param> }}` via [`path_param_names_for_kind`].
 const CANONICAL_PATH_PARAMS: &[&str] = &["file_path", "path", "target_file"];
 
 const CHECK_TIMEOUT: Duration = Duration::from_millis(100);
@@ -33,8 +33,9 @@ pub(super) fn is_project_workflow_rhai_path(path: &Path) -> bool {
 
     let components: Vec<_> = path.components().collect();
     components.windows(2).any(|pair| {
-        matches!(pair[0], Component::Normal(name) if name == ".chutes-build")
-            && matches!(pair[1], Component::Normal(name) if name == "workflows")
+        let [a, b] = pair else { return false };
+        matches!(a, Component::Normal(name) if *name == ".chutes-build")
+            && matches!(b, Component::Normal(name) if *name == "workflows")
     })
 }
 
@@ -84,8 +85,8 @@ pub(super) fn authored_workflow_arg_path<'a>(
     is_project_workflow_rhai_path(Path::new(input)).then_some(input)
 }
 
-/// Last model-emitted write/edit per workflow path. Earlier edits in the same
-/// batch are not smoke-checked; only the final file state matters.
+/// Last model-emitted write or edit per workflow path.
+/// Earlier edits in the same batch are not smoke-checked; only the final file state matters.
 pub(super) fn last_smoke_check_indices<I>(targets: I) -> HashSet<usize>
 where
     I: IntoIterator<Item = (usize, Option<String>)>,

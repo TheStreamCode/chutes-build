@@ -39,25 +39,19 @@ async fn actor_with_pre_tool_use_hook(
     .await
 }
 
-/// The fixture's plan file lives under the process temp dir (see
-/// `support.rs`'s tracker); the gate compares the tool path against it, so
-/// the test target must agree on every platform.
-fn fixture_plan_file_path() -> String {
-    std::env::temp_dir()
-        .join("test-session")
-        .join("plan.md")
-        .to_string_lossy()
-        .into_owned()
-}
-
 async fn hook_annotations(updates: &std::sync::Mutex<Vec<serde_json::Value>>) -> Vec<String> {
     drain_gateway_turns().await;
     updates
         .lock()
         .unwrap()
         .iter()
-        .filter(|update| update["sessionUpdate"] == "hook_annotation")
-        .map(|update| update["message"].as_str().unwrap_or_default().to_string())
+        .filter(|update| j(update, "sessionUpdate") == "hook_annotation")
+        .map(|update| {
+            j(update, "message")
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
         .collect()
 }
 
@@ -85,7 +79,8 @@ async fn pre_tool_use_updated_input_rewrites_prepared_call() {
                 .await
                 .expect("hook rewrite must prepare");
             assert_eq!(
-                prepared.parsed_args["target_file"], "/tmp/rewritten.txt",
+                j(&prepared.parsed_args, "target_file"),
+                "/tmp/rewritten.txt",
                 "hook updatedInput must replace the tool input; got {}",
                 prepared.raw_arguments
             );
@@ -112,7 +107,7 @@ async fn pre_tool_use_rewrite_runs_silently_and_is_telemetry_tagged() {
 
             tokio::time::timeout(
                 Duration::from_secs(10),
-                actor.execute_tool_calls(vec![read_file_call("call_run_rewrite")]),
+                actor.execute_tool_calls(vec![read_file_call("call_run_rewrite")], None),
             )
             .await
             .expect("execute_tool_calls must not hang")
@@ -123,9 +118,9 @@ async fn pre_tool_use_rewrite_runs_silently_and_is_telemetry_tagged() {
             let completed = events
                 .lines()
                 .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-                .find(|e| e["type"] == "tool_completed")
+                .find(|e| j(e, "type") == "tool_completed")
                 .unwrap_or_else(|| panic!("a tool_completed row must be written; got:\n{events}"));
-            assert_eq!(completed["rewriting_hook"], "test/pretooluse");
+            assert_eq!(j(&completed, "rewriting_hook"), "test/pretooluse");
 
             let annotations = hook_annotations(&updates).await;
             assert!(
@@ -565,7 +560,7 @@ async fn pre_tool_use_ask_on_a_plan_file_edit_forces_a_prompt() {
 
             let result = prepare_call(
                 &actor,
-                search_replace_call_at("call_plan_file_ask", &fixture_plan_file_path()),
+                search_replace_call_at("call_plan_file_ask", "/tmp/test-session/plan.md"),
             )
             .await;
             assert!(
@@ -599,7 +594,7 @@ async fn pre_tool_use_defer_hook_neither_blocks_nor_prompts() {
 
             tokio::time::timeout(
                 Duration::from_secs(10),
-                actor.execute_tool_calls(vec![read_file_call("call_defer")]),
+                actor.execute_tool_calls(vec![read_file_call("call_defer")], None),
             )
             .await
             .expect("execute_tool_calls must not hang")
@@ -653,7 +648,7 @@ async fn pre_tool_use_additional_context_reaches_the_model_after_the_tool_result
 
             tokio::time::timeout(
                 Duration::from_secs(10),
-                actor.execute_tool_calls(vec![read_file_call("call_context")]),
+                actor.execute_tool_calls(vec![read_file_call("call_context")], None),
             )
             .await
             .expect("execute_tool_calls must not hang")
@@ -693,8 +688,15 @@ async fn pre_tool_use_additional_context_reaches_the_model_after_the_tool_result
                 "context lands in hook call order: {conversation:?}"
             );
             assert!(
-                conversation[second].text_content().contains("<\\/system-reminder>"),
+                at(&conversation, second)
+                    .text_content()
+                    .contains("<\\/system-reminder>"),
                 "hook text must not be able to close the reminder envelope: {conversation:?}"
+            );
+            let note = at(&conversation, first).text_content();
+            assert!(
+                note.contains("from PreToolUse hook") && !note.contains("pre_tool_use"),
+                "the model-facing note must spell the event in CamelCase: {note}"
             );
         })
         .await;

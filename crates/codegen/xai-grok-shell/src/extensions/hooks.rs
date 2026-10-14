@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -16,10 +16,45 @@ struct ListRequest {
     session_id: String,
 }
 
-pub(crate) fn hook_spec_to_info_with(
+/// Current hooks as wire DTOs for `HooksListResponse` / `HooksChanged`
+/// payloads. Reads the disabled set and registered dirs fresh from disk so
+/// every producer converts with the same inputs.
+pub(crate) fn current_hook_infos(
+    registry: Option<&xai_grok_hooks::discovery::HookRegistry>,
+) -> Vec<HookInfo> {
+    let Some(registry) = registry else {
+        return Vec::new();
+    };
+    let disabled = xai_grok_workspace::permission::resolution::disabled_hooks_snapshot(
+        xai_grok_workspace::permission::resolution::managed_settings(),
+        xai_grok_config::user_grok_home().as_deref(),
+    );
+    let registered = crate::config::registered_hook_paths();
+    hook_specs_to_infos(&registry.all_hooks(), &disabled, &registered)
+}
+
+/// Convert a whole spec list to wire DTOs. `removable` is source-level: `HooksAction::Remove` unregisters the entire `source_dir`, and a managed-policy member pins the directory (removal is refused), so no hook in such a source is removable.
+fn hook_specs_to_infos(
+    specs: &[&xai_grok_hooks::config::HookSpec],
+    disabled: &xai_grok_hooks::trust::DisabledHooks,
+    registered_dirs: &HashSet<String>,
+) -> Vec<HookInfo> {
+    let pinned_dirs: HashSet<String> = specs
+        .iter()
+        .filter(|s| s.is_managed_policy())
+        .map(|s| s.source_dir.display().to_string())
+        .collect();
+    specs
+        .iter()
+        .map(|spec| hook_spec_to_info_with(spec, disabled, registered_dirs, &pinned_dirs))
+        .collect()
+}
+
+fn hook_spec_to_info_with(
     spec: &xai_grok_hooks::config::HookSpec,
     disabled: &xai_grok_hooks::trust::DisabledHooks,
-    registered_dirs: &std::collections::HashSet<String>,
+    registered_dirs: &HashSet<String>,
+    pinned_source_dirs: &HashSet<String>,
 ) -> HookInfo {
     use xai_grok_hooks::event::HookEventName;
 
@@ -54,7 +89,8 @@ pub(crate) fn hook_spec_to_info_with(
     let url_display = spec.url_raw.clone().or_else(|| spec.url.clone());
 
     let source_dir = spec.source_dir.display().to_string();
-    let removable = registered_dirs.contains(&source_dir);
+    let removable =
+        registered_dirs.contains(&source_dir) && !pinned_source_dirs.contains(&source_dir);
     HookInfo {
         name: spec.name.clone(),
         event,
@@ -64,7 +100,7 @@ pub(crate) fn hook_spec_to_info_with(
         url: url_display,
         timeout_ms: spec.timeout_ms,
         source_dir,
-        disabled: xai_grok_hooks::trust::hook_disabled_for_display_with(spec, disabled),
+        disabled: disabled.blocks(spec),
         pinned: spec.is_managed_policy(),
         removable,
     }
@@ -128,7 +164,7 @@ pub(crate) struct ClientHookResponse {
 pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
     let mut hooks = ClientHooks::new();
     let Some(map) = meta
-        .and_then(|m| m.get("chutes.build/hooks"))
+        .and_then(|m| m.get("chutes.ai/hooks"))
         .and_then(|h| h.as_object())
     else {
         return hooks;
@@ -155,7 +191,7 @@ pub(crate) fn parse_client_hooks(meta: Option<&acp::Meta>) -> ClientHooks {
 }
 
 pub(crate) fn reconnect_client_hooks(meta: Option<&acp::Meta>) -> Option<ClientHooks> {
-    meta.and_then(|m| m.get("chutes.build/hooks"))
+    meta.and_then(|m| m.get("chutes.ai/hooks"))
         .map(|_| parse_client_hooks(meta))
 }
 
@@ -208,7 +244,7 @@ fn parse_hook_group(event: HookEventName, value: &serde_json::Value) -> Option<C
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/hooks/list" => {
+        "chutes.ai/hooks/list" => {
             let req: ListRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -218,7 +254,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .ok_or_else(|| anyhow::anyhow!("session not found"));
             super::to_ext_response(result)
         }
-        "chutes.build/hooks/action" => {
+        "chutes.ai/hooks/action" => {
             let req: xai_hooks_plugins_types::HooksActionRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -235,7 +271,6 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use xai_grok_hooks::config::HookSpec;
     use xai_grok_hooks::event::HookEventName;
@@ -266,14 +301,15 @@ mod tests {
 
     #[test]
     fn hook_spec_to_info_raw_display_wins_so_secrets_never_reach_dto() {
-        let no_disabled = xai_grok_hooks::trust::DisabledHooks::from_names([]);
-        let no_dirs = std::collections::HashSet::new();
+        let no_disabled = xai_grok_hooks::trust::DisabledHooks::new([], false);
+        let no_dirs = HashSet::new();
         let command = |raw, resolved| {
-            hook_spec_to_info_with(
-                &make_spec(raw, resolved, None, None),
+            hook_specs_to_infos(
+                &[&make_spec(raw, resolved, None, None)],
                 &no_disabled,
                 &no_dirs,
             )
+            .remove(0)
             .command
         };
         assert_eq!(
@@ -287,11 +323,12 @@ mod tests {
         assert!(command(None, None).is_none());
 
         let url = |raw, resolved| {
-            hook_spec_to_info_with(
-                &make_spec(None, None, raw, resolved),
+            hook_specs_to_infos(
+                &[&make_spec(None, None, raw, resolved)],
                 &no_disabled,
                 &no_dirs,
             )
+            .remove(0)
             .url
         };
         assert_eq!(
@@ -309,10 +346,89 @@ mod tests {
         assert!(url(None, None).is_none());
     }
 
+    /// `removable` must mean "Remove can succeed": a managed-policy member pins the whole source directory even when it is user-registered, and an unpinned sibling in that directory is pinned along with it.
+    /// Both managed tiers (`SystemManaged` and `Requirements`) pin identically.
+    #[test]
+    fn hook_specs_to_infos_pins_removable_at_source_level() {
+        let no_disabled = xai_grok_hooks::trust::DisabledHooks::new([], false);
+        let registered: HashSet<String> = [
+            "/reg/policy".to_string(),
+            "/reg/req".to_string(),
+            "/reg/user".to_string(),
+        ]
+        .into();
+
+        let mut policy = make_spec(Some("a"), None, None, None);
+        policy.source_dir = PathBuf::from("/reg/policy");
+        policy.layer = xai_grok_hooks::config::HookProvenance::SystemManaged;
+        let mut sibling = make_spec(Some("b"), None, None, None);
+        sibling.source_dir = PathBuf::from("/reg/policy");
+        let mut req = make_spec(Some("r"), None, None, None);
+        req.source_dir = PathBuf::from("/reg/req");
+        req.layer = xai_grok_hooks::config::HookProvenance::Requirements;
+        let mut req_sibling = make_spec(Some("s"), None, None, None);
+        req_sibling.source_dir = PathBuf::from("/reg/req");
+        let mut user = make_spec(Some("c"), None, None, None);
+        user.source_dir = PathBuf::from("/reg/user");
+        let unregistered = make_spec(Some("d"), None, None, None); // stays at /tmp
+
+        let infos = hook_specs_to_infos(
+            &[&policy, &sibling, &req, &req_sibling, &user, &unregistered],
+            &no_disabled,
+            &registered,
+        );
+        let [
+            policy_info,
+            sibling_info,
+            req_info,
+            req_sib,
+            user_info,
+            unreg,
+            ..,
+        ] = infos.as_slice()
+        else {
+            panic!("expected 6 hook infos: {infos:?}");
+        };
+        assert!(policy_info.pinned && !policy_info.removable);
+        assert!(
+            !sibling_info.pinned && !sibling_info.removable,
+            "unpinned sibling of a managed-policy hook must not be removable"
+        );
+        assert!(
+            req_info.pinned && !req_info.removable,
+            "Requirements tier must pin its source like SystemManaged"
+        );
+        assert!(
+            !req_sib.pinned && !req_sib.removable,
+            "unpinned sibling of a Requirements hook must not be removable"
+        );
+        assert!(user_info.removable);
+        assert!(!unreg.removable, "unregistered dirs are never removable");
+    }
+
+    /// The `[disabled]` badge under `allow_managed_hooks_only` comes from the dispatch skip rule, not `enabled`/disabled-hooks alone.
+    #[test]
+    fn hook_specs_to_infos_marks_non_managed_hooks_disabled_under_managed_only() {
+        let lockdown = xai_grok_hooks::trust::DisabledHooks::new([], true);
+        let user = make_spec(Some("u"), None, None, None);
+        let mut req = make_spec(Some("r"), None, None, None);
+        req.layer = xai_grok_hooks::config::HookProvenance::Requirements;
+
+        let infos = hook_specs_to_infos(&[&user, &req], &lockdown, &HashSet::new());
+        let [user_info, req_info] = infos.as_slice() else {
+            panic!("expected 2 hook infos: {infos:?}");
+        };
+        assert!(
+            user_info.disabled,
+            "enabled file hook shows disabled under the pin"
+        );
+        assert!(!req_info.disabled, "managed-policy hook stays enabled");
+    }
+
     #[test]
     fn parse_client_hooks_parses_valid_groups() {
         let meta = serde_json::json!({
-            "chutes.build/hooks": {
+            "chutes.ai/hooks": {
                 "PreToolUse": [
                     { "matcher": "run_terminal_command", "hookCallbackIds": ["cb_0"] },
                     { "matcher": null, "hookCallbackIds": ["cb_1"] },
@@ -323,14 +439,19 @@ mod tests {
         });
         let hooks = parse_client_hooks(meta.as_object());
 
-        let pre = &hooks[&HookEventName::PreToolUse];
+        let Some(pre) = hooks.get(&HookEventName::PreToolUse) else {
+            panic!("expected PreToolUse hooks: {hooks:?}");
+        };
         assert_eq!(pre.len(), 3);
-        assert_eq!(pre[0].callback_ids, ["cb_0"]);
-        let matcher = pre[0].matcher.as_ref().unwrap();
+        let Some(first) = pre.first() else {
+            panic!("expected PreToolUse group: {pre:?}");
+        };
+        assert_eq!(first.callback_ids, ["cb_0"]);
+        let matcher = first.matcher.as_ref().unwrap();
         assert!(matcher.is_match("run_terminal_command"));
         assert!(!matcher.is_match("read_file"));
-        assert!(pre[1].matcher.is_none());
-        assert!(pre[2].matcher.is_none());
+        assert!(pre.get(1).is_some_and(|g| g.matcher.is_none()));
+        assert!(pre.get(2).is_some_and(|g| g.matcher.is_none()));
         assert!(hooks.contains_key(&HookEventName::PostToolUse));
     }
 
@@ -344,7 +465,7 @@ mod tests {
 
         let meta = serde_json::json!({
             "NotARealEvent": [{ "hookCallbackIds": ["x"] }],
-            "chutes.build/hooks": {
+            "chutes.ai/hooks": {
                 "PreToolUse": [
                     { "matcher": "[invalid", "hookCallbackIds": ["bad_regex"] },
                     { "matcher": "run_terminal_command", "hookCallbackIds": [] },
@@ -352,15 +473,21 @@ mod tests {
                 ]
             }
         });
-        let groups = &parse_client_hooks(meta.as_object())[&HookEventName::PreToolUse];
+        let parsed = parse_client_hooks(meta.as_object());
+        let Some(groups) = parsed.get(&HookEventName::PreToolUse) else {
+            panic!("expected PreToolUse hooks: {parsed:?}");
+        };
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].callback_ids, ["good"]);
+        let Some(first) = groups.first() else {
+            panic!("expected one group: {groups:?}");
+        };
+        assert_eq!(first.callback_ids, ["good"]);
     }
 
     #[test]
     fn parse_client_hooks_reads_group_timeout() {
         let meta = serde_json::json!({
-            "chutes.build/hooks": {
+            "chutes.ai/hooks": {
                 "PreToolUse": [
                     { "hookCallbackIds": ["a"], "timeout": 5.0 },
                     { "hookCallbackIds": ["b"], "timeout": 0 },
@@ -369,17 +496,23 @@ mod tests {
                 ]
             }
         });
-        let groups = &parse_client_hooks(meta.as_object())[&HookEventName::PreToolUse];
-        assert_eq!(groups[0].timeout, Some(std::time::Duration::from_secs(5)));
-        assert_eq!(groups[1].timeout, None);
-        assert_eq!(groups[2].timeout, None);
-        assert_eq!(groups[3].timeout, Some(std::time::Duration::from_secs(600)));
+        let parsed = parse_client_hooks(meta.as_object());
+        let Some(groups) = parsed.get(&HookEventName::PreToolUse) else {
+            panic!("expected PreToolUse hooks: {parsed:?}");
+        };
+        let [g0, g1, g2, g3] = groups.as_slice() else {
+            panic!("expected 4 groups: {groups:?}");
+        };
+        assert_eq!(g0.timeout, Some(std::time::Duration::from_secs(5)));
+        assert_eq!(g1.timeout, None);
+        assert_eq!(g2.timeout, None);
+        assert_eq!(g3.timeout, Some(std::time::Duration::from_secs(600)));
     }
 
     #[test]
     fn parse_client_hooks_canonicalizes_subagent_alias() {
         let meta = serde_json::json!({
-            "chutes.build/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
+            "chutes.ai/hooks": { "SubagentEnd": [{ "hookCallbackIds": ["cb"] }] }
         });
         let hooks = parse_client_hooks(meta.as_object());
         assert!(hooks.contains_key(&HookEventName::SubagentStop));
@@ -391,13 +524,12 @@ mod tests {
         assert!(reconnect_client_hooks(None).is_none());
         assert!(reconnect_client_hooks(serde_json::json!({ "other": true }).as_object()).is_none());
 
-        let cleared =
-            reconnect_client_hooks(serde_json::json!({ "chutes.build/hooks": {} }).as_object());
+        let cleared = reconnect_client_hooks(serde_json::json!({ "chutes.ai/hooks": {} }).as_object());
         assert!(cleared.is_some_and(|h| h.is_empty()));
 
         let set = reconnect_client_hooks(
             serde_json::json!({
-                "chutes.build/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
+                "chutes.ai/hooks": { "PreToolUse": [{ "hookCallbackIds": ["cb"] }] }
             })
             .as_object(),
         );
@@ -469,7 +601,7 @@ mod tests {
         });
         for signal in ADVERTISED_STOP_SIGNALS {
             let response: ClientHookResponse = serde_json::from_value(
-                serde_json::json!({ *signal: signal_values[*signal].clone() }),
+                serde_json::json!({ *signal: signal_values.get(*signal).cloned().unwrap_or(serde_json::Value::Null) }),
             )
             .unwrap();
             let captured = match *signal {
@@ -509,14 +641,38 @@ mod tests {
             envelope: &envelope,
         };
         let value = serde_json::to_value(&dispatch).unwrap();
-        assert_eq!(value["hookCallbackId"], "cb_0");
-        assert_eq!(value["hookEventName"], "pre_tool_use");
-        assert_eq!(value["sessionId"], "s1");
-        assert_eq!(value["cwd"], "/work");
-        assert_eq!(value["toolUseId"], "call_1");
-        assert_eq!(value["toolName"], "run_terminal_command");
-        assert_eq!(value["toolInput"]["command"], "ls");
-        assert_eq!(value["toolInputTruncated"], true);
-        assert_eq!(value["permissionMode"], "default");
+        assert_eq!(
+            value.get("hookCallbackId").and_then(|v| v.as_str()),
+            Some("cb_0")
+        );
+        assert_eq!(
+            value.get("hookEventName").and_then(|v| v.as_str()),
+            Some("pre_tool_use")
+        );
+        assert_eq!(value.get("sessionId").and_then(|v| v.as_str()), Some("s1"));
+        assert_eq!(value.get("cwd").and_then(|v| v.as_str()), Some("/work"));
+        assert_eq!(
+            value.get("toolUseId").and_then(|v| v.as_str()),
+            Some("call_1")
+        );
+        assert_eq!(
+            value.get("toolName").and_then(|v| v.as_str()),
+            Some("run_terminal_command")
+        );
+        assert_eq!(
+            value
+                .get("toolInput")
+                .and_then(|t| t.get("command"))
+                .and_then(|v| v.as_str()),
+            Some("ls")
+        );
+        assert_eq!(
+            value.get("toolInputTruncated").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value.get("permissionMode").and_then(|v| v.as_str()),
+            Some("default")
+        );
     }
 }

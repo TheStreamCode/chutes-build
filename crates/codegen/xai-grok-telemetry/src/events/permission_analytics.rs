@@ -271,6 +271,7 @@ impl TryFrom<&str> for PermissionClassifierVerdict {
 pub enum PermissionSecurityFinding {
     FailClosedPolicy,
     UnparseableShell,
+    UnresolvedArgument,
     OpaqueShell,
     ExecOrAmbientGit,
     EnvInjection,
@@ -284,6 +285,7 @@ impl PermissionSecurityFinding {
     pub const ALL: &'static [Self] = &[
         Self::FailClosedPolicy,
         Self::UnparseableShell,
+        Self::UnresolvedArgument,
         Self::OpaqueShell,
         Self::ExecOrAmbientGit,
         Self::EnvInjection,
@@ -300,6 +302,7 @@ impl TryFrom<&str> for PermissionSecurityFinding {
         Ok(match s {
             "fail_closed_policy" => Self::FailClosedPolicy,
             "unparseable_shell" => Self::UnparseableShell,
+            "unresolved_argument" => Self::UnresolvedArgument,
             "opaque_shell" => Self::OpaqueShell,
             "exec_or_ambient_git" => Self::ExecOrAmbientGit,
             "env_injection" => Self::EnvInjection,
@@ -378,6 +381,36 @@ pub struct PermissionDecisionPayload {
     pub auto_denials_consecutive: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_denials_total: Option<u32>,
+}
+
+/// External-stream-only tool args for a permission decision. Never serialized
+/// onto Mixpanel; deny never reaches [`super::ToolCallCompleted`].
+#[derive(Debug, Clone, Default)]
+pub struct ExternalToolInput {
+    pub parameters: Option<serde_json::Value>,
+    pub tool_use_id: Option<String>,
+}
+
+/// Product `permission_decision` event: Mixpanel sees only [`PermissionDecisionPayload`];
+/// the sidecar is passed into the external mapper via [`PermissionDecisionRecord::tool_input`].
+pub struct PermissionDecisionRecord {
+    pub payload: PermissionDecisionPayload,
+    pub tool_input: ExternalToolInput,
+}
+
+impl serde::Serialize for PermissionDecisionRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.payload.serialize(serializer)
+    }
+}
+
+impl From<PermissionDecisionPayload> for PermissionDecisionRecord {
+    fn from(payload: PermissionDecisionPayload) -> Self {
+        Self {
+            payload,
+            tool_input: ExternalToolInput::default(),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -6,11 +6,9 @@ use std::time::Instant;
 
 use super::ExitStatus;
 
-/// Proof of whether the child was waited on. The field is private:
-/// [`Collection::of`] reads the child handle, which tokio clears once a
-/// `wait` or `try_wait` has returned, so a call site cannot claim a wait
-/// that never happened. [`Collection::ABANDONED`] is always claimable,
-/// since that direction only costs more polling.
+/// Proof of whether the child was waited on. The field is private: [`Collection::of`] reads the child handle, which
+/// tokio clears once a `wait` or `try_wait` has returned, so a call site cannot claim a wait that never happened.
+/// [`Collection::ABANDONED`] is always claimable, since that direction only costs more polling.
 pub(super) struct Collection(bool);
 
 impl Collection {
@@ -177,17 +175,12 @@ mod tests {
     /// until a `wait` has returned.
     #[cfg(unix)]
     #[tokio::test]
-    // The ban exists because an unenrolled child outlives its session. Nothing here
-    // does: this spawns `true`, hands the handle straight to the assertion, and
-    // waits on it before the test ends. Enrolling it in the process scope would
-    // also take away the very thing under test — `Collection::of` reads the raw
-    // `Child`, and the case is that no collection may be claimed until a `wait`
-    // has returned.
-    #[allow(clippy::disallowed_methods)]
     async fn a_collection_claim_requires_the_child_to_have_been_waited_on() {
-        let mut child = tokio::process::Command::new("true")
-            .spawn()
-            .expect("spawn `true`");
+        let mut command = tokio::process::Command::new("true");
+        crate::util::detach_command(&mut command);
+        command.kill_on_drop(true);
+        #[allow(clippy::disallowed_methods)] // Test fixture; waited below.
+        let mut child = command.spawn().expect("spawn `true`");
         let mut lifecycle = exiting();
 
         lifecycle.finish_output(Collection::of(&child));

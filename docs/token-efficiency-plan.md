@@ -26,6 +26,11 @@ named/hashed-section restructure and the ≥15% fixed-token reduction remain
 the next steps, followed by workstream 2 (capability-scoped tool disclosure)
 — the tool catalog, not the base prompt, dominates the per-turn fixed cost.
 
+Workstream 1 re-baseline (2026-10-14): the upstream 1.0.45 template rebased
+the fixed prompt to 2,236 estimated tokens (ceiling 2,250); compressing the
+fork's `official_chutes_sources` block to one tight paragraph with identical
+policy coverage cut it to 2,161 (ceiling 2,175, −75 tokens every turn).
+
 Workstream 2 baseline (2026-08-26): finalizing the default toolset measures
 the full per-turn catalog at 11,170 estimated tokens across 24 tools
 (`builder::tests::tool_catalog_token_budget`, ceiling 11,200). The top three
@@ -44,6 +49,19 @@ survive, and dispatch keeps validating against the untouched canonical
 (−11.6%) and the budget test's ceiling drops to 9,900 so the fixed cost cannot
 silently re-bloat. Aggregate savings land on every turn; the "detail on
 demand" meta-tool and capability-based filtering remain the next steps.
+
+Workstream 2 re-baseline (2026-10-14): the 1.0.8-era census and compact-schema
+export were both lost in the 1.0.12 sync, so the catalog grew unpinned across
+three upstream syncs. The census is re-ported onto the 1.0.45 tree
+(`builder::tests::tool_catalog_token_budget`, now building through the
+production test helper): 12,784 estimated tokens across 30 tools (ceiling
+12,820). Top three are browser (1,318), send_feedback (1,269, new upstream
+addition), and extract_document (803). The four Phase 2 ecosystem tools
+(extract_document, generate_media, embed_texts, transcribe_audio) cost 2,363
+tokens per turn combined — 18% of the catalog. Their weight is JSON schema
+plus parameter descriptions, so the compact-schema re-port (deferred-loading
+architecture) is still where the reduction lives; it needs a fresh port onto
+the 1.0.45 `ToolConfig` contract and stays follow-up work.
 
 No model, reasoning level, validation evidence, or answer-quality setting is
 reduced by these changes. The full task benchmark corpus, capability-scoped

@@ -126,7 +126,7 @@ fn effective_local_ts(m: &MergedSession) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RowMeta {
-    #[serde(rename = "chutes.build/session")]
+    #[serde(rename = "chutes.ai/session")]
     pub session: SessionMetaEnvelope,
 }
 
@@ -152,8 +152,7 @@ pub struct SessionInfo {
     pub meta: RowMeta,
 }
 
-/// The ACP schema types `cwd` as an absolute path, so a row without one has no
-/// representation there.
+/// The ACP schema types `cwd` as an absolute path, so a row without one has no representation there.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CwdNotAbsolute;
 
@@ -202,10 +201,22 @@ mod tests {
         assert_eq!(row.legacy.cwd, "");
 
         let ext = serde_json::to_value(row.clone().into_ext_superset()).unwrap();
-        assert_eq!(ext["sessionId"], "conv_abc123");
-        assert_eq!(ext["cwd"], "");
-        assert_eq!(ext["source"], "conversation");
-        assert_eq!(ext["_meta"]["chutes.build/session"]["kind"], "chat");
+        assert_eq!(
+            ext.get("sessionId").and_then(|v| v.as_str()),
+            Some("conv_abc123")
+        );
+        assert_eq!(ext.get("cwd").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(
+            ext.get("source").and_then(|v| v.as_str()),
+            Some("conversation")
+        );
+        assert_eq!(
+            ext.get("_meta")
+                .and_then(|m| m.get("chutes.ai/session"))
+                .and_then(|s| s.get("kind"))
+                .and_then(|v| v.as_str()),
+            Some("chat")
+        );
         // Chat rows have no local git enrichment (fields omitted).
         assert!(ext.get("gitRootDir").is_none());
         assert!(ext.get("gitRemotes").is_none());
@@ -213,7 +224,10 @@ mod tests {
         assert!(ext.get("sessionKind").is_none());
 
         let bare = serde_json::to_value(row.into_session_info()).unwrap();
-        assert_eq!(bare["sessionId"], "conv_abc123");
+        assert_eq!(
+            bare.get("sessionId").and_then(|v| v.as_str()),
+            Some("conv_abc123")
+        );
     }
 
     #[test]
@@ -222,13 +236,7 @@ mod tests {
             session_id: "sess_abc123".into(),
             summary: "Implement session list API".into(),
             updated_at: "2026-10-29T14:22:15Z".into(),
-            // The conversion requires an absolute cwd; `/Users/me/xai` is not
-            // absolute on Windows (no drive), so build one from the temp dir.
-            cwd: std::env::temp_dir()
-                .join("me")
-                .join("xai")
-                .to_string_lossy()
-                .into_owned(),
+            cwd: "/Users/me/xai".into(),
             ..MergedSession::default()
         };
         let info = merged_session_to_row(merged, facet_registry()).into_session_info();

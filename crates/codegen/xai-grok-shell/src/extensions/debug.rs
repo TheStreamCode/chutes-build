@@ -1,12 +1,10 @@
 //! `chutes.ai/debug/*` extension handlers for local client testing.
 //!
-//! These methods bypass heuristics, sampling, cooldowns, and enabled checks
-//! so client engineers can exercise notification → response flows without
-//! needing real experiments, real sessions, or real model inference.
+//! These methods bypass heuristics, sampling, cooldowns, and enabled checks.
+//! Client engineers can exercise a notification and its response without real experiments, real sessions, or real model inference.
 //!
 //! - `trigger_feedback`: fire a synthetic `FeedbackRequestNotification`.
-//! - `arm_auto_compact`: arm the next turn to unconditionally trigger
-//!   auto-compaction, regardless of context window usage.
+//! - `arm_auto_compact`: make the next turn trigger auto-compaction unconditionally, regardless of context window usage.
 //! - `agent`: agent-process diagnostics (registry counts).
 
 use agent_client_protocol as acp;
@@ -18,12 +16,12 @@ use crate::session::{ExtMethodResult, SessionCommand};
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/debug/trigger_feedback" => {
+        "chutes.ai/debug/trigger_feedback" => {
             tracing::info!("debug: triggering test feedback request");
             handle_trigger_feedback(agent, args).await
         }
-        "chutes.build/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
-        "chutes.build/debug/agent" => handle_agent(agent).await,
+        "chutes.ai/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
+        "chutes.ai/debug/agent" => handle_agent(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -100,13 +98,15 @@ async fn handle_trigger_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> Ex
 }
 
 fn handle_arm_auto_compact(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
-    let params: serde_json::Value = parse_params(args)?;
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ArmAutoCompactParams {
+        #[serde(alias = "session_id")]
+        session_id: String,
+    }
 
-    let session_id_str = params["sessionId"]
-        .as_str()
-        .or_else(|| params["session_id"].as_str())
-        .ok_or_else(|| acp::Error::invalid_params().data("sessionId required"))?;
-    let session_id = acp::SessionId::new(session_id_str);
+    let params: ArmAutoCompactParams = parse_params(args)?;
+    let session_id = acp::SessionId::new(params.session_id.clone());
 
     let handle = agent
         .resident_handle(&session_id)
@@ -117,7 +117,7 @@ fn handle_arm_auto_compact(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResul
         .store(true, std::sync::atomic::Ordering::Relaxed);
 
     tracing::info!(
-        session_id = %session_id_str,
+        session_id = %params.session_id,
         "debug: armed auto-compact for next turn"
     );
 

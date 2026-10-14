@@ -254,10 +254,10 @@ pub(crate) fn run_with_timeout(
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn a_probe_that_times_out_takes_what_it_started_with_it() {
         let scratch = tempfile::tempdir().unwrap();

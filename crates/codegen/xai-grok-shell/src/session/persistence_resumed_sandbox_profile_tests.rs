@@ -6,9 +6,8 @@ use super::{
 use std::{fs, io};
 use tempfile::TempDir;
 
-/// Write a session summary under the *encoded* cwd dir (matching how the
-/// resume helpers locate sessions). `sandbox_profile` is included only when
-/// `Some`, mirroring older summaries that predate the field.
+/// Write a session summary under the *encoded* cwd dir (matching how the resume helpers locate sessions).
+/// `sandbox_profile` is included only when `Some`, mirroring older summaries that predate the field.
 fn write_session(
     root: &std::path::Path,
     cwd: &str,
@@ -23,20 +22,28 @@ fn write_session(
     fs::create_dir_all(&dir).unwrap();
     let mut summary = serde_json::json!({
         "info": { "id": session_id, "cwd": cwd },
-        "session_summary": "",
+        "session_summary": session_id,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": updated_at,
-        "num_messages": 0,
+        "num_messages": 1,
         "current_model_id": "grok-3",
     });
-    if let Some(la) = last_active_at {
-        summary["last_active_at"] = serde_json::Value::String(la.to_string());
-    }
-    if let Some(profile) = sandbox_profile {
-        summary["sandbox_profile"] = serde_json::Value::String(profile.to_string());
-    }
-    if hidden {
-        summary["hidden"] = serde_json::Value::Bool(true);
+    if let Some(obj) = summary.as_object_mut() {
+        if let Some(la) = last_active_at {
+            obj.insert(
+                "last_active_at".into(),
+                serde_json::Value::String(la.to_string()),
+            );
+        }
+        if let Some(profile) = sandbox_profile {
+            obj.insert(
+                "sandbox_profile".into(),
+                serde_json::Value::String(profile.to_string()),
+            );
+        }
+        if hidden {
+            obj.insert("hidden".into(), serde_json::Value::Bool(true));
+        }
     }
     fs::write(dir.join("summary.json"), summary.to_string()).unwrap();
 }
@@ -87,17 +94,16 @@ fn explicit_remote_id_resolves_local_child_profile() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("sessions");
     let cwd = "/work/remote";
-    // A remote session restored into a local child: the child has a fresh
-    // id and records `parent_session_id` = the remote id.
+    // A remote session restored into a local child: the child has a fresh id and records the remote id as `parent_session_id`
     let encoded = crate::util::grok_home::encode_cwd_dirname(cwd);
     let dir = root.join(&encoded).join("local-child");
     fs::create_dir_all(&dir).unwrap();
     let summary = serde_json::json!({
         "info": { "id": "local-child", "cwd": cwd },
-        "session_summary": "",
+        "session_summary": "local-child",
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-        "num_messages": 0,
+        "num_messages": 1,
         "current_model_id": "grok-3",
         "parent_session_id": "remote-xyz",
         "sandbox_profile": "workspace",
@@ -109,7 +115,7 @@ fn explicit_remote_id_resolves_local_child_profile() {
         resumed_session_sandbox_profile_in_root(Some("remote-xyz"), Some(cwd), &root),
         Some("workspace".to_string())
     );
-    // Without a cwd the child can't be located -> None.
+    // Without a cwd the child can't be located, so the lookup returns None
     assert_eq!(
         resumed_session_sandbox_profile_in_root(Some("remote-xyz"), None, &root),
         None
@@ -325,7 +331,6 @@ fn most_recent_cwd_skips_hidden_session() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("sessions");
     let cwd = "/work/proj";
-    // Older, visible session.
     write_session(
         &root,
         cwd,
@@ -335,8 +340,7 @@ fn most_recent_cwd_skips_hidden_session() {
         Some("workspace"),
         false,
     );
-    // Newer, hidden (e.g. subagent) session — the most-recent peek must
-    // ignore it, matching what `list_sessions` resumes.
+    // Newer, hidden (e.g. subagent) session: the most-recent peek must ignore it, matching what `list_sessions` resumes.
     write_session(
         &root,
         cwd,

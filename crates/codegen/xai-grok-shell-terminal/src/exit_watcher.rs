@@ -1,6 +1,5 @@
-//! Exit detection and completion for ACP background terminals: awaits
-//! `wait_for_exit` while polling `terminal/output` into the [`OutputRecorder`],
-//! then completes and releases the terminal.
+//! Awaits `wait_for_exit` on an ACP background terminal while polling `terminal/output` into the [`OutputRecorder`].
+//! On exit it completes the task and releases the terminal.
 
 use std::time::Duration;
 
@@ -16,6 +15,9 @@ const RECORDER_POLL: Duration = Duration::from_millis(250);
 const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 const GATEWAY_LOST_AFTER: Duration = Duration::from_secs(30);
+
+/// Same lifetime cap the local terminal applies to background tasks.
+pub(super) const BACKGROUND_MAX_RUNTIME: Duration = Duration::from_secs(36_000);
 
 fn max_poll_errors(cadence: Duration) -> u32 {
     (GATEWAY_LOST_AFTER.as_millis() / cadence.as_millis().max(1)).max(1) as u32
@@ -65,18 +67,20 @@ enum Exit {
     WithOutput(Box<acp::TerminalOutputResponse>),
     NeedFetch,
     Lost,
+    MaxRuntime,
 }
 
+/// `terminal_id` can differ from `task_id`.
+/// A foreground command moved to the background is tracked under its tool call id.
 pub(super) async fn watch_for_exit(
     gateway: GatewaySender,
     session_id: acp::SessionId,
     task_id: String,
+    terminal_id: acp::TerminalId,
     tasks: TaskMap,
     notification_handle: ToolNotificationHandle,
     mut recorder: OutputRecorder,
 ) {
-    let terminal_id = acp::TerminalId::new(task_id.clone());
-
     let wait = gateway.send(acp::WaitForTerminalExitRequest::new(
         session_id.clone(),
         terminal_id.clone(),
@@ -85,8 +89,22 @@ pub(super) async fn watch_for_exit(
     let mut wait_pending = true;
     let mut consecutive_errors = 0u32;
     let poll_error_budget = max_poll_errors(RECORDER_POLL);
+    let cap = tokio::time::sleep(BACKGROUND_MAX_RUNTIME);
+    tokio::pin!(cap);
     let exit = loop {
         tokio::select! {
+            _ = &mut cap => {
+                tracing::warn!(task_id, "background task exceeded max runtime, killing");
+                let _ = tokio::time::timeout(
+                    GATEWAY_LOST_AFTER,
+                    gateway.send(acp::KillTerminalRequest::new(
+                        session_id.clone(),
+                        terminal_id.clone(),
+                    )),
+                )
+                .await;
+                break Exit::MaxRuntime;
+            }
             res = &mut wait, if wait_pending => match res {
                 Ok(_) => break Exit::NeedFetch,
                 Err(e) => {
@@ -124,7 +142,12 @@ pub(super) async fn watch_for_exit(
     };
 
     let output = match exit {
-        Exit::Lost => {
+        Exit::Lost | Exit::MaxRuntime => {
+            let signal = if matches!(exit, Exit::Lost) {
+                "gateway-lost"
+            } else {
+                "max_runtime"
+            };
             complete_and_release(
                 &gateway,
                 &session_id,
@@ -136,7 +159,7 @@ pub(super) async fn watch_for_exit(
                     output: recorder.mirrored().to_string(),
                     truncated: false,
                     exit_code: None,
-                    signal: Some("gateway-lost".into()),
+                    signal: Some(signal.into()),
                 },
             )
             .await;
@@ -151,8 +174,7 @@ pub(super) async fn watch_for_exit(
             .await
         {
             Ok(output) => output,
-            // The fetch failed; fall back to what we already mirrored to disk so
-            // the completion snapshot is not empty while the log file has data.
+            // The fetch failed; fall back to what we already mirrored to disk so the completion snapshot is not empty while the log file has data
             Err(_) => acp::TerminalOutputResponse::new(recorder.mirrored().to_string(), false),
         },
     };
@@ -217,9 +239,9 @@ pub(super) async fn release_terminal(
     }
 }
 
-/// Fallback exit detector for the blocking `wait_for_completion` path. Unlike
-/// [`watch_for_exit`] it only detects exit and does not mirror output. Returns
-/// `true` on exit, `false` on deadline or [`GATEWAY_LOST_AFTER`] of failures.
+/// Fallback exit detector for the blocking `wait_for_completion` path.
+/// Unlike [`watch_for_exit`] it only detects exit and does not mirror output.
+/// Returns `true` on exit, `false` on deadline or [`GATEWAY_LOST_AFTER`] of failures.
 pub(super) async fn poll_for_terminal_exit(
     gateway: &GatewaySender,
     session_id: &acp::SessionId,

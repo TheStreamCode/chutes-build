@@ -8,7 +8,7 @@ Use it interactively as a TUI, or integrate it into your own apps via headless m
 
 ```bash
 # Install
-npm i -g chutes-build
+curl -fsSL https://chutes.ai/cli/install.sh | bash
 
 # Interactive TUI
 chutes-build
@@ -59,14 +59,11 @@ chutes-build agent stdio
 
 ```bash
 # Install latest stable
-npm i -g chutes-build
+curl -fsSL https://chutes.ai/cli/install.sh | bash
 
 # Install a specific version
-npm i -g chutes-build@1.0.0
+curl -fsSL https://chutes.ai/cli/install.sh | bash -s 0.1.42
 ```
-
-Or take a binary from
-[Releases](https://github.com/TheStreamCode/chutes-build/releases).
 
 Verify installation:
 
@@ -74,8 +71,11 @@ Verify installation:
 chutes-build --version
 ```
 
-To update, re-run the install: Chutes Build does not update itself, and
-`chutes-build update` reports where to look rather than fetching anything.
+Update to the latest version:
+
+```bash
+chutes-build update
+```
 
 ---
 
@@ -101,10 +101,10 @@ chutes-build login
 
 ### API Key
 
-For CI/CD, automation, or environments without browser access, use an API key from [chutes.ai/app/api](https://chutes.ai/app/api):
+For CI/CD, automation, or environments without browser access, use an API key from [console.chutes.ai](https://console.chutes.ai):
 
 ```bash
-export CHUTES_API_KEY="cpk_..."
+export CHUTES_API_KEY="xai-..."
 chutes-build
 ```
 
@@ -327,7 +327,7 @@ export CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS=300
 ```
 
 **Keep in mind:**
-- When using `auth_provider_command`, you don't need to run `chutes-build login` before starting — Chutes Build runs your binary automatically on first launch. You _can_ run `chutes-build login` to explicitly hydrate `auth.json` ahead of time if you prefer.
+- When using `auth_provider_command`, you don't need to run `chutes-build login` before starting — on first launch Chutes Build runs your binary on the real terminal (URL and progress on stderr), then opens the UI already signed in. You _can_ run `chutes-build login` to explicitly hydrate `auth.json` ahead of time if you prefer. Mid-session `/login` still uses the in-TUI copy-link overlay.
 - If both OIDC and `auth_provider_command` are configured: at **login** time, Chutes Build tries OIDC silent refresh first (if a `refresh_token` exists), then the external binary, then browser-based login. During a **session**, whichever method is configured is used exclusively — if `auth_provider_command` is set it handles all mid-session refreshes; otherwise OIDC silent refresh is used.
 - Your binary's stderr output is displayed to the user but interactive stdin is not supported. This works well for browser-based SSO flows where the binary displays a URL and you complete authentication in the browser.
 
@@ -496,7 +496,7 @@ Type `/` in the input to access commands:
 | `/new`                             |           | Start a new session (clears context)                     |
 | `/load [workspace] [session]`      | `/resume` | Load a previous session                                  |
 | `/rewind <prompt>`                 |           | Rewind to a previous prompt (restores files)             |
-| `/compact [context]`               |           | Compact conversation history                             |
+| `/compact`                         |           | Compact conversation history                             |
 | `/always-approve [on\|off]`        | `/yolo`   | Toggle auto-approve mode                                 |
 | `/multiline`                       | `/ml`     | Toggle multiline input mode                              |
 | `/memory [workspace\|global] <text>` |         | Append text to a memory file (requires memory enabled) |
@@ -808,7 +808,7 @@ Communication happens via JSON-RPC over stdin/stdout. This mode is used by:
 To expose the agent over the internet (instead of local network), run a WebSocket relay server and have the agent connect to it:
 
 ```bash
-chutes-build agent headless --chutes-ws-url wss://your-relay.example.com/ws
+chutes-build agent headless --grok-ws-url wss://your-relay.example.com/ws
 ```
 
 The agent connects OUT to your relay, and your web clients connect to the same relay. Useful for building web UIs where browsers can't spawn local processes.
@@ -1336,8 +1336,8 @@ Each feature section below documents its own config. This section covers the gen
 auto_update = true                     # check for updates on launch
 
 [models]
-default = "model-router"               # model used for new sessions ("Chutes Auto")
-web_search = "model-router"            # model used by the web_search tool
+default = "grok-4.6"                   # model used for new sessions
+web_search = "grok-4.6"                # model used by the web_search tool
 
 [ui]
 max_thoughts_width = 120               # max column width for reasoning display
@@ -1793,9 +1793,31 @@ never removes or replaces another layer's block. Each hook's `/hooks-list` name 
 prefixed with the layer it came from (for example `managed:` or
 `requirements/user:`).
 
-Config-layer hooks are convenience distribution, not an enforcement boundary: on
-an unmanaged device a user can still edit these files. Tamper-resistant,
-admin-enforced hooks are tracked separately.
+Hooks from two kinds of layer are enforced: they cannot be disabled from the
+hooks modal, the enable/disable APIs, or the `disabled-hooks` file, and a
+byte-identical copy in a lower layer cannot take over their provenance.
+
+- The **root-owned** system layers (`/etc/grok/requirements.toml`,
+  `/etc/grok/managed_config.toml`). Enforcement relies on OS file ownership, so
+  deploy these files root-owned (or via MDM).
+- The **signed** `$CHUTES_BUILD_HOME/requirements.toml` the deployment sync writes.
+  Its hooks are enforced while the file's bytes match the server-signed
+  envelope (`requirements/signed:` names); an edited copy, or one whose
+  signature file is missing or unreadable, is the user's own file again
+  (`requirements/user:` names, disableable); an unreadable `requirements.toml`
+  contributes no hooks. Pair the policy with `fail_closed = true`, which
+  refuses the session on an edited copy or a missing signature (an unreadable
+  file is a read error, not tampering, and still starts).
+
+Hooks in the other `$CHUTES_BUILD_HOME` layers (`managed_config.toml`, `config.toml`)
+remain convenience distribution, not an enforcement boundary: the user owns
+that directory and can edit or repoint it.
+
+`allow_managed_hooks_only = true` (also `allowManagedHooksOnly`) in any policy
+layer is a tighten-only pin that skips every hook that is not managed policy:
+user, project, plugin, agent-frontmatter, and vendor-compat hooks are left out of
+dispatch and show `[disabled]` in the modal, and enabling them is refused.
+ACP client-registered hooks are unaffected. A non-boolean value engages the pin.
 
 ---
 
@@ -1824,7 +1846,7 @@ context_window = 256000               # Total context window in tokens (for auto
 
 **Credential resolution order:** `api_key` → `env_key` → cached `auth_provider` token (terminal: a cache miss resolves to no credential, never the session token) → session token → `CHUTES_API_KEY`. See [Per-Model Auth Providers](#per-model-auth-providers).
 
-The `context_window` parameter is used to calculate when auto-compact should trigger. If not specified, Chutes Build falls back to built-in defaults for known models.
+The `context_window` parameter is used to calculate when auto-compact should trigger. If not specified, Chutes Build falls back to built-in defaults for known models. To offer a choice of windows, set `context_windows = [256000, 500000]`. `context_window` stays the default (the first listed window when unset), and older clients ignore the list.
 
 ### Overriding Built-in Models
 
@@ -1940,7 +1962,7 @@ Point Chutes Build at a custom OpenAI-compatible `/v1/models` endpoint instead o
 
 ```bash
 export CHUTES_BUILD_MODELS_BASE_URL="https://api.acme.com/v1"
-export CHUTES_API_KEY="cpk_..."
+export CHUTES_API_KEY="xai-..."
 chutes-build
 ```
 
@@ -1959,9 +1981,9 @@ models_base_url = "https://api.acme.com/v1"
 api_key = "my-api-key"
 ```
 
-When using `[endpoints]` with partial model overrides, the `base_url` is inherited from the endpoints config — you don't need to specify it in each `[model.*]` section.
+Each `[model.*]` section inherits `base_url` from the `[endpoints]` config. `CHUTES_API_KEY` is still required. A per-model `api_key`/`env_key` authenticates that model's inference requests. The startup model-list fetch still uses `CHUTES_API_KEY`.
 
-**Auth behavior:** When `models_base_url` is set, Chutes Build uses API key auth (`Authorization: Bearer`) instead of session auth. `chutes-build login` is not required — only the API key.
+**Auth behavior:** When `models_base_url` is set, Chutes Build authenticates the model-list request with `CHUTES_API_KEY` (`Authorization: Bearer`). That request never uses your `chutes-build login` session. With an external auth provider (`auth_provider_command`) and no `CHUTES_API_KEY`, it sends the provider's token instead. Otherwise, if `CHUTES_API_KEY` is unset, the fetch fails with an error asking you to set it. Inference requests to the custom host authenticate with each model's `api_key`/`env_key`.
 
 ---
 
@@ -2381,7 +2403,7 @@ disallowedTools:
 
 Fetch a specific URL and return its content as markdown. **Disabled by default** — enable with `CHUTES_BUILD_WEB_FETCH=1`. 
 
-When no custom `allowed_domains` is set, the tool permits a default allowlist of useful documentation sites (Chutes, language docs, frameworks, cloud providers, databases, etc.). Domains not on the allowlist prompt the user for approval; `--always-approve` auto-approves all. Domain matching is case-insensitive, strips `www.` prefixes, and supports path-scoped entries (e.g. `chutes.ai/company`).
+When no custom `allowed_domains` is set, the tool permits a default allowlist of useful documentation sites (SpaceXAI, language docs, frameworks, cloud providers, databases, etc.). Domains not on the allowlist prompt the user for approval; `--always-approve` auto-approves all. Domain matching is case-insensitive, strips `www.` prefixes, and supports path-scoped entries (e.g. `chutes.ai/company`).
 
 ---
 
@@ -2494,7 +2516,7 @@ The agent persists all session updates automatically. Clients can reconnect and 
 
 | Variable                         | Description                                                                                              |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `CHUTES_API_KEY`         | API key from [chutes.ai/app/api](https://chutes.ai/app/api). Used for custom endpoint auth and API key login      |
+| `CHUTES_API_KEY`         | API key from [console.chutes.ai](https://console.chutes.ai). Used for custom endpoint auth and API key login      |
 | `CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL`  | Override the cli-chat-proxy URL (default: `https://cli-chat-proxy.chutes.ai/v1`)                          |
 | `CHUTES_BUILD_MODELS_BASE_URL`          | Custom base URL for inference. Model list auto-fetched from `{base_url}/models` (see [Custom Models Endpoint](#custom-models-endpoint)) |
 | `CHUTES_BUILD_MODELS_LIST_URL`          | Override the model list URL if it differs from `{CHUTES_BUILD_MODELS_BASE_URL}/models`                                              |
@@ -2607,7 +2629,7 @@ The `--debug` firehose uses a fixed filter (first-party crates at `debug`) and i
 
 ```bash
 # Debug auth, info for everything else
-CHUTES_BUILD_LOG_FILE=/tmp/grok-debug.log RUST_LOG="info,xai_grok_shell::auth=debug" chutes-build
+CHUTES_BUILD_LOG_FILE=/tmp/grok-debug.log RUST_LOG="info,xai_grok_login=debug" chutes-build
 ```
 
 ### Authentication fails

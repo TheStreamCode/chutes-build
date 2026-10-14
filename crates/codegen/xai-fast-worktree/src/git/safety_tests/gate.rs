@@ -155,7 +155,6 @@ fn write_at(worktree: &Path, path: &str, bytes: &[u8]) {
 }
 
 #[test]
-#[cfg(unix)]
 fn reclaiming_a_worktree_runs_none_of_its_hooks() {
     use std::os::unix::fs::PermissionsExt;
     let fixture = Fixture::new("");

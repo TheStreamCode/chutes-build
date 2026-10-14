@@ -1,7 +1,5 @@
-//! `x.ai/consent/record` extension handler.
-//!
-//! POSTs an accepted notice to the configured proxy. The client has already accepted it
-//! locally, so a failure here loses the server-side record but does not block the user.
+//! POSTs an accepted consent notice to the configured proxy.
+//! The client has already accepted it locally, so a failure here loses the server-side record but does not block the user.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -15,7 +13,7 @@ const RECORD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/consent/record" => handle_record(agent, args).await,
+        "x.ai/consent/record" => handle_record(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -42,7 +40,7 @@ async fn handle_record(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let token_header = agent.auth_manager.grok_com_config().token_header.clone();
 
     let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> = std::sync::Arc::new(
-        crate::auth::credential_provider::ShellAuthCredentialProvider::new(
+        xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
             agent.auth_manager.clone(),
             None,
             None,

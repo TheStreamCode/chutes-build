@@ -7,6 +7,7 @@ description = "Headless markdown analysis sharing Chutes Build's exact pulldown-
 
 [dependencies]
 pulldown-cmark = { workspace = true }
+strum = { workspace = true }
 
 [lints]
 workspace = true

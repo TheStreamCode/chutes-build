@@ -1,7 +1,7 @@
 //! Layer-2 stream transform for the Chat Completions API.
 //!
-//! Consumes a raw `ChatCompletionChunk` stream and produces
-//! [`SamplingEvent`]s. Pure: no I/O, no shell coupling.
+//! Consumes a raw `ChatCompletionChunk` stream and produces [`SamplingEvent`]s.
+//! Pure: no I/O, no shell coupling.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -18,56 +18,8 @@ use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
 use crate::metrics::InferenceLatencyStats;
 use crate::types::RequestId;
 
-/// Resolve which accumulator slot a tool-call delta belongs to.
-///
-/// An explicit `index` always wins. Without one, a non-empty `id` claims a slot
-/// of its own the first time it is seen and reuses it afterwards; a delta with
-/// neither continues the slot the previous delta used, which is what an
-/// argument fragment after the opening chunk looks like.
-///
-/// `name` is deliberately *not* part of this: the caller overwrites it rather
-/// than appending, because the common case is a provider repeating the full
-/// name in every chunk, and appending would corrupt it. A genuinely chunked
-/// name is left unhandled rather than guessed at.
-fn resolve_tool_index(
-    index: Option<u32>,
-    id: Option<&str>,
-    id_to_index: &mut BTreeMap<String, u32>,
-    next_index: &mut u32,
-    last_index: Option<u32>,
-) -> u32 {
-    let id = id.filter(|id| !id.is_empty());
-    let resolved = match (index, id) {
-        (Some(explicit), _) => explicit,
-        (None, Some(id)) => id_to_index.get(id).copied().unwrap_or(*next_index),
-        (None, None) => last_index.unwrap_or(0),
-    };
-    // Keep the counter clear of explicitly-numbered slots, so a provider that
-    // mixes both forms cannot have an id-assigned slot collide with one.
-    *next_index = (*next_index).max(resolved.saturating_add(1));
-    // Record the mapping even when the index was explicit: a later fragment may
-    // carry the id but not the index.
-    if let Some(id) = id {
-        id_to_index.entry(id.to_owned()).or_insert(resolved);
-    }
-    resolved
-}
-
-/// Transform a raw Chat Completions chunk stream into a stream of
-/// [`SamplingEvent`]s.
-///
-/// The output stream emits exactly one terminal event per request:
-/// [`SamplingEvent::Completed`] on normal stream end, or
-/// [`SamplingEvent::Failed`] on error / idle timeout. Callers must not
-/// consume past the terminal event (the implementation `return`s after
-/// yielding it).
-///
-/// `idle_timeout` covers two cases:
-/// 1. The transport stops yielding chunks at all (`tokio::time::timeout`).
-/// 2. The transport keeps yielding empty / keepalive chunks but no
-///    meaningful content (separate `last_content_chunk_at` timer).
-///
-/// Both produce `SamplingEvent::Failed { kind: IdleTimeout }`.
+/// The output stream emits exactly one terminal event per request.
+/// Callers must not consume past the terminal event (the implementation `return`s after yielding it).
 pub fn stream_chat_completions<'a>(
     raw_stream: BoxStream<'a, Result<ChatCompletionChunk, SamplingError>>,
     model_metadata: Option<ResponseModelMetadata>,
@@ -75,11 +27,17 @@ pub fn stream_chat_completions<'a>(
     idle_timeout: Duration,
 ) -> impl Stream<Item = SamplingEvent> + Send + 'a {
     async_stream::stream! {
+        let decode_region = crate::span_timing::Region::from_span(tracing::info_span!(
+            "sampling.stream_decode",
+            ttft_ms = tracing::field::Empty,
+            ttlb_ms = tracing::field::Empty,
+            output_tokens = tracing::field::Empty,
+            chunk_count = tracing::field::Empty,
+        ));
         let stream_start = Instant::now();
         let mut chunk_timestamps: Vec<Instant> = Vec::new();
 
-        // Emit StreamStarted before reading any chunks so subscribers
-        // can record TTFB / TTLB baselines.
+        // Emit StreamStarted before reading any chunks so subscribers can record TTFB / TTLB baselines
         yield SamplingEvent::StreamStarted {
             request_id: request_id.clone(),
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
@@ -104,34 +62,19 @@ pub fn stream_chat_completions<'a>(
 
         let mut content_acc = String::new();
         let mut reasoning_acc = String::new();
-        // Tool call deltas keyed by positional index. Each entry is
-        // (id, name, arguments_buffer); the first chunk for an index
-        // carries id+name and starts the arguments buffer, subsequent
-        // chunks append to arguments only.
+        // Tool call deltas keyed by positional index; each entry is (id, name, arguments_buffer)
+        // The first chunk for an index carries the id and name and starts the arguments buffer; later chunks append to arguments only
         let mut tool_call_acc: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
-        // Correlation state for providers that omit `index` on tool-call
-        // deltas. `id` then becomes the only thing distinguishing two parallel
-        // calls, so each unseen id claims its own slot; a delta carrying
-        // neither index nor id continues the slot it opened.
-        let mut tool_id_to_index: BTreeMap<String, u32> = BTreeMap::new();
-        let mut next_tool_index: u32 = 0;
-        let mut last_tool_index: Option<u32> = None;
 
-        // Index counter spanning text + reasoning chunks (matches the
-        // shell's chunk_index used for notification correlation).
+        // Index counter spanning text and reasoning chunks (matches the shell's chunk_index used for notification correlation)
         let mut chunk_index: u64 = 0;
-        // Separate counter for AgentMessageChunk (text-only) emissions;
-        // mirrored onto ConversationResponse.message_chunks_emitted so
-        // downstream can detect lost-streaming-events scenarios.
+        // Separate counter for AgentMessageChunk (text-only) emissions
+        // Mirrored onto ConversationResponse.message_chunks_emitted so downstream can detect lost streaming events
         let mut message_chunk_count: u64 = 0;
 
-        // Content-aware idle timer: the outer
-        // `tokio::time::timeout(idle_timeout, stream.next())` already
-        // catches "transport stops yielding chunks". This second timer
-        // catches the more subtle case where the model keeps emitting
-        // keepalive / empty-delta SSE events that satisfy the outer
-        // timer but make no real progress -- some inference engines
-        // do exactly that.
+        // The outer `tokio::time::timeout(idle_timeout, stream.next())` already catches a transport that stops yielding chunks
+        // This second timer catches the model emitting keepalive or empty-delta SSE events: they satisfy the outer timer but make no real progress
+        // Some inference engines do exactly that
         let mut last_content_chunk_at = Instant::now();
 
         let mut stream = raw_stream;
@@ -239,17 +182,8 @@ pub fn stream_chat_completions<'a>(
                 for tc_delta in delta.tool_calls.into_iter() {
                     chunk_has_content = true;
 
-                    let tool_index = resolve_tool_index(
-                        tc_delta.index,
-                        tc_delta.id.as_deref(),
-                        &mut tool_id_to_index,
-                        &mut next_tool_index,
-                        last_tool_index,
-                    );
-                    last_tool_index = Some(tool_index);
-
                     let entry = tool_call_acc
-                        .entry(tool_index)
+                        .entry(tc_delta.index)
                         .or_insert_with(|| (String::new(), String::new(), String::new()));
 
                     let mut id_for_event: Option<String> = None;
@@ -273,7 +207,7 @@ pub fn stream_chat_completions<'a>(
 
                     yield SamplingEvent::ToolCallDelta {
                         request_id: request_id.clone(),
-                        tool_index,
+                        tool_index: tc_delta.index,
                         id: id_for_event,
                         name: name_for_event,
                         arguments_delta: args_for_event,
@@ -297,30 +231,28 @@ pub fn stream_chat_completions<'a>(
 
         // ── Build the final response ─────────────────────────────────
         let tool_calls: Vec<ToolCall> = tool_call_acc
-            .into_iter()
-            .map(|(tool_index, (id, name, arguments))| ToolCall {
-                // A provider that streams no id still needs one: the id pairs
-                // the tool result back to this call, and it is replayed in
-                // history next to other turns' calls, so it has to be unique
-                // beyond this response — hence the request id, not the bare
-                // index.
-                id: if id.is_empty() {
-                    std::sync::Arc::<str>::from(format!("{request_id}_tool_{tool_index}"))
-                } else {
-                    std::sync::Arc::<str>::from(id)
-                },
+            .into_values()
+            .map(|(id, name, arguments)| ToolCall {
+                id: std::sync::Arc::<str>::from(id),
                 name,
                 arguments: std::sync::Arc::<str>::from(arguments),
             })
             .collect();
 
-        // Honor tool calls by overriding the stop reason if the model
-        // forgot to set it (mirrors the shell's behavior).
+        // Tool calls override the stop reason, even an explicit `length`.
+        // NOTE: the Messages backend has the opposite precedence: Length wins there
+        // Load-bearing; don't "fix" here
         if !tool_calls.is_empty() {
+            if finish_reason == Some(StopReason::Length) {
+                tracing::warn!(
+                    request_id = %request_id,
+                    "tool calls mask a length-truncated response; arguments may be truncated"
+                );
+            }
             finish_reason = Some(StopReason::ToolCalls);
         }
 
-        // Build the trailing Assistant + any reasoning sibling.
+        // Build the trailing Assistant and any reasoning sibling
         let mut items: Vec<ConversationItem> = Vec::new();
         if first_choice_seen {
             if !reasoning_acc.is_empty() {
@@ -343,6 +275,22 @@ pub fn stream_chat_completions<'a>(
         let stream_end = Instant::now();
         let metrics =
             InferenceLatencyStats::from_timestamps(stream_start, &chunk_timestamps, stream_end);
+
+        decode_region
+            .span()
+            .record("ttlb_ms", metrics.time_to_last_byte_ms as i64);
+        decode_region
+            .span()
+            .record("chunk_count", metrics.chunk_count as i64);
+        if let Some(ttft) = metrics.time_to_first_token_ms {
+            decode_region.span().record("ttft_ms", ttft as i64);
+        }
+        if let Some(u) = usage.as_ref() {
+            decode_region
+                .span()
+                .record("output_tokens", u.completion_tokens as i64);
+        }
+        drop(decode_region);
 
         let response = ConversationResponse {
             items,
@@ -369,6 +317,13 @@ pub fn stream_chat_completions<'a>(
 mod tests {
     use super::*;
     use futures_util::stream;
+
+    fn nth<T>(xs: &[T], i: usize) -> &T {
+        let Some(x) = xs.get(i) else {
+            panic!("expected item {i}, got {} items", xs.len());
+        };
+        x
+    }
     use std::pin::pin;
     use xai_grok_sampling_types::{
         ChatChunkChoice, ChatChunkDelta, FinishReason, Role, ToolCallDelta as ChunkToolCallDelta,
@@ -411,7 +366,10 @@ mod tests {
 
     fn final_chunk(reason: FinishReason) -> ChatCompletionChunk {
         let mut chunk = make_chunk(vec![ChatChunkDelta::default()]);
-        chunk.choices[0].finish_reason = Some(reason);
+        let Some(choice) = chunk.choices.first_mut() else {
+            panic!("expected a choice");
+        };
+        choice.finish_reason = Some(reason);
         chunk
     }
 
@@ -436,8 +394,11 @@ mod tests {
         .await;
 
         assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], SamplingEvent::StreamStarted { .. }));
-        match &events[1] {
+        assert!(matches!(
+            nth(&events, 0),
+            SamplingEvent::StreamStarted { .. }
+        ));
+        match &nth(&events, 1) {
             SamplingEvent::Completed { response, .. } => {
                 assert!(response.is_empty());
             }
@@ -461,10 +422,12 @@ mod tests {
         ))
         .await;
 
-        // Expected sequence: StreamStarted, FirstToken, ChannelToken(Text)
-        // x 2, Completed.
-        assert!(matches!(events[0], SamplingEvent::StreamStarted { .. }));
-        assert!(matches!(events[1], SamplingEvent::FirstToken { .. }));
+        // Expected sequence: StreamStarted, FirstToken, two ChannelToken(Text), Completed
+        assert!(matches!(
+            nth(&events, 0),
+            SamplingEvent::StreamStarted { .. }
+        ));
+        assert!(matches!(nth(&events, 1), SamplingEvent::FirstToken { .. }));
 
         let text_tokens: Vec<&str> = events
             .iter()
@@ -499,7 +462,10 @@ mod tests {
             tool_calls: vec![],
             tool_call_id: None,
         }]);
-        reasoning_chunk.choices[0].finish_reason = None;
+        let Some(choice) = reasoning_chunk.choices.first_mut() else {
+            panic!("expected a choice");
+        };
+        choice.finish_reason = None;
 
         let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
             Ok(reasoning_chunk),
@@ -515,7 +481,6 @@ mod tests {
         ))
         .await;
 
-        // FirstToken should appear exactly once.
         let first_token_count = events
             .iter()
             .filter(|e| matches!(e, SamplingEvent::FirstToken { .. }))
@@ -535,6 +500,9 @@ mod tests {
                         assert_eq!(text, "done");
                         saw_text = true;
                     }
+                    SamplingChannel::Narration => {
+                        panic!("chat completions never emits narration tokens")
+                    }
                 }
             }
         }
@@ -546,22 +514,92 @@ mod tests {
                     .reasoning_items()
                     .next()
                     .expect("reasoning sibling preserved");
-                let rs::SummaryPart::SummaryText(t) = &r.summary[0];
+                let Some(part) = r.summary.first() else {
+                    panic!("expected a summary part");
+                };
+                let rs::SummaryPart::SummaryText(t) = part;
                 assert_eq!(t.text, "thinking...");
             }
             other => panic!("expected Completed, got {other:?}"),
         }
     }
 
+    /// A text-only `length` finish completes with `stop_reason=Length` and the partial text preserved.
+    /// Deciding whether to fail or salvage the truncation belongs to `drive_l2`, not this transform.
+    #[tokio::test]
+    async fn length_finish_completes_with_length_stop() {
+        let raw = stream::iter::<Vec<Result<ChatCompletionChunk, SamplingError>>>(vec![
+            Ok(text_chunk("truncated answ")),
+            Ok(final_chunk(FinishReason::Length)),
+        ])
+        .boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                assert_eq!(response.stop_reason, Some(StopReason::Length));
+                assert_eq!(response.assistant_text(), "truncated answ");
+            }
+            other => panic!("expected Completed(Length), got {other:?}"),
+        }
+    }
+
+    /// Pins the load-bearing precedence: tool calls override an explicit `length` finish (opposite of the Messages backend).
+    /// See the NOTE at the override site.
+    #[tokio::test]
+    async fn tool_calls_override_length_finish() {
+        let tool_chunk = make_chunk(vec![ChatChunkDelta {
+            role: None,
+            content: None,
+            reasoning_content: None,
+            tool_calls: vec![ChunkToolCallDelta {
+                index: 0,
+                id: Some("call_cut".into()),
+                kind: Some("function".into()),
+                function: Some(ToolCallFunctionDelta {
+                    name: Some("do_thing".into()),
+                    arguments: Some("{\"x\": \"trunc".into()),
+                }),
+            }],
+            tool_call_id: None,
+        }]);
+        let raw = stream::iter::<Vec<Result<ChatCompletionChunk, SamplingError>>>(vec![
+            Ok(tool_chunk),
+            Ok(final_chunk(FinishReason::Length)),
+        ])
+        .boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                assert_eq!(response.stop_reason, Some(StopReason::ToolCalls));
+                assert_eq!(response.tool_calls().len(), 1);
+            }
+            other => panic!("expected Completed(ToolCalls), got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn tool_call_stream_emits_deltas_and_assembles_final_call() {
-        // First chunk has id + name + part of arguments.
+        // First chunk has id, name, and part of arguments
         let chunk1 = make_chunk(vec![ChatChunkDelta {
             role: None,
             content: None,
             reasoning_content: None,
             tool_calls: vec![ChunkToolCallDelta {
-                index: Some(0),
+                index: 0,
                 id: Some("call_abc".into()),
                 kind: Some("function".into()),
                 function: Some(ToolCallFunctionDelta {
@@ -571,13 +609,13 @@ mod tests {
             }],
             tool_call_id: None,
         }]);
-        // Second chunk has only argument fragment.
+        // Second chunk has only an argument fragment
         let chunk2 = make_chunk(vec![ChatChunkDelta {
             role: None,
             content: None,
             reasoning_content: None,
             tool_calls: vec![ChunkToolCallDelta {
-                index: Some(0),
+                index: 0,
                 id: None,
                 kind: None,
                 function: Some(ToolCallFunctionDelta {
@@ -621,195 +659,25 @@ mod tests {
             .collect();
 
         assert_eq!(deltas.len(), 2);
-        assert_eq!(deltas[0].0, 0);
-        assert_eq!(deltas[0].1.as_deref(), Some("call_abc"));
-        assert_eq!(deltas[0].2.as_deref(), Some("do_thing"));
-        assert_eq!(deltas[0].3.as_deref(), Some("{\"x\":"));
-        assert_eq!(deltas[1].1, None);
-        assert_eq!(deltas[1].2, None);
-        assert_eq!(deltas[1].3.as_deref(), Some("1}"));
+        assert_eq!(nth(&deltas, 0).0, 0);
+        assert_eq!(nth(&deltas, 0).1.as_deref(), Some("call_abc"));
+        assert_eq!(nth(&deltas, 0).2.as_deref(), Some("do_thing"));
+        assert_eq!(nth(&deltas, 0).3.as_deref(), Some("{\"x\":"));
+        assert_eq!(nth(&deltas, 1).1, None);
+        assert_eq!(nth(&deltas, 1).2, None);
+        assert_eq!(nth(&deltas, 1).3.as_deref(), Some("1}"));
 
         match events.last().unwrap() {
             SamplingEvent::Completed { response, .. } => {
                 let calls = response.tool_calls();
                 assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].id.as_ref(), "call_abc");
-                assert_eq!(calls[0].name, "do_thing");
-                assert_eq!(calls[0].arguments.as_ref(), "{\"x\":1}");
-                // Tool calls force ToolCalls stop reason.
+                assert_eq!(nth(calls, 0).id.as_ref(), "call_abc");
+                assert_eq!(nth(calls, 0).name, "do_thing");
+                assert_eq!(nth(calls, 0).arguments.as_ref(), "{\"x\":1}");
                 assert_eq!(response.stop_reason, Some(StopReason::ToolCalls));
             }
             other => panic!("expected Completed, got {other:?}"),
         }
-    }
-
-    fn tool_delta_chunk(
-        index: Option<u32>,
-        id: Option<&str>,
-        name: Option<&str>,
-        arguments: Option<&str>,
-    ) -> ChatCompletionChunk {
-        make_chunk(vec![ChatChunkDelta {
-            role: None,
-            content: None,
-            reasoning_content: None,
-            tool_calls: vec![ChunkToolCallDelta {
-                index,
-                id: id.map(str::to_owned),
-                kind: None,
-                function: Some(ToolCallFunctionDelta {
-                    name: name.map(str::to_owned),
-                    arguments: arguments.map(str::to_owned),
-                }),
-            }],
-            tool_call_id: None,
-        }])
-    }
-
-    /// `(id, name, arguments)` of the assembled calls on the terminal event.
-    async fn completed_tool_calls(
-        chunks: Vec<Result<ChatCompletionChunk, SamplingError>>,
-    ) -> Vec<(String, String, String)> {
-        let raw = stream::iter(chunks).boxed();
-        let events = collect(stream_chat_completions(
-            raw,
-            None,
-            rid(),
-            Duration::from_secs(60),
-        ))
-        .await;
-        match events.last().expect("stream must yield a terminal event") {
-            SamplingEvent::Completed { response, .. } => response
-                .tool_calls()
-                .iter()
-                .map(|c| (c.id.to_string(), c.name.clone(), c.arguments.to_string()))
-                .collect(),
-            other => panic!("expected Completed, got {other:?}"),
-        }
-    }
-
-    /// A provider that omits `index` on parallel calls. Defaulting the missing
-    /// index to `0` merged both into one slot and concatenated their argument
-    /// strings into `{"a":1}{"b":2}`, which no tool can parse.
-    #[tokio::test]
-    async fn parallel_tool_calls_without_index_stay_separate() {
-        let calls = completed_tool_calls(vec![
-            Ok(tool_delta_chunk(
-                None,
-                Some("call_a"),
-                Some("first"),
-                Some("{\"a\":1}"),
-            )),
-            Ok(tool_delta_chunk(
-                None,
-                Some("call_b"),
-                Some("second"),
-                Some("{\"b\":2}"),
-            )),
-        ])
-        .await;
-
-        assert_eq!(calls.len(), 2);
-        assert_eq!(
-            calls[0],
-            ("call_a".into(), "first".into(), "{\"a\":1}".into())
-        );
-        assert_eq!(
-            calls[1],
-            ("call_b".into(), "second".into(), "{\"b\":2}".into())
-        );
-    }
-
-    /// The shape of every argument fragment after the opening chunk when the
-    /// provider sends neither index nor id.
-    #[tokio::test]
-    async fn argument_fragments_without_index_or_id_continue_the_open_call() {
-        let calls = completed_tool_calls(vec![
-            Ok(tool_delta_chunk(
-                None,
-                Some("call_a"),
-                Some("do_thing"),
-                Some("{\"x\":"),
-            )),
-            Ok(tool_delta_chunk(None, None, None, Some("1}"))),
-        ])
-        .await;
-
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].2, "{\"x\":1}");
-    }
-
-    /// Interleaved parallel calls: the third fragment belongs to the first
-    /// call, and only its id says so.
-    #[tokio::test]
-    async fn a_later_fragment_is_matched_by_id_not_by_arrival_order() {
-        let calls = completed_tool_calls(vec![
-            Ok(tool_delta_chunk(
-                None,
-                Some("call_a"),
-                Some("first"),
-                Some("{\"a\":"),
-            )),
-            Ok(tool_delta_chunk(
-                None,
-                Some("call_b"),
-                Some("second"),
-                Some("{\"b\":2}"),
-            )),
-            Ok(tool_delta_chunk(None, Some("call_a"), None, Some("1}"))),
-        ])
-        .await;
-
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].2, "{\"a\":1}");
-        assert_eq!(calls[1].2, "{\"b\":2}");
-    }
-
-    /// An empty id cannot pair a tool result back to its call.
-    #[tokio::test]
-    async fn missing_tool_call_id_is_synthesized_from_the_request_id() {
-        let calls = completed_tool_calls(vec![Ok(tool_delta_chunk(
-            Some(0),
-            None,
-            Some("do_thing"),
-            Some("{}"),
-        ))])
-        .await;
-
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "test-req_tool_0");
-    }
-
-    #[test]
-    fn an_id_assigned_slot_never_collides_with_an_explicit_index() {
-        let mut id_to_index = BTreeMap::new();
-        let mut next_index = 0;
-
-        let a = resolve_tool_index(
-            Some(0),
-            Some("call_a"),
-            &mut id_to_index,
-            &mut next_index,
-            None,
-        );
-        // A second call arriving without an index must not land on slot 0.
-        let b = resolve_tool_index(
-            None,
-            Some("call_b"),
-            &mut id_to_index,
-            &mut next_index,
-            Some(a),
-        );
-        // The first call's id still resolves to the slot it was given.
-        let a_again = resolve_tool_index(
-            None,
-            Some("call_a"),
-            &mut id_to_index,
-            &mut next_index,
-            Some(b),
-        );
-
-        assert_eq!((a, b, a_again), (0, 1, 0));
     }
 
     #[tokio::test]
@@ -853,8 +721,7 @@ mod tests {
         ))
         .await;
 
-        // Stream should emit StreamStarted, FirstToken, ChannelToken
-        // then Failed(IdleTimeout) when the stall hits the deadline.
+        // The stream emits StreamStarted, FirstToken, ChannelToken, then Failed(IdleTimeout) when the stall hits the deadline
         match events.last().unwrap() {
             SamplingEvent::Failed { error, .. } => {
                 assert_eq!(error.kind, crate::events::SamplingErrorKind::IdleTimeout);
@@ -879,8 +746,11 @@ mod tests {
         ))
         .await;
 
-        assert!(matches!(events[0], SamplingEvent::StreamStarted { .. }));
-        match &events[1] {
+        assert!(matches!(
+            nth(&events, 0),
+            SamplingEvent::StreamStarted { .. }
+        ));
+        match &nth(&events, 1) {
             SamplingEvent::ModelMetadata { metadata: m, .. } => {
                 assert_eq!(m.context_window, Some(8192));
                 assert_eq!(m.max_completion_tokens, Some(4096));
@@ -926,8 +796,7 @@ mod tests {
         }
     }
 
-    /// Server-reported cost lands on the response; the REST mapper's `0`
-    /// backfill means "unreported" and must yield `None`.
+    /// Server-reported cost lands on the response; the REST mapper's `0` backfill means "unreported" and must yield `None`.
     #[tokio::test]
     async fn cost_is_extracted_and_zero_is_unreported() {
         for (wire, expected) in [(Some(78), Some(78)), (Some(0), None), (None, None)] {

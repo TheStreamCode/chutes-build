@@ -1,4 +1,4 @@
-//! MCP elicitation card (`chutes.build/mcp/elicit`).
+//! MCP elicitation card (`x.ai/mcp/elicit`).
 //! Form and URL elicitation cards behave like the other cards that wait on the user (permission, question, plan approval).
 //! State transitions live in [`state`], painting in [`render`].
 

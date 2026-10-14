@@ -1,36 +1,26 @@
-//! Server integration for the workspace.
+//! Server integration for the workspace, over a single [`ToolServer`] connection.
 //!
-//! Provides server integration via a single [`ToolServer`] connection:
+//! **Provider direction:** The workspace exposes its session tools to the server via [`ToolServer`] and [`WorkspaceToolHandler`].
+//! When the server receives a `tool_call_request` it routes to the workspace's handler.
+//! The handler dispatches to the workspace session matching the `session_id`.
+//! Sessions are created on demand via `session.bind`; there is no privileged "main" session.
 //!
-//! **Provider direction:** The workspace exposes its session tools to
-//! the server via [`ToolServer`] + [`WorkspaceToolHandler`]. When the server
-//! receives a `tool_call_request` it routes to the workspace's handler,
-//! which dispatches to the workspace session matching the
-//! `session_id`. Sessions are created on demand via
-//! `session.bind` — there is no privileged "main" session.
+//! **Session multiplexing:** Multiple sessions can be bound to the same workspace server concurrently.
+//! Each gets its own workspace session (isolated CWD, shell state, toolset).
+//! Sessions are created when the server sends a `session.bind` notification, and cleaned up on disconnect or explicit unbind.
 //!
-//! **Session multiplexing:** Multiple sessions can be bound to the
-//! same workspace server concurrently. Each gets its own workspace
-//! session (isolated CWD, shell state, toolset). Sessions are created
-//! when the server sends a `session.bind` notification, and
-//! cleaned up on disconnect or explicit unbind.
+//! **Notifications:** The same `ToolServer` connection is used for subscribing to notifications (tool changes).
+//! It also sends workspace events / tool notifications back to the server.
 //!
-//! **Notifications:** The same `ToolServer` connection is used for
-//! subscribing to notifications (tool changes) and sending
-//! workspace events / tool notifications back to the server.
-//!
-//! The [`HubConnectionPool`] and auth credential are shared, so
-//! everything multiplexes over one WebSocket per `(url, principal)`.
+//! The [`HubConnectionPool`] and auth credential are shared, so everything multiplexes over one WebSocket per `(url, principal)`.
 //!
 //! # Security considerations
 //!
-//! - **Provider direction** returns full `result.prompt_text` to the
-//!   remote server. This may contain sensitive workspace data (file
-//!   contents, env vars). Callers must ensure the server endpoint is
-//!   trusted.
-//! - **Consumer direction** remote tools are merged with `kind: None` and
-//!   are only visible under `CapabilityMode::All`. They are dropped in
-//!   subagent sessions with restricted capability modes.
+//! - **Provider direction** returns full `result.prompt_text` to the remote server.
+//!   This may contain sensitive workspace data (file contents, env vars).
+//!   Callers must ensure the server endpoint is trusted.
+//! - **Consumer direction** remote tools are merged with `kind: None` and are only visible under `CapabilityMode::All`.
+//!   They are dropped in subagent sessions with restricted capability modes.
 use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::handle::WorkspaceHandle;
 use async_trait::async_trait;
@@ -39,8 +29,8 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use url::Url;
 use xai_computer_hub_sdk::{
-    AuthProvider, CLOSE_CODE_SANDBOX_TERMINATED, ClientError, HubConnectionPool, ToolServer,
-    ToolServerBuilder, ToolServerHandler,
+    AuthProvider, CLOSE_CODE_SANDBOX_TERMINATED, ClientError, HubConnectionPool,
+    InitialConnectPolicy, RefusalCode, ToolServer, ToolServerBuilder, ToolServerHandler,
 };
 use xai_grok_diag_server::DiagHandle;
 use xai_grok_tools::registry::types::ToolConfig;
@@ -50,34 +40,34 @@ use xai_tool_runtime::{
     terminal_only,
 };
 use xai_tool_types::ToolDescription;
-/// Configuration for connecting to a server instance.
-///
-/// Passed via [`WorkspaceConfig::hub_config`](crate::config::WorkspaceConfig::hub_config).
-/// When `Some`, the workspace can connect to the server after construction
-/// via [`WorkspaceHandle::connect_hub`](crate::handle::WorkspaceHandle::connect_hub).
+/// Configuration for connecting to a server instance, via [`WorkspaceConfig::hub_config`](crate::config::WorkspaceConfig::hub_config).
+/// When `Some`, connect after construction via [`WorkspaceHandle::connect_hub`](crate::handle::WorkspaceHandle::connect_hub).
 #[derive(Clone)]
 pub struct HubConfig {
     /// Server WebSocket URL (`ws://` or `wss://`).
     pub url: Url,
     pub auth: Arc<dyn AuthProvider>,
-    /// Activity tracker to poke on reconnect so the status publisher
-    /// sends an immediate heartbeat (prevents status reverting to null).
+    /// Activity tracker to poke on reconnect so the status publisher sends an immediate heartbeat (prevents status reverting to null).
     pub activity_tracker: Option<Arc<crate::activity::ActivityTracker>>,
-    /// Stable server ID for `register_server` / `servers.list` /
-    /// `server.bind`. When `None`, the SDK default (`"workspace-server"`)
-    /// is used. Set to the sandbox `session_id` in production so each
-    /// workspace server has a unique, predictable identity.
+    /// Stable server ID for `register_server` / `servers.list` / `server.bind`.
+    /// When `None`, the SDK default (`"workspace-server"`) is used.
+    /// Set to the sandbox `session_id` in production so each workspace server has a unique, predictable identity.
     pub server_id: Option<String>,
-    /// Optional extra access key attached on the server connection when the
-    /// non-production feature set is enabled. `None` on prod / local-dev.
+    /// Optional extra access key attached on the server connection when the non-production feature set is enabled.
+    /// `None` on prod / local-dev.
     pub alpha_test_key: Option<String>,
     /// Permit a plaintext `ws://` server on a non-loopback host (mesh-secured).
     pub allow_insecure_ws: bool,
-    /// Diagnostics-server state handle driving the `/ready` state from the
-    /// connection lifecycle. `None` = no diagnostics server (embedded/local
-    /// use).
+    /// Diagnostics-server state handle that drives the `/ready` state from connection events.
+    /// `None` means no diagnostics server (embedded/local use).
     pub diag: Option<DiagHandle>,
+    /// Told when a reconnect's upgrade is refused `401`/`403` (with the policy code a `403` names);
+    /// the connection is over, and an owner that supervises it acts at once rather than at its
+    /// next liveness sweep.
+    pub on_handshake_refused: Option<HandshakeRefused>,
 }
+/// See [`HubConfig::on_handshake_refused`].
+pub type HandshakeRefused = Arc<dyn Fn(u16, Option<RefusalCode>) + Send + Sync>;
 impl std::fmt::Debug for HubConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HubConfig")
@@ -87,45 +77,40 @@ impl std::fmt::Debug for HubConfig {
             .finish()
     }
 }
-/// Live handle to a server connection, tool server, and notification
-/// listener.
-///
-/// Stored on [`WorkspaceShared`](crate::session::WorkspaceShared) as
-/// `Option<HubHandle>`. Created by
-/// [`WorkspaceHandle::connect_hub`](crate::handle::WorkspaceHandle::connect_hub).
+/// Live handle to a server connection, tool server, and notification listener.
+/// Stored on [`WorkspaceShared`](crate::session::WorkspaceShared); created by [`WorkspaceHandle::connect_hub`](crate::handle::WorkspaceHandle::connect_hub).
 pub(crate) struct HubHandle {
     /// The tool server exposing workspace tools to the server (provider direction).
     /// Also used for subscribing to and sending notifications.
     pub(crate) server: ToolServer,
     /// Kept alive so the underlying WebSocket connection is not dropped.
     /// Dropping this last reference tears down the connection.
-    /// Not directly accessed — its lifetime keeps connections alive.
     #[allow(dead_code)]
     pub(crate) pool: Arc<HubConnectionPool>,
     /// Background tool server run loop task handle.
     server_task: Option<JoinHandle<()>>,
     /// Background notification listener task handle.
     notification_task: Option<JoinHandle<()>>,
-    /// Background task that forwards `WorkspaceEvent`s as `tool.notify`
-    /// custom frames through the server.
+    /// Background task that forwards `WorkspaceEvent`s as `tool.notify` custom frames through the server.
     event_publisher_task: Option<JoinHandle<()>>,
-    /// Background drain feeding the `ActivityTracker` from the session
-    /// tool-notification stream (see `run_activity_feed`).
+    /// Background drain feeding the `ActivityTracker` from the session tool-notification stream (see `run_activity_feed`).
     activity_feed_task: Option<JoinHandle<()>>,
     /// Background task that publishes `tool_server.status` to the server.
     status_publisher_task: Option<JoinHandle<()>>,
-    /// Background task that listens for `session.bind` and
-    /// creates workspace sessions.
+    /// Background task that listens for `session.bind` and creates workspace sessions.
     session_bind_task: Option<JoinHandle<()>>,
-    /// Background codebase-index event forwarder. Tracked so shutdown aborts it
-    /// (it holds the `events` sender and cannot self-terminate).
+    /// Background codebase-index event forwarder.
+    /// Tracked so shutdown aborts it (it holds the `events` sender and cannot self-terminate).
     codebase_index_forwarder_task: Option<JoinHandle<()>>,
     /// Background client ext-notification forwarder.
     client_ext_forwarder_task: Option<JoinHandle<()>>,
-    /// Background tool-definitions event forwarder. Tracked so shutdown aborts
-    /// it — otherwise a reconnect would stack a second subscriber processing
-    /// every workspace event for the rest of the process.
+    /// Background tool-definitions event forwarder.
+    /// Tracked so shutdown aborts it; otherwise a reconnect would stack a second subscriber processing every workspace event.
     tool_defs_forwarder_task: Option<JoinHandle<()>>,
+    /// Background `FsChanged` producer for the exposed root. It holds the only strong reference to
+    /// the shared OS watcher, so the handle aborts it on drop: a `HubHandle` that goes away without
+    /// `shutdown` still releases the watch.
+    fs_change_producer_task: Option<tokio_util::task::AbortOnDropHandle<()>>,
 }
 impl std::fmt::Debug for HubHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -204,6 +189,7 @@ pub(crate) struct HubWsTiming {
     pub ping: std::time::Duration,
     pub reconnect_backoff: Option<Vec<std::time::Duration>>,
     pub liveness_deadline: Option<std::time::Duration>,
+    pub initial_connect: InitialConnectPolicy,
 }
 impl HubWsTiming {
     pub(crate) fn from_status(cfg: &crate::StatusConfig) -> Self {
@@ -211,23 +197,24 @@ impl HubWsTiming {
             ping: cfg.ws_ping,
             reconnect_backoff: cfg.ws_reconnect_backoff.clone(),
             liveness_deadline: cfg.ws_liveness_deadline,
+            initial_connect: InitialConnectPolicy {
+                attempt_timeout: None,
+                hedge_after: cfg.hub_connect_hedge_after,
+                deadline: cfg.hub_connect_deadline,
+            },
         }
     }
 }
 impl HubHandle {
-    /// Build server connection pool, tool server, and return a handle.
-    ///
-    /// The tool server starts with zero sessions — all sessions are
-    /// bound dynamically via `session.bind` at runtime.
-    /// The tool server run loop and notification listener are NOT
-    /// started here — call [`Self::set_server_task`] and
-    /// [`Self::set_notification_task`] after spawning.
+    /// Build the connection pool and tool server and return a handle. Sessions are bound later via `session.bind`.
+    /// The run loop and notification listener are not started here; set those tasks after spawning.
     pub(crate) async fn connect(
         config: &HubConfig,
         ws: HubWsTiming,
         tool_handlers: Vec<std::sync::Arc<dyn ToolServerHandler>>,
         server_metadata: Option<serde_json::Value>,
         session_handler_resolver: Option<xai_computer_hub_sdk::SessionHandlerResolver>,
+        on_session_unbound: Option<std::sync::Arc<xai_computer_hub_sdk::SessionUnboundCallback>>,
     ) -> Result<Self, ClientError> {
         let pool = HubConnectionPool::new();
         let server_url = config.url.clone();
@@ -242,7 +229,8 @@ impl HubHandle {
                     .wire()
                     .to_vec(),
             )
-            .with_ws_ping_interval(ws.ping);
+            .with_ws_ping_interval(ws.ping)
+            .with_initial_connect(ws.initial_connect);
         if let Some(schedule) = ws.reconnect_backoff {
             server_builder = server_builder.with_reconnect_backoff(schedule);
         }
@@ -270,6 +258,10 @@ impl HubHandle {
                     diag.revive_connected(&[CLOSE_CODE_SANDBOX_TERMINATED]);
                 });
         }
+        if let Some(refused) = config.on_handshake_refused.clone() {
+            server_builder =
+                server_builder.on_handshake_refused(move |status, code| refused(status, code));
+        }
         if let Some(ref id) = config.server_id {
             server_builder = server_builder.server_id(parse_server_id(id)?);
         }
@@ -281,6 +273,9 @@ impl HubHandle {
         }
         if let Some(resolver) = session_handler_resolver {
             server_builder = server_builder.session_handler_resolver(resolver);
+        }
+        if let Some(cb) = on_session_unbound {
+            server_builder = server_builder.on_session_unbound(move |sid| cb(sid));
         }
         let server = server_builder.build().await?;
         Ok(Self {
@@ -295,6 +290,7 @@ impl HubHandle {
             codebase_index_forwarder_task: None,
             client_ext_forwarder_task: None,
             tool_defs_forwarder_task: None,
+            fs_change_producer_task: None,
         })
     }
     /// Attach the background tool server run loop task.
@@ -329,13 +325,15 @@ impl HubHandle {
     pub(crate) fn set_tool_defs_forwarder_task(&mut self, task: JoinHandle<()>) {
         self.tool_defs_forwarder_task = Some(task);
     }
-    /// Cooperative shutdown with timeout.
-    ///
-    /// 1. Shuts down the tool server (unregisters tools + sessions).
-    /// 2. Aborts background tasks.
-    ///
-    /// The shutdown call is guarded by a 5-second timeout to prevent
-    /// blocking indefinitely if the server is unreachable.
+    /// Attach the background `FsChanged` producer task.
+    pub(crate) fn set_fs_change_producer_task(
+        &mut self,
+        task: tokio_util::task::AbortOnDropHandle<()>,
+    ) {
+        self.fs_change_producer_task = Some(task);
+    }
+    /// Cooperative shutdown: unregister tools and sessions, then abort background tasks.
+    /// Guarded by a 5-second timeout so an unreachable server cannot block indefinitely.
     pub(crate) async fn shutdown(self) {
         const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
         match tokio::time::timeout(SHUTDOWN_TIMEOUT, self.server.shutdown()).await {
@@ -379,23 +377,17 @@ impl HubHandle {
             task.abort();
             let _ = task.await;
         }
+        if let Some(task) = self.fs_change_producer_task {
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
-/// [`ToolServerHandler`] for an individual tool, dispatched to the
-/// workspace session matching the `session_id`.
-///
-/// One instance is created per tool discovered from the workspace's
-/// `default_tool_config`. The server sees individual tools (bash,
-/// read_file, etc.) and routes `tool_call_request` frames directly by
-/// `tool_id`. No meta-wrapper, no envelope — the server has full per-tool
-/// visibility for routing, listing, and per-session binding.
-///
-/// Sessions must be bound via `session.bind` before tool calls
-/// are accepted. There is no implicit default session.
+/// Per-tool handler dispatched to the session matching `session_id`. The server routes by `tool_id` with no meta-wrapper.
+/// Sessions must be bound via `session.bind` first; there is no implicit default session.
 pub(crate) struct SessionRoutedToolHandler {
     tool_id: ToolId,
     desc: ToolDescription,
-    semantic_kind: Option<xai_grok_tools::types::tool::ToolKind>,
     schema: Option<Value>,
     workspace: WorkspaceHandle,
 }
@@ -403,14 +395,12 @@ impl SessionRoutedToolHandler {
     pub(crate) fn new(
         name: String,
         desc: ToolDescription,
-        semantic_kind: Option<xai_grok_tools::types::tool::ToolKind>,
         schema: Option<Value>,
         workspace: WorkspaceHandle,
     ) -> Result<Self, xai_tool_protocol::IdError> {
         Ok(Self {
             tool_id: ToolId::new(name)?,
             desc,
-            semantic_kind,
             schema,
             workspace,
         })
@@ -418,19 +408,9 @@ impl SessionRoutedToolHandler {
     fn name(&self) -> &str {
         self.tool_id.as_str()
     }
-    pub(crate) fn permission_access(&self, args: &Value) -> Option<crate::permission::AccessKind> {
-        crate::permission::access_kind_for_hub_tool(self.semantic_kind, self.name(), args)
-    }
 }
-/// RAII guard that brackets a tool call's activity-tracker accounting.
-///
-/// [`SessionRoutedToolHandler::handle_call`] calls
-/// [`ActivityTracker::tool_call_started`](crate::activity::ActivityTracker::tool_call_started)
-/// at stream construction and moves this guard into the returned stream. Its
-/// [`Drop`] calls
-/// [`tool_call_completed`](crate::activity::ActivityTracker::tool_call_completed),
-/// so completion bookkeeping fires whether the stream reaches its terminal
-/// item *or* the consumer drops the stream early (e.g. harness disconnect).
+/// RAII guard for a tool call's activity accounting. Start fires at stream construction; [`Drop`] completes it.
+/// Completion runs whether the stream finishes or the consumer drops it early.
 struct CallCompletedGuard {
     tracker: Arc<crate::activity::ActivityTracker>,
     call_id: String,
@@ -503,60 +483,76 @@ impl ToolServerHandler for SessionRoutedToolHandler {
             }
         };
         let call_id = ctx.call_id.to_string();
-        if crate::permission::hitl_permission_live_enabled()
-            && !session.yolo_mode()
-            && let Some(access) = self.permission_access(&args)
+        let (sandbox, mode) = match self.workspace.shared.sandbox() {
+            Some(sandbox) => match sandbox.engage_unless_off().await {
+                crate::sandbox::SandboxMode::Off => (None, None),
+                mode => (Some(sandbox), Some(mode)),
+            },
+            None => (None, None),
+        };
+        let tool = session
+            .toolset()
+            .get_tool_metadata(self.name())
+            .map(|tool| (tool.kind(), tool.tool_namespace()));
+        let path = crate::permission::SandboxPath::for_tool(tool, mode)
+            .for_call(
+                self.workspace.shared.tool_approval,
+                &session,
+                self.name(),
+                &args,
+            )
+            .await;
+        if self.workspace.shared.tool_approval == crate::permission::ToolApprovalGate::Enforced
+            && let Err(denied) = crate::permission::approve_hub_call(
+                &self.workspace,
+                &session,
+                self.name(),
+                &call_id,
+                &args,
+                path.prompt_gate(),
+            )
+            .await
         {
-            let transport = self
-                .workspace
-                .hub_server_blocking()
-                .await
-                .and_then(|server| {
-                    crate::permission::ToolServerPermissionTransport::from_session_id(
-                        server, session_id,
-                    )
-                });
-            match transport {
-                Some(transport) => {
-                    let outcome = crate::permission::request_permission_via_hub(
-                        &transport, &access, &call_id, None,
-                    )
-                    .await;
-                    if !crate::permission::prompt_outcome_allows(&outcome) {
-                        use crate::permission::PromptOutcome;
-                        let deny_msg = match &outcome {
-                            PromptOutcome::FollowupMessage(msg) => {
-                                format!("tool permission redirected: {msg}")
-                            }
-                            _ => format!("tool permission denied for {}", self.name()),
-                        };
-                        tracing::info!(
-                            tool = %self.name(),
-                            session = %session_id,
-                            call_id = %call_id,
-                            ?outcome,
-                            "tool-permission denied via hub; rejecting tool call"
-                        );
-                        return terminal_only(Err(ToolError::new(
-                            ToolErrorKind::PermissionDenied,
-                            deny_msg,
-                        )));
-                    }
-                }
-                None => {
-                    tracing::warn!(
-                        tool = %self.name(),
-                        session = %session_id,
-                        "CHUTES_BUILD_HITL_PERMISSION_LIVE set but no hub ToolServer; rejecting guarded tool"
-                    );
-                    return terminal_only(Err(ToolError::new(
-                        ToolErrorKind::PermissionDenied,
-                        "tool permission unavailable (no hub transport)",
-                    )));
-                }
-            }
+            return terminal_only(Err(denied));
         }
-        let toolset = session.toolset();
+        if path.follows_result_path()
+            && let (Some(sandbox), Some(mode)) = (&sandbox, mode)
+            && let Err(error) = sandbox.pin_mode(
+                &xai_grok_sandbox::command::CallId::tool(call_id.as_str()),
+                mode,
+            )
+        {
+            if path == crate::permission::SandboxPath::Gated
+                || !matches!(error, crate::sandbox::WorkspaceSandboxError::CallTableFull)
+            {
+                return terminal_only(Err(ToolError::new(
+                    ToolErrorKind::ConcurrencyLimit,
+                    error.to_string(),
+                )));
+            }
+            if !sandbox.floor_mode(
+                &xai_grok_sandbox::command::CallId::tool(call_id.as_str()),
+                mode,
+            ) {
+                return terminal_only(Err(ToolError::new(
+                    ToolErrorKind::ConcurrencyLimit,
+                    error.to_string(),
+                )));
+            }
+            tracing::warn!(
+                call_id = %call_id,
+                %error,
+                "no room to pin the call; it runs unpinned, no weaker than its dispatch mode"
+            );
+        }
+        if path == crate::permission::SandboxPath::None
+            && let Some(sandbox) = &sandbox
+            && let Err(refused) =
+                crate::permission::refuse_mode_layer_write(sandbox, &session, self.name(), &args)
+                    .await
+        {
+            return terminal_only(Err(refused));
+        }
         tracing::debug!(
             tool = %self.name(),
             call_id = %call_id,
@@ -569,11 +565,38 @@ impl ToolServerHandler for SessionRoutedToolHandler {
             Some(v) => v.rewrite_json_inbound(args),
             None => args,
         };
-        let inner = toolset.call_streaming(self.name(), args, &call_id, None);
         let tracker = self.workspace.shared.activity_tracker.clone();
         let name = self.name().to_owned();
         let session_label = session_id.to_owned();
-        let guard = CallCompletedGuard::new(tracker, call_id, Some(session_label.clone()));
+        let guard = CallCompletedGuard::new(tracker, call_id.clone(), Some(session_label.clone()));
+        let dispatch_session = session.clone();
+        let dispatch_name = name.clone();
+        let dispatch_call_id = call_id.clone();
+        let inner = if path.follows_result_path() {
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            crate::sandbox::result_path::run_shell_call_with_replay(
+                self.workspace.clone(),
+                session,
+                call_id,
+                command,
+                path == crate::permission::SandboxPath::Gated,
+                move || {
+                    dispatch_session.toolset().call_streaming(
+                        &dispatch_name,
+                        args.clone(),
+                        &dispatch_call_id,
+                        None,
+                    )
+                },
+            )
+        } else {
+            dispatch_session
+                .toolset()
+                .call_streaming(&dispatch_name, args, &dispatch_call_id, None)
+        };
         Box::pin(async_stream::stream! {
             use futures::StreamExt;
             let mut _guard = guard;
@@ -622,19 +645,8 @@ impl ToolServerHandler for SessionRoutedToolHandler {
         })
     }
 }
-/// Convert a set of remote [`ToolId`]s into workspace [`ToolConfig`]s.
-///
-/// Each remote tool gets a `ToolConfig` with:
-/// - `id` prefixed with `hub:` to avoid collisions with baseline/MCP tools
-/// - `kind: None` (remote tools have unknown capability kind)
-/// - `name_override` set to the bare tool name
-///
-/// # Capability mode filtering
-///
-/// Remote-origin `kind: None` tools are dropped under non-`All` capability
-/// modes (e.g. `ReadWrite`, `ReadOnly` in subagent sessions), matching
-/// MCP-origin tool behavior. They are only visible in the main session
-/// which uses `CapabilityMode::All`.
+/// Each remote tool gets a `hub:`-prefixed id (no collision with baseline/MCP), `kind: None`, and a bare `name_override`.
+/// Remote-origin `kind: None` tools are dropped under non-`All` modes, matching MCP; only the main session's `All` keeps them.
 pub(crate) fn hub_tool_ids_to_tool_configs(tool_ids: &[ToolId]) -> Vec<ToolConfig> {
     if !tool_ids.is_empty() {
         tracing::info!(
@@ -655,8 +667,7 @@ pub(crate) fn hub_tool_ids_to_tool_configs(tool_ids: &[ToolId]) -> Vec<ToolConfi
 }
 /// Apply a `ToolsChanged` notification to the current remote tools snapshot.
 ///
-/// Returns the new snapshot. Extracted as a named function for
-/// testability.
+/// Returns the new snapshot.
 pub(crate) fn apply_tools_changed(
     current: &[ToolConfig],
     added: &[ToolId],
@@ -692,7 +703,12 @@ fn parse_server_id(id: &str) -> Result<xai_tool_protocol::ServerId, ClientError>
 }
 /// Map a [`ClientError`] into a [`WorkspaceError::HubError`].
 pub(crate) fn client_error_to_workspace(err: ClientError) -> WorkspaceError {
-    WorkspaceError::HubError(err.to_string())
+    match err {
+        ClientError::HandshakeAuthFailed { status, refusal } => {
+            WorkspaceError::HubRefused { status, refusal }
+        }
+        other => WorkspaceError::HubError(other.to_string()),
+    }
 }
 /// Map a server connection failure into a [`WorkspaceResult`].
 pub(crate) fn hub_result<T>(result: Result<T, ClientError>) -> WorkspaceResult<T> {
@@ -710,11 +726,14 @@ mod tests {
         ];
         let configs = hub_tool_ids_to_tool_configs(&ids);
         assert_eq!(configs.len(), 2);
-        assert_eq!(configs[0].id, "hub:read_file");
-        assert_eq!(configs[0].name_override.as_deref(), Some("read_file"));
-        assert_eq!(configs[0].kind, None::<ToolKind>);
-        assert_eq!(configs[1].id, "hub:web_search");
-        assert_eq!(configs[1].name_override.as_deref(), Some("web_search"));
+        let [cfg0, cfg1] = configs.as_slice() else {
+            panic!("expected two configs: {configs:?}");
+        };
+        assert_eq!(cfg0.id, "hub:read_file");
+        assert_eq!(cfg0.name_override.as_deref(), Some("read_file"));
+        assert_eq!(cfg0.kind, None::<ToolKind>);
+        assert_eq!(cfg1.id, "hub:web_search");
+        assert_eq!(cfg1.name_override.as_deref(), Some("web_search"));
     }
     #[test]
     fn hub_tool_ids_to_tool_configs_empty() {
@@ -743,7 +762,10 @@ mod tests {
         let initial = hub_tool_ids_to_tool_configs(&[ToolId::new("tool_a").unwrap()]);
         let result = apply_tools_changed(&initial, &[], &[], &[ToolId::new("tool_a").unwrap()]);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "hub:tool_a");
+        let Some(first) = result.first() else {
+            panic!("expected one config: {result:?}");
+        };
+        assert_eq!(first.id, "hub:tool_a");
     }
     use futures::StreamExt;
     use xai_tool_runtime::{SessionContext, ToolCallId};
@@ -751,7 +773,6 @@ mod tests {
         SessionRoutedToolHandler::new(
             tool_name.to_owned(),
             ToolDescription::new(tool_name.to_owned(), String::new()),
-            None,
             None,
             workspace.clone(),
         )
@@ -764,52 +785,12 @@ mod tests {
             "not a tool id!".to_owned(),
             ToolDescription::new("not a tool id!".to_owned(), String::new()),
             None,
-            None,
             handle.clone(),
         );
         assert!(
             err.is_err(),
             "invalid name must be rejected at construction"
         );
-    }
-    #[tokio::test]
-    async fn renamed_active_message_handler_keeps_semantic_hitl_classification() {
-        let handle = crate::handle::tests::make_handle();
-        let mut config = xai_grok_tools::registry::types::ToolConfig::for_tool::<
-            xai_grok_tools::implementations::grok_build::SendSubagentMessageTool,
-        >();
-        config.name_override = Some("relay_to_subagent".to_owned());
-        assert_eq!(
-            config.kind,
-            Some(xai_grok_tools::types::tool::ToolKind::ActiveAgentMessage)
-        );
-        let model_name = config.name_override.clone().expect("name override");
-        let desc = ToolDescription::new(model_name.clone(), "relay");
-        let handler = SessionRoutedToolHandler::new(
-            model_name,
-            desc,
-            Some(ToolKind::ActiveAgentMessage),
-            None,
-            handle,
-        )
-        .expect("renamed handler");
-        let args = serde_json::json!({
-            "subagent_id": "sub-1",
-            "text": "private follow-up",
-        });
-        let access = handler
-            .permission_access(&args)
-            .expect("renamed semantic handler must remain guarded");
-        let crate::permission::AccessKind::AgentMessage { subagent_id } = &access else {
-            panic!("renamed semantic handler must use agent-message access")
-        };
-        assert_eq!(subagent_id, "sub-1");
-        assert!(!subagent_id.contains("private follow-up"));
-        let payload = crate::permission::build_permission_payload_for_test(&access, "tc");
-        assert_eq!(payload["tool_name"], "send_subagent_message");
-        assert_eq!(payload["subagent_id"], "sub-1");
-        assert!(payload.get("text").is_none());
-        assert!(payload.get("edit_file_paths").is_none());
     }
     #[tokio::test]
     async fn handler_tool_id_round_trips_the_validated_name() {
@@ -856,6 +837,51 @@ mod tests {
         assert_eq!(progress, 0, "gate-off pass-through must emit zero Progress");
         assert_eq!(terminal, 1, "must emit exactly one Terminal");
         assert!(matches!(items.last(), Some(ToolStreamItem::Terminal(_))));
+    }
+    /// The gate is consulted from `handle_call` when the handle says `Enforced`: a guarded tool
+    /// with no hub transport is denied before dispatch, a read still runs. Pins the check itself,
+    /// not the gate's internals (those are `permission::hub_gate::tests`).
+    #[tokio::test]
+    async fn handle_call_on_an_enforced_handle_denies_a_guarded_tool_without_a_transport() {
+        let handle = crate::handle::tests::make_enforced_handle();
+        handle
+            .create_session_with_config(
+                "gate",
+                None,
+                Some(xai_grok_agent::workspace_grok_build_toolset()),
+                crate::capability::CapabilityMode::All,
+                None,
+                false,
+            )
+            .expect("daemon toolset session");
+        let (ctx, _) = make_ctx("gate");
+        let items: Vec<_> = make_handler(&handle, "run_terminal_command")
+            .handle_call(
+                ctx,
+                serde_json::json!({ "command": "cargo build", "description": "build" }),
+            )
+            .await
+            .collect()
+            .await;
+        match items.as_slice() {
+            [ToolStreamItem::Terminal(Err(denied))] => {
+                assert_eq!(
+                    xai_tool_runtime::ToolErrorKind::PermissionDenied,
+                    denied.kind
+                );
+            }
+            other => panic!("expected one PermissionDenied terminal, got {other:?}"),
+        }
+        let (ctx, _) = make_ctx("gate");
+        let items: Vec<_> = make_handler(&handle, "read_file")
+            .handle_call(ctx, serde_json::json!({ "target_file": "missing.txt" }))
+            .await
+            .collect()
+            .await;
+        assert!(
+            matches!(items.as_slice(), [ToolStreamItem::Terminal(Ok(_))]),
+            "a read runs unasked (a missing file is the tool's own answer): {items:?}"
+        );
     }
     #[tokio::test]
     async fn handle_call_terminal_matches_non_streaming_call() {
@@ -913,7 +939,10 @@ mod tests {
             .await;
         let items: Vec<_> = stream.collect().await;
         assert_eq!(items.len(), 1, "draining yields exactly one item");
-        match &items[0] {
+        let Some(item) = items.first() else {
+            panic!("expected one stream item: {items:?}");
+        };
+        match item {
             ToolStreamItem::Terminal(Err(e)) => {
                 assert!(e.to_string().contains("draining"), "got: {e}");
             }
@@ -1205,7 +1234,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn auto_background_on_timeout_increments_then_decrements_through_real_wiring() {
         let mut cfg = bg_config();
-        cfg.tools[0].params = serde_json::json!({
+        let Some(tool) = cfg.tools.first_mut() else {
+            panic!("expected at least one tool in bg_config");
+        };
+        tool.params = serde_json::json!({
             "enabled_background": true,
             "auto_background_on_timeout": true,
         })

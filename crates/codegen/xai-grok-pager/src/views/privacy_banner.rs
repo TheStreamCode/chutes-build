@@ -1,10 +1,5 @@
-//! Coding-data sharing upsell banner (Figma "Data Sharing Upsell",
-//! node 8698:3690). Shared by the welcome tip slot and the agent-view
-//! banner slot; visibility is gated by `AppView::privacy_banner_should_show`,
-//! which in Chutes Build always answers `false` — the banner offers a
-//! coding-data-retention control the product does not have
-//! (`product::CODING_DATA_RETENTION_CONTROLS`). The view is kept whole, and its
-//! tests with it, so upstream merges land cleanly.
+//! Coding-data sharing upsell banner (the Figma "Data Sharing Upsell" design).
+//! Shared by the welcome tip slot and the agent-view banner slot; visibility is gated by `AppView::privacy_banner_should_show`.
 
 use crate::theme::Theme;
 use ratatui::buffer::Buffer;
@@ -20,20 +15,14 @@ const PRIVACY_BANNER_DESC: &str = "Off by default. Opt-in to allow SpaceXAI to r
      data, e.g., prompts, traces, & metrics, for training and debugging purposes. Change \
      anytime via settings.";
 
-// These are the upstream vendor's legal pages, deliberately left as they are:
-// the banner is unreachable in Chutes Build
-// (`product::CODING_DATA_RETENTION_CONTROLS`), and inventing plausible
-// `chutes.ai` paths would be worse than an honest dead link. If the floor is
-// ever lifted, these must be replaced before the banner can ship.
 pub(crate) const PRIVACY_BANNER_TERMS_URL: &str = "https://x.ai/legal/terms-of-service";
 pub(crate) const PRIVACY_BANNER_POLICY_URL: &str = "https://x.ai/legal/privacy-policy";
 
 /// `(text, url_when_link)`.
 type LegalSegment = (&'static str, Option<&'static str>);
 
-/// Widest first; the first that fits *whole* wins. A clipped line would
-/// leave hit rects over unreadable link text, and every variant keeps both
-/// links so neither document becomes unreachable.
+/// Widest first; the first that fits *whole* wins.
+/// A clipped line would leave hit rects over unreadable link text, and every variant keeps both links so neither document becomes unreachable.
 const PRIVACY_BANNER_LEGAL_VARIANTS: [&[LegalSegment]; 3] = [
     &[
         ("Read ", None),
@@ -57,17 +46,15 @@ const PRIVACY_BANNER_LEGAL_VARIANTS: [&[LegalSegment]; 3] = [
 const OPT_OUT_LABEL: &str = "[Opt out]";
 const OPT_IN_LABEL: &str = "[Opt in]";
 
-/// Title + legal.
+/// The title row and the legal row.
 const CHROME_ROWS: u16 = 2;
 
 pub(crate) const MIN_HEIGHT: u16 = CHROME_ROWS + 1;
 
-/// Caps banner growth on narrow terminals; overflow is elided with `…` so
-/// the disclosure never looks complete when it isn't.
+/// Caps banner growth on narrow terminals; overflow is elided with `…` so the disclosure never looks complete when it isn't.
 const MAX_BODY_ROWS: usize = 4;
 
-/// Past this, the body abandons the button column for the full slot width:
-/// a shorter banner beats a tidy right edge.
+/// Past this, the body abandons the button column for the full slot width: a shorter banner beats a tidy right edge.
 const PREFERRED_BODY_ROWS: usize = 3;
 
 pub(crate) struct PrivacyBannerRects {
@@ -96,9 +83,8 @@ fn legal_width(variant: &[LegalSegment]) -> u16 {
     variant.iter().map(|(text, _)| text.len() as u16).sum()
 }
 
-/// Buttons render whole or not at all, and never at the cost of the title:
-/// a clipped/overflowing `[Opt in]` must not leave a click target in the
-/// blank margin (a stray click there would silently opt the user in).
+/// Buttons render whole or not at all, and never at the cost of the title.
+/// A clipped/overflowing `[Opt in]` must not leave a click target in the blank margin (a stray click there would silently opt the user in).
 fn buttons_fit(area_width: u16) -> bool {
     area_width >= PRIVACY_BANNER_TITLE.len() as u16 + 1 + button_block_width()
 }
@@ -145,14 +131,12 @@ fn body_lines(area_width: u16) -> Vec<std::borrow::Cow<'static, str>> {
     lines
 }
 
-/// Rows needed at `width` — the body wraps, so both slot owners must size
-/// from this rather than a constant.
+/// Rows needed at `width`; the body wraps, so both slot owners must size from this rather than a constant.
 pub(crate) fn height(width: u16) -> u16 {
     CHROME_ROWS + (body_lines(width).len() as u16).max(1)
 }
 
-/// Needs `area.height >= MIN_HEIGHT`; give it [`height`] rows for the full
-/// body.
+/// Needs `area.height >= MIN_HEIGHT`; give it [`height`] rows for the full body.
 pub(crate) fn render(
     area: Rect,
     buf: &mut Buffer,
@@ -167,7 +151,6 @@ pub(crate) fn render(
         mouse_pos.is_some_and(|(mx, my)| r.contains(ratatui::layout::Position::new(mx, my)))
     };
 
-    // Figma node 8698:3806.
     buf.set_stringn(
         area.x,
         area.y,
@@ -193,7 +176,7 @@ pub(crate) fn render(
         buf,
     );
 
-    // Last row, so it gets the full width — no buttons to dodge.
+    // Last row, so it gets the full width; no buttons to dodge
     let gray = Style::default().fg(theme.gray);
     let legal_y = area.y + area.height - 1;
     let mut terms_rect = Rect::default();
@@ -263,12 +246,12 @@ pub(crate) fn render(
         height: 1,
     };
     let opt_out_style = if hovered(opt_out_rect) {
-        Style::default().fg(theme.text_primary).bg(theme.bg_hover)
+        theme.hover_overlay().fg(theme.text_primary)
     } else {
         Style::default().fg(theme.gray_bright)
     };
     let opt_in_style = if hovered(opt_in_rect) {
-        Style::default().fg(theme.link_fg).bg(theme.bg_hover)
+        theme.hover_overlay().fg(theme.link_fg)
     } else {
         Style::default().fg(theme.text_primary)
     };
@@ -298,8 +281,7 @@ pub(crate) fn render(
 mod tests {
     use super::*;
 
-    /// Render at `width` into a buffer sized by [`height`], returning the
-    /// rows (trailing blanks trimmed) and the hit rects.
+    /// Render at `width` into a buffer sized by [`height`], returning the rows (trailing blanks trimmed) and the hit rects.
     fn draw(width: u16) -> (Vec<String>, PrivacyBannerRects) {
         let h = height(width);
         let area = Rect::new(0, 0, width, h);
@@ -328,33 +310,30 @@ mod tests {
 
     /// The buffer text under `rect` on its row.
     fn text_at(rows: &[String], rect: Rect) -> String {
-        let row = &rows[rect.y as usize];
+        let Some(row) = rows.get(rect.y as usize) else {
+            return String::new();
+        };
         row.chars()
             .skip(rect.x as usize)
             .take(rect.width as usize)
             .collect()
     }
 
-    /// Slot owners reserve [`height`] rows, so the last one it promises must
-    /// be the legal line — not a body row pushed off the end.
-    /// The narrow end of this range is the title's own width: `Help improve
-    /// Chutes Build` is 25 columns where upstream's title is 17, and below its
-    /// own width there is nothing left to assert but truncation. The banner
-    /// itself never reaches a screen in Chutes Build — it offers a
-    /// coding-data-retention control the product does not have
-    /// (`product::CODING_DATA_RETENTION_CONTROLS`) — but the view is kept whole
-    /// so upstream merges stay clean.
+    /// Slot owners reserve [`height`] rows, so the last one it promises must be the legal line, not a body row pushed off the end.
     #[test]
     fn height_reserves_every_row_the_banner_paints() {
-        for width in [200, 117, 110, 100, 80, 72, 60, 45, 40, 36, 30, 26] {
+        for width in [200, 117, 110, 100, 80, 72, 60, 45, 40, 36, 30, 24, 18] {
             let rows = rows(width);
             assert_eq!(rows.len(), height(width) as usize);
+            let Some((title, body, legal)) = rows.split_first().and_then(|(title, rest)| {
+                rest.split_last().map(|(legal, body)| (title, body, legal))
+            }) else {
+                panic!("width {width}: expected title, body, and legal rows, got {rows:?}");
+            };
             assert!(
-                rows[0].starts_with(PRIVACY_BANNER_TITLE),
-                "width {width}: title must never be clipped, got {:?}",
-                rows[0]
+                title.starts_with(PRIVACY_BANNER_TITLE),
+                "width {width}: title must never be clipped, got {title:?}"
             );
-            let legal = rows.last().expect("legal row");
             assert!(
                 PRIVACY_BANNER_LEGAL_VARIANTS
                     .iter()
@@ -362,17 +341,18 @@ mod tests {
                 "width {width}: legal line must survive whole, got {legal:?}"
             );
             assert!(
-                rows[1..rows.len() - 1].iter().all(|r| !r.is_empty()),
+                body.iter().all(|r| !r.is_empty()),
                 "width {width}: body rows must not be blank: {rows:?}"
             );
         }
     }
 
-    /// The row cap's elision is a narrow-terminal fallback, not the norm.
+    /// The elision at the row cap is a fallback for narrow terminals.
     #[test]
     fn body_copy_is_complete_at_common_widths() {
         for width in [200, 117, 100, 80, 60] {
-            let body = rows(width)[1..].join(" ");
+            let rows = rows(width);
+            let body = rows.get(1..).unwrap_or(&[]).join(" ");
             let flattened: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
                 flattened.contains(PRIVACY_BANNER_DESC),
@@ -417,8 +397,7 @@ mod tests {
         assert_eq!(rects.policy, Rect::default());
     }
 
-    /// The two links open different documents, so an off-by-one rect sends
-    /// the user to the wrong page.
+    /// The two links open different documents, so an off-by-one rect sends the user to the wrong page.
     #[test]
     fn each_legal_link_hits_its_own_words() {
         for width in [200, 117, 80, 60, 40, 30, 24, 18] {

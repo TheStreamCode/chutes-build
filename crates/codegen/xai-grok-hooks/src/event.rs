@@ -2,14 +2,12 @@ use serde::Serialize;
 
 pub const MAX_PAYLOAD_SIZE: usize = 128 * 1024;
 
-/// Generates [`HookEventName`] and its `Deserialize`, `Display`, `traits()`, and
-/// `ALL` from one table, so adding an event is a single row.
 macro_rules! hook_events {
     ($(
         $(#[$vmeta:meta])*
         $variant:ident {
             display: $display:literal,
-            aliases: [$($alias:literal),* $(,)?],
+            aliases: [$first_alias:literal $(, $alias:literal)* $(,)?],
             traits: ($gate:ident, $matcher:ident, $hub:literal $(,)?),
         }
     ),* $(,)?) => {
@@ -24,9 +22,13 @@ macro_rules! hook_events {
 
             fn from_key_str(s: &str) -> Option<Self> {
                 match s {
-                    $($($alias)|* => Some(Self::$variant),)*
+                    $($first_alias $(| $alias)* => Some(Self::$variant),)*
                     _ => None,
                 }
+            }
+
+            pub fn pascal_case(self) -> &'static str {
+                match self { $(Self::$variant => $first_alias,)* }
             }
 
             pub fn traits(self) -> EventTraits {
@@ -108,7 +110,7 @@ hook_events! {
             "afterAgentResponse",
             "afterAgentThought",
         ],
-        traits: (Observe, Tested, true),
+        traits: (PostTool, Tested, true),
     },
     PostToolUseFailure {
         display: "post_tool_use_failure",
@@ -182,9 +184,10 @@ pub enum GateKind {
     Observe,
     Tool,
     Stop,
-    /// Prompt decision control (`decision: "block"` + `reason`, exit 2). The
-    /// block reason is user-facing, never model context. Exit 2 blocks
-    /// regardless of JSON, and the default timeout is 30s.
+    PostTool,
+    /// Prompt decision control (`decision: "block"` with `reason`, exit 2).
+    /// The block reason is user-facing, never model context.
+    /// Exit 2 blocks regardless of JSON, and the default timeout is 30s.
     Prompt,
 }
 
@@ -214,6 +217,8 @@ impl HookEventName {
     }
 }
 
+pub const END_TURN_STOP_REASON: &str = "end_turn";
+
 pub const MAX_STOP_ENTRY_TEXT_CHARS: usize = 1000;
 
 pub const MAX_CANCEL_TRIGGER_CHARS: usize = 64;
@@ -241,6 +246,8 @@ pub fn clip_stop_entry_text(text: &str) -> String {
 pub const MAX_REASON_CHARS: usize = 256;
 
 pub const MAX_HOOK_FEEDBACK_CHARS: usize = 10_000;
+
+pub const MAX_HOOK_OUTPUT_REPLACEMENT_CHARS: usize = 64 * 1024;
 
 pub fn clip_reason(reason: &str) -> String {
     clip_text(reason, MAX_REASON_CHARS)
@@ -284,7 +291,17 @@ pub enum BackgroundTaskType {
     Subagent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr, strum::EnumIter)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    strum::AsRefStr,
+    strum::IntoStaticStr,
+    strum::EnumIter,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum StopFailureKind {
@@ -296,7 +313,17 @@ pub enum StopFailureKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr, strum::EnumIter)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    strum::AsRefStr,
+    strum::IntoStaticStr,
+    strum::EnumIter,
+)]
 #[strum(serialize_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum StopCancelledReason {
@@ -326,18 +353,7 @@ impl StopCancelledReason {
             Self::Unknown => CancelledBy::Unknown,
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
 }
-
-impl StopFailureKind {
-    pub fn as_str(self) -> &'static str {
-        self.into()
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookEventEnvelope {
@@ -358,8 +374,7 @@ pub struct HookEventEnvelope {
     pub payload: HookPayload,
 }
 
-// chutes-build camelCase -> additive snake_case aliases some hook clients read; chutes-build's
-// camelCase stays authoritative.
+// Additive snake_case aliases for chutes-build's camelCase keys, which some hook clients read; the camelCase keys stay authoritative
 const SNAKE_CASE_ALIASES: &[(&str, &str)] = &[
     ("hookEventName", "hook_event_name"),
     ("sessionId", "session_id"),
@@ -369,6 +384,8 @@ const SNAKE_CASE_ALIASES: &[(&str, &str)] = &[
     ("toolInput", "tool_input"),
     ("toolResult", "tool_response"),
     ("toolUseId", "tool_use_id"),
+    ("durationMs", "duration_ms"),
+    ("isInterrupt", "is_interrupt"),
 ];
 
 impl HookEventEnvelope {
@@ -380,6 +397,11 @@ impl HookEventEnvelope {
                     map.entry(*snake).or_insert(aliased);
                 }
             }
+            // The snake key carries Claude's PascalCase value; the camel key stays grok-native.
+            map.insert(
+                "hook_event_name".to_string(),
+                self.hook_event_name.pascal_case().into(),
+            );
         }
         value
     }
@@ -448,9 +470,8 @@ pub enum HookPayload {
     },
 
     PreToolUse {
-        /// For meta-dispatch tools (`use_tool`, the external MCP-call tool) this is
-        /// the resolved underlying tool (`server__tool`), not the dispatcher, so
-        /// matchers key on the real target.
+        /// For meta-dispatch tools (`use_tool`, the external MCP-call tool) this is the underlying tool (`server__tool`), not the dispatcher.
+        /// Matchers key on the real target.
         #[serde(rename = "toolName")]
         tool_name: String,
         #[serde(rename = "toolUseId")]
@@ -492,6 +513,10 @@ pub enum HookPayload {
         #[serde(rename = "toolInputTruncated")]
         tool_input_truncated: bool,
         error: String,
+        #[serde(rename = "durationMs", skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(rename = "isInterrupt")]
+        is_interrupt: bool,
         #[serde(rename = "subagentType", skip_serializing_if = "Option::is_none")]
         subagent_type: Option<String>,
     },
@@ -555,6 +580,17 @@ pub enum HookPayload {
 }
 
 impl HookPayload {
+    /// The tool a tool-event payload is about; `None` for every other event.
+    pub fn tool_name(&self) -> Option<&str> {
+        match self {
+            Self::PreToolUse { tool_name, .. }
+            | Self::PostToolUse { tool_name, .. }
+            | Self::PostToolUseFailure { tool_name, .. }
+            | Self::PermissionDenied { tool_name, .. } => Some(tool_name),
+            _ => None,
+        }
+    }
+
     pub fn match_value(&self) -> Option<&str> {
         let value = match self {
             Self::PreToolUse { tool_name, .. }
@@ -570,8 +606,8 @@ impl HookPayload {
             | Self::PreCompact { source }
             | Self::PostCompact { source } => source,
             Self::SessionEnd { reason, .. } => reason,
-            Self::StopFailure { error, .. } => return Some(error.as_str()),
-            Self::StopCancelled { reason, .. } => return Some(reason.as_str()),
+            Self::StopFailure { error, .. } => return Some(error.as_ref()),
+            Self::StopCancelled { reason, .. } => return Some(reason.as_ref()),
             Self::Stop { .. } | Self::UserPromptSubmit { .. } => return None,
         };
         Some(value.as_str()).filter(|v| !v.is_empty())
@@ -589,7 +625,10 @@ pub fn truncate_payload(value: serde_json::Value) -> (serde_json::Value, bool) {
     while !serialized.is_char_boundary(end) {
         end -= 1;
     }
-    let mut result = serialized[..end].to_string();
+    let Some(prefix) = serialized.get(..end) else {
+        return (value, false);
+    };
+    let mut result = prefix.to_string();
     result.push_str(" [truncated]");
     (serde_json::Value::String(result), true)
 }
@@ -686,6 +725,18 @@ mod tests {
     }
 
     #[test]
+    fn pascal_case_is_the_pascal_alias() {
+        for event in HookEventName::ALL {
+            let pascal = event.pascal_case();
+            let first = pascal.chars().next().expect("alias is non-empty");
+            assert!(
+                first.is_ascii_uppercase() && !pascal.contains('_'),
+                "{event}: pascal_case() must be the PascalCase alias, got {pascal:?}"
+            );
+        }
+    }
+
+    #[test]
     fn event_traits_report_gate_matcher_and_hub_forward() {
         use super::{GateKind, MatcherPolicy};
 
@@ -701,7 +752,7 @@ mod tests {
             GateKind::Stop,
             "alias resolves through canonical()"
         );
-        assert_eq!(HookEventName::PostToolUse.traits().gate, GateKind::Observe);
+        assert_eq!(HookEventName::PostToolUse.traits().gate, GateKind::PostTool);
 
         assert_eq!(HookEventName::Stop.traits().matcher, MatcherPolicy::Ignored);
         assert_eq!(
@@ -770,15 +821,17 @@ mod tests {
 
         let assert_base_aliases = |v: &serde_json::Value| {
             for (camel, snake) in [
-                ("hookEventName", "hook_event_name"),
                 ("sessionId", "session_id"),
                 ("transcriptPath", "transcript_path"),
                 ("permissionMode", "permission_mode"),
             ] {
-                assert_eq!(v[camel], v[snake], "{camel} != {snake}");
-                assert!(!v[camel].is_null(), "missing base key pair for {camel}");
+                assert_eq!(v.get(camel), v.get(snake), "{camel} != {snake}");
+                assert!(
+                    v.get(camel).is_some_and(|x| !x.is_null()),
+                    "missing base key pair for {camel}"
+                );
             }
-            assert_eq!(v["cwd"], "/repo");
+            assert_eq!(v.get("cwd").and_then(|x| x.as_str()), Some("/repo"));
         };
 
         let pre = base(HookPayload::PreToolUse {
@@ -795,11 +848,24 @@ mod tests {
             ("toolInput", "tool_input"),
             ("toolUseId", "tool_use_id"),
         ] {
-            assert_eq!(pre[camel], pre[snake], "{camel} != {snake}");
-            assert!(!pre[camel].is_null(), "missing tool key pair for {camel}");
+            assert_eq!(pre.get(camel), pre.get(snake), "{camel} != {snake}");
+            assert!(
+                pre.get(camel).is_some_and(|x| !x.is_null()),
+                "missing tool key pair for {camel}"
+            );
         }
-        assert_eq!(pre["hook_event_name"], "pre_tool_use");
-        assert_eq!(pre["tool_name"], "run_terminal_command");
+        assert_eq!(
+            pre.get("hookEventName").and_then(|x| x.as_str()),
+            Some("pre_tool_use")
+        );
+        assert_eq!(
+            pre.get("hook_event_name").and_then(|x| x.as_str()),
+            Some("PreToolUse")
+        );
+        assert_eq!(
+            pre.get("tool_name").and_then(|x| x.as_str()),
+            Some("run_terminal_command")
+        );
 
         let post = HookEventEnvelope {
             hook_event_name: HookEventName::PostToolUse,
@@ -830,16 +896,71 @@ mod tests {
             ("toolUseId", "tool_use_id"),
             ("toolResult", "tool_response"),
         ] {
-            assert_eq!(post[camel], post[snake], "{camel} != {snake}");
-            assert!(!post[camel].is_null(), "missing tool key pair for {camel}");
+            assert_eq!(post.get(camel), post.get(snake), "{camel} != {snake}");
+            assert!(
+                post.get(camel).is_some_and(|x| !x.is_null()),
+                "missing tool key pair for {camel}"
+            );
         }
-        assert_eq!(post["toolResult"], post["tool_response"]);
+        assert_eq!(post.get("toolResult"), post.get("tool_response"));
         assert_eq!(
-            post["tool_response"],
-            serde_json::json!({ "stdout": "a\nb\n" })
+            post.get("tool_response"),
+            Some(&serde_json::json!({ "stdout": "a\nb\n" }))
         );
-        assert_eq!(post["hookEventName"], "post_tool_use");
+        assert_eq!(
+            post.get("hookEventName").and_then(|x| x.as_str()),
+            Some("post_tool_use")
+        );
+        assert_eq!(
+            post.get("hook_event_name").and_then(|x| x.as_str()),
+            Some("PostToolUse")
+        );
         assert!(post.get("durationMs").is_some());
+    }
+
+    #[test]
+    fn post_tool_use_failure_carries_duration_and_interrupt() {
+        let value = HookEventEnvelope {
+            hook_event_name: HookEventName::PostToolUseFailure,
+            session_id: "sess-1".into(),
+            cwd: "/repo".into(),
+            workspace_root: "/repo".into(),
+            timestamp: "2025-01-01T00:00:00Z".into(),
+            transcript_path: None,
+            client_identifier: None,
+            prompt_id: None,
+            permission_mode: None,
+            payload: HookPayload::PostToolUseFailure {
+                tool_name: "run_terminal_command".into(),
+                tool_use_id: "tu-1".into(),
+                tool_input: serde_json::json!({ "command": "ls" }),
+                tool_input_truncated: false,
+                error: "boom".into(),
+                duration_ms: Some(42),
+                is_interrupt: true,
+                subagent_type: None,
+            },
+        }
+        .to_hook_json();
+        assert_eq!(
+            value.get("hookEventName").and_then(|x| x.as_str()),
+            Some("post_tool_use_failure")
+        );
+        assert_eq!(
+            value.get("hook_event_name").and_then(|x| x.as_str()),
+            Some("PostToolUseFailure")
+        );
+        assert_eq!(value.get("error").and_then(|x| x.as_str()), Some("boom"));
+        assert_eq!(value.get("durationMs").and_then(|x| x.as_u64()), Some(42));
+        assert_eq!(value.get("duration_ms").and_then(|x| x.as_u64()), Some(42));
+        assert_eq!(
+            value.get("isInterrupt").and_then(|x| x.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value.get("is_interrupt").and_then(|x| x.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
@@ -864,8 +985,11 @@ mod tests {
             };
             assert_eq!(payload.match_value(), Some(wire));
             let value = serde_json::to_value(&payload).unwrap();
-            assert_eq!(value["reason"], wire);
-            assert_eq!(value["cancelledBy"], cancelled_by);
+            assert_eq!(value.get("reason").and_then(|x| x.as_str()), Some(wire));
+            assert_eq!(
+                value.get("cancelledBy").and_then(|x| x.as_str()),
+                Some(cancelled_by)
+            );
             assert!(value.get("cancelTrigger").is_none());
         }
     }

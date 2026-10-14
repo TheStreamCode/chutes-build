@@ -1,11 +1,10 @@
-//! The is-managed claim in the gate decision and the staleness refetch
-//! (sidecar-removal downgrade closure).
+//! The is-managed claim in the gate decision and the staleness refetch: removing the policy sidecar must not downgrade a claimed principal.
 
 use super::super::*;
 use super::team;
 
-/// Headline: a stripped policy sidecar + imposing claim refuses even over a fully
-/// forged permissive marker; without the claim that state is the pre-fix downgrade.
+/// A stripped policy sidecar plus an imposing claim refuses even over a fully forged permissive marker.
+/// Without the claim that same state is the documented marker downgrade.
 #[test]
 fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
     use crate::signed_policy::SignedVerdict;
@@ -17,7 +16,9 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         fail_closed: false,
         ..Default::default()
     };
-    assert!(
+
+    assert_eq!(
+        Some(ManagedPolicyCompromise::SignatureMissing),
         managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || true,
@@ -28,8 +29,9 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
         ),
         "an imposing claim outranks the forged marker when the policy sidecar is gone"
     );
-    assert!(
-        !managed_policy_compromised_decision(
+    assert_eq!(
+        None,
+        managed_policy_compromised_decision(
             SignedVerdict::NoAuthenticSidecar,
             || false,
             false,
@@ -41,8 +43,7 @@ fn claim_refuses_stripped_sidecar_even_with_forged_marker() {
     );
 }
 
-/// A policy-sidecar read blip stays lenient: the claim is not consulted on
-/// `SidecarUnreadable` (rationale on the variant doc).
+/// A policy-sidecar read blip stays lenient: the claim is not consulted on `SidecarUnreadable` (rationale on the variant doc).
 #[test]
 fn claim_not_consulted_on_sidecar_read_blip() {
     use crate::signed_policy::SignedVerdict;
@@ -55,8 +56,10 @@ fn claim_not_consulted_on_sidecar_read_blip() {
         fail_closed: true,
         ..Default::default()
     };
-    assert!(
-        !managed_policy_compromised_decision(
+
+    assert_eq!(
+        None,
+        managed_policy_compromised_decision(
             SignedVerdict::SidecarUnreadable,
             || true,
             false,
@@ -68,7 +71,7 @@ fn claim_not_consulted_on_sidecar_read_blip() {
     );
 }
 
-/// Armed: garbage claim alone (no fail-closed) does not trip gate or force refetch.
+/// Keyed build: a garbage claim alone (no fail-closed) does not trip the gate or force a refetch.
 #[test]
 fn garbage_claim_without_fail_closed_is_not_imposing() {
     assert!(crate::signed_policy::verification_active());
@@ -89,8 +92,10 @@ fn garbage_claim_without_fail_closed_is_not_imposing() {
         "{\"signed_payload\":\"{}\",\"signature\":\"\",\"key_id\":\"\"}",
     )
     .unwrap();
-    assert!(
-        !managed_policy_compromised_for_at(home, &team("team-a")),
+
+    assert_eq!(
+        None,
+        managed_policy_compromised_for_at(home, &team("team-a")),
         "garbage claim without fail-closed must not make the gate fail closed"
     );
     assert!(
@@ -99,7 +104,7 @@ fn garbage_claim_without_fail_closed_is_not_imposing() {
     );
 }
 
-/// Keyless: claim file does not affect gate or staleness.
+/// Keyless: a claim file does not affect the gate or staleness.
 #[test]
 fn claim_paths_are_inert_in_dark_build() {
     crate::signed_policy::test_seam::with_dark(|| {
@@ -121,8 +126,10 @@ fn claim_paths_are_inert_in_dark_build() {
             r#"{"signed_payload":"{}","signature":"","key_id":""}"#,
         )
         .unwrap();
-        assert!(
-            !managed_policy_compromised_for_at(home, &team("team-a")),
+
+        assert_eq!(
+            None,
+            managed_policy_compromised_for_at(home, &team("team-a")),
             "dark build: a claim file must not make the gate fail closed"
         );
         assert!(

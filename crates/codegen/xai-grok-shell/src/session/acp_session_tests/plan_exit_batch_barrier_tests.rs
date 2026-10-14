@@ -1,4 +1,4 @@
-//! Mixed plan.md edit + exit: approval snapshot matches the post-edit plan body.
+//! A batch mixing a plan.md edit and exit_plan_mode: the approval snapshot must match the plan body after the edit.
 
 use super::support::*;
 use super::*;
@@ -68,7 +68,6 @@ async fn seeded_active_plan_actor_with_edit_tools() -> (
             description_override: None,
             behavior_version: None,
             kind: None,
-            compact_schema: false,
         },
         ToolConfig::for_tool::<EnterPlanModeTool>(),
         ToolConfig::for_tool::<ExitPlanModeTool>(),
@@ -91,8 +90,7 @@ async fn seeded_active_plan_actor_with_edit_tools() -> (
             plan_path.clone(),
         ))
         .await;
-    // Phase-2 file tools dispatch through workspace_ops; without a bound
-    // session, search_replace hard-errors before writing plan.md.
+    // Phase-2 file tools dispatch through workspace_ops; without a bound session, search_replace hard-errors before writing plan.md
     actor
         .workspace_ops
         .bind_local_session(
@@ -119,7 +117,7 @@ fn spawn_exit_capture(
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                    if args.request.method.as_ref() == "chutes.build/exit_plan_mode" {
+                    if args.request.method.as_ref() == "x.ai/exit_plan_mode" {
                         let req: ExitPlanModeExtRequest =
                             serde_json::from_str(args.request.params.get()).unwrap();
                         *captured_for_task.lock().unwrap() = req.plan_content;
@@ -153,7 +151,7 @@ async fn assert_mixed_batch_snapshot(write_first: bool) {
 
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        actor.execute_tool_calls(batch),
+        actor.execute_tool_calls(batch, None),
     )
     .await
     .expect("execute_tool_calls must not hang")
@@ -189,8 +187,7 @@ fn bash_call(id: &str) -> ToolCallResponse {
         kind: "function".to_string(),
         function: crate::sampling::types::ToolCallFunction::new(
             "run_terminal_cmd",
-            // Must be a command the manager still prompts for (`echo` is
-            // safe-listed and auto-allows).
+            // Must be a command the manager still prompts for (`echo` is safe-listed and auto-allows)
             r#"{"command":"./probe-mixed-batch-reject.sh","description":"probe mixed-batch permission cancel"}"#,
         ),
     }
@@ -213,8 +210,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor =
                 create_test_actor(0, 256_000, 85, gateway_tx.clone(), persistence_tx).await;
-            // Disable background bash so finalize does not require the
-            // get_task_output / kill_task companion tools.
+            // Disable background bash so finalize does not require the get_task_output / kill_task companion tools
             *actor.agent.borrow_mut() = test_agent_with_tools(vec![
                 ToolConfig {
                     id: "ChutesBuild:run_terminal_cmd".into(),
@@ -229,7 +225,6 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                     description_override: None,
                     behavior_version: None,
                     kind: None,
-                    compact_schema: false,
                 },
                 ToolConfig::for_tool::<EnterPlanModeTool>(),
                 ToolConfig::for_tool::<ExitPlanModeTool>(),
@@ -253,9 +248,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                 .await;
 
             let cwd = AbsPathBuf::new(std::path::PathBuf::from(actor.session_info.cwd.clone()))
-                .unwrap_or_else(|_| {
-                    AbsPathBuf::new(std::env::temp_dir()).expect("temp dir is absolute")
-                });
+                .unwrap_or_else(|_| AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap());
             let (perms, _ev) = spawn_permission_manager(
                 actor.session_info.id.clone(),
                 xai_acp_lib::AcpAgentGatewaySender::new(gateway_tx),
@@ -282,7 +275,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
                                 )));
                         }
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "chutes.build/exit_plan_mode" {
+                            if args.request.method.as_ref() == "x.ai/exit_plan_mode" {
                                 exit_fired_task.store(true, std::sync::atomic::Ordering::SeqCst);
                                 let _ = args
                                     .response_tx
@@ -299,10 +292,13 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
 
             tokio::time::timeout(
                 std::time::Duration::from_secs(10),
-                actor.execute_tool_calls(vec![
-                    bash_call("call_bash_reject"),
-                    exit_plan_mode_call("call_exit"),
-                ]),
+                actor.execute_tool_calls(
+                    vec![
+                        bash_call("call_bash_reject"),
+                        exit_plan_mode_call("call_exit"),
+                    ],
+                    None,
+                ),
             )
             .await
             .expect("execute_tool_calls must not hang")

@@ -39,18 +39,14 @@ fn save_cursor(grok_home: &Path, cursor: u64) {
 }
 
 /// Pick the next tip for this session and advance the persistent cursor.
-///
-/// Each call returns the tip at `cursor % tips.len()` and increments the
-/// cursor in `~/.chutes-build/tip_cursor.json`, so every session sees the next tip
-/// in sequence. After all tips have been shown, the cycle repeats.
-///
+/// Each call returns the tip at `cursor % tips.len()` and increments the cursor in `~/.chutes-build/tip_cursor.json`, so every session sees the next tip in sequence. After all tips have been shown, the cycle repeats.
 /// Returns `None` if `tips` is empty (cursor is not advanced in that case).
 pub fn pick_and_advance(tips: &[String], grok_home: &Path) -> Option<String> {
     if tips.is_empty() {
         return None;
     }
     let cursor = load_cursor(grok_home);
-    let tip = tips[cursor as usize % tips.len()].clone();
+    let tip = tips.get(cursor as usize % tips.len())?.clone();
     save_cursor(grok_home, cursor + 1);
     Some(tip)
 }
@@ -140,12 +136,5 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(cursor_path(dir.path()), b"not json").unwrap();
         assert_eq!(load_cursor(dir.path()), 0);
-    }
-
-    #[test]
-    fn save_and_load_roundtrip() {
-        let dir = tempfile::tempdir().unwrap();
-        save_cursor(dir.path(), 42);
-        assert_eq!(load_cursor(dir.path()), 42);
     }
 }

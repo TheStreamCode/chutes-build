@@ -1,8 +1,3 @@
-//! Session meta-information handlers.
-//!
-//! Router pattern: single `handle()` dispatches by method name.
-//! Business logic delegates to pure functions or MvpAgent methods.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,10 +12,9 @@ use crate::session::{
     SessionCommand, SessionInfoData, SessionInfoResponse, SessionListRequest, SessionListResponse,
 };
 
-/// Mirrors the display title (`generated_title`, else `session_summary`) into
-/// `session_summary` so clients that only read that field show the same title
-/// as `display_title()` — including after a `/rename` that updated only
-/// `generated_title`. Mutates the response copy only; never persisted.
+/// Copies `display_title()` (`generated_title`, else `session_summary`) into `session_summary`.
+/// Clients that only read that field then show the same title, even after a `/rename` that updated only `generated_title`.
+/// This mutates the response copy only; nothing is written back to disk.
 fn backfill_session_summary(summary: &mut Summary) {
     let display = summary.display_title().to_owned();
     if !display.is_empty() && display != summary.session_summary {
@@ -34,21 +28,20 @@ pub(crate) async fn handle(
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "chutes.build/session/info" => handle_session_info(agent, args).await,
-        "chutes.build/session/close" => handle_session_close(agent, args).await,
-        "chutes.build/session/list" => handle_session_list(agent, args).await,
-        "chutes.build/sessions/list" => handle_roster_list(agent, args).await,
-        m if m.starts_with("chutes.build/session_summaries/") => {
+        "chutes.ai/session/info" => handle_session_info(agent, args).await,
+        "chutes.ai/session/close" => handle_session_close(agent, args).await,
+        "chutes.ai/session/list" => handle_session_list(agent, args).await,
+        "chutes.ai/sessions/list" => handle_roster_list(agent, args).await,
+        m if m.starts_with("chutes.ai/session_summaries/") => {
             handle_session_summaries(agent, args).await
         }
         _ => Err(acp::Error::method_not_found()),
     }
 }
 
-/// `chutes.ai/sessions/list` — the FleetView roster. Returns every
-/// resident session plus recently-touched on-disk `Dormant` sessions. Clients
-/// poll this while the dashboard is open and reconcile against the
-/// `chutes.ai/sessions/changed` broadcast.
+/// `chutes.ai/sessions/list`, the FleetView roster.
+/// Returns every resident session plus on-disk `Dormant` sessions that were touched recently.
+/// Clients poll this while the dashboard is open and reconcile against the `chutes.ai/sessions/changed` broadcast.
 async fn handle_roster_list(
     agent: &MvpAgent,
     _args: &acp::ExtRequest,
@@ -123,21 +116,18 @@ async fn handle_session_info(
         },
     });
 
-    // Calculate the model's display name.
     data.model_display_name = agent
         .models_manager
         .models()
         .get(session.model_id.0.as_ref())
         .and_then(|entry| entry.info.name.clone());
 
-    // Construct `SessionInfoResponse`.
     let response = SessionInfoResponse {
         session_id,
         cwd: session.info.cwd.clone(),
         data,
     };
 
-    // Wrap `SessionInfoResponse` in `ExtMethodResult` and return it.
     ExtMethodResult::success(serde_json::to_value(&response).unwrap_or_default())
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
@@ -161,11 +151,10 @@ async fn handle_session_close(
     tracing::info!(
         session_id = %sid.0,
         ?outcome,
-        "chutes.build/session/close"
+        "chutes.ai/session/close"
     );
 
-    // `success` stays for existing callers; `outcome` says what the close
-    // actually did (`closed` / `notResident` / `superseded`).
+    // `success` stays for existing callers; `outcome` says what the close actually did (`closed`, `notResident`, `superseded`)
     ExtMethodResult::success(serde_json::json!({
         "success": true,
         "outcome": outcome.wire_str(),
@@ -179,7 +168,7 @@ async fn handle_session_summaries(
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "chutes.build/session_summaries/session_list" => {
+        "chutes.ai/session_summaries/session_list" => {
             let req = serde_json::from_str::<SessionListRequest>(args.params.get())?;
             let cwd = req.workspace_directory.to_string_lossy().to_string();
 
@@ -201,7 +190,7 @@ async fn handle_session_summaries(
 
             Ok(acp::ExtResponse::new(value))
         }
-        "chutes.build/session_summaries/workspace_list" => {
+        "chutes.ai/session_summaries/workspace_list" => {
             tracing::debug!("xai/session_summaries/workspace_list is working");
             let _req = serde_json::from_str::<AllSessionOverviewRequest>(args.params.get())?;
 
@@ -213,7 +202,7 @@ async fn handle_session_summaries(
 
             summaries_to_overview_response(summaries)
         }
-        "chutes.build/session_summaries/workspace_list_recent" => {
+        "chutes.ai/session_summaries/workspace_list_recent" => {
             let req = serde_json::from_str::<RecentSessionsRequest>(args.params.get())?;
 
             let _timer = crate::instrumentation_timer!("session.list_sessions_recent");
@@ -265,8 +254,7 @@ async fn handle_session_list(
 ) -> Result<acp::ExtResponse, acp::Error> {
     use crate::session::unified_list;
 
-    // Under chat mode `parse_list_req` force-rewrites `kind` to conversations
-    // unless `local-workspace` is compiled in and the client sent chat/build.
+    // Under chat mode `parse_list_req` rewrites `kind` to conversations unless `local-workspace` is compiled in and the client sent chat or build
     let req = unified_list::parse_list_req(args.params.get())
         .map_err(|e| acp::Error::invalid_params().data(format!("invalid params: {e}")))?;
     tracing::debug!(
@@ -288,16 +276,15 @@ async fn handle_session_list(
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Build sessions in exactly the requested directory. A page walk cannot reach
-/// past `over_fetch(limit)` rows per cwd: the local lane re-scans that window
-/// each page instead of seeking to the cursor.
+/// Build sessions in exactly the requested directory.
+/// A page walk cannot reach past `over_fetch(limit)` rows per cwd: the local scan re-reads that window each page instead of seeking to the cursor.
 pub(crate) async fn handle_list_sessions(
     agent: &MvpAgent,
     args: acp::ListSessionsRequest,
 ) -> Result<acp::ListSessionsResponse, acp::Error> {
     use crate::session::unified_list;
 
-    // Kept in step with the capability, withheld under chat mode.
+    // Chat mode also withholds the session capabilities at initialize, so refuse the method here to match
     if crate::agent::chat_modes::process_chat_mode_enabled() {
         return Err(acp::Error::method_not_found());
     }
@@ -323,8 +310,8 @@ pub(crate) async fn handle_list_sessions(
     .await;
 
     let meta = unified_list::acp_response_meta(&result);
-    // `CwdScope::Only` already dropped rows the schema cannot represent, so this
-    // conversion discards nothing and the page keeps the size it was given.
+    // `CwdScope::Only` already dropped rows the schema cannot represent
+    // This conversion therefore discards nothing and the page keeps the size it was given
     let sessions: Vec<acp::SessionInfo> = result
         .rows
         .into_iter()

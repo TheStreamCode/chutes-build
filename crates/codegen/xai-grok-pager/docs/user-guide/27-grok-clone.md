@@ -1,11 +1,33 @@
 # grok clone
 
 `grok clone` fetches a Git repository into a Grove content store and mounts a
-projected working tree (NFS on macOS, FUSE on Linux). It is gated by
-`[clone] enabled = true` in Grove config (`~/.config/grove/config.toml`).
+projected working tree (NFS on macOS, FUSE on Linux). Each invocation reads
+`CHUTES_BUILD_CLONE` / `GROVE_CLONE` in this process, then grok enable-all
+(`CHUTES_BUILD_GROVE` or `[cli] grove` in `~/.chutes-build/config.toml`), then `[clone] enabled`
+authorize Clone IPC.
+
+This does **not** enable Grove for session / `-w` worktrees. Those use a
+separate gate (`CHUTES_BUILD_WORKTREE_TYPE` and `[cli] grove_worktree` in
+`~/.chutes-build/config.toml`; see [Configuration reference](26-config-reference.md)).
+`CHUTES_BUILD_WORKTREE_TYPE` and `[cli] grove_worktree` do **not** enable `grok clone`.
+`CHUTES_BUILD_CLONE` / `GROVE_CLONE` / `[clone] enabled` do **not** enable session /
+`-w` Grove.
+
+To turn **both** surfaces on without touching the specific knobs:
 
 ```bash
-grok clone <url> [dir] [--branch NAME] [--cone PATH]... [--full-history]
+export CHUTES_BUILD_GROVE=1
+# or in ~/.chutes-build/config.toml:
+# [cli]
+# grove = true
+```
+
+Specific knobs still win: `CHUTES_BUILD_WORKTREE_TYPE=copy` keeps session worktrees on
+copy while clone can stay on; `CHUTES_BUILD_CLONE=0` keeps `grok clone` off while
+worktrees can stay on.
+
+```bash
+grok clone <url> [dir] [--branch NAME] [--full-history]
 ```
 
 ## History
@@ -31,6 +53,96 @@ full history through the default refspec:
 git fetch --depth=1 origin refs/heads/NAME:refs/remotes/origin/NAME
 ```
 
-A default shallow clone requires a Grove daemon that understands the
 `clone_shallow` RPC. If the client refuses, restart or update the daemon (or
-pass `--full-history`).
+pass `--full-history`):
+
+```bash
+```
+
+On macOS you can also install a KeepAlive agent:
+
+```bash
+```
+
+## Authentication
+
+The two are separate worlds:
+
+| World | Covers | Commands | Store |
+|-------|--------|----------|-------|
+| Chutes Build | the model and API | `chutes-build login`, `chutes-build logout` | `~/.chutes-build/auth.json` |
+
+`grok clone` never reads `~/.chutes-build/auth.json` for Git. Signing into Chutes Build does not
+give the daemon a credential for the remote, and neither does
+`[clone] enabled = true`: that flag is a **product gate** deciding whether
+`grok clone` runs at all, not authorization for GitHub.
+
+When Grove classifies a failure as a credential problem, the clone prints the
+class and the commands that own it, without the remote URL:
+
+```
+Grove Git credentials rejected (unavailable).
+Check `grove status` then `grove reload-credentials`.
+```
+
+| Class | Meaning | Next step |
+|-------|---------|-----------|
+| `unavailable` | the daemon had no usable credential, or the remote rejected it | `grove status` names the live provider; fix that source, then `grove reload-credentials` |
+| `expired-static` | the token expired and this deployment does not refresh tokens | start a new session, or enable `GROVE_TOKEN_ROTATION=expected` |
+| `carrier-stale` | the daemon waited for a carrier rewrite and still holds the rejected token | wait for the rewrite, or `grove reload-credentials` |
+| `other` | the credential provider failed for another reason | `grove status`, then `grove reload-credentials` |
+
+Only `expired-static` and `carrier-stale` add their own line to the message. The
+advice for `unavailable` depends on which provider the daemon holds, and the
+
+One credential rejection stays unclassified: when a token cannot see a private
+repository, GitHub answers as if the repository did not exist. That is
+indistinguishable from a typo in a public URL, so the clone reports it as a
+missing repository rather than guessing at credentials.
+
+`grove status` prints a daemon-scoped auth block even with no mounts:
+
+```
+  auth: mode=auto live=git-delegate health=ok last=- reload=supported
+        hint=credentials look healthy
+```
+
+`mode` is the configured `auth_mode`; `live` is the provider the daemon actually
+holds. `mode` and `live` can disagree — that is the case
+`grove reload-credentials` exists to fix. For example, with `auth_mode = auto`,
+a daemon that started before a token file was written stays on `git-delegate`
+until the cell is rebuilt.
+
+```bash
+grove reload-credentials
+# grove: credentials reloaded → token-file
+```
+
+Reload rebuilds the cell from env and disk and prints the provider it landed on;
+it prints no secrets. It cannot create a login: with `auto` or `git` and no
+carrier token, configure `git credential` or `gh auth` first, then reload.
+
+`auth.degraded`, `auth.unavailable`, `auth.daemon-down`, or `auth.old-daemon`.
+
+## Daemon
+
+`grok` does not take the daemon or its mounts down) and waits for the socket.
+
+The `grove` binary is resolved from `PATH`, then from the directory of the
+`grok` executable (for example `~/.chutes-build/bin/grove` next to `grok`). There is
+no separate install location. macOS has no PATH package for grove; build it
+from the monorepo:
+
+```bash
+cargo build -p grove --release
+```
+
+On Linux, clone needs a usable FUSE before it starts a daemon: `/dev/fuse` must
+exist, and either this user can open it or a setuid `fusermount3` / `fusermount`
+error with install commands, not a hang. When a daemon is already running the
+check is skipped, since that daemon may hold privileges this process does not.
+
+On Windows, clone mounts through ProjFS (Windows Projected File System),
+whether it is enabled. Build-output directories such as `target` and
+`node_modules` are redirected out of the projected tree as NTFS junctions
+(`[redirects] windows_junction`, on by default).

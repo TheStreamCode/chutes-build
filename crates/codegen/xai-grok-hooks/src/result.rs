@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::event::{MAX_HOOK_OUTPUT_REPLACEMENT_CHARS, clip_text};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HookDecision {
     Allow,
@@ -32,6 +34,74 @@ pub struct StopHookOutcome {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StopOverride {
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplacementKind {
+    Builtin,
+    Mcp,
+}
+
+impl ReplacementKind {
+    pub fn wire_field(self) -> &'static str {
+        match self {
+            Self::Builtin => "updatedToolOutput",
+            Self::Mcp => "updatedMCPToolOutput",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputReplacement {
+    pub kind: ReplacementKind,
+    pub hook_name: String,
+    pub value: serde_json::Value,
+}
+
+impl OutputReplacement {
+    pub fn wire_field(&self) -> &'static str {
+        self.kind.wire_field()
+    }
+
+    /// A structured value stays structured while its JSON fits in `MAX_HOOK_OUTPUT_REPLACEMENT_CHARS`.
+    /// A client can still unpack that value.
+    pub fn mcp_output(self) -> serde_json::Value {
+        let text = match self.value {
+            serde_json::Value::String(text) => text,
+            structured => {
+                let text = structured.to_string();
+                if text.chars().count() <= MAX_HOOK_OUTPUT_REPLACEMENT_CHARS {
+                    return structured;
+                }
+                text
+            }
+        };
+        serde_json::Value::String(clip_text(&text, MAX_HOOK_OUTPUT_REPLACEMENT_CHARS))
+    }
+
+    /// The text a model reads in place of an MCP tool's output: the text form of [`Self::mcp_output`].
+    pub fn mcp_output_text(self) -> String {
+        let text = match self.value {
+            serde_json::Value::String(text) => text,
+            structured => structured.to_string(),
+        };
+        clip_text(&text, MAX_HOOK_OUTPUT_REPLACEMENT_CHARS)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PostToolUseHookOutcome {
+    pub block_reason: Option<String>,
+    pub additional_context: Option<String>,
+    pub output_replacement: Option<OutputReplacement>,
+}
+
+impl PostToolUseHookOutcome {
+    pub fn is_empty(&self) -> bool {
+        self.block_reason.is_none()
+            && self.additional_context.is_none()
+            && self.output_replacement.is_none()
+    }
 }
 
 impl StopHookOutcome {

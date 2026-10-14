@@ -34,8 +34,7 @@ impl LineEditor {
         self.buffer = EditBuffer::new();
     }
 
-    /// Test helper; cross-crate consumers (the pager's tests) need it, so it
-    /// cannot be `#[cfg(test)]`-gated here.
+    /// Test helper; cross-crate consumers (the pager's tests) need it, so it cannot be `#[cfg(test)]`-gated here.
     pub fn set_cursor_byte(&mut self, cursor_byte: usize) -> LineEditOutcome {
         Self::from_edit_outcome(self.buffer.set_cursor_byte(cursor_byte))
     }
@@ -296,9 +295,10 @@ mod tests {
             LineEditOutcome::CursorChanged
         );
         let viewport = editor.viewport(3);
+        let expected = format!("{grapheme}b");
         assert_eq!(
-            &editor.text()[viewport.visible_byte_range.clone()],
-            format!("{grapheme}b")
+            editor.text().get(viewport.visible_byte_range.clone()),
+            Some(expected.as_str())
         );
         assert_eq!(viewport.cursor_display_column, 2);
     }

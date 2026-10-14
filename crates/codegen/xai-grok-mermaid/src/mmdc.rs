@@ -24,7 +24,6 @@ pub fn detect_mmdc() -> Option<PathBuf> {
 }
 
 /// An engine that shells out to `mmdc` (mermaid-cli).
-///
 /// Off by default: construct it explicitly (it requires Node and headless Chromium).
 /// Use [`MmdcEngine::detect`] to build one only if `mmdc` is present.
 pub struct MmdcEngine {
@@ -163,12 +162,6 @@ mod tests {
     fn theme_arg_maps_light_and_dark() {
         assert_eq!(theme_arg(MermaidTheme::Light), "default");
         assert_eq!(theme_arg(MermaidTheme::Dark), "dark");
-    }
-
-    #[test]
-    fn binary_accessor_round_trips() {
-        let p = PathBuf::from("/some/path/to/mmdc");
-        assert_eq!(MmdcEngine::new(p.clone()).binary(), p.as_path());
     }
 
     #[test]

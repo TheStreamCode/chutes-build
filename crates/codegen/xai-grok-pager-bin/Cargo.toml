@@ -1,33 +1,34 @@
 [package]
-name = "chutes-build"
-version = "1.4.0"
+name = "xai-grok-pager-bin"
+version = "1.0.45"
 edition.workspace = true
 license = "Apache-2.0"
-authors = ["Michael Gasperini (Mikesoft)"]
-default-run = "chutes-build"
-description = "Privacy-first coding agent optimized for the Chutes ecosystem"
+authors = ["xAI"]
+default-run = "xai-grok-pager"
 
-# Composition-root binary for the Chutes Build TUI. This package exists so the binary can link both the pager
+# Composition-root binary for the Chutes Build TUI. The artifact is still named
+# `xai-grok-pager`. This package exists so the binary can link both the pager
 # library and the optional `xai-grok-pager-minimal` render mode: `minimal`
 # depends on `xai-grok-pager`, so the pager library cannot depend back on it
 # (cargo cycle). The binary installs the minimal-mode IoC hooks at startup.
 [[bin]]
-name = "chutes-build"
+name = "xai-grok-pager"
 path = "src/main.rs"
 
 [dependencies]
-# The pager library (all application logic + the public API main.rs drives).
-xai-grok-pager = { path = "../xai-grok-pager" }
-# Optional scrollback-native render mode, wired in via the fn-pointer seam.
-xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal" }
-
-# Agent runtime + leader/stdio/headless entry points.
-xai-grok-shell = { workspace = true }
-xai-grok-active-sessions = { workspace = true }
 # The compile-time product kill switches. This binary owns the decision to check
 # for updates at all, so it is where `AUTOMATIC_SELF_UPDATE` has to be read.
 chutes-build-core = { path = "../../chutes-build-core" }
-xai-grok-update = { path = "../xai-grok-update" }
+# The pager library (all application logic + the public API main.rs drives).
+xai-grok-pager = { path = "../xai-grok-pager", default-features = false }
+# Optional scrollback-native render mode, wired in via the fn-pointer seam.
+xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features = false }
+
+# Agent runtime + leader/stdio/headless entry points.
+xai-grok-cloud-config = { workspace = true }
+xai-grok-login = { workspace = true }
+xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
+xai-grok-update = { path = "../xai-grok-update", default-features = false }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-workspace = { workspace = true }
@@ -54,16 +55,26 @@ semver = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
-rustls = { version = "0.23", default-features = false, features = [
-    "ring",
-    "logging",
-    "std",
-    "tls12",
-] }
+xai-grok-extra-ca = { workspace = true }
 
 # Binary hardening: compile-time string + control-flow obfuscation.
 obfstr = { workspace = true }
 cryptify = { workspace = true }
+
+# Single-binary builds: the embedded runtime, its unpacker, and the site setup command.
+clap = { workspace = true, features = ["derive"], optional = true }
+serde = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+xai-dirs = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
@@ -82,25 +93,40 @@ tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats", "u
 
 [dev-dependencies]
 serial_test = { workspace = true }
-tempfile = { workspace = true }
-# Resolves the pager binary for the hermetic `update` integration test, in the
-# same order the PTY e2e suite uses (env var, CARGO_BIN_EXE, local build).
-xai-grok-pager-pty-harness = { path = "../xai-grok-pager-pty-harness" }
 # `PagerArgs::try_parse_from` in the CLI-parsing unit tests (needs the
 # `clap::Parser` trait in scope).
 clap = { workspace = true, features = ["derive"] }
 
 [features]
 default = [
+    "stock",
     "jemalloc",
     "sandbox-enforce",
     ]
 default-bazel = [
+    "stock",
     "jemalloc",
     "sandbox-enforce",
     "local-workspace",
     ]
+# The defaults of the crates this binary builds on. `default` and `release-dist` turn them on; a
+# `--no-default-features` build that wants them names this feature.
+stock = [
+    "xai-grok-pager/default",
+    "xai-grok-pager-minimal/default",
+    "xai-grok-shell/default",
+    "xai-grok-update/default",
+]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
-sandbox-enforce = ["xai-grok-pager/sandbox-enforce"]
+# xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
+sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]
-release-dist = ["xai-grok-pager/release-dist"]
+# Test-only, prod-inert seam: lets the e2e harness install a TEST-signed managed-policy key the
+# spawned pager trusts. Double locked out of production: absent from `default`, `default-bazel`, and
+# `release-dist`, and the install hook is additionally gated on `debug_assertions` (off in shipped
+# `-c opt`/release builds). Never add this to a shipped feature set.
+test-seams = []
+release-dist = [
+    "stock",
+    "xai-grok-pager/release-dist",
+    ]

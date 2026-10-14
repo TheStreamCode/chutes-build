@@ -1,39 +1,37 @@
-use std::path::PathBuf;
+use std::path::Path;
 
-use crate::implementations::skills::types::SkillInfo;
+use crate::implementations::skills::types::{SkillInfo, SkillScope};
 
 use super::SkillManager;
-
-/// Absolute in the host's own dialect.
-///
-/// Upstream's fixtures are POSIX literals, and on Windows a leading slash is
-/// drive-*relative*: `Path::new("/repo/x").is_absolute()` is false there.
-/// `suggest_skill_path` skips every registration that is not absolute, so it
-/// saw an empty candidate set and seven of these tests failed here while
-/// passing on upstream's Linux and macOS CI. The production guard is correct —
-/// a real skill path on Windows is `C:\…` and absolute — so only the fixtures
-/// needed a dialect. Keep new paths in this file going through `abs`.
-fn abs(path: &str) -> String {
-    #[cfg(windows)]
-    {
-        format!("C:{path}")
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_owned()
-    }
-}
-
-fn abs_path(path: &str) -> PathBuf {
-    PathBuf::from(abs(path))
-}
 
 fn skill(name: &str, path: &str) -> SkillInfo {
     SkillInfo {
         name: name.to_owned(),
-        path: abs(path),
+        path: path.to_owned(),
         ..SkillInfo::default()
     }
+}
+
+#[test]
+fn registered_scope_matches_the_directory_and_not_a_name_prefix() {
+    let mut info = skill(
+        "secret-skill-name",
+        "/opt/repo/.chutes-build/skills/secret-skill-name/SKILL.md",
+    );
+    info.scope = SkillScope::Bundled;
+    let manager = seeded_manager(vec![info]);
+    assert_eq!(
+        manager.registered_scope(Path::new(
+            "/opt/repo/.chutes-build/skills/secret-skill-name/references/guide.md"
+        )),
+        Some(SkillScope::Bundled)
+    );
+    assert_eq!(
+        manager.registered_scope(Path::new(
+            "/opt/repo/.chutes-build/skills/secret-skill-name-extra/SKILL.md"
+        )),
+        None
+    );
 }
 
 fn seeded_manager(skills: Vec<SkillInfo>) -> SkillManager {
@@ -50,21 +48,18 @@ fn suggests_unique_registered_path_for_wrong_root() {
     )]);
 
     let suggestion = manager
-        .suggest_skill_path(&abs_path("/wrong/root/skills/code-review/SKILL.md"))
+        .suggest_skill_path(Path::new("/wrong/root/skills/code-review/SKILL.md"))
         .unwrap();
 
     assert_eq!(
         suggestion.display_path,
-        abs_path("/home/user/.chutes-build/skills/code-review/SKILL.md")
+        Path::new("/home/user/.chutes-build/skills/code-review/SKILL.md")
     );
 }
 
 #[test]
 fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
-    let mut retired = skill(
-        "retired",
-        "/home/user/.chutes-build/skills/retired/SKILL.md",
-    );
+    let mut retired = skill("retired", "/home/user/.chutes-build/skills/retired/SKILL.md");
     retired.enabled = false;
     let manager = seeded_manager(vec![
         skill("review", "/repo/.chutes-build/skills/review/SKILL.md"),
@@ -76,7 +71,7 @@ fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
     // Control: the manager does produce a suggestion for a clean miss.
     assert!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/solo/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/solo/SKILL.md"))
             .is_some()
     );
 
@@ -91,7 +86,7 @@ fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
         "/home/user/.chutes-build/skills/solo/SKILL.md",
     ] {
         assert!(
-            manager.suggest_skill_path(&abs_path(requested)).is_none(),
+            manager.suggest_skill_path(Path::new(requested)).is_none(),
             "{requested}"
         );
     }
@@ -99,10 +94,9 @@ fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
 
 #[test]
 fn requested_path_among_same_named_registrations_is_ambiguous() {
-    // The failed read targets one registered path for "review"; another
-    // same-named registration exists. Counting the requested path as a match
-    // keeps this ambiguous (no suggestion) rather than treating the sibling
-    // as a unique alternate.
+    // The failed read targets one registered path for "review"; another same-named registration
+    // exists. Counting the requested path as a match keeps this ambiguous (no suggestion) rather
+    // than treating the sibling as a unique alternate.
     let manager = seeded_manager(vec![
         skill("review", "/repo/.chutes-build/skills/review/SKILL.md"),
         skill("review", "/home/user/.chutes-build/skills/review/SKILL.md"),
@@ -113,7 +107,7 @@ fn requested_path_among_same_named_registrations_is_ambiguous() {
         "/home/user/.chutes-build/skills/review/SKILL.md",
     ] {
         assert!(
-            manager.suggest_skill_path(&abs_path(requested)).is_none(),
+            manager.suggest_skill_path(Path::new(requested)).is_none(),
             "{requested}"
         );
     }
@@ -142,7 +136,7 @@ fn includes_model_disabled_and_held_conditional_skills() {
         "/wrong/root/conditional/SKILL.md",
     ] {
         assert!(
-            manager.suggest_skill_path(&abs_path(requested)).is_some(),
+            manager.suggest_skill_path(Path::new(requested)).is_some(),
             "{requested}"
         );
     }
@@ -155,10 +149,7 @@ fn baseline_reload_updates_lookup_but_not_snapshot_names() {
     manager.seed(
         None,
         None,
-        vec![skill(
-            "initial",
-            "/repo/.chutes-build/skills/initial/SKILL.md",
-        )],
+        vec![skill("initial", "/repo/.chutes-build/skills/initial/SKILL.md")],
         None,
         None,
         None,
@@ -177,12 +168,12 @@ fn baseline_reload_updates_lookup_but_not_snapshot_names() {
     );
     assert!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/reloaded/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/reloaded/SKILL.md"))
             .is_some()
     );
     assert!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/initial/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/initial/SKILL.md"))
             .is_none()
     );
 }
@@ -202,7 +193,7 @@ fn reload_disabling_a_discovered_skill_stops_suggesting_it() {
     // neither be suggested nor count as a second match.
     assert!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/review/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
             .is_none()
     );
 }
@@ -220,11 +211,11 @@ fn reload_moving_a_skill_suggests_only_the_current_registration() {
         "/repo/new/.chutes-build/skills/review/SKILL.md",
     )]);
     let suggestion = manager
-        .suggest_skill_path(&abs_path("/wrong/root/review/SKILL.md"))
+        .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
         .unwrap();
     assert_eq!(
         suggestion.display_path,
-        abs_path("/repo/new/.chutes-build/skills/review/SKILL.md")
+        Path::new("/repo/new/.chutes-build/skills/review/SKILL.md")
     );
 
     // With a stale dynamic record left at the old path, lookup cannot tell a
@@ -241,7 +232,7 @@ fn reload_moving_a_skill_suggests_only_the_current_registration() {
     )]);
     assert!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/review/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
             .is_none()
     );
 }
@@ -253,39 +244,33 @@ fn deduplicates_discovered_and_baseline_copies() {
     manager.add_discovered(vec![skill("review", path)]);
 
     let suggestion = manager
-        .suggest_skill_path(&abs_path("/wrong/root/review/SKILL.md"))
+        .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
         .unwrap();
 
-    assert_eq!(suggestion.display_path, abs_path(path));
+    assert_eq!(suggestion.display_path, Path::new(path));
 }
 
 #[test]
 fn rewrites_worktree_paths_to_display_cwd_but_preserves_external_paths() {
     let mut manager = seeded_manager(vec![
-        skill(
-            "review",
-            "/real/worktree/.chutes-build/skills/review/SKILL.md",
-        ),
-        skill(
-            "external",
-            "/home/user/.chutes-build/skills/external/SKILL.md",
-        ),
+        skill("review", "/real/worktree/.chutes-build/skills/review/SKILL.md"),
+        skill("external", "/home/user/.chutes-build/skills/external/SKILL.md"),
     ]);
-    manager.real_cwd_prefix = Some(abs("/real/worktree"));
-    manager.display_cwd = Some(abs("/display/project"));
+    manager.real_cwd_prefix = Some("/real/worktree".to_owned());
+    manager.display_cwd = Some("/display/project".to_owned());
 
     assert_eq!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/review/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
             .unwrap()
             .display_path,
-        abs_path("/display/project/.chutes-build/skills/review/SKILL.md")
+        Path::new("/display/project/.chutes-build/skills/review/SKILL.md")
     );
     assert_eq!(
         manager
-            .suggest_skill_path(&abs_path("/wrong/root/external/SKILL.md"))
+            .suggest_skill_path(Path::new("/wrong/root/external/SKILL.md"))
             .unwrap()
             .display_path,
-        abs_path("/home/user/.chutes-build/skills/external/SKILL.md")
+        Path::new("/home/user/.chutes-build/skills/external/SKILL.md")
     );
 }

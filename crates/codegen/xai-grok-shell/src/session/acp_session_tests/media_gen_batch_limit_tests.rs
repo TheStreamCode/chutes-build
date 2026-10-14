@@ -1,11 +1,9 @@
-//! Media-gen per-batch cap: Pending ToolCall + Failed update + tool_result pairing.
+//! Media-gen per-batch cap: a rejected call gets a Pending ToolCall, a Failed update, and a paired tool_result.
 //!
-//! Regression for the reject path that previously shipped orphan ToolCallUpdates
-//! and broke streaming-messages-json reducers (GBT-5790 council rounds).
+//! Regression test for the reject path that previously shipped orphan ToolCallUpdates and broke streaming-messages-json reducers.
 //!
-//! `send_update` enqueues on the actor's `event_tx` (SessionEvent::Notification);
-//! the session run loop fans those out to the gateway. Actor-level tests assert
-//! on `event_rx`, not the gateway channel.
+//! `send_update` enqueues on the actor's `event_tx` (SessionEvent::Notification); the session run loop fans those out to the gateway.
+//! Actor-level tests assert on `event_rx`, not the gateway channel.
 
 use super::support::*;
 use super::*;
@@ -91,7 +89,7 @@ async fn first_k_tail_rejects_get_pending_then_failed() {
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let (mut actor, mut event_rx) =
                 create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            // max_image=0 → first-K admits none, so ImageGen never runs.
+            // With max_image at 0 the first-K gate admits no image_gen calls, so ImageGen never runs
             std::sync::Arc::get_mut(&mut actor.rebuild_spec)
                 .expect("test rebuild_spec is uniquely owned")
                 .media_gen_batch_limits
@@ -109,7 +107,7 @@ async fn first_k_tail_rejects_get_pending_then_failed() {
 
             tokio::time::timeout(
                 std::time::Duration::from_secs(15),
-                actor.execute_tool_calls(batch),
+                actor.execute_tool_calls(batch, None),
             )
             .await
             .expect("execute_tool_calls must not hang")
@@ -145,8 +143,8 @@ async fn first_k_tail_rejects_get_pending_then_failed() {
                     "id {id} needs Pending then Failed, got {for_id:?} from {statuses:?}"
                 );
                 assert_eq!(
-                    for_id[0],
-                    acp::ToolCallStatus::Pending,
+                    at(&for_id, 0),
+                    &acp::ToolCallStatus::Pending,
                     "id {id} first status must be Pending: {for_id:?}"
                 );
                 assert!(
@@ -184,11 +182,11 @@ async fn over_cap_report_classifies_modest_vs_egregious() {
                 .collect();
             let report = actor.media_gen_over_cap(&calls);
             assert_eq!(report.len(), 1);
-            assert_eq!(report[0].name, "image_gen");
-            assert_eq!(report[0].total, over);
-            assert_eq!(report[0].max, DEFAULT_MAX_PARALLEL_IMAGE_GEN);
+            assert_eq!(at(&report, 0).name, "image_gen");
+            assert_eq!(at(&report, 0).total, over);
+            assert_eq!(at(&report, 0).max, DEFAULT_MAX_PARALLEL_IMAGE_GEN);
             assert!(
-                !report[0].is_egregious(),
+                !at(&report, 0).is_egregious(),
                 "max+1 is modest first-K, not a 2x resample"
             );
 
@@ -202,7 +200,7 @@ async fn over_cap_report_classifies_modest_vs_egregious() {
                 .collect();
             let spam_report = actor.media_gen_over_cap(&spam);
             assert_eq!(spam_report.len(), 1);
-            assert!(spam_report[0].is_egregious());
+            assert!(at(&spam_report, 0).is_egregious());
 
             let under: Vec<xai_grok_sampling_types::ToolCall> = (0..DEFAULT_MAX_PARALLEL_IMAGE_GEN)
                 .map(|i| xai_grok_sampling_types::ToolCall {

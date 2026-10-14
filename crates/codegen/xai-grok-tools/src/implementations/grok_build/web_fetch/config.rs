@@ -9,12 +9,10 @@ use crate::register_resource;
 // Safety-boundary constants. Not configurable.
 pub const MAX_URL_LENGTH: usize = 2_000;
 pub const MAX_REDIRECTS: usize = 10;
-pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; chutes-build/1.0)";
+pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; grok-agent/1.0; +https://chutes.ai)";
 
-/// Runtime-configurable parameters for the `web_fetch` tool.
-///
-/// Injected via `Params<WebFetchParams>` in `SharedResources`.
-/// All fields are optional — `None` means "use built-in default."
+/// Runtime-configurable parameters for the `web_fetch` tool. Injected via `Params<WebFetchParams>`
+/// in `SharedResources`. All fields are optional — `None` means "use built-in default."
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebFetchParams {
@@ -30,20 +28,17 @@ pub struct WebFetchParams {
     pub max_markdown_length: Option<usize>,
     /// Model context window size in tokens. Used to enforce 3% cap on web content.
     pub context_window_tokens: Option<u64>,
-    /// Domains the tool is allowed to fetch. All other
-    /// domains are rejected before any network I/O.
-    /// Defaults to `DEFAULT_ALLOWED_DOMAINS` if no
-    /// list given.
+    /// Domains the tool is allowed to fetch. All other domains are rejected before any network I/O.
+    /// Defaults to `DEFAULT_ALLOWED_DOMAINS` if no list given.
     #[serde(default)]
     pub allowed_domains: Option<Vec<String>>,
     /// Optional egress proxy endpoint. When set, all HTTP requests are
     /// routed through this URL.
     #[serde(default)]
     pub proxy_endpoint: Option<String>,
-    /// When true, allow fetches to **explicit** loopback hosts only
-    /// (`localhost`, `127.0.0.0/8`, `::1`). Private/metadata stay blocked.
-    /// Default: `false` (fail closed). Set via `[toolset.web_fetch]
-    /// allow_local = true` or `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL=1`.
+    /// When true, allow fetches to **explicit** loopback hosts only (`localhost`, `127.0.0.0/8`,
+    /// `::1`). Private/metadata stay blocked. Default: `false` (fail closed). Set via
+    /// `[toolset.web_fetch] allow_local = true` or `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL=1`.
     #[serde(default)]
     pub allow_local: Option<bool>,
 }
@@ -100,7 +95,6 @@ pub static DEFAULT_ALLOWED_DOMAINS: &[&str] = &[
     "console.chutes.ai",
     "docs.chutes.ai",
     "api.chutes.ai",
-    "llm.chutes.ai",
     // Programming languages
     "docs.python.org",
     "en.cppreference.com",

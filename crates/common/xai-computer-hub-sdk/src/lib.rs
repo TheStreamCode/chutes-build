@@ -47,8 +47,10 @@ pub mod trace_donate;
 pub mod oidc_provider;
 
 pub use auth::{AuthCredential, AuthIdentity, AuthProvider, PrincipalKey, SharedAuthProvider};
-pub use connection::{CLOSE_CODE_SANDBOX_TERMINATED, ConnKey, HubConnection, ReconnectEvent};
-pub use error::ClientError;
+pub use connection::{
+    CLOSE_CODE_SANDBOX_TERMINATED, ConnKey, HubConnection, InitialConnectPolicy, ReconnectEvent,
+};
+pub use error::{ClientError, MAX_REFUSAL_CODE_LEN, RefusalCode};
 pub use harness::{
     CancelOnDrop, LocalRegistry, ModelOutputExtractor, SessionBindReport, ToolHarness,
     ToolHarnessBuilder, extractor_for,
@@ -63,12 +65,13 @@ pub use oidc_provider::{
 };
 pub use pool::HubConnectionPool;
 pub use server::{
-    ResolvedSessionHandlers, SessionHandlerResolver, SystemNotifyAck, ToolServer,
-    ToolServerBuilder, ToolServerHandler, WeakToolServer,
+    ResolvedSessionHandlers, SessionHandlerResolver, SessionUnboundCallback, SystemNotifyAck,
+    ToolServer, ToolServerBuilder, ToolServerHandler, WeakToolServer,
 };
 pub use trace_donate::{HubDonatingReporter, TraceDonationPump};
 pub use xai_computer_hub_core::{
-    CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS, grok_bot_tool_description,
+    CHUTES_BUILD_BOT_DEFAULT_TOOL_IDS, CHUTES_BUILD_BOT_TOOL_DESCRIPTIONS, CHUTES_BUILD_BOT_TOOL_IDS,
+    grok_bot_tool_arguments_schema, grok_bot_tool_description, is_grok_bot_default_tool,
     is_grok_bot_tool,
 };
 // Re-exported so consumers that depend only on the SDK can recognize the

@@ -32,7 +32,13 @@ data class BotCommandParams(
 
 typealias BotCommandResult = JsonElement
 
-typealias BotVncDescriptorParams = BotEmptyParams
+/**
+ * `bot.vncDescriptor` params.
+ */
+@Serializable
+data class BotVncDescriptorParams(
+    val agentId: String,
+)
 
 /**
  * `bot.vncDescriptor` result.
@@ -50,14 +56,19 @@ data class BotVncDescriptorResult(
 typealias BotRosterParams = BotEmptyParams
 
 /**
- * One cached roster row.
+ * One roster row, read live from the box.
  */
 @Serializable
 data class BotRosterEntry(
     val agentId: String,
     val name: String,
     val status: String,
+    val viewerIsOwner: Boolean,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val lastTurnAt: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val avatarColor: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val avatarShape: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenFromSidebar: Boolean? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val hasCustomImage: Boolean? = null,
 )
 
 /**
@@ -66,6 +77,7 @@ data class BotRosterEntry(
 @Serializable
 data class BotRosterResult(
     val agents: List<BotRosterEntry>,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val rememberedAtMs: Long? = null,
 )
 
 typealias BotStatusParams = BotEmptyParams
@@ -116,6 +128,45 @@ data class BotTranscriptOffboxResult(
 )
 
 /**
+ * Fields the hub merges into every transcript entry it decodes from the
+ * durable store — `getAgentTranscriptTail` / window / thread reads and
+ * `transcript` events alike — next to the box's own fields. Entries the box
+ * answers directly carry none of them.
+ */
+@Serializable
+data class BotTranscriptEntryStamp(
+    val entryVersion: Long,
+)
+
+typealias BotUsageParams = BotEmptyParams
+
+/**
+ * `bot.usage` result: the caller's weekly Grok Bot allowance. Percent-only
+ * by contract — no currency amounts cross the wire — so clients render a
+ * meter, not a balance.
+ *
+ * `usage_percent` is absent when the account has no personal meter (a
+ * pooled team allowance, or a zero denominator with no grants). It is not
+ * clamped: on-demand overage reads above 100.
+ */
+@Serializable
+data class BotUsageResult(
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val usagePercent: Double? = null,
+    val currentPeriodStartMs: Long,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val nextResetAtMs: Long? = null,
+    val hasAvailableUsage: Boolean,
+    val hasNonZeroIncludedLimit: Boolean,
+    val includedLimitZero: Boolean,
+    val trial: Boolean,
+    val isTeamSeat: Boolean,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val fundingPlan: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val planLabel: String? = null,
+    val manageUrl: String,
+    val onDemandEligible: Boolean,
+    val onDemandEnabled: Boolean,
+)
+
+/**
  * `bot.subscribe` / `bot.unsubscribe` params.
  */
 @Serializable
@@ -144,6 +195,18 @@ data class BotBindConversationParams(
 typealias BotBindConversationResult = BotEmptyResult
 
 /**
+ * `bot.presence` params. A connection views at most one agent; `viewing:
+ * true` for a new agent replaces the previous one.
+ */
+@Serializable
+data class BotPresenceParams(
+    val agentId: String,
+    val viewing: Boolean,
+)
+
+typealias BotPresenceResult = BotEmptyResult
+
+/**
  * Closed hub-owned error code. This list is the client stability boundary.
  *
  * Senders emit only these codes. Receivers treat any unknown wire string
@@ -153,6 +216,26 @@ typealias BotBindConversationResult = BotEmptyResult
 enum class BotRelayErrorCode {
     @SerialName("identity_unavailable")
     IdentityUnavailable,
+    @SerialName("link_required")
+    LinkRequired,
+    @SerialName("link_removed")
+    LinkRemoved,
+    @SerialName("consent_required")
+    ConsentRequired,
+    @SerialName("enterprise_unsupported")
+    EnterpriseUnsupported,
+    @SerialName("legacy_pricing_unsupported")
+    LegacyPricingUnsupported,
+    @SerialName("email_unverified")
+    EmailUnverified,
+    @SerialName("link_conflict")
+    LinkConflict,
+    @SerialName("cursor_account_unavailable")
+    CursorAccountUnavailable,
+    @SerialName("link_unsupported")
+    LinkUnsupported,
+    @SerialName("legacy_privacy_unsupported")
+    LegacyPrivacyUnsupported,
     @SerialName("no_plan")
     NoPlan,
     @SerialName("usage_exhausted")
@@ -172,12 +255,53 @@ enum class BotRelayErrorCode {
 }
 
 /**
- * Opaque upstream diagnostic. Present for debugging only; clients must
- * not parse `upstream`.
+ * How one of the caller's Grok accounts signs in. Senders emit only the
+ * named variants. Receivers treat any unknown wire string as
+ * [`Self::Other`].
+ */
+@Serializable
+enum class BotRelaySignIn {
+    @SerialName("x")
+    X,
+    @SerialName("google")
+    Google,
+    @SerialName("apple")
+    Apple,
+    @SerialName("password")
+    Password,
+    @SerialName("github")
+    Github,
+    @SerialName("sso")
+    Sso,
+    @SerialName("email_code")
+    EmailCode,
+    @SerialName("other")
+    Other,
+}
+
+/**
+ * One of the caller's other Grok accounts on the same verified email.
+ *
+ * `signIn` is a string on the wire. Generated clients see `string` and
+ * compare against [`BotRelaySignIn`]. Unknown values degrade to `other`.
+ */
+@Serializable
+data class BotRelaySiblingAccount(
+    val signIn: String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val handle: String? = null,
+    val createdAtMs: Long,
+    val linked: Boolean,
+)
+
+/**
+ * Structured context on a bot-relay error. `upstream` is an opaque
+ * diagnostic present for debugging only; clients must not parse it.
  */
 @Serializable
 data class BotRelayErrorDetail(
     @EncodeDefault(EncodeDefault.Mode.NEVER) val upstream: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val upstreamMessage: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val siblingAccounts: List<BotRelaySiblingAccount>? = null,
 )
 
 /**
@@ -185,7 +309,9 @@ data class BotRelayErrorDetail(
  *
  * Wire form: `{code, retryable, detail, reason?}`.
  * `detail` is always present (empty object when unused).
- * `reason` is set only for [`BotRelayErrorCode::CommandRejected`].
+ * `reason` is set for [`BotRelayErrorCode::CommandRejected`] and for the
+ * link-state codes ([`BotRelayErrorCode::is_link_state`]), where it
+ * carries the exchange's machine reason token for per-case client copy.
  *
  * On the JSON-RPC envelope this object is `error.data`. Receivers
  * switch on `data.code`. The envelope `error.message` is the snake_case
@@ -209,6 +335,8 @@ data class BotRelayError(
  */
 @Serializable
 enum class HubChannel {
+    @SerialName("hub:turn_started")
+    TurnStarted,
     @SerialName("hub:turn_finished")
     TurnFinished,
     @SerialName("hub:resync_required")
@@ -216,13 +344,31 @@ enum class HubChannel {
 }
 
 /**
+ * Body of `hub:turn_started` (`event` when [`HubChannel::TurnStarted`]).
+ *
+ * The hub mints `turn_id` when it sees the agent's `isRunning` level rise
+ * and repeats it on the matching [`HubTurnFinishedEvent`], so a client can
+ * tell which running span a finish closes. A subscriber joining mid-turn
+ * receives the running turn's start first.
+ */
+@Serializable
+data class HubTurnStartedEvent(
+    val agentId: String,
+    val turnId: String,
+)
+
+/**
  * Body of `hub:turn_finished` (`event` when [`HubChannel::TurnFinished`]).
+ *
+ * `turn_id` matches the [`HubTurnStartedEvent`] that opened the span;
+ * empty from hubs that predate turn ids.
  */
 @Serializable
 data class HubTurnFinishedEvent(
     val agentId: String,
     val conversationIds: List<String>,
     val preview: String,
+    val turnId: String,
 )
 
 /**
@@ -246,6 +392,7 @@ data class HubResyncRequiredEvent(
  * omitted from the wire when `None`.
  *
  * `event` is upstream-verbatim for [`BotEventChannel::Upstream`]. For
+ * [`HubChannel::TurnStarted`] it is [`HubTurnStartedEvent`]; for
  * [`HubChannel::TurnFinished`] it is [`HubTurnFinishedEvent`]; for
  * [`HubChannel::ResyncRequired`] it is [`HubResyncRequiredEvent`].
  *
@@ -277,10 +424,16 @@ const val COMMAND_REJECTED_AGENT_ID_MISMATCH: String = "agent_id_mismatch"
 const val COMMAND_REJECTED_ARGS_TOO_LARGE: String = "args_too_large"
 /** `reason` on `command_rejected` when required command args are missing or empty. */
 const val COMMAND_REJECTED_ARGS_INVALID: String = "args_invalid"
+/** `reason` on `command_rejected` when the session's audience (owner vs. viewer) may not act on that agent. */
+const val COMMAND_REJECTED_AUDIENCE_UNSUPPORTED: String = "audience_unsupported"
 /** `reason` on `command_rejected` when Live mode cannot accept attachments. */
 const val COMMAND_REJECTED_ATTACHMENTS_NOT_SUPPORTED_IN_LIVE: String = "attachments_not_supported_in_live"
-/** `reason` on `command_rejected` when Live mode cannot interrupt or look up */
+/** `reason` on `command_rejected` when Live mode cannot interrupt or look up prompt acceptance. */
 const val COMMAND_REJECTED_NOT_SUPPORTED_IN_LIVE: String = "not_supported_in_live"
+/** `reason` on `command_rejected` when attachUpload cannot fetch the file because this connection has no usable credential. */
+const val COMMAND_REJECTED_ATTACHMENT_CREDENTIAL_UNAVAILABLE: String = "attachment_credential_unavailable"
+/** `reason` on `command_rejected` when the owning harness refused the send. */
+const val COMMAND_REJECTED_HARNESS_REFUSED: String = "harness_refused"
 /** `reason` on `command_rejected` when attachUpload cannot see the file (missing or not the caller's). */
 const val COMMAND_REJECTED_ATTACHMENT_NOT_FOUND: String = "attachment_not_found"
 /** `reason` on `command_rejected` when the file exists but is not a BOT_CHAT upload. */
@@ -289,8 +442,16 @@ const val COMMAND_REJECTED_ATTACHMENT_WRONG_SOURCE: String = "attachment_wrong_s
 const val COMMAND_REJECTED_ATTACHMENT_TOO_LARGE: String = "attachment_too_large"
 /** `reason` on `command_rejected` when the BotChat upload is not PostProcessDone. */
 const val COMMAND_REJECTED_ATTACHMENT_NOT_READY: String = "attachment_not_ready"
-/** `reason` on `command_rejected` when the box refused a well-formed */
+/** `reason` on `command_rejected` when the live box gateway refused a well-formed command with its own sentence. */
+const val COMMAND_REJECTED_BOX_REFUSED: String = "box_refused"
+/** `reason` on `command_rejected` when the box refused a well-formed catalog method (capability skew, not a client catalog bug). */
 const val COMMAND_REJECTED_GATEWAY_UNKNOWN_METHOD: String = "gateway/unknown-method"
+/** `reason` on `command_rejected` when the target agent's harness owns this state and exposes no RPC for the operation. */
+const val COMMAND_REJECTED_TEMPORAL_UNSUPPORTED: String = "temporal_unsupported"
+/** `reason` on `command_rejected` when the upstream answered the voice mint with `invalid_argument` or a voice harness call with `not_found`: voice calling is not enabled for this account, or the mint was refused. */
+const val COMMAND_REJECTED_VOICE_CALL_UNAVAILABLE: String = "voice_call_unavailable"
+/** `reason` on `command_rejected` when the upstream refused `setMainAgent` because the main bot feature is not enabled for this account: `getMainAgent` still reads the pointer, but nothing can write it until the account is enrolled. */
+const val COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED: String = "main_agent_not_enabled"
 
 fun isGatewayMethodUnsupported(error: BotRelayError): Boolean =
     error.code == "command_rejected" &&

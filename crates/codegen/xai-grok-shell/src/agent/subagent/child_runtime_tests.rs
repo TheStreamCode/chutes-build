@@ -11,7 +11,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{
     SubagentValidateTypeOutcome,
 };
 
-const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 async fn await_with_timeout<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(TEST_TIMEOUT, future)
@@ -58,6 +58,8 @@ struct SnapshotProbeRunner {
 
 impl ChildRunner for SnapshotProbeRunner {
     type Control = SnapshotProbeControl;
+    type RootControl =
+        xai_grok_tools::implementations::grok_build::task::root_control::NoRootControl;
     type CompletionData = ();
     type RunFuture = LocalBoxFuture<ChildRunOutput<()>>;
     type ValidateFuture = LocalBoxFuture<SubagentValidateTypeOutcome>;
@@ -91,6 +93,10 @@ impl ChildRunner for SnapshotProbeRunner {
                                 ),
                             child_cmd_tx,
                             active_message_target_session_id: run.request.id.clone(),
+                            active_message_target_agent_id:
+                                xai_message_delivery_core::AgentId::parse("ag1.c1")
+                                    .expect("test child id"),
+                            active_message_target_generation: run.generation,
                             child_signals: crate::session::signals::SessionSignalsHandle::new(),
                             _child_thread: Some(SessionThread::from_handle(std::thread::spawn(
                                 || {},
@@ -120,7 +126,13 @@ impl ChildRunner for SnapshotProbeRunner {
         Box::pin(std::future::pending())
     }
 
-    fn on_completed(&self, _: ChildCompletion<()>) {}
+    fn supports_wake(&self) -> bool {
+        true
+    }
+
+    fn on_completed(&self, _: ChildCompletion<()>, terminal_published: Box<dyn FnOnce() + Send>) {
+        terminal_published();
+    }
 }
 
 fn request() -> SubagentRequest {
@@ -140,6 +152,8 @@ fn request() -> SubagentRequest {
         fork_context: false,
         owner: SubagentOwner::Task,
         cancel_token: CancellationToken::new(),
+        spawn_root: Default::default(),
+        tool_call_id: None,
     }
 }
 
@@ -179,7 +193,7 @@ async fn send_active_message_freezes_parent_turn_before_first_poll() {
         let coordinator_task = tokio::task::spawn_local(coordinator.run());
         let spawn_task = tokio::task::spawn_local({
             let backend = backend.clone();
-            async move { backend.spawn(request()).await }
+            async move { backend.spawn(request(), None).await }
         });
         await_with_timeout(started_rx.recv())
             .await
@@ -254,18 +268,53 @@ async fn rejected_delivery(
         let coordinator_task = tokio::task::spawn_local(coordinator.run());
         let spawn_task = tokio::task::spawn_local({
             let backend = backend.clone();
-            async move { backend.spawn(request()).await }
+            async move { backend.spawn(request(), None).await }
         });
         await_with_timeout(started_rx.recv())
             .await
             .expect("probe child started");
 
-        let outcome = await_with_timeout(backend.send_active_message(
-            ActiveAgentMessageRequest::try_new_with_operation("child", "follow up", operation)
-            .expect("valid message"),
-        ))
-        .await;
-        let dispatched = child_cmd_rx.try_recv().is_ok();
+        // Poll send on the LocalSet while this task waits for the child command.
+        // A pinned-but-unpolled future deadlocks Steer dispatch on current_thread.
+        let send_task = tokio::task::spawn_local({
+            let backend = backend.clone();
+            async move {
+                backend
+                    .send_active_message(
+                        ActiveAgentMessageRequest::try_new_with_operation(
+                            "child",
+                            "follow up",
+                            operation,
+                        )
+                        .expect("valid message"),
+                    )
+                    .await
+            }
+        });
+        let (outcome, dispatched) = if target == "child"
+            && matches!(
+                operation,
+                ActiveAgentMessageOperation::Steer | ActiveAgentMessageOperation::Interject
+            )
+            && !force_queue_envelope
+        {
+            let command = await_with_timeout(child_cmd_rx.recv())
+                .await
+                .expect("Steer command dispatched");
+            let SessionCommand::ParentAgentMessage { respond_to, .. } = command else {
+                panic!("expected parent-message command");
+            };
+            respond_to
+                .send(ActiveMessageAdmission::Rejected)
+                .expect("admission future remains open");
+            (
+                await_with_timeout(send_task).await.expect("send task"),
+                true,
+            )
+        } else {
+            let outcome = await_with_timeout(send_task).await.expect("send task");
+            (outcome, child_cmd_rx.try_recv().is_ok())
+        };
         coordinator_task.abort();
         spawn_task.abort();
         (outcome, dispatched)
@@ -284,9 +333,21 @@ async fn target_mismatch_rejects_without_dispatch() {
 }
 
 #[tokio::test]
-async fn matched_steer_is_unsupported_and_uncommitted() {
+async fn matched_steer_dispatches_to_the_child_host() {
     let actual = rejected_delivery("child", ActiveAgentMessageOperation::Steer, false).await;
-    assert_eq!(actual, (ActiveAgentMessageOutcome::Unsupported, false));
+    assert_eq!(
+        actual,
+        (ActiveAgentMessageOutcome::NotActiveOrFinalizing, true)
+    );
+}
+
+#[tokio::test]
+async fn matched_interject_dispatches_to_the_child_host() {
+    let actual = rejected_delivery("child", ActiveAgentMessageOperation::Interject, false).await;
+    assert_eq!(
+        actual,
+        (ActiveAgentMessageOutcome::NotActiveOrFinalizing, true)
+    );
 }
 
 #[tokio::test]

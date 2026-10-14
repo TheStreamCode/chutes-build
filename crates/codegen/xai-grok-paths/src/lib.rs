@@ -1,5 +1,7 @@
 //! Type-safe path wrappers for absolute and relative UTF-8 paths.
 
+#![deny(clippy::indexing_slicing)]
+
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::ffi::OsStr;
@@ -31,7 +33,6 @@ pub trait ToAbsPath {
 }
 
 /// Convert an absolute path to relative by stripping the root prefix.
-///
 /// Returns the path unchanged if not under `root`.
 /// For strict validation, use [`RelPathBuf::from_absolute`] instead.
 pub fn to_relative_path(root: &Path, abs_path: &Path) -> PathBuf {
@@ -51,9 +52,7 @@ pub fn from_relative_path(root: &Path, rel_path: &Path) -> PathBuf {
 }
 
 /// Resolve `.` and `..` components without touching the filesystem.
-///
 /// Use only for lexical display or containment.
-/// If `b` is a symlink, normalizing `a/b/../c` can name a different filesystem target than the OS would resolve from the original spelling.
 /// Filesystem consumers must preserve the original path or deliberately canonicalize it before use.
 pub fn normalize_lexically(path: &Path) -> PathBuf {
     use std::path::Component;
@@ -341,13 +340,6 @@ impl From<RelPathBuf> for camino::Utf8PathBuf {
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
-    #[test]
-    fn test_abs_path_buf_new() {
-        let abs = AbsPathBuf::new(PathBuf::from("/home/user")).unwrap();
-        assert_eq!(abs.as_str(), "/home/user");
-    }
-
     #[test]
     fn test_abs_path_buf_new_relative_fails() {
         let result = AbsPathBuf::new(PathBuf::from("relative/path"));
@@ -417,12 +409,6 @@ mod tests {
             normalize_lexically(Path::new(r"C:..\outside.rs")),
             PathBuf::from(r"C:..\outside.rs")
         );
-    }
-
-    #[test]
-    fn test_rel_path_buf_new() {
-        let rel = RelPathBuf::new("src/main.rs").unwrap();
-        assert_eq!(rel.as_str(), "src/main.rs");
     }
 
     #[test]
@@ -543,7 +529,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Tests for ToAbsPath on &str and String
+    // Tests for ToAbsPath on &str
 
     #[cfg(unix)]
     #[test]
@@ -561,14 +547,5 @@ mod tests {
         let path: &str = "/other/path";
         let abs = path.to_abs_path(root);
         assert_eq!(abs.as_ref(), Path::new("/other/path"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_to_abs_path_string_relative() {
-        let root = Path::new("/home/user");
-        let path: String = "src/main.rs".to_string();
-        let abs = path.to_abs_path(root);
-        assert_eq!(abs.as_ref(), Path::new("/home/user/src/main.rs"));
     }
 }

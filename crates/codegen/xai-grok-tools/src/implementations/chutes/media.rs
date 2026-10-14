@@ -226,7 +226,7 @@ impl crate::types::tool_metadata::ToolMetadata for GenerateMediaTool {
     }
 
     fn description_template(&self) -> &str {
-        "Generate or edit image, video, music, or speech with a Chutes model. Self-contained: `{model, kind, prompt}` is enough — the model name is resolved against the catalog, the cord is selected, and the prompt is placed into the field that cord declares. Add `params` only for non-default settings (size, steps, voice) or to pass a workspace file as an input asset. Call describe_media_model only when a call reports a schema mismatch or you need an exact field name. Outputs and a provenance sidecar are saved only inside the current workspace."
+        "Generate or edit image, video, music, or speech with a Chutes model. For speech-to-text, document extraction, or embeddings, prefer the transcribe_audio, extract_document, and embed_texts tools. Self-contained: `{model, kind, prompt}` is enough — the model name is resolved against the catalog, the cord is selected, and the prompt is placed into the field that cord declares. Add `params` only for non-default settings (size, steps, voice) or to pass a workspace file as an input asset. Call describe_media_model only when a call reports a schema mismatch or you need an exact field name. Outputs and a provenance sidecar are saved only inside the current workspace."
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -269,9 +269,10 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
         let cwd = resources.lock().await.require::<Cwd>()?.0.clone();
         let client = ChutesMediaClient::from_env()
             .map_err(|error| execution_error("generate_media", error))?;
-        let (detail, resolved_model) = resolve_model_detail(&client, input.model.trim())
-            .await
-            .map_err(|error| execution_error("generate_media", error))?;
+        let (detail, resolved_model, fallback_note) =
+            resolve_with_fallback(&client, input.model.trim(), input.kind)
+                .await
+                .map_err(|error| execution_error("generate_media", error))?;
         let cord = select_cord(&detail, input.kind, input.cord.as_deref())
             .map_err(|error| execution_error("generate_media", error))?;
         let invoke_base = invoke_base_url(&detail)
@@ -356,7 +357,7 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
             .unwrap_or_else(default_filename_stem);
         let path = output_dir.join(format!("{stem}.{extension}"));
         let provenance = if env_flag_default("CHUTES_PROVENANCE", true) {
-            let provenance = serde_json::json!({
+            let mut provenance = serde_json::json!({
                 "provider": "chutes",
                 "model": &resolved_model,
                 "kind": input.kind.as_str(),
@@ -365,6 +366,9 @@ impl xai_tool_runtime::Tool for GenerateMediaTool {
                 "cost": media.cost,
                 "created_at": chrono::Utc::now().to_rfc3339(),
             });
+            if let Some(note) = fallback_note.as_deref() {
+                provenance["fallback_note"] = serde_json::Value::String(note.to_owned());
+            }
             Some(
                 serde_json::to_vec_pretty(&provenance)
                     .map_err(|error| execution_error("generate_media", error))?,
@@ -572,6 +576,80 @@ async fn resolve_model_detail(
     Ok((detail, identifier))
 }
 
+/// Resolve the requested model, falling back to same-kind catalog
+/// alternatives when it is gone. Returns the detail, the id that will
+/// actually serve, and a provenance note when a substitution happened.
+///
+/// At most two alternatives are described: models come and go, but the
+/// substitution must stay cheap and legible. When nothing can serve, the
+/// error names everything tried and points at `list_media_models`.
+async fn resolve_with_fallback(
+    client: &ChutesMediaClient,
+    model: &str,
+    kind: MediaKind,
+) -> Result<(serde_json::Value, String, Option<String>), String> {
+    match resolve_model_detail(client, model).await {
+        Ok((detail, id)) => Ok((detail, id, None)),
+        Err(first_error) => {
+            let catalog = client.list().await.map_err(|error| {
+                format!("{first_error} (catalog lookup for alternatives failed: {error})")
+            })?;
+            let mut tried = vec![model.to_owned()];
+            for candidate in equivalent_media_models(&catalog, model, kind)
+                .into_iter()
+                .take(2)
+            {
+                tried.push(candidate.clone());
+                match client.describe(&candidate).await {
+                    Ok(detail) => {
+                        let note = format!(
+                            "model `{model}` was not found; using equivalent `{candidate}`"
+                        );
+                        return Ok((detail, candidate, Some(note)));
+                    }
+                    Err(_) => continue,
+                }
+            }
+            Err(format!(
+                "{first_error} No equivalent {} model could serve the request (tried: {}).                  Use list_media_models kind={} to browse alternatives.",
+                kind.as_str(),
+                tried.join(", "),
+                kind.as_str()
+            ))
+        }
+    }
+}
+
+/// Catalog slugs whose inferred kind matches, excluding the failed name.
+/// Pure over a fetched body so the selection stays hermetic and testable.
+fn equivalent_media_models(
+    catalog: &serde_json::Value,
+    exclude: &str,
+    kind: MediaKind,
+) -> Vec<String> {
+    let wanted = normalize_model_key(exclude);
+    catalog_records(catalog)
+        .into_iter()
+        .filter_map(|record| {
+            let searchable = format!(
+                "{} {} {}",
+                first_string(record, &["standard_template", "template"])
+                    .as_deref()
+                    .unwrap_or_default(),
+                first_string(record, &["tagline"]).as_deref().unwrap_or_default(),
+                record.get("cords").unwrap_or(&serde_json::Value::Null)
+            );
+            if infer_kind(&searchable).is_some_and(|found| found == kind.as_str()) {
+                let id = first_string(record, &["slug", "name"])?;
+                if normalize_model_key(&id) != wanted {
+                    return Some(id);
+                }
+            }
+            None
+        })
+        .collect()
+}
+
 /// Lowercase alphanumerics only, so "FLUX.1 schnell", "flux-1-schnell" and
 /// "FLUX.1-schnell" all compare equal.
 fn normalize_model_key(value: &str) -> String {
@@ -716,7 +794,7 @@ fn select_cord(
         .ok_or_else(|| "model exposes no callable cords".to_owned())
 }
 
-fn invoke_base_url(value: &serde_json::Value) -> Option<String> {
+pub(crate) fn invoke_base_url(value: &serde_json::Value) -> Option<String> {
     if let Some(explicit) = first_string(value, &["invocation_url", "invoke_url", "subdomain"]) {
         return Some(explicit.trim_end_matches('/').to_owned());
     }
@@ -1896,5 +1974,25 @@ mod tests {
             );
         })
         .await;
+    }
+
+    #[test]
+    fn equivalent_media_models_match_kind_and_skip_excluded() {
+        let catalog = serde_json::json!([
+            {"slug": "old-image", "tagline": "text2image diffusion"},
+            {"slug": "new-image", "tagline": "flux text2image"},
+            {"slug": "clip-video", "tagline": "text2video"},
+        ]);
+        assert_eq!(
+            equivalent_media_models(&catalog, "old-image", MediaKind::Image),
+            vec!["new-image".to_owned()]
+        );
+        assert_eq!(
+            equivalent_media_models(&catalog, "missing", MediaKind::Video),
+            vec!["clip-video".to_owned()]
+        );
+        assert!(
+            equivalent_media_models(&catalog, "new-image", MediaKind::Music).is_empty()
+        );
     }
 }

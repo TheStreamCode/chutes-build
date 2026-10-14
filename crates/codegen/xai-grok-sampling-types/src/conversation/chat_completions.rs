@@ -1,5 +1,3 @@
-//! Chat Completions wire format.
-
 use super::*;
 
 impl From<ChatRequestMessage> for ConversationItem {
@@ -7,6 +5,7 @@ impl From<ChatRequestMessage> for ConversationItem {
         match msg.role {
             Role::System => ConversationItem::System(SystemItem {
                 content: Arc::<str>::from(msg.text_content()),
+                synthetic_reason: SyntheticReason::Primary,
             }),
             Role::User => {
                 let parts = msg
@@ -24,13 +23,14 @@ impl From<ChatRequestMessage> for ConversationItem {
                     .collect();
                 ConversationItem::User(UserItem {
                     content: parts,
-                    synthetic_reason: None,
-                    ..Default::default()
+                    synthetic_reason: SyntheticReason::Human,
+                    cwd_generation: None,
+                    prior_turn_interrupt: None,
+                    prompt_index: None,
                 })
             }
             Role::Assistant => {
-                // Reasoning is a sibling item, which a single-item conversion
-                // cannot emit, so it is dropped here.
+                // Reasoning is a sibling item, which a single-item conversion cannot emit, so it is dropped here
                 let content = msg.text_content();
                 let model_id = msg.model_id;
 
@@ -64,10 +64,9 @@ impl From<ChatRequestMessage> for ConversationItem {
     }
 }
 
-/// Convert a single non-`Reasoning` [`ConversationItem`]. The wire format
-/// carries `reasoning_content` on the *following* assistant message, which a
-/// single item cannot see, so use [`conversation_to_chat_messages`] instead
-/// when reasoning must survive.
+/// Convert a single non-`Reasoning` [`ConversationItem`].
+/// The wire format carries `reasoning_content` on the *following* assistant message, which a single item cannot see.
+/// Use [`conversation_to_chat_messages`] instead when reasoning must survive.
 pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestMessage {
     match item {
         ConversationItem::System(s) => ChatRequestMessage::system(s.content.as_ref()),
@@ -76,8 +75,7 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
                 .content
                 .iter()
                 .any(|p| matches!(p, ContentPart::Image { .. }));
-            // Collapse to a single text block when there are no images, as
-            // the pre-blocks behavior did.
+            // Collapse to a single text block when there are no images, matching the behavior from before content blocks existed
             let content = if !has_images {
                 let text = u
                     .content
@@ -165,8 +163,7 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
             }
         }
         // Backend tool calls have no Chat Completions equivalent.
-        // Emit a synthetic assistant message so the model sees context
-        // about what was searched, without breaking the message sequence.
+        // Emit a synthetic assistant message so the model sees context about what was searched, without breaking the message sequence
         ConversationItem::BackendToolCall(b) => ChatRequestMessage {
             role: Role::Assistant,
             content: MessageContent::Text(b.text_summary()),
@@ -184,10 +181,8 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
     }
 }
 
-/// The canonical conversion. Each run of `Reasoning` siblings folds into the
-/// `reasoning_content` of the following `Assistant`; a `BackendToolCall` in
-/// between does not break the fold, any other item clears it, and reasoning
-/// with no following assistant is dropped.
+/// The canonical conversion: each run of `Reasoning` siblings folds into the `reasoning_content` of the following `Assistant`.
+/// A `BackendToolCall` in between does not break the fold, any other item clears it, and reasoning with no following assistant is dropped.
 pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRequestMessage> {
     let mut out: Vec<ChatRequestMessage> = Vec::with_capacity(items.len());
     let mut pending_reasoning: Vec<String> = Vec::new();
@@ -209,8 +204,7 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
                 out.push(msg);
             }
             ConversationItem::BackendToolCall(_) => {
-                // Keep `pending_reasoning` so it still folds onto the
-                // following assistant, as the Responses path does.
+                // Keep `pending_reasoning` so it still folds onto the following assistant, as the Responses path does
                 out.push(conversation_item_to_chat_message(item));
             }
             other => {
@@ -220,75 +214,12 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
         }
     }
 
-    merge_adjacent_plain_messages(out)
-}
-
-/// Collapse runs of adjacent `System`/`User` messages into one message each.
-///
-/// Some serving templates are strict about role alternation and reject a
-/// request whose history contains two same-role messages in a row (observed
-/// on Mistral-Nemo: "conversation roles must alternate"). The agent assembles
-/// system instructions, project reminders, and injected user reminders as
-/// separate items that tolerant backends accept; merging the plain-text runs
-/// keeps those backends working without touching anything else.
-///
-/// Assistant and Tool messages are never merged: an assistant message can
-/// carry `tool_calls` and a tool message is paired to one call id, so joining
-/// either would break the tool protocol. A message with `tool_calls` or
-/// `tool_call_id` set is left alone even when its role would otherwise match.
-fn merge_adjacent_plain_messages(messages: Vec<ChatRequestMessage>) -> Vec<ChatRequestMessage> {
-    let mut out: Vec<ChatRequestMessage> = Vec::with_capacity(messages.len());
-    for msg in messages {
-        let mergeable_role = matches!(msg.role, Role::System | Role::User);
-        let carries_tool_state = !msg.tool_calls.is_empty() || msg.tool_call_id.is_some();
-        if mergeable_role
-            && !carries_tool_state
-            && let Some(last) = out.last_mut()
-            && last.role == msg.role
-            && last.tool_calls.is_empty()
-            && last.tool_call_id.is_none()
-        {
-            append_message_content(&mut last.content, msg.content);
-            continue;
-        }
-        out.push(msg);
-    }
     out
-}
-
-/// Append `extra` onto `content`, keeping `Text` when both sides are text.
-fn append_message_content(content: &mut MessageContent, extra: MessageContent) {
-    match (&mut *content, extra) {
-        (MessageContent::Text(a), MessageContent::Text(b)) => {
-            if a.is_empty() {
-                *a = b;
-            } else if !b.is_empty() {
-                a.push_str("\n\n");
-                a.push_str(&b);
-            }
-        }
-        (MessageContent::Blocks(blocks), MessageContent::Blocks(mut more)) => {
-            blocks.append(&mut more);
-        }
-        (MessageContent::Text(text), MessageContent::Blocks(mut more)) => {
-            let mut all = vec![ChatContentBlock::Text {
-                text: std::mem::take(text),
-            }];
-            all.append(&mut more);
-            *content = MessageContent::Blocks(all);
-        }
-        (MessageContent::Blocks(blocks), MessageContent::Text(text)) => {
-            if !text.is_empty() {
-                blocks.push(ChatContentBlock::Text { text });
-            }
-        }
-    }
 }
 
 impl From<ChatResponseMessage> for ConversationItem {
     fn from(msg: ChatResponseMessage) -> Self {
-        // Reasoning is dropped: the streaming consumer synthesizes the
-        // sibling item instead.
+        // Reasoning is dropped: the streaming consumer synthesizes the sibling item instead
         let content = msg.content.unwrap_or_default();
 
         let tool_calls: Vec<ToolCall> = msg
@@ -372,6 +303,7 @@ impl From<ConversationRequest> for ChatCompletionRequest {
             x_grok_deployment_id: req.x_grok_deployment_id,
             x_grok_user_id: req.x_grok_user_id,
             trace: None,
+            traceparent: req.traceparent,
         }
     }
 }

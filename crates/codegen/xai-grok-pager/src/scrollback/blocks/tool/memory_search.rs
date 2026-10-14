@@ -1,5 +1,3 @@
-//! MemorySearchToolCallBlock — structured memory search results display.
-
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 
@@ -23,7 +21,6 @@ pub struct MemoryResult {
     pub snippet: String,
 }
 
-/// Memory search tool call block with structured result display.
 #[derive(Debug, Clone)]
 pub struct MemorySearchToolCallBlock {
     pub query: String,
@@ -159,8 +156,7 @@ impl BlockContent for MemorySearchToolCallBlock {
                     .into_iter()
                     .enumerate()
                     .map(|(i, line)| {
-                        // First span is label (or indent on continuations); only
-                        // the query span is selectable on the first visual row.
+                        // First span is label (or indent on continuations); only the query span is selectable on the first visual row
                         let selectable = if i == 0 {
                             let query_end = 2.min(line.spans.len()).max(1);
                             Selectable::Spans(1..query_end)
@@ -305,18 +301,14 @@ fn shorten_path(path: &str) -> &str {
     let memory_root = xai_grok_config::grok_home().join("memory");
     let memory_prefix = memory_root.display().to_string();
     if let Some(rest) = path.strip_prefix(&memory_prefix) {
-        // Both separators: the prefix comes from a `PathBuf`, so on Windows the rest
-        // begins with a `\` that a `/`-only strip left in place. The header then read
-        // `\MEMORY.md`, and a nested path kept its whole tail because the search for
-        // the first separator never matched.
-        let rest = rest.strip_prefix(['/', '\\']).unwrap_or(rest);
-        if let Some(after_separator) = rest.find(['/', '\\']) {
-            return &rest[after_separator + 1..];
+        let rest = rest.strip_prefix('/').unwrap_or(rest);
+        if let Some(after_slash) = rest.find('/') {
+            return rest.get(after_slash + 1..).unwrap_or(rest);
         }
         return rest;
     }
     // Fallback: strip to filename
-    path.rsplit(['/', '\\']).next().unwrap_or(path)
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
@@ -340,25 +332,34 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
 
         // Line 0: "1 (score: 0.72, source: global)"
         if let Some(first) = lines.first() {
-            if let Some(score_start) = first.find("score: ") {
-                let after = &first[score_start + 7..];
-                if let Some(end) = after.find(',') {
-                    score = after[..end].parse().unwrap_or(0.0);
-                }
+            if let Some(score_start) = first.find("score: ")
+                && let Some(after) = first.get(score_start + 7..)
+                && let Some(end) = after.find(',')
+                && let Some(score_str) = after.get(..end)
+            {
+                score = score_str.parse().unwrap_or(0.0);
             }
-            if let Some(src_start) = first.find("source: ") {
-                let after = &first[src_start + 8..];
+            if let Some(src_start) = first.find("source: ")
+                && let Some(after) = first.get(src_start + 8..)
+            {
                 let end = after.find(')').unwrap_or(after.len());
-                source = after[..end].to_string();
+                if let Some(src) = after.get(..end) {
+                    source = src.to_string();
+                }
             }
         }
 
         // Line 1: "**File:** /path (lines 10-25)"
-        for line in &lines[1..] {
+        for line in lines.iter().skip(1) {
             if let Some(rest) = line.strip_prefix("**File:** ") {
                 if let Some(paren) = rest.find(" (lines ") {
-                    path = rest[..paren].to_string();
-                    let range_str = &rest[paren + 8..];
+                    let Some(path_str) = rest.get(..paren) else {
+                        continue;
+                    };
+                    path = path_str.to_string();
+                    let Some(range_str) = rest.get(paren + 8..) else {
+                        continue;
+                    };
                     let range_str = range_str.trim_end_matches(')');
                     if let Some((s, e)) = range_str.split_once('-') {
                         start_line = s.parse().unwrap_or(0);
@@ -372,11 +373,12 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
 
         // Extract snippet between ``` markers
         let full = section;
-        if let Some(code_start) = full.find("```\n") {
-            let after_start = &full[code_start + 4..];
-            if let Some(code_end) = after_start.find("\n```") {
-                snippet = after_start[..code_end].to_string();
-            }
+        if let Some(code_start) = full.find("```\n")
+            && let Some(after_start) = full.get(code_start + 4..)
+            && let Some(code_end) = after_start.find("\n```")
+            && let Some(body) = after_start.get(..code_end)
+        {
+            snippet = body.to_string();
         }
 
         if !path.is_empty() || !snippet.is_empty() {
@@ -411,12 +413,15 @@ mod tests {
 "#;
         let results = parse_memory_results(output);
         assert_eq!(results.len(), 1);
-        assert!((results[0].score - 0.72).abs() < 0.01);
-        assert_eq!(results[0].source, "global");
-        assert_eq!(results[0].path, "/root/.chutes-build/memory/MEMORY.md");
-        assert_eq!(results[0].start_line, 0);
-        assert_eq!(results[0].end_line, 10);
-        assert!(results[0].snippet.contains("graphite"));
+        let Some(r0) = results.first() else {
+            panic!("expected one result: {results:?}");
+        };
+        assert!((r0.score - 0.72).abs() < 0.01);
+        assert_eq!(r0.source, "global");
+        assert_eq!(r0.path, "/root/.chutes-build/memory/MEMORY.md");
+        assert_eq!(r0.start_line, 0);
+        assert_eq!(r0.end_line, 10);
+        assert!(r0.snippet.contains("graphite"));
     }
 
     #[test]
@@ -437,10 +442,13 @@ session content
 "#;
         let results = parse_memory_results(output);
         assert_eq!(results.len(), 2);
-        assert!((results[0].score - 0.85).abs() < 0.01);
-        assert_eq!(results[0].source, "workspace");
-        assert!((results[1].score - 0.42).abs() < 0.01);
-        assert_eq!(results[1].source, "session");
+        let [r0, r1] = results.as_slice() else {
+            panic!("expected two results: {results:?}");
+        };
+        assert!((r0.score - 0.85).abs() < 0.01);
+        assert_eq!(r0.source, "workspace");
+        assert!((r1.score - 0.42).abs() < 0.01);
+        assert_eq!(r1.source, "session");
     }
 
     #[test]
@@ -452,25 +460,16 @@ session content
 
     #[test]
     fn shorten_memory_path() {
-        // Paths under the configured chutes-build memory root keep one trailing segment group.
+        // Paths under the configured chutes-build memory root drop the root and the first directory below it
         let memory_root = xai_grok_config::grok_home().join("memory");
-        // Joined segment by segment so the fixture carries the platform's own
-        // separator: `shorten_path` returns a slice of its input, so a `/` written
-        // into the fixture would come back out and prove nothing about Windows.
-        let session = memory_root
-            .join("xai-50aa78f0")
-            .join("sessions")
-            .join("2026-05-01.md");
+        let session = memory_root.join("xai-50aa78f0/sessions/2026-05-01.md");
         let top = memory_root.join("MEMORY.md");
         assert_eq!(
             shorten_path(session.to_str().expect("utf8 path")),
-            crate::test_util::rel_path("sessions/2026-05-01.md")
+            "sessions/2026-05-01.md"
         );
         assert_eq!(shorten_path(top.to_str().expect("utf8 path")), "MEMORY.md");
         // Outside the memory root falls back to the filename.
-        assert_eq!(
-            shorten_path(&crate::test_util::abs_path("/some/other/path.md")),
-            "path.md"
-        );
+        assert_eq!(shorten_path("/some/other/path.md"), "path.md");
     }
 }

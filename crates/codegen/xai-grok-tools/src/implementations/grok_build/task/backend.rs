@@ -13,35 +13,34 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 use super::types::{
-    ActiveAgentMessageOutcome, ActiveAgentMessageRequest, SpawnedSubagentRef,
-    SubagentActiveMessageRequest, SubagentCancelOutcome, SubagentCancelRequest,
-    SubagentCancelTarget, SubagentDescribeOutcome, SubagentDescribeRequest, SubagentEvent,
-    SubagentEventSender, SubagentInspectRequest, SubagentInspection, SubagentListRunningRequest,
-    SubagentQueryRequest, SubagentRegistryCounts, SubagentRegistryCountsRequest, SubagentRequest,
-    SubagentResult, SubagentSnapshot, SubagentSpawnRequest, SubagentSpawnedRefsRequest,
+    ActiveAgentMessageOutcome, ActiveAgentMessageRequest, ActiveMessageSenderContext,
+    HandedOffForegroundSubagent, SpawnedSubagentRef, SubagentActiveMessageRequest,
+    SubagentCancelOutcome, SubagentCancelRequest, SubagentCancelTarget, SubagentDescribeOutcome,
+    SubagentDescribeRequest, SubagentEvent, SubagentEventSender, SubagentHandOffForegroundRequest,
+    SubagentInspectRequest, SubagentInspection, SubagentListRunningRequest, SubagentQueryRequest,
+    SubagentRegistryCounts, SubagentRegistryCountsRequest, SubagentRequest, SubagentResult,
+    SubagentSnapshot, SubagentSpawnRequest, SubagentSpawnedRefsRequest,
     SubagentValidateTypeOutcome, SubagentValidateTypeRequest,
 };
 use crate::register_resource;
 use xai_tool_runtime::ToolError;
 
-/// Abstraction over the mechanism used to spawn, query, and cancel subagents.
-///
-/// Injected into `Resources` as [`SubagentBackendResource`] so that
-/// `TaskTool`, `TaskOutputTool`, and `KillTaskTool` can operate
-/// identically regardless of the underlying transport.
+/// Abstraction over the mechanism used to spawn, query, and cancel subagents. Injected into
+/// `Resources` as [`SubagentBackendResource`] so that `TaskTool`, `TaskOutputTool`, and
+/// `KillTaskTool` can operate identically regardless of the underlying transport.
 #[async_trait::async_trait]
 pub trait SubagentBackend: Send + Sync + 'static {
-    /// Spawn a subagent and await its result.
-    ///
-    /// For blocking mode the caller awaits the returned future directly.
-    /// For background mode the caller spawns a tokio task around this call
-    /// and drops the receiver immediately.
-    async fn spawn(&self, request: SubagentRequest) -> Result<SubagentResult, ToolError>;
+    /// Spawn a subagent and await its terminal result. The returned value is completion, cancellation, a foreground-budget handoff, or a definite
+    /// reject — never a Task background start ack. `registered_tx`, when `Some`, is signaled once the child is recorded pending or queued. Callers
+    /// that send to a spawning child must pass this oneshot; `None` means there is no registration signal and a later send can fail immediately.
+    async fn spawn(
+        &self,
+        request: SubagentRequest,
+        registered_tx: Option<oneshot::Sender<()>>,
+    ) -> Result<SubagentResult, ToolError>;
 
-    /// Query the current state of a subagent by ID.
-    ///
-    /// When `block` is true the backend waits (up to `timeout_ms`) for the
-    /// subagent to reach a terminal state before responding.
+    /// Query the current state of a subagent by ID. When `block` is true the backend waits (up to
+    /// `timeout_ms`) for the subagent to reach a terminal state before responding.
     async fn query(
         &self,
         id: &str,
@@ -63,26 +62,17 @@ pub trait SubagentBackend: Send + Sync + 'static {
     async fn cancel(&self, id: &str) -> SubagentCancelOutcome;
 
     /// Validate a subagent type synchronously before spawning.
-    /// Returns `ValidationUnavailable` on channel close / responder drop / timeout.
+    /// Returns `CoordinatorGone` on channel close and `ValidationUnavailable`
+    /// on responder drop / timeout.
     async fn validate_type(
         &self,
         subagent_type: &str,
         parent_session_id: &str,
     ) -> SubagentValidateTypeOutcome;
 
-    /// Describe a subagent type's resolved toolset (tool names + capability
-    /// flags) before spawning. Read-only: builds the agent definition and
-    /// applies the same parent-dependent toolset re-selection a spawn would,
-    /// then reports the result without starting a child session.
-    ///
-    /// Returns [`SubagentDescribeOutcome::Unavailable`] on channel close /
-    /// responder drop / timeout (modeled exactly on [`Self::validate_type`]).
-    ///
-    /// `harness_agent_type` is the `/goal`-only harness override (see
-    /// [`super::types::SubagentRuntimeOverrides::harness_agent_type`]); the
-    /// coordinator resolves the toolset for `(subagent_type,
-    /// harness_agent_type)`. `None` (every non-goal caller) defers the flavor
-    /// to the parent agent.
+    /// Describe a subagent type's resolved toolset (tool names + capability flags) before spawning. Read-only: builds the agent definition and
+    /// applies the same parent-dependent toolset re-selection a spawn would, then reports the result without starting a child session. Returns
+    /// [`SubagentDescribeOutcome::Unavailable`] on channel close / responder drop / timeout (modeled exactly on [`Self::validate_type`]).
     async fn describe_subagent_type(
         &self,
         subagent_type: &str,
@@ -91,10 +81,8 @@ pub trait SubagentBackend: Send + Sync + 'static {
     ) -> SubagentDescribeOutcome;
 }
 
-/// Resource wrapper injected into every session's `Resources`.
-///
-/// Wraps an `Arc<dyn SubagentBackend>` so the backend can be shared across
-/// concurrent tool invocations within the same session.
+/// Resource wrapper injected into every session's `Resources`. Wraps an `Arc<dyn SubagentBackend>`
+/// so the backend can be shared across concurrent tool invocations within the same session.
 #[derive(Clone)]
 pub struct SubagentBackendResource(pub Arc<dyn SubagentBackend>);
 
@@ -129,13 +117,13 @@ impl SubagentCoordinatorSender {
     pub(crate) fn from_paired_channels(
         tx: mpsc::UnboundedSender<SubagentEvent>,
         active_message_tx: mpsc::UnboundedSender<super::active_message::ActiveMessageIngress>,
-        capacity: usize,
+        active_message_permits: Arc<tokio::sync::Semaphore>,
+        active_message_capacity: usize,
     ) -> Self {
-        let active_message_capacity = capacity.max(1);
         Self {
             tx,
             active_message_tx,
-            active_message_permits: Arc::new(tokio::sync::Semaphore::new(active_message_capacity)),
+            active_message_permits,
             active_message_capacity,
         }
     }
@@ -225,6 +213,7 @@ impl ChannelBackendSender {
 pub struct ChannelBackend {
     tx: ChannelBackendSender,
     parent_session_id: Option<Arc<str>>,
+    root_targets: bool,
 }
 
 impl ChannelBackend {
@@ -232,13 +221,7 @@ impl ChannelBackend {
         Self {
             tx: ChannelBackendSender::Legacy(SubagentEventSender(tx)),
             parent_session_id: None,
-        }
-    }
-
-    pub fn from_event_sender(sender: SubagentEventSender) -> Self {
-        Self {
-            tx: ChannelBackendSender::Legacy(sender),
-            parent_session_id: None,
+            root_targets: false,
         }
     }
 
@@ -246,6 +229,7 @@ impl ChannelBackend {
         Self {
             tx: ChannelBackendSender::Coordinator(sender),
             parent_session_id: None,
+            root_targets: false,
         }
     }
 
@@ -257,16 +241,7 @@ impl ChannelBackend {
         Self {
             tx: ChannelBackendSender::Legacy(SubagentEventSender(tx)),
             parent_session_id: Some(parent_session_id.into()),
-        }
-    }
-
-    pub fn for_event_sender_session(
-        sender: SubagentEventSender,
-        parent_session_id: impl Into<Arc<str>>,
-    ) -> Self {
-        Self {
-            tx: ChannelBackendSender::Legacy(sender),
-            parent_session_id: Some(parent_session_id.into()),
+            root_targets: false,
         }
     }
 
@@ -277,6 +252,23 @@ impl ChannelBackend {
         Self {
             tx: ChannelBackendSender::Coordinator(sender),
             parent_session_id: Some(parent_session_id.into()),
+            root_targets: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_root_targets(mut self) -> Self {
+        self.root_targets = true;
+        self
+    }
+
+    /// Same transport, with lookups bound to `parent_session_id` so the coordinator only answers for children reachable from that session.
+    #[must_use]
+    pub fn scoped_to_session(&self, parent_session_id: impl Into<Arc<str>>) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            parent_session_id: Some(parent_session_id.into()),
+            root_targets: self.root_targets,
         }
     }
 
@@ -319,10 +311,9 @@ impl ChannelBackend {
         response_rx.await.unwrap_or(SubagentCancelOutcome::NotFound)
     }
 
-    /// User Stop: cancel all non-workflow children for this parent session.
-    ///
-    /// Requires [`Self::for_session`]; unbound backends return `NotFound` and
-    /// do not broadcast a wildcard cancel.
+    /// User Stop: cancel all non-workflow children for this parent session. Requires
+    /// [`Self::for_session`]; unbound backends return `NotFound` and do not broadcast a wildcard
+    /// cancel.
     pub async fn cancel_parent_session(&self) -> SubagentCancelOutcome {
         let (respond_to, response_rx) = oneshot::channel();
         if !self.request_cancel_parent_session(respond_to) {
@@ -361,11 +352,9 @@ impl ChannelBackend {
             .is_ok()
     }
 
-    /// Delete-path teardown: cancel `parent_session_id`'s children and wait, up
-    /// to `budget`, for the coordinator to drain them. Owns the event shape and
-    /// the wait policy so the host does not rebuild them. Best-effort: on a
-    /// closed channel or an elapsed budget it logs and returns (the coordinator
-    /// keeps admission closed until its own backstop deadline).
+    /// Delete-path teardown: cancel `parent_session_id`'s children and wait, up to `budget`, for the coordinator to drain
+    /// them. Owns the event shape and the wait policy so the host does not rebuild them. Best-effort: on a closed channel
+    /// or an elapsed budget it logs and returns (the coordinator keeps admission closed until its own backstop deadline).
     pub async fn teardown_session_and_drain(
         &self,
         parent_session_id: &str,
@@ -445,6 +434,30 @@ impl ChannelBackend {
         response_rx.await.unwrap_or_default()
     }
 
+    pub async fn hand_off_foreground_for_prompt(
+        &self,
+        prompt_id: &str,
+    ) -> Vec<HandedOffForegroundSubagent> {
+        let Some(parent_session_id) = self.parent_session_id() else {
+            return Vec::new();
+        };
+        let (respond_to, response_rx) = oneshot::channel();
+        if self
+            .tx
+            .send(SubagentEvent::HandOffForeground(
+                SubagentHandOffForegroundRequest {
+                    parent_session_id,
+                    prompt_id: prompt_id.to_owned(),
+                    respond_to,
+                },
+            ))
+            .is_err()
+        {
+            return Vec::new();
+        }
+        response_rx.await.unwrap_or_default()
+    }
+
     pub async fn registry_counts(&self) -> SubagentRegistryCounts {
         let (respond_to, response_rx) = oneshot::channel();
         if self
@@ -466,7 +479,7 @@ impl ChannelBackend {
         wait: Option<&super::types::SubagentForegroundWait>,
     ) -> Result<SubagentResult, ToolError> {
         let _wait = wait.map(super::types::SubagentForegroundWait::enter);
-        self.spawn(request).await
+        self.spawn(request, None).await
     }
 }
 
@@ -485,7 +498,11 @@ impl Drop for CancelResultReceiverOnDrop {
 
 #[async_trait::async_trait]
 impl SubagentBackend for ChannelBackend {
-    async fn spawn(&self, mut request: SubagentRequest) -> Result<SubagentResult, ToolError> {
+    async fn spawn(
+        &self,
+        mut request: SubagentRequest,
+        registered_tx: Option<oneshot::Sender<()>>,
+    ) -> Result<SubagentResult, ToolError> {
         if let Some(parent_session_id) = self.parent_session_id.as_deref() {
             request.parent_session_id = parent_session_id.to_owned();
         }
@@ -497,6 +514,7 @@ impl SubagentBackend for ChannelBackend {
             .send(SubagentEvent::Spawn(SubagentSpawnRequest {
                 request: Box::new(request),
                 result_tx: respond_to,
+                registered_tx,
             }))
             .map_err(|_| {
                 ToolError::custom(
@@ -552,13 +570,37 @@ impl SubagentBackend for ChannelBackend {
         &self,
         request: ActiveAgentMessageRequest,
     ) -> ActiveAgentMessageOutcome {
+        if matches!(request.target(), super::types::ActiveMessageTarget::Parent)
+            || matches!(
+                request.target(),
+                super::types::ActiveMessageTarget::Agent { .. }
+            ) && !self.root_targets
+        {
+            return ActiveAgentMessageOutcome::Unsupported;
+        }
         let Some(parent_session_id) = self.parent_session_id() else {
             return ActiveAgentMessageOutcome::NotFoundOrNotOwned;
         };
         let (respond_to, response_rx) = oneshot::channel();
+        let sender_context = match request.target() {
+            super::types::ActiveMessageTarget::Address(_) => {
+                ActiveMessageSenderContext::HumanRoot {
+                    session_id: Arc::from(parent_session_id),
+                }
+            }
+            super::types::ActiveMessageTarget::ChildId(_)
+            | super::types::ActiveMessageTarget::Agent { .. } => {
+                ActiveMessageSenderContext::RootSession {
+                    session_id: Arc::from(parent_session_id),
+                }
+            }
+            super::types::ActiveMessageTarget::Parent => {
+                return ActiveAgentMessageOutcome::Unsupported;
+            }
+        };
         let command = SubagentActiveMessageRequest {
             request,
-            parent_session_id,
+            sender_context,
             respond_to,
         };
         match self.tx.send_active_message(command) {
@@ -615,29 +657,11 @@ impl SubagentBackend for ChannelBackend {
         {
             tracing::warn!(
                 subagent_type,
-                "coordinator validation channel closed, treating as ValidationUnavailable",
+                "coordinator validation channel closed, treating as CoordinatorGone",
             );
-            return SubagentValidateTypeOutcome::ValidationUnavailable;
+            return SubagentValidateTypeOutcome::CoordinatorGone;
         }
-        let timeout = validate_type_timeout();
-        match tokio::time::timeout(timeout, response_rx).await {
-            Ok(Ok(outcome)) => outcome,
-            Ok(Err(_)) => {
-                tracing::warn!(
-                    subagent_type,
-                    "coordinator validation responder dropped, treating as ValidationUnavailable",
-                );
-                SubagentValidateTypeOutcome::ValidationUnavailable
-            }
-            Err(_) => {
-                tracing::warn!(
-                    subagent_type,
-                    timeout_ms = timeout.as_millis() as u64,
-                    "coordinator validation timed out, treating as ValidationUnavailable",
-                );
-                SubagentValidateTypeOutcome::ValidationUnavailable
-            }
-        }
+        await_validate_reply(subagent_type, validate_type_timeout(), response_rx).await
     }
 
     async fn describe_subagent_type(
@@ -667,7 +691,7 @@ impl SubagentBackend for ChannelBackend {
             );
             return SubagentDescribeOutcome::Unavailable;
         }
-        let timeout = validate_type_timeout();
+        let timeout = describe_type_timeout();
         match tokio::time::timeout(timeout, response_rx).await {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(_)) => {
@@ -689,29 +713,72 @@ impl SubagentBackend for ChannelBackend {
     }
 }
 
-/// Default `validate_type` timeout. Override via [`VALIDATE_TYPE_TIMEOUT_ENV_VAR`].
-pub const VALIDATE_TYPE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+/// Race the coordinator's validation reply against `timeout`; the timeout
+/// WARN reports the raced (post-override) duration.
+async fn await_validate_reply(
+    subagent_type: &str,
+    timeout: std::time::Duration,
+    response_rx: oneshot::Receiver<SubagentValidateTypeOutcome>,
+) -> SubagentValidateTypeOutcome {
+    match tokio::time::timeout(timeout, response_rx).await {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(_)) => {
+            tracing::warn!(
+                subagent_type,
+                "coordinator validation responder dropped, treating as ValidationUnavailable",
+            );
+            SubagentValidateTypeOutcome::ValidationUnavailable
+        }
+        Err(_) => {
+            tracing::warn!(
+                subagent_type,
+                timeout_ms = timeout.as_millis() as u64,
+                "coordinator validation timed out, treating as ValidationUnavailable",
+            );
+            SubagentValidateTypeOutcome::ValidationUnavailable
+        }
+    }
+}
+
+/// Default `validate_type` timeout; override via [`VALIDATE_TYPE_TIMEOUT_ENV_VAR`].
+/// A short default false-fails while the coordinator is busy; a shut-down
+/// coordinator still fails instantly on the closed channel.
+pub const VALIDATE_TYPE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Default `describe_subagent_type` timeout. Kept short: the `/goal` role gate awaits describe
+/// serially per distinct agent type before failing open, so a long budget multiplies into a
+/// turn-start stall. Override via [`DESCRIBE_TYPE_TIMEOUT_ENV_VAR`].
+pub const DESCRIBE_TYPE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Env-var override for [`VALIDATE_TYPE_TIMEOUT`] (positive milliseconds).
 pub const VALIDATE_TYPE_TIMEOUT_ENV_VAR: &str = "XAI_VALIDATE_TYPE_TIMEOUT_MS";
 
+/// Env-var override for [`DESCRIBE_TYPE_TIMEOUT`] (positive milliseconds).
+pub const DESCRIBE_TYPE_TIMEOUT_ENV_VAR: &str = "XAI_DESCRIBE_TYPE_TIMEOUT_MS";
+
 /// Validation timeout, honoring the env-var override.
 pub fn validate_type_timeout() -> std::time::Duration {
-    let value = std::env::var(VALIDATE_TYPE_TIMEOUT_ENV_VAR).ok();
-    parse_timeout_ms(value.as_deref())
-        .map(std::time::Duration::from_millis)
-        .unwrap_or(VALIDATE_TYPE_TIMEOUT)
+    env_duration_or(VALIDATE_TYPE_TIMEOUT_ENV_VAR, VALIDATE_TYPE_TIMEOUT)
 }
 
-/// Parse a positive `u64` millisecond value; `None` for unset, invalid, or zero.
-pub(crate) fn parse_timeout_ms(value: Option<&str>) -> Option<u64> {
-    value.and_then(crate::util::env::parse_positive)
+/// Describe timeout, honoring the env-var override.
+pub fn describe_type_timeout() -> std::time::Duration {
+    env_duration_or(DESCRIBE_TYPE_TIMEOUT_ENV_VAR, DESCRIBE_TYPE_TIMEOUT)
 }
 
 /// Resolve a `Duration` from a positive-millisecond env override, falling back
 /// to `default` when the var is unset / non-numeric / zero.
 pub fn env_duration_or(env_var: &str, default: std::time::Duration) -> std::time::Duration {
-    parse_timeout_ms(std::env::var(env_var).ok().as_deref())
+    duration_or(std::env::var(env_var).ok().as_deref(), default)
+}
+
+/// Value-taking core of [`env_duration_or`], testable without env mutation.
+pub(crate) fn duration_or(
+    value: Option<&str>,
+    default: std::time::Duration,
+) -> std::time::Duration {
+    value
+        .and_then(crate::util::env::parse_positive)
         .map(std::time::Duration::from_millis)
         .unwrap_or(default)
 }

@@ -15,51 +15,17 @@ pub fn loop_usage_message() -> &'static str {
      Tell me how often it should run (e.g. 30m, 1 hour, every 2 days)."
 }
 
-/// Where a scheduled fire runs, which decides what the stored prompt can rely on.
-///
-/// Resolved from `[scheduler] background_loops` (env, config, managed policy and
-/// remote settings all feed it), so `/loop` describes the runtime the user
-/// actually has rather than hedging across both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoopFireMode {
-    /// Each fire runs in a detached background subagent that cannot see this
-    /// conversation. The default.
-    Detached,
-    /// Each fire runs as a turn in this conversation, where earlier results from
-    /// the same task may still be visible.
-    InSession,
-}
-
-/// Build the model instruction that `/loop` expands into for `args`.
-///
-/// The model, not brittle host parsing, turns the request into the
-/// `scheduler_create` interval, accepting every natural phrasing and erroring
-/// on bad input rather than silently defaulting. See [`loop_usage_message`].
-///
-/// Only the framing differs by `mode`; the stop condition and length guidance
-/// are identical, because both hold wherever the fire runs.
-pub fn loop_schedule_instruction(args: &str, mode: LoopFireMode) -> String {
-    let fire_context = match mode {
-        LoopFireMode::Detached => {
-            "Each fire runs in a detached background subagent, not in this conversation,\n\
-             so the prompt you store must stand on its own.\n\n\
-             ## Writing a prompt that survives a fresh fire\n\
-             - Inline the state a fire needs: paths, job/PR/branch ids, the command that checks\n\
-               status, and what \"healthy\" looks like. A fire cannot see this conversation, and\n\
-               a long-running task restarts from a short summary every few iterations.\n\
-             - Only a short status comes back here, so say what that status must contain."
-        }
-        LoopFireMode::InSession => {
-            "Each fire arrives as a new turn in this conversation, and earlier results from\n\
-             the same task may still be above it. The stored prompt is re-sent verbatim every\n\
-             time, so write a standing order rather than a one-off request.\n\n\
-             ## Writing a prompt that reads well on every fire\n\
-             - Name the state that must not be guessed: paths, job/PR/branch ids, the command\n\
-               that checks status, and what \"healthy\" looks like. This conversation is\n\
-               compacted as it grows, so do not rely on details staying visible.\n\
-             - Earlier fires may be above you: continue from them instead of restarting."
-        }
-    };
+/// Build the model instruction that `/loop` expands into for `args`. The model, not brittle host
+/// parsing, turns the request into the `scheduler_create` interval, accepting every natural
+/// phrasing and erroring on bad input rather than silently defaulting. See [`loop_usage_message`].
+pub fn loop_schedule_instruction(args: &str) -> String {
+    let fire_context = "Each fire runs in a detached background subagent, not in this conversation,\n\
+         so the prompt you store must stand on its own.\n\n\
+         ## Writing a prompt that survives a fresh fire\n\
+         - Inline the state a fire needs: paths, job/PR/branch ids, the command that checks\n\
+           status, and what \"healthy\" looks like. A fire cannot see this conversation, and\n\
+           a long-running task restarts from a short summary every few iterations.\n\
+         - Only a short status comes back here, so say what that status must contain.";
     format!(
         "# /loop -- schedule a recurring prompt\n\n\
          Turn the input below into a scheduler_create call. {fire_context}\n\
@@ -95,26 +61,13 @@ pub fn loop_schedule_instruction(args: &str, mode: LoopFireMode) -> String {
     )
 }
 
-/// Canonical name of the image generation tool; upstream's `/imagine` gate.
-///
-/// Retained because the config resolver and the tool implementation still refer
-/// to it, but it no longer gates any command: the tool calls an xAI endpoint
-/// Chutes has no equivalent for. See [`GENERATE_MEDIA_TOOL_NAME`].
+/// Canonical name of the image generation tool; gates `/imagine`.
 pub const IMAGE_GEN_TOOL_NAME: &str = "image_gen";
-
-/// Canonical name of the Chutes media tool; gates `/imagine` and
-/// `/imagine-video`.
-///
-/// One tool covers image, video, music and speech, because on Chutes the model
-/// is a catalog entry rather than a fixed endpoint — which is also why the
-/// instructions below teach a workflow instead of naming a model.
-pub const GENERATE_MEDIA_TOOL_NAME: &str = "generate_media";
 
 /// Advertised name of the /imagine command.
 pub const IMAGINE_COMMAND_NAME: &str = "imagine";
 
-/// Canonical name of the image-to-video tool; upstream's `/imagine-video` gate.
-/// Kept for the same reason as [`IMAGE_GEN_TOOL_NAME`].
+/// Canonical name of the image-to-video tool; gates `/imagine-video`.
 pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "image_to_video";
 
 /// Advertised name of the /imagine-video command.
@@ -129,47 +82,13 @@ pub fn imagine_usage_message() -> &'static str {
 /// Build the model instruction that `/imagine` expands into for `prompt`.
 pub fn imagine_instruction(prompt: &str) -> String {
     format!(
-        "{IMAGINE_SKILL}\n\n\
-         Prompt (pass verbatim — do not rewrite, embellish, or expand it): {prompt}"
+        "Call the image_gen tool immediately, passing the user's prompt below \
+         verbatim — do not rewrite, embellish, or expand it. \
+         After the tool completes, briefly acknowledge and mention \
+         where the image was saved.\n\n\
+         Prompt: {prompt}"
     )
 }
-
-/// Image workflow injected by `/imagine`.
-///
-/// Chutes publishes a catalog, not one endpoint, and every model declares its own
-/// invocation schema — so the payload cannot be guessed. `describe_media_model`
-/// returns a ready-to-fill `example` per cord; starting from it is the difference
-/// between one call and a series of validation errors.
-const IMAGINE_SKILL: &str = "\
-# Imagine
-
-Generate the image with `generate_media`. Do not ask which model to use — pick one \
-and go.
-
-1. **Pick a model.** If one is already known to work for this kind of image, reuse \
-it. Otherwise call `list_media_models` with `kind: \"image\"` and choose from the \
-result.
-2. **Describe it** with `describe_media_model` unless this session already did, \
-for this exact model. Read the generation cord's `required` fields and its \
-`example`.
-3. **Generate** with `generate_media { model, kind: \"image\", params }`, building \
-`params` from that example and placing the user's prompt in the field the cord \
-declares for it. Keep the payload flat.
-4. **Say where it landed** — report the returned `path` so the user can open it.
-
-## Notes
-
-- **Never invent field names.** Model schemas differ (FLUX, Qwen-Image and the \
-rest share nothing); a guessed field is a wasted GPU call. If a call reports a \
-schema mismatch, re-read the cord rather than trying variants.
-- **Draft cheap, then finalise.** For an iteration, lower `num_inference_steps` \
-and the dimensions; raise them once the prompt is right.
-- **Cold start.** A `503 \"No instances available\"` means the model is scaling \
-from zero; the tool already re-warms and retries. If it stays cold, pick another \
-model of the same kind instead of retrying.
-- **Editing** an existing image means passing its workspace path in the field the \
-edit cord declares (often `image`, sometimes an array). The tool reads the file \
-and encodes it, so an image generated moments ago can be edited by its path.";
 
 /// Usage hint shown when `/imagine-video` is invoked with no arguments.
 pub fn imagine_video_usage_message() -> &'static str {
@@ -186,58 +105,51 @@ pub fn imagine_video_instruction(prompt: &str) -> String {
 }
 
 /// Video workflow guidance injected by `/imagine-video`.
-///
-/// Deliberately different from upstream's, which is built on there being no
-/// text-to-video tool. On Chutes that depends on the model you pick, so the
-/// workflow starts by finding out.
 const IMAGINE_VIDEO_SKILL: &str = "\
 # Imagine Video
 
-Generate video with `generate_media`. Do not ask which model to use — pick one and go.
+Video starts from an image — there is no text-to-video tool. \
+Default to `image_to_video`; use `reference_to_video` when the user \
+explicitly asks for it, a shot genuinely needs multiple reference images, \
+or the subject should speak in a specific preset voice (`voices`).
 
-## Find out what the model wants
+If a video tool fails with a zero-data-retention (ZDR) storage error, relay \
+that error verbatim and stop the workflow — do not generate more source \
+images or retry.
 
-1. `list_media_models` with `kind: \"video\"`. Some models take a prompt directly; \
-others animate a starting image. Both exist — do not assume.
-2. `describe_media_model` on the one you chose. The cord's `required` fields answer \
-the question: a `prompt` field means text-to-video, an image field (`image`, \
-`image_b64s`, `start_image`) means you must supply frame 1.
-3. If it needs a starting frame, generate one first with `generate_media` \
-`kind: \"image\"`, then pass that returned path in the field the video cord declares.
+## Default: single clip
 
-## Default: one clip
+Unless the user asks for a long video, multiple scenes, or a multi-shot sequence, \
+generate **one** video:
 
-Unless the user asks for a longer or multi-shot video, make **one** clip: compose the \
-payload from the cord's example, describe the motion or camera move in one or two \
-present-tense sentences, and report the returned `path`.
+1. Create a source image with `image_gen` that stages the first frame \
+(composition, subject, lighting).
+2. Call `image_to_video` with that image and a short prompt describing the motion \
+or camera move (1–2 sentences, present tense).
+3. After the tool completes, mention the saved file path so the user can find it.
 
 ## Longer / multi-shot videos
 
+When the user requests a longer video, multiple scenes, or a narrative sequence:
+
 1. **Plan the story as shots** — break the idea into distinct shots, one beat each.
-2. **Favor frequent, short shots** — more short clips over fewer long ones; cuts keep \
-it dynamic.
-3. **Keep continuity** — reuse the same model and the same style language for every \
-shot, and keep characters and settings consistent.
-4. **Assemble with FFmpeg** using stream copy (`ffmpeg -f concat ... -c copy` — never \
-re-encode). Every shot must share resolution and frame rate for the concat to work. \
-Report the final path.
+2. **Favor frequent, short shots** — prefer more 6s clips over fewer long ones; more cuts keep it dynamic.
+3. **Create each shot's source image** with `image_gen` (or `image_edit` to combine references), keeping characters and settings consistent across shots.
+4. **Animate each shot with `image_to_video`** — the source image becomes frame 1.
+5. **Assemble with FFmpeg** using stream copy (`ffmpeg -f concat ... -c copy` — never re-encode). \
+Keep every shot at the same resolution and frame rate so the concat works. \
+After assembly, mention the final output path.
 
 ## Shot guidance
 
-- **Prompt-craft:** one short, vivid moment in present tense with a clear camera \
-movement, in 1–2 sentences.
-- **Minimal but interesting:** one subject, one motion or camera move per shot. Make \
-it compelling through composition, lighting and timing rather than complex action.
-- **Busy starting frame?** Intricate frames (fine detail, heavy reflections) warp when \
-animated. Hold the subject and move only the camera, or generate a simpler base frame.
-- **Duration** is whatever the cord's field allows — read it rather than assuming; \
-values outside its range are rejected before the call is spent.
-- **Draft cheap:** short duration and small dimensions while iterating, then re-run \
-at quality.
-- **Real people:** reference-first — drive the video from a verified reference image; \
-never animate a named person without one.
-- **Cold start:** a `503 \"No instances available\"` means the model is scaling from \
-zero and the tool retries. If it stays cold, choose another video model.
+- **Prompt-craft:** one short, vivid moment in present tense with a clear camera movement, in 1–2 sentences.
+- **Minimal but interesting:** one clear subject, one simple motion or camera move per shot. Avoid complex multi-action animation; make the shot compelling through composition, lighting, and a strong moment.
+- **Complex source image?** Intricate frames (busy geometry, fine detail, heavy reflections) warp when animated. Keep the subject fixed and move only the camera (slow push-in, orbit, or parallax), or break into simpler shots. For new shots, generate a simpler, animation-friendly base image rather than animating a busy one.
+- **`image_to_video` animates from frame 1** — stage the first frame with `image_gen`/`image_edit` before animating.
+- **Aspect ratio:** set it on the source image (`image_gen` `aspect_ratio`); don't re-crop an existing video.
+- **Duration:** 6s or 10s only (prefer 6s); round to the nearest. `reference_to_video` accepts 1–15s.
+- **Speaking subjects:** to give a subject a voice, use `reference_to_video` with `voices` (up to 3 preset voice identifiers, e.g. \"ara\", \"eve\") and tag them in the prompt as `<AUDIO_0>`…; combine with reference `images` tagged `<IMAGE_0>`… for a consistent character.
+- **Real people:** reference-first — drive the video from a verified reference image; never animate a named person without one.
 - Don't loop the same clip unless asked.";
 
 pub const UPDATE_GOAL_TOOL_NAME: &str = "update_goal";
@@ -288,7 +200,6 @@ mod tests {
         let text = imagine_instruction("a golden sunset");
         assert!(text.contains("a golden sunset"));
         assert!(text.contains("image_gen"));
-        assert!(text.contains("verbatim"));
     }
 
     #[test]
@@ -296,55 +207,30 @@ mod tests {
         let text = imagine_video_instruction("a cat playing piano");
         assert!(text.contains("a cat playing piano"));
         assert!(text.contains("image_to_video"));
-        assert!(text.contains("FFmpeg"));
     }
 
     #[test]
     fn instruction_carries_args_and_contract_tokens() {
-        for mode in [LoopFireMode::Detached, LoopFireMode::InSession] {
-            let text = loop_schedule_instruction("every 30 minutes do x", mode);
-            assert!(text.contains("every 30 minutes do x"), "{mode:?}");
-            assert!(text.contains("<number><unit>"), "{mode:?}");
-            assert!(text.contains("ask the user how often"), "{mode:?}");
-            assert!(
-                !text.contains("10m"),
-                "no host-side default interval: {mode:?}"
-            );
-            assert!(
-                !text.contains("recurring:"),
-                "the retired one-shot flag must not be referenced: {mode:?}"
-            );
-            assert!(
-                text.contains("task_id"),
-                "must teach in-place updates via task_id: {mode:?}"
-            );
-            assert!(
-                text.contains("delete and recreate"),
-                "must steer away from delete+recreate: {mode:?}"
-            );
-            assert!(
-                text.contains("scheduler_delete <task_id>"),
-                "every mode must authorize the fire to end the task: {mode:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn each_fire_mode_describes_its_own_runtime() {
-        let detached = loop_schedule_instruction("5m check ci", LoopFireMode::Detached);
-        let in_session = loop_schedule_instruction("5m check ci", LoopFireMode::InSession);
-
-        assert!(detached.contains("cannot see this conversation"));
-        assert!(!detached.contains("arrives as a new turn in this conversation"));
-
-        assert!(in_session.contains("arrives as a new turn in this conversation"));
-        assert!(!in_session.contains("cannot see this conversation"));
-
-        // The two levers the A/B showed carry the behavior are mode-independent.
-        for text in [&detached, &in_session] {
-            assert!(text.contains("report it and call"));
-            assert!(text.contains("Keep it short and concrete"));
-        }
+        let text = loop_schedule_instruction("every 30 minutes do x");
+        assert!(text.contains("every 30 minutes do x"));
+        assert!(text.contains("<number><unit>"));
+        assert!(!text.contains("10m"), "no host-side default interval");
+        assert!(
+            !text.contains("recurring:"),
+            "the retired one-shot flag must not be referenced"
+        );
+        assert!(
+            text.contains("task_id"),
+            "must teach in-place updates via task_id"
+        );
+        assert!(
+            text.contains("scheduler_delete <task_id>"),
+            "the fire must be authorized to end the task"
+        );
+        assert!(
+            text.contains("detached background subagent"),
+            "every fire is detached, and the stored prompt must be told so"
+        );
     }
 
     #[test]
@@ -353,7 +239,6 @@ mod tests {
         assert!(text.contains("ship the widget"));
         assert!(text.contains("update_goal(completed: true"));
         assert!(text.contains("blocked_reason"));
-        assert!(text.contains("If update_goal returns an error"));
         assert!(
             !text.contains("system-reminder"),
             "expansions ride as user messages and must not claim reminder authority"

@@ -80,7 +80,6 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
             description_override: None,
             behavior_version: None,
             kind: None,
-            compact_schema: false,
         }],
         behavior_preset: None,
     };
@@ -105,10 +104,9 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
             base_url: web_search_sampling.base_url.clone(),
             model: web_search_sampling.model.clone(),
             extra_headers: web_search_sampling.extra_headers.clone(),
-            // The optional extra access key is no longer carried on
-            // `SamplerConfig`. The shell-level value flows in via
-            // `Credentials` at session-spawn time; in this self-contained
-            // test fixture there's no extra access key in scope.
+            // `SamplerConfig` does not carry the optional extra access key
+            // The shell passes that key through `Credentials` when it spawns a session
+            // This test builds the config directly, so there is no key to pass
             alpha_test_key: None,
             allowed_domains: None,
             excluded_domains: None,
@@ -163,7 +161,6 @@ async fn web_search_errors_when_configured_model_cannot_be_resolved() {
             description_override: None,
             behavior_version: None,
             kind: None,
-            compact_schema: false,
         }],
         behavior_preset: None,
     };

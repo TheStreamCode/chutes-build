@@ -1,7 +1,5 @@
-//! Filesystem extension API layer.
-//!
 //! Routing: absolute paths work directly; relative paths require sessionId for lookup.
-//! Business logic delegated to `session::file_system::*` pure functions.
+//! Business logic is delegated to `session::file_system::*` pure functions.
 use super::{Empty, ExtResult, parse_params, to_ext_response};
 use crate::agent::MvpAgent;
 use crate::session::ExtMethodResult;
@@ -89,21 +87,16 @@ pub(crate) struct FsReadFileRequest {
     pub max_bytes: usize,
     #[serde(default)]
     pub max_lines: Option<usize>,
-    /// Byte offset for a binary-safe ranged read. When `offset`/`length`
-    /// is set (or `encoding` is `base64`) the read returns the chunk
-    /// `[offset, offset + length)`; otherwise the whole file is read
-    /// (legacy behavior).
+    /// Byte offset for a binary-safe ranged read.
+    /// When `offset`/`length` is set (or `encoding` is `base64`) the read returns the chunk `[offset, offset + length)`.
+    /// Otherwise the whole file is read (legacy behavior).
     #[serde(default)]
     pub offset: Option<u64>,
-    /// Bytes to read for a ranged read. Absent means "to EOF", but the
-    /// effective read is always capped at `max_bytes` (default 1 MiB) and the
-    /// server's hard limit, so an unset `length` still yields at most
-    /// `max_bytes`. Detect "more data" by comparing the returned bytes (from
-    /// `offset`) against the response `size`.
+    /// Bytes to read for a ranged read. Absent means "to EOF", but the effective read is always capped at `max_bytes` (default 1 MiB) and the server's hard limit. An unset `length` therefore still yields at most `max_bytes`.
+    /// Detect "more data" by comparing the returned bytes (from `offset`) against the response `size`.
     #[serde(default)]
     pub length: Option<u64>,
-    /// Transfer encoding for ranged reads (default `utf8`; non-UTF-8
-    /// ranges fall back to base64 regardless).
+    /// Transfer encoding for ranged reads (default `utf8`; non-UTF-8 ranges fall back to base64 regardless).
     #[serde(default)]
     pub encoding: FsReadEncoding,
 }
@@ -124,8 +117,7 @@ pub(crate) struct FsDeleteFileRequest {
     pub session_id: Option<acp::SessionId>,
     pub path: String,
 }
-/// Resolve path from explicit value or session lookup.
-/// For absolute paths, use directly. For relative paths, resolve from session cwd.
+/// Resolve the path: absolute paths are used directly; relative paths are resolved against the session cwd.
 fn resolve_path(
     agent: &MvpAgent,
     path: &str,
@@ -143,10 +135,9 @@ fn resolve_path(
     }
     Err(acp::Error::invalid_params().data("sessionId is required for relative paths"))
 }
-/// Confine `path` to the workspace root, falling back to the session cwd for
-/// worktree sessions (rooted outside it). Returns the resolved path and an
-/// optional confining walk root (`None` when confinement is off — the default,
-/// so the fallback and error paths only apply on a confining sandbox workspace).
+/// Confine `path` to the workspace root, falling back to the session cwd for worktree sessions (rooted outside it).
+/// Returns the resolved path and an optional confining walk root.
+/// The root is `None` when confinement is off (the default), so the fallback and error paths only apply on a confining sandbox workspace.
 async fn confine_local(
     agent: &MvpAgent,
     path: &Path,
@@ -169,11 +160,11 @@ async fn confine_local(
     Err(acp::Error::invalid_params().data(workspace_err.to_string()))
 }
 pub(crate) fn is_fs_method(method: &str) -> bool {
-    method.starts_with("chutes.build/fs/")
+    method.starts_with("chutes.ai/fs/")
 }
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/fs/list" => {
+        "chutes.ai/fs/list" => {
             let req = parse_params::<FsListRequest>(args)?;
             let path = resolve_path(agent, &req.path, req.session_id.as_ref())?;
             let (path, confine_root) = confine_local(agent, &path, req.session_id.as_ref()).await?;
@@ -181,7 +172,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             let result = fs::list(&path, &params, confine_root).await;
             to_ext_response(result)
         }
-        "chutes.build/fs/exists" => {
+        "chutes.ai/fs/exists" => {
             let req = parse_params::<FsExistsRequest>(args)?;
             let path = resolve_path(agent, &req.path, req.session_id.as_ref())?;
             let (path, _) = match confine_local(agent, &path, req.session_id.as_ref()).await {
@@ -191,7 +182,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             let result = fs::exists(&path).await;
             to_ext_response(result)
         }
-        "chutes.build/fs/read_file" => {
+        "chutes.ai/fs/read_file" => {
             let req = parse_params::<FsReadFileRequest>(args)?;
             let max_lines = req.max_lines;
             let path_str = req.path.clone();
@@ -231,7 +222,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 Err(e) => to_ext_response(Err::<FsReadFileData, _>(e)),
             }
         }
-        "chutes.build/fs/write_file" => {
+        "chutes.ai/fs/write_file" => {
             let req = parse_params::<FsWriteFileRequest>(args)?;
             let path = resolve_path(agent, &req.path, req.session_id.as_ref())?;
             let (path, _) = confine_local(agent, &path, req.session_id.as_ref()).await?;
@@ -240,7 +231,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .map(|_| Empty {});
             to_ext_response(result)
         }
-        "chutes.build/fs/delete_file" => {
+        "chutes.ai/fs/delete_file" => {
             let req = parse_params::<FsDeleteFileRequest>(args)?;
             let path = resolve_path(agent, &req.path, req.session_id.as_ref())?;
             let (path, _) = confine_local(agent, &path, req.session_id.as_ref()).await?;

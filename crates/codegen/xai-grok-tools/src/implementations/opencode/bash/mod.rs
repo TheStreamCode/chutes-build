@@ -222,6 +222,7 @@ impl From<BashInput> for ToolInput {
             timeout: value.timeout,
             description: value.description,
             is_background: false,
+            block_until_ms: None,
         })
     }
 }
@@ -1136,10 +1137,8 @@ mod tests {
         );
     }
 
-    // ─── Description template shell-awareness parity tests ───
-    //
-    // Same shape as grok_build/bash: the opencode tool inherits the same
-    // Unix-utility guidance and must branch on PowerShell/cmd.
+    // ─── Description template shell-awareness parity tests ─── Same shape as grok_build/bash: the
+    // opencode tool inherits the same Unix-utility guidance and must branch on PowerShell/cmd.
 
     mod description_shell_branches {
         use super::*;

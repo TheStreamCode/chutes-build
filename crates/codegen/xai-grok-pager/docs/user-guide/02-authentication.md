@@ -1,35 +1,12 @@
 # Authentication
 
-**The API key is the primary credential.** It always works, it is what a fresh
-install uses, and it is the only method that needs no setup beyond creating the key.
-Skip to [API Key](#api-key) if that is all you need.
-
-Browser login is available too, but it is opt-in: it requires an OAuth application
-that **you** register in your own account area at
-[chutes.ai/app/api](https://chutes.ai/app/api), because there is no shared app that
-could sign in on everyone's behalf. Without one configured, `chutes-build login`
-says so and points you at the API key rather than opening a browser.
-
-Enterprise single sign-on (OIDC) and external credential providers are also
-supported, for organisations that run their own IdP.
+Chutes Build supports several authentication methods, including interactive browser login, enterprise single sign-on (SSO), and headless CI/CD runners.
 
 ---
 
-## Browser Login (opt-in)
+## Browser Login (Default)
 
-First register an OAuth application in your Chutes account area, then tell Chutes
-Build its client ID:
-
-```bash
-export CHUTES_BUILD_OAUTH2_CLIENT_ID="cid_..."   # your registered app
-chutes-build login
-```
-
-Set `CHUTES_BUILD_OAUTH2_ISSUER` as well only for a non-standard deployment; the
-default is the standard Chutes IdP. With no client ID configured there is no OAuth
-method to offer, and `login` tells you to set `CHUTES_API_KEY` instead.
-
-Once signed in, Chutes Build opens your browser on subsequent logins:
+On first launch, Chutes Build opens your browser to authenticate with chutes.ai:
 
 ```bash
 chutes-build
@@ -53,11 +30,11 @@ To switch accounts or resolve an authentication problem, run:
 chutes-build login
 ```
 
-Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through Chutes OAuth. The issuer is `api.chutes.ai` — that is the value its discovery document declares, even though the document itself is served from `idp.chutes.ai`. Pass a flag to select a different flow:
+Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through SpaceXAI OAuth at `auth.chutes.ai`. Pass a flag to select a different flow:
 
 | Flag | Description |
 |------|-------------|
-| `--oauth` | Sign in through Chutes OAuth. Requires `CHUTES_BUILD_OAUTH2_CLIENT_ID` to name an app you registered; without it there is no OAuth method and the flag has nothing to select. |
+| `--oauth` | Sign in through SpaceXAI OAuth at `auth.chutes.ai`. This is the default, so the flag is optional. |
 | `--device-auth` (alias `--device-code`) | Sign in with the device-code flow for headless or remote environments. |
 
 To sign out, run `chutes-build logout`. It takes no flags and clears your cached credentials.
@@ -66,29 +43,14 @@ To sign out, run `chutes-build logout`. It takes no flags and clears your cached
 
 ## API Key
 
-Create a key at [chutes.ai/app/api](https://chutes.ai/app/api). There are three
-ways to give it to Chutes Build:
+For CI/CD, automation, or environments without browser access, use an API key from [console.chutes.ai](https://console.chutes.ai):
 
-- **In the app**: press `k` on the login screen, or run `/apikey` in a session, and
-  paste it. Chutes Build stores it in `~/.chutes-build/auth.json` with owner-only
-  permissions, so you only do this once.
-- **In the environment**, which is what CI and automation want:
+```bash
+export CHUTES_API_KEY="xai-..."
+chutes-build
+```
 
-  ```bash
-  export CHUTES_API_KEY="cpk_..."
-  chutes-build
-  ```
-
-- **From stdin** for protected automation: `chutes-build login --api-key-stdin`.
-
-This is the method a fresh install uses, and the one that always works. If you have also signed in interactively, the stored session token takes precedence for as long as it is valid; run `chutes-build logout` or delete `~/.chutes-build/auth.json` to go back to the key.
-
-A blank value counts as unset. A CI job that exports the variable from a secret
-that does not exist gets "You are not authenticated" rather than a login that
-claims to be using a key and then fails.
-
-`CHUTES_BUILD_API_KEY` is accepted as a legacy alias, checked only when
-`CHUTES_API_KEY` is unset or blank.
+Chutes Build uses the API key as a fallback when no session token is active. If you have already signed in interactively, the stored session token takes precedence. To fall back to the API key, run `chutes-build logout` or delete `~/.chutes-build/auth.json`.
 
 ---
 
@@ -326,44 +288,42 @@ Chutes Build resolves credentials for each request in this order, highest to low
 
 1. **Per-model `api_key` or `env_key`** -- set under `[model.<name>]` in `config.toml`. Wins whenever present.
 2. **Active session token** -- obtained through browser, OIDC/OAuth2, or external-provider login and stored in `~/.chutes-build/auth.json`.
-3. **`CHUTES_API_KEY`** -- used when no session token is active, and whenever the
-   model's endpoint is one a session token may not be sent to (see below). On a
-   default install this is the only method in play.
-
-A session token is attached only to an official Chutes endpoint. A model pointed at
-a custom `base_url` -- your own gateway, a local proxy, a third-party provider --
-never receives your Chutes session credential; it falls through to the per-model
-key, and if there is none, the request goes out unauthenticated rather than
-leaking one. Give such a model its own `api_key` or `env_key`.
+3. **`CHUTES_API_KEY`** -- fallback when no session token is active.
 
 When more than one login flow is configured, Chutes Build populates the session token from the first available source, highest to lowest:
 
 1. **External auth provider** (`auth_provider_command`)
 2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.toml` or the `CHUTES_BUILD_OIDC_ISSUER` and `CHUTES_BUILD_OIDC_CLIENT_ID` environment variables
-3. **Chutes OAuth2 browser login** -- only when `CHUTES_BUILD_OAUTH2_CLIENT_ID` names an app you registered
+3. **SpaceXAI OAuth2 browser login** -- the default
 
 During a session, the active method handles all mid-session refreshes.
 
 ---
 
+## Grove Git credentials (not this page's `chutes-build login`)
+
+
+**`~/.chutes-build/auth.json` is never read for Git.** `chutes-build login` does not create a Git credential and `chutes-build logout` does not revoke one; the daemon builds its own credential cell from `auth_mode` in Grove config. Those credentials are managed with `grove status` and `grove reload-credentials` -- see [chutes-build clone](27-grok-clone.md#authentication) for the failure classes and their next steps.
+
+---
+
 ## Related settings
 
-Coding-data sharing — **Coding data, retention, and training** in Settings, which
-`/privacy` opens — is locked in this build and changes nothing. It is listed here
-because upstream's version does affect a user's account, and because these config
-knobs are separate from it either way:
+Coding-data sharing — **Coding data, retention, and training** in Settings,
+which `/privacy` opens — does not change these config knobs:
 
 | Setting | How to set it |
 |---------|---------------|
 | `[features] telemetry` | `config.toml` or `CHUTES_BUILD_TELEMETRY_ENABLED` |
 | `[telemetry] trace_upload` | `config.toml` or `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` |
-| External OpenTelemetry | **Deadened** — no OTLP exporter is ever constructed; the stream can never activate. |
+| External OpenTelemetry | `CHUTES_BUILD_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
 
 On team accounts, only a team admin can change coding-data sharing.
 Team admins can also enable or disable Zero Data Retention (ZDR) for their team.
-See [How to enable ZDR](https://chutes.ai/docs#how-to-enable-zdr).
+See [How to enable ZDR](https://docs.chutes.ai/developers/faq/security#how-to-enable-zdr).
 When ZDR is on, coding-data sharing cannot be changed at all — the settings
-row shows `ZDR` in place of the value.
+row shows `ZDR` in place of the value. ZDR does not turn off external OTEL
+or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configuration](05-configuration.md#telemetry).
 

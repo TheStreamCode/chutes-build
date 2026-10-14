@@ -18,17 +18,71 @@ use tokio::io::AsyncWriteExt;
 use xai_grok_tools::util::ProcessGroup;
 
 use crate::config::{HookSpec, RUNNER_ALWAYS_SET_ENV};
-use crate::event::{HookEventEnvelope, clip_reason};
+use crate::event::{
+    HookEventEnvelope, MAX_HOOK_FEEDBACK_CHARS, MAX_HOOK_OUTPUT_REPLACEMENT_CHARS, clip_reason,
+    clip_text,
+};
 use crate::result::StopHookOutcome;
 
 use super::{
-    GateHookJson, GateKind, GateOutcome, HookHealth, HookRunnerResult, PromptHookJson, RunContext,
-    StopHookJson, extract_system_message, gate_outcome, prompt_json_to_block, stop_json_to_outcome,
+    GateHookJson, GateKind, GateOutcome, HookHealth, HookRunnerResult, PostToolUseHookJson,
+    PostToolUseParse, PromptHookJson, RunContext, StopHookJson, extract_system_message,
+    gate_outcome, post_tool_use_json_to_outcome, prompt_json_to_block, stop_json_to_outcome,
 };
 
-pub(crate) const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+const CAPTURE_HEADROOM_OVER_REPLACEMENT: usize = 16;
+pub(crate) const MAX_OUTPUT_BYTES: usize =
+    CAPTURE_HEADROOM_OVER_REPLACEMENT * MAX_HOOK_OUTPUT_REPLACEMENT_CHARS;
 
 const GATE_EXIT_CODE: i32 = 2;
+const HOOK_GROUP_REAP: Duration = Duration::from_millis(500);
+
+tokio::task_local! {
+    static HOOK_GROUP_REAPS: std::cell::RefCell<Vec<tokio::task::JoinHandle<()>>>;
+}
+
+pub async fn join_hook_group_reaps<F: std::future::Future>(work: F) -> F::Output {
+    HOOK_GROUP_REAPS
+        .scope(std::cell::RefCell::new(Vec::new()), async {
+            let out = work.await;
+            let joins = HOOK_GROUP_REAPS.with(|slot| std::mem::take(&mut *slot.borrow_mut()));
+            if !joins.is_empty() {
+                let _ = tokio::time::timeout(HOOK_GROUP_REAP, async {
+                    for join in joins {
+                        let _ = join.await;
+                    }
+                })
+                .await;
+            }
+            out
+        })
+        .await
+}
+
+struct HookProcessGuard {
+    group: Option<Arc<ProcessGroup>>,
+}
+
+impl HookProcessGuard {
+    fn arm(group: Option<Arc<ProcessGroup>>) -> Self {
+        Self { group }
+    }
+
+    fn disarm(&mut self) {
+        self.group = None;
+    }
+}
+
+impl Drop for HookProcessGuard {
+    fn drop(&mut self) {
+        if let Some(group) = self.group.take() {
+            let _ = group.kill();
+            if let Some(join) = group.schedule_reap(HOOK_GROUP_REAP) {
+                let _ = HOOK_GROUP_REAPS.try_with(|slot| slot.borrow_mut().push(join));
+            }
+        }
+    }
+}
 
 // SECURITY: a process group lets session close killpg the whole tree; kill_on_drop would leak detached grandchildren.
 fn hook_process_group(child: &tokio::process::Child) -> Option<Arc<ProcessGroup>> {
@@ -164,10 +218,7 @@ pub async fn run_command_hook(
         .current_dir(ctx.workspace_root)
         // SECURITY: extra_env is applied before the GROK_* identity vars so a hook cannot spoof them.
         .envs(&spec.extra_env)
-        .env(
-            "CHUTES_BUILD_HOOK_EVENT",
-            envelope.hook_event_name.to_string(),
-        )
+        .env("CHUTES_BUILD_HOOK_EVENT", envelope.hook_event_name.to_string())
         .env("CHUTES_BUILD_HOOK_NAME", &spec.name)
         .env("CHUTES_BUILD_SESSION_ID", ctx.session_id)
         .env("CHUTES_BUILD_WORKSPACE_ROOT", env_root.as_ref())
@@ -186,19 +237,22 @@ pub async fn run_command_hook(
         }
     };
 
-    let mut hook_group = None;
-    if let Some(scope) = ctx.process_scope.as_ref()
-        && let Some(group) = hook_process_group(&child)
+    let hook_group = hook_process_group(&child);
+    if let (Some(scope), Some(group)) = (ctx.process_scope.as_ref(), hook_group.as_ref())
+        && !scope.register(group)
     {
-        if !scope.register(&group) {
-            return (
-                HookRunnerResult::Failed("session closed before the hook ran".to_string()),
-                start.elapsed(),
-                None,
-            );
+        let _ = group.kill();
+        if let Some(join) = group.schedule_reap(HOOK_GROUP_REAP) {
+            let _ = join.await;
         }
-        hook_group = Some(group);
+        drop(child);
+        return (
+            HookRunnerResult::Failed("session closed before the hook ran".to_string()),
+            start.elapsed(),
+            None,
+        );
     }
+    let mut reap = HookProcessGuard::arm(hook_group.clone());
 
     let stdin = child.stdin.take();
     let timeout = Duration::from_millis(spec.timeout_ms);
@@ -215,9 +269,9 @@ pub async fn run_command_hook(
 
     let elapsed = start.elapsed();
 
-    if !matches!(result, Ok(Ok(_)))
-        && let Some(group) = &hook_group
-    {
+    if matches!(result, Ok(Ok(_))) {
+        reap.disarm();
+    } else if let Some(group) = &hook_group {
         let _ = group.kill();
     }
 
@@ -278,13 +332,7 @@ pub async fn run_command_hook(
                     if exit_code == 0 {
                         (HookRunnerResult::Success, elapsed)
                     } else {
-                        (
-                            HookRunnerResult::Failed(append_stderr_line(
-                                &format!("exit code {exit_code}"),
-                                &stderr,
-                            )),
-                            elapsed,
-                        )
+                        (failed_with_exit_code(exit_code, &stderr), elapsed)
                     }
                 }
                 GateKind::Tool => {
@@ -292,6 +340,9 @@ pub async fn run_command_hook(
                 }
                 GateKind::Stop => {
                     parse_stop_result(&stdout, &stderr, exit_code, &spec.name, elapsed)
+                }
+                GateKind::PostTool => {
+                    parse_post_tool_use_result(&stdout, &stderr, exit_code, &spec.name, elapsed)
                 }
                 GateKind::Prompt => {
                     parse_prompt_result(&stdout, &stderr, exit_code, &spec.name, elapsed)
@@ -334,19 +385,31 @@ fn rewrite_posix_env_refs_for_powershell<'a>(
         }
         let buf = out.get_or_insert_with(|| String::with_capacity(command.len() + 24));
         if quote == PsQuote::Bare {
-            let token_end = command[r.start..]
-                .find(|c: char| {
-                    c.is_whitespace()
-                        || matches!(c, ';' | '|' | '&' | '<' | '>' | '(' | ')' | '[' | ']' | ',')
+            let token_end = command
+                .get(r.start..)
+                .and_then(|s| {
+                    s.find(|c: char| {
+                        c.is_whitespace()
+                            || matches!(
+                                c,
+                                ';' | '|' | '&' | '<' | '>' | '(' | ')' | '[' | ']' | ','
+                            )
+                    })
                 })
                 .map_or(command.len(), |i| r.start + i);
-            buf.push_str(&command[cursor..r.start]);
+            if let Some(lit) = command.get(cursor..r.start) {
+                buf.push_str(lit);
+            }
             buf.push('"');
-            rewrite_ps_env_refs_in_span(buf, &command[r.start..token_end], extra_env);
+            if let Some(span) = command.get(r.start..token_end) {
+                rewrite_ps_env_refs_in_span(buf, span, extra_env);
+            }
             buf.push('"');
             cursor = token_end;
         } else {
-            buf.push_str(&command[cursor..r.start]);
+            if let Some(lit) = command.get(cursor..r.start) {
+                buf.push_str(lit);
+            }
             push_ps_env_ref(buf, r.braced, r.name);
             cursor = r.end;
         }
@@ -357,7 +420,9 @@ fn rewrite_posix_env_refs_for_powershell<'a>(
     match out {
         None => Cow::Borrowed(command),
         Some(mut buf) => {
-            buf.push_str(&command[cursor..]);
+            if let Some(tail) = command.get(cursor..) {
+                buf.push_str(tail);
+            }
             if first_rewrite_at.is_some_and(|at| {
                 let pad = command.len() - command.trim_start().len();
                 at == pad || (command.as_bytes().get(pad) == Some(&b'"') && at == pad + 1)
@@ -384,11 +449,15 @@ fn rewrite_ps_env_refs_in_span(
         if !RUNNER_ALWAYS_SET_ENV.contains(&r.name) && !extra_env.contains_key(r.name) {
             continue;
         }
-        buf.push_str(&span[cur..r.start]);
+        if let Some(lit) = span.get(cur..r.start) {
+            buf.push_str(lit);
+        }
         push_ps_env_ref(buf, r.braced, r.name);
         cur = r.end;
     }
-    buf.push_str(&span[cur..]);
+    if let Some(tail) = span.get(cur..) {
+        buf.push_str(tail);
+    }
 }
 
 #[cfg(any(test, not(unix)))]
@@ -409,7 +478,9 @@ fn powershell_ctx_at(command: &str, at: usize) -> (PsQuote, bool) {
     let mut i = 0;
     let mut quote = PsQuote::Bare;
     while i < at {
-        let c = bytes[i];
+        let Some(&c) = bytes.get(i) else {
+            break;
+        };
         match quote {
             PsQuote::Single => {
                 if c == b'\'' {
@@ -442,7 +513,8 @@ fn powershell_ctx_at(command: &str, at: usize) -> (PsQuote, bool) {
             }
         }
     }
-    let escaped = quote != PsQuote::Single && at > 0 && bytes[at - 1] == b'`';
+    let escaped = quote != PsQuote::Single
+        && at.checked_sub(1).and_then(|j| bytes.get(j)).copied() == Some(b'`');
     (quote, escaped)
 }
 
@@ -507,9 +579,14 @@ fn find_local_shell_assignments(command_str: &str) -> std::collections::HashSet<
         }
         let mut j = idx;
         while j > 0 {
-            let c = bytes[j - 1];
+            let Some(prev) = j.checked_sub(1) else {
+                return true;
+            };
+            let Some(&c) = bytes.get(prev) else {
+                return true;
+            };
             if c == b' ' || c == b'\t' {
-                j -= 1;
+                j = prev;
                 continue;
             }
             return matches!(c, b';' | b'&' | b'|' | b'\n' | b'(' | b'{');
@@ -517,29 +594,39 @@ fn find_local_shell_assignments(command_str: &str) -> std::collections::HashSet<
         true
     };
     while i < bytes.len() {
-        let c = bytes[i];
+        let Some(&c) = bytes.get(i) else {
+            break;
+        };
         if !(c.is_ascii_alphabetic() || c == b'_') {
             i += 1;
             continue;
         }
         let start = i;
-        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+        while bytes
+            .get(i)
+            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        {
             i += 1;
         }
-        let ident = std::str::from_utf8(&bytes[start..i]).unwrap_or("");
+        let ident = bytes
+            .get(start..i)
+            .and_then(|s| std::str::from_utf8(s).ok())
+            .unwrap_or("");
         if ident.is_empty() {
             continue;
         }
-        if i < bytes.len() && bytes[i] == b'=' && is_statement_start(start) {
+        if bytes.get(i).copied() == Some(b'=') && is_statement_start(start) {
             names.insert(ident.to_string());
             continue;
         }
         if ident == "read" && is_statement_start(start) {
-            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            while bytes.get(i).is_some_and(|&b| b == b' ' || b == b'\t') {
                 i += 1;
             }
             while i < bytes.len() {
-                let c2 = bytes[i];
+                let Some(&c2) = bytes.get(i) else {
+                    break;
+                };
                 if matches!(c2, b';' | b'&' | b'|' | b'\n' | b'<' | b'>') {
                     break;
                 }
@@ -548,7 +635,7 @@ fn find_local_shell_assignments(command_str: &str) -> std::collections::HashSet<
                     continue;
                 }
                 if c2 == b'-' {
-                    while i < bytes.len() && bytes[i] != b' ' && bytes[i] != b'\t' {
+                    while bytes.get(i).is_some_and(|&b| b != b' ' && b != b'\t') {
                         i += 1;
                     }
                     continue;
@@ -557,10 +644,16 @@ fn find_local_shell_assignments(command_str: &str) -> std::collections::HashSet<
                     break;
                 }
                 let s = i;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                while bytes
+                    .get(i)
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                {
                     i += 1;
                 }
-                let read_ident = std::str::from_utf8(&bytes[s..i]).unwrap_or("");
+                let read_ident = bytes
+                    .get(s..i)
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .unwrap_or("");
                 if !read_ident.is_empty() {
                     names.insert(read_ident.to_string());
                 }
@@ -581,9 +674,10 @@ fn append_stderr_line(message: &str, stderr: &str) -> String {
     }
 }
 
-fn failed_with_exit_code(hook_name: &str, exit_code: i32, stderr: &str) -> HookRunnerResult {
+/// Same shape in every mode (`exit code N: <first stderr line>`); the dispatcher and the UI name the hook and the verb.
+fn failed_with_exit_code(exit_code: i32, stderr: &str) -> HookRunnerResult {
     HookRunnerResult::Failed(append_stderr_line(
-        &format!("hook '{hook_name}' failed with exit code {exit_code}"),
+        &format!("exit code {exit_code}"),
         stderr,
     ))
 }
@@ -702,7 +796,7 @@ fn parse_blocking_result(
             },
             elapsed,
         ),
-        _ => (failed_with_exit_code(hook_name, exit_code, stderr), elapsed),
+        _ => (failed_with_exit_code(exit_code, stderr), elapsed),
     }
 }
 
@@ -750,7 +844,7 @@ fn parse_stop_result(
                 elapsed,
             )
         }
-        _ => (failed_with_exit_code(hook_name, exit_code, stderr), elapsed),
+        _ => (failed_with_exit_code(exit_code, stderr), elapsed),
     }
 }
 
@@ -816,21 +910,72 @@ fn parse_prompt_result(
             },
             elapsed,
         ),
-        _ => (
-            HookRunnerResult::Failed(append_stderr_line(
-                &format!("hook '{hook_name}' failed with exit code {exit_code}"),
-                stderr,
-            )),
-            elapsed,
-        ),
+        _ => (failed_with_exit_code(exit_code, stderr), elapsed),
     }
+}
+
+fn parse_post_tool_use_result(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+    hook_name: &str,
+    elapsed: Duration,
+) -> (HookRunnerResult, Duration) {
+    let health = HookHealth::from_success(exit_code == 0);
+    let trimmed = stdout.trim();
+    let PostToolUseParse {
+        mut outcome,
+        failure,
+    } = if trimmed.is_empty() {
+        PostToolUseParse::default()
+    } else {
+        match serde_json::from_str::<PostToolUseHookJson>(trimmed) {
+            Ok(json) => post_tool_use_json_to_outcome(json, hook_name, health),
+            Err(err) => {
+                if trimmed.starts_with('{') {
+                    tracing::warn!(
+                        hook_name,
+                        error = %err,
+                        "post_tool_use hook stdout looks like JSON but failed to parse; ignoring"
+                    );
+                }
+                PostToolUseParse::default()
+            }
+        }
+    };
+
+    if exit_code == GATE_EXIT_CODE && outcome.block_reason.is_none() {
+        let feedback = stderr.trim();
+        if !feedback.is_empty() {
+            outcome.block_reason = Some(clip_text(feedback, MAX_HOOK_FEEDBACK_CHARS));
+        }
+    }
+
+    if exit_code != 0 && exit_code != GATE_EXIT_CODE {
+        let exit_failure = append_stderr_line(&format!("exit code {exit_code}"), stderr);
+        if outcome.is_empty() {
+            return (HookRunnerResult::Failed(exit_failure), elapsed);
+        }
+        return (
+            HookRunnerResult::PostToolUse {
+                outcome,
+                failure: Some(exit_failure),
+            },
+            elapsed,
+        );
+    }
+
+    (HookRunnerResult::PostToolUse { outcome, failure }, elapsed)
 }
 
 fn truncate_output(bytes: &[u8]) -> String {
     if bytes.len() <= MAX_OUTPUT_BYTES {
         String::from_utf8_lossy(bytes).into_owned()
     } else {
-        let mut truncated = String::from_utf8_lossy(&bytes[..MAX_OUTPUT_BYTES]).into_owned();
+        let Some(head) = bytes.get(..MAX_OUTPUT_BYTES) else {
+            return String::from_utf8_lossy(bytes).into_owned();
+        };
+        let mut truncated = String::from_utf8_lossy(head).into_owned();
         truncated.push_str(" [truncated]");
         tracing::warn!(
             total_bytes = bytes.len(),
@@ -853,7 +998,10 @@ pub fn resolve_command_path(spec: &HookSpec) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{MAX_HOOK_FEEDBACK_CHARS, MAX_REASON_CHARS};
+    use crate::event::{
+        MAX_HOOK_FEEDBACK_CHARS, MAX_HOOK_OUTPUT_REPLACEMENT_CHARS, MAX_REASON_CHARS,
+    };
+    use crate::result::{OutputReplacement, ReplacementKind};
 
     fn parse(json: &str) -> HookRunnerResult {
         parse_blocking_result(json, "", 0, "test", Duration::ZERO).0
@@ -872,7 +1020,10 @@ mod tests {
             r#"{"hookSpecificOutput":{"updatedInput":{"command":"xb build"}}}"#,
             r#"{"decision":"allow","hookSpecificOutput":{"updatedInput":{"command":"xb build"}}}"#,
         ] {
-            assert_eq!(rewrite(parse(json))["command"], "xb build");
+            assert_eq!(
+                rewrite(parse(json)).get("command").and_then(|v| v.as_str()),
+                Some("xb build")
+            );
         }
         assert!(matches!(
             parse(r#"{"decision":"deny","hookSpecificOutput":{"updatedInput":{"command":"x"}}}"#),
@@ -906,7 +1057,7 @@ mod tests {
         match result {
             HookRunnerResult::Deny { reason, .. } => assert_eq!(
                 reason,
-                "unknown decision value 'denied' in 'hookSpecificOutput.permissionDecision' from hook 'typo': writes outside the repo"
+                "unknown decision value 'denied' in 'hookSpecificOutput.permissionDecision': writes outside the repo"
             ),
             other => panic!("expected Deny, got {other:?}"),
         }
@@ -921,7 +1072,7 @@ mod tests {
         match result {
             HookRunnerResult::Deny { reason, .. } => assert!(
                 reason.starts_with(
-                    "unknown decision value 'denied' in 'hookSpecificOutput.permissionDecision' from hook 'typo'"
+                    "unknown decision value 'denied' in 'hookSpecificOutput.permissionDecision'"
                 ),
                 "the error must survive a full-length stderr line, got: {reason}"
             ),
@@ -966,7 +1117,7 @@ mod tests {
             (r#"{"decision":"deny"}"#, "deny: denied by hook 'test'"),
             (
                 r#"{"decision":"maybe"}"#,
-                "failed: unknown decision value 'maybe' in 'decision' from hook 'test'",
+                "failed: unknown decision value 'maybe' in 'decision'",
             ),
             (
                 r#"{"decision":"allow","continue":false,"systemMessage":"hi"}"#,
@@ -1025,7 +1176,7 @@ mod tests {
             ),
             (
                 r#"{"hookSpecificOutput":{"permissionDecision":"maybe"}}"#,
-                "failed: unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision' from hook 'test'",
+                "failed: unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision'",
             ),
             (
                 r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"defer","permissionDecisionReason":"because"}}"#,
@@ -1038,7 +1189,7 @@ mod tests {
             ),
             (
                 r#"{"decision":"defer","hookSpecificOutput":{"permissionDecision":"maybe"}}"#,
-                "failed: unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision' from hook 'test'",
+                "failed: unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision'",
             ),
         ] {
             assert_eq!(summarize(parse(json)), expected, "for {json}");
@@ -1047,13 +1198,13 @@ mod tests {
 
     #[test]
     fn json_reason_is_capped() {
-        let long = "├®".repeat(MAX_REASON_CHARS + 50);
+        let long = "é".repeat(MAX_REASON_CHARS + 50);
         let json = serde_json::json!({ "decision": "deny", "reason": long }).to_string();
         match parse(&json) {
             HookRunnerResult::Deny { reason, .. } => {
                 assert_eq!(
                     reason,
-                    format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
+                    format!("{}… [+50 chars]", "é".repeat(MAX_REASON_CHARS))
                 );
             }
             other => panic!("expected Deny, got {other:?}"),
@@ -1064,7 +1215,7 @@ mod tests {
             HookRunnerResult::Ask { reason, .. } => {
                 assert_eq!(
                     reason,
-                    Some(format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS)))
+                    Some(format!("{}… [+50 chars]", "é".repeat(MAX_REASON_CHARS)))
                 );
             }
             other => panic!("expected Ask, got {other:?}"),
@@ -1103,7 +1254,7 @@ mod tests {
 
     #[test]
     fn additional_context_is_capped_in_characters_not_bytes() {
-        let long = "├®".repeat(MAX_HOOK_FEEDBACK_CHARS + 50);
+        let long = "é".repeat(MAX_HOOK_FEEDBACK_CHARS + 50);
         let json = serde_json::json!({
             "hookSpecificOutput": { "permissionDecision": "allow", "additionalContext": long }
         })
@@ -1115,7 +1266,7 @@ mod tests {
                 additional_context,
                 Some(format!(
                     "{}… [+50 chars]",
-                    "├®".repeat(MAX_HOOK_FEEDBACK_CHARS)
+                    "é".repeat(MAX_HOOK_FEEDBACK_CHARS)
                 ))
             ),
             other => panic!("expected Allow, got {other:?}"),
@@ -1127,7 +1278,7 @@ mod tests {
             stop_outcome(result).additional_context,
             Some(format!(
                 "{}… [+50 chars]",
-                "├®".repeat(MAX_HOOK_FEEDBACK_CHARS)
+                "é".repeat(MAX_HOOK_FEEDBACK_CHARS)
             ))
         );
     }
@@ -1192,11 +1343,11 @@ mod tests {
         let cases = [
             (
                 r#"{"decision":"maybe"}"#,
-                "unknown decision value 'maybe' in 'decision' from hook 'test'",
+                "unknown decision value 'maybe' in 'decision'",
             ),
             (
                 r#"{"hookSpecificOutput":{"permissionDecision":"maybe"}}"#,
-                "unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision' from hook 'test'",
+                "unknown decision value 'maybe' in 'hookSpecificOutput.permissionDecision'",
             ),
         ];
         for (json, expected) in cases {
@@ -1263,8 +1414,8 @@ mod tests {
 
     #[test]
     fn deny_reason_and_stderr_excerpt_are_capped() {
-        let long = "├®".repeat(MAX_REASON_CHARS + 50);
-        let capped = format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS));
+        let long = "é".repeat(MAX_REASON_CHARS + 50);
+        let capped = format!("{}… [+50 chars]", "é".repeat(MAX_REASON_CHARS));
 
         let json = serde_json::json!({ "decision": "deny", "reason": long }).to_string();
         match parse(&json) {
@@ -1345,12 +1496,12 @@ mod tests {
 
     #[test]
     fn stderr_line_is_capped() {
-        let long = "├®".repeat(MAX_REASON_CHARS + 50);
+        let long = "é".repeat(MAX_REASON_CHARS + 50);
         let (deny, _) = parse_blocking_result("", &long, 2, "test", Duration::ZERO);
         match deny {
             HookRunnerResult::Deny { reason, .. } => assert_eq!(
                 reason,
-                format!("{}… [+50 chars]", "├®".repeat(MAX_REASON_CHARS))
+                format!("{}… [+50 chars]", "é".repeat(MAX_REASON_CHARS))
             ),
             other => panic!("expected Deny, got {other:?}"),
         }
@@ -1708,12 +1859,85 @@ mod tests {
         }
     }
 
+    fn post_tool_use_outcome(result: HookRunnerResult) -> crate::result::PostToolUseHookOutcome {
+        match result {
+            HookRunnerResult::PostToolUse { outcome, .. } => outcome,
+            other => panic!("expected PostToolUse outcome, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_tool_use_exit_2_feeds_stderr() {
+        let (result, _) =
+            parse_post_tool_use_result("", "lint found 3 issues\n", 2, "p", Duration::ZERO);
+        assert_eq!(
+            post_tool_use_outcome(result).block_reason.as_deref(),
+            Some("lint found 3 issues")
+        );
+    }
+
+    #[test]
+    fn post_tool_use_broken_hook_keeps_only_its_block_reason() {
+        let json = serde_json::json!({
+            "decision": "block",
+            "reason": "tests failed",
+            "hookSpecificOutput": {
+                "additionalContext": "all tests passed",
+                "updatedToolOutput": { "type": "Bash" },
+                "updatedMCPToolOutput": "all tests passed",
+            },
+        })
+        .to_string();
+        let (result, _) = parse_post_tool_use_result(&json, "boom", 1, "p", Duration::ZERO);
+        let HookRunnerResult::PostToolUse { outcome, failure } = result else {
+            panic!("a surviving block reason must still be delivered");
+        };
+        assert_eq!(outcome.block_reason.as_deref(), Some("tests failed"));
+        assert_eq!(outcome.additional_context, None);
+        assert_eq!(outcome.output_replacement, None);
+        let failure = failure.expect("a non-zero exit is recorded even when a field parsed");
+        assert!(
+            failure.contains("exit code 1") && failure.contains("boom"),
+            "failure must carry exit code and stderr, got: {failure}"
+        );
+    }
+
     #[test]
     fn truncate_output_respects_limit() {
         assert_eq!(truncate_output(b"hello world"), "hello world");
 
         let large = truncate_output(&vec![b'x'; MAX_OUTPUT_BYTES + 1000]);
         assert!(large.ends_with(" [truncated]"));
+    }
+
+    #[test]
+    fn post_tool_use_replacement_at_ceiling_survives_capture_and_parse() {
+        let at_ceiling = "x".repeat(MAX_HOOK_OUTPUT_REPLACEMENT_CHARS);
+        let document = serde_json::json!({
+            "hookSpecificOutput": { "updatedMCPToolOutput": at_ceiling },
+        })
+        .to_string();
+
+        let captured = truncate_output(document.as_bytes());
+        assert!(
+            !captured.ends_with(" [truncated]"),
+            "a ceiling replacement must fit the capture cap without truncation"
+        );
+        let (result, _) = parse_post_tool_use_result(&captured, "", 0, "p", Duration::ZERO);
+        let outcome = post_tool_use_outcome(result);
+        let Some(OutputReplacement {
+            kind: ReplacementKind::Mcp,
+            value,
+            ..
+        }) = outcome.output_replacement.as_ref()
+        else {
+            panic!("the ceiling replacement must survive, not be dropped as an empty success");
+        };
+        assert_eq!(
+            value.as_str().map(str::len),
+            Some(MAX_HOOK_OUTPUT_REPLACEMENT_CHARS),
+            "the full ceiling-length replacement survives, unclipped"
+        );
     }
 
     #[test]
@@ -1806,6 +2030,7 @@ mod tests {
             session_id: "test-session",
             workspace_root: "/tmp",
             process_scope: None,
+            disabled: Default::default(),
         }
     }
 
@@ -1906,6 +2131,7 @@ mod tests {
             session_id: "test-session",
             workspace_root: &workspace,
             process_scope: None,
+            disabled: Default::default(),
         };
         let (result, _, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await;
 
@@ -2207,6 +2433,48 @@ mod tests {
         assert!(
             !marker.exists(),
             "grandchild outlived session close, so the group was not killpg'd"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_command_hook_kills_and_reaps_grandchild() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("grandchild_alive");
+        let child_pid = tmp.path().join("child.pid");
+        let mut spec = make_shell_spec(&format!(
+            "sh -c 'echo $$ > \"{}\"; sleep 30; echo alive > \"{}\"' & wait",
+            child_pid.display(),
+            marker.display()
+        ));
+        spec.timeout_ms = 60_000;
+        let envelope = make_envelope();
+        let ctx = make_ctx();
+        let hook = tokio::spawn(async move {
+            run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if child_pid.exists() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("grandchild pid");
+        hook.abort();
+        let _ = tokio::time::timeout(Duration::from_secs(2), hook).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!marker.exists(), "grandchild wrote after hook drop");
+        let pid: u32 = std::fs::read_to_string(&child_pid)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "grandchild {pid} still live after hook drop"
         );
     }
 

@@ -68,7 +68,15 @@ pub(crate) async fn apply_for_mode_transition(
         "mode model switch: applying configured mode model"
     );
     let request = acp::SetSessionModelRequest::new(session_id.clone(), model_id.clone());
-    if let Err(error) = model_switch::apply(agent, request, None).await {
+    if let Err(error) = model_switch::apply(
+        agent,
+        request,
+        model_switch::SwitchEffort::Preserve,
+        model_switch::SwitchContextWindow::Preserve,
+        model_switch::ConfigNotice::Send,
+    )
+    .await
+    {
         tracing::warn!(
             session_id = %session_id.0,
             config_key = direction,

@@ -1,4 +1,4 @@
-//! Canonical bounded recovery-outcome records.
+//! Recovery-outcome records; each has one canonical encoding and a byte bound checked on encode and decode.
 
 use serde_json::Value;
 
@@ -136,15 +136,12 @@ pub(super) enum RecoveryRecordV1 {
     Claim(RecoveryClaim),
 }
 impl RecoveryRecordV1 {
-    fn event(&self) -> u8 {
-        match self {
-            Self::RunReserved(_) => 0,
-            Self::Outcome(_) => 1,
-            Self::Claim(_) => 2,
-        }
-    }
     pub(super) fn limits(&self) -> (usize, usize) {
-        RECOVERY_ROW_BYTES[usize::from(self.event())]
+        match self {
+            Self::RunReserved(_) => RECOVERY_ROW_BYTES[0],
+            Self::Outcome(_) => RECOVERY_ROW_BYTES[1],
+            Self::Claim(_) => RECOVERY_ROW_BYTES[2],
+        }
     }
 }
 
@@ -288,8 +285,8 @@ pub(super) fn account_recovery(segments: u64) -> Result<RecoveryAccounting> {
             .ok_or(CodecError::Invalid("accounting overflow"))?;
         multiply(RECOVERY_RUNS_PER_SLOT, bytes_per_run)
     };
-    // Known generations permit runs 0..=7. Unknown permits only terminal run 7,
-    // but all three record kinds remain constructible on that sole legal key.
+    // Known generations permit runs 0..=7
+    // Unknown permits only terminal run 7, but all three record kinds remain constructible on that sole legal key
     let rows_per_known_slot = multiply(RECOVERY_RUNS_PER_SLOT, RECORDS_PER_RECOVERY_RUN)?;
     let unknown_terminal_rows = RECORDS_PER_RECOVERY_RUN;
     let unknown_terminal_bytes = max_bytes_per_run;

@@ -143,7 +143,11 @@ fn mixed_report() -> DiagnosticReport {
     report.facts.ssh = true;
     report.facts.color = ColorFacts {
         level: RuntimeFact::Available(ColorLevel::Ansi256),
-        available_themes: vec![ThemeKind::ChutesNight, ThemeKind::ChutesDay],
+        available_themes: vec![
+            ThemeKind::ChutesNight,
+            ThemeKind::ChutesDay,
+            ThemeKind::Terminal,
+        ],
         total_themes: ThemeKind::ALL.len(),
     };
     report.facts.keyboard = Some(KeyboardFact {
@@ -241,7 +245,7 @@ fn fake_standalone_facts_compose_through_shared_view() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with_voice(snapshot, false);
+    let report = collect_report_with(snapshot);
 
     assert_eq!(report.issue_count(), 1);
     assert!(
@@ -250,10 +254,10 @@ fn fake_standalone_facts_compose_through_shared_view() {
             .iter()
             .all(|finding| { finding.id != DiagnosticId::new("terminal", "control-mode") })
     );
-    assert_eq!(
-        report.findings[0].id,
-        DiagnosticId::new("terminal", "tmux-clipboard")
-    );
+    let Some(finding) = report.findings.first() else {
+        panic!("expected tmux-clipboard finding: {:?}", report.findings);
+    };
+    assert_eq!(finding.id, DiagnosticId::new("terminal", "tmux-clipboard"));
 }
 
 #[test]
@@ -280,7 +284,7 @@ fn standalone_wayland_missing_is_issue_but_no_seats_or_errors_are_not() {
             false,
             RuntimeEvidence::Available(ColorLevel::TrueColor),
         );
-        let report = collect_report_with_voice(snapshot, false);
+        let report = collect_report_with(snapshot);
         let has_issue = report
             .findings
             .iter()
@@ -394,7 +398,7 @@ fn standalone_runtime_and_tmux_are_unavailable_without_false_wezterm_finding() {
         false,
         RuntimeEvidence::Available(ColorLevel::TrueColor),
     );
-    let report = collect_report_with_voice(snapshot, false);
+    let report = collect_report_with(snapshot);
 
     assert!(report.findings.iter().all(|finding| {
         finding.id != DiagnosticId::new("terminal", "wezterm-kitty")
@@ -488,7 +492,7 @@ fn human_mixed_fixture_is_exact() {
             "  · byobu                        tmux\n",
             "  · ssh                          yes\n",
             "  · color                        256\n",
-            "  · themes                       2/5: chutesnight, chutesday\n",
+            "  · themes                       3/6: chutesnight, chutesday, terminal\n",
             "  · keyboard                     cmd=dropped, opt=native (OS rescue active)\n",
             "  · newline                      Alt+Enter (Cursor: xterm.js cannot distinguish Shift+Enter)\n",
             "\n",
@@ -525,9 +529,9 @@ fn human_mixed_fixture_is_exact() {
 
 #[test]
 fn fix_preview_contains_exact_change_and_caveats() {
-    let temp = crate::test_util::sandbox_dir();
+    let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix_ignoring_platform(
+    let plan = crate::diagnostics::plan_fix(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,
@@ -543,9 +547,7 @@ fn fix_preview_contains_exact_change_and_caveats() {
             "# >>> chutes-build doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='chutes-build wrap ssh'"
         )
     );
-    assert!(
-        preview.contains("To use once without changing config: `chutes-build wrap ssh <host>`")
-    );
+    assert!(preview.contains("To use once without changing config: `chutes-build wrap ssh <host>`"));
     assert!(preview.contains("Use `command ssh ...` to bypass the alias."));
     assert!(preview.contains("ssh -f"));
     assert!(preview.contains("ControlPersist"));
@@ -554,9 +556,9 @@ fn fix_preview_contains_exact_change_and_caveats() {
 
 #[test]
 fn decline_is_success_and_does_not_write() {
-    let temp = crate::test_util::sandbox_dir();
+    let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix_ignoring_platform(
+    let plan = crate::diagnostics::plan_fix(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,
@@ -586,9 +588,9 @@ fn decline_is_success_and_does_not_write() {
 
 #[test]
 fn non_tty_without_yes_fails_safely_before_write() {
-    let temp = crate::test_util::sandbox_dir();
+    let temp = tempfile::tempdir().unwrap();
     let terminal = local_terminal();
-    let plan = crate::diagnostics::plan_fix_ignoring_platform(
+    let plan = crate::diagnostics::plan_fix(
         ssh_wrap_fix_request(temp.path()),
         &ssh_wrap_report(),
         &terminal,
@@ -690,7 +692,7 @@ fn json_empty_fixture_pins_null_policy() {
                 "color": {
                     "level": {"status": "unavailable", "value": null},
                     "availableThemes": [],
-                    "totalThemes": 5
+                    "totalThemes": 6
                 },
                 "keyboard": null,
                 "newline": null,
@@ -737,8 +739,8 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                 "ssh": true,
                 "color": {
                     "level": {"status": "available", "value": "256"},
-                    "availableThemes": ["chutesnight", "chutesday"],
-                    "totalThemes": 5
+                    "availableThemes": ["chutesnight", "chutesday", "terminal"],
+                    "totalThemes": 6
                 },
                 "keyboard": {"cmd": "dropped", "opt": "native", "os": "macos"},
                 "newline": {"kind": "xterm_js", "terminalName": "cursor"},
@@ -976,8 +978,16 @@ fn newline_variant_and_field_mappings_are_stable() {
         let mut output = Vec::new();
         write_report(&report, true, &mut output).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(json["facts"]["newline"]["kind"], kind);
-        assert_eq!(json["facts"]["newline"][field], value);
+        assert_eq!(
+            json.pointer("/facts/newline/kind")
+                .and_then(serde_json::Value::as_str),
+            Some(kind)
+        );
+        let field_ptr = format!("/facts/newline/{field}");
+        assert_eq!(
+            json.pointer(&field_ptr).and_then(serde_json::Value::as_str),
+            Some(value)
+        );
     }
     let mut report = healthy_report();
     report.facts.newline = Some(NewlineFact::NoKittyKeyboardProtocol);
@@ -985,8 +995,8 @@ fn newline_variant_and_field_mappings_are_stable() {
     write_report(&report, true, &mut output).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
-        json["facts"]["newline"],
-        serde_json::json!({"kind": "no_kitty_keyboard_protocol"})
+        json.pointer("/facts/newline"),
+        Some(&serde_json::json!({"kind": "no_kitty_keyboard_protocol"}))
     );
 }
 
@@ -1023,14 +1033,27 @@ fn new_named_findings_extend_json_without_schema_changes() {
     let mut output = Vec::new();
     write_report(&report, true, &mut output).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["schemaVersion"], "1");
-    assert_eq!(json["facts"]["clipboard"]["delivery"], "unverified");
     assert_eq!(
-        json["facts"]["clipboard"]["fix"],
-        "chutes-build wrap <ssh command> or /minimal"
+        json.pointer("/schemaVersion")
+            .and_then(serde_json::Value::as_str),
+        Some("1")
     );
-    assert_eq!(json["findings"][0]["id"], "clipboard.delivery-unverified");
-    assert_eq!(json["counts"]["issues"], 1);
+    assert_eq!(
+        json.pointer("/facts/clipboard/delivery")
+            .and_then(serde_json::Value::as_str),
+        Some("unverified")
+    );
+    assert_eq!(
+        json.pointer("/facts/clipboard/fix")
+            .and_then(serde_json::Value::as_str),
+        Some("chutes-build wrap <ssh command> or /minimal")
+    );
+    assert_eq!(
+        json.pointer("/findings/0/id")
+            .and_then(serde_json::Value::as_str),
+        Some("clipboard.delivery-unverified")
+    );
+    assert_eq!(json.pointer("/counts/issues"), Some(&serde_json::json!(1)));
 }
 
 #[test]

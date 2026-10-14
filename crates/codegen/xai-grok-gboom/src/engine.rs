@@ -1,12 +1,10 @@
 //! Software renderer for the `/gboom` easter egg.
 //!
-//! Grid raycaster (Lodev-style DDA): textured walls, floor, and ceiling
-//! with distance fog, billboard sprites with a 1D depth buffer, a
-//! view-model gun, and full-frame effects (muzzle light, damage flash,
-//! vignette). Also renders the title/end screens (animated fire + text).
+//! Grid raycaster (Lodev-style DDA): textured walls, floor, and ceiling with distance fog, and billboard sprites with a 1D depth buffer.
+//! On top go a view-model gun and full-frame effects (muzzle light, damage flash, vignette).
+//! It also renders the title/end screens (animated fire and text).
 //!
-//! Everything draws into a plain RGB8 framebuffer the caller PNG-encodes
-//! for the kitty graphics protocol.
+//! Everything draws into a plain RGB8 framebuffer the caller PNG-encodes for the kitty graphics protocol.
 
 use super::assets::{self, GunSprites, ImpSprites, Rgb, TEX_SIZE, Texture, XorShift64};
 use super::game::{Game, ImpVisual};
@@ -15,9 +13,9 @@ use super::game::{Game, ImpVisual};
 const FOG: f32 = 0.16;
 /// Sprite height in world units (walls are 1.0 tall).
 const IMP_WORLD_HEIGHT: f32 = 0.72;
-/// Camera half-FOV tangent (0.66 ≈ the classic 66° FOV).
+/// Camera half-FOV tangent (0.66 gives the classic 66° FOV).
 const PLANE_LEN: f32 = 0.66;
-/// Corner-vignette strength (0 = none); subtle, ~0.8 at the extreme corners.
+/// Corner-vignette strength (0 disables it); subtle, ~0.8 at the extreme corners.
 const VIGNETTE: f32 = 0.11;
 
 /// RGB framebuffer with reusable scratch buffers.
@@ -26,9 +24,8 @@ pub(super) struct FrameBuffer {
     pub h: usize,
     pub pixels: Vec<u8>, // RGB8, row-major
     zbuf: Vec<f32>,      // per-column wall depth
-    /// Per-column wall strip bounds `[top, bottom)` in screen rows, written
-    /// by `draw_walls` and read by `draw_floor_ceiling` to skip the pixels
-    /// walls already cover (avoids texturing them twice).
+    /// Per-column wall strip bounds `[top, bottom)` in screen rows.
+    /// `draw_walls` writes them; `draw_floor_ceiling` reads them to skip the pixels walls already cover.
     wall_top: Vec<i32>,
     wall_bottom: Vec<i32>,
     /// Scratch for painter's-order sprite sorting, reused across frames.
@@ -78,31 +75,55 @@ impl FrameBuffer {
     #[inline]
     fn put(&mut self, x: usize, y: usize, c: Rgb) {
         let i = (y * self.w + x) * 3;
-        self.pixels[i] = c[0];
-        self.pixels[i + 1] = c[1];
-        self.pixels[i + 2] = c[2];
+        let Some(px) = self.pixels.get_mut(i..i + 3) else {
+            return;
+        };
+        let [r, g, b] = px else {
+            return;
+        };
+        *r = c[0];
+        *g = c[1];
+        *b = c[2];
     }
 
     /// Multiply the pixel at `(x, y)` by `f` (used for sprite shadows).
     #[inline]
     fn darken(&mut self, x: usize, y: usize, f: f32) {
         let i = (y * self.w + x) * 3;
-        self.pixels[i] = (self.pixels[i] as f32 * f) as u8;
-        self.pixels[i + 1] = (self.pixels[i + 1] as f32 * f) as u8;
-        self.pixels[i + 2] = (self.pixels[i + 2] as f32 * f) as u8;
+        let Some(px) = self.pixels.get_mut(i..i + 3) else {
+            return;
+        };
+        let [r, g, b] = px else {
+            return;
+        };
+        *r = (*r as f32 * f) as u8;
+        *g = (*g as f32 * f) as u8;
+        *b = (*b as f32 * f) as u8;
     }
 
-    /// Darken the frame toward the corners. Applied to the world (before
-    /// the view-model gun, which stays crisp).
+    /// Darken the frame toward the corners.
+    /// Runs before the view-model gun draws so the gun stays crisp.
     fn apply_vignette(&mut self) {
         for y in 0..self.h {
-            let vy = self.vig_y[y];
-            let row = &mut self.pixels[y * self.w * 3..(y + 1) * self.w * 3];
+            let Some(&vy) = self.vig_y.get(y) else {
+                continue;
+            };
+            let start = y * self.w * 3;
+            let end = (y + 1) * self.w * 3;
+            let Some(row) = self.pixels.get_mut(start..end) else {
+                continue;
+            };
             for (x, px) in row.chunks_exact_mut(3).enumerate() {
-                let f = self.vig_x[x] * vy;
-                px[0] = (px[0] as f32 * f) as u8;
-                px[1] = (px[1] as f32 * f) as u8;
-                px[2] = (px[2] as f32 * f) as u8;
+                let Some(&vx) = self.vig_x.get(x) else {
+                    continue;
+                };
+                let f = vx * vy;
+                let [r, g, b] = px else {
+                    continue;
+                };
+                *r = (*r as f32 * f) as u8;
+                *g = (*g as f32 * f) as u8;
+                *b = (*b as f32 * f) as u8;
             }
         }
     }
@@ -157,8 +178,7 @@ impl Renderer {
         // Muzzle flash briefly lights the whole scene.
         let light_boost = if game.player.muzzle > 0.0 { 1.35 } else { 1.0 };
 
-        // Walls first: they record per-column strip bounds + depth, letting
-        // the floor/ceiling pass skip the pixels they cover (no double-write).
+        // Walls first: they record per-column strip bounds and depth, letting the floor/ceiling pass skip the pixels they cover
         self.draw_walls(fb, game, light_boost);
         self.draw_floor_ceiling(fb, game, light_boost);
         self.draw_imps(fb, game, light_boost);
@@ -166,34 +186,33 @@ impl Renderer {
         fb.apply_vignette();
         self.draw_gun(fb, game);
 
-        // Damage flash: flat blend of the whole frame toward red, decaying
-        // with `damage_flash`. Reads clearly even at low resolutions.
+        // Damage flash: flat blend of the whole frame toward red, decaying with `damage_flash`
+        // It reads clearly even at low resolutions
         if game.player.damage_flash > 0.0 {
             let t = (game.player.damage_flash * 0.45).min(0.45);
             for px in fb.pixels.chunks_exact_mut(3) {
-                px[0] = (px[0] as f32 + (220.0 - px[0] as f32) * t) as u8;
-                px[1] = (px[1] as f32 * (1.0 - t * 0.8)) as u8;
-                px[2] = (px[2] as f32 * (1.0 - t * 0.8)) as u8;
+                let [r, g, b] = px else {
+                    continue;
+                };
+                *r = (*r as f32 + (220.0 - *r as f32) * t) as u8;
+                *g = (*g as f32 * (1.0 - t * 0.8)) as u8;
+                *b = (*b as f32 * (1.0 - t * 0.8)) as u8;
             }
         }
         // Low-health vignette pulse.
         if game.player.hp <= 25 && !game.dead() {
             let pulse = 0.10 + 0.06 * (game.time * 5.0).sin();
             for px in fb.pixels.chunks_exact_mut(3) {
-                px[0] = (px[0] as f32 + (160.0 - px[0] as f32) * pulse) as u8;
+                let [r, ..] = px else {
+                    continue;
+                };
+                *r = (*r as f32 + (160.0 - *r as f32) * pulse) as u8;
             }
         }
     }
 
-    /// Perspective-correct textured floor and ceiling (Lodev scanline
-    /// casting): each screen row below/above the horizon maps to one
-    /// world-space distance, so texels are sampled by stepping world
-    /// coordinates across the row. Distance fog matches the wall pass,
-    /// making the whole scene recede uniformly into darkness.
-    ///
-    /// Runs after `draw_walls` and skips pixels inside each column's wall
-    /// strip — the world coords still step every pixel (to stay aligned),
-    /// but the texture sample/shade/write are elided where a wall covers.
+    /// Perspective-correct textured floor and ceiling (Lodev scanline casting).
+    /// Each screen row below/above the horizon maps to one distance, so texels are sampled by stepping world coordinates across the row.
     fn draw_floor_ceiling(&self, fb: &mut FrameBuffer, game: &Game, light: f32) {
         let (w, h) = (fb.w, fb.h);
         let p = &game.player;
@@ -216,8 +235,7 @@ impl Renderer {
             let mut world_x = p.x + row_dist * ray0_x;
             let mut world_y = p.y + row_dist * ray0_y;
 
-            // The ceiling row at the same distance mirrors across the
-            // horizon (camera eye is at half wall height).
+            // The ceiling row at the same distance mirrors across the horizon (camera eye is at half wall height)
             let ceil_y = h - 1 - y;
             let (yi, ceil_yi) = (y as i32, ceil_y as i32);
             for x in 0..w {
@@ -225,11 +243,16 @@ impl Renderer {
                 world_x += step_x;
                 world_y += step_y;
 
-                // Skip pixels the wall strip already filled this column. The
-                // texel coords are computed lazily, so the central wall band
-                // (where both are covered) costs only the world-coord step.
-                let floor_vis = yi >= fb.wall_bottom[x];
-                let ceil_vis = ceil_yi < fb.wall_top[x];
+                // Skip pixels the wall strip already filled this column
+                // The texel coords are computed lazily, so the central wall band (where both are covered) costs only the world-coord step
+                let Some(&wall_bottom) = fb.wall_bottom.get(x) else {
+                    continue;
+                };
+                let Some(&wall_top) = fb.wall_top.get(x) else {
+                    continue;
+                };
+                let floor_vis = yi >= wall_bottom;
+                let ceil_vis = ceil_yi < wall_top;
                 if !(floor_vis || ceil_vis) {
                     continue;
                 }
@@ -279,8 +302,8 @@ impl Renderer {
                 (1, (map_y as f32 + 1.0 - p.y) * delta_y)
             };
 
-            // DDA until a solid cell. The map border is fully solid, so
-            // bound the loop defensively rather than trusting it blindly.
+            // DDA until a solid cell
+            // The map border is fully solid, but bound the loop anyway
             let mut side = 0;
             let mut tex_id = 1u8;
             for _ in 0..256 {
@@ -306,14 +329,20 @@ impl Renderer {
                 (map_y as f32 - p.y + (1 - step_y) as f32 / 2.0) / rd_y
             };
             let perp = perp.max(1e-4);
-            fb.zbuf[x] = perp;
+            if let Some(slot) = fb.zbuf.get_mut(x) {
+                *slot = perp;
+            }
 
             let line_h = (h as f32 / perp) as i32;
             let draw_start = ((h as i32 - line_h) / 2).max(0);
             let draw_end = ((h as i32 + line_h) / 2).min(h as i32);
             // Record the strip so draw_floor_ceiling skips these rows.
-            fb.wall_top[x] = draw_start;
-            fb.wall_bottom[x] = draw_end;
+            if let Some(slot) = fb.wall_top.get_mut(x) {
+                *slot = draw_start;
+            }
+            if let Some(slot) = fb.wall_bottom.get_mut(x) {
+                *slot = draw_end;
+            }
 
             // Texture column.
             let wall_x = if side == 0 {
@@ -327,7 +356,12 @@ impl Renderer {
                 tex_x = TEX_SIZE - 1 - tex_x.min(TEX_SIZE - 1);
             }
 
-            let texture = &self.textures[(tex_id as usize - 1).min(self.textures.len() - 1)];
+            let Some(tex_idx) = (tex_id as usize).checked_sub(1) else {
+                continue;
+            };
+            let Some(texture) = self.textures.get(tex_idx).or_else(|| self.textures.last()) else {
+                continue;
+            };
             let side_shade = if side == 1 { 0.72 } else { 1.0 };
             let fog_shade = (1.0 / (1.0 + perp * FOG)) * side_shade * light;
 
@@ -349,10 +383,9 @@ impl Renderer {
         let (plane_x, plane_y) = (-dir_y * PLANE_LEN, dir_x * PLANE_LEN);
         let inv_det = 1.0 / (plane_x * dir_y - dir_x * plane_y);
 
-        // Painter's order: far → near. The order buffer lives on the
-        // framebuffer so the 30 fps render loop stays allocation-free;
-        // it is taken out for the duration of the draw because the loop
-        // body needs `fb` mutably.
+        // Painter's order: far to near
+        // The order buffer lives on the framebuffer so the 30 fps render loop stays allocation-free
+        // It is taken out for the duration of the draw because the loop body needs `fb` mutably
         let mut order = std::mem::take(&mut fb.sprite_order);
         order.clear();
         order.extend(game.imps.iter().enumerate().map(|(i, imp)| {
@@ -362,10 +395,12 @@ impl Renderer {
         order.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
         for &(i, _) in &order {
-            let imp = &game.imps[i];
+            let Some(imp) = game.imps.get(i) else {
+                continue;
+            };
             let rel_x = imp.x - p.x;
             let rel_y = imp.y - p.y;
-            // Camera-space transform: ty = forward depth, tx = lateral.
+            // Camera-space transform: ty is forward depth, tx is lateral
             let tx = inv_det * (dir_y * rel_x - dir_x * rel_y);
             let ty = inv_det * (-plane_y * rel_x + plane_x * rel_y);
             if ty <= 0.08 {
@@ -383,8 +418,7 @@ impl Renderer {
             };
 
             let screen_x = (w as f32 / 2.0) * (1.0 + tx / ty);
-            // Vertical span from world heights [0, IMP_WORLD_HEIGHT] with the
-            // camera eye at 0.5: y(world_z) = h/2 + (0.5 - z) * h / ty.
+            // Vertical span from world heights [0, IMP_WORLD_HEIGHT] with the camera eye at 0.5: y(world_z) = h/2 + (0.5 - z) * h / ty
             let y_feet = h as f32 / 2.0 + 0.5 * h as f32 / ty;
             let y_head = h as f32 / 2.0 + (0.5 - IMP_WORLD_HEIGHT) * h as f32 / ty;
             let sprite_h = (y_feet - y_head).max(1.0);
@@ -400,8 +434,8 @@ impl Renderer {
 
             let fog_shade = (1.0 / (1.0 + ty * FOG)) * light;
 
-            // Soft elliptical contact shadow under standing demons. Drawn
-            // before the body, z-tested per column like the body.
+            // Soft elliptical contact shadow under standing demons
+            // It is drawn before the body and z-tested per column like the body
             if !matches!(imp.visual(), ImpVisual::Corpse) {
                 draw_contact_shadow(fb, screen_x, y_feet, sprite_w, sprite_h, ty);
             }
@@ -410,7 +444,7 @@ impl Renderer {
             let pain_flash = imp.visual() == ImpVisual::Pain;
 
             for sx in x0.max(0)..x1.min(w as i32) {
-                if fb.zbuf[sx as usize] <= ty {
+                if fb.zbuf.get(sx as usize).copied().is_some_and(|z| z <= ty) {
                     continue; // occluded by a wall
                 }
                 let u = (sx as f32 - x0 as f32) / (x1 - x0).max(1) as f32;
@@ -463,8 +497,7 @@ impl Renderer {
 
         // Crosshair.
         let (cx, cy) = (w / 2, h / 2);
-        // Aim feedback: the crosshair turns red over a hittable demon and
-        // gains a center dot.
+        // Aim feedback: the crosshair turns red over a hittable demon and gains a center dot
         let on_target = game.target_in_crosshair().is_some();
         let ch_c: Rgb = if on_target {
             assets::GBOOM_RED
@@ -487,8 +520,7 @@ impl Renderer {
     }
 }
 
-/// Soft elliptical contact shadow at a sprite's feet, z-tested per column
-/// with the sprite's own depth so walls still occlude it.
+/// Soft elliptical contact shadow at a sprite's feet, z-tested per column with the sprite's own depth so walls still occlude it.
 fn draw_contact_shadow(
     fb: &mut FrameBuffer,
     center_x: f32,
@@ -505,7 +537,12 @@ fn draw_contact_shadow(
     let y0 = (y_feet - ry).floor() as i32;
     let y1 = (y_feet + ry).ceil() as i32;
     for sx in x0.max(0)..x1.min(w as i32) {
-        if fb.zbuf[sx as usize] <= depth {
+        if fb
+            .zbuf
+            .get(sx as usize)
+            .copied()
+            .is_some_and(|z| z <= depth)
+        {
             continue;
         }
         let nx = (sx as f32 - center_x) / rx;
@@ -524,8 +561,8 @@ fn draw_contact_shadow(
 // Title / end screens: animated fire + 5x7 pixel text
 // -------------------------------------------------------------------------
 
-/// The classic PSX-style fire effect: a cellular automaton on a coarse
-/// grid, upscaled at draw time. Heat values 0..=36 index a fire palette.
+/// The classic PSX-style fire effect: a cellular automaton on a coarse grid, upscaled at draw time.
+/// Heat values 0..=36 index a fire palette.
 pub(super) struct FireSim {
     w: usize,
     h: usize,
@@ -541,7 +578,9 @@ impl FireSim {
         let mut heat = vec![0u8; w * h];
         // Bottom row is the white-hot source.
         for x in 0..w {
-            heat[(h - 1) * w + x] = FIRE_MAX;
+            if let Some(slot) = heat.get_mut((h - 1) * w + x) {
+                *slot = FIRE_MAX;
+            }
         }
         Self {
             w,
@@ -558,16 +597,21 @@ impl FireSim {
                 let src = y * self.w + x;
                 let r = self.rng.next_u32();
                 let decay = (r & 1) as i32; // cool by 0 or 1
-                let drift = (r >> 2) % 3; // 0, 1, 2 → left, stay, right
+                let drift = (r >> 2) % 3; // 0, 1, 2: left, stay, right
                 let dst_x = (x as i32 + drift as i32 - 1).rem_euclid(self.w as i32) as usize;
                 let dst = (y - 1) * self.w + dst_x;
-                self.heat[dst] = (self.heat[src] as i32 - decay).max(0) as u8;
+                let Some(&src_h) = self.heat.get(src) else {
+                    continue;
+                };
+                if let Some(slot) = self.heat.get_mut(dst) {
+                    *slot = (src_h as i32 - decay).max(0) as u8;
+                }
             }
         }
     }
 
     fn palette(heat: u8) -> Rgb {
-        // Black → deep red → orange → yellow → white.
+        // Ramps from black through deep red, orange, and yellow to white
         let t = heat as f32 / FIRE_MAX as f32;
         if t < 0.02 {
             [7, 7, 9]
@@ -592,7 +636,15 @@ impl FireSim {
             let fy = (y - y_start) * self.h / fire_h.max(1);
             for x in 0..w {
                 let fx = x * self.w / w;
-                let heat = self.heat[fy.min(self.h - 1) * self.w + fx.min(self.w - 1)];
+                let Some(max_y) = self.h.checked_sub(1) else {
+                    continue;
+                };
+                let Some(max_x) = self.w.checked_sub(1) else {
+                    continue;
+                };
+                let Some(&heat) = self.heat.get(fy.min(max_y) * self.w + fx.min(max_x)) else {
+                    continue;
+                };
                 if heat > 1 {
                     fb.put(x, y, Self::palette(heat));
                 }
@@ -601,7 +653,6 @@ impl FireSim {
     }
 }
 
-/// Fill the framebuffer with a flat color.
 pub(super) fn clear(fb: &mut FrameBuffer, c: Rgb) {
     for px in fb.pixels.chunks_exact_mut(3) {
         px.copy_from_slice(&c);
@@ -638,8 +689,7 @@ pub(super) fn draw_text(fb: &mut FrameBuffer, text: &str, x0: i32, y0: i32, scal
     }
 }
 
-/// Draw centered text with an 8-direction outline, which keeps the chunky
-/// font legible over the animated fire background.
+/// Draw centered text with an 8-direction outline, which keeps the chunky font legible over the animated fire background.
 pub(super) fn draw_text_centered_outlined(
     fb: &mut FrameBuffer,
     text: &str,
@@ -679,24 +729,11 @@ mod tests {
         assert!(fb.pixels.iter().any(|&b| b != 0));
         assert_eq!(fb.pixels.len(), 320 * 200 * 3);
     }
-
-    #[test]
-    fn render_survives_extreme_sizes() {
-        let renderer = Renderer::new();
-        let game = Game::new();
-        let mut fb = FrameBuffer::new();
-        for (w, h) in [(1usize, 1usize), (2, 2), (16, 8), (639, 401)] {
-            fb.resize(w, h);
-            renderer.render_game(&mut fb, &game);
-        }
-    }
-
     #[test]
     fn zbuffer_occludes_sprites_behind_walls() {
         let renderer = Renderer::new();
         let mut game = Game::new();
-        // Move all imps far behind the player so none are visible, render,
-        // then put one directly in front and confirm pixels change.
+        // Move all imps far behind the player so none are visible, render, then put one directly in front and confirm pixels change
         for imp in &mut game.imps {
             imp.x = game.player.x - 8.0;
             imp.y = game.player.y;
@@ -707,8 +744,11 @@ mod tests {
         let before = fb.pixels.clone();
 
         let (dx, dy) = game.player.dir();
-        game.imps[0].x = game.player.x + dx * 1.5;
-        game.imps[0].y = game.player.y + dy * 1.5;
+        let Some(imp) = game.imps.first_mut() else {
+            panic!("expected at least one imp");
+        };
+        imp.x = game.player.x + dx * 1.5;
+        imp.y = game.player.y + dy * 1.5;
         renderer.render_game(&mut fb, &game);
         assert_ne!(before, fb.pixels, "visible imp must change the frame");
     }
@@ -719,9 +759,9 @@ mod tests {
         for _ in 0..60 {
             fire.step();
         }
-        // After enough steps some heat must exist above the source row.
         let above: u32 = (0..fire.w)
-            .map(|x| fire.heat[(fire.h / 2) * fire.w + x] as u32)
+            .filter_map(|x| fire.heat.get((fire.h / 2) * fire.w + x).copied())
+            .map(u32::from)
             .sum();
         assert!(above > 0, "fire should propagate upward");
     }

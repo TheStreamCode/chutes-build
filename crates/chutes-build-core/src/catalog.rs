@@ -90,23 +90,28 @@ pub async fn model_supports_input(
     if model == "model-router" {
         return Ok(Some(ROUTER_SUPPORTED_MODALITIES.contains(&modality)));
     }
+    let body = live_catalog_body().await?;
+    Ok(supports_input(&body, model, modality))
+}
+
+/// The live catalog body behind every query below: fresh-or-cached within
+/// the TTL, single-flighted across concurrent callers, stale-cache tolerant
+/// when a refresh fails.
+async fn live_catalog_body() -> Result<CatalogResponse, CatalogError> {
     let endpoint = ChutesEndpoints::default().inference;
     crate::endpoint_policy::validate_endpoint_url(&endpoint)?;
-
-    if let Some(result) = cached_lookup(&endpoint, model, modality).await {
-        return Ok(result);
+    if let Some(body) = cached_body(&endpoint).await {
+        return Ok(body);
     }
-
     // Single-flight: only one task fetches at a time. Others queue here
     // (not on the network call itself) and re-check the cache once they get
     // the gate, in case another task just refreshed it while they waited.
     let _gate = REFRESH_GATE.lock().await;
-    if let Some(result) = cached_lookup(&endpoint, model, modality).await {
-        return Ok(result);
+    if let Some(body) = cached_body(&endpoint).await {
+        return Ok(body);
     }
-
     match refresh_catalog(&endpoint).await {
-        Ok(body) => Ok(supports_input(&body, model, modality)),
+        Ok(body) => Ok(body),
         Err(error) => {
             // Stale-cache fallback: prefer a previous (even expired) entry
             // for this endpoint over a hard failure, if one exists.
@@ -114,18 +119,18 @@ pub async fn model_supports_input(
             if let Some(entry) = cache.as_ref()
                 && entry.endpoint == endpoint
             {
-                return Ok(supports_input(&entry.body, model, modality));
+                return Ok(entry.body.clone());
             }
             Err(error)
         }
     }
 }
 
-async fn cached_lookup(endpoint: &str, model: &str, modality: &str) -> Option<Option<bool>> {
+async fn cached_body(endpoint: &str) -> Option<CatalogResponse> {
     let cache = CACHE.read().await;
     let entry = cache.as_ref()?;
     if entry.endpoint == endpoint && entry.fetched_at.elapsed() < CATALOG_CACHE_TTL {
-        Some(supports_input(&entry.body, model, modality))
+        Some(entry.body.clone())
     } else {
         None
     }
@@ -134,50 +139,22 @@ async fn cached_lookup(endpoint: &str, model: &str, modality: &str) -> Option<Op
 /// Chat-capable catalogue ids for Auto's live inline pool. Cached for the
 /// same TTL as modality lookups. Order follows the live catalogue.
 pub async fn live_chat_model_ids() -> Result<Vec<String>, CatalogError> {
-    let endpoint = ChutesEndpoints::default().inference;
-    crate::endpoint_policy::validate_endpoint_url(&endpoint)?;
-    if let Some(ids) = cached_chat_ids(&endpoint).await {
-        return Ok(ids);
-    }
-    let _gate = REFRESH_GATE.lock().await;
-    if let Some(ids) = cached_chat_ids(&endpoint).await {
-        return Ok(ids);
-    }
-    match refresh_catalog(&endpoint).await {
-        Ok(body) => Ok(chat_model_ids(&body)),
-        Err(error) => {
-            let cache = CACHE.read().await;
-            if let Some(entry) = cache.as_ref()
-                && entry.endpoint == endpoint
-            {
-                return Ok(chat_model_ids(&entry.body));
-            }
-            Err(error)
-        }
-    }
+    let body = live_catalog_body().await?;
+    Ok(chat_model_ids(&body))
 }
 
-async fn cached_chat_ids(endpoint: &str) -> Option<Vec<String>> {
-    let cache = CACHE.read().await;
-    let entry = cache.as_ref()?;
-    if entry.endpoint == endpoint && entry.fetched_at.elapsed() < CATALOG_CACHE_TTL {
-        Some(chat_model_ids(&entry.body))
-    } else {
-        None
-    }
+/// A chat-capable catalog entry with the modalities fallback selection needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChatModelEntry {
+    id: String,
+    input_modalities: Vec<String>,
 }
 
-async fn refresh_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
-    let body = fetch_catalog(endpoint).await?;
-    *CACHE.write().await = Some(CatalogCacheEntry {
-        endpoint: endpoint.to_owned(),
-        fetched_at: std::time::Instant::now(),
-        body: body.clone(),
-    });
-    Ok(body)
-}
-
-fn chat_model_ids(body: &CatalogResponse) -> Vec<String> {
+/// Chat-capable entries in live catalog order: concrete text-in/text-out ids
+/// only (no saved-pool aliases, no virtual router id, no inline pools).
+/// Missing modality lists default to text, matching the inference API's
+/// behavior for legacy entries.
+fn chat_models(body: &CatalogResponse) -> Vec<ChatModelEntry> {
     body.data
         .iter()
         .filter_map(|raw_entry| {
@@ -200,12 +177,54 @@ fn chat_model_ids(body: &CatalogResponse) -> Vec<String> {
                 entry.output_modalities
             };
             if input.iter().any(|m| m == "text") && output.iter().any(|m| m == "text") {
-                Some(id)
+                Some(ChatModelEntry {
+                    id,
+                    input_modalities: input,
+                })
             } else {
                 None
             }
         })
         .collect()
+}
+
+/// First live chat model other than `exclude`, in catalog order. When
+/// `require_image`, only models declaring image input qualify. Pure over a
+/// fetched body so fallback selection stays hermetic and testable.
+fn equivalent_model(body: &CatalogResponse, exclude: &str, require_image: bool) -> Option<String> {
+    chat_models(body).into_iter().find_map(|model| {
+        if model.id == exclude {
+            return None;
+        }
+        if require_image && !model.input_modalities.iter().any(|m| m == "image") {
+            return None;
+        }
+        Some(model.id)
+    })
+}
+
+/// Live equivalent of [`equivalent_model`] over the cached/live catalog, for
+/// sampler pre-stream fallback when a model is gone or cannot serve.
+pub async fn find_equivalent_chat_model(
+    exclude: &str,
+    require_image: bool,
+) -> Result<Option<String>, CatalogError> {
+    let body = live_catalog_body().await?;
+    Ok(equivalent_model(&body, exclude, require_image))
+}
+
+async fn refresh_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
+    let body = fetch_catalog(endpoint).await?;
+    *CACHE.write().await = Some(CatalogCacheEntry {
+        endpoint: endpoint.to_owned(),
+        fetched_at: std::time::Instant::now(),
+        body: body.clone(),
+    });
+    Ok(body)
+}
+
+fn chat_model_ids(body: &CatalogResponse) -> Vec<String> {
+    chat_models(body).into_iter().map(|model| model.id).collect()
 }
 
 async fn fetch_catalog(endpoint: &str) -> Result<CatalogResponse, CatalogError> {
@@ -437,5 +456,41 @@ mod tests {
             ],
         };
         assert_eq!(chat_model_ids(&body), ["a/Chat", "c/Bare"]);
+    }
+
+    #[test]
+    fn equivalent_model_skips_excluded_aliases_and_pools() {
+        let body = CatalogResponse {
+            data: vec![
+                serde_json::json!({"id": "a/Text", "input_modalities": ["text"], "output_modalities": ["text"]}),
+                serde_json::json!({"id": "b/Multi", "input_modalities": ["text", "image"], "output_modalities": ["text"]}),
+                serde_json::json!({"id": "default"}),
+                serde_json::json!({"id": "model-router"}),
+                serde_json::json!({"id": "x,y"}),
+                serde_json::json!({"id": "c/Text", "input_modalities": ["text"], "output_modalities": ["text"]}),
+            ],
+        };
+        assert_eq!(
+            equivalent_model(&body, "a/Text", false),
+            Some("b/Multi".to_owned())
+        );
+        assert_eq!(
+            equivalent_model(&body, "missing", false),
+            Some("a/Text".to_owned())
+        );
+        assert_eq!(
+            equivalent_model(&body, "a/Text", true),
+            Some("b/Multi".to_owned())
+        );
+        assert_eq!(equivalent_model(&body, "b/Multi", true), None);
+    }
+
+    #[test]
+    fn equivalent_model_returns_none_when_only_excluded_remains() {
+        let solo = CatalogResponse {
+            data: vec![serde_json::json!({"id": "only"})],
+        };
+        assert_eq!(equivalent_model(&solo, "only", false), None);
+        assert_eq!(equivalent_model(&solo, "other", false), Some("only".to_owned()));
     }
 }

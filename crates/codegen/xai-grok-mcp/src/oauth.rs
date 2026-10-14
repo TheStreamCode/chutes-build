@@ -6,10 +6,14 @@ use tokio::sync::{Mutex, oneshot, watch};
 
 use crate::oauth_config::McpOAuthConfig;
 use crate::rmcp::transport::auth::{
-    AuthError, AuthorizationManager, AuthorizationMetadata, OAuthClientConfig,
+    AuthError, AuthorizationManager, AuthorizationMetadata, AuthorizationMetadataSource,
+    OAuthClientConfig,
 };
 
 const MCP_OAUTH_CLIENT_NAME: &str = "Chutes Build";
+
+#[cfg(debug_assertions)]
+const CONSENT_URL_FILE_ENV: &str = "CHUTES_BUILD_TEST_MCP_CONSENT_URL_FILE";
 
 const CREDENTIAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -19,14 +23,21 @@ const BROWSER_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 const AUTH_LOCK_WAIT: std::time::Duration =
     BROWSER_AUTH_TIMEOUT.saturating_add(std::time::Duration::from_secs(60));
 
-/// rmcp's discovery client has no request timeout; a hung authorization
-/// server would otherwise wedge the flow and the manager lock.
+/// rmcp's discovery client has no request timeout; a hung authorization server would otherwise wedge the flow and the manager lock.
 pub(crate) const OAUTH_DISCOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) async fn discover_metadata_bounded(
     manager: &AuthorizationManager,
 ) -> Result<AuthorizationMetadata, AuthError> {
-    tokio::time::timeout(OAUTH_DISCOVERY_TIMEOUT, manager.discover_metadata())
+    // rmcp 3.x `resolve_metadata` never fails discovery: it degrades to legacy endpoints guessed from the base URL. The probe's auth decision needs the rmcp 2.x "no OAuth support" signal back, so the fallback maps to `NoAuthorizationSupport` instead of guessing endpoints.
+    let resolve = async {
+        let resolution = manager.resolve_metadata().await?;
+        if resolution.source == AuthorizationMetadataSource::LegacyEndpointFallback {
+            return Err(AuthError::NoAuthorizationSupport);
+        }
+        Ok(resolution.metadata)
+    };
+    tokio::time::timeout(OAUTH_DISCOVERY_TIMEOUT, resolve)
         .await
         .unwrap_or_else(|_| {
             Err(AuthError::InternalError(format!(
@@ -224,8 +235,7 @@ fn auth_lock_path(server_name: &str) -> std::path::PathBuf {
     xai_grok_config::grok_home().join(format!("mcp_auth_{safe}.lock"))
 }
 
-/// Run the interactive browser-based OAuth flow. `readiness` carries a
-/// caller's fresh [`ensure_oauth_ready`] result so the flow does not re-probe.
+/// `readiness` carries a caller's fresh [`ensure_oauth_ready`] result so the flow does not re-probe.
 async fn run_browser_auth_flow(
     server_name: &str,
     server_url: &str,
@@ -301,19 +311,16 @@ async fn try_token_refresh(
     }
 }
 
-/// What one [`ensure_oauth_ready`] pass learned, for callers to consume
-/// instead of re-probing.
+/// What one [`ensure_oauth_ready`] pass learned, for callers to consume instead of re-probing.
 pub(crate) struct OauthReadiness {
-    /// The bounded discovery outcome; `Ok` means fresh metadata is set on the
-    /// manager, `Err` kept whatever metadata the manager already held.
+    /// The bounded discovery outcome; `Ok` means fresh metadata is set on the manager, `Err` kept whatever metadata the manager already held.
     pub(crate) discovery: Result<(), AuthError>,
     /// Whether the oauth client got hydrated from the credential store.
     pub(crate) hydrated: bool,
 }
 
-/// The one prelude to `refresh_token`: bounded discovery (degrading to held
-/// metadata), then hydrate the oauth client from the store. The sole caller
-/// of `initialize_from_store`; discovery runs at most once per flow.
+/// The one prelude to `refresh_token`: bounded discovery (degrading to held metadata), then hydrate the oauth client from the store.
+/// The sole caller of `initialize_from_store`; discovery runs at most once per flow.
 pub(crate) async fn ensure_oauth_ready(
     server_name: &str,
     mgr: &mut AuthorizationManager,
@@ -413,15 +420,37 @@ async fn build_authorization_url(
 
 fn open_consent_browser(server_name: &str, auth_url: &str) {
     tracing::info!(server = server_name, "Opening browser for OAuth consent");
+    if record_consent_url_for_test(auth_url) {
+        return;
+    }
     if let Err(e) = webbrowser::open(auth_url) {
         // eprintln! corrupts the TUI alternate screen (in-process, fd 2).
-        // TODO: surface auth URL via ACP notification instead.
+        // TODO: show the auth URL via ACP notification instead
         tracing::warn!(%e, url = %auth_url, "Failed to open browser for MCP OAuth; user must visit URL manually");
     }
 }
 
-/// Peeks the file directly: `initialize_from_store` would clobber the
-/// freshly-DCR'd client with stored values and break the pending exchange.
+#[cfg(debug_assertions)]
+fn record_consent_url_for_test(auth_url: &str) -> bool {
+    let Ok(path) = std::env::var(CONSENT_URL_FILE_ENV) else {
+        return false;
+    };
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| writeln!(f, "{auth_url}"))
+        .unwrap_or_else(|e| panic!("{CONSENT_URL_FILE_ENV} write to {path} failed: {e}"));
+    true
+}
+
+#[cfg(not(debug_assertions))]
+fn record_consent_url_for_test(_auth_url: &str) -> bool {
+    false
+}
+
+/// Peeks the file directly: `initialize_from_store` would clobber the freshly registered client with stored values and break the pending exchange.
 async fn wait_for_disk_token(
     server_name: String,
     server_url: String,

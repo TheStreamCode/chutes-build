@@ -354,6 +354,8 @@ pub enum MediaError {
     UntrustedInvocationUrl,
     #[error("media response exceeds the configured {max_bytes}-byte safety limit")]
     TooLarge { max_bytes: usize },
+    #[error("unexpected Chutes response: {0}")]
+    UnexpectedResponse(String),
 }
 
 #[cfg(test)]

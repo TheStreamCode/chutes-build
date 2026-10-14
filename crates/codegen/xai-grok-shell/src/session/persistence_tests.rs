@@ -50,7 +50,7 @@ fn test_actor_inner(
             pending_notification: None,
             rx,
             remote_sync,
-            // Resumed-style actor for these tests; upgrade backfill is fresh-only.
+            // These tests run the actor as resumed; the backfill on writeback upgrade only runs for a fresh session
             created_fresh: false,
             relay_sync: None,
             summary,
@@ -61,6 +61,9 @@ fn test_actor_inner(
             disk_full_notified: false,
             dirty_files: Default::default(),
             pending_write_error: None,
+            last_usage_live: None,
+            last_usage_turn: None,
+            last_incoming_turn: None,
         }
         .run(),
     );
@@ -112,6 +115,38 @@ async fn writeback_backfill_is_fresh_only_and_acp_only() {
             .is_err(),
         "resumed session must not re-send any prior history",
     );
+}
+
+#[tokio::test]
+async fn winning_identity_stamp_seeds_remote_writeback() {
+    let dir = tempfile::tempdir().unwrap();
+    let info = Info {
+        id: acp::SessionId::new("winner-identity"),
+        cwd: "/test".into(),
+    };
+    let storage = Arc::new(JsonlStorageAdapter::with_explicit_session_dir(
+        dir.path().to_path_buf(),
+    ));
+    storage
+        .init_session(&info, default_model_id())
+        .await
+        .unwrap();
+    let (remote_sync, mut identities) = RemoteSync::test_identity_observer();
+    let actor = test_actor_with_remote_sync(info, storage, Some(remote_sync));
+    let identity = mint_next_session_identity(None, false);
+    let expected = identity.agent_id.clone();
+    let (respond_to, response) = tokio::sync::oneshot::channel();
+    actor
+        .handle
+        .tx
+        .send(PersistenceMsg::StampSessionIdentity {
+            identity,
+            respond_to,
+        })
+        .unwrap();
+    response.await.unwrap().unwrap();
+    assert_eq!(identities.recv().await.as_deref(), Some(expected.as_str()));
+    actor.stop().await;
 }
 
 fn break_summary_writes(dir: &std::path::Path) {
@@ -411,6 +446,186 @@ async fn flush_ack(handle: &PersistenceHandle) -> io::Result<()> {
         .send(PersistenceMsg::FlushAndAck { respond_to: tx })
         .unwrap();
     rx.await.unwrap()
+}
+
+#[tokio::test]
+async fn aborted_wake_queued_behind_actor_delay_keeps_prior_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let info = Info {
+        id: acp::SessionId::new("aborted-wake-delayed"),
+        cwd: "/test".into(),
+    };
+    let storage = Arc::new(JsonlStorageAdapter::with_explicit_session_dir(
+        dir.path().to_path_buf(),
+    ));
+    storage
+        .init_session(&info, default_model_id())
+        .await
+        .unwrap();
+    storage
+        .update_wake_start(
+            &info,
+            WakeStart {
+                prior: WakeSummaryState {
+                    attempt_id: None,
+                    next_trace_turn: 0,
+                    current_model_id: default_model_id(),
+                    agent_name: None,
+                    reasoning_effort: None,
+                    summary_bytes: std::fs::read(dir.path().join("summary.json")).unwrap(),
+                },
+                attempt_id: "at1.prior".into(),
+                next_trace_turn: 7,
+                model_id: default_model_id(),
+                agent_name: None,
+                reasoning_effort: None,
+            },
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let actor = test_actor(info.clone(), storage.clone());
+    let (entered, entered_rx) = tokio::sync::oneshot::channel();
+    let (release, release_rx) = tokio::sync::oneshot::channel();
+    actor
+        .handle
+        .tx
+        .send(PersistenceMsg::HoldForTest {
+            entered,
+            release: release_rx,
+        })
+        .unwrap();
+    entered_rx.await.unwrap();
+
+    let abort = tokio_util::sync::CancellationToken::new();
+    let (start_reply, start_rx) = tokio::sync::oneshot::channel();
+    actor
+        .handle
+        .tx
+        .send(PersistenceMsg::WakeStart {
+            start: WakeStart {
+                prior: WakeSummaryState {
+                    attempt_id: Some("at1.prior".into()),
+                    next_trace_turn: 7,
+                    current_model_id: default_model_id(),
+                    agent_name: None,
+                    reasoning_effort: None,
+                    summary_bytes: std::fs::read(dir.path().join("summary.json")).unwrap(),
+                },
+                attempt_id: "at1.aborted".into(),
+                next_trace_turn: 8,
+                model_id: default_model_id(),
+                agent_name: None,
+                reasoning_effort: None,
+            },
+            abort: abort.clone(),
+            respond_to: start_reply,
+        })
+        .unwrap();
+    abort.cancel();
+    let (abort_reply, abort_rx) = tokio::sync::oneshot::channel();
+    actor
+        .handle
+        .tx
+        .send(PersistenceMsg::WakeAbort {
+            prior: WakeSummaryState {
+                attempt_id: Some("at1.prior".into()),
+                next_trace_turn: 7,
+                current_model_id: default_model_id(),
+                agent_name: None,
+                reasoning_effort: None,
+                summary_bytes: std::fs::read(dir.path().join("summary.json")).unwrap(),
+            },
+            respond_to: abort_reply,
+        })
+        .unwrap();
+    release.send(()).unwrap();
+
+    assert_eq!(
+        start_rx.await.unwrap().unwrap_err().kind(),
+        io::ErrorKind::Interrupted
+    );
+    abort_rx.await.unwrap().unwrap();
+    let summary = storage.load_summary(&info).await.unwrap();
+    assert_eq!(summary.attempt_id.as_deref(), Some("at1.prior"));
+    assert_eq!(summary.next_trace_turn, 7);
+    actor.stop().await;
+}
+
+#[tokio::test]
+async fn acknowledged_wake_start_stamps_summary_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let info = Info {
+        id: acp::SessionId::new("acknowledged-wake-start"),
+        cwd: "/test".into(),
+    };
+    let storage = Arc::new(JsonlStorageAdapter::with_explicit_session_dir(
+        dir.path().to_path_buf(),
+    ));
+    storage
+        .init_session(&info, default_model_id())
+        .await
+        .unwrap();
+    storage
+        .update_wake_start(
+            &info,
+            WakeStart {
+                prior: WakeSummaryState {
+                    attempt_id: None,
+                    next_trace_turn: 0,
+                    current_model_id: default_model_id(),
+                    agent_name: None,
+                    reasoning_effort: None,
+                    summary_bytes: std::fs::read(dir.path().join("summary.json")).unwrap(),
+                },
+                attempt_id: "at1.prior".into(),
+                next_trace_turn: 7,
+                model_id: default_model_id(),
+                agent_name: None,
+                reasoning_effort: None,
+            },
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let actor = test_actor(info.clone(), storage.clone());
+    let (respond_to, response_rx) = tokio::sync::oneshot::channel();
+    let wake_model = acp::ModelId::new("wake-model");
+    actor
+        .handle
+        .tx
+        .send(PersistenceMsg::WakeStart {
+            start: WakeStart {
+                prior: WakeSummaryState {
+                    attempt_id: Some("at1.prior".into()),
+                    next_trace_turn: 7,
+                    current_model_id: default_model_id(),
+                    agent_name: None,
+                    reasoning_effort: None,
+                    summary_bytes: std::fs::read(dir.path().join("summary.json")).unwrap(),
+                },
+                attempt_id: "at1.started".into(),
+                next_trace_turn: 8,
+                model_id: wake_model.clone(),
+                agent_name: Some("wake-agent".into()),
+                reasoning_effort: Some(Some(xai_grok_sampling_types::ReasoningEffort::High)),
+            },
+            abort: tokio_util::sync::CancellationToken::new(),
+            respond_to,
+        })
+        .unwrap();
+
+    response_rx.await.unwrap().unwrap();
+    let summary = storage.load_summary(&info).await.unwrap();
+    assert_eq!(summary.attempt_id.as_deref(), Some("at1.started"));
+    assert_eq!(summary.next_trace_turn, 8);
+    assert_eq!(summary.current_model_id, wake_model);
+    assert_eq!(summary.agent_name(), Some("wake-agent"));
+    assert_eq!(
+        summary.reasoning_effort,
+        Some(xai_grok_sampling_types::ReasoningEffort::High)
+    );
+    actor.stop().await;
 }
 
 fn merge_boundary_update(info: &Info, text: &str) -> SessionUpdate {
@@ -1019,19 +1234,20 @@ async fn flush_and_ack_propagates_session_file_sync_error_through_the_ack() {
 }
 
 /// Baselines on APFS (M-series laptop SSD), 50 iterations, medians:
-/// prompt-send FlushAndAck round-trip ~26 ms (max ~48 ms); idle FlushAndAck
-/// ~30-40 us with zero file syncs (was ~5 ms for the fixed 5-file set before
-/// dirty tracking); barrier sync of 2 dirty files + dir ~4-5 ms; summary.json
-/// atomic rewrite (per-append bookkeeping) ~10 ms.
+/// prompt-send FlushAndAck round-trip ~26 ms (max ~48 ms);.
+/// idle FlushAndAck ~30-40 us with zero file syncs (was ~5 ms for the fixed 5-file set before dirty tracking);.
 #[tokio::test]
 #[ignore = "manual durability-cost measurement; run with --ignored --nocapture and RUST_MIN_STACK=8388608"]
 async fn measure_prompt_barrier_idle_barrier_and_summary_rewrite_cost() {
     fn median_and_max(mut samples: Vec<std::time::Duration>) -> (String, String) {
         samples.sort();
-        (
-            format!("{:?}", samples[samples.len() / 2]),
-            format!("{:?}", samples[samples.len() - 1]),
-        )
+        let Some(mid) = samples.get(samples.len() / 2) else {
+            panic!("expected samples for median: {samples:?}");
+        };
+        let Some(last) = samples.last() else {
+            panic!("expected samples for max: {samples:?}");
+        };
+        (format!("{mid:?}"), format!("{last:?}"))
     }
 
     const N: usize = 50;
@@ -1158,18 +1374,15 @@ async fn probe_writable(handle: &PersistenceHandle) -> io::Result<()> {
     rx.await.unwrap()
 }
 
-/// Manual rename → next `RemoteSync` flush must not revert the backend title.
-///
-/// Seeds `RemoteSync` with a pre-rename title (the cache at init), drives
-/// `PersistenceMsg::ManualTitleRenamed`, then queues an update and flushes.
+/// Seeds `RemoteSync` with a pre-rename title (the cache at init), drives `PersistenceMsg::ManualTitleRenamed`, then queues an update and flushes.
 /// The flush's `save_session_data` payload must carry the manual title.
 #[tokio::test]
 async fn manual_rename_next_flush_does_not_revert_backend_title() {
     use std::sync::Arc;
 
-    use crate::auth::{AuthManager, GrokAuth};
     use crate::remote::BackendClient;
     use crate::session::export::ExportedMetadata;
+    use xai_grok_login::{AuthManager, GrokAuth};
     use xai_grok_test_support::MockInferenceServer;
 
     const OLD_TITLE: &str = "Auto first-prompt summary";
@@ -1182,7 +1395,7 @@ async fn manual_rename_next_flush_does_not_revert_backend_title() {
     let home = tempfile::tempdir().unwrap();
     let auth = Arc::new(AuthManager::new(
         home.path(),
-        crate::auth::GrokComConfig::default(),
+        xai_grok_login::GrokComConfig::default(),
     ));
     auth.hot_swap(GrokAuth {
         key: "writeback-test-token".into(),
@@ -1210,6 +1423,7 @@ async fn manual_rename_next_flush_does_not_revert_backend_title() {
         updated_at: None,
         total_messages: None,
         parent_session_id: None,
+        agent_id: None,
         session_kind: None,
         subagent_type: None,
         subagent_persona: None,
@@ -1359,9 +1573,9 @@ async fn wait_for_save_session_titles(
 async fn manual_after_auto_last_flush_is_manual() {
     use std::sync::Arc;
 
-    use crate::auth::{AuthManager, GrokAuth};
     use crate::remote::BackendClient;
     use crate::session::export::ExportedMetadata;
+    use xai_grok_login::{AuthManager, GrokAuth};
     use xai_grok_test_support::MockInferenceServer;
 
     const AUTO: &str = "Auto title";
@@ -1374,7 +1588,7 @@ async fn manual_after_auto_last_flush_is_manual() {
     let home = tempfile::tempdir().unwrap();
     let auth = Arc::new(AuthManager::new(
         home.path(),
-        crate::auth::GrokComConfig::default(),
+        xai_grok_login::GrokComConfig::default(),
     ));
     auth.hot_swap(GrokAuth {
         key: "writeback-test-token".into(),
@@ -1402,6 +1616,7 @@ async fn manual_after_auto_last_flush_is_manual() {
         updated_at: None,
         total_messages: None,
         parent_session_id: None,
+        agent_id: None,
         session_kind: None,
         subagent_type: None,
         subagent_persona: None,
@@ -1463,9 +1678,9 @@ async fn manual_after_auto_last_flush_is_manual() {
 async fn auto_after_committed_manual_emits_no_set_title() {
     use std::sync::Arc;
 
-    use crate::auth::{AuthManager, GrokAuth};
     use crate::remote::BackendClient;
     use crate::session::export::ExportedMetadata;
+    use xai_grok_login::{AuthManager, GrokAuth};
     use xai_grok_test_support::MockInferenceServer;
 
     const AUTO: &str = "Rejected auto";
@@ -1478,7 +1693,7 @@ async fn auto_after_committed_manual_emits_no_set_title() {
     let home = tempfile::tempdir().unwrap();
     let auth = Arc::new(AuthManager::new(
         home.path(),
-        crate::auth::GrokComConfig::default(),
+        xai_grok_login::GrokComConfig::default(),
     ));
     auth.hot_swap(GrokAuth {
         key: "writeback-test-token".into(),
@@ -1510,6 +1725,7 @@ async fn auto_after_committed_manual_emits_no_set_title() {
         updated_at: None,
         total_messages: None,
         parent_session_id: None,
+        agent_id: None,
         session_kind: None,
         subagent_type: None,
         subagent_persona: None,
@@ -1586,19 +1802,18 @@ async fn manual_title_renamed_is_noop_without_remote_sync() {
     actor.stop().await;
 }
 
-/// Auto → manual → unpin: generator starts Done (as production `load` would),
-/// a ContentChunk before reset must not spawn, ResetTitleToAuto must
-/// `reset()` + clear the remote pin, and a later ContentChunk must adopt
-/// via the fallback (empty model, no live LLM).
+/// A ContentChunk before reset must not spawn.
+/// ResetTitleToAuto must `reset()` and clear the remote pin.
+/// A later ContentChunk must adopt via the fallback (empty model, no live LLM).
 #[tokio::test]
 async fn reset_title_to_auto_then_generated_title_is_adopted() {
     use std::sync::Arc;
 
-    use crate::auth::{AuthManager, GrokAuth};
     use crate::remote::BackendClient;
     use crate::session::export::ExportedMetadata;
     use crate::session::helpers::session_summary::title_fallback_from_user_text;
     use crate::session::persistence::PersistenceContentChunk;
+    use xai_grok_login::{AuthManager, GrokAuth};
     use xai_grok_test_support::MockInferenceServer;
 
     const AUTO: &str = "Auto first title";
@@ -1613,7 +1828,7 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
     let home = tempfile::tempdir().unwrap();
     let auth = Arc::new(AuthManager::new(
         home.path(),
-        crate::auth::GrokComConfig::default(),
+        xai_grok_login::GrokComConfig::default(),
     ));
     auth.hot_swap(GrokAuth {
         key: "writeback-test-token".into(),
@@ -1658,6 +1873,7 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
         updated_at: None,
         total_messages: None,
         parent_session_id: None,
+        agent_id: None,
         session_kind: None,
         subagent_type: None,
         subagent_persona: None,
@@ -1727,10 +1943,13 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
+    // ClearTitle is save_session_data then upsert_session on the remote-sync
+    // task; the POST can become visible before the PUT is recorded under load.
     // The sync task sends the row PUT only after the data POST's response.
     let upsert_path = format!("/sessions/{SESSION_ID}");
-    let find_upserted_title = || {
-        server.requests().into_iter().rev().find_map(|r| {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let upserted_title = loop {
+        let found = server.requests().into_iter().rev().find_map(|r| {
             (r.method == "PUT" && r.path == upsert_path)
                 .then(|| {
                     r.body
@@ -1741,15 +1960,15 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
                         .map(str::to_owned)
                 })
                 .flatten()
-        })
-    };
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let upserted_title = loop {
-        if let Some(title) = find_upserted_title() {
-            break Some(title);
+        });
+        if found.as_deref() == Some("") {
+            break found;
         }
         if tokio::time::Instant::now() >= deadline {
-            break None;
+            panic!(
+                "ClearTitle must upsert the session-row title empty, not only the metadata blob; last={found:?} requests={:?}",
+                request_path_summary(&server)
+            );
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
@@ -1815,9 +2034,8 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
     actor.stop().await;
 }
 
-/// In-flight first-chunk generation overlapping unpin: disk is already blank
-/// when the stale `GeneratedTitle` arrives, so if-absent adopts it as auto
-/// (never re-pins).
+/// A title generation from the first chunk is still running when the unpin lands.
+/// Disk is already blank when the stale `GeneratedTitle` arrives, so `set_generated_title_if_absent` adopts it as auto (never re-pins).
 #[tokio::test]
 async fn reset_title_to_auto_adopts_in_flight_generation_as_auto() {
     use std::sync::Arc;
@@ -1882,8 +2100,8 @@ async fn reset_title_to_auto_adopts_in_flight_generation_as_auto() {
     actor.stop().await;
 }
 
-/// Non-resident unpin only patches disk. The next load sees a blank
-/// `display_title()` so the generator stays Idle and a ContentChunk adopts.
+/// An unpin while the session is not resident only patches disk.
+/// The next load sees a blank `display_title()` so the generator stays Idle and a ContentChunk adopts.
 #[tokio::test]
 async fn non_resident_reset_then_load_regenerates() {
     use std::sync::Arc;
@@ -2074,14 +2292,13 @@ mod prompt_file_tests {
 
         let path = get_prompt_file_path_in(home.path(), &info, 0);
 
-        // The chain below prompts/ is ensure_owner_only_session_dir_in's job,
-        // pinned by ensure_owner_only_session_dir_tightens_chain — only the
-        // prompts/ level is this path's own creation.
+        // The chain below prompts/ is ensure_owner_only_session_dir_in's job, pinned by ensure_owner_only_session_dir_tightens_chain
+        // Only the prompts/ level is this path's own creation
         let prompts_dir = path.parent().unwrap();
         assert_eq!(unix_mode(prompts_dir), 0o700, "prompts dir must be 0700");
     }
 
-    /// The chat-kind (noop-persistence) writers' dir creator.
+    /// ensure_owner_only_session_dir_in is the dir creator for chat-kind (noop-persistence) writers.
     #[test]
     fn ensure_owner_only_session_dir_tightens_chain() {
         let home = tempfile::TempDir::new().unwrap();
@@ -2190,9 +2407,8 @@ mod prompt_file_tests {
         );
     }
 
-    /// Hash-encoded `.cwd` contents must hit stable media before the parent
-    /// dir sync that durableizes the direntry. Otherwise power loss can freeze
-    /// a present-but-torn marker and path recovery cannot fall back to missing.
+    /// Hash-encoded `.cwd` contents must hit stable media before the parent dir sync that makes the direntry durable.
+    /// Otherwise power loss can freeze a present-but-torn marker and path recovery cannot fall back to missing.
     #[test]
     fn hash_encoded_cwd_marker_is_synced_before_parent_dir_sync() {
         let home = tempfile::TempDir::new().unwrap();
@@ -2244,4 +2460,61 @@ mod prompt_file_tests {
             ".cwd file sync must happen before the parent-dir sync that would freeze the direntry, got {events:?}"
         );
     }
+}
+
+/// The caller's pre-lock snapshot must not clobber an agent id a concurrent cold-spawn stamp persisted in between.
+#[tokio::test]
+async fn stamp_session_identity_prefers_live_agent_id_over_stale_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let info = Info {
+        id: acp::SessionId::new("identity-race"),
+        cwd: "/test".into(),
+    };
+    let storage = JsonlStorageAdapter::with_explicit_session_dir(dir.path().join("session"));
+    let summary = storage
+        .init_session(&info, default_model_id())
+        .await
+        .unwrap();
+    assert!(
+        summary.agent_id.is_none(),
+        "snapshot taken before any stamp"
+    );
+
+    // A concurrent cold spawn lands first.
+    let concurrent = stamp_session_identity(&storage, &info, None).await.unwrap();
+
+    // The stale snapshot (None) must not mint a fresh agent over the live one.
+    let stamped = stamp_session_identity(&storage, &info, summary.agent_id.as_deref())
+        .await
+        .unwrap();
+    assert_eq!(stamped.agent_id, concurrent.agent_id);
+    assert_ne!(stamped.attempt_id, concurrent.attempt_id);
+
+    let on_disk = storage.load_summary(&info).await.unwrap();
+    assert_eq!(on_disk.agent_id, Some(concurrent.agent_id));
+    assert_eq!(on_disk.attempt_id, Some(stamped.attempt_id));
+}
+
+/// With nothing on disk, the snapshot is the resume source: a stale-but-parseable snapshot id is kept.
+#[tokio::test]
+async fn stamp_session_identity_falls_back_to_snapshot_when_disk_has_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let info = Info {
+        id: acp::SessionId::new("identity-fallback"),
+        cwd: "/test".into(),
+    };
+    let storage = JsonlStorageAdapter::with_explicit_session_dir(dir.path().join("session"));
+    storage
+        .init_session(&info, default_model_id())
+        .await
+        .unwrap();
+
+    let stamped = stamp_session_identity(&storage, &info, Some("ag1.c0ffee"))
+        .await
+        .unwrap();
+    assert_eq!(stamped.agent_id, "ag1.c0ffee");
+
+    let on_disk = storage.load_summary(&info).await.unwrap();
+    assert_eq!(on_disk.agent_id.as_deref(), Some("ag1.c0ffee"));
+    assert_eq!(on_disk.attempt_id, Some(stamped.attempt_id));
 }

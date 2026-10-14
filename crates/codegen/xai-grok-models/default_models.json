@@ -12,7 +12,8 @@
       "temperature": 0.7,
       "top_p": 0.95,
       "api_backend": "chat_completions",
-      "supported_in_api": true
+      "supported_in_api": true,
+      "hidden": false
     }
   ]
 }

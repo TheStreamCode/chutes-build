@@ -126,7 +126,7 @@ impl WorkflowRegistry {
         let mut duplicate_names = BTreeMap::new();
 
         // Bundled first so a GCS-shipped `deep-research.rhai` shadows include_str!.
-        // Project/user still cannot override a compiled-in name (same as today).
+        // Project/user still cannot override a compiled-in name
         let mut bundled_entries = scan_directory(&bundled_workflow_dir(), "bundled");
         reject_same_scope_duplicates(&mut bundled_entries, "bundled", &mut duplicate_names);
         merge_scope(&mut entries, bundled_entries);
@@ -139,10 +139,7 @@ impl WorkflowRegistry {
         if let Some(cwd) = session_cwd
             && crate::agent::folder_trust::project_scope_allowed(cwd)
         {
-            dirs.push((
-                project_root(cwd).join(".chutes-build").join("workflows"),
-                "project",
-            ));
+            dirs.push((project_root(cwd).join(".chutes-build").join("workflows"), "project"));
         }
         dirs.push((user_workflow_dir(), "user"));
 
@@ -256,9 +253,7 @@ fn scan_directory(dir: &Path, source_label: &'static str) -> Vec<RegistryEntry> 
         .filter_map(|path| {
             let script = read_trusted_source(&path).ok()?;
             let meta = parse_workflow(&script, Some(&path)).ok()?;
-            // A GCS update of a compiled-in name stays privileged (fork
-            // context, telemetry name, not user-savable). New bundled-only
-            // names stay file-scoped.
+            // A GCS update of a compiled-in name stays privileged (fork context, telemetry name, not user-savable)
             let compiled_in = source_label == "bundled"
                 && is_compiled_in_builtin(&meta.name)
                 && bundled_file_is_managed(&path);
@@ -281,8 +276,8 @@ fn is_compiled_in_builtin(name: &str) -> bool {
     BUILTIN_WORKFLOWS.iter().any(|builtin| builtin.name == name)
 }
 
-/// Privilege only if this file is still the extractor-managed bundle bytes.
-fn bundled_file_is_managed(path: &Path) -> bool {
+/// True only while the file is byte-identical to what the GCS bundle update wrote; an edited copy loses builtin privilege.
+pub(crate) fn bundled_file_is_managed(path: &Path) -> bool {
     let Some(workflows_dir) = path.parent() else {
         return false;
     };
@@ -873,8 +868,11 @@ mod tests {
             entries,
             duplicate_names: BTreeMap::new(),
         };
-        assert_eq!(registry.list().len(), 1);
-        assert_eq!(registry.list()[0].source, "builtin");
+        let listed = registry.list();
+        let [first] = listed.as_slice() else {
+            panic!("expected one listing: {listed:?}");
+        };
+        assert_eq!(first.source, "builtin");
         assert_eq!(
             registry.resolve_by_name("same").unwrap().source,
             WorkflowSource::Builtin

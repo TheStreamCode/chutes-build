@@ -28,11 +28,9 @@ pub fn parse_positive_env(var: &str, value: Option<String>) -> Option<usize> {
     parsed
 }
 
-/// Env var set on agent-spawned terminal processes so host tools (e.g. `x ban`)
-/// can distinguish agent invocations from human interactive shells.
-/// Note: the CLI also uses `CHUTES_BUILD_AGENT` as an
-/// optional agent-definition selector for launching `chutes-build` itself; child terminal
-/// processes only need the sentinel value `"1"`.
+/// Env var set on agent-spawned terminal processes so host tools (e.g. `x ban`) can distinguish agent invocations from
+/// human interactive shells. Note: the CLI also uses `CHUTES_BUILD_AGENT` as an optional agent-definition selector for
+/// launching `chutes-build` itself; child terminal processes only need the sentinel value `"1"`.
 pub const CHUTES_BUILD_AGENT_ENV: &str = "CHUTES_BUILD_AGENT";
 
 /// Sentinel value for [`CHUTES_BUILD_AGENT_ENV`] on agent tool terminals.
@@ -44,10 +42,9 @@ pub fn apply_grok_agent_marker(cmd: &mut tokio::process::Command) {
     cmd.env(CHUTES_BUILD_AGENT_ENV, CHUTES_BUILD_AGENT_ENV_VALUE);
 }
 
-/// Expand the four plugin-path tokens (`${CLAUDE_PLUGIN_ROOT}` / `${CHUTES_BUILD_PLUGIN_ROOT}`
-/// and `${CLAUDE_PLUGIN_DATA}` / `${CHUTES_BUILD_PLUGIN_DATA}`) in `s`. Each pair is expanded
-/// only when its value is provided. Single source of truth for plugin agent bodies,
-/// plugin skill/command bodies, and plugin MCP/hook config substitution.
+/// Expand the four plugin-path tokens (`${CLAUDE_PLUGIN_ROOT}` / `${CHUTES_BUILD_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` /
+/// `${CHUTES_BUILD_PLUGIN_DATA}`) in `s`. Each pair is expanded only when its value is provided. Single source of truth for
+/// plugin agent bodies, plugin skill/command bodies, and plugin MCP/hook config substitution.
 pub fn substitute_plugin_tokens(
     s: &str,
     plugin_root: Option<&str>,

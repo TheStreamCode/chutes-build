@@ -1,6 +1,5 @@
-//! Actor-level tests for the `/context` usage categories: populated rows
-//! with counts, compat-harness suppression of the MCP row, and parity
-//! between the MCP snapshot and the injected reminder.
+//! Actor-level tests for the `/context` usage categories.
+//! They cover populated rows with counts, the compat harness suppressing the MCP row, and parity between the MCP snapshot and the injected reminder.
 use super::support::*;
 use super::*;
 use crate::session::tool_index::{ServerMetadata, ToolMetadata};
@@ -53,11 +52,15 @@ async fn usage_categories_include_skills_and_mcp_with_counts() {
             install_mcp_servers(&actor);
             let rows = actor.usage_categories().await;
             assert_eq!(rows.len(), 2, "{rows:?}");
-            let skills = &rows[0];
+            let Some(skills) = rows.first() else {
+                panic!("expected Skills row: {rows:?}");
+            };
             assert_eq!(skills.label, "Skills");
             assert_eq!(skills.detail.as_deref(), Some("2 skills"));
             assert!(skills.tokens > 0);
-            let mcp = &rows[1];
+            let Some(mcp) = rows.get(1) else {
+                panic!("expected MCP row: {rows:?}");
+            };
             assert_eq!(mcp.label, "MCP servers");
             assert_eq!(mcp.detail.as_deref(), Some("1 server"));
             assert!(mcp.tokens > 0);
@@ -83,11 +86,13 @@ async fn usage_categories_include_agents_md_with_count() {
                         file_name: "AGENTS.md".into(),
                         file_path: "/repo/AGENTS.md".into(),
                         content: "# Root\nUse rustfmt.".into(),
+                        source: Default::default(),
                     },
                     xai_grok_agent::prompt::agents_md::AgentConfigFile {
                         file_name: "AGENTS.md".into(),
                         file_path: "/repo/crates/AGENTS.md".into(),
                         content: "# Crate\nPrefer unit tests.".into(),
+                        source: Default::default(),
                     },
                 ],
                 ..Default::default()
@@ -162,7 +167,7 @@ async fn baseline_reminder_lists_workflows_under_skills() {
                         item,
                         ConversationItem::User(u)
                             if u.synthetic_reason
-                                == Some(xai_grok_sampling_types::SyntheticReason::SystemReminder)
+                                == xai_grok_sampling_types::SyntheticReason::SystemReminder
                     )
                     .then(|| item.text_content())
                 })
@@ -201,7 +206,7 @@ async fn baseline_reminder_lists_workflows_when_there_are_no_skills() {
                         item,
                         ConversationItem::User(u)
                             if u.synthetic_reason
-                                == Some(xai_grok_sampling_types::SyntheticReason::SystemReminder)
+                                == xai_grok_sampling_types::SyntheticReason::SystemReminder
                     )
                     .then(|| item.text_content())
                 })
@@ -233,7 +238,7 @@ async fn subagent_session_does_not_list_workflows() {
                         item,
                         ConversationItem::User(u)
                             if u.synthetic_reason
-                                == Some(xai_grok_sampling_types::SyntheticReason::SystemReminder)
+                                == xai_grok_sampling_types::SyntheticReason::SystemReminder
                     )
                     .then(|| item.text_content())
                 })
@@ -247,10 +252,9 @@ async fn subagent_session_does_not_list_workflows() {
         })
         .await;
 }
-/// Anti-drift pin for the MCP row: the estimated snapshot must equal the body
-/// `maybe_inject_mcp_reminder` injects in `Full` mode, minus the
-/// `<system-reminder>` wrapper. Composing the two texts differently (for
-/// example, dropping the tool usage hint from one side) fails this test.
+/// This test pins the MCP row against drift.
+/// The estimated snapshot must equal the body `maybe_inject_mcp_reminder` injects in `Full` mode, minus the `<system-reminder>` wrapper.
+/// Composing the two texts differently (for example, dropping the tool usage hint from one side) fails this test.
 #[tokio::test(flavor = "current_thread")]
 async fn mcp_snapshot_matches_full_mode_injected_reminder() {
     let local = tokio::task::LocalSet::new();

@@ -103,7 +103,14 @@ pub fn reasoning_profile(model_id: &str) -> ReasoningProfile {
         return ReasoningProfile::Fixed;
     }
 
-    if model.contains("qwen3-32b") || model.contains("qwen3.5-") || model.contains("qwen3.6-") {
+    // Qwen3.8 verified 2026-10-14 against the published Qwen/Qwen3.8-27B
+    // chat template: `enable_thinking` defaults to thinking, `false` emits
+    // an empty think block. Same switch family as Qwen3.5/3.6.
+    if model.contains("qwen3-32b")
+        || model.contains("qwen3.5-")
+        || model.contains("qwen3.6-")
+        || model.contains("qwen3.8-")
+    {
         return ReasoningProfile::Toggle {
             switch: TemplateSwitch::EnableThinking,
             default_enabled: true,
@@ -202,18 +209,22 @@ mod tests {
 
     #[test]
     fn current_chutes_catalog_has_conservative_profiles() {
+        // Live catalog snapshot 2026-10-14 (14 models). MiniMax-M2.5 and the
+        // base GLM-5 chute left the catalog; their generation rules stay so a
+        // returning chute keeps its verified profile.
         let cases = [
             ("deepseek-ai/DeepSeek-V3.2-TEE", true),
+            ("deepseek-ai/DeepSeek-V4-Flash-0731-TEE", false),
             ("google/gemma-4-31B-turbo-TEE", true),
-            ("MiniMaxAI/MiniMax-M2.5-TEE", false),
-            ("moonshotai/Kimi-K2.5-TEE", true),
             ("moonshotai/Kimi-K2.6-TEE", true),
+            ("moonshotai/Kimi-K3-TEE", false),
+            ("Nemotron-3-Nano-Omni-30B-TEE", false),
             ("Qwen/Qwen3-235B-A22B-Thinking-2507-TEE", false),
             ("Qwen/Qwen3-32B-TEE", true),
             ("Qwen/Qwen3.5-397B-A17B-TEE", true),
             ("Qwen/Qwen3.6-27B-TEE", true),
+            ("Qwen/Qwen3.8-27B-TEE", true),
             ("unsloth/Mistral-Nemo-Instruct-2407-TEE", false),
-            ("zai-org/GLM-5-TEE", true),
             ("zai-org/GLM-5.1-TEE", true),
             ("zai-org/GLM-5.2-TEE", true),
         ];
@@ -223,6 +234,30 @@ mod tests {
                 reasoning_profile(model).is_selectable(),
                 selectable,
                 "unexpected reasoning profile for {model}"
+            );
+        }
+    }
+
+    #[test]
+    fn unverifiable_new_generations_fail_closed() {
+        // Kimi-K3, DeepSeek-V4-Flash and Nemotron-3-Nano publish no chat
+        // template (HF repos carry no template; Nemotron is gated) and the
+        // gateway exposes no per-model reasoning metadata, so all three stay
+        // Unknown until a template switch is verified.
+        for model in [
+            "moonshotai/Kimi-K3-TEE",
+            "deepseek-ai/DeepSeek-V4-Flash-0731-TEE",
+            "Nemotron-3-Nano-Omni-30B-TEE",
+        ] {
+            assert_eq!(
+                reasoning_profile(model),
+                ReasoningProfile::Unknown,
+                "unverified generation must fail closed for {model}"
+            );
+            assert_eq!(
+                reasoning_wire_plan(model, RequestedReasoning::High),
+                ReasoningWirePlan::default(),
+                "unverified generation must send no reasoning keys for {model}"
             );
         }
     }

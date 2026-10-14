@@ -1,4 +1,4 @@
-use crate::agent::mvp_agent::MvpAgent;
+use crate::extensions::agent_runtime::AgentRuntime;
 use crate::extensions::routing::RequestMeta;
 use crate::session::ExtMethodResult;
 use crate::terminal::{self, KillOutcome};
@@ -35,7 +35,7 @@ pub(crate) struct TerminalIdRequest {
     pub terminal_id: String,
 }
 
-/// Response for any terminal creation — piped or PTY. Both return just a `terminalId`.
+/// Response for any terminal creation, piped or PTY. Both return just a `terminalId`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTerminalResponse {
@@ -66,8 +66,7 @@ pub(crate) struct PtyLoadRequest {
     pub meta: Option<RequestMeta>,
 }
 
-/// Terminal kill request — `session_id` is required for piped terminals,
-/// ignored for PTY terminals (looked up by `terminal_id` alone).
+/// `session_id` is required for piped terminals and ignored for PTY terminals, which are looked up by `terminal_id` alone.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct KillTerminalRequest {
@@ -140,8 +139,7 @@ fn respond<T: Serialize>(result: Result<T, impl std::fmt::Display>) -> ExtResult
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Like `respond`, but converts `TerminalExtError` into a structured
-/// `{ code, message, data }` error instead of stringifying it.
+/// Like `respond`, but converts `TerminalExtError` into a structured `{ code, message, data }` error instead of stringifying it.
 fn respond_pty<T: Serialize>(result: Result<T, terminal::TerminalExtError>) -> ExtResult {
     let ext_result: ExtMethodResult<T> = match result {
         Ok(value) => ExtMethodResult::success(value),
@@ -182,9 +180,9 @@ impl From<KillOutcome> for KillOutcomeResponse {
     }
 }
 
-pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
+pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "chutes.build/terminal/create" => {
+        "chutes.ai/terminal/create" => {
             let req: CreateTerminalRequest = parse(args)?;
             let env: HashMap<String, String> = req
                 .env
@@ -206,7 +204,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             respond(result)
         }
 
-        "chutes.build/terminal/kill" => {
+        "chutes.ai/terminal/kill" => {
             // Try PTY registry first, then piped terminal registry.
             let req: KillTerminalRequest = parse(args)?;
 
@@ -249,7 +247,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             }
         }
 
-        "chutes.build/terminal/output" => {
+        "chutes.ai/terminal/output" => {
             let req: TerminalIdRequest = parse(args)?;
             let result = terminal::get_terminal_output(&req.session_id, &req.terminal_id)
                 .await
@@ -258,7 +256,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             respond(result)
         }
 
-        "chutes.build/terminal/wait_for_exit" => {
+        "chutes.ai/terminal/wait_for_exit" => {
             let req: TerminalIdRequest = parse(args)?;
             let result = terminal::wait_for_terminal_exit(&req.session_id, &req.terminal_id)
                 .await
@@ -267,7 +265,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             respond(result)
         }
 
-        "chutes.build/terminal/release" => {
+        "chutes.ai/terminal/release" => {
             let req: TerminalIdRequest = parse(args)?;
             terminal::release_terminal(&req.session_id, &req.terminal_id).await;
             ExtMethodResult::success(ReleaseTerminalResponse {})
@@ -275,13 +273,10 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))
         }
 
-        "chutes.build/terminal/background" => {
-            // Mark a terminal as backgrounded - the process keeps running but
-            // waiting callers are notified so the agent can continue.
-            //
-            // Route through the session's tool bridge so the LocalTerminalBackend
-            // actor unblocks the foreground waiter (BashTool::run). Also try the
-            // StreamingLocalTerminalRunner registry for AcpTerminalAdapter-based sessions.
+        "chutes.ai/terminal/background" => {
+            // Mark a terminal as backgrounded: the process keeps running but waiting callers are notified so the agent can continue
+            // Route through the session's tool bridge so the LocalTerminalBackend actor unblocks the foreground waiter (BashTool::run)
+            // Also try the StreamingLocalTerminalRunner registry for AcpTerminalAdapter-based sessions
             let req: TerminalIdRequest = parse(args)?;
             agent
                 .background_foreground_command(&req.session_id, &req.terminal_id)
@@ -292,7 +287,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))
         }
 
-        "chutes.build/terminal/pty/create" => {
+        "chutes.ai/terminal/pty/create" => {
             let req: PtyCreateRequest = parse(args)?;
             let env: HashMap<String, String> = req
                 .env
@@ -314,7 +309,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 req.rows.unwrap_or(24),
                 req.cols.unwrap_or(80),
                 req.name.as_deref(),
-                agent.gateway.clone(),
+                agent.gateway().clone(),
                 target_client_id,
             )
             .await
@@ -323,23 +318,23 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             respond_pty(result)
         }
 
-        "chutes.build/terminal/pty/load" => {
+        "chutes.ai/terminal/pty/load" => {
             let req: PtyLoadRequest = parse(args)?;
             let target_client_id = req.meta.map(|m| m.client_id).unwrap_or_default();
             let result =
-                terminal::pty_session::load(&req.terminal_id, &agent.gateway, target_client_id)
+                terminal::pty_session::load(&req.terminal_id, agent.gateway(), target_client_id)
                     .await;
             respond_pty(result)
         }
 
-        "chutes.build/terminal/pty/resize" => {
+        "chutes.ai/terminal/pty/resize" => {
             let req: PtyResizeRequest = parse(args)?;
             respond_pty(
                 terminal::pty_session::resize_pty(&req.terminal_id, req.rows, req.cols).await,
             )
         }
 
-        "chutes.build/terminal/list" => {
+        "chutes.ai/terminal/list" => {
             let terminals = terminal::list_terminals().await;
             respond(Ok::<_, String>(TerminalListResponse { terminals }))
         }

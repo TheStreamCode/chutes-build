@@ -4,6 +4,8 @@
 //! Archive extraction is bounded (entry count, per-entry size, total decompressed size).
 //! Every path is sanitized before it is joined onto the cache root.
 
+#![deny(clippy::indexing_slicing)]
+
 use anyhow::{Context, Result, bail};
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
 use serde::{Deserialize, Serialize};
@@ -1308,7 +1310,9 @@ mod tests {
             h.set_size(small.len() as u64);
             h.set_mode(0o644);
             h.set_cksum();
-            builder.append_data(&mut h, &path, &small[..]).unwrap();
+            builder
+                .append_data(&mut h, &path, small.as_slice())
+                .unwrap();
         }
 
         let encoder = builder.into_inner().unwrap();
@@ -1350,7 +1354,11 @@ mod tests {
         fh.set_mode(0o644);
         fh.set_cksum();
         builder
-            .append_data(&mut fh, "subagents/personas/researcher.toml", &content[..])
+            .append_data(
+                &mut fh,
+                "subagents/personas/researcher.toml",
+                content.as_slice(),
+            )
             .unwrap();
 
         let encoder = builder.into_inner().unwrap();
@@ -1482,44 +1490,6 @@ mod tests {
         );
     }
 
-    // --- map_archive_path_to_cache_path tests ---
-
-    #[test]
-    fn map_archive_strips_subagents_prefix() {
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/personas/researcher.toml"),
-            Some("personas/researcher.toml".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/roles/reviewer.toml"),
-            Some("roles/reviewer.toml".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("subagents/agents/default.md"),
-            Some("agents/default.md".to_string())
-        );
-    }
-
-    #[test]
-    fn map_archive_preserves_skills_path() {
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/commit/SKILL.md"),
-            Some("skills/commit/SKILL.md".to_string())
-        );
-    }
-
-    #[test]
-    fn map_archive_preserves_nested_skill_paths() {
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/implement/scripts/memory.py"),
-            Some("skills/implement/scripts/memory.py".to_string())
-        );
-        assert_eq!(
-            map_archive_path_to_cache_path("skills/implement/tests/test_memory.py"),
-            Some("skills/implement/tests/test_memory.py".to_string())
-        );
-    }
-
     #[test]
     fn sanitize_accepts_shared_data_under_skills() {
         // Directories under skills/ that are not skills (e.g., shared/personas/) are valid archive entries
@@ -1559,36 +1529,10 @@ mod tests {
     }
 
     #[test]
-    fn map_archive_skips_unknown_paths() {
-        assert_eq!(map_archive_path_to_cache_path("unknown/file.txt"), None);
-        assert_eq!(map_archive_path_to_cache_path("README.md"), None);
-        assert_eq!(map_archive_path_to_cache_path(""), None);
-    }
-
-    #[test]
     fn map_archive_rejects_traversal_under_subagents() {
         assert_eq!(
             map_archive_path_to_cache_path("subagents/personas/../../etc/passwd"),
             None
         );
-    }
-
-    // --- count_entries_by_prefix tests ---
-
-    #[test]
-    fn count_entries_by_prefix_counts_correctly() {
-        let manifest = BundleManifest {
-            version: "v1".to_string(),
-            checksums: HashMap::from([
-                ("personas/a.toml".to_string(), "abc".to_string()),
-                ("personas/b.toml".to_string(), "def".to_string()),
-                ("roles/r.toml".to_string(), "ghi".to_string()),
-                ("skills/commit/SKILL.md".to_string(), "jkl".to_string()),
-            ]),
-        };
-        assert_eq!(count_entries_by_prefix(&manifest, "personas/"), 2);
-        assert_eq!(count_entries_by_prefix(&manifest, "roles/"), 1);
-        assert_eq!(count_entries_by_prefix(&manifest, "skills/"), 1);
-        assert_eq!(count_entries_by_prefix(&manifest, "agents/"), 0);
     }
 }

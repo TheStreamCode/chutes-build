@@ -23,8 +23,11 @@
 //!                                     └──────────────────────────────────────┘
 //! ```
 
+#![deny(clippy::indexing_slicing)]
+
 pub mod actor;
 pub mod commands;
+pub mod compaction_image_context;
 pub mod compaction_mode;
 pub mod compaction_utils;
 pub mod conversation_util;
@@ -45,7 +48,7 @@ pub use actor::state::{
 pub use commands::{ModelMetadata, StrictAppendAck, StrictAppendError};
 pub use compaction_mode::CompactionMode;
 pub use events::ChatStateEvent;
-pub use handle::ChatStateHandle;
+pub use handle::{ChatStateHandle, ChatStateMailboxClosed};
 pub use persistence::{
     ChatPersistence, MockChatPersistence, MockPersistenceReceiver, NullChatPersistence,
     PersistenceRecord, StripOutcome,

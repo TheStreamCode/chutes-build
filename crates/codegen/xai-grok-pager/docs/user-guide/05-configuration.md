@@ -1,6 +1,6 @@
 # Configuration
 
-Chutes Build reads settings from config files, environment variables, and CLI flags. This page covers the common options.
+Chutes Build reads settings from config files, environment variables, and CLI flags. This page covers the common options. The field list for `config.toml`, `managed_config.toml`, and `requirements.toml` is [26-config-reference.md](26-config-reference.md) (extracted to `~/.chutes-build/docs/user-guide/` on launch).
 
 ---
 
@@ -10,9 +10,28 @@ Settings resolve highest-priority first:
 
 1. **CLI flags** (e.g. `--yolo`, `--model`, `--sandbox`)
 2. **Environment variables** (e.g. `CHUTES_API_KEY`, `CHUTES_BUILD_MEMORY`)
-3. **config.toml** (`~/.chutes-build/config.toml`)
-4. **Managed / requirements config** (files your org may deploy, e.g. `managed_config.toml` / `requirements.toml`)
-5. **Built-in defaults**
+3. **`requirements.toml` / MDM** (org-enforced; clamps every config layer below, including the overlay)
+4. **`CHUTES_BUILD_CONFIG` / `CHUTES_BUILD_CONFIG_PATH` overlay** (above `config.toml` and managed, below `requirements.toml` / MDM)
+5. **config.toml** (`~/.chutes-build/config.toml`)
+6. **`managed_config.toml`** (org-deployed defaults; below `config.toml`)
+7. **Built-in defaults**
+
+Within the config-file tier, the layers merge lowest-to-highest: `managed_config.toml` → `config.toml` → `CHUTES_BUILD_CONFIG` overlay → `requirements.toml` / MDM. So `requirements.toml` and MDM clamp **both** your `config.toml` and the overlay.
+
+`CHUTES_BUILD_CONFIG` / `CHUTES_BUILD_CONFIG_PATH` (tier 4) are config **overlays**: a merged config layer, not direct-setting environment variables like `CHUTES_API_KEY` (tier 2). They set config keys (subject to the allowlist below), so read them as part of the config-file tier rather than the env-var tier.
+
+### Injecting config with `CHUTES_BUILD_CONFIG`
+
+A harness or ACP client that launches `chutes-build agent stdio` can inject settings without writing a `config.toml` or relocating `$CHUTES_BUILD_HOME`:
+
+- **`CHUTES_BUILD_CONFIG`**: an inline JSON object overlay.
+- **`CHUTES_BUILD_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.toml`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `CHUTES_BUILD_CONFIG` wins if both are set. An empty `CHUTES_BUILD_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `CHUTES_BUILD_CONFIG_PATH`.
+
+The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM so an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config); Chutes Build is ACP-native, so the overlay lives in the agent itself. It only affects settings read from the merged config, and it is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses); every other table is dropped at the choke point, so the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay. The `ConfigLayers::env_overlay` rustdoc is the canonical list of what the overlay can and cannot reach and which gates read it overlay-free; see also the [internal environment-variables reference](../internal/22-environment-variables.md). Use `CHUTES_BUILD_DEFAULT_SELECTED_PERMISSION` for headless permission control. For example, to set the default reasoning effort:
+
+```bash
+CHUTES_BUILD_CONFIG='{"models": {"default_reasoning_effort": "high"}}' chutes-build agent stdio
+```
 
 ---
 
@@ -26,11 +45,16 @@ Location: `~/.chutes-build/config.toml`. If the file is missing, Chutes Build us
 [cli]
 auto_update = true                     # check for updates on launch
 
+[agent]
+# name = "chutes-build"                  # default agent on interactive `chutes-build` (no --plan / --agent-profile)
+# definition = "/path/to/agent.md"     # path wins over name if both are set
+
 [models]
-default = "model-router"               # model used for new sessions ("Chutes Auto")
-web_search = "model-router"            # model used by the web_search tool
-plan_model = "zai-org/GLM-5.2-TEE"     # switched to while plan mode is on (opt-in)
-build_model = "Qwen/Qwen3.5-397B-A17B-TEE" # switched back to when plan mode exits (opt-in)
+default = "grok-4.5"                   # model used for new sessions
+web_search = "grok-4.5"                # model used by the web_search tool
+# Optional picker allowlist (globs on catalog key or model id). Empty = unrestricted.
+# A signed policy pin replaces this list (model id only) and cannot be widened from here.
+# allowed_models = ["grok-4.5", "grok-4*"]
 
 # Defaults applied to every model; a per-model [model.<id>] value always wins.
 # See "Custom Models" for the per-model overrides and full details.
@@ -40,6 +64,7 @@ top_p = 0.95
 max_completion_tokens = 8192
 max_retries = 8
 inference_idle_timeout_secs = 600
+subagent_rate_limit_max_attempts = 8
 stream_tool_calls = true
 
 [ui]
@@ -47,18 +72,20 @@ simple_mode = true                     # readline-style prompt editing (default)
 vim_mode = false                       # vim-style scrollback navigation keys (default: false)
 max_thoughts_width = 120               # max column width for reasoning display
 default_selected_permission = "always_allow_all_sessions" # preselected row on the FIRST approval prompt
-remember_tool_approvals = false        # show per-command "Always allow" options on permission prompts;
-                                       # grants are remembered per project (default: false); see 22-permissions-and-safety.md
+remember_tool_approvals = true         # show per-command "Always allow" options on permission prompts;
+                                       # grants are remembered per project (default: true); see 22-permissions-and-safety.md
 show_thinking_blocks = true            # show agent thinking blocks in the TUI (default: true)
 group_tool_verbs = true                # fold runs of read/search/list tool calls and subagent rows
                                        # — and finished thoughts among them — into one row (default: true)
 collapsed_edit_blocks = false          # show edits as one-line +N/-M diffstat summaries and merge
                                        # back-to-back same-file edits into one row, expand for the
-                                       # diffs (default: false; pager.toml [scrollback.blocks.edit]
-                                       # expanded_by_default/line_summary override its fold shape)
+                                       # diffs (default: false)
 page_flip_on_send = true               # pin a just-sent prompt at the top of the viewport so the
                                        # response starts on a fresh page (default: true); set false
                                        # so sending never moves the scroll position
+follow_up_behavior = "queue"           # mid-turn follow-ups: "queue" (wait for turn end; default) or
+                                       # "steer" (plain Enter still queues visibly, then injects at the
+                                       # next tool/model safe gap). See Keyboard Shortcuts → Mid-turn.
 screen_mode = "fullscreen"             # default render mode: "fullscreen" | "minimal"
                                        # (unset → fullscreen); set via /settings → Default screen mode
 
@@ -67,7 +94,7 @@ telemetry = false                      # anonymous usage telemetry
 feedback = true                        # feedback system (default: true)
 lsp_tools = false                      # expose the lsp tool
 codebase_indexing = true               # code graph indexing (default: true)
-two_pass_compaction = false            # prefire two-pass compaction (default: false, opt-in)
+two_pass_compaction = true             # prefire two-pass compaction (default: true)
 remote_fetch = true                    # allow optional online model-catalog fetches (default: true;
                                        # set false for firewalled/air-gapped deployments; background
                                        # managed-config sync has its own switch: managed_config)
@@ -89,6 +116,18 @@ respect_gitignore = false              # default: false; set true to make every 
 # max_parallel_image_gen_calls = 8
 # max_parallel_video_gen_calls = 4
 ```
+
+### Default agent
+
+Interactive `chutes-build` uses `[agent]` in `config.toml` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
+
+```toml
+[agent]
+name = "my-custom-agent"
+# definition = "/path/to/agent.md"   # path wins over name
+```
+
+`definition` is a markdown file with YAML frontmatter. `name` is a built-in or discovered agent (`~/.chutes-build/agents/`, `.chutes-build/agents/`). If the named agent is missing, Chutes Build uses `CHUTES_BUILD_AGENT`, then the built-in default. `--agent-profile`, `--plan`, and `--ask-user` still override that session. Field list: [26-config-reference.md](26-config-reference.md).
 
 #### Input mode
 
@@ -126,7 +165,7 @@ default_selected_permission = "allow_once"
 
 After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts until you restart. So this setting only picks the starting point.
 
-Values match case-insensitively; an unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), never a global allow-everything — that's what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows only appear when `[ui] remember_tool_approvals = true` (default false). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
+Values match case-insensitively; an unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), never a global allow-everything — that's what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default; set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
 
 You can also override this with `CHUTES_BUILD_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that shouldn't mutate `config.toml`. Precedence: env var → `config.toml` → `always_allow_all_sessions`.
 
@@ -136,8 +175,8 @@ You can also override this with `CHUTES_BUILD_DEFAULT_SELECTED_PERMISSION`, whic
 
 | Value | Behavior |
 |-------|----------|
-| `false` (default) | Bare-letter and `Shift+letter` keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, `o`/`O`, `r`, `x`, `e`/`E`, `H`/`L`, plus `i`) are suppressed in the scrollback: pressing one focuses the prompt and types the character. Arrows, `Tab`, `Space`, `PageUp`/`PageDown`, and every `Ctrl+letter` shortcut still navigate. `Esc` is **not** a scrollback key — it cancels a running turn, and while idle follows the clear / rewind policy (see [Keyboard Shortcuts](03-keyboard-shortcuts.md#escape)). |
-| `true` | All vim-style scrollback bindings are active, exactly as listed in [Keyboard Shortcuts](03-keyboard-shortcuts.md). Mid-turn `Esc` is swallowed in this mode (`Ctrl+C` cancels); minimal mode keeps Esc-cancel regardless. |
+| `false` (default) | Bare-letter and `Shift+letter` keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, `o`/`O`, `r`, `x`, `e`/`E`, `H`/`L`, plus `i`) are suppressed in the scrollback: pressing one focuses the prompt and types the character. Arrows, `Tab`, `Space`, `PageUp`/`PageDown`, and every `Ctrl+letter` shortcut still navigate. `Esc` is **not** a scrollback key — it never cancels a running turn (`Ctrl+C` does), and while idle follows the clear / rewind policy (see [Keyboard Shortcuts](03-keyboard-shortcuts.md#escape)). |
+| `true` | All vim-style scrollback bindings are active, exactly as listed in [Keyboard Shortcuts](03-keyboard-shortcuts.md). Esc behavior is the same in both settings. |
 
 Toggle it at runtime with `/vim-mode`, or from `/settings` → **Vim scrollback navigation**. Chutes Build writes the change to `[ui] vim_mode` immediately and applies it to every future pager session, including new agents and subagents in the same process. There's no per-session override — `config.toml` is the source of truth on next launch. `vim_mode` is independent of `simple_mode`.
 
@@ -194,9 +233,17 @@ timeout_secs = 1800                    # seconds to wait when enabled (default: 
 proxy_endpoint = "https://proxy.example.com"   # egress proxy URL
 allowed_domains = ["docs.rs", "chutes.ai"]          # override the built-in allowlist
 allow_local = false                            # true = allow localhost / 127.0.0.0/8 / ::1 only
+
+[toolset.web_search]
+# Restrict web_search to these domains (max 5). Mutually exclusive with excluded_domains.
+allowed_domains = ["docs.chutes.ai", "arxiv.org"]
+# ...or block these domains instead (leave allowed_domains unset):
+# excluded_domains = ["reddit.com", "pinterest.com"]
 ```
 
 `allow_local` is off by default (SSRF fail-closed). Turn it on (or set `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
+
+`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**; if you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model — the model's own per-call `allowed_domains` is ignored whenever you have set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you have configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes don't apply mid-session.
 
 `[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `CHUTES_BUILD_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself; `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval); changes apply to newly started sessions.
 
@@ -242,7 +289,7 @@ Credential resolution: `api_key` > `env_key` > signed-in session token > `CHUTES
 To override a built-in model, use its name as the section key and set only the fields you need:
 
 ```toml
-[model.chutes-build]
+[model.grok-4.6]
 api_key = "my-api-key"
 ```
 
@@ -269,17 +316,24 @@ url = "https://mcp.example.com/api/mcp"  # HTTP/SSE transport
 headers = { "x-mcp-session-id" = "{{session_id}}" }
 ```
 
+Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header; a
+valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare
+`grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
+
 MCP servers can also be set per-project in `.chutes-build/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules; every other section loads only from `~/.chutes-build/config.toml`.
 
 Priority for `[mcp_servers]` and `[plugins]`: `.chutes-build/config.toml` (current dir) > `<repo-root>/.chutes-build/config.toml` > `~/.chutes-build/config.toml`. `[permission]` rules aren't overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
-Persist knowledge across sessions (requires `--experimental-memory` or `CHUTES_BUILD_MEMORY=1`).
+Persist knowledge across sessions. Enable it with `[memory] enabled = true` or
+`CHUTES_BUILD_MEMORY=1`; an explicit `[memory] enabled = false` turns it off even when a
+managed remote setting enables it. Notes recorded by earlier versions are
+carried over automatically. See [13-memory.md](13-memory.md).
 
 ```toml
 [memory]
-enabled = false                       # enable memory
+enabled = true
 
 [memory.session]
 save_on_end = true                    # write metadata summary on session end
@@ -289,14 +343,14 @@ enabled = true                        # watch memory files for external edits
 
 [memory.search]
 max_results = 6                       # default number of results
-min_score = 0.35                      # minimum relevance score
+min_score = 0.7                       # minimum relevance score
 
 [memory.initial_injection]
 enabled = true                        # auto-inject memory on first turn
-min_score = 0.0                       # score threshold for first-turn injection
+min_score = 0.9                       # score threshold for first-turn injection
 
 [memory.embedding]
-model = "embedding-model"             # embedding model name
+# model is unset by default, so retrieval uses full-text search only
 dimensions = 1024                     # vector dimensions
 ```
 
@@ -305,39 +359,17 @@ dimensions = 1024                     # vector dimensions
 ```toml
 [subagents]
 enabled = true
+sampling_limit = 12                   # concurrent in-flight subagent sampling calls per process; defaults to max_concurrent (32) when unset (CHUTES_BUILD_SUBAGENT_SAMPLING_LIMIT)
 
 [subagents.toggle]
 explore = true                        # enable/disable specific types
 plan = false
 
 [subagents.models]
-explore = "chutes-build"               # route to different models
+explore = "grok-4.6"               # route to different models
 ```
 
 To pin the model a subagent uses, set its entry under `[subagents.models]`.
-
-### Voice
-
-```toml
-[voice]
-stt_mode = "batch"                                        # default
-batch_api_base = "https://vonkaiser-audiodojo.chutes.ai"
-language = "auto"                                         # or a catalog code
-```
-
-`batch` buffers the whole utterance locally and posts it once, when you stop
-speaking, to a Whisper-shaped REST endpoint. There is no live preview of the
-transcript — it arrives all at once after a short round trip — and this is the only
-transport Chutes serves.
-
-`streaming` opens a WebSocket to `{api_base}/v1/stt` for interim results. Chutes'
-inference API has no such route, so it is only useful pointed at a proxy that
-provides one; `api_base` deliberately defaults to a closed loopback address so an
-unconfigured switch to streaming fails immediately rather than hanging on a host
-that cannot answer.
-
-`language = "auto"` is sent as an omitted field in batch mode, so the backend's own
-detection runs instead of a guess from your locale.
 
 ### Goal mode and background workflows
 
@@ -352,7 +384,7 @@ enabled = false                       # disable background workflows (or CHUTES_
 
 Project workflows are discovered from `<repo-root>/.chutes-build/workflows/`; user workflows from `~/.chutes-build/workflows/`. Discovery and invocation key off the script's `meta.name`, so keep each filename aligned with its `meta.name`. Built-ins win over project names, and project names win over user names, so keep names unique across scopes.
 
-Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflows` run dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle isn't a reusable definition name, so the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
+Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle isn't a reusable definition name, so the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
 ### Skills
 
@@ -510,6 +542,20 @@ Run `/doctor` in the affected session. It shows the detected notification and fo
 
 **Sleep prevention not taking effect:** on macOS, sleep prevention uses `IOPMAssertionCreateWithName` via CoreFoundation; on Linux, `systemd-inhibit` (which must be on `$PATH`). Make sure the relevant tool is available. Prevention is only active during agent turns and releases automatically when the turn ends.
 
+### Status line
+
+An optional row at the bottom of the full-screen pager, disabled by default. Opt in with `[ui.status_line]`:
+
+```toml
+[ui.status_line]
+type = "builtin"                # builtin | command | disabled
+items = ["cwd", "model", "context"]
+```
+
+The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds; re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
+
+Minimal mode has no status-line row; it uses the terminal tab title instead (see [Notifications](#notifications) `title.items`).
+
 ### Keyboard shortcuts
 
 Keyboard shortcuts are **not** configurable — all bindings are built in. See [Keyboard Shortcuts](03-keyboard-shortcuts.md) for the complete reference.
@@ -518,20 +564,12 @@ Keyboard shortcuts are **not** configurable — all bindings are built in. See [
 
 These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#related-settings)):
 
-- **`[features] telemetry`** / `CHUTES_BUILD_TELEMETRY_ENABLED` — upstream's
-  product-analytics master switch. Inert here: analytics are compiled out
-  (`product::TELEMETRY`), so the knob loads and does nothing.
-- **Coding data, retention, and training** — the Settings row `/privacy` opens.
-  Locked in this build; there is no retention control to enable.
-- **`[telemetry] trace_upload`** / `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` — also
-  inert: `chutes-build trace` writes a local archive and never uploads.
+- **`[features] telemetry`** / `CHUTES_BUILD_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` doesn't change it.
+- **Coding data, retention, and training** — the Settings row `/privacy` opens; coding-data sharing, separate from telemetry.
+- **`[telemetry] trace_upload`** / `CHUTES_BUILD_TELEMETRY_TRACE_UPLOAD` — session traces; follows telemetry when unset.
 - **`[telemetry] otel_*`** / `CHUTES_BUILD_EXTERNAL_OTEL` — external OTEL to your own collector (below).
 
-The `[telemetry]` block below redirects upstream's event stream to a collector of
-your own. It has no effect here, for the reason above — there is no event stream
-to redirect. To collect usage from this build, use the external OTEL export in
-[Monitoring Usage](24-monitoring-usage.md), which is a separate mechanism and does
-work:
+When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
 
 ```toml
 [telemetry]
@@ -552,32 +590,54 @@ otel_metrics_exporter = "otlp"                            # otlp | console | non
 otel_logs_exporter = "otlp"                               # otlp | console | none
 otel_endpoint = "https://collector.corp.example:4318"     # OTLP base endpoint
 otel_protocol = "http/protobuf"                           # http/protobuf | grpc
-otel_log_user_prompts = false                             # content gate (admins can pin via requirements)
-otel_log_tool_details = false                             # content gate (admins can pin via requirements)
+otel_certificate = "/etc/ssl/corp-ca.pem"                 # optional: trust private CA (path only)
+otel_client_certificate = "/etc/ssl/client.crt"           # optional: mTLS client cert (path only)
+otel_client_key = "/etc/ssl/client.key"                   # optional: mTLS client key (path only)
+otel_log_user_prompts = false                             # content gate (admins pin via requirements)
+otel_log_assistant_responses = false                      # unset follows prompts; pin false for prompts-only
+otel_log_tool_details = true                              # metadata/preview; enterprise default on for SIEM join
+otel_log_tool_content = false                             # full-body gate; independent of details — does not imply names/paths
 ```
+
+Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over
+process env (destination lock). `managed_config.toml` does not. There is no
+`headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See
+[Monitoring & Usage](24-monitoring-usage.md).
 
 ### Version pinning
 
-> **Not enforced in this build.** The four keys below are still accepted and
-> validated, so a managed config written for upstream loads without error, but
-> nothing acts on them: Chutes Build has no updater for the soft bounds to
-> constrain, and no startup gate reads the hard ones. They are documented here so
-> the behaviour is not mistaken for policy.
+Control which versions the CLI may auto-update to and which versions may run. Set
+these in `[cli]`, or in a managed layer for fleet-wide policy. Each has an
+environment override that can only tighten the bound, for CI and testing.
+
+> **Changed:** `minimum_version` no longer blocks startup. It is now a soft
+> anti-downgrade floor for the updater. For a hard floor that prevents old
+> versions from starting, use `required_minimum_version`.
 
 ```toml
 [cli]
-minimum_version = "1.0.0"            # accepted, no effect
-maximum_version = "2.0.0"            # accepted, no effect
-required_minimum_version = "1.0.0"   # accepted, no effect
-required_maximum_version = "2.0.0"   # accepted, no effect
+minimum_version = "0.2.109"          # updater won't downgrade below this
+maximum_version = "0.2.180"          # updater won't install above this
+required_minimum_version = "0.2.100" # refuse to start below this
+required_maximum_version = "0.2.200" # refuse to start above this
 ```
 
-To pin a version for a fleet, pin the artifact: install a specific version from
-npm (`npm i -g chutes-build@1.0.0`) or distribute a specific release binary. That
-is enforceable; a config key the binary ignores is not.
-
-Note `version_overrides[].minimum_version` / `maximum_version` is a different
-feature and does work — it gates which config patches apply to which versions.
+- `minimum_version` (`CHUTES_BUILD_MINIMUM_VERSION`) is a soft anti-downgrade floor. The
+  updater skips a target below it and keeps the current version. It never blocks
+  startup.
+- `maximum_version` (`CHUTES_BUILD_MAXIMUM_VERSION`) is a soft ceiling. The updater caps
+  its target at it and never installs above it.
+- `required_minimum_version` (`CHUTES_BUILD_REQUIRED_MINIMUM_VERSION`) and
+  `required_maximum_version` (`CHUTES_BUILD_REQUIRED_MAXIMUM_VERSION`) are hard bounds. If
+  the running version is outside the range, the CLI exits at startup and instructs
+  the user to install an approved version. `chutes-build update` and `chutes-build --version` keep
+  working so an out-of-range install can recover.
+- Bounds resolve across config layers by tightening only: a floor takes the
+  highest value and a ceiling the lowest, so a managed bound can't be loosened,
+  and a user or environment bound can't cancel a managed hard bound. An invalid
+  value is ignored so a bad policy can't block startup.
+- An explicit `chutes-build update --version X` is allowed above the ceiling, to recover
+  from a too-new install, and rejected below the hard floor.
 
 ### Enterprise deployment
 
@@ -596,9 +656,9 @@ auth_token_ttl = 3600
 default = "company-grok"
 
 [model.company-grok]
-model = "chutes-build"
+model = "grok-4.6"
 base_url = "https://grok-proxy.acme.com/"
-name = "Chutes Build Latest (Proxy)"
+name = "Grok 4.6 (Proxy)"
 context_window = 128000
 
 [features]
@@ -686,8 +746,8 @@ dim_accent = 0.5                      # dimming factor for collapsed accents (0.
 [scrollback.blocks.edit]
 indent = true                         # indent diff content
 vpad = false                          # vertical padding
-# expanded_by_default = true          # unset: follows [ui] collapsed_edit_blocks in config.toml
-                                      # (flag on = collapsed one-liner); uncomment to pin either shape
+# expanded_by_default = true          # Unset follows Collapsed edit blocks. When that setting is on,
+                                      # edits start collapsed even if this line is true.
 dual_line_numbers = false             # two-column line numbers (old + new)
 # line_summary = false                # show +N/-M in the collapsed header; unset follows the same flag
 hunk_separator = "…"                  # separator between diff hunks (default: "…")
@@ -701,19 +761,6 @@ min_lines = 2                         # minimum content lines in sticky mode
 animate = true                        # animated accent while thinking
 truncated_lines = 3                   # lines in truncated mode
 ```
-
-### Todo
-
-```toml
-[todo]
-badge_format = "default"              # "default", "colon", or "comma"
-```
-
-Badge format examples:
-
-- `default`: `2/5` — a `done/total` progress fraction (done = completed, total = all tasks except cancelled).
-- `colon`: `[>:1 [ ]:4 ok:3 x:2]` — icon:count.
-- `comma`: `[1 >, 4 [ ], 3 ok, 2 x]` — count icon, comma-separated.
 
 ### Plugins
 
@@ -731,7 +778,7 @@ The key ones. See the README for the complete list.
 
 | Variable | Description |
 |----------|-------------|
-| `CHUTES_API_KEY` | API key from chutes.ai/app/api |
+| `CHUTES_API_KEY` | API key from console.chutes.ai |
 | `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` | External auth binary path |
 | `CHUTES_BUILD_AUTH_PROVIDER_LABEL` | Display name on TUI login screen |
 | `CHUTES_BUILD_AUTH_TOKEN_TTL` | Token lifetime in seconds |
@@ -756,6 +803,7 @@ The key ones. See the README for the complete list.
 | `CHUTES_BUILD_WEB_FETCH_ALLOW_LOCAL` | Allow `web_fetch` to explicit loopback hosts only (`localhost` / `127.0.0.0/8` / `::1`). Same as `[toolset.web_fetch] allow_local`. Default off; private/metadata stay blocked. |
 | `CHUTES_BUILD_AGENT` | Custom agent definition path or name |
 | `CHUTES_BUILD_SANDBOX` | Sandbox profile (off, workspace, devbox, read-only, strict; or a custom profile name) |
+| `CHUTES_BUILD_EXIT_TIMEOUT_SECS` | Seconds after a quit is requested before the process is force-exited if teardown hangs (default: 20, `0` disables; a hard exit follows 5s later) |
 
 ### Logging
 
@@ -770,8 +818,6 @@ The key ones. See the README for the complete list.
 |----------|-------------|
 | `CHUTES_BUILD_HOME` | Override config directory (default: `~/.chutes-build`) |
 | `CHUTES_BUILD_RESPECT_GITIGNORE` | Force gitignore filtering on (`1`) or off (`0`); overrides `[tools] respect_gitignore` |
-| `CHUTES_BUILD_MAX_PARALLEL_IMAGE_GEN_CALLS` | Cap parallel image generation/edit calls in one model step (default 8) |
-| `CHUTES_BUILD_MAX_PARALLEL_VIDEO_GEN_CALLS` | Cap parallel video-generation calls in one model step (default 4) |
 
 ### Telemetry
 
@@ -806,6 +852,14 @@ The key ones. See the README for the complete list.
 | `.chutes-build/agents/` | Project-scoped agent definitions |
 | `.chutes-build/hooks/` | Project-scoped hooks |
 | `.chutes-build/lsp.json` | LSP server configuration |
+
+### How Chutes Build saves `config.toml`
+
+Writes to **`~/.chutes-build/config.toml`** (`/settings`, `/vim-mode`, and other user-config saves) follow a leaf symlink. The atomic rename writes the referent (a file in your dotfiles repo). The link stays a link. If the link is dangling, the write creates the referent as a regular file.
+
+Writes to a **project** `.chutes-build/config.toml` (MCP / plugin / permission edits) **replace** a leaf symlink with a regular file. That keeps a later save from following the link out of the repository.
+
+A user `config.toml` that cannot be parsed is not overwritten. Fix the syntax (or restore a backup) and save again.
 
 ---
 

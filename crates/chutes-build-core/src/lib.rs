@@ -1,8 +1,11 @@
 //! Chutes-specific runtime primitives shared by the CLI, agent, and tools.
 
 pub mod account;
+pub mod audio;
 pub mod catalog;
 pub mod context7;
+pub mod docs;
+pub mod embeddings;
 pub mod endpoint_policy;
 pub mod endpoints;
 pub mod media;

@@ -38,8 +38,8 @@ const SOURCE_FIELD_ENCODED_BYTES: u64 =
 const LATER_ONE_DIGIT_METADATA: u64 = INITIAL_METADATA - SOURCE_FIELD_ENCODED_BYTES;
 const FIRST_TWO_DIGIT_GENERATION: u8 = 10;
 const TWO_DIGIT_GENERATION_BYTE_INCREMENT: u64 = 1;
-// Aligned reserves consume canonical `.1` codec limits from the row-byte tuples —
-// not `align16(exact)`. Complete and Claim `.1` exceed `align16(.0)`.
+// Aligned reserves consume canonical `.1` codec limits from the row-byte tuples, not `align16(exact)`
+// Complete and Claim `.1` exceed `align16(.0)`
 const COMPLETION_ALIGNED_PER_GENERATION: u64 = CompletionEffectV1::COUNT as u64
     * COMPLETION_ROW_BYTES[0].1 as u64
     + ProductClaimSlotV1::COUNT as u64 * COMPLETION_ROW_BYTES[1].1 as u64
@@ -278,11 +278,19 @@ pub(super) fn accepted_metadata(segments: u8, accepted_rows: u8) -> Result<u64, 
 
 const fn row_sum(table: &[(usize, usize)], indexes: &[usize], is_aligned: bool) -> u64 {
     let mut total = 0;
-    let mut offset = 0;
-    while offset < indexes.len() {
-        let row = table[indexes[offset]];
+    let mut rest = indexes;
+    // Only const callers: a row id past `table` fails the build here, as the old index did.
+    while let Some((&idx, tail)) = rest.split_first() {
+        assert!(idx < table.len(), "row id past the accounting table");
+        let row = match table.split_at_checked(idx) {
+            Some((_, after)) => match after.split_first() {
+                Some((&row, _)) => row,
+                None => (0, 0),
+            },
+            None => (0, 0),
+        };
         total += (if is_aligned { row.1 } else { row.0 }) as u64;
-        offset += 1;
+        rest = tail;
     }
     total
 }

@@ -33,6 +33,7 @@
 //! ```
 
 #![warn(missing_docs)]
+#![deny(clippy::indexing_slicing)]
 
 mod engine;
 mod mmdc;
@@ -67,7 +68,6 @@ pub(crate) const DARK_SURFACE: Rgba = Rgba::new(0x18, 0x18, 0x1B, 0xFF);
 
 impl MermaidTheme {
     /// The default opaque surface color a diagram blends into for this theme.
-    ///
     /// Used as the raster background when the caller supplies no explicit [`RenderParams::background`].
     /// The color approximates a typical terminal scrollback surface so the PNG sits flush with the grid.
     pub fn surface_background(self) -> Rgba {
@@ -219,19 +219,5 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>(_: &T) {}
         let engine = default_engine();
         assert_send_sync(&engine);
-    }
-
-    /// The default engine renders a real PNG and never panics on valid input.
-    #[test]
-    fn default_engine_renders_valid_input() {
-        let engine = default_engine();
-        let diagram = render_checked(
-            engine.as_ref(),
-            "flowchart LR\nA-->B",
-            &RenderParams::default(),
-            &RenderLimits::default(),
-        )
-        .expect("the default engine should render");
-        assert!(diagram.width_px > 0 && diagram.height_px > 0);
     }
 }

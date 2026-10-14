@@ -1,12 +1,11 @@
-pub const PAGER_CLIENT_TYPE: &str = "chutes-build";
-pub const HEADLESS_CLIENT_TYPE: &str = "chutes-build";
+pub const PAGER_CLIENT_TYPE: &str = "grok-pager";
+pub const HEADLESS_CLIENT_TYPE: &str = "grok-shell";
 
 pub const PAGER_CLIENT_VERSION: &str = xai_grok_version::VERSION;
 
-/// `User-Agent` for pager-owned direct-to-`api.chutes.ai` clients (voice STT).
+/// `User-Agent` for the pager's own HTTP clients that call `api.chutes.ai` directly (voice STT).
 ///
-/// Matches the sampler's `<client>/<version> (os; arch)` shape so server-side
-/// dashboards bucket voice traffic alongside chat / imagine requests.
+/// Matches the sampler's `grok-shell/<version> (os; arch)` shape so server-side dashboards bucket voice traffic alongside chat / imagine requests.
 pub fn client_user_agent() -> String {
     format!(
         "{}/{} ({}; {})",
@@ -23,13 +22,13 @@ mod tests {
 
     #[test]
     fn client_user_agent_has_expected_shape() {
-        // e.g. "chutes-build/1.2.3 (macos; aarch64)". The pieces are wire
-        // contract for server-side UA parsing, so pin the exact shape.
+        // e.g. "grok-shell/1.2.3 (macos; aarch64)".
+        // Servers parse this UA string, so pin the exact shape
         let ua = client_user_agent();
         assert_eq!(
             ua,
             format!(
-                "{HEADLESS_CLIENT_TYPE}/{} ({}; {})",
+                "grok-shell/{} ({}; {})",
                 PAGER_CLIENT_VERSION,
                 std::env::consts::OS,
                 std::env::consts::ARCH
