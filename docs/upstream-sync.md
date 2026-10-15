@@ -1605,8 +1605,8 @@ unchanged: upstream's published tree still carries `559751fd`, which
 already matched. Known partial-sync risk: versions 1.0.46–1.0.52 exist as
 changelog entries only and were not ported; the next sync starts from this
 record, not from the parked 1.0.16 branch (which is now obsolete — its
-per-area work was absorbed by this rebase, and it should be deleted after
-this branch lands).
+per-area work was absorbed by this rebase, and the branch was deleted
+after this branch landed).
 
 ## Purifica record: 2026-10-14 — privacy-first Chutes independence
 
@@ -1675,4 +1675,7 @@ class as the documented `parse_cli` debug overflow):
 Fixing upstream's Windows file-transaction semantics, the pager crash,
 and the remaining Windows-only test noise is out of scope for this
 pass — same accepted class as the agent/login failures in the rebase
-record. No push yet: this branch still lands only when the user asks.
+record. Landed on `main` (fast-forward to the 1.5.0 cut) and released:
+`chutes-build@1.5.0` on npm with all six native packages, tag `v1.5.0`,
+and the GitHub release with executables, archives, and checksums. The
+release branch was deleted after landing.

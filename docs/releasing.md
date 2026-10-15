@@ -130,6 +130,33 @@ fix belongs in the workflow. Check `npm view chutes-build version` and
 still free and a re-dispatch is clean. That check is what made cancelling and
 re-running safe here rather than burning a version number.
 
+### A PUT 404 is an auth failure, and the secret has two homes
+
+The 1.5.0 publish failed on its first package — all six builds and the smoke
+test green — with `npm error 404 Not Found - PUT
+https://registry.npmjs.org/chutes-build-darwin-arm64`. The package exists
+(through 1.4.0); npm answers 404 to an unauthorized publish, so on an
+existing package that error means the credential, never the code. The release
+files were byte-identical to the working 1.4.0 apart from the version bumps,
+which closed the case from the other side.
+
+The credential had two layers of wrong. The `NPM_TOKEN` the job reads lives on
+the `npm-release` environment, where it had sat untouched since July and died
+quietly — and an environment secret **shadows** a repo secret of the same
+name, so two fresh repo-level tokens had exactly zero effect until the new
+token was set on the environment with `gh secret set NPM_TOKEN --env
+npm-release`. There is deliberately no repo-level `NPM_TOKEN` any more: one
+home for the secret means the next failure cannot be this one again. Verify a
+replacement token with `npm whoami` against the package maintainers before
+re-running; then `gh run rerun <id> --failed` — the publish loop skips what
+already landed, so no version burns.
+
+One more timing trap in the same run: npm answers `+ chutes-build@1.5.0`
+followed by "Your package is being processed and may take a few minutes to
+become available", and it means it — the packument still shows the old
+`latest` for minutes after a genuinely successful PUT. Wait before declaring
+a phantom failure.
+
 ### Why the release is not a manual step any more
 
 The releases for v0.4.1, v0.4.2 and v0.4.3 exist and carry real notes. What none of
