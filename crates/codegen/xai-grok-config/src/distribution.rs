@@ -54,14 +54,18 @@ impl Distribution {
     /// that reports to, or is driven from, anyone but the Chutes ecosystem.
     /// Product telemetry, crash/error reports, remote control of this
     /// machine, and voice dictation to a third-party STT service stay off
-    /// whatever config, requirements or the environment say. `RemoteFetch`
-    /// stays allowed: it also gates the Chutes model-catalog fetch, whose
-    /// targets are Chutes-only by endpoint default.
+    /// whatever config, requirements or the environment say. Account login
+    /// stays off too: the only credential is the `CHUTES_API_KEY` the build
+    /// was given, so no sign-in screen, session token, or provider command
+    /// is ever offered. `RemoteFetch` stays allowed: it also gates the
+    /// Chutes model-catalog fetch, whose targets are Chutes-only by
+    /// endpoint default.
     pub const CHUTES: Self = Self::withholding(&[
         Capability::Telemetry,
         Capability::ErrorReporting,
         Capability::RemoteControl,
         Capability::Voice,
+        Capability::AccountLogin,
     ]);
     /// This build's distribution.
     pub const fn current() -> Self {
@@ -78,8 +82,8 @@ impl Distribution {
         }
         match capability {
             Capability::AccountLogin => Some(
-                "This build has no account to sign in to or out of: it uses only the API key it was \
-                 given.",
+                "This build has no account sign-in: set the CHUTES_API_KEY environment variable to \
+                 your Chutes API key and restart.",
             ),
             Capability::RemoteControl => Some("Remote Control is off in this build."),
             Capability::Voice => Some("Voice dictation is off in this build."),

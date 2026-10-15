@@ -27,16 +27,17 @@ fn current_build_is_the_chutes_distribution() {
         Capability::ErrorReporting,
         Capability::RemoteControl,
         Capability::Voice,
+        Capability::AccountLogin,
     ] {
         assert!(
             !Distribution::current().allows(capability),
             "{capability:?} must stay withheld: nothing may report to, or be driven from, anyone but Chutes"
         );
     }
-    for capability in [Capability::AccountLogin, Capability::RemoteFetch] {
+    for capability in [Capability::RemoteFetch] {
         assert!(
             Distribution::current().allows(capability),
-            "{capability:?} must stay allowed: Chutes login and the Chutes model-catalog fetch need it"
+            "{capability:?} must stay allowed: the Chutes model-catalog fetch needs it"
         );
     }
 }

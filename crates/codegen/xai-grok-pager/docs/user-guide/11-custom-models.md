@@ -6,7 +6,7 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 ## Default Models
 
-By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Authenticate with `chutes-build login` or an API key, then start a session.
+By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Set `CHUTES_API_KEY`, then start a session.
 
 List all available models:
 
@@ -110,8 +110,7 @@ Chutes Build resolves the API key in this order:
 
 1. The `api_key` field in the model config
 2. The environment variable(s) named by `env_key` — a single string or an array of names. The first set, non-empty value wins (for example `env_key = ["ANTHROPIC_AUTH_TOKEN", "LC_ANTHROPIC_AUTH_TOKEN"]` for SSH `LC_*` forwarding)
-3. Your signed-in session token (from `chutes-build login`), for a model with no `api_key`/`env_key` of its own
-4. The `CHUTES_API_KEY` environment variable (global fallback; Chutes Build also accepts `CHUTES_BUILD_API_KEY` for backward compatibility)
+3. The `CHUTES_API_KEY` environment variable (global fallback; Chutes Build also accepts `CHUTES_BUILD_API_KEY` for backward compatibility)
 
 ### Context Window
 
@@ -378,7 +377,7 @@ When you use `[endpoints]` with partial model overrides, Chutes Build inherits t
 
 ### Auth Behavior
 
-When you set `models_base_url`, Chutes Build authenticates the model-list request with `CHUTES_API_KEY` only (`Authorization: Bearer`). That request never uses your `chutes-build login` session. With an external auth provider (`auth_provider_command`) and no `CHUTES_API_KEY`, it sends the provider's token instead. Otherwise, if `CHUTES_API_KEY` is unset, the fetch fails with an error asking you to set it. Inference requests to the custom host authenticate separately. An `api_key` or `env_key` on each model makes those requests use an API key too.
+When you set `models_base_url`, Chutes Build authenticates the model-list request with `CHUTES_API_KEY` only (`Authorization: Bearer`). If `CHUTES_API_KEY` is unset, the fetch fails with an error asking you to set it. Inference requests to the custom host authenticate separately. An `api_key` or `env_key` on each model makes those requests use an API key too.
 
 ---
 

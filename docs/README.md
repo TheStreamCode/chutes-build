@@ -25,6 +25,9 @@ binary. Update them with the matching public guide whenever behavior changes.
 
 ## Maintain the project
 
+- [Product spec](product-spec.md) — the checkable product contract: identity,
+  API-key-only authentication, privacy boundaries, ecosystem behavior, and the
+  change protocol that keeps them from regressing.
 - [Architecture](ARCHITECTURE.md) — runtime layers, routing, media lifecycle,
   ownership boundaries, and retained upstream infrastructure.
 - [Security review](security-review.md) — implemented controls, accepted

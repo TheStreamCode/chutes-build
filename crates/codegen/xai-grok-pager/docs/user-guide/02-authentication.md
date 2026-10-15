@@ -1,309 +1,106 @@
 # Authentication
 
-Chutes Build supports several authentication methods, including interactive browser login, enterprise single sign-on (SSO), and headless CI/CD runners.
+Chutes Build authenticates with a Chutes API key. There are no accounts to
+sign in to, no browser login, no device-code flow, no enterprise SSO, and no
+session tokens: the API key is the only credential, and every surface says
+so. If you see a message naming `CHUTES_API_KEY`, that is the whole setup.
 
 ---
 
-## Browser Login (Default)
+## Get a Chutes API key
 
-On first launch, Chutes Build opens your browser to authenticate with chutes.ai:
+Generate a key from [console.chutes.ai](https://console.chutes.ai). Keys start
+with `cpk_`. Treat a key like a password: anyone holding it can bill your
+account.
 
-```bash
-chutes-build
-```
+## Configure the key
 
-Chutes Build stores credentials in `~/.chutes-build/auth.json` and reuses them across sessions. Chutes Build refreshes access tokens automatically in the background. When a token can't be refreshed, Chutes Build prompts you to sign in again. Credentials without a server-provided expiry fall back to a 30-day lifetime.
-
-### Credential storage
-
-Tokens in `~/.chutes-build/auth.json` (and MCP OAuth tokens in `~/.chutes-build/mcp_credentials.json`) are written with owner-only permissions (`0600` on Unix). Anyone with filesystem access to those paths can use the credentials, so:
-
-- Prefer full-disk encryption (FileVault, BitLocker, LUKS, or equivalent).
-- Do not copy `auth.json` or `mcp_credentials.json` into shared directories, tickets, or chat.
-- On multi-user hosts, keep `$HOME` / `$CHUTES_BUILD_HOME` private to your account.
-
-### Re-authenticate
-
-To switch accounts or resolve an authentication problem, run:
-
-```bash
-chutes-build login
-```
-
-Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through Chutes OAuth at `api.chutes.ai`. Pass a flag to select a different flow:
-
-| Flag | Description |
-|------|-------------|
-| `--oauth` | Sign in through Chutes OAuth at `api.chutes.ai`. This is the default, so the flag is optional. |
-| `--device-auth` (alias `--device-code`) | Sign in with the device-code flow for headless or remote environments. |
-
-To sign out, run `chutes-build logout`. It takes no flags and clears your cached credentials.
-
----
-
-## API Key
-
-For CI/CD, automation, or environments without browser access, use an API key from [console.chutes.ai](https://console.chutes.ai):
+Set the environment variable before starting Chutes Build:
 
 ```bash
 export CHUTES_API_KEY="cpk_..."
 chutes-build
 ```
 
-Chutes Build uses the API key as a fallback when no session token is active. If you have already signed in interactively, the stored session token takes precedence. To fall back to the API key, run `chutes-build logout` or delete `~/.chutes-build/auth.json`.
+On Windows (PowerShell), either for the session:
 
----
+```powershell
+$env:CHUTES_API_KEY = "cpk_..."
+chutes-build
+```
 
-## OIDC (Customer SSO)
+or persistently for your user:
 
-Authenticate developers through your own Identity Provider (IdP) -- such as Okta, Azure AD, or Auth0 -- instead of chutes.ai.
+```powershell
+setx CHUTES_API_KEY "cpk_..."
+```
 
-### 1. Register a public client in your IdP
-
-- Grant type: Authorization Code with PKCE (Proof Key for Code Exchange)
-- Redirect URI: `http://127.0.0.1/callback` -- a loopback address. Chutes Build binds a random port at sign-in time, and most IdPs treat the loopback redirect as port-agnostic per [RFC 8252](https://tools.ietf.org/html/rfc8252).
-- No client secret. PKCE replaces it.
-
-### 2. Configure the CLI
-
-Via config file:
+A per-model key in `~/.chutes-build/config.toml` wins over the global one.
+Under `[model.<name>]`, set `api_key` for a literal key or `env_key` for the
+name of an environment variable holding it:
 
 ```toml
-# ~/.chutes-build/config.toml
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
+[model.my-model]
+model = "my-model"
+env_key = "MY_MODEL_KEY"
 ```
 
-Or via environment variables:
+The legacy `CHUTES_BUILD_API_KEY` variable is still accepted when
+`CHUTES_API_KEY` is unset, so existing deployments keep working; new setups
+should use `CHUTES_API_KEY`.
 
-```bash
-export CHUTES_BUILD_OIDC_ISSUER="https://acme.okta.com"
-export CHUTES_BUILD_OIDC_CLIENT_ID="0oa1b2c3d4e5f6g7h8i9"
-```
+Without any key, Chutes Build starts on a setup screen that names
+`CHUTES_API_KEY` and exits only via Quit. Headless runs (`-p`) fail with the
+same message instead of producing output.
 
-You can also override the API endpoint to point at your own proxy:
+## No login, no logout, no sessions
 
-```bash
-export CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL="https://grok-proxy.acme.com/v1"
-```
-
-### 3. Run `chutes-build`
-
-The CLI discovers endpoints via `{issuer}/.well-known/openid-configuration`, opens the IdP login page, and stores tokens in `~/.chutes-build/auth.json`. Tokens auto-refresh silently via the stored `refresh_token`.
-
-### Optional fields
-
-| Field | Default | Notes |
-|-------|---------|-------|
-| `scopes` | `["openid", "profile", "email", "offline_access", "api:access"]` | `offline_access` enables silent token refresh |
-| `audience` | None | Required by some IdPs (e.g., Auth0) |
+`chutes-build login` and `chutes-build logout` exist only to tell you the
+above: both print the API-key setup message and exit. The `/login` and
+`/logout` TUI commands are unavailable for the same reason. There is no
+`~/.chutes-build/auth.json` session to create, refresh, expire, or steal —
+this build neither reads nor writes a login store — and no auth-provider
+command is ever honored, whatever the config names.
 
 ---
 
-## External Auth Provider
+## Auth precedence
 
-When browser-based login isn't possible -- for example, on sandboxed VMs, CI runners, or air-gapped networks -- delegate authentication to an external binary or script.
+Chutes Build resolves credentials for each request in this order, highest to
+lowest:
 
-### How It Works
+1. **Per-model `api_key` or `env_key`** — set under `[model.<name>]` in
+   `config.toml`. Wins whenever present.
+2. **`CHUTES_API_KEY`** — the global key from the environment.
 
-```
-+--------------+     sh -c     +------------------------+
-|     Chutes Build     |-------------->|  your auth binary      |
-|              |               |                        |
-|  reads       |<-- stdout ----|  prints token          |
-|  auth.json   |               |                        |
-|              |   (stderr)    |  prints status/URLs    |--> surfaced to user
-+--------------+               +------------------------+
-```
-
-1. Chutes Build runs your command via `sh -c "<command>"`
-2. Your binary runs whatever auth flow it needs (SSO, device code, certificate exchange)
-3. **stderr** carries human-readable output, such as login URLs and status messages. Chutes Build reads stderr and surfaces it to the user; in the TUI, it turns the first `https://` URL into a clickable sign-in link.
-4. **stdout** is captured by Chutes Build and saved as the access token
-5. Exit 0 = success; exit non-zero = Chutes Build falls back to interactive login
-
-### The stdout / stderr Contract
-
-| Stream | What to print | Who sees it |
-|--------|---------------|-------------|
-| **stdout** | The token -- nothing else | Chutes Build (parsed and stored in auth.json) |
-| **stderr** | Login URLs, status messages, errors | The user (Chutes Build reads stderr and shows the sign-in URL as a clickable link in the TUI) |
-
-**Do not print anything to stdout except the token.** No progress messages, no debug output. Chutes Build reads stdout, trims surrounding whitespace, and parses the result as a token.
-
-### stdout Token Format
-
-**Bare string** -- just the raw token:
-
-```
-eyJhbGciOiJSUzI1NiIs...
-```
-
-**JSON** -- with optional refresh token, expiry, and issuer:
-
-```json
-{"access_token": "eyJhbGciOi...", "refresh_token": "ref-tok", "expires_in": 3600, "issuer": "https://idp.example.com"}
-```
-
-Use JSON if your tokens expire and you want Chutes Build to automatically re-run the binary before expiry.
-
-JSON fields:
-
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `access_token` | yes | Bearer token Chutes Build sends to the Chutes API |
-| `refresh_token` | no | Stored for reference. Chutes Build refreshes by re-running your binary, not with an OAuth refresh grant |
-| `expires_in` | no | Token lifetime in seconds; enables proactive refresh before expiry |
-| `issuer` | no | Identifies the token's issuer |
-
-### Configuration
-
-Via config file:
-
-```toml
-# ~/.chutes-build/config.toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"   # optional -- customizes the TUI login button
-auth_token_ttl = 3600               # optional -- token lifetime in seconds
-```
-
-Or via environment variables:
-
-```bash
-export CHUTES_BUILD_AUTH_PROVIDER_COMMAND="/usr/local/bin/my-auth-provider"
-export CHUTES_BUILD_AUTH_PROVIDER_LABEL="Acme Corp"
-export CHUTES_BUILD_AUTH_TOKEN_TTL=3600
-```
-
-### Token Refresh
-
-Chutes Build runs your binary on two different contracts, and `CHUTES_BUILD_AUTH_EXPIRED` is how
-it tells them apart. Each run fully replaces the stored credential, so emit the
-same JSON fields (such as `issuer`) on every invocation, including refreshes.
-
-- **`CHUTES_BUILD_AUTH_EXPIRED=1` — a headless refresh.** Chutes Build is re-minting over a
-  credential it already holds: a near-expiry rotation, or a token the server
-  rejected. Nobody is watching. stdin is closed, your stderr is swallowed, and
-  the binary is given a few seconds before it is killed. Mint silently or exit
-  non-zero — never block.
-- **Unset — a sign-in.** `chutes-build login`, the sign-in screen, or the escalation
-  Chutes Build performs when a headless run couldn't mint. A user is waiting, your
-  stderr reaches them, and you have 300 seconds — enough for a browser round
-  trip or a device code.
-
-```bash
-#!/bin/sh
-if [ "$CHUTES_BUILD_AUTH_EXPIRED" = "1" ]; then
-    # Headless: silent refresh only. Declining is the fast, correct answer
-    # when your SSO session has lapsed and only the user can renew it.
-    echo "Refreshing token..." >&2
-    TOKEN=$(my-company-auth --refresh --silent) || exit 1
-else
-    echo "Authenticating via Acme Corp SSO..." >&2
-    TOKEN=$(my-company-auth --login --interactive)
-fi
-
-if [ -z "$TOKEN" ]; then
-    echo "Authentication failed" >&2
-    exit 1
-fi
-
-echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
-```
-
-When the headless run can't produce a token, Chutes Build stops treating the stored
-credential as usable and starts the sign-in flow instead — the same one you get
-on a machine that has never signed in, with your binary's stderr shown, so a
-device-code URL or a browser prompt reaches you. Exiting promptly on
-`CHUTES_BUILD_AUTH_EXPIRED=1` is what makes that handover fast; a binary that blocks
-instead makes you wait out the refresh timeout on every start. Mid-session, the
-turn fails with a re-auth prompt and `/login` re-runs the binary interactively.
-
-One case stays ambiguous, and only in **leader mode** (`--leader`, or
-`[cli] use_leader = true`; off by default): with no credential at all, the
-leader makes one extra attempt in the background just after startup, and that
-run has the variable unset, like a sign-in. A binary that mints without help
-(service account, keytab, mounted token) succeeds there and the session heals
-itself. One that must prompt just sits, up to the 300s sign-in ceiling —
-nothing waits on it, the sign-in screen is already up, and that run's stderr
-goes to `~/.chutes-build/leader.log` rather than to you.
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `CHUTES_BUILD_AUTH_PROVIDER_COMMAND` | Path to your auth binary |
-| `CHUTES_BUILD_AUTH_PROVIDER_LABEL` | Display name on the TUI login screen (e.g., "Acme Corp") |
-| `CHUTES_BUILD_AUTH_TOKEN_TTL` | Token lifetime in seconds (for bare-string tokens without `expires_in`) |
-| `CHUTES_BUILD_AUTH_EXPIRED` | Set to `1` on a headless refresh: don't prompt, and don't hand back a cached token. Unset on a sign-in, where a user is attached |
-| `CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS` | Seconds before expiry to proactively refresh (default: 300) |
+That is the whole list. There is no session token below or above the key.
 
 ---
 
-## Device Code Flow
+## Credential storage
 
-For headless environments (SSH sessions, Docker containers, remote VMs) where no browser is available locally:
+The API key lives where you put it — the process environment, or a
+per-model entry in `~/.chutes-build/config.toml` — and is never written
+anywhere else by this build. MCP OAuth tokens in
+`~/.chutes-build/mcp_credentials.json` are written with owner-only
+permissions (`0600` on Unix). Anyone with filesystem access to those paths
+can use the credentials, so:
 
-```bash
-chutes-build login --device-auth    # or: chutes-build login --device-code
-```
-
-This prints a URL and code to the terminal. Open the URL on any device, enter the code, and complete authentication. Chutes Build polls until the login is confirmed.
-
-You can also implement the device-code flow through an [External Auth Provider](#external-auth-provider) for full control.
-
----
-
-## Automatic Credential Refresh
-
-Chutes Build automatically refreshes expired credentials:
-
-- **Before expiry:** If your auth provider returned `expires_in` (JSON output) or you set `auth_token_ttl`, Chutes Build re-runs the auth binary ~5 minutes before expiry.
-- **On auth error:** If the server returns 401 Unauthorized, Chutes Build refreshes the credentials and retries the request.
-- **OIDC:** If a `refresh_token` is available, Chutes Build silently refreshes via your IdP without re-opening the browser.
-
-Tune the refresh buffer:
-
-```bash
-# Refresh 5 minutes before expiry (default)
-export CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS=300
-
-# Disable the proactive buffer: refresh at expiry or on a 401 (set to 0)
-export CHUTES_BUILD_AUTH_EARLY_INVALIDATION_SECS=0
-```
+- Prefer full-disk encryption (FileVault, BitLocker, LUKS, or equivalent).
+- Do not copy config files or `mcp_credentials.json` into shared directories,
+  tickets, or chat.
+- On multi-user hosts, keep `$HOME` / `$CHUTES_BUILD_HOME` private to your
+  account.
 
 ---
 
-## Hot Reload
+## Grove Git credentials (not an account login)
 
-Chutes Build picks up changes to `~/.chutes-build/auth.json` automatically. If you update credentials externally (for example, with a script that writes new tokens), Chutes Build uses the new credentials on the next API call without a restart.
-
----
-
-## Auth Precedence
-
-Chutes Build resolves credentials for each request in this order, highest to lowest:
-
-1. **Per-model `api_key` or `env_key`** -- set under `[model.<name>]` in `config.toml`. Wins whenever present.
-2. **Active session token** -- obtained through browser, OIDC/OAuth2, or external-provider login and stored in `~/.chutes-build/auth.json`.
-3. **`CHUTES_API_KEY`** -- fallback when no session token is active.
-
-When more than one login flow is configured, Chutes Build populates the session token from the first available source, highest to lowest:
-
-1. **External auth provider** (`auth_provider_command`)
-2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.toml` or the `CHUTES_BUILD_OIDC_ISSUER` and `CHUTES_BUILD_OIDC_CLIENT_ID` environment variables
-3. **Chutes OAuth2 browser login** -- the default
-
-During a session, the active method handles all mid-session refreshes.
-
----
-
-## Grove Git credentials (not this page's `chutes-build login`)
-
-
-**`~/.chutes-build/auth.json` is never read for Git.** `chutes-build login` does not create a Git credential and `chutes-build logout` does not revoke one; the daemon builds its own credential cell from `auth_mode` in Grove config. Those credentials are managed with `grove status` and `grove reload-credentials` -- see [chutes-build clone](27-grok-clone.md#authentication) for the failure classes and their next steps.
+Grove (the `chutes-build clone` daemon) builds its own Git credential cell
+from `auth_mode` in Grove config. Those credentials are managed with
+`grove status` and `grove reload-credentials` — see
+[chutes-build clone](27-grok-clone.md#authentication) for the failure classes
+and their next steps.
 
 ---
 
@@ -338,8 +135,8 @@ Set `RUST_LOG` to control the verbosity of the file log and headless stderr outp
 In the TUI, set `CHUTES_BUILD_LOG_FILE` to an absolute path to write logs to that file:
 
 ```bash
-CHUTES_BUILD_LOG_FILE=/tmp/grok.log RUST_LOG=debug chutes-build
-tail -f /tmp/grok.log
+CHUTES_BUILD_LOG_FILE=/tmp/chutes-build.log RUST_LOG=debug chutes-build
+tail -f /tmp/chutes-build.log
 ```
 
 `CHUTES_BUILD_LOG_FILE` is treated as a literal file path. A relative value such as `1` writes a file named `1` in the current directory.
@@ -347,22 +144,17 @@ tail -f /tmp/grok.log
 In headless mode, logs go to stderr. Redirect them to a file:
 
 ```bash
-RUST_LOG=debug chutes-build -p "hello" 2> /tmp/grok.log
+RUST_LOG=debug chutes-build -p "hello" 2> /tmp/chutes-build.log
 ```
-
-### Common log messages
-
-| Log message | What it means |
-|-------------|---------------|
-| `auth: running external auth provider (headless refresh)` / `(interactive login)` | Chutes Build is running your binary, and on which contract |
-| `auth: external auth provider returned fresh token` | Chutes Build parsed and stored the token |
-| `auth: external auth provider failed` | Binary exited non-zero or stdout was empty |
-| `auth: external auth provider timed out (likely needs interactive auth), killing` | Binary did not exit before the timeout and was killed |
-| `auth: failed to start external auth provider` | Command could not be spawned (binary not found) |
 
 ### Common fixes
 
-- **"Authentication failed"** -- Run `chutes-build logout` to clear cached credentials, then `chutes-build login` to sign in again.
-- **Token expires too quickly** -- Set `auth_token_ttl` or return `expires_in` in your auth provider's JSON output.
-- **OIDC redirect fails** -- Ensure your IdP allows loopback redirect URIs (`http://127.0.0.1/callback`).
-- **External auth provider not found** -- Check that the `auth_provider_command` path is correct and the binary is executable.
+- **"Not signed in"** — `CHUTES_API_KEY` is unset or empty in this shell.
+  Export it (see above) and retry. There is no login command that can
+  substitute for the key.
+- **"Authentication failed"** — the key is rejected by the Chutes API.
+  Generate a fresh key at [console.chutes.ai](https://console.chutes.ai),
+  check for trailing whitespace or quotes in the value, and confirm no
+  per-model `api_key`/`env_key` overrides the global one with a stale key.
+- **"Set CHUTES_API_KEY ... and restart" on the start screen** — same cause
+  as "Not signed in": quit, export the key, start again.

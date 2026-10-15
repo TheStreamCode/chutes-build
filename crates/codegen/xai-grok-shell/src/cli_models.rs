@@ -100,7 +100,6 @@ mod tests {
     use serial_test::serial;
     use xai_grok_login::{AuthMode, GrokAuth};
     use xai_grok_test_support::EnvGuard;
-    const EXPECTED_LOGIN_HOST: &str = "chutes.ai";
     /// A session the compiled-in backend recognises as its own, which `AuthBackend::owns` requires.
     fn session_credential() -> GrokAuth {
         GrokAuth {
@@ -157,13 +156,13 @@ mod tests {
     }
     #[test]
     #[serial]
-    fn resolve_oauth_session() {
+    fn resolve_session_env_ignored_without_account_login() {
         let (_dir, _g) = isolate_auth_sources();
         let json = serde_json::to_string(&session_credential()).unwrap();
         let _auth = EnvGuard::set("CHUTES_BUILD_AUTH", &json);
         assert_eq!(
             AuthStatus::resolve(&Config::default()),
-            AuthStatus::LoggedIn(EXPECTED_LOGIN_HOST.to_owned())
+            AuthStatus::NotAuthenticated
         );
     }
     #[test]
@@ -256,7 +255,7 @@ mod tests {
     }
     #[test]
     #[serial]
-    fn resolve_priority_session_over_byok_and_deployment() {
+    fn resolve_priority_byok_over_ignored_session_and_deployment() {
         let (_dir, _g) = isolate_auth_sources();
         let json = serde_json::to_string(&session_credential()).unwrap();
         let _auth = EnvGuard::set("CHUTES_BUILD_AUTH", &json);
@@ -264,7 +263,7 @@ mod tests {
         let cfg = config_from_toml(&byok_and_deployment_toml(dm));
         assert_eq!(
             AuthStatus::resolve(&cfg),
-            AuthStatus::LoggedIn(EXPECTED_LOGIN_HOST.to_owned())
+            AuthStatus::ModelCredentials(dm.to_owned())
         );
     }
     #[test]

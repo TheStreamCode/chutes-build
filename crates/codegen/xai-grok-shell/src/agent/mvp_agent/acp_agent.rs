@@ -472,6 +472,7 @@ impl acp::Agent for MvpAgent {
                 login_label: login_label.as_deref(),
                 has_auth_provider_command: has_auth_provider,
                 preferred_method,
+                distribution: xai_grok_config::Distribution::current(),
             })
         };
         let auth_methods = built.methods;
@@ -666,6 +667,19 @@ impl acp::Agent for MvpAgent {
                 return Err(acp::Error::auth_required().data(msg));
             }
         }
+        if auth_method::AuthMethodKind::from_id(&arguments.method_id).is_session_based() {
+            if let Some(refusal) = xai_grok_config::Distribution::current()
+                .refusal(xai_grok_config::Capability::AccountLogin)
+            {
+                emit_login_span(
+                    false,
+                    arguments.method_id.0.as_ref(),
+                    None,
+                    Some("account_login_withheld"),
+                );
+                return Err(acp::Error::auth_required().data(refusal));
+            }
+        }
         match arguments.method_id.0.as_ref() {
             auth_method::XAI_API_KEY_METHOD_ID => {
                 if self.cfg.borrow().grok_com_config.api_key_auth_disabled() {
@@ -679,10 +693,15 @@ impl acp::Agent for MvpAgent {
                 if sampling_config.api_key.is_none() {
                     if let Ok(api_key) = auth_method::read_chutes_api_key_env() {
                         sampling_config.api_key = Some(api_key.clone());
-                        if let Err(e) = xai_grok_login::store_api_key(
-                            &crate::util::grok_home::grok_home(),
-                            &api_key,
-                        ) {
+                        // A build without a login store keeps the env key in memory only:
+                        // persisting would fail by design, so it is not attempted.
+                        if xai_grok_config::Distribution::current()
+                            .allows(xai_grok_config::Capability::AccountLogin)
+                            && let Err(e) = xai_grok_login::store_api_key(
+                                &crate::util::grok_home::grok_home(),
+                                &api_key,
+                            )
+                        {
                             tracing::warn!("failed to persist API key to auth.json: {e}");
                             xai_grok_telemetry::unified_log::warn(
                                 "failed to persist API key to auth.json",

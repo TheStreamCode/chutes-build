@@ -5,6 +5,11 @@ contributors working on Chutes Build.
 
 ## Product invariants
 
+The binding product contract is `docs/product-spec.md` — identity, API-key-only
+authentication, privacy boundaries, ecosystem behavior, and the change
+protocol. When retained upstream code disagrees with the spec, gate the code,
+never the spec.
+
 - Chutes Build is a privacy-first, Chutes-native fork of `xai-org/grok-build`.
 - Preserve Chutes model discovery, routing, credentials, usage, media, OCR,
   voice, and endpoint policy.

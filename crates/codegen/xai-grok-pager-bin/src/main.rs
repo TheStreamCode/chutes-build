@@ -2385,6 +2385,12 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 device_auth,
                 devbox,
             } => {
+                if let Some(refusal) = xai_grok_config::Distribution::current()
+                    .refusal(xai_grok_config::Capability::AccountLogin)
+                {
+                    eprintln!("{refusal}");
+                    std::process::exit(1);
+                }
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
                 let config = xai_grok_shell::config::load_agent_config_disk_only()
@@ -2406,6 +2412,12 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 xai_grok_shell::instrumentation::finalize_and_exit(0);
             }
             Command::Logout => {
+                if let Some(refusal) = xai_grok_config::Distribution::current()
+                    .refusal(xai_grok_config::Capability::AccountLogin)
+                {
+                    eprintln!("{refusal}");
+                    std::process::exit(1);
+                }
                 init_tracing_simple("cli");
                 let config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;

@@ -22,6 +22,7 @@ use crate::views::prompt_widget::{PromptFlag, PromptInfo, PromptWidget};
 use crate::views::session_picker_surface::{
     SessionPickerRenderCtx, SessionPickerRenderMode, render_session_picker,
 };
+use xai_grok_config::{Capability, Distribution};
 mod consent;
 mod hero_box;
 pub(crate) mod logo;
@@ -793,10 +794,26 @@ pub fn render_welcome(
 
     let mut result = match params.auth_state {
         AuthState::Pending { error } => {
+            // API-key-only build: there is no login to offer, so the blocked
+            // screen names the one credential instead of a dead login option.
+            let api_key_only = !Distribution::current().allows(Capability::AccountLogin);
             let label = params.login_label.unwrap_or("chutes.ai");
             let login_text = format!("Login with {}", label);
-            let menu = [("l", login_text.as_str()), ("q", "Quit")];
-            let msg = error.as_deref().map(|e| (e, theme.accent_error));
+            let login_menu = [("l", login_text.as_str()), ("q", "Quit")];
+            let key_only_menu = [("q", "Quit")];
+            let menu: &[(&str, &str)] = if api_key_only {
+                &key_only_menu
+            } else {
+                &login_menu
+            };
+            let msg = error.as_deref().map(|e| (e, theme.accent_error)).or(if api_key_only {
+                Some((
+                    "Set the CHUTES_API_KEY environment variable to your Chutes API key, then restart.",
+                    theme.text_primary,
+                ))
+            } else {
+                None
+            });
             let info = PromptInfo {
                 model_name: params.model_name,
                 flags: params.flags,
@@ -808,7 +825,7 @@ pub fn render_welcome(
                 content_area,
                 buf,
                 msg,
-                &menu,
+                menu,
                 params.selected,
                 Some((prompt, &info)),
                 h_margin,
@@ -3811,6 +3828,28 @@ mod tests {
         for token in ["alpha-one", "bravo-two", "charlie-three"] {
             assert!(text.contains(token), "{token} missing:\n{text}");
         }
+    }
+
+    /// API-key-only build: the blocked screen names the one credential instead of a login option.
+    #[test]
+    fn pending_without_account_login_shows_api_key_setup_instead_of_login() {
+        let auth = AuthState::Pending { error: None };
+        let trust = TrustState::Done;
+        let params = render_params(&auth, &trust, None);
+        let area = Rect::new(0, 0, 100, 40);
+        let mut picker = PickerState::default();
+        let mut prompt = PromptWidget::new();
+        let mut buf = Buffer::empty(area);
+        let _ = render_welcome(area, &mut buf, &params, &mut prompt, &mut picker);
+        let text = buffer_text(&buf);
+        assert!(
+            text.contains("CHUTES_API_KEY"),
+            "blocked screen must name the API key:\n{text}"
+        );
+        assert!(
+            !text.contains("Login with"),
+            "blocked screen must offer no login:\n{text}"
+        );
     }
 
     /// Rows of the painted buffer that hold braille logo art.

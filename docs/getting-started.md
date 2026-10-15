@@ -36,10 +36,11 @@ not fetch an executable from a post-install script.
 Chutes documents API keys as the fastest way to get started. Create a scoped
 key in the Chutes dashboard and provide it through one of these paths:
 
-- press `k` on the welcome screen;
-- run `/apikey` in an interactive session;
-- run `chutes-build login` for hidden local input; or
+- run `/apikey` in an interactive session for setup instructions; or
 - set `CHUTES_API_KEY` for the current process.
+
+There is no login step: `chutes-build login` only prints this same setup
+guidance.
 
 ```powershell
 $env:CHUTES_API_KEY = "your-api-key"

@@ -1,6 +1,7 @@
 use agent_client_protocol as acp;
 
 use crate::agent::config::ModelEntry;
+use xai_grok_config::{Capability, Distribution};
 use xai_grok_login::PreferredAuthMethod;
 
 /// Shared, live handle to the agent's current ACP auth method id. `Arc` so a clone can cross the per-session-thread boundary at spawn.
@@ -69,6 +70,10 @@ pub struct AuthMethodsBuildInputs<'a> {
     /// Config pin (`[auth] preferred_method`).
     /// `None` keeps multi-method fallthrough; `Some` is fail-closed (only that method family).
     pub preferred_method: Option<PreferredAuthMethod>,
+    /// This build's distribution. A distribution that withholds [`Capability::AccountLogin`]
+    /// is API-key-only: cached session tokens, interactive login, and the pin above are all
+    /// ignored, and only `chutes.api_key` is ever advertised.
+    pub distribution: Distribution,
 }
 
 /// Output of [`build_auth_methods`].
@@ -82,7 +87,9 @@ pub struct BuiltAuthMethods {
     pub default_auth_method_id: Option<acp::AuthMethodId>,
 }
 
-/// REGRESSION GUARD: when unpinned and `has_external_api_key` is true, the **first** entry MUST be `chutes.api_key`.
+/// REGRESSION GUARD: a distribution withholding [`Capability::AccountLogin`] advertises at most
+/// `chutes.api_key` (empty list without a key); sessions, pins, and provider commands are ignored.
+/// When logins are allowed, unpinned and `has_external_api_key` true, the **first** entry MUST be `chutes.api_key`.
 /// Unpinned ordering (when each method is enabled): `chutes.api_key` (if `has_external_api_key`) `cached_token` (if `has_cached_token`) exactly one of: `oidc` (if `has_enterprise_oidc`) `grok.com` (otherwise)
 /// Unpinned `default_auth_method_id`: `cached_token` if `has_cached_token` `chutes.api_key` else if `has_external_api_key` `None` otherwise Pinned (`preferred_method`): `ApiKey`: only `chutes.api_key` if available; else an empty list and `None` (fail). `Oidc`: `cached_token` (if any) then interactive login; never `chutes.api_key`.
 pub fn build_auth_methods(inputs: AuthMethodsBuildInputs<'_>) -> BuiltAuthMethods {
@@ -94,7 +101,14 @@ pub fn build_auth_methods(inputs: AuthMethodsBuildInputs<'_>) -> BuiltAuthMethod
         login_label,
         has_auth_provider_command,
         preferred_method,
+        distribution,
     } = inputs;
+
+    // API-key-only distribution: no session may authenticate and no login may be
+    // advertised, whatever tokens, pins, or provider commands the config names.
+    if !distribution.allows(Capability::AccountLogin) {
+        return build_pinned_api_key(has_external_api_key);
+    }
 
     match preferred_method {
         Some(PreferredAuthMethod::ApiKey) => build_pinned_api_key(has_external_api_key),
@@ -299,9 +313,9 @@ pub(crate) fn session_token_auth_gate(
 }
 
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =
-    "Session expired. Run `chutes-build login` to re-authenticate.";
+    "Session expired. Set CHUTES_API_KEY to your Chutes API key and retry.";
 
-pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `chutes-build login`, set CHUTES_API_KEY, or add api_key to ~/.chutes-build/config.toml.";
+pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Set CHUTES_API_KEY to your Chutes API key, or add a per-model api_key to ~/.chutes-build/config.toml.";
 
 /// Next ACP method id when `cached_token` cannot proceed (missing / expired / legacy WebLogin), or `None` when fallthrough is forbidden.
 /// Unpinned: prefer non-interactive `chutes.api_key` when advertiseable, else interactive `grok.com`. Pinned `oidc`: **no** fallthrough to api_key; return `None` so the caller fails auth.
@@ -469,6 +483,7 @@ mod tests {
             login_label: None,
             has_auth_provider_command: false,
             preferred_method: None,
+            distribution: Distribution::STOCK,
         }
     }
 
@@ -866,16 +881,16 @@ mod tests {
         assert_eq!(read_chutes_api_key_env().unwrap(), "new-key");
     }
 
-    // -- chutes-build login --legacy regression coverage ------------------------ `chutes-build login --legacy` produces a GrokAuth with `auth_mode: WebLogin`, `oidc_issuer: None`, and no `expires_at` (30-day hardcoded TTL)
-    // When this token is in the `CHUTES_BUILD_AUTH` env var (or the legacy scope fallback in auth.json), `AuthManager::new` returns it from `current()`
-    // That feeds `has_cached_token = true` into `build_auth_methods`, which puts `cached_token` first `startup_auth_metadata()` then returns `needs_login = false`: legacy users get frictionless auth, no login screen This test pins the env-var path (highest priority in AuthManager) end-to-end
+    // -- API-key-only contract: no session may authenticate ------------------------ A legacy
+    // auth token (WebLogin, no expires_at) in the `CHUTES_BUILD_AUTH` env var MUST be ignored:
+    // `AuthManager` serves no session and `build_auth_methods` advertises nothing, so the pager
+    // shows the API-key setup screen instead of a login. This test pins the env-var path end-to-end.
 
-    /// END-TO-END REGRESSION TEST for a legacy auth token (WebLogin, no expires_at) in the `CHUTES_BUILD_AUTH` env var with no other auth available.
-    /// `AuthManager` MUST load it and `build_auth_methods` must advertise `cached_token` first.
-    /// The pager therefore skips the login screen (frictionless legacy auth).
+    /// A legacy-style token in `CHUTES_BUILD_AUTH` is ignored without account logins.
+    /// Neither `AuthManager` nor the advertised methods may honor it.
     #[test]
     #[serial]
-    fn grok_login_legacy_token_does_not_require_login() {
+    fn legacy_token_in_env_ignored_without_account_login() {
         use xai_grok_login::{AuthManager, AuthMode, GrokAuth, GrokComConfig};
 
         // Ensure clean slate for "no other auth available".
@@ -898,58 +913,36 @@ mod tests {
         };
 
         // Provide it via the CHUTES_BUILD_AUTH env var (highest priority code path in AuthManager::new)
-        // This is the "legacy auth token exists in the env" case with no other auth
         let legacy_json = serde_json::to_string(&legacy_token).expect("serialize legacy token");
         let _g = EnvGuard::set("CHUTES_BUILD_AUTH", &legacy_json);
 
-        // AuthManager picks it up from the env var directly (no file needed).
+        // AuthManager serves no session from the env var: this build has no login store.
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig::default();
         let mgr = AuthManager::new(dir.path(), cfg);
-        let current = mgr.current();
         assert!(
-            current.is_some(),
-            "legacy token in CHUTES_BUILD_AUTH env MUST be loaded directly -- if this fails, \
-             users with legacy auth in env would be sent to the login screen",
-        );
-        assert_eq!(
-            current.as_ref().unwrap().key,
-            "legacy-relay-token",
-            "loaded token must match the one injected via env",
+            mgr.current().is_none(),
+            "legacy token in CHUTES_BUILD_AUTH env MUST be ignored -- if this fails, \
+             a stale session could authenticate an API-key-only build",
         );
 
         // Derive has_cached_token exactly as initialize() does
         let has_cached_token = mgr.current().is_some();
-        assert!(has_cached_token);
+        assert!(!has_cached_token);
 
-        // With only this legacy token (no xai api key), the first method must be cached_token so the pager skips the login screen
+        // With no API key, an API-key-only distribution advertises nothing at all,
+        // so the pager shows the API-key setup screen instead of a login.
         let built = build_auth_methods(AuthMethodsBuildInputs {
             has_external_api_key: false,
             has_cached_token,
+            distribution: Distribution::withholding(&[Capability::AccountLogin]),
             ..default_inputs()
         });
-
-        assert_eq!(
-            first_kind(&built.methods),
-            Some(AuthMethodKind::CachedToken),
-            "legacy token in env: cached_token MUST be auth_methods.first() \
-             (pager startup_auth_metadata returns needs_login=false)",
-        );
         assert!(
-            built
-                .methods
-                .first()
-                .is_some_and(|m| !AuthMethodKind::from_id(m.id()).needs_interactive_login()),
-            "auth_methods.first() MUST NOT need interactive login when legacy token \
-             is in env -- prevents login screen regression",
+            built.methods.is_empty(),
+            "no session, login, or provider method may leak through"
         );
-        assert_eq!(
-            built
-                .default_auth_method_id
-                .as_ref()
-                .map(|id| id.0.as_ref()),
-            Some(CACHED_TOKEN_AUTH_METHOD_ID),
-        );
+        assert!(built.default_auth_method_id.is_none());
     }
 
     /// Negative case for the legacy flow: when auth.json does NOT contain a legacy-scope entry, AuthManager::current() is None.
@@ -1032,5 +1025,61 @@ mod tests {
         });
         assert_eq!(method_ids(&built), vec![CHUTES_BUILD_COM_METHOD_ID]);
         assert!(built.default_auth_method_id.is_none());
+    }
+
+    // ── API-key-only distribution (AccountLogin withheld) ──────────────
+
+    fn key_only_inputs() -> AuthMethodsBuildInputs<'static> {
+        AuthMethodsBuildInputs {
+            has_cached_token: true,
+            has_enterprise_oidc: true,
+            enterprise_oidc_issuer: Some("https://sso.example.com"),
+            login_label: Some("Acme Corp"),
+            has_auth_provider_command: true,
+            distribution: Distribution::withholding(&[Capability::AccountLogin]),
+            ..default_inputs()
+        }
+    }
+
+    /// A distribution without account logins never advertises sessions or login methods:
+    /// with a key it offers only `chutes.api_key`, ignoring tokens, pins, OIDC, and provider commands.
+    #[test]
+    fn withheld_login_with_key_advertises_only_api_key() {
+        for preferred_method in [
+            None,
+            Some(PreferredAuthMethod::ApiKey),
+            Some(PreferredAuthMethod::Oidc),
+        ] {
+            let built = build_auth_methods(AuthMethodsBuildInputs {
+                has_external_api_key: true,
+                preferred_method,
+                ..key_only_inputs()
+            });
+            assert_eq!(method_ids(&built), vec![XAI_API_KEY_METHOD_ID]);
+            assert_eq!(default_id(&built), Some(XAI_API_KEY_METHOD_ID));
+        }
+    }
+
+    /// Without a key the same distribution advertises nothing at all: no cached
+    /// session may authenticate and no login may be offered. The pager turns the
+    /// empty list into the API-key setup screen.
+    #[test]
+    fn withheld_login_without_key_advertises_nothing() {
+        for preferred_method in [
+            None,
+            Some(PreferredAuthMethod::ApiKey),
+            Some(PreferredAuthMethod::Oidc),
+        ] {
+            let built = build_auth_methods(AuthMethodsBuildInputs {
+                has_external_api_key: false,
+                preferred_method,
+                ..key_only_inputs()
+            });
+            assert!(
+                built.methods.is_empty(),
+                "no session, login, or provider method may leak through"
+            );
+            assert!(built.default_auth_method_id.is_none());
+        }
     }
 }

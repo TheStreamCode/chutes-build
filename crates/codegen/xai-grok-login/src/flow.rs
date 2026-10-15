@@ -608,6 +608,10 @@ pub(super) async fn run_auth_flow_steps(
         )
         .await;
     }
+    if let Some(refusal) = Distribution::current().refusal(Capability::AccountLogin) {
+        tracing::error!("auth: login flow reached in an API-key-only build");
+        anyhow::bail!("{refusal}");
+    }
     tracing::error!(
         "auth: no OAuth2 configuration available (neither enterprise OIDC nor xAI OAuth2 configured)"
     );

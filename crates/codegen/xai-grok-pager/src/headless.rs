@@ -410,18 +410,10 @@ fn auto_respond_to_permissions(
     None
 }
 /// "Not signed in" error message, tailored to the session type.
-fn auth_required_message(interactive: bool) -> String {
-    if interactive {
-        "Not signed in. Run `chutes-build login` to authenticate \
-         (or `chutes-build login --device-code` if no browser is available)."
-            .to_string()
-    } else {
-        "Not signed in. To authenticate without a browser, run:\n  \
-         chutes-build login --device-code\n\n\
-         Alternatively, set the CHUTES_API_KEY environment variable \
-         or run `chutes-build login` on a machine with a browser."
-            .to_string()
-    }
+/// This build has no account sign-in: the Chutes API key is the only credential.
+fn auth_required_message(_interactive: bool) -> String {
+    "Not signed in. Set the CHUTES_API_KEY environment variable to your Chutes API key and retry."
+        .to_string()
 }
 /// The same backend switch the TUI applies; the shell unless another backend is enabled.
 async fn spawn_agent(

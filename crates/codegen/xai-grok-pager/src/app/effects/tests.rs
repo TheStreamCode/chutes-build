@@ -2818,21 +2818,23 @@ fn format_session_info_api_key_without_env() {
     assert!(!text.contains("CHUTES_API_KEY"), "{text}");
     assert!(!text.contains("Manage account and credits"), "{text}");
     assert!(
-            text.contains("Run `chutes-build login` to use your SuperGrok subscription instead."),
-            "{text}"
+            !text.contains("chutes-build login"),
+            "API-key-only build must not upsell a login: {text}"
         );
+    assert!(!text.contains("SuperGrok"), "{text}");
     assert!(!text.contains("grok.com"), "{text}");
 }
 #[test]
-fn format_session_info_api_key_auth_suggests_grok_login() {
+fn format_session_info_api_key_auth_suggests_no_login() {
     let info = make_session_info("auto", None, 1000, 10000);
     let text = format_session_info(&info, None, false, true, true);
     assert!(text.contains("Auth method: API key (CHUTES_API_KEY)"), "{text}");
     assert!(!text.contains("Manage account and credits"), "{text}");
     assert!(
-            text.contains("Run `chutes-build login` to use your SuperGrok subscription instead."),
-            "{text}"
+            !text.contains("chutes-build login"),
+            "API-key-only build must not upsell a login: {text}"
         );
+    assert!(!text.contains("SuperGrok"), "{text}");
     assert!(!text.contains("Also present: CHUTES_API_KEY"), "{text}");
     assert!(!text.contains("console.chutes.ai"), "{text}");
     assert!(!text.contains("grok.com"), "{text}");

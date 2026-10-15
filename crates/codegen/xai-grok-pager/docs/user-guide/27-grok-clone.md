@@ -70,12 +70,12 @@ The two are separate worlds:
 
 | World | Covers | Commands | Store |
 |-------|--------|----------|-------|
-| Chutes Build | the model and API | `chutes-build login`, `chutes-build logout` | `~/.chutes-build/auth.json` |
+| Chutes Build | the model and API | `CHUTES_API_KEY` | the process environment |
 
-`grok clone` never reads `~/.chutes-build/auth.json` for Git. Signing into Chutes Build does not
-give the daemon a credential for the remote, and neither does
-`[clone] enabled = true`: that flag is a **product gate** deciding whether
-`grok clone` runs at all, not authorization for GitHub.
+`grok clone` never reads Chutes Build credentials for Git. Setting
+`CHUTES_API_KEY` does not give the daemon a credential for the remote, and
+neither does `[clone] enabled = true`: that flag is a **product gate**
+deciding whether `grok clone` runs at all, not authorization for GitHub.
 
 When Grove classifies a failure as a credential problem, the clone prints the
 class and the commands that own it, without the remote URL:

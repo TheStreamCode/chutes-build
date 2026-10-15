@@ -4,6 +4,37 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-15
+
+### Fixed
+
+- **Authentication is API-key-only: no login screen, ever.** Starting without
+  a key showed a `Login with Chutes Build` option that could only fail with
+  `No OAuth2 configuration available. Run 'chutes-build login'`. The Chutes
+  distribution now withholds account login end to end: no login method is
+  advertised, no session (inline env or `auth.json`) is served or honored,
+  the blocked screen names the one credential (`CHUTES_API_KEY`) instead of
+  a dead login option, and `chutes-build login` / `logout` explain the
+  setup instead of starting an OAuth flow. All headless, ACP, and sampling
+  auth errors point at the API key too.
+- **Terminal tab no longer says `grok`.** The TUI title string is now
+  `chutes-build` (or `<title> - chutes-build`), still within the 80-column
+  guarantee.
+
+### Tests
+
+- New pins: API-key-only method advertising (with and without a key, across
+  all `preferred_method` pins), ignored legacy session env, ignored session
+  in the `models` banner precedence, and the blocked-screen API-key setup
+  text with no login option.
+- Known limitation: the `xai-grok-login` session-store machinery tests
+  (~106: manager refresh/recovery, OIDC refresher, device code) fail in
+  this build because the login store they exercise is intentionally absent
+  — reads find nothing and writes are refused by the pre-existing
+  distribution gate. They are not run by CI; the injected-distribution
+  storage tests pin both sides (STOCK reads/writes, withheld finds
+  nothing and refuses writes).
+
 ## [1.5.0] - 2026-10-15
 
 ### Changed

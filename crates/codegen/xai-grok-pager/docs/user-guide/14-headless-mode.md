@@ -569,14 +569,10 @@ chutes-build -p "Run the test suite" --yolo
 
 ## Authentication for Headless Environments
 
-For headless use, authenticate with one of:
-
-- **`CHUTES_API_KEY`**: simplest for CI. See [Environment Variables](#environment-variables-for-headless) above.
-- **`chutes-build login --device-auth`** (or `--device-code`): no browser needed on the target machine.
-  See [Authentication > Device Code Flow](02-authentication.md#device-code-flow).
-- **`chutes-build login`**: browser-based OAuth2 on machines with a GUI.
-
-If you've previously logged in, cached credentials are used automatically.
+For headless use, set **`CHUTES_API_KEY`**: simplest for CI. See
+[Environment Variables](#environment-variables-for-headless) above. There is
+no login flow: without a key, headless runs fail with a message naming
+`CHUTES_API_KEY`.
 
 ---
 

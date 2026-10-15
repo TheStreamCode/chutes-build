@@ -58,17 +58,12 @@ export CHUTES_API_KEY="cpk_..."
 chutes-build
 ```
 
-The API key is the primary credential and the one that always works. Chutes Build
-stores what you paste in `~/.chutes-build/auth.json`, with owner-only permissions,
-and reuses it across sessions.
+The API key is the only credential: there is no browser login, no device-code
+flow, and no session to store. Export the key and start; without one, the
+start screen tells you to set `CHUTES_API_KEY`.
 
-Browser login is available as well, but it is opt-in: it needs an OAuth application
-you register in your own account area, since there is no shared app that could sign
-in on your behalf. Set `CHUTES_BUILD_OAUTH2_CLIENT_ID` to its client ID and
-`chutes-build login` will use it; without one, `login` tells you to use the API key.
-
-See [Authentication](02-authentication.md) for the full set of auth options,
-including OIDC, external auth providers, and the device code flow.
+See [Authentication](02-authentication.md) for per-model keys, precedence,
+and troubleshooting.
 
 ---
 
