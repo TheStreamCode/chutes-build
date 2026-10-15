@@ -21,7 +21,7 @@ Chutes Build processes the prompt, runs any necessary tools, and prints the resu
 | Flag                    | Description                                           |
 | ----------------------- | ----------------------------------------------------- |
 | `-p, --single <PROMPT>` | The prompt to send (or use `--prompt-json` / `--prompt-file`) |
-| `-m, --model <MODEL>`   | Model to use (e.g., `grok-4.6`)              |
+| `-m, --model <MODEL>`   | Model to use (e.g., `model-router`)              |
 | `-s, --session-id <ID>` | Create a **new** session with this **UUID** (errors if invalid UUID or already in use under the target session directory; does not resume, use `-r`/`-c`) |
 | `--fork-session`        | With `-r`/`-c`, fork into a new session ID instead of appending to the original |
 | `-r, --resume <ID_OR_TITLE>` | Resume an existing session by ID, or by title for the current directory, ignoring letter case (a sole manually renamed match wins among duplicates; remaining duplicates error with their IDs; UUID-shaped values always take the ID path; scripts should prefer IDs) |
@@ -150,7 +150,7 @@ ACP/Messages token (`end_turn`, `max_tokens`, …).
     "total_tokens": 50103
   },
   "modelUsage": {
-    "grok-4.6": {
+    "model-router": {
       "inputTokens": 7210,
       "outputTokens": 1893,
       "cacheReadInputTokens": 41000,
@@ -211,7 +211,7 @@ failures may also include frozen spend fields when usage was recorded:
 
 ### streaming-json
 
-Newline-delimited JSON, one `type`-tagged object per line, derived from the agent's ACP session updates. Leaf field names (`toolCallId`, `kind`, `rawInput`, `rawOutput`) follow ACP; `toolName` and the `usage` line are xAI additions. Consume it by switching on `type`.
+Newline-delimited JSON, one `type`-tagged object per line, derived from the agent's ACP session updates. Leaf field names (`toolCallId`, `kind`, `rawInput`, `rawOutput`) follow ACP; `toolName` and the `usage` line are Chutes Build additions. Consume it by switching on `type`.
 
 ```json
 {"type":"thought","data":"Analyzing the directory structure..."}
@@ -250,13 +250,13 @@ Chutes Build may also emit `max_turns_reached` and `auto_compact_*` events; trea
 
 Newline-delimited JSON in the Messages API `stream-json` wire format. The data-bearing surface matches the Messages shape exactly. This includes the `assistant`/`user` message bodies, `usage`, `tool_use`/`tool_result`, inline web search, `stop_reason`, and the `--include-partial-messages` event framing. A consumer that reconstructs messages, reads spend, or detects errors works without changes.
 
-The `system`/`init` and terminal `result` lines carry metadata. Chutes Build emits the fields it has real data for and omits pure-placeholder fields it cannot fill, rather than zero-filling them. As a result, those two lines may not pass strict `init`/`result` schema validation. The individual fields are listed below. Read the fidelity notes before treating any one field as authoritative. For a clean xAI-native stream with no placeholder shape, use `streaming-json`.
+The `system`/`init` and terminal `result` lines carry metadata. Chutes Build emits the fields it has real data for and omits pure-placeholder fields it cannot fill, rather than zero-filling them. As a result, those two lines may not pass strict `init`/`result` schema validation. The individual fields are listed below. Read the fidelity notes before treating any one field as authoritative. For a clean Chutes-native stream with no placeholder shape, use `streaming-json`.
 
 The stream opens with a `system`/`init` line, then `assistant` messages whose `message.content[]` holds `text`, `thinking`, and `tool_use` blocks, `user` messages carrying `tool_result` blocks, and a terminal `result`:
 
 ```json
-{"type":"system","subtype":"init","session_id":"abc123","apiKeySource":"user","model":"grok-4.6","cwd":"/repo","permissionMode":"default","tools":["read_file","bash"],"slash_commands":["review"],"mcp_servers":[{"name":"linear","status":"connected"}],"skills":[],"uuid":"..."}
-{"type":"assistant","message":{"id":"msg_0","type":"message","role":"assistant","model":"grok-4.6","content":[{"type":"text","text":"Let me read the file."},{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"src/main.rs"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{...}},"parent_tool_use_id":null,"session_id":"abc123","uuid":"..."}
+{"type":"system","subtype":"init","session_id":"abc123","apiKeySource":"user","model":"model-router","cwd":"/repo","permissionMode":"default","tools":["read_file","bash"],"slash_commands":["review"],"mcp_servers":[{"name":"linear","status":"connected"}],"skills":[],"uuid":"..."}
+{"type":"assistant","message":{"id":"msg_0","type":"message","role":"assistant","model":"model-router","content":[{"type":"text","text":"Let me read the file."},{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"src/main.rs"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{...}},"parent_tool_use_id":null,"session_id":"abc123","uuid":"..."}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"fn main() {}","is_error":false}]},"parent_tool_use_id":null,"session_id":"abc123","uuid":"..."}
 {"type":"result","subtype":"success","is_error":false,"duration_ms":0,"duration_api_ms":0,"num_turns":7,"result":"Here's a summary...","stop_reason":"end_turn","total_cost_usd":0.0127,"usage":{"input_tokens":812,"output_tokens":210,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"server_tool_use":{"web_search_requests":0}},"modelUsage":{},"session_id":"abc123","uuid":"..."}
 ```
@@ -457,7 +457,7 @@ class GrokChat:
                 "--output-format", "streaming-json" if stream else "json",
                 "--yolo"]
 
-    async def create(self, messages, model="grok-4.6", stream=False):
+    async def create(self, messages, model="model-router", stream=False):
         prompt = messages[-1]["content"] if len(messages) == 1 else "\n".join(
             f"{m['role']}: {m['content']}" for m in messages
         )
@@ -547,10 +547,10 @@ Key environment variables that affect headless mode:
 | `CHUTES_BUILD_LOG_FILE`                | Path to a log file (used verbatim as the path; works in headless and TUI, honors `RUST_LOG`) |
 | `RUST_LOG`                     | Log level filter (e.g. `debug`). Headless logs to stderr.     |
 
-For CI environments without browser access, set `CHUTES_API_KEY` with an API key from [console.x.ai](https://console.x.ai):
+For CI environments without browser access, set `CHUTES_API_KEY` with an API key from [console.chutes.ai](https://console.chutes.ai):
 
 ```bash
-export CHUTES_API_KEY="xai-..."
+export CHUTES_API_KEY="cpk_..."
 chutes-build -p "Run the test suite" --yolo
 ```
 
@@ -629,7 +629,7 @@ For containers or CI, mount `~/.chutes-build` read-only:
 - Update checks log a warning and skip
 
 ```bash
-export CHUTES_API_KEY="xai-..."
+export CHUTES_API_KEY="cpk_..."
 export CHUTES_BUILD_DISABLE_AUTOUPDATER=1
 chutes-build -p "..." --no-auto-update
 ```

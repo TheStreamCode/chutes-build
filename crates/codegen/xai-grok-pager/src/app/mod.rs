@@ -305,7 +305,7 @@ fn resolve_voice_mode_enabled_as(
     if !distribution.allows(xai_grok_config::Capability::Voice) {
         return false;
     }
-    let resolved = Feature::VoiceMode.resolve(FeatureSources {
+    let resolved = Feature::VoiceMode.resolve_as(distribution, FeatureSources {
         pin: requirement,
         config,
         remote,
@@ -318,7 +318,19 @@ fn resolve_voice_mode_enabled_as(
 }
 /// Resolve from live policy, env, remote, and API-key state.
 pub(crate) fn resolve_voice_mode_live(remote: Option<bool>, is_api_key: bool) -> bool {
-    resolve_voice_mode_enabled(
+    resolve_voice_mode_live_as(
+        xai_grok_config::Distribution::current(),
+        remote,
+        is_api_key,
+    )
+}
+pub(crate) fn resolve_voice_mode_live_as(
+    distribution: xai_grok_config::Distribution,
+    remote: Option<bool>,
+    is_api_key: bool,
+) -> bool {
+    resolve_voice_mode_enabled_as(
+        distribution,
         voice_mode_requirement_pin(),
         voice_mode_config_value(),
         remote,
@@ -350,8 +362,22 @@ mod voice_gate_tests {
     }
     #[test]
     fn api_key_force_on_over_remote_kill_only() {
-        assert!(resolve_voice_mode_enabled(None, None, Some(false), true));
-        assert!(!resolve_voice_mode_enabled(None, None, Some(false), false));
+        // Api-key precedence is distribution-independent; resolve as STOCK
+        // so the CHUTES voice withhold does not mask it.
+        assert!(resolve_voice_mode_enabled_as(
+            Distribution::STOCK,
+            None,
+            None,
+            Some(false),
+            true
+        ));
+        assert!(!resolve_voice_mode_enabled_as(
+            Distribution::STOCK,
+            None,
+            None,
+            Some(false),
+            false
+        ));
     }
     #[test]
     fn policy_false_outranks_api_key_force_on() {

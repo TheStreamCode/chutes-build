@@ -120,7 +120,11 @@ fn every_registered_feature_reads_its_own_remote_setting() {
             }
         }
 
-        let resolved = spec.id.resolve(FeatureSources {
+        // Resolve against STOCK, not the current distribution: this pins the
+        // remote-setting wiring per feature, while capability withholding
+        // (e.g. Voice/Telemetry in the Chutes distribution) is pinned
+        // separately and would otherwise mask the wiring.
+        let resolved = spec.id.resolve_as(Distribution::STOCK, FeatureSources {
             remote: spec.id.remote_value(Some(&settings)),
             ..Default::default()
         });
@@ -134,6 +138,30 @@ fn every_registered_feature_reads_its_own_remote_setting() {
             resolved.value, value,
             "{} reads another feature's setting",
             spec.key,
+        );
+    }
+}
+
+#[test]
+fn telemetry_gated_features_stay_off_in_the_chutes_distribution() {
+    // Feedback, its trace card, and voice dictation report to (or are driven
+    // from) the vendor: with Telemetry/Voice withheld they resolve false no
+    // matter what config, env, or remote settings say.
+    for feature in [
+        Feature::Feedback,
+        Feature::FeedbackTraceCard,
+        Feature::VoiceMode,
+    ] {
+        let resolved = feature.resolve(FeatureSources {
+            config: Some(true),
+            env: Some(true),
+            remote: Some(true),
+            ..Default::default()
+        });
+        assert!(
+            !resolved.value,
+            "{:?} must stay off in this distribution",
+            feature
         );
     }
 }

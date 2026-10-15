@@ -18,11 +18,17 @@ pub struct GrokBuildEndpoints {
     pub ws_origin: &'static str,
 }
 const PRODUCTION_ENDPOINTS: GrokBuildEndpoints = GrokBuildEndpoints {
-    cli_chat_proxy_base_url: "https://cli-chat-proxy.grok.com/v1",
-    asset_server_url: "https://assets.grok.com",
-    relay_ws_url: "wss://code.grok.com/ws/code-agent",
-    gateway_ws_url: "wss://grok.com/ws/gw/",
-    ws_origin: "https://grok.com",
+    // Inference (API-key and session) and the model catalog resolve here.
+    // Every other service that falls back to this base is withheld by the
+    // distribution (telemetry, trace upload) or gated on explicit operator
+    // config (managed sync), so nothing phones home unexpectedly.
+    cli_chat_proxy_base_url: "https://llm.chutes.ai/v1",
+    asset_server_url: "https://api.chutes.ai",
+    // Remote control is off in this distribution; the relay/gateway defaults
+    // point at the discard port so even a misconfigured client connects nowhere.
+    relay_ws_url: "ws://127.0.0.1:9/chutes-build-relay-disabled",
+    gateway_ws_url: "ws://127.0.0.1:9/chutes-build-gateway-disabled",
+    ws_origin: "https://chutes.ai",
 };
 pub const PROD_CLI_CHAT_PROXY_BASE_URL: &str = PRODUCTION_ENDPOINTS.cli_chat_proxy_base_url;
 pub const PROD_ASSET_SERVER_URL: &str = PRODUCTION_ENDPOINTS.asset_server_url;
@@ -75,7 +81,9 @@ impl GrokBuildEnvironment {
     pub fn asset_server_url(&self) -> String {
         self.resolve("_ASSET_SERVER_URL", self.endpoints().asset_server_url)
     }
-    /// The relay WebSocket URL (Web Frontend at `grok.com/code` driving a local agent).
+    /// The relay WebSocket URL. Remote control is off in this distribution;
+    /// the default is the discard port, and any explicit URL still needs the
+    /// RemoteControl capability before a connection is attempted.
     /// Not the cloud-sandbox gateway ([`Self::gateway_ws_url`]); the two speak different protocols.
     pub fn relay_ws_url(&self) -> String {
         self.resolve("_WS_URL", self.endpoints().relay_ws_url)

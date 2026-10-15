@@ -7,7 +7,6 @@ mod model_source;
 pub mod pull;
 #[cfg(test)]
 mod pull_smoke_test;
-pub(crate) mod skills_client;
 pub mod sync;
 pub mod workspaces_client;
 pub use agent::{
@@ -34,10 +33,6 @@ pub use conversations_client::{
 };
 pub(crate) use model_source::{ModelSource, active_model_source};
 pub use pull::{PullResult, pull_session_to_local};
-pub use skills_client::{
-    BundledSkill, CHAT_PRODUCT_META_KEY, CHAT_PRODUCT_META_VALUE, ListBundledSkillsResponse,
-    ListUserSkillsResponse, ProductSkillsCatalog, SkillsClient, SkillsError, UserSkill,
-};
 pub use sync::RemoteSync;
 pub use workspaces_client::{ListWorkspacesPage, Workspace, WorkspacesClient, WsError, WsQuery};
 pub use xai_grok_cloud_config::{SettingsFetch, fetch_settings_blocking};

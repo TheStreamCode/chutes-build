@@ -57,8 +57,8 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `auth.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also CHUTES_BUILD_AUTH_TOKEN_TTL; also valid as `grok_com_config.auth_token_ttl`. |
 | `auth.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth so only the deployment IdP can log in. Also CHUTES_BUILD_DISABLE_API_KEY_AUTH; also valid as `grok_com_config.disable_api_key_auth`. |
 | `auth.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID, or any of an array; empty array fails closed. Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID; also valid as `grok_com_config.force_login_team_uuid`. |
-| `auth.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for grok.com. Also CHUTES_BUILD_WS_ORIGIN; also valid as `grok_com_config.grok_ws_origin`. |
-| `auth.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Also CHUTES_BUILD_WS_URL; also valid as `grok_com_config.grok_ws_url`. |
+| `auth.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN. |
+| `auth.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL. |
 | `auth.oauth2` | `table` | `yes` | `user` | OAuth2 provider used when enterprise OIDC is unset; also valid as `grok_com_config.oauth2`. |
 | `auth.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id. Also CHUTES_BUILD_OAUTH2_CLIENT_ID; also valid as `grok_com_config.oauth2.client_id`. |
 | `auth.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL. Also CHUTES_BUILD_OAUTH2_ISSUER; also valid as `grok_com_config.oauth2.issuer`. |
@@ -268,8 +268,8 @@ User-level configuration lives in `$CHUTES_BUILD_HOME/config.toml` (default `~/.
 | `grok_com_config.auth_token_ttl` | `number` | `yes` | `user` | Token TTL in seconds for providers that return a bare token. Also CHUTES_BUILD_AUTH_TOKEN_TTL. |
 | `grok_com_config.disable_api_key_auth` | `boolean` | `pin` | `user` | Refuse API-key auth so only the deployment IdP can log in. Also CHUTES_BUILD_DISABLE_API_KEY_AUTH. |
 | `grok_com_config.force_login_team_uuid` | `string / string[]` | `pin` | `user` | Require login to this team UUID, or any of an array; empty array fails closed. Also CHUTES_BUILD_FORCE_LOGIN_TEAM_ID. |
-| `grok_com_config.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for grok.com. Also CHUTES_BUILD_WS_ORIGIN. |
-| `grok_com_config.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Also CHUTES_BUILD_WS_URL. |
+| `grok_com_config.grok_ws_origin` | `string` | `yes` | `user` | Websocket origin for remote control. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_ORIGIN. |
+| `grok_com_config.grok_ws_url` | `string` | `yes` | `user` | Relay websocket URL. Remote control is off in this build; retained for compatibility. Also CHUTES_BUILD_WS_URL. |
 | `grok_com_config.oauth2` | `table` | `yes` | `user` | OAuth2 provider used when enterprise OIDC is unset. |
 | `grok_com_config.oauth2.client_id` | `string` | `yes` | `user` | OAuth2 client id. Also CHUTES_BUILD_OAUTH2_CLIENT_ID. |
 | `grok_com_config.oauth2.issuer` | `string` | `yes` | `user` | OAuth2 issuer URL. Also CHUTES_BUILD_OAUTH2_ISSUER. |

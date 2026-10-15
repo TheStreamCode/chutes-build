@@ -68,7 +68,7 @@ Built-in types still exist as host types. The model cannot pick them by name. An
 
 Project- or user-defined agents can add new types or shadow these built-ins by name.
 
-`spawn_subagent` has an optional `subagent_type` enum when plugin, project, or user agents exist. Its values are those agents, for example `my-plugin:reviewer`. Built-in names and xAI-bundled agents are not listed. If a parent's `tools` list restricts spawning with `Agent(...)`, the enum shows only the allowed types. An unknown type fails the call with the list of valid types.
+`spawn_subagent` has an optional `subagent_type` enum when plugin, project, or user agents exist. Its values are those agents, for example `my-plugin:reviewer`. Built-in names and bundled agents are not listed. If a parent's `tools` list restricts spawning with `Agent(...)`, the enum shows only the allowed types. An unknown type fails the call with the list of valid types.
 
 ---
 
@@ -277,20 +277,20 @@ explore = true                       # default -- omit to keep enabled
 plan = false                         # disable the plan subagent
 
 [subagents.models]
-explore = "grok-4.6"                 # route explore to a specific model
+explore = "model-router"                 # route explore to a specific model
 ```
 
 Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model.
 
 ### Model Selection by the Agent
 
-The `spawn_subagent` tool offers the agent a `model` argument, and its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `CHUTES_BUILD_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden whenever every model in your picker is an xAI model: subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected. Read when a session starts; changing it requires a restart. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
+The `spawn_subagent` tool offers the agent a `model` argument, and its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `CHUTES_BUILD_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden whenever every model in your picker is a first-party model: subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected. Read when a session starts; changing it requires a restart. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
 
 You can also toggle it from `/settings` → Models → **Subagent model inheritance**:
 
 - On: Chutes Build cannot set models for subagents
 - Off: Chutes Build may choose a different model for a subagent. Takes effect after restart.
-- NOTE: This setting only applies when all models are xAI "model_family". You likely don't need to configure this setting.
+- NOTE: This setting only applies when all models share a first-party "model_family". You likely don't need to configure this setting.
 
 The row shows the value that applies after restart. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`); `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `CHUTES_BUILD_CONFIG` overlay, or an active campaign — both the toggle and the reset are refused with a toast that names that layer.
 
@@ -302,7 +302,7 @@ Define custom roles with their own capability and model defaults:
 [subagents.roles.researcher]
 description = "Deep research agent"
 default_capability_mode = "read-only"
-model = "grok-4.6"
+model = "model-router"
 prompt_file = ".chutes-build/prompts/researcher.md"
 ```
 
@@ -339,7 +339,7 @@ Subagents appear in several places in the interactive TUI:
 
 When a subagent is spawned, a compact lifecycle block is added to the *parent's* scrollback:
 
-- `Subagent running: "do the thing" (Implementer · grok-4.6) · Thinking`
+- `Subagent running: "do the thing" (Implementer · model-router) · Thinking`
 - Or for background subagents: `Subagent started: "..."`
 
 While running, the block shows a live activity suffix (e.g. "Running: cargo test", "Compacting", "Retrying (2/3)") pulled from the child's turn tracker. The bullet animates (or is colored) according to state.

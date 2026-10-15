@@ -44,15 +44,15 @@ use xai_grok_auth::bearer_suffix;
 
 pub use xai_grok_sampling_types::ApiBackend;
 
-/// Process-level fallback for the `x-grok-client-identifier` header.
-const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
+/// Process-level fallback for the `x-chutes-build-identifier` header.
+const DEFAULT_CLIENT_IDENTIFIER: &str = "chutes-build";
 
 /// Product identifier baked into User-Agent strings.
-const AGENT_PRODUCT: &str = "grok-shell";
+const AGENT_PRODUCT: &str = "chutes-build";
 const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
-/// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
-struct GrokRequestHeaders<'a> {
+/// Per-request `x-chutes-build-*` headers. Optional fields are skipped when empty/`None`.
+struct ChutesRequestHeaders<'a> {
     conv_id: &'a str,
     req_id: &'a str,
     model_id: &'a str,
@@ -65,25 +65,25 @@ struct GrokRequestHeaders<'a> {
     user_id: Option<&'a str>,
 }
 
-impl GrokRequestHeaders<'_> {
+impl ChutesRequestHeaders<'_> {
     fn apply(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         let mut b = builder
-            .header("x-grok-conv-id", self.conv_id)
-            .header("x-grok-req-id", self.req_id)
-            .header("x-grok-model-override", self.model_id)
-            .header("x-grok-session-id", self.session_id)
-            .header("x-grok-agent-id", self.agent_id);
+            .header("x-chutes-build-conv-id", self.conv_id)
+            .header("x-chutes-build-req-id", self.req_id)
+            .header("x-chutes-build-model-override", self.model_id)
+            .header("x-chutes-build-session-id", self.session_id)
+            .header("x-chutes-build-agent-id", self.agent_id);
         if let Some(idx) = self.turn_idx {
-            b = b.header("x-grok-turn-idx", idx);
+            b = b.header("x-chutes-build-turn-idx", idx);
         }
         if let Some(attempt) = self.transient_retry {
-            b = b.header("x-grok-transient-retry", attempt);
+            b = b.header("x-chutes-build-transient-retry", attempt);
         }
         if let Some(id) = self.deployment_id.filter(|s| !s.is_empty()) {
-            b = b.header("x-grok-deployment-id", id);
+            b = b.header("x-chutes-build-deployment-id", id);
         }
         if let Some(id) = self.user_id.filter(|s| !s.is_empty()) {
-            b = b.header("x-grok-user-id", id);
+            b = b.header("x-chutes-build-user-id", id);
         }
         b
     }
@@ -557,12 +557,12 @@ impl SamplingClient {
             &mut headers,
         );
 
-        // Add x-grok-client-version header for version gating at the proxy.
+        // Identify the client release to the serving backend.
         if let Some(client_version) = config.client_version.as_ref()
             && let Ok(header_value) = HeaderValue::from_str(client_version)
         {
             headers.insert(
-                HeaderName::from_static("x-grok-client-version"),
+                HeaderName::from_static("x-chutes-build-version"),
                 header_value,
             );
         }
@@ -571,7 +571,7 @@ impl SamplingClient {
             && let Ok(header_value) = HeaderValue::from_str(deployment_id)
         {
             headers.insert(
-                HeaderName::from_static("x-grok-deployment-id"),
+                HeaderName::from_static("x-chutes-build-deployment-id"),
                 header_value,
             );
         }
@@ -579,14 +579,17 @@ impl SamplingClient {
         if let Some(user_id) = config.user_id.as_ref()
             && let Ok(header_value) = HeaderValue::from_str(user_id)
         {
-            headers.insert(HeaderName::from_static("x-grok-user-id"), header_value);
+            headers.insert(
+                HeaderName::from_static("x-chutes-build-user-id"),
+                header_value,
+            );
         }
 
         if let Some(conversation_group_id) = config.conversation_group_id.as_ref()
             && let Ok(header_value) = HeaderValue::from_str(conversation_group_id.as_ref())
         {
             headers.insert(
-                HeaderName::from_static("x-grok-conv-group-id"),
+                HeaderName::from_static("x-chutes-build-conv-group-id"),
                 header_value,
             );
         }
@@ -598,7 +601,7 @@ impl SamplingClient {
                 .unwrap_or_else(|| DEFAULT_CLIENT_IDENTIFIER.to_string());
             if let Ok(header_value) = HeaderValue::from_str(&client_id) {
                 headers.insert(
-                    HeaderName::from_static("x-grok-client-identifier"),
+                    HeaderName::from_static("x-chutes-build-identifier"),
                     header_value,
                 );
             }
@@ -940,7 +943,7 @@ impl SamplingClient {
             "Sending chat completion request"
         );
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -957,7 +960,7 @@ impl SamplingClient {
             sent_bearer,
         } = self.post(self.endpoint("chat/completions"));
         let built_request = self
-            .build_json_request(grok_headers.apply(builder), &payload)
+            .build_json_request(chutes_headers.apply(builder), &payload)
             .await?;
         let response = self.send(built_request).await?;
 
@@ -1078,7 +1081,7 @@ impl SamplingClient {
             },
         };
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1094,7 +1097,7 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("chat/completions"));
-        let http_request = grok_headers
+        let http_request = chutes_headers
             .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
         let built_request = self
@@ -1298,7 +1301,7 @@ impl SamplingClient {
         tracing::debug!("create_response: {:?}", &request);
         tracing::debug!("endpoint: {:?}", self.endpoint("responses"));
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1325,7 +1328,7 @@ impl SamplingClient {
             sent_bearer,
         } = self.post(self.endpoint("responses"));
         let built_request = self
-            .build_json_request(grok_headers.apply(builder), &request_body)
+            .build_json_request(chutes_headers.apply(builder), &request_body)
             .await?;
         let response = self.send(built_request).await?;
 
@@ -1439,7 +1442,7 @@ impl SamplingClient {
             "Sending responses API stream request"
         );
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1474,7 +1477,7 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("responses"));
-        let mut http_request = grok_headers
+        let mut http_request = chutes_headers
             .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
         if let Some(policy) = self.defaults.doom_loop_recovery {
@@ -1665,7 +1668,7 @@ impl SamplingClient {
         tracing::debug!("create_message: {:?}", &request.inner);
         tracing::debug!("endpoint: {:?}", self.endpoint("messages"));
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1682,7 +1685,7 @@ impl SamplingClient {
             sent_bearer,
         } = self.post(self.endpoint("messages"));
         let built_request = self
-            .build_json_request(grok_headers.apply(builder), &request.inner)
+            .build_json_request(chutes_headers.apply(builder), &request.inner)
             .await?;
         let response = self.send(built_request).await?;
 
@@ -1791,7 +1794,7 @@ impl SamplingClient {
             "Sending Messages API stream request"
         );
 
-        let grok_headers = GrokRequestHeaders {
+        let chutes_headers = ChutesRequestHeaders {
             conv_id: x_grok_conv_id,
             req_id: x_grok_req_id,
             model_id: &model_id,
@@ -1807,7 +1810,7 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("messages"));
-        let http_request = grok_headers
+        let http_request = chutes_headers
             .apply(builder)
             .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
         let built_request = self
@@ -2621,7 +2624,7 @@ mod tests {
                 );
                 // cli-chat-proxy rejects a zstd body it cannot attribute from headers.
                 assert!(
-                    header(&headers, HeaderName::from_static("x-grok-model-override"))
+                    header(&headers, HeaderName::from_static("x-chutes-build-model-override"))
                         .is_some_and(|model| !model.is_empty()),
                     "{route}: a compressed body must carry the model override"
                 );
@@ -2996,8 +2999,8 @@ mod tests {
             version: None,
         };
         let ua = user_agent_string_for(&origin);
-        // No slash between product and the grok-shell agent product.
-        assert!(ua.starts_with("my-client grok-shell/"));
+        // No slash between product and the chutes-build agent product.
+        assert!(ua.starts_with("my-client chutes-build/"));
     }
 
     #[test]

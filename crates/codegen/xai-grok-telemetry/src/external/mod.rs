@@ -143,13 +143,11 @@ impl ExternalTelemetry {
     }
 }
 
-/// Called once from binary startup after config resolution, **before auth** (no credentials needed).
-/// `None` records the dormant state; the default path allocates nothing.
-pub fn init(cfg: Option<ExternalOtelConfig>) {
-    let value = cfg.and_then(build_handle);
-    if EXTERNAL.set(value).is_err() {
-        tracing::debug!("external otel: init called more than once; keeping first registration");
-    }
+/// **DEADENED in Chutes Build**: `init` is a no-op, `is_active()` is always
+/// `false`, and no OTLP exporter is ever constructed. No data can leave the
+/// process via this path regardless of any environment variable or setting.
+pub fn init(_cfg: Option<ExternalOtelConfig>) {
+    // Compile-time deadening: Chutes Build does not phone home.
 }
 
 fn build_handle(cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
@@ -324,28 +322,16 @@ fn settings_gate_window_expired() -> bool {
     true
 }
 
-/// Cheap check used by the fan-out hook and the split-sink call sites: registry present AND the runtime emission gate set AND the settings gate open.
-/// A stale `true` read only costs a wasted mapping, never an export ([`emit`] re-checks).
+/// **always false in Chutes Build** — the external stream is compile-time
+/// deadened (see [`init`]).
 pub fn is_active() -> bool {
-    is_settings_gate_open()
-        && matches!(EXTERNAL.get(), Some(Some(ext)) if ext.active.load(Ordering::Relaxed))
+    false
 }
 
-/// Map and emit one typed telemetry event.
-/// No-op unless the stream is active and the event has an `external = …` mapping.
-/// Synchronous and cheap (the batch processor queues; nothing blocks on I/O).
-pub fn emit<T: crate::events::TelemetryEvent>(data: &T) {
-    // Fail-closed: suppress until the leader confirms the remote policy; open by default for everyone else
-    if !is_settings_gate_open() {
-        return;
-    }
-    let Some(ext) = active_handle() else {
-        return;
-    };
-    let Some(record) = data.external_record() else {
-        return;
-    };
-    emit::emit_record(&ext, record);
+/// Map and emit one typed telemetry event. **No-op in Chutes Build** —
+/// the external stream is compile-time deadened (see [`init`]).
+pub fn emit<T: crate::events::TelemetryEvent>(_data: &T) {
+    // Deadened: no external emission.
 }
 
 /// Update identity attrs when auth completes (called alongside the telemetry-client init sites).
@@ -433,35 +419,9 @@ pub(crate) fn flush_on(ext: &ExternalTelemetry) {
     }
 }
 
-/// Reachable from every `shutdown_otel()` exit path (16 `OtelGuard` sites, the direct call, and the signal handler); subsequent calls are no-ops.
+/// **No-op in Chutes Build** — the external stream is compile-time deadened.
 pub fn shutdown() {
-    let Some(ext) = handle() else {
-        return;
-    };
-    ext.shutdown_once.call_once(|| {
-        ext.active.store(false, Ordering::Relaxed);
-        let logger_provider = ext.logger_provider.clone();
-        let meter_provider = ext.meter_provider.clone();
-        xai_grok_otel::timeout::run_with_timeout(
-            "external otel",
-            xai_grok_otel::timeout::OTEL_SHUTDOWN_TIMEOUT,
-            move || {
-                if let Some(p) = logger_provider
-                    && let Err(e) = p.shutdown()
-                {
-                    tracing::debug!(error = %e, "external otel: logger shutdown failed");
-                }
-                if let Some(p) = meter_provider
-                    && let Err(e) = p.shutdown()
-                {
-                    tracing::debug!(error = %e, "external otel: meter shutdown failed");
-                }
-            },
-        );
-        // Runs after provider shutdown, which flushes pending batches
-        // Short-lived CLI exits often only export on this path, so the health counters and the mTLS total-failure warn must run after it
-        emit_export_health(&ext);
-    });
+    // Deadened: no exporter to flush.
 }
 
 /// Best-effort export-health meta-event on the product-events stream; never exported externally (avoid feedback loops).

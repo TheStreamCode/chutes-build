@@ -185,7 +185,7 @@ This shows:
 
 - Session title (when set)
 - Shell version
-- Auth method (OAuth vs API key; API-key sessions also suggest `chutes-build login` for SuperGrok)
+- Auth method (OAuth vs API key; API-key sessions also suggest `chutes-build login`)
 - Session ID
 - Working directory
 - Model (with a model hash for coding models)
@@ -246,7 +246,7 @@ await connection.request("session/load", {
 await connection.request("session/set_config_option", {
   sessionId,
   configId: "model",
-  value: { value: "grok-4.6" },
+  value: { value: "model-router" },
 });
 ```
 

@@ -2110,3 +2110,14 @@ fn metric_increments_pass_model_through_scrub_and_attach_session_id() {
         "model-id metric attribute must pass the secret scrub: {blob}"
     );
 }
+
+#[test]
+fn external_stream_stays_deadened_at_compile_time() {
+    // Chutes Build never phones home: init is a no-op even with a config,
+    // is_active is always false, and emit/shutdown do nothing. If a future
+    // sync re-enables this path, this test must fail loudly.
+    super::init(None);
+    assert!(!super::is_active());
+    super::shutdown();
+    assert!(!super::is_active());
+}

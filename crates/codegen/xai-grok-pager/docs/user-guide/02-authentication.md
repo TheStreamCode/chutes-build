@@ -30,11 +30,11 @@ To switch accounts or resolve an authentication problem, run:
 chutes-build login
 ```
 
-Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through SpaceXAI OAuth at `auth.chutes.ai`. Pass a flag to select a different flow:
+Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through Chutes OAuth at `auth.chutes.ai`. Pass a flag to select a different flow:
 
 | Flag | Description |
 |------|-------------|
-| `--oauth` | Sign in through SpaceXAI OAuth at `auth.chutes.ai`. This is the default, so the flag is optional. |
+| `--oauth` | Sign in through Chutes OAuth at `auth.chutes.ai`. This is the default, so the flag is optional. |
 | `--device-auth` (alias `--device-code`) | Sign in with the device-code flow for headless or remote environments. |
 
 To sign out, run `chutes-build logout`. It takes no flags and clears your cached credentials.
@@ -46,7 +46,7 @@ To sign out, run `chutes-build logout`. It takes no flags and clears your cached
 For CI/CD, automation, or environments without browser access, use an API key from [console.chutes.ai](https://console.chutes.ai):
 
 ```bash
-export CHUTES_API_KEY="xai-..."
+export CHUTES_API_KEY="cpk_..."
 chutes-build
 ```
 
@@ -152,7 +152,7 @@ JSON fields:
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `access_token` | yes | Bearer token Chutes Build sends to the xAI API |
+| `access_token` | yes | Bearer token Chutes Build sends to the Chutes API |
 | `refresh_token` | no | Stored for reference. Chutes Build refreshes by re-running your binary, not with an OAuth refresh grant |
 | `expires_in` | no | Token lifetime in seconds; enables proactive refresh before expiry |
 | `issuer` | no | Identifies the token's issuer |
@@ -294,7 +294,7 @@ When more than one login flow is configured, Chutes Build populates the session 
 
 1. **External auth provider** (`auth_provider_command`)
 2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.toml` or the `CHUTES_BUILD_OIDC_ISSUER` and `CHUTES_BUILD_OIDC_CLIENT_ID` environment variables
-3. **SpaceXAI OAuth2 browser login** -- the default
+3. **Chutes OAuth2 browser login** -- the default
 
 During a session, the active method handles all mid-session refreshes.
 

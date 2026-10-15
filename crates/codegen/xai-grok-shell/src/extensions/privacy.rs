@@ -1,7 +1,8 @@
 //! `chutes.ai/privacy/setCodingDataRetention` extension handler.
 //!
-//! PUTs the new opt-out flag to cli-chat-proxy and updates local auth state to match.
-//! The local update only refreshes the cached copy, so its errors are ignored.
+//! Local-only: records the opt-out flag in local auth state. Chutes serves
+//! no retention API, so no PUT is attempted and the toggle never fails for
+//! want of a backend.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -32,51 +33,10 @@ async fn handle_set(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             .data("Authentication required. Run `chutes-build login` to re-authenticate.")
     })?;
 
-    let proxy_url = agent.cfg.borrow().endpoints.proxy_url();
-    let url = format!("{proxy_url}/privacy/coding-data-retention");
-    let token_header = agent.auth_manager.grok_com_config().token_header.clone();
-
-    let body = serde_json::json!({
-        "codingDataRetentionOptOut": params.coding_data_retention_opt_out,
-    });
-
-    let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> = std::sync::Arc::new(
-        xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
-            agent.auth_manager.clone(),
-            None,
-            None,
-        ),
-    );
-    let client = crate::http::with_auth_retry(crate::http::shared_client(), provider);
-
-    let resp = client
-        .put(&url)
-        .header("X-XAI-Token-Auth", &token_header)
-        .header("x-grok-client-version", xai_grok_version::VERSION)
-        .header(
-            crate::http::CLIENT_MODE_HEADER,
-            crate::http::process_client_mode(),
-        )
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| acp::Error::internal_error().data(format!("HTTP request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        tracing::warn!(status, "setCodingDataRetention request failed");
-        let friendly = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| {
-                v.get("error")
-                    .or_else(|| v.get("message"))
-                    .and_then(|e| e.as_str().map(String::from))
-            })
-            .unwrap_or_else(|| format!("server returned HTTP {status}"));
-        return Err(acp::Error::internal_error().data(friendly));
-    }
-
+    // Local-only: Chutes serves no coding-data-retention API, so there is
+    // no server flag to PUT. The opt-out lives in local auth state, where
+    // the pager already reads it (default opted-out), and gates local
+    // behavior. Never fail the toggle for want of a backend.
     // Update local auth state to reflect the change.
     // Use save_without_enrichment to avoid a race
     // update() spawns a background GET /user enrichment that may read stale ACL state and overwrite the opt-out flag back to its previous value

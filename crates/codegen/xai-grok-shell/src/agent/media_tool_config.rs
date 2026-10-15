@@ -100,7 +100,7 @@ fn media_headers(cfg: &Config, base_url: &str) -> indexmap::IndexMap<String, Str
         .clone()
         .unwrap_or_else(|| xai_grok_version::VERSION.to_owned());
     let mut headers = indexmap::IndexMap::new();
-    headers.insert("user-agent".to_owned(), format!("xai-grok-build/{version}"));
+    headers.insert("user-agent".to_owned(), format!("chutes-build/{version}"));
     inject_proxy_headers(
         &mut headers,
         cfg.client_version.as_deref(),

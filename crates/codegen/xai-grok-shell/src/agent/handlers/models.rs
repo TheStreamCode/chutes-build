@@ -1,4 +1,4 @@
-//! `x.ai/models/list`: the model catalog for one-shot consumers.
+//! `chutes.ai/models/list`: the model catalog for one-shot consumers.
 
 use agent_client_protocol::{self as acp};
 

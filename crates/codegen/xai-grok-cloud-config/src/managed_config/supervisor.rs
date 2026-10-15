@@ -344,8 +344,20 @@ async fn fetch_for_principal(
 ) -> Result<FetchedConfig, ManagedConfigError> {
     let max_attempts = budget.max_attempts();
     // Merged-config resolution: the bearer must not go to the public default URL.
-    let url =
-        xai_grok_config::EndpointsConfig::from_effective_config().resolve_managed_config_url();
+    let endpoints = xai_grok_config::EndpointsConfig::from_effective_config();
+    // Managed config is an operator-owned endpoint: sync only when one is
+    // explicitly configured. Without `managed_config_url` there is no
+    // managed service to poll (a deployment key alone names no host), so
+    // stock builds sync nothing. Previously staged operator config already
+    // on disk keeps being served; only the network fetch is gated.
+    let operator_managed = endpoints
+        .managed_config_url
+        .as_deref()
+        .is_some_and(|u| !u.trim().is_empty());
+    if !operator_managed {
+        return Ok(FetchedConfig::NoPrincipal);
+    }
+    let url = endpoints.resolve_managed_config_url();
 
     let team_auth = team_override.or_else(store::read_active_team_auth);
 

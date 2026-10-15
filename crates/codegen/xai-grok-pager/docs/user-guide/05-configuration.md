@@ -50,11 +50,11 @@ auto_update = true                     # check for updates on launch
 # definition = "/path/to/agent.md"     # path wins over name if both are set
 
 [models]
-default = "grok-4.5"                   # model used for new sessions
-web_search = "grok-4.5"                # model used by the web_search tool
+default = "model-router"                   # model used for new sessions
+web_search = "model-router"                # model used by the web_search tool
 # Optional picker allowlist (globs on catalog key or model id). Empty = unrestricted.
 # A signed policy pin replaces this list (model id only) and cannot be widened from here.
-# allowed_models = ["grok-4.5", "grok-4*"]
+# allowed_models = ["model-router", "Qwen/*"]
 
 # Defaults applied to every model; a per-model [model.<id>] value always wins.
 # See "Custom Models" for the per-model overrides and full details.
@@ -289,7 +289,7 @@ Credential resolution: `api_key` > `env_key` > signed-in session token > `CHUTES
 To override a built-in model, use its name as the section key and set only the fields you need:
 
 ```toml
-[model.grok-4.6]
+[model.model-router]
 api_key = "my-api-key"
 ```
 
@@ -366,7 +366,7 @@ explore = true                        # enable/disable specific types
 plan = false
 
 [subagents.models]
-explore = "grok-4.6"               # route to different models
+explore = "model-router"               # route to different models
 ```
 
 To pin the model a subagent uses, set its entry under `[subagents.models]`.
@@ -653,12 +653,12 @@ auth_provider_label = "Acme Corp"
 auth_token_ttl = 3600
 
 [models]
-default = "company-grok"
+default = "company-llm"
 
-[model.company-grok]
-model = "grok-4.6"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok 4.6 (Proxy)"
+[model.company-llm]
+model = "my-model"
+base_url = "https://llm-proxy.acme.com/"
+name = "My Model (Proxy)"
 context_window = 128000
 
 [features]

@@ -187,7 +187,11 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
         }
     }
     if let Some(remote_v) = update.voice_mode_enabled {
-        let v = crate::app::resolve_voice_mode_live(Some(remote_v), app.is_api_key_auth);
+        let v = crate::app::resolve_voice_mode_live_as(
+            app.distribution,
+            Some(remote_v),
+            app.is_api_key_auth,
+        );
         if !v {
             app.voice_reset();
             app.voice_ui_active = false;

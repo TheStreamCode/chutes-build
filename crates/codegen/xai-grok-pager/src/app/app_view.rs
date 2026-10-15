@@ -1333,7 +1333,7 @@ impl AppView {
         if !self.is_api_key_auth || self.voice_mode_enabled {
             return;
         }
-        if crate::app::resolve_voice_mode_live(None, false) {
+        if crate::app::resolve_voice_mode_live_as(self.distribution, None, false) {
             self.apply_voice_mode_enabled(true);
         }
     }

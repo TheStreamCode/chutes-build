@@ -1,12 +1,19 @@
-//! What a build of grok may do. Call sites ask [`Distribution::allows`] instead of testing Cargo
+//! What a build of this CLI may do. Call sites ask [`Distribution::allows`] instead of testing Cargo
 //! features, so each distribution's answers are testable in any build.
 //!
 //! A withheld capability stays off whatever config, requirements or the environment say. Keeping a
 //! service's code out of the binary is the Cargo feature set's job.
-/// The capabilities a build of grok withholds. [`Distribution::current`] is this build's.
+/// The capabilities a build withholds. [`Distribution::current`] is this build's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Distribution {
     withheld: u32,
+}
+impl Default for Distribution {
+    /// A fresh value is always this build's distribution; other
+    /// distributions only exist where a caller names one explicitly.
+    fn default() -> Self {
+        Self::current()
+    }
 }
 /// Something a distribution may withhold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::EnumIter)]
@@ -43,9 +50,22 @@ impl Distribution {
         }
         Self { withheld }
     }
+    /// This build's distribution: Chutes Build withholds every capability
+    /// that reports to, or is driven from, anyone but the Chutes ecosystem.
+    /// Product telemetry, crash/error reports, remote control of this
+    /// machine, and voice dictation to a third-party STT service stay off
+    /// whatever config, requirements or the environment say. `RemoteFetch`
+    /// stays allowed: it also gates the Chutes model-catalog fetch, whose
+    /// targets are Chutes-only by endpoint default.
+    pub const CHUTES: Self = Self::withholding(&[
+        Capability::Telemetry,
+        Capability::ErrorReporting,
+        Capability::RemoteControl,
+        Capability::Voice,
+    ]);
     /// This build's distribution.
     pub const fn current() -> Self {
-        Self::STOCK
+        Self::CHUTES
     }
     pub const fn allows(self, capability: Capability) -> bool {
         self.withheld & capability.bit() == 0

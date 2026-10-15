@@ -2444,6 +2444,7 @@ async fn feedback_trace_offer_asks_personal_oauth_accounts() {
     let _e3 = EnvGuard::unset("CHUTES_BUILD_FEEDBACK_TRACE_CARD");
     let _e4 = EnvGuard::unset("DISABLE_TELEMETRY");
     let agent = build_agent_with_auth(personal_xai_oauth_auth());
+    agent.cfg.borrow_mut().distribution = xai_grok_config::Distribution::STOCK;
     make_trace_card_eligible(&agent);
     assert!(agent.feedback_trace_offer(), "every gate is open");
     assert!(
@@ -2667,6 +2668,7 @@ async fn upload_trace_exact_intent_cannot_bypass_residency() {
     let tmp = tempfile::tempdir().unwrap();
     let _env = trace_gate_env(tmp.path());
     let agent = build_agent_with_auth(personal_xai_oauth_auth());
+    agent.cfg.borrow_mut().distribution = xai_grok_config::Distribution::STOCK;
     make_trace_card_eligible(&agent);
     let err = upload_trace_error(
         &agent,
@@ -2683,6 +2685,9 @@ async fn upload_trace_checks_residency_before_the_offer_gate() {
     let tmp = tempfile::tempdir().unwrap();
     let _env = trace_gate_env(tmp.path());
     let agent = build_agent_with_auth(personal_xai_oauth_auth());
+    // Gate order is distribution-independent; resolve as STOCK so the
+    // CHUTES withhold does not answer before the residency check runs.
+    agent.cfg.borrow_mut().distribution = xai_grok_config::Distribution::STOCK;
     let err = upload_trace_error(&agent, serde_json::json!({ "sessionId": "sess" }), None).await;
     assert!(err.to_string().contains("session not found"), "got: {err}");
 }
@@ -4083,8 +4088,8 @@ async fn prepare_image_gen_config_fails_open_without_auth() {
         "no resolved auth ⇒ fail open (tools not tier-restricted)"
     );
 }
-/// The imagine tools bypass cli-chat-proxy (direct API calls).
-/// The server can only scope the coding data-retention opt-out (`/privacy opt-out`) to Build traffic via the `x-grok-client-identifier` header.
+/// The imagine tools bypass the chat proxy (direct API calls).
+/// The server can only scope the coding data-retention opt-out (`/privacy opt-out`) to Build traffic via the `x-chutes-build-identifier` header.
 /// If this header is dropped, opted-out users' imagine prompts are logged/retained server-side.
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_image_gen_config_sends_client_identifier_header() {
@@ -4096,7 +4101,7 @@ async fn prepare_image_gen_config_sends_client_identifier_header() {
     };
     assert_eq!(
         extra_headers
-            .get("x-grok-client-identifier")
+            .get("x-chutes-build-identifier")
             .map(String::as_str),
         Some(crate::http::process_client_identifier().as_str()),
         "imagine API calls must carry the client identifier so the server \
@@ -4114,7 +4119,7 @@ async fn prepare_video_gen_config_sends_client_identifier_header() {
     };
     assert_eq!(
         extra_headers
-            .get("x-grok-client-identifier")
+            .get("x-chutes-build-identifier")
             .map(String::as_str),
         Some(crate::http::process_client_identifier().as_str()),
         "video gen API calls must carry the client identifier so the server \
@@ -4224,11 +4229,16 @@ async fn data_collection_enabled_for_non_zdr_team_with_unrelated_blocks() {
     );
 }
 fn enable_product_telemetry(agent: &MvpAgent) {
-    agent.cfg.borrow_mut().features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
+    // Auth-gate logic is distribution-independent; resolve as STOCK so the
+    // CHUTES withhold does not mask the gate under test.
+    let mut cfg = agent.cfg.borrow_mut();
+    cfg.distribution = xai_grok_config::Distribution::STOCK;
+    cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
 }
 /// Enable trace uploads via config so only the auth-level privacy gate can disable collection in the tests below.
 fn enable_trace_upload_config(agent: &MvpAgent) {
     let mut cfg = agent.cfg.borrow_mut();
+    cfg.distribution = xai_grok_config::Distribution::STOCK;
     cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
     cfg.telemetry.trace_upload = Some(true);
 }
@@ -4262,6 +4272,19 @@ async fn product_analytics_disabled_when_telemetry_off() {
     let agent = build_agent_with_auth(xai_grok_login::GrokAuth::test_default());
     agent.cfg.borrow_mut().features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
     assert!(!agent.product_analytics_enabled());
+}
+/// Under CHUTES even a normal user with every telemetry switch on gets
+/// no product analytics and no diagnostics uploader.
+#[tokio::test]
+async fn chutes_distribution_disables_telemetry_for_normal_user() {
+    let agent = build_agent_with_auth(xai_grok_login::GrokAuth::test_default());
+    {
+        let mut cfg = agent.cfg.borrow_mut();
+        cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
+        cfg.telemetry.trace_upload = Some(true);
+    }
+    assert!(!agent.product_analytics_enabled());
+    assert!(agent.diagnostic_upload_config().is_none());
 }
 /// Counting HTTP stub: any request increments the counter and gets a storage-proxy-shaped 200 so the client does not retry.
 async fn spawn_counting_storage_stub() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {

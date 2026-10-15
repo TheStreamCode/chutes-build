@@ -2621,6 +2621,11 @@ fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
     if cfg!(debug_assertions) {
         return false;
     }
+    // Product floor: Chutes Build never phones home for updates on its own.
+    // The `update` subcommand still checks on explicit user request.
+    if !chutes_build_core::product::AUTOMATIC_SELF_UPDATE {
+        return false;
+    }
     !is_opted_out_of_updates(no_auto_update_flag)
 }
 fn is_opted_out_of_updates(no_auto_update_flag: bool) -> bool {

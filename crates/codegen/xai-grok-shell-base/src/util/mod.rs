@@ -95,6 +95,22 @@ pub fn matches_trusted_base_url(candidate: &str, trusted_base: &str) -> bool {
 pub fn is_prod_cli_chat_proxy_url(url: &str) -> bool {
     matches_trusted_base_url(url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL)
 }
+/// True for xAI-operated hosts only (`api.x.ai`, `auth.x.ai`, `grok.com`),
+/// independent of this build's compiled proxy default (which is Chutes).
+/// xAI-protocol request extensions (the legacy token headers) attach only
+/// here, so BYOK users pointing at xAI keep working while Chutes traffic
+/// carries no xAI vendor headers.
+pub fn is_xai_proxy_url(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| {
+            host == "api.x.ai"
+                || host == "auth.x.ai"
+                || host == "grok.com"
+                || host.ends_with(".grok.com")
+        })
+}
 /// True for configured first-party cli-chat-proxy routes, excluding arbitrary loopback URLs.
 /// Unlike [`is_cli_chat_proxy_url`], this only trusts the exact compiled or environment-selected route.
 /// It is suitable for xAI-only request extensions.
@@ -384,7 +400,7 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
         assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.chutes.ai/v1/chat/completions"
+            "https://llm.chutes.ai/v1/chat/completions"
         ));
     }
     #[test]
@@ -425,6 +441,8 @@ mod tests {
     #[test]
     fn test_is_xai_api_bearer_url() {
         assert!(is_xai_api_bearer_url("https://api.chutes.ai/v1"));
+        // Session bearers stay inside Chutes: xAI hosts are BYOK-only and
+        // never receive the session token.
         assert!(!is_xai_api_bearer_url("http://api.chutes.ai/v1"));
         assert!(!is_xai_api_bearer_url("http://localhost:11434/v1"));
         {
@@ -432,7 +450,7 @@ mod tests {
             assert!(!is_xai_api_bearer_url("https://127.0.0.2:11434/v1"));
             assert!(!is_xai_api_bearer_url("https://[::1]:11434/v1"));
         }
-        assert!(is_xai_api_bearer_url("https://API.X.AI/v1"));
+        assert!(!is_xai_api_bearer_url("https://API.X.AI/v1"));
         assert!(!is_xai_api_bearer_url(
             "https://api.chutes.ai@attacker.example/v1"
         ));

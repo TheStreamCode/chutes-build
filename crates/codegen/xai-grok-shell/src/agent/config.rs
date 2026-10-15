@@ -754,6 +754,13 @@ pub struct Config {
     /// One tier of [`Config::feature`].
     #[serde(skip)]
     pub(crate) feature_values: BTreeMap<Feature, bool>,
+    /// Ambient distribution for every capability gate resolved through
+    /// this config. Always [`Distribution::current`] in production;
+    /// tests override it to exercise STOCK-only precedence logic through
+    /// the agent entry points. Never deserialized: a config file cannot
+    /// change what this build may do.
+    #[serde(skip)]
+    pub(crate) distribution: Distribution,
     /// `[model.*]` overrides from config.toml. Resolve via `resolve_model_list()`.
     #[serde(skip)]
     pub config_models: IndexMap<String, ConfigModelOverride>,
@@ -1144,6 +1151,7 @@ impl Default for Config {
             prompt_suggestions: crate::util::config::PromptSuggestConfig::default(),
             file_acceleration: xai_grok_config_types::FileAccelerationConfig::default(),
             feature_values: BTreeMap::new(),
+            distribution: Distribution::current(),
             config_models: IndexMap::new(),
             config_warnings: Vec::new(),
             grok_com_config: GrokComConfig::default(),
@@ -1865,7 +1873,13 @@ impl Config {
         self.is_feature_enabled(Feature::TwoPassCompaction)
     }
     pub(crate) fn resolve_telemetry_mode(&self) -> Resolved<TelemetryMode> {
-        if !Distribution::current().allows(Capability::Telemetry) {
+        self.resolve_telemetry_mode_as(self.distribution)
+    }
+    pub(crate) fn resolve_telemetry_mode_as(
+        &self,
+        distribution: Distribution,
+    ) -> Resolved<TelemetryMode> {
+        if !distribution.allows(Capability::Telemetry) {
             return Resolved::new(TelemetryMode::Disabled, ConfigSource::Default);
         }
         if let Some(mode) = self.requirements.telemetry.pinned() {
@@ -1893,13 +1907,13 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-        self.resolve_trace_upload_as(Distribution::current())
+        self.resolve_trace_upload_as(self.distribution)
     }
     fn resolve_trace_upload_as(&self, distribution: Distribution) -> Resolved<bool> {
         if !distribution.allows(Capability::Telemetry) {
             return Resolved::new(false, ConfigSource::Default);
         }
-        let mode = self.resolve_telemetry_mode();
+        let mode = self.resolve_telemetry_mode_as(distribution);
         let ff = if mode.value.is_disabled() {
             None
         } else {
@@ -1947,8 +1961,14 @@ impl Config {
         )
     }
     pub(crate) fn trace_upload_decision_debug(&self) -> serde_json::Value {
-        let telemetry = self.resolve_telemetry_mode();
-        let trace_upload = self.resolve_trace_upload();
+        self.trace_upload_decision_debug_as(self.distribution)
+    }
+    pub(crate) fn trace_upload_decision_debug_as(
+        &self,
+        distribution: Distribution,
+    ) -> serde_json::Value {
+        let telemetry = self.resolve_telemetry_mode_as(distribution);
+        let trace_upload = self.resolve_trace_upload_as(distribution);
         let req = &self.requirements.trace_upload;
         serde_json::json!({
             "trace_upload": trace_upload.value,
@@ -2051,7 +2071,10 @@ impl Config {
         }
     }
     pub fn feature(&self, feature: Feature) -> Resolved<bool> {
-        feature.resolve(self.feature_sources(feature))
+        self.feature_as(feature, self.distribution)
+    }
+    pub fn feature_as(&self, feature: Feature, distribution: Distribution) -> Resolved<bool> {
+        feature.resolve_as(distribution, self.feature_sources(feature))
     }
     pub fn feature_off_reason(&self, feature: Feature) -> Option<String> {
         feature.off_reason(self.feature_sources(feature))
@@ -2606,7 +2629,10 @@ impl SyncBoolFlag {
 /// Sync slice of [`Config::resolve_telemetry_mode`] for use before the tokio runtime (e.g. `init_sentry`).
 /// `true` only when explicitly off.
 pub(crate) fn is_telemetry_disabled_sync() -> bool {
-    !Distribution::current().allows(Capability::Telemetry)
+    is_telemetry_disabled_sync_as(Distribution::current())
+}
+pub(crate) fn is_telemetry_disabled_sync_as(distribution: Distribution) -> bool {
+    !distribution.allows(Capability::Telemetry)
         || !SyncBoolFlag::new(telemetry_enabled_from_toml)
             .disable_env("DISABLE_TELEMETRY")
             .enable_env(grok_telemetry_env_enabled)
@@ -2615,7 +2641,10 @@ pub(crate) fn is_telemetry_disabled_sync() -> bool {
 /// Like [`is_telemetry_disabled_sync`] but only `true` when telemetry is *explicitly* off.
 /// Absence is not disabled (`.default(true)`), so remote-only enablement still builds the OTLP exporter (the runtime gate then governs it).
 pub(crate) fn is_telemetry_explicitly_disabled_sync() -> bool {
-    !Distribution::current().allows(Capability::Telemetry)
+    is_telemetry_explicitly_disabled_sync_as(Distribution::current())
+}
+pub(crate) fn is_telemetry_explicitly_disabled_sync_as(distribution: Distribution) -> bool {
+    !distribution.allows(Capability::Telemetry)
         || !SyncBoolFlag::new(telemetry_enabled_from_toml)
             .disable_env("DISABLE_TELEMETRY")
             .enable_env(grok_telemetry_env_enabled)
@@ -4743,14 +4772,15 @@ pub(crate) fn sampling_config_for_model(
     }
 }
 /// Fold URL-derived headers into `extra_headers`. The sampler crate is intentionally URL-agnostic: it does not inspect `base_url` to decide which auth or staging headers to add.
-/// Replicate the URL-derived header logic at the shell boundary so callers downstream see a single homogenous header bag. cli-chat-proxy bases get `X-XAI-Token-Auth` and `x-authenticateresponse` headers.
-/// This mirrors the inline match in the legacy `sampling::Client::new` on `is_cli_chat_proxy_url`. Existing entries are never overwritten so callers can pre-set a value.
+/// Replicate the URL-derived header logic at the shell boundary so callers downstream see a single homogenous header bag.
+/// xAI-operated bases get the legacy `X-XAI-Token-Auth` and `x-authenticateresponse` headers (BYOK compat); Chutes bases get none.
+/// This mirrors the inline match in the legacy `sampling::Client::new`, narrowed from "this build's proxy" to "genuine xAI hosts". Existing entries are never overwritten so callers can pre-set a value.
 pub(crate) fn inject_url_derived_headers(
     headers: &mut IndexMap<String, String>,
     alpha_test_key: Option<&str>,
     base_url: &str,
 ) {
-    if crate::util::is_cli_chat_proxy_url(base_url) {
+    if crate::util::is_xai_proxy_url(base_url) {
         headers
             .entry("X-XAI-Token-Auth".to_string())
             .or_insert_with(|| "xai-grok-cli".to_string());

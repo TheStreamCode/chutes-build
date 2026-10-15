@@ -28,94 +28,10 @@ fn acu_skill_source_chat_vs_build() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn product_skill_infos_none_without_auth() {
-    clear_product_skills_cache_for_test();
+async fn product_skill_infos_stays_none_without_a_remote_catalog() {
+    // This build has no remote skill catalog: chat-kind listing is refused
+    // and disk/plugin skills are the only sources.
     assert!(product_skill_infos(None).await.is_none());
-}
-
-#[test]
-fn product_skills_cache_matches_identity_and_team() {
-    use xai_grok_login::{AuthMode, GrokAuth};
-    let base = ProductSkillsCacheEntry {
-        auth_key: "tok-a".into(),
-        user_id: "user-1".into(),
-        team_id: Some("team-a".into()),
-        organization_id: None,
-        skills: vec![],
-        fetched_at: std::time::Instant::now(),
-    };
-    let same = GrokAuth {
-        key: "tok-a".into(),
-        user_id: "user-1".into(),
-        team_id: Some("team-a".into()),
-        auth_mode: AuthMode::Oidc,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    assert!(product_skills_cache_matches(&base, &same));
-    let other_team = GrokAuth {
-        team_id: Some("team-b".into()),
-        ..same.clone()
-    };
-    assert!(!product_skills_cache_matches(&base, &other_team));
-    let same_user_other_key = GrokAuth {
-        key: "tok-b".into(),
-        user_id: "user-1".into(),
-        team_id: Some("team-a".into()),
-        auth_mode: AuthMode::WebLogin,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    assert!(product_skills_cache_matches(&base, &same_user_other_key));
-    let other_user = GrokAuth {
-        key: "tok-c".into(),
-        user_id: "user-2".into(),
-        team_id: Some("team-a".into()),
-        auth_mode: AuthMode::Oidc,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    assert!(!product_skills_cache_matches(&base, &other_user));
-    // Personal (empty team) must not hit a team-keyed entry via user_id.
-    let personal_same_user = GrokAuth {
-        key: "tok-personal".into(),
-        user_id: "user-1".into(),
-        team_id: None,
-        organization_id: None,
-        auth_mode: AuthMode::WebLogin,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    assert!(!product_skills_cache_matches(&base, &personal_same_user));
-}
-
-#[test]
-fn product_skills_cache_after_untagged_recovery_keeps_primary_tenant() {
-    use xai_grok_login::{AuthMode, GrokAuth};
-    let primary = GrokAuth {
-        key: "oidc-team".into(),
-        user_id: "user-1".into(),
-        team_id: Some("team-a".into()),
-        organization_id: Some("org-1".into()),
-        auth_mode: AuthMode::Oidc,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    let entry = product_skills_cache_entry_after_fetch(&primary, vec![], true);
-    assert_eq!(entry.team_id.as_deref(), Some("team-a"));
-    assert_eq!(entry.organization_id.as_deref(), Some("org-1"));
-    assert_eq!(entry.user_id, "user-1");
-    assert!(product_skills_cache_matches(&entry, &primary));
-    let personal = GrokAuth {
-        key: "web-personal".into(),
-        user_id: "user-1".into(),
-        team_id: None,
-        organization_id: None,
-        auth_mode: AuthMode::WebLogin,
-        create_time: chrono::Utc::now(),
-        ..Default::default()
-    };
-    assert!(!product_skills_cache_matches(&entry, &personal));
 }
 
 fn all_gated() -> CommandAvailability {

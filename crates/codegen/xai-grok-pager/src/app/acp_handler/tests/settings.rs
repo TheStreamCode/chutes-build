@@ -31,6 +31,9 @@
     fn settings_api_key_keeps_voice_despite_remote_false() {
         // Remote false alone must not disable an already API-key session.
         let mut app = make_app_with_agent("sess-api-key");
+        // Tier/api-key precedence is distribution-independent; resolve as
+        // STOCK so the CHUTES voice withhold does not mask it.
+        app.distribution = xai_grok_config::Distribution::STOCK;
         app.is_api_key_auth = true;
         app.apply_voice_mode_enabled(true);
         app.voice_ui_active = true;
@@ -43,6 +46,7 @@
 
         // Same update can stamp API Key while remote settings sends voice false.
         let mut app = make_app_with_agent("sess-combined");
+        app.distribution = xai_grok_config::Distribution::STOCK;
         let notif = acp::ExtNotification::new(
             "chutes.ai/settings/update",
             std::sync::Arc::from(
@@ -62,6 +66,7 @@
     #[test]
     fn settings_non_api_key_tier_clears_stale_api_key_flag() {
         let mut app = make_app_with_agent("sess-stale-key");
+        app.distribution = xai_grok_config::Distribution::STOCK;
         assert!(handle_ext_notification(
             &tier_settings_update("API Key"),
             &mut app
@@ -83,6 +88,7 @@
 
         // Paid tier after API Key must not force voice off (omit voice field).
         let mut app = make_app_with_agent("sess-paid-keep-voice");
+        app.distribution = xai_grok_config::Distribution::STOCK;
         assert!(handle_ext_notification(
             &tier_settings_update("API Key"),
             &mut app
@@ -100,6 +106,7 @@
     #[test]
     fn voice_remote_true_re_enables_after_kill_switch() {
         let mut app = make_app_with_agent("sess-1");
+        app.distribution = xai_grok_config::Distribution::STOCK;
         app.apply_voice_mode_enabled(false);
         assert!(!app.voice_mode_enabled);
 
@@ -109,6 +116,20 @@
         assert!(
             app.voice_mode_enabled,
             "remote true lifts the kill switch (env unset)"
+        );
+    }
+
+    #[test]
+    fn voice_remote_true_cannot_enable_under_chutes() {
+        // make_app_with_agent resolves as the current (CHUTES) build:
+        // neither remote true nor API-key auth may switch voice on.
+        let mut app = make_app_with_agent("sess-chutes");
+        app.is_api_key_auth = true;
+        let affected = handle_ext_notification(&voice_settings_update(true), &mut app);
+        assert!(affected);
+        assert!(
+            !app.voice_mode_enabled,
+            "CHUTES withholds voice dictation end to end"
         );
     }
 

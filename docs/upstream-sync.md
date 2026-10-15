@@ -1595,7 +1595,7 @@ Re-applied fork seams, all verified by the suites named:
 - Pruned the caller-less static model scorer from `chutes-build-core`.
 
 Behavioral gates: `cargo check --workspace` green, `dead_modules.py` all
-reachable (3,148 files), release build of `xai-grok-pager-bin` green with a
+reachable (3,148 files), release build of `chutes-build` green with a
 `--help` smoke test exiting 0 as `Chutes Build TUI`. The debug-build CLI
 stack overflow (clap `parse_from` over 1 MiB frames in opt-level-0) is
 documented at the `parse_cli` call site; release binaries are unaffected.
@@ -1607,3 +1607,72 @@ changelog entries only and were not ported; the next sync starts from this
 record, not from the parked 1.0.16 branch (which is now obsolete — its
 per-area work was absorbed by this rebase, and it should be deleted after
 this branch lands).
+
+## Purifica record: 2026-10-14 — privacy-first Chutes independence
+
+Same upstream base (`2bdd1d6a`/1.0.45); no new upstream port. This pass
+removes everything Grok/xAI-specific that the rebase carried over and makes
+the fork Chutes-only by default:
+
+- `Distribution::current()` is `CHUTES`, which withholds Telemetry,
+  ErrorReporting, RemoteControl, and Voice; managed sync only with an
+  explicit `managed_config_url`, and the retention toggle stays local-only.
+- Inference, catalog, and models-list endpoints default to Chutes hosts
+  (`https://llm.chutes.ai/v1`, `chutes.ai/models/list`); relay/gateway URLs
+  discard any port/path override. Probe-verified: chat completions answer
+  on the inference host (429 unauthenticated), `/v1/models` 404s on the
+  gateway, so each default points at the host that actually serves it.
+- Automatic self-update is off by default (`AUTOMATIC_SELF_UPDATE=false`
+  gates the check); external OpenTelemetry export is deadened (`init`
+  no-op, `is_active` false) while local collectors keep working.
+- Wire headers are `x-chutes-build-*`; xAI headers are sent only to
+  genuine xAI hosts (BYOK compatibility).
+- Removed the product-skills network client and its cache, the vestigial
+  installers, and the `pager/npm/grok*` template. Package identity
+  restored to `chutes-build` 1.4.0.
+- User-facing strings, splash, help, slash commands, and the full
+  user-guide rewritten for Chutes: `model-router` default, `cpk_...` key
+  format, capability-defaults table verified against
+  [Chutes Docs](https://chutes.ai/docs) and the live `/v1/models`
+  catalog. The fork NOTICES file records the upstream attribution.
+
+Gates: `cargo check --workspace` green; `rebrand.py --check` reports
+no forbidden token; `dead_modules.py` all reachable (3,147 files).
+Release `--help` smokes as `Chutes Build TUI`. The three lib suites
+were each verified by stash-compare against the untouched rebase
+commit, with `RUST_MIN_STACK=16777216` (without it the `mvp_agent`
+tests overflow the 2 MiB debug test stacks on Windows, same failure
+class as the documented `parse_cli` debug overflow):
+- `xai-grok-config --lib`: 398 passed, 16 failed, plus one deadlock
+  (`transaction_lock_...`), all inside `fs_atomic` Windows-symlink,
+  `managed_text`, and one `mcp_servers` test — files this fork never
+  touched. The identical failure set and the deadlock reproduce on the
+  untouched tree; a parallel-mode extra (`ensure_creates_hooks_dir`)
+  passes in isolation and single-threaded, i.e. flaky under load.
+- `xai-grok-shell --lib`: 5,981 passed, 946 failed. The failure set is
+  identical to pristine — every failure is a pre-existing
+  Windows-environment issue (Unix-path assumptions, symlink
+  privileges, timing flakes). The gate caught and fixed 21 genuine
+  purifica regressions (telemetry precedence, endpoint defaults,
+  header names, relay lifecycle): resolution now threads an explicit
+  distribution (`_as` variants plus an ambient `Config::distribution`
+  that defaults to the current build), precedence tests resolve as
+  STOCK, and four new tests pin the CHUTES withhold. Two pristine
+  failures (`cli_models` session resolution) are fixed by the Chutes
+  endpoint defaults.
+- `xai-grok-pager --lib`: the binary aborts with
+  `STATUS_ACCESS_VIOLATION` identically on pristine (pre-existing,
+  environmental). Before the crash point, six voice-gating failures
+  were fixed: the pager's `resolve_voice_mode_enabled_as` never
+  threaded its distribution into `Feature::resolve` (latent
+  incoherence, invisible while `current()` was STOCK), and the three
+  live call sites now use the pre-existing `AppView::distribution`
+  field, which test helpers already set to STOCK. The
+  `session_usage_block_by_model` snapshot was accepted with the
+  rebranded `chutes-build` row label (its fixture already used the new
+  name). Two further divergences (`disk_usage`, `git_info` worktree)
+  fail identically in isolation on pristine.
+Fixing upstream's Windows file-transaction semantics, the pager crash,
+and the remaining Windows-only test noise is out of scope for this
+pass — same accepted class as the agent/login failures in the rebase
+record. No push yet: this branch still lands only when the user asks.

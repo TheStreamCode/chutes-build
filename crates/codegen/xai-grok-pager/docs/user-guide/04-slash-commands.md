@@ -98,8 +98,8 @@ Rename the current session. Alias: `/title`.
 Switch models. Accepts a model ID or display name (case-insensitive). When the model offers more than one context window, you can add a window size next. For reasoning models you can add an effort level last. The picker asks in the same order: model, then window, then effort. Alias: `/m`.
 
 ```
-/model grok-4.6
-/model Grok 4.6
+/model model-router
+/model Qwen/Qwen3.6-27B-TEE
 /model Reasoning X high
 /model Reasoning X 500k high
 ```
@@ -379,7 +379,7 @@ Browse the built-in How-to Guides, open the online Build docs, or jump straight 
 ```
 
 - Bare `/docs` (or `/docs how-to`) opens the How-to Guides picker.
-- `/docs web` opens https://docs.x.ai/build/overview in your browser.
+- `/docs web` opens https://docs.chutes.ai/build/overview in your browser.
 - `/docs <title>` opens a specific guide by case-insensitive title match.
 
 ### `/tutorial`
@@ -444,7 +444,7 @@ Open Settings on **Coding data, retention, and training**, where you choose
 /privacy
 ```
 
-This setting doesn't touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it, and admins can also enable or disable Zero Data Retention for the team ([how to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr)). When the choice isn't yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing; it does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+This setting doesn't touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it, and admins can also enable or disable Zero Data Retention for the team. When the choice isn't yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing; it does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 ---
 

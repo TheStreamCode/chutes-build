@@ -27,10 +27,11 @@ embedded in editors via the Agent Client Protocol (ACP).
 
 ## What this is, and what it is built on
 
-Chutes Build is a fork of [`xai-org/grok-build`](https://github.com/xai-org/grok-build)
-— SpaceXAI's Grok Build — re-based onto upstream 1.0.45 and adapted to run on
-Chutes. Upstream wrote most of the code in this tree and it is used here under
-Apache-2.0; the project is not affiliated with or endorsed by SpaceXAI.
+Chutes Build started from [`xai-org/grok-build`](https://github.com/xai-org/grok-build)
+(re-based onto upstream 1.0.45) and is developed independently, for the Chutes
+ecosystem only: it talks to Chutes services and nothing else. Upstream code in
+this tree is used under Apache-2.0 (see [`NOTICE`](NOTICE)); the project is not
+affiliated with or endorsed by xAI.
 
 What the fork changes:
 
@@ -102,9 +103,9 @@ Requirements:
   platform cannot execute from a build script.
 
 ```sh
-cargo run -p xai-grok-pager-bin              # build + launch the TUI
-cargo build -p xai-grok-pager-bin --release  # release binary: target/release/xai-grok-pager
-cargo check --workspace                      # fast validation
+cargo run -p chutes-build              # build + launch the TUI
+cargo build -p chutes-build --release  # release binary: target/release/chutes-build
+cargo check --workspace                # fast validation
 ```
 
 The binary artifact is named `xai-grok-pager`; official installs ship it as
@@ -128,7 +129,7 @@ MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 
 | Path | Contents |
 |------|----------|
-| `crates/codegen/xai-grok-pager-bin` | Composition-root package `xai-grok-pager-bin`; builds the `xai-grok-pager` binary (shipped as `chutes-build`) |
+| `crates/codegen/xai-grok-pager-bin` | Composition-root package `chutes-build`; builds the `chutes-build` binary |
 | `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
 | `crates/codegen/xai-grok-shell` | Agent runtime + leader/stdio/headless entry points |
 | `crates/codegen/xai-grok-tools` | Tool implementations (terminal, file edit, search, ...) |

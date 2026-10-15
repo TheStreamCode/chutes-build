@@ -12,7 +12,8 @@ pub struct EndpointsConfig {
     /// `Some` means someone configured it, even when the value is the default URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cli_chat_proxy_base_url: Option<String>,
-    /// Base URL for the public xAI API.
+    /// Base URL for API-key inference. The field keeps its upstream name so
+    /// existing `[endpoints]` tables keep parsing; the default is Chutes.
     pub xai_api_base_url: String,
     /// An extra access header value for matching first-party hosts, used only with the optional non-production feature.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,13 +268,15 @@ fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
-const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+/// Default API-key inference host: the Chutes LLM host, which serves
+/// OpenAI-compatible chat completions and validates Chutes credentials.
+const CHUTES_API_BASE_URL_DEFAULT: &str = "https://llm.chutes.ai/v1";
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
             cli_chat_proxy_base_url: std::env::var("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL").ok(),
             xai_api_base_url: std::env::var("CHUTES_BUILD_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+                .unwrap_or_else(|_| CHUTES_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
             models_base_url: env_string("CHUTES_BUILD_MODELS_BASE_URL"),
             models_list_url: env_string("CHUTES_BUILD_MODELS_LIST_URL"),

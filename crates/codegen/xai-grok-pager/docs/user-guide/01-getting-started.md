@@ -2,7 +2,7 @@
 
 Chutes Build is a terminal-based AI coding assistant for the Chutes ecosystem. It runs as a TUI (Terminal User Interface) that understands your codebase, executes shell commands, edits files, searches the web, and manages tasks.
 
-It is a fork of [Grok Build](https://github.com/xai-org/grok-build), re-based on upstream 1.0.0 and adapted to run on Chutes. Not affiliated with or endorsed by SpaceXAI.
+It is a fork of [Grok Build](https://github.com/xai-org/grok-build), re-based on upstream 1.0.45 and adapted to run on Chutes. Not affiliated with or endorsed by xAI.
 
 You can use it interactively as a full-screen TUI, run it headlessly for scripting and CI/CD, or integrate it into editors via the Agent Client Protocol (ACP).
 

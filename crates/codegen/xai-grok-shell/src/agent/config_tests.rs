@@ -199,9 +199,9 @@ fn subagent_permission_mode_precedence() {
     }
 }
 #[test]
-fn inject_url_derived_headers_adds_proxy_headers_for_cli_chat_proxy_url() {
+fn inject_url_derived_headers_adds_xai_headers_for_xai_hosts_only() {
     let mut headers = IndexMap::new();
-    inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+    inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
     assert_eq!(
         headers.get("X-XAI-Token-Auth").map(String::as_str),
         Some("xai-grok-cli")
@@ -218,23 +218,32 @@ fn inject_url_derived_headers_adds_proxy_headers_for_cli_chat_proxy_url() {
     );
 }
 #[test]
-fn inject_url_derived_headers_skips_proxy_headers_for_external_url() {
-    let mut headers = IndexMap::new();
-    inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
-    assert!(headers.get("X-XAI-Token-Auth").is_none());
-    assert!(headers.get("x-authenticateresponse").is_none());
-    assert_eq!(
-        headers
-            .get(crate::http::CLIENT_MODE_HEADER)
-            .map(String::as_str),
-        Some(crate::http::process_client_mode())
-    );
+fn inject_url_derived_headers_skips_xai_headers_for_chutes_and_byok_urls() {
+    for url in [
+        crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
+        "https://llm.chutes.ai/v1",
+        "https://llm.acme.com/v1",
+    ] {
+        let mut headers = IndexMap::new();
+        inject_url_derived_headers(&mut headers, None, url);
+        assert!(
+            headers.get("X-XAI-Token-Auth").is_none(),
+            "no xAI vendor headers for {url}"
+        );
+        assert!(headers.get("x-authenticateresponse").is_none());
+        assert_eq!(
+            headers
+                .get(crate::http::CLIENT_MODE_HEADER)
+                .map(String::as_str),
+            Some(crate::http::process_client_mode())
+        );
+    }
 }
 #[test]
 fn inject_url_derived_headers_preserves_caller_extra_headers() {
     let mut headers = IndexMap::new();
     headers.insert("x-custom-byok".to_string(), "value".to_string());
-    inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+    inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
     assert_eq!(
         headers.get("x-custom-byok").map(String::as_str),
         Some("value")
@@ -248,7 +257,7 @@ fn inject_url_derived_headers_preserves_caller_extra_headers() {
 fn inject_url_derived_headers_does_not_overwrite_existing_entries() {
     let mut headers = IndexMap::new();
     headers.insert("X-XAI-Token-Auth".to_string(), "caller-set".to_string());
-    inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+    inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
     assert_eq!(
         headers.get("X-XAI-Token-Auth").map(String::as_str),
         Some("caller-set"),
@@ -1512,13 +1521,7 @@ fn resolve_credentials_env_key_byok_keeps_api_key_auth_with_session() {
 }
 #[test]
 fn proxy_messages_models_use_bearer_auth_scheme() {
-    let mut model = test_model_entry(
-        "grok-4.5",
-        crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
-        None,
-        None,
-        None,
-    );
+    let mut model = test_model_entry("grok-4.5", "https://api.x.ai/v1", None, None, None);
     model.info.api_backend = ApiBackend::Messages;
     let config = sampling_config_for_model(
         &model,
@@ -1531,7 +1534,7 @@ fn proxy_messages_models_use_bearer_auth_scheme() {
     assert_eq!(config.api_backend, ApiBackend::Messages);
     assert_eq!(config.auth_scheme, AuthScheme::Bearer);
     assert_eq!(config.api_key, Some("tok".to_string()));
-    assert_eq!(config.base_url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+    assert_eq!(config.base_url, "https://api.x.ai/v1");
     assert_eq!(
         config
             .extra_headers
@@ -3440,23 +3443,23 @@ fn e2e_default_model_with_session_routes_to_proxy() {
     let sampling = resolve_sampling(model, Some("session-token-123"));
     assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
     assert_eq!(
-        sampling.base_url, "https://cli-chat-proxy.grok.com/v1",
-        "session auth should route to cli-chat-proxy, not api.x.ai"
+        sampling.base_url, "https://llm.chutes.ai/v1",
+        "session auth should route to the Chutes proxy, not a direct API host"
     );
 }
 #[test]
 #[serial]
-fn e2e_default_model_with_external_api_key_routes_to_api_xai() {
+fn e2e_default_model_with_external_api_key_routes_to_chutes_llm() {
     let (_, models) = resolve_models_from_toml("", None);
     let model = models
         .get(crate::models::default_model())
         .expect("default model should exist");
-    unsafe { std::env::set_var("CHUTES_API_KEY", "xai-external-key") };
+    unsafe { std::env::set_var("CHUTES_API_KEY", "external-key-123") };
     let sampling = resolve_sampling(model, None);
-    assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
+    assert_eq!(sampling.api_key.as_deref(), Some("external-key-123"));
     assert_eq!(
-        sampling.base_url, "https://api.x.ai/v1",
-        "external API key should route to api.x.ai via api_base_url"
+        sampling.base_url, "https://llm.chutes.ai/v1",
+        "external API key should route to the Chutes LLM host via api_base_url"
     );
     unsafe { std::env::remove_var("CHUTES_API_KEY") };
 }
@@ -3580,7 +3583,7 @@ fn e2e_duplicate_model_field_both_entries_survive() {
     assert_eq!(sampling.base_url, "https://inference.example.com/v1");
     let sampling = resolve_sampling(default, Some("session-key"));
     assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-    assert_eq!(sampling.base_url, "https://cli-chat-proxy.grok.com/v1",);
+    assert_eq!(sampling.base_url, "https://llm.chutes.ai/v1");
 }
 #[test]
 fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
@@ -4001,10 +4004,31 @@ fn requirement_pin_outranks_a_hostile_environment() {
         let mut cfg = Config::default();
         cfg.requirements
             .pin_feature(spec.id, pinned, crate::config::RequirementSource::Unknown);
-        let r = cfg.feature(spec.id);
+        // Precedence is distribution-independent; resolve as STOCK so
+        // CHUTES-withheld capabilities (voice, telemetry) don't mask it.
+        let r = cfg.feature_as(spec.id, xai_grok_config::Distribution::STOCK);
         assert_eq!(r.value, pinned, "{} lost to {}", spec.key, spec.env);
         assert_eq!(r.source, ConfigSource::Requirement, "{}", spec.key);
     }
+}
+/// A requirements pin cannot switch on a capability this distribution
+/// withholds: the distribution gate outranks every tier, including pins.
+#[test]
+#[serial]
+fn requirements_pin_cannot_enable_a_chutes_withheld_feature() {
+    let _env = EnvGuard::unset("CHUTES_BUILD_VOICE_MODE");
+    let mut cfg = Config::default();
+    cfg.requirements.pin_feature(
+        Feature::VoiceMode,
+        true,
+        crate::config::RequirementSource::Unknown,
+    );
+    let r = cfg.feature(Feature::VoiceMode);
+    assert!(!r.value, "CHUTES withholds voice dictation");
+    assert_eq!(r.source, ConfigSource::Default);
+    let stock = cfg.feature_as(Feature::VoiceMode, xai_grok_config::Distribution::STOCK);
+    assert!(stock.value, "the pin itself is honored where allowed");
+    assert_eq!(stock.source, ConfigSource::Requirement);
 }
 /// A registered key is a `&'static str` matched against the `[features]` table, not a serde field name, so every one of them is read back here.
 #[test]
@@ -4017,7 +4041,9 @@ fn every_registered_key_parses_out_of_the_features_table() {
         let cfg = Config::new_from_toml_cfg(&raw).unwrap();
         {
             let _env = EnvGuard::unset(spec.env);
-            let r = cfg.feature(spec.id);
+            // Parse coverage is distribution-independent; resolve as STOCK
+            // so CHUTES-withheld capabilities still exercise this path.
+            let r = cfg.feature_as(spec.id, xai_grok_config::Distribution::STOCK);
             assert_eq!(
                 r.value, configured,
                 "{} never reached the registry",
@@ -4026,7 +4052,7 @@ fn every_registered_key_parses_out_of_the_features_table() {
             assert_eq!(r.source, ConfigSource::Config, "{}", spec.key);
         }
         let _env = EnvGuard::set(spec.env, if configured { "0" } else { "1" });
-        let r = cfg.feature(spec.id);
+        let r = cfg.feature_as(spec.id, xai_grok_config::Distribution::STOCK);
         assert_eq!(r.value, !configured, "config.toml outranked {}", spec.env);
         assert_eq!(r.source, ConfigSource::Env, "{}", spec.key);
     }
@@ -4577,7 +4603,7 @@ fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Disabled);
     cfg.telemetry.trace_upload = Some(true);
-    let r = cfg.resolve_trace_upload();
+    let r = cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK);
     assert!(
         r.value,
         "explicit trace_upload config wins over telemetry off"
@@ -4587,7 +4613,10 @@ fn resolve_trace_upload_explicit_config_wins_over_telemetry_off() {
     cfg.requirements
         .trace_upload
         .pin(true, crate::config::RequirementSource::Unknown);
-    assert!(cfg.resolve_trace_upload().value);
+    assert!(
+        cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK)
+            .value
+    );
 }
 #[test]
 #[serial]
@@ -4624,7 +4653,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
         trace_upload_enabled: Some(true),
         ..Default::default()
     });
-    let d = cfg.trace_upload_decision_debug();
+    let d = cfg.trace_upload_decision_debug_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         d.get("trace_upload"),
         Some(&serde_json::json!(serde_json::json!(false)))
@@ -4646,7 +4675,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
         Some(&serde_json::json!(serde_json::json!(true)))
     );
     cfg.telemetry.trace_upload = Some(true);
-    let d = cfg.trace_upload_decision_debug();
+    let d = cfg.trace_upload_decision_debug_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         d.get("trace_upload"),
         Some(&serde_json::json!(serde_json::json!(true)))
@@ -4669,11 +4698,11 @@ fn resolve_trace_upload_honors_config_when_telemetry_on() {
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Enabled);
     cfg.telemetry.trace_upload = Some(false);
-    let r = cfg.resolve_trace_upload();
+    let r = cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK);
     assert!(!r.value);
     assert_eq!(r.source, ConfigSource::Config);
     cfg.telemetry.trace_upload = None;
-    let r = cfg.resolve_trace_upload();
+    let r = cfg.resolve_trace_upload_as(xai_grok_config::Distribution::STOCK);
     assert!(r.value, "defaults on when telemetry fully enabled");
 }
 #[test]
@@ -7025,15 +7054,31 @@ telemetry = "garbage"
 #[test]
 #[serial]
 fn is_telemetry_explicitly_disabled_sync_env_signals() {
+    // Env-signal precedence is distribution-independent; resolve as STOCK.
+    // (Under CHUTES the distribution gate answers first; see the CHUTES
+    // withhold test below.)
+    use xai_grok_config::Distribution;
     unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "0") };
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
-    assert!(is_telemetry_explicitly_disabled_sync());
+    assert!(is_telemetry_explicitly_disabled_sync_as(Distribution::STOCK));
     unsafe { std::env::set_var("CHUTES_BUILD_TELEMETRY_ENABLED", "1") };
-    assert!(!is_telemetry_explicitly_disabled_sync());
+    assert!(!is_telemetry_explicitly_disabled_sync_as(
+        Distribution::STOCK
+    ));
     unsafe { std::env::remove_var("CHUTES_BUILD_TELEMETRY_ENABLED") };
     unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
-    assert!(is_telemetry_explicitly_disabled_sync());
+    assert!(is_telemetry_explicitly_disabled_sync_as(Distribution::STOCK));
     unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
+}
+/// Under CHUTES both sync gates answer disabled whatever the environment
+/// says: telemetry can never be switched on in this distribution.
+#[test]
+#[serial]
+fn telemetry_sync_gates_stay_disabled_under_chutes() {
+    let _enable = EnvGuard::set("CHUTES_BUILD_TELEMETRY_ENABLED", "1");
+    let _disable = EnvGuard::unset("DISABLE_TELEMETRY");
+    assert!(is_telemetry_disabled_sync());
+    assert!(is_telemetry_explicitly_disabled_sync());
 }
 #[test]
 #[serial]
@@ -7044,13 +7089,13 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Enabled);
     let _falsy = EnvGuard::set("DISABLE_TELEMETRY", "0");
-    let resolved = cfg.resolve_telemetry_mode();
+    let resolved = cfg.resolve_telemetry_mode_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         (resolved.value, resolved.source),
         (TelemetryMode::Enabled, ConfigSource::Env)
     );
     let _truthy = EnvGuard::set("DISABLE_TELEMETRY", "1");
-    let resolved = cfg.resolve_telemetry_mode();
+    let resolved = cfg.resolve_telemetry_mode_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         (resolved.value, resolved.source),
         (TelemetryMode::Disabled, ConfigSource::Env)
@@ -7063,7 +7108,7 @@ fn resolve_telemetry_mode_disable_env_beats_opt_in_but_not_requirements_pin() {
         TelemetryMode::Enabled,
         crate::config::RequirementSource::Unknown,
     );
-    let resolved = cfg.resolve_telemetry_mode();
+    let resolved = cfg.resolve_telemetry_mode_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         (resolved.value, resolved.source),
         (TelemetryMode::Enabled, ConfigSource::Requirement)
@@ -7080,7 +7125,7 @@ fn requirements_telemetry_pin_beats_user_config() {
         TelemetryMode::Disabled,
         crate::config::RequirementSource::Unknown,
     );
-    let off = cfg.resolve_telemetry_mode();
+    let off = cfg.resolve_telemetry_mode_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         (off.value, off.source),
         (TelemetryMode::Disabled, ConfigSource::Requirement)
@@ -7090,7 +7135,7 @@ fn requirements_telemetry_pin_beats_user_config() {
         TelemetryMode::Enabled,
         crate::config::RequirementSource::Unknown,
     );
-    let on = cfg.resolve_telemetry_mode();
+    let on = cfg.resolve_telemetry_mode_as(xai_grok_config::Distribution::STOCK);
     assert_eq!(
         (on.value, on.source),
         (TelemetryMode::Enabled, ConfigSource::Requirement)
@@ -8594,3 +8639,47 @@ fn test_model_entry(
         api_base_url: api_base_url.map(|s| s.to_string()),
     }
 }
+
+/// Stock builds talk to Chutes and only Chutes: API-key and session
+/// inference resolve to the Chutes LLM host, as does the model catalog.
+/// No endpoint env var, no config file, no session may be needed for that;
+/// xAI hosts must never appear in a default resolution.
+#[test]
+#[serial]
+fn stock_endpoints_resolve_to_chutes_only() {
+    use xai_grok_test_support::EnvGuard;
+    let _unset_api = EnvGuard::unset("CHUTES_BUILD_XAI_API_BASE_URL");
+    let _unset_base = EnvGuard::unset("CHUTES_BUILD_MODELS_BASE_URL");
+    let _unset_list = EnvGuard::unset("CHUTES_BUILD_MODELS_LIST_URL");
+    let _unset_proxy = EnvGuard::unset("CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL");
+    let _unset_auth = EnvGuard::unset("CHUTES_BUILD_AUTH");
+    let _key = EnvGuard::set("CHUTES_API_KEY", "cpk_pinning_probe");
+    let cfg = Config::default();
+    assert_eq!(
+        cfg.endpoints.xai_api_base_url, "https://llm.chutes.ai/v1",
+        "API-key inference default must be the Chutes LLM host"
+    );
+    assert_eq!(
+        cfg.endpoints.proxy_url(),
+        "https://llm.chutes.ai/v1",
+        "session-auth inference default must be the Chutes LLM host"
+    );
+    assert_eq!(
+        cfg.endpoints.resolve_models_list_url(),
+        "https://llm.chutes.ai/v1/models",
+        "model catalog default must be the Chutes LLM host"
+    );
+    let models = resolve_model_list(&cfg, None);
+    let entry = models.get("model-router").expect("bundled default model");
+    let creds = resolve_credentials(entry, None);
+    assert_eq!(
+        creds.base_url, "https://llm.chutes.ai/v1",
+        "a stock CHUTES_API_KEY setup must sample from Chutes, not xAI"
+    );
+    assert!(
+        !creds.base_url.contains("x.ai") && !creds.base_url.contains("grok.com"),
+        "resolved inference URL must not name xAI hosts: {}",
+        creds.base_url
+    );
+}
+

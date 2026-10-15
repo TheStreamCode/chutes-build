@@ -31,6 +31,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verified `enable_thinking` toggle family; Kimi-K3, DeepSeek-V4-Flash, and
   Nemotron-3-Nano stay fail-closed (`Unknown`, no reasoning keys sent) until a
   chat-template switch is verified for them.
+- **User guide rewritten for Chutes.** Every model example uses the live
+  catalog (`model-router` default, `cpk_...` keys), auth/update/telemetry
+  pages describe Chutes-only behavior, and the ecosystem page gains a
+  capability-defaults table verified against Chutes Docs and the code's
+  pinned slugs.
 
 ### Fixed
 
@@ -48,6 +53,39 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ModelCapabilities`, `ModelCandidate`, and `select_capable_model` had no
   callers; equivalent-model selection lives in
   `catalog::find_equivalent_chat_model`, which ranks the live catalog.
+
+### Privacy
+
+- **Stock builds talk to Chutes and only Chutes.** Inference (API-key and
+  session), the model catalog, and every default endpoint resolve to Chutes
+  hosts; xAI hosts can no longer appear in a default resolution (pinned by
+  `stock_endpoints_resolve_to_chutes_only`). A probe of the rebased tree had
+  shown `https://api.x.ai/v1` as the resolved default — fixed.
+- **The Chutes distribution withholds telemetry, error reporting, remote
+  control, and voice dictation.** `Distribution::current()` is now `CHUTES`,
+  which forces telemetry mode to `Disabled`, disables trace upload, gates the
+  feedback surface and session-signal sync behind the `Telemetry` capability,
+  and refuses relay connections (plus discard-port relay/gateway defaults).
+- **No automatic update checks.** `should_check_for_updates` honors
+  `AUTOMATIC_SELF_UPDATE=false`; the `update` subcommand still checks on
+  explicit request.
+- **The wire no longer identifies as Grok.** Request headers are renamed to
+  `x-chutes-build-*` (version, identifier, conversation/request/session/agent
+  ids, user agent); the legacy `X-XAI-Token-Auth` headers attach only for
+  genuine xAI hosts (BYOK compat).
+- **Managed-config sync needs an explicit operator endpoint.** Stock builds
+  sync nothing instead of polling a default URL.
+- **Dead Grok surfaces removed.** The unused grok-web skills client (and its
+  unreachable slash-command hook), the vestigial `curl|bash` installers that
+  fetched Grok Build binaries from xAI's bucket, and the unused xAI npm
+  packaging template are gone. The retention toggle is local-only (Chutes
+  serves no retention API), and `chutes-build models` works again
+  (`x.ai/models/list` → `chutes.ai/models/list`).
+- **Rebase regressions restored.** The rebase had lost the fork's
+  `chutes-build` package/binary identity (breaking `cargo build -p
+  chutes-build` and the release workflow), the Chutes endpoint defaults, and
+  the external-OTEL compile-time deadening — all restored from `main` and
+  pinned by tests.
 
 ## [1.4.0] - 2026-09-03
 

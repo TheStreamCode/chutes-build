@@ -316,12 +316,17 @@ pub async fn run_headless(
     reauthenticate: bool,
     memory_config: Option<crate::config::MemoryConfig>,
 ) -> anyhow::Result<()> {
+    if let Some(refusal) = xai_grok_config::Distribution::current()
+        .refusal(xai_grok_config::Capability::RemoteControl)
+    {
+        anyhow::bail!("{refusal}");
+    }
     register_fs_watch_runtime();
     xai_grok_telemetry::unified_log::set_version(xai_grok_version::VERSION);
     crate::http::set_process_client_mode_headless();
     use crate::agent::relay::spawn_relay_connection_with_callback;
     use tokio_util::sync::CancellationToken;
-    const HEADLESS_NO_SESSION: &str = "Headless mode requires a grok.com session. \
+    const HEADLESS_NO_SESSION: &str = "Headless mode requires a signed-in session. \
         Run `chutes-build login` to sign in, or use `chutes-build agent stdio` for API-key access.";
     xai_file_utils::queue::cleanup_orphaned_uploads(
         &grok_home::grok_home(),
@@ -584,7 +589,32 @@ fn spawn_leader_relay(
     agent_to_ws_tx: Rc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
+    spawn_leader_relay_as(
+        slot,
+        relay_config,
+        relay_on_demand,
+        relay_demand_rx,
+        ws_to_agent_tx,
+        agent_to_ws_tx,
+        cancel,
+        xai_grok_config::Distribution::current(),
+    );
+}
+fn spawn_leader_relay_as(
+    slot: Rc<std::cell::RefCell<Option<crate::agent::relay::RelayHandle>>>,
+    relay_config: crate::agent::relay::RelayConfig,
+    relay_on_demand: bool,
+    mut relay_demand_rx: tokio::sync::watch::Receiver<bool>,
+    ws_to_agent_tx: mpsc::UnboundedSender<String>,
+    agent_to_ws_tx: Rc<Mutex<Option<mpsc::UnboundedSender<String>>>>,
+    cancel: tokio_util::sync::CancellationToken,
+    distribution: xai_grok_config::Distribution,
+) {
     use crate::agent::relay::spawn_relay_connection;
+    if !distribution.allows(xai_grok_config::Capability::RemoteControl) {
+        tracing::info!("relay connection withheld: RemoteControl is off in this distribution");
+        return;
+    }
     if !relay_on_demand {
         info!("Starting relay connection (eager)");
         let (tx, handle) = spawn_relay_connection(relay_config, ws_to_agent_tx, cancel);
@@ -631,6 +661,14 @@ impl DeferredRelayArm {
     /// Returns `Some(self)` when the session is not relay-eligible, so a later eligible token can still arm.
     /// Ineligible means BYOK / non-x.ai issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
     fn arm_if_eligible(self, session: &GrokAuth, auth_manager: &Arc<AuthManager>) -> Option<Self> {
+        self.arm_if_eligible_as(session, auth_manager, xai_grok_config::Distribution::current())
+    }
+    fn arm_if_eligible_as(
+        self,
+        session: &GrokAuth,
+        auth_manager: &Arc<AuthManager>,
+        distribution: xai_grok_config::Distribution,
+    ) -> Option<Self> {
         let Some(relay_config) = crate::agent::relay::RelayConfig::for_session(
             session,
             &self.grok_com_config,
@@ -640,7 +678,7 @@ impl DeferredRelayArm {
             return Some(self);
         };
         info!("Relay-eligible auth token appeared after startup — arming grok.com relay");
-        spawn_leader_relay(
+        spawn_leader_relay_as(
             self.slot,
             relay_config,
             self.relay_on_demand,
@@ -648,6 +686,7 @@ impl DeferredRelayArm {
             self.ws_to_agent_tx,
             self.agent_to_ws_tx,
             self.cancel,
+            distribution,
         );
         None
     }
@@ -1563,7 +1602,7 @@ mod tests {
         local
             .run_until(async {
                 let slot = Rc::new(std::cell::RefCell::new(None));
-                spawn_leader_relay(
+                spawn_leader_relay_as(
                     slot.clone(),
                     config,
                     false,
@@ -1571,6 +1610,7 @@ mod tests {
                     ws_to_agent_tx,
                     agent_to_ws_tx.clone(),
                     cancel.clone(),
+                    xai_grok_config::Distribution::STOCK,
                 );
                 assert!(
                     slot.borrow().is_some(),
@@ -1601,7 +1641,7 @@ mod tests {
         local
             .run_until(async {
                 let slot = Rc::new(std::cell::RefCell::new(None));
-                spawn_leader_relay(
+                spawn_leader_relay_as(
                     slot.clone(),
                     config,
                     true,
@@ -1609,6 +1649,7 @@ mod tests {
                     ws_to_agent_tx,
                     agent_to_ws_tx.clone(),
                     cancel.clone(),
+                    xai_grok_config::Distribution::STOCK,
                 );
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 assert_eq!(
@@ -1619,6 +1660,46 @@ mod tests {
                 assert!(agent_to_ws_tx.lock().is_none());
                 demand_tx.send(true).unwrap();
                 wait_for_connection(&count, "after headless demand signal").await;
+            })
+            .await;
+        cancel.cancel();
+    }
+    /// CHUTES withholds RemoteControl: even eager mode must park no handle
+    /// and open no relay connection.
+    #[tokio::test]
+    #[tracing::instrument(level = "debug", skip_all)]
+    async fn chutes_distribution_spawns_no_leader_relay() {
+        let (addr, count) = spawn_mock_relay_server().await;
+        let config = test_relay_config(addr);
+        let cancel = CancellationToken::new();
+        let (ws_to_agent_tx, _ws_to_agent_rx) = mpsc::unbounded_channel();
+        let agent_to_ws_tx: Rc<Mutex<Option<mpsc::UnboundedSender<String>>>> =
+            Rc::new(Mutex::new(None));
+        let (_demand_tx, demand_rx) = watch::channel(false);
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let slot = Rc::new(std::cell::RefCell::new(None));
+                spawn_leader_relay(
+                    slot.clone(),
+                    config,
+                    false,
+                    demand_rx,
+                    ws_to_agent_tx,
+                    agent_to_ws_tx.clone(),
+                    cancel.clone(),
+                );
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                assert!(
+                    slot.borrow().is_none(),
+                    "withheld relay must park no handle"
+                );
+                assert!(agent_to_ws_tx.lock().is_none());
+                assert_eq!(
+                    count.load(Ordering::SeqCst),
+                    0,
+                    "withheld relay must open no connection"
+                );
             })
             .await;
         cancel.cancel();
@@ -1657,7 +1738,11 @@ mod tests {
             .run_until(async {
                 let ineligible = GrokAuth::test_default();
                 let arm = arm
-                    .arm_if_eligible(&ineligible, &auth_manager)
+                    .arm_if_eligible_as(
+                        &ineligible,
+                        &auth_manager,
+                        xai_grok_config::Distribution::STOCK,
+                    )
                     .expect("non-eligible token must hand the parts back");
                 assert!(slot.borrow().is_none(), "no handle parked yet");
                 assert_eq!(
@@ -1671,7 +1756,12 @@ mod tests {
                     ..GrokAuth::test_default()
                 };
                 assert!(
-                    arm.arm_if_eligible(&eligible, &auth_manager).is_none(),
+                    arm.arm_if_eligible_as(
+                        &eligible,
+                        &auth_manager,
+                        xai_grok_config::Distribution::STOCK
+                    )
+                    .is_none(),
                     "eligible token must consume the arm parts"
                 );
                 assert!(
@@ -1752,7 +1842,12 @@ mod tests {
         local
             .run_until(async {
                 assert!(
-                    arm.arm_if_eligible(&minted, &auth_manager).is_none(),
+                    arm.arm_if_eligible_as(
+                        &minted,
+                        &auth_manager,
+                        xai_grok_config::Distribution::STOCK
+                    )
+                    .is_none(),
                     "a cold-minted relay-eligible session must arm the relay"
                 );
                 assert!(slot.borrow().is_some(), "relay handle must be parked");

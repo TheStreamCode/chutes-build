@@ -4004,7 +4004,13 @@ fn managed_settings_disables_features_and_requirements_overrides() {
             cfg.features.telemetry,
             Some(crate::agent::config::TelemetryMode::Enabled)
         );
-    assert!(cfg.is_feature_enabled(Feature::Feedback));
+    // Requirements-vs-managed precedence is distribution-independent;
+    // resolve as STOCK because CHUTES withholds the telemetry capability
+    // the feedback surface needs.
+    assert!(
+        cfg.feature_as(Feature::Feedback, xai_grok_config::Distribution::STOCK)
+            .value
+    );
     assert!(cfg.ui.yolo);
 }
 /// REGRESSION: external managed-settings.json is advisory, not authoritative.

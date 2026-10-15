@@ -1733,6 +1733,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "chutes-build"
+version = "1.4.0"
+dependencies = [
+ "anyhow",
+ "chutes-build-core",
+ "clap",
+ "cryptify",
+ "dunce",
+ "libc",
+ "obfstr",
+ "semver",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tikv-jemalloc-sys",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "xai-acp-lib",
+ "xai-crash-handler",
+ "xai-dirs",
+ "xai-grok-cloud-config",
+ "xai-grok-config",
+ "xai-grok-extra-ca",
+ "xai-grok-login",
+ "xai-grok-pager",
+ "xai-grok-pager-minimal",
+ "xai-grok-sandbox",
+ "xai-grok-shell",
+ "xai-grok-telemetry",
+ "xai-grok-update",
+ "xai-grok-version",
+ "xai-grok-workspace",
+ "xai-tty-utils",
+ "zstd",
+]
+
+[[package]]
 name = "chutes-build-core"
 version = "0.1.0"
 dependencies = [
@@ -14411,51 +14456,6 @@ dependencies = [
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
-]
-
-[[package]]
-name = "xai-grok-pager-bin"
-version = "1.0.45"
-dependencies = [
- "anyhow",
- "chutes-build-core",
- "clap",
- "cryptify",
- "dunce",
- "libc",
- "obfstr",
- "semver",
- "serde",
- "serde_json",
- "serial_test",
- "sha2 0.10.9",
- "tar",
- "tempfile",
- "tikv-jemalloc-ctl",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "tracing-subscriber",
- "xai-acp-lib",
- "xai-crash-handler",
- "xai-dirs",
- "xai-grok-cloud-config",
- "xai-grok-config",
- "xai-grok-extra-ca",
- "xai-grok-login",
- "xai-grok-pager",
- "xai-grok-pager-minimal",
- "xai-grok-sandbox",
- "xai-grok-shell",
- "xai-grok-telemetry",
- "xai-grok-update",
- "xai-grok-version",
- "xai-grok-workspace",
- "xai-tty-utils",
- "zstd",
 ]
 
 [[package]]

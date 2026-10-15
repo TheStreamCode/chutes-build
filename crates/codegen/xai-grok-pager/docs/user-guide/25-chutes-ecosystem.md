@@ -50,6 +50,27 @@ first; a mismatch reports the fields that cord accepts, and
 `describe_media_model` remains available when an exact schema is needed up
 front.
 
+## Capability defaults
+
+Single-purpose tools ship with a pinned default chute, overridable per call.
+`generate_media` instead resolves the model name against the live catalog, so
+new image, video, music, and speech chutes work with no client update.
+
+| Capability | Tool | Default |
+|---|---|---|
+| Image OCR (verbatim) | `ocr_page` | `google/gemma-4-31B-turbo-TEE` vision model |
+| PDF / document extraction | `extract_document` | [vonkaiser-docuextract](https://chutes.ai/docs/models/vonkaiser-docuextract) (LightOnOCR + NuExtract3) |
+| Speech-to-text | `transcribe_audio` | [vonkaiser-audiodojo](https://chutes.ai/docs/models/vonkaiser-audiodojo) |
+| Embeddings | `embed_texts` | `Qwen/Qwen3-Embedding-8B-TEE` ([docs](https://chutes.ai/docs/models/chutes-qwen-qwen3-embedding-8b-tee)) |
+| Image generation | `generate_media` | Live catalog, e.g. [vonkaiser-z-image-turbo](https://chutes.ai/docs/models/vonkaiser-z-image-turbo) |
+| Image editing | `generate_media` | Live catalog, e.g. [vonkaiser-qwen-image-edit-2511](https://chutes.ai/docs/models/vonkaiser-qwen-image-edit-2511) |
+| Video generation | `generate_media` | Live catalog, e.g. [vonkaiser-ltx-23-video](https://chutes.ai/docs/models/vonkaiser-ltx-23-video) |
+| Music generation | `generate_media` | Live catalog, e.g. [vonkaiser-ace-step-15-music-generator](https://chutes.ai/docs/models/vonkaiser-ace-step-15-music-generator) |
+
+When a default chute is unavailable the tool reports the failure honestly,
+names the chute it tried, and — where an equivalent exists — falls back
+automatically and says which replacement answered.
+
 Generated files are saved inside the workspace and returned as typed media
 artifacts rather than path text. Supported terminals keep inline image/video
 previews. Music and speech cards provide a local audio toggle backed by

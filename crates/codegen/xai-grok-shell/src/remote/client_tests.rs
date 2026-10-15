@@ -807,7 +807,7 @@ fn get_object_returns_some_for_actual_object() {
 /// REGRESSION: `chutes-build setup` must send the deployment key to the proxy, never the inference endpoint.
 #[test]
 #[serial_test::serial]
-fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
+fn deployment_config_url_uses_chutes_proxy_when_not_overridden() {
     use crate::agent::config::EndpointsConfig;
     for k in [
         "CHUTES_BUILD_CLI_CHAT_PROXY_BASE_URL",
@@ -824,7 +824,7 @@ fn deployment_config_url_uses_cli_chat_proxy_when_not_overridden() {
     )
     .unwrap();
     let url = EndpointsConfig::from_config_value(&managed).resolve_managed_config_url();
-    assert_eq!(url, "https://cli-chat-proxy.grok.com/v1/deployment/config");
+    assert_eq!(url, "https://llm.chutes.ai/v1/deployment/config");
     assert!(
         !url.contains("acme-corp"),
         "deployment key would be sent to the inference host: {url}"

@@ -215,7 +215,10 @@ pub const FEATURES: &[FeatureSpec] = &[
         env: "CHUTES_BUILD_FEEDBACK_ENABLED",
         default_enabled: true,
         remote: Some(|settings| settings.feedback_enabled),
-        capability: None,
+        // Feedback popups, the `/feedback` command, and session-signal sync
+        // exist to report back to the vendor: a distribution without
+        // telemetry has no such backend, so the whole surface stays off.
+        capability: Some(Capability::Telemetry),
     },
     FeatureSpec {
         id: Feature::FeedbackTraceCard,
@@ -224,7 +227,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         env: "CHUTES_BUILD_FEEDBACK_TRACE_CARD",
         default_enabled: false,
         remote: Some(|settings| settings.feedback_trace_card_enabled),
-        capability: None,
+        capability: Some(Capability::Telemetry),
     },
     FeatureSpec {
         id: Feature::TurnSummary,
@@ -451,7 +454,7 @@ impl Feature {
         self.resolve_as(Distribution::current(), sources)
     }
 
-    fn resolve_as(self, distribution: Distribution, sources: FeatureSources) -> Resolved<bool> {
+    pub fn resolve_as(self, distribution: Distribution, sources: FeatureSources) -> Resolved<bool> {
         if let Some(capability) = self.spec().capability
             && !distribution.allows(capability)
         {

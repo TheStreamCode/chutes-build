@@ -6,7 +6,7 @@ Chutes Build connects to custom model endpoints for alternative providers, self-
 
 ## Default Models
 
-By default, Chutes Build uses models hosted by SpaceXAI, and new sessions start with `grok-4.5`. Default models require no configuration. Authenticate with `chutes-build login` or an API key, then start a session.
+By default, Chutes Build uses models hosted by Chutes, and new sessions start with `model-router`. Default models require no configuration. Authenticate with `chutes-build login` or an API key, then start a session.
 
 List all available models:
 
@@ -21,7 +21,7 @@ chutes-build models
 ### CLI Flag
 
 ```bash
-chutes-build -p "Hello" -m grok-4.6
+chutes-build -p "Hello" -m model-router
 ```
 
 ### Slash Command
@@ -29,13 +29,13 @@ chutes-build -p "Hello" -m grok-4.6
 In the TUI, switch models during a session:
 
 ```
-/model grok-4.6
+/model model-router
 ```
 
 Or use the alias:
 
 ```
-/m grok-4.6
+/m model-router
 ```
 
 ### Model Picker (Ctrl+M)
@@ -48,8 +48,8 @@ Enterprise hosts can pin the **selectable** set — not only the default — in 
 
 ```toml
 [models]
-default = "grok-4.5"
-allowed_models = ["grok-4.5", "grok-4*"]
+default = "model-router"
+allowed_models = ["model-router", "Qwen/*"]
 ```
 
 A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
@@ -60,7 +60,7 @@ Set a persistent default in `~/.chutes-build/config.toml`:
 
 ```toml
 [models]
-default = "grok-4.5"
+default = "model-router"
 ```
 
 ---
@@ -210,7 +210,7 @@ Both fields also work on a shared `[model_providers.<id>]` block. A model that p
 [model.legacy]
 model = "legacy-model"
 base_url = "https://gateway.example/v1"
-notice = { severity = "warning", text = "This model is deprecated on Oct 15. Switch to grok-4.6.", label = "deprecated" }
+notice = { severity = "warning", text = "This model is deprecated on Oct 15. Switch to model-router.", label = "deprecated" }
 ```
 
 `severity` sets the banner color and is `info`, `warning`, or `critical`. It defaults to `info`. `text` is required, and long text wraps. `label` is an optional short tag shown before the text. A custom models endpoint can send the same object as `notice` or `_meta.notice` on a model entry. To remove a notice a built-in or remote model carries, set `notice = { text = "" }`.
@@ -223,11 +223,11 @@ You can override specific fields of built-in models without redefining everythin
 
 ```toml
 # Override only the API key for a default model
-[model.grok-4.6]
+[model.model-router]
 api_key = "my-api-key"
 
 # Override temperature and add a custom API key
-[model.grok-4.6]
+[model.model-router]
 temperature = 0.5
 api_key = "sk-custom"
 ```
@@ -296,10 +296,10 @@ Bedrock's OpenAI-compatible gateway rejects `reasoning.summary`, so set `reasoni
 command = "aws-bedrock-token"   # prints a Bedrock API key on stdout (e.g. via aws-bedrock-token-generator)
 token_ttl_secs = 3600
 
-[model."bedrock-grok-4.6"]
-model = "xai.grok-4.6"
+[model."bedrock-acme-model"]
+model = "acme.my-model"
 base_url = "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
-name = "Grok 4.6 (Bedrock)"
+name = "My Model (Bedrock)"
 api_backend = "responses"
 reasoning_summary = "none"
 auth_provider = "bedrock"
@@ -359,7 +359,7 @@ Point Chutes Build at a custom OpenAI-compatible `/v1/models` endpoint instead o
 
 ```bash
 export CHUTES_BUILD_MODELS_BASE_URL="https://api.acme.com/v1"
-export CHUTES_API_KEY="xai-..."
+export CHUTES_API_KEY="cpk_..."
 grok
 ```
 
@@ -370,7 +370,7 @@ grok
 models_base_url = "https://api.acme.com/v1"
 
 # Override only the API key for a specific model
-[model.grok-4.6]
+[model.model-router]
 api_key = "my-api-key"
 ```
 
@@ -388,13 +388,13 @@ The `web_search` tool uses a separate model. Configure it with:
 
 ```toml
 [models]
-web_search = "grok-4.5"
+web_search = "model-router"
 ```
 
 Or via environment variable:
 
 ```bash
-export CHUTES_BUILD_WEB_SEARCH_MODEL="grok-4.5"
+export CHUTES_BUILD_WEB_SEARCH_MODEL="model-router"
 ```
 
 If you point web search at a custom model, you also need a `[model.*]` entry so Chutes Build can reach it. Server-side ("backend") web search runs only when the model sets `supports_backend_search = true` (and the build enables backend search); it does not depend on `api_backend`:
@@ -443,12 +443,12 @@ auth_provider_label = "Acme Corp"
 auth_token_ttl = 3600
 
 [models]
-default = "company-grok"
+default = "company-llm"
 
-[model.company-grok]
-model = "grok-4.6"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok 4.6 (Proxy)"
+[model.company-llm]
+model = "my-model"
+base_url = "https://llm-proxy.acme.com/"
+name = "My Model (Proxy)"
 context_window = 128000
 
 [features]

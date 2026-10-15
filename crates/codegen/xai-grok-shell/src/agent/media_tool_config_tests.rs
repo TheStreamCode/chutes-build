@@ -61,12 +61,12 @@ fn media_headers_identify_build_traffic() {
     else {
         panic!("image tools are enabled by default");
     };
-    assert!(extra_headers.contains_key("x-grok-client-identifier"));
-    assert!(extra_headers.contains_key("x-grok-client-version"));
+    assert!(extra_headers.contains_key("x-chutes-build-identifier"));
+    assert!(extra_headers.contains_key("x-chutes-build-version"));
     assert!(
         extra_headers
             .get("user-agent")
-            .is_some_and(|agent| agent.starts_with("xai-grok-build/")),
+            .is_some_and(|agent| agent.starts_with("chutes-build/")),
         "{extra_headers:?}"
     );
 }

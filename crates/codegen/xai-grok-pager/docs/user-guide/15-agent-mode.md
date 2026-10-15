@@ -57,13 +57,13 @@ Typical clients: IDE extensions (Zed, Neovim, Emacs), custom tools, and ACP SDKs
 Agent options apply to every transport (`stdio`, `serve`, `headless`, `leader`). They go after `agent` and before the mode name. Mode-specific flags go after the mode (for example `serve --bind`).
 
 ```bash
-chutes-build agent --always-approve --model grok-4.6 stdio
+chutes-build agent --always-approve --model model-router stdio
 chutes-build agent --always-approve serve --bind 127.0.0.1:2419 --secret <token>
 ```
 
 | Flag | Description |
 | ---- | ----------- |
-| `-m, --model <MODEL>` | Model ID (for example `grok-4.6`). |
+| `-m, --model <MODEL>` | Model ID (for example `model-router`). |
 | `--always-approve` | Run without interactive tool-permission prompts. Alias: `--yolo`. |
 | `--reauth` | Authenticate before the agent starts. |
 | `--agent-profile <PATH>` | Load an agent profile from a file. |
@@ -141,7 +141,7 @@ Each update names its type, so a client can render distinct panels for reasoning
 
 ## Extension methods
 
-Beyond the base ACP protocol, Chutes Build defines extension methods under the `x.ai/` prefix for SpaceXAI-specific functionality. These cover:
+Beyond the base ACP protocol, Chutes Build defines extension methods under the `x.ai/` prefix for agent-specific functionality. These cover:
 
 | Category                   | Prefix               | Examples                                         |
 | -------------------------- | -------------------- | ------------------------------------------------ |
@@ -155,7 +155,7 @@ Beyond the base ACP protocol, Chutes Build defines extension methods under the `
 | **Authentication**         | `x.ai/auth/*`        | `get_url`, `submit_code`                         |
 | **Feedback & Telemetry**   | `x.ai/*`             | `feedback`, `telemetry/*`                        |
 
-The tables here show representative methods in each category. The `x.ai/*` set is SpaceXAI-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
+The tables here show representative methods in each category. The `x.ai/*` set is Chutes Build-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
 
 ### Notifications (agent to client)
 
