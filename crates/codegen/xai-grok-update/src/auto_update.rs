@@ -69,7 +69,7 @@ fn manual_install_cmd(channel: &str) -> String {
 fn reinstall_hint(installer: &str, channel: &str) -> String {
     match installer {
         "npm" => "Please reinstall via npm:\n  npm i -g @xai-official/grok".to_string(),
-        "gh-release" => "Please reinstall via GitHub Releases:\n  gh release download --repo xai-org-shared/grok-build --pattern 'grok-*' --output grok && chmod +x grok".to_string(),
+        "gh-release" => "Please reinstall via GitHub Releases:\n  gh release download --repo TheStreamCode/chutes-build --pattern 'chutes-build-*' --output chutes-build && chmod +x chutes-build".to_string(),
         WINGET => format!("Update with WinGet:\n  {UPGRADE_COMMAND}"),
         _ => format!("Please reinstall via:\n  {}", manual_install_cmd(channel)),
     }
@@ -1039,6 +1039,23 @@ pub(crate) fn detect_platform() -> Result<(&'static str, &'static str)> {
     ))
 }
 
+/// GitHub release asset name for a `detect_platform` pair, matching the
+/// `package-release` workflow (`chutes-build-<target>[.exe]`). `None`
+/// where the release matrix has no such platform.
+pub(crate) fn release_asset_name(os: &str, arch: &str) -> Option<String> {
+    let target = match (os, arch) {
+        ("windows", "x86_64") => "win32-x64",
+        ("windows", "aarch64") => "win32-arm64",
+        ("linux", "x86_64") => "linux-x64-gnu",
+        ("linux", "aarch64") => "linux-arm64-gnu",
+        ("macos", "x86_64") => "darwin-x64",
+        ("macos", "aarch64") => "darwin-arm64",
+        _ => return None,
+    };
+    let ext = if os == "windows" { ".exe" } else { "" };
+    Some(format!("chutes-build-{target}{ext}"))
+}
+
 /// Age past which a leftover `.tmp` download file or freshly-renamed versioned binary counts as abandoned (crashed or
 /// killed updater). The per-request budget is [`DOWNLOAD_REQUEST_TIMEOUT`] and the leader's check-and-download pass
 /// matches it. So a concurrent updater's in-flight or just-landed file is never deleted out from under it.
@@ -1660,16 +1677,16 @@ async fn download_verified_from_base(
     let download_dir = grok_home.join("downloads");
     tokio::fs::create_dir_all(&download_dir).await?;
 
-    let binary_name = format!("grok-{}-{}", version, platform);
+    let binary_name = format!("chutes-build-{}-{}", version, platform);
     let binary_path = download_dir.join(&binary_name);
 
-    eprintln!("  Downloading grok v{} ({})...", version, platform);
+    eprintln!("  Downloading chutes-build v{} ({})...", version, platform);
 
     // The downloaded binary is already +x (see `publish_downloaded_artifact`)
     download_cli_artifact_from_gcs(gcs_base_url, &binary_name, &binary_path, true).await?;
 
     // Smoke-test: run the binary before activating it
-    // A truncated or corrupt download is caught here and never becomes the active grok
+    // A truncated or corrupt download is caught here and never becomes the active chutes-build
     let smoke_span = xai_grok_telemetry::region::Region::from_span(tracing::info_span!(
         "update.smoke_test",
         elapsed_ms = tracing::field::Empty,
@@ -1724,6 +1741,9 @@ async fn activate_verified_download(download: &VerifiedDownload) -> Result<()> {
     eprintln!();
 
     // Current, N-1, and any leftover a live process is still executing.
+    // The legacy `grok` prefix prunes downloads from releases that still
+    // named their objects `grok-<version>-<platform>`.
+    cleanup_old_downloads(&download_dir, "chutes-build", &download.version).await;
     cleanup_old_downloads(&download_dir, "grok", &download.version).await;
     cleanup_old_downloads(&download_dir, "grok-pager", &download.version).await;
 
@@ -1784,7 +1804,7 @@ pub(crate) fn relative_symlink_target(
     let (Some(target_parent), Some(link_parent)) = (target.parent(), link.parent()) else {
         return target.to_path_buf();
     };
-    // Same directory: just the filename (e.g. grok-latest -> grok-0.1.203-…)
+    // Same directory: just the filename (e.g. chutes-build-latest -> chutes-build-0.1.203-…)
     if target_parent == link_parent
         && let Some(name) = target.file_name()
     {
@@ -1807,15 +1827,19 @@ async fn swap_managed_bin_links(
     binary_path: &std::path::Path,
     bin_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf> {
-    let grok_name = if cfg!(windows) { "grok.exe" } else { "grok" };
+    let app_name = if cfg!(windows) {
+        "chutes-build.exe"
+    } else {
+        "chutes-build"
+    };
     let agent_name = if cfg!(windows) { "agent.exe" } else { "agent" };
-    let grok_link = bin_dir.join(grok_name);
+    let app_link = bin_dir.join(app_name);
     let pairs = [
-        (binary_path.to_path_buf(), grok_link.clone()),
+        (binary_path.to_path_buf(), app_link.clone()),
         (binary_path.to_path_buf(), bin_dir.join(agent_name)),
     ];
     replace_managed_bins(&pairs).await?;
-    Ok(grok_link)
+    Ok(app_link)
 }
 
 /// Point every `dest` in `pairs` at its `src` (a symlink on Unix, a copy through
@@ -2197,24 +2221,24 @@ async fn heal_managed_install(installer: &str) {
 
 #[cfg(unix)]
 async fn reconcile_agent_to_grok(bin_dir: &std::path::Path) {
-    let grok_link = bin_dir.join("grok");
+    let app_link = bin_dir.join("chutes-build");
     let agent_link = bin_dir.join("agent");
 
-    let Ok(grok_target) = tokio::fs::read_link(&grok_link).await else {
+    let Ok(app_target) = tokio::fs::read_link(&app_link).await else {
         return;
     };
-    if tokio::fs::metadata(&grok_link).await.is_err() {
+    if tokio::fs::metadata(&app_link).await.is_err() {
         return;
     }
     if let Ok(agent_target) = tokio::fs::read_link(&agent_link).await
-        && agent_target == grok_target
+        && agent_target == app_target
     {
         return;
     }
-    match atomic_symlink_swap(&grok_target, &agent_link).await {
+    match atomic_symlink_swap(&app_target, &agent_link).await {
         Ok(()) => tracing::info!(
-            grok_target = %grok_target.display(),
-            "reconciled agent bin symlink to grok target"
+            app_target = %app_target.display(),
+            "reconciled agent bin symlink to chutes-build target"
         ),
         Err(e) => tracing::warn!("failed to reconcile agent bin symlink: {e:#}"),
     }
@@ -2222,13 +2246,13 @@ async fn reconcile_agent_to_grok(bin_dir: &std::path::Path) {
 
 #[cfg(windows)]
 async fn reconcile_agent_exe_to_grok(bin_dir: &std::path::Path) {
-    let grok_exe = bin_dir.join("grok.exe");
+    let app_exe = bin_dir.join("chutes-build.exe");
     let agent_exe = bin_dir.join("agent.exe");
 
-    if tokio::fs::metadata(&grok_exe).await.is_err() {
+    if tokio::fs::metadata(&app_exe).await.is_err() {
         return;
     }
-    match agent_exe_differs(&grok_exe, &agent_exe).await {
+    match agent_exe_differs(&app_exe, &agent_exe).await {
         Ok(true) => {}
         Ok(false) => return,
         Err(e) => {
@@ -2236,9 +2260,9 @@ async fn reconcile_agent_exe_to_grok(bin_dir: &std::path::Path) {
             return;
         }
     }
-    match windows_replace_exe(&grok_exe, &agent_exe).await {
-        Ok(()) => tracing::info!("reconciled agent.exe to grok.exe"),
-        Err(e) => tracing::warn!("failed to reconcile agent.exe to grok.exe: {e:#}"),
+    match windows_replace_exe(&app_exe, &agent_exe).await {
+        Ok(()) => tracing::info!("reconciled agent.exe to chutes-build.exe"),
+        Err(e) => tracing::warn!("failed to reconcile agent.exe to chutes-build.exe: {e:#}"),
     }
 }
 
@@ -2319,7 +2343,7 @@ async fn gh_release_download(tag: &str, pattern: &str, dest: &std::path::Path) -
     Ok(())
 }
 
-/// Download and install grok from GitHub Releases (xai-org-shared/grok-build). Uses `gh release download` to fetch the
+/// Download and install chutes-build from GitHub Releases (TheStreamCode/chutes-build). Uses `gh release download` to fetch the
 /// binary matching the current platform. This works anywhere the `gh` CLI is authenticated, without needing npm or
 /// internal network access.
 async fn install_gh_release(target: Option<&str>) -> Result<()> {
@@ -2337,16 +2361,20 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
     tokio::fs::create_dir_all(&download_dir).await?;
     tokio::fs::create_dir_all(&bin_dir).await?;
 
-    let binary_name = format!("grok-{}-{}", version, platform);
-    let binary_path = download_dir.join(&binary_name);
+    // Remote asset names carry no version (the tag versions the release);
+    // the local copy keeps a versioned name so cleanup can prune N-2.
+    let asset_name = release_asset_name(os, arch)
+        .ok_or_else(|| anyhow::anyhow!("unsupported platform for GitHub release: {platform}"))?;
+    let local_name = format!("chutes-build-{}-{}", version, platform);
+    let binary_path = download_dir.join(&local_name);
     let tag = format!("v{}", version);
 
     eprintln!(
-        "  Downloading grok v{} ({}) from GitHub Releases...",
+        "  Downloading chutes-build v{} ({}) from GitHub Releases...",
         version, platform
     );
 
-    gh_release_download(&tag, &binary_name, &binary_path).await?;
+    gh_release_download(&tag, &asset_name, &binary_path).await?;
 
     // chmod +x
     #[cfg(unix)]
@@ -2355,30 +2383,30 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
         tokio::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).await?;
     }
 
-    // Atomic swap of ~/.chutes-build/bin/{grok,agent} -> downloaded binary.
+    // Atomic swap of ~/.chutes-build/bin/{chutes-build,agent} -> downloaded binary.
     swap_managed_bin_links(&binary_path, &bin_dir).await?;
 
-    // Update grok-latest -> versioned binary so any existing symlinks that route
-    // through it (e.g. /usr/local/bin/grok -> ~/.chutes-build/downloads/grok-latest)
+    // Update chutes-build-latest -> versioned binary so any existing symlinks that route
+    // through it (e.g. /usr/local/bin/chutes-build -> ~/.chutes-build/downloads/chutes-build-latest)
     // resolve to the newly installed version.
     #[cfg(unix)]
     {
-        let latest_path = download_dir.join("grok-latest");
+        let latest_path = download_dir.join("chutes-build-latest");
         let rel_target = relative_symlink_target(&binary_path, &latest_path);
         if let Err(e) = atomic_symlink_swap(&rel_target, &latest_path).await {
-            tracing::warn!("Failed to update grok-latest symlink: {e}");
+            tracing::warn!("Failed to update chutes-build-latest symlink: {e}");
         }
     }
 
-    // Also update /usr/local/bin/{grok,agent} if either points directly into
-    // ~/.chutes-build/downloads/ (legacy layout — skips the grok-latest indirection).
+    // Also update /usr/local/bin/{chutes-build,agent} if either points directly into
+    // ~/.chutes-build/downloads/ (legacy layout — skips the chutes-build-latest indirection).
     // Permission errors are ignored
     #[cfg(unix)]
-    for name in ["grok", "agent"] {
+    for name in ["chutes-build", "agent"] {
         let system_link = std::path::PathBuf::from(format!("/usr/local/bin/{name}"));
         if let Ok(existing_target) = tokio::fs::read_link(&system_link).await {
             let target_str = existing_target.to_string_lossy();
-            if target_str.contains(".chutes-build/downloads/") && !target_str.ends_with("grok-latest") {
+            if target_str.contains(".chutes-build/downloads/") && !target_str.ends_with("chutes-build-latest") {
                 let _ = atomic_symlink_swap(&binary_path, &system_link).await;
             }
         }
@@ -2389,6 +2417,9 @@ async fn install_gh_release(target: Option<&str>) -> Result<()> {
     eprintln!();
 
     // Current, N-1, and any leftover a live process is still executing.
+    // The legacy `grok` prefix prunes downloads from releases that still
+    // named their objects `grok-<version>-<platform>`.
+    cleanup_old_downloads(&download_dir, "chutes-build", &version).await;
     cleanup_old_downloads(&download_dir, "grok", &version).await;
     cleanup_old_downloads(&download_dir, "grok-pager", &version).await;
 

@@ -216,7 +216,7 @@ async fn test_reconcile_agent_repoints_diverged_agent() {
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
     std::fs::write(downloads.join("grok-0.1.199-macos-aarch64"), "old").unwrap();
 
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("grok"))
+    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
         .unwrap();
     std::os::unix::fs::symlink("../downloads/grok-0.1.199-macos-aarch64", bin.join("agent"))
         .unwrap();
@@ -238,7 +238,7 @@ async fn test_reconcile_agent_heals_legacy_unversioned_agent() {
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
     std::fs::write(downloads.join("grok-macos-aarch64"), "legacy").unwrap();
 
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("grok"))
+    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
         .unwrap();
     std::os::unix::fs::symlink("../downloads/grok-macos-aarch64", bin.join("agent")).unwrap();
 
@@ -256,7 +256,7 @@ async fn test_reconcile_agent_heals_legacy_unversioned_agent() {
 async fn test_reconcile_agent_creates_missing_agent() {
     let (_dir, bin, downloads) = managed_layout();
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("grok"))
+    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
         .unwrap();
 
     reconcile_agent_to_grok(&bin).await;
@@ -271,7 +271,7 @@ async fn test_reconcile_agent_noop_when_consistent() {
     let (_dir, bin, downloads) = managed_layout();
     std::fs::write(downloads.join("grok-0.2.101-macos-aarch64"), "new").unwrap();
     let target = "../downloads/grok-0.2.101-macos-aarch64";
-    std::os::unix::fs::symlink(target, bin.join("grok")).unwrap();
+    std::os::unix::fs::symlink(target, bin.join("chutes-build")).unwrap();
     std::os::unix::fs::symlink(target, bin.join("agent")).unwrap();
 
     reconcile_agent_to_grok(&bin).await;
@@ -292,7 +292,7 @@ async fn test_reconcile_agent_noop_when_consistent() {
 #[tokio::test]
 async fn test_reconcile_agent_skips_when_grok_dangling() {
     let (_dir, bin, downloads) = managed_layout();
-    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("grok"))
+    std::os::unix::fs::symlink("../downloads/grok-0.2.101-macos-aarch64", bin.join("chutes-build"))
         .unwrap();
     std::fs::write(downloads.join("grok-0.1.199-macos-aarch64"), "old").unwrap();
     std::os::unix::fs::symlink("../downloads/grok-0.1.199-macos-aarch64", bin.join("agent"))
@@ -310,7 +310,7 @@ async fn test_reconcile_agent_skips_when_grok_dangling() {
 #[tokio::test]
 async fn test_reconcile_agent_skips_when_grok_not_symlink() {
     let (_dir, bin, downloads) = managed_layout();
-    std::fs::write(bin.join("grok"), "copy-binary").unwrap();
+    std::fs::write(bin.join("chutes-build"), "copy-binary").unwrap();
     std::fs::write(downloads.join("grok-0.1.199-macos-aarch64"), "old").unwrap();
     std::os::unix::fs::symlink("../downloads/grok-0.1.199-macos-aarch64", bin.join("agent"))
         .unwrap();
@@ -934,7 +934,7 @@ fn test_reinstall_hint_gh_release_mentions_gh_command() {
         "should suggest gh release download: {hint}"
     );
     assert!(
-        hint.contains("xai-org-shared/grok-build"),
+        hint.contains("TheStreamCode/chutes-build"),
         "should name the repo: {hint}"
     );
 }
@@ -1439,6 +1439,27 @@ fn test_detect_platform_matches_compile_time_cfg() {
     if cfg!(target_arch = "aarch64") {
         assert_eq!(arch, "aarch64");
     }
+}
+
+/// Release asset names must match the `package-release` workflow matrix
+/// exactly, or `update` downloads 404.
+#[test]
+fn test_release_asset_name_matches_workflow_matrix() {
+    for (os, arch, expected) in [
+        ("windows", "x86_64", "chutes-build-win32-x64.exe"),
+        ("windows", "aarch64", "chutes-build-win32-arm64.exe"),
+        ("linux", "x86_64", "chutes-build-linux-x64-gnu"),
+        ("linux", "aarch64", "chutes-build-linux-arm64-gnu"),
+        ("macos", "x86_64", "chutes-build-darwin-x64"),
+        ("macos", "aarch64", "chutes-build-darwin-arm64"),
+    ] {
+        assert_eq!(
+            release_asset_name(os, arch).as_deref(),
+            Some(expected),
+            "{os}/{arch}"
+        );
+    }
+    assert_eq!(release_asset_name("plan9", "x86_64"), None);
 }
 
 /// Rosetta correction applies exactly to macos/x86_64 on Apple Silicon; every other (os, arch, host) combination keeps the compile-time arch.

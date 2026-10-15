@@ -280,7 +280,7 @@ The key being **present** is what restricts: an empty list (`strict_known_market
 Adding a **local path** while a binding strict list is present is refused (paths never match a git-URL allowlist; fail closed), unless an **admin** `extraKnownMarketplaces` pin names that exact path. A pin from a user-writable `~/.chutes-build` layer cannot carve that exception. Existing git sources that fail the list are dropped at load (`Marketplace source blocked by allowlist`).
 
 ```toml
-# /etc/grok/requirements.toml  (native: binds every marketplace)
+# /etc/chutes-build/requirements.toml  (native: binds every marketplace)
 [[strict_known_marketplaces]]
 source = "git"
 url = "git@github.enterprise.example:ACME/my-org-plugins.git"
@@ -321,7 +321,7 @@ Each allow or deny entry is one of:
 `enableAllProjectMcpServers = false` drops project-scoped MCP unless the server also matches an allow entry.
 
 ```toml
-# /etc/grok/requirements.toml
+# /etc/chutes-build/requirements.toml
 allow_managed_mcp_servers_only = true
 enable_all_project_mcp_servers = false
 

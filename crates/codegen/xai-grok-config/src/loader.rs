@@ -137,7 +137,7 @@ pub fn load_system_managed_config() -> std::io::Result<toml::Value> {
 pub struct ManagedConfigLayer {
     pub value: toml::Value,
     pub path: std::path::PathBuf,
-    /// `true` for the root-owned system layer (`/etc/grok`), derived from the load directory.
+    /// `true` for the root-owned system layer (`/etc/chutes-build`), derived from the load directory.
     pub is_system: bool,
 }
 
@@ -192,11 +192,11 @@ pub fn managed_config_layers_at(
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum HookProvenance {
-    /// `/etc/grok/managed_config.toml` (root-owned).
+    /// `/etc/chutes-build/managed_config.toml` (root-owned).
     SystemManaged,
     /// `$CHUTES_BUILD_HOME/managed_config.toml` (server-synced, user-writable).
     Managed,
-    /// System-tier `requirements.toml` (root-owned, e.g. `/etc/grok`).
+    /// System-tier `requirements.toml` (root-owned, e.g. `/etc/chutes-build`).
     Requirements,
     /// `$CHUTES_BUILD_HOME/requirements.toml` while its bytes match the server-signed envelope (see [`crate::signed_policy::signed_requirements_attest`]).
     SignedRequirements,

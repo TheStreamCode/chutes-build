@@ -649,7 +649,7 @@ chutes-build -p "..." --no-auto-update
 case) counts as not set. The agent SDKs
 inject `CHUTES_BUILD_DISABLE_AUTOUPDATER=1` for the non-leader agents they spawn (a falsy value in
 the SDK's isolation env keeps updates on), and the stdio agent skips its background update
-unless it runs from the managed install (`$CHUTES_BUILD_HOME/bin/grok`).
+unless it runs from the managed install (`$CHUTES_BUILD_HOME/bin/chutes-build`).
 
 Update messages go to **stderr**. Stdout stays clean for `--output-format json`. See also [Environment Variables for Headless](#environment-variables-for-headless).
 

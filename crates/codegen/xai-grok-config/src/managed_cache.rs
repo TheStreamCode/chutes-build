@@ -2,7 +2,7 @@
 //! It also holds the fail-closed enforcement gate that combines the signed-cache verdict with the best-effort marker.
 //!
 //! The marker is **unsigned** and user-writable: a refresh hint, not a tamper control.
-//! Real tamper resistance is [`crate::signed_policy`] plus the OS-protected layers (root-owned `/etc/grok`, MDM).
+//! Real tamper resistance is [`crate::signed_policy`] plus the OS-protected layers (root-owned `/etc/chutes-build`, MDM).
 
 use std::path::Path;
 

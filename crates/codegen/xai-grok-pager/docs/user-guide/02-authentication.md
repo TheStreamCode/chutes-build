@@ -30,11 +30,11 @@ To switch accounts or resolve an authentication problem, run:
 chutes-build login
 ```
 
-Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through Chutes OAuth at `auth.chutes.ai`. Pass a flag to select a different flow:
+Running `chutes-build login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through Chutes OAuth at `api.chutes.ai`. Pass a flag to select a different flow:
 
 | Flag | Description |
 |------|-------------|
-| `--oauth` | Sign in through Chutes OAuth at `auth.chutes.ai`. This is the default, so the flag is optional. |
+| `--oauth` | Sign in through Chutes OAuth at `api.chutes.ai`. This is the default, so the flag is optional. |
 | `--device-auth` (alias `--device-code`) | Sign in with the device-code flow for headless or remote environments. |
 
 To sign out, run `chutes-build logout`. It takes no flags and clears your cached credentials.

@@ -4,7 +4,7 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-10-15
 
 ### Changed
 
@@ -46,6 +46,21 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Pre-rebrand preset names keep resolving.** `grok-build`, `grok-computer`,
   and their concise/plan variants work as aliases of the `chutes-*` canonical
   presets, so existing configs and upstream tests continue to work.
+- **`--version` reports the fork name.** The version line read `grok x.y.z`;
+  it now reads `chutes-build x.y.z`.
+- **`update` targets this repo's releases.** The GitHub-release updater
+  queried `xai-org-shared/chutes-build` for `grok-<version>-<platform>`
+  assets; it now queries `TheStreamCode/chutes-build` for the
+  `chutes-build-<target>[.exe]` assets the release workflow publishes,
+  installs to `bin/chutes-build[.exe]`, and maintains a
+  `chutes-build-latest` link. Managed-install detection, on-disk version
+  parsing, and stale-download cleanup follow the same names.
+- **System config moved to `/etc/chutes-build`.** The Unix system layer no
+  longer reads Grok's `/etc/grok` managed files.
+- **OAuth strings match the live issuer.** Help and docs named
+  `auth.chutes.ai`; both hosts serve discovery but the canonical issuer —
+  and the token `iss` — is `https://api.chutes.ai`, which the code
+  already used.
 
 ### Removed
 

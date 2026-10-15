@@ -9,19 +9,19 @@ Three files configure Chutes Build, and they are written by different people.
 | File | Who writes it | Where it lives | Use it to |
 | --- | --- | --- | --- |
 | `config.toml` | The developer | `~/.chutes-build/config.toml`, and `.chutes-build/config.toml` in a project | Set personal defaults. Anything here can be changed by the person using the machine. |
-| `managed_config.toml` | You, through the console or a deployment tool | `/etc/grok/managed_config.toml`, or `$CHUTES_BUILD_HOME/managed_config.toml` | Ship a starting point to a fleet. A developer's own file overrides it. |
-| `requirements.toml` | You, signed | `/etc/grok/requirements.toml`, macOS device management, or `$CHUTES_BUILD_HOME/requirements.toml` | Set values a developer cannot change. Keys marked `pin` below hold against every other file, the environment, and the command line. |
+| `managed_config.toml` | You, through the console or a deployment tool | `/etc/chutes-build/managed_config.toml`, or `$CHUTES_BUILD_HOME/managed_config.toml` | Ship a starting point to a fleet. A developer's own file overrides it. |
+| `requirements.toml` | You, signed | `/etc/chutes-build/requirements.toml`, macOS device management, or `$CHUTES_BUILD_HOME/requirements.toml` | Set values a developer cannot change. Keys marked `pin` below hold against every other file, the environment, and the command line. |
 
 Choose `managed_config.toml` for defaults you want people to be able to adjust, and `requirements.toml` for the ones you do not.
 
 Chutes Build also reads these layers, later rows winning except where a requirements pin or the Managed column says otherwise.
 
 1. Compiled defaults.
-2. `/etc/grok/managed_config.toml`, then `$CHUTES_BUILD_HOME/managed_config.toml` (fleet defaults; console-synced).
+2. `/etc/chutes-build/managed_config.toml`, then `$CHUTES_BUILD_HOME/managed_config.toml` (fleet defaults; console-synced).
 3. `$CHUTES_BUILD_HOME/config.toml` (your settings; `/settings` writes here). Default `$CHUTES_BUILD_HOME` is `~/.chutes-build`.
 4. Project `.chutes-build/config.toml`: only `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
 5. `CHUTES_BUILD_CONFIG` (inline JSON) or `CHUTES_BUILD_CONFIG_PATH` (JSON or TOML file). Allowlisted keys only.
-6. `$CHUTES_BUILD_HOME/requirements.toml`, then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.chutes-build`. Admin layer. Keys marked `pin` in the table cannot be overridden; keys marked `yes` are also valid in this file.
+6. `$CHUTES_BUILD_HOME/requirements.toml`, then `/etc/chutes-build/requirements.toml`, then macOS MDM `ai.x.chutes-build`. Admin layer. Keys marked `pin` in the table cannot be overridden; keys marked `yes` are also valid in this file.
 7. `GROK_*` environment variables.
 8. CLI flags such as `--model`, `--sandbox`, `--yolo`.
 
@@ -696,13 +696,13 @@ One exception to that rule:
 | --- | --- |
 | `features.remote_fetch` | The managed value wins over the developer's. |
 
-Chutes Build reads `/etc/grok/managed_config.toml` first, then `$CHUTES_BUILD_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
+Chutes Build reads `/etc/chutes-build/managed_config.toml` first, then `$CHUTES_BUILD_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
 
 The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins, `—` means this file is ignored.
 
 ## requirements.toml
 
-`requirements.toml` is an admin-enforced file. Locations: `$CHUTES_BUILD_HOME/requirements.toml` (signed cache) then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.chutes-build`. The **Requirements** column on the `config.toml` tables lists every `config.toml` key this file accepts (`pin` or `yes`). Omitted keys stay unconstrained.
+`requirements.toml` is an admin-enforced file. Locations: `$CHUTES_BUILD_HOME/requirements.toml` (signed cache) then `/etc/chutes-build/requirements.toml`, then macOS MDM `ai.x.chutes-build`. The **Requirements** column on the `config.toml` tables lists every `config.toml` key this file accepts (`pin` or `yes`). Omitted keys stay unconstrained.
 
 These keys exist only in `requirements.toml`:
 
@@ -714,7 +714,7 @@ These keys exist only in `requirements.toml`:
 
 Policy pins such as `allow_managed_hooks_only` (see [Hooks](10-hooks.md#allow-only-managed-hooks)) and the MCP and marketplace lists (see [Plugins](09-plugins.md#restrict-which-mcp-servers-can-run)) are accepted in `requirements.toml` and `managed_config.toml` alike and only ever tighten.
 
-`[[hooks.<Event>]]` tables are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/grok` files are enforced; see [Hooks](10-hooks.md#enforced-hooks).
+`[[hooks.<Event>]]` tables are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/chutes-build` files are enforced; see [Hooks](10-hooks.md#enforced-hooks).
 
 ## What happens when a setting is refused
 
