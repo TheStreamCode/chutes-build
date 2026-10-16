@@ -253,3 +253,28 @@ fn covers_detects_same_process_vs_reset_ledger() {
     assert!(!smaller.covers(&bigger));
     assert!(smaller.covers(&UsageSummary::default()));
 }
+
+#[test]
+fn tokens_per_second_derives_from_duration_and_survives_deltas() {
+    // `live` records 10ms per call: 20 output tokens over 10ms = 2000 tok/s.
+    let first = live(&[("grok-4", 100, 20, Some(50))]);
+    assert_eq!(first.api_duration_ms, 10);
+    assert_eq!(first.tokens_per_second, Some(2000.0));
+    let mut file = SessionUsageFile::new("sess-1");
+    file.apply_turn(1, "t1", &first, None);
+    let second = live(&[
+        ("grok-4", 100, 20, Some(50)),
+        ("grok-4", 40, 10, Some(20)),
+    ]);
+    file.apply_turn(2, "t2", &second, Some(&first));
+    let turn = file.turn(2).expect("turn 2");
+    assert_eq!(turn.usage.output_tokens, 10);
+    assert_eq!(turn.usage.api_duration_ms, 10);
+    assert_eq!(turn.usage.tokens_per_second, Some(1000.0));
+    // Untimed rows show no speed instead of a fake one.
+    let untimed = UsageSummary::default();
+    assert_eq!(untimed.tokens_per_second(), None);
+    let json = serde_json::to_value(&untimed).expect("serialize");
+    assert!(json.get("tokensPerSecond").is_none(), "{json}");
+    assert!(json.get("apiDurationMs").is_none(), "{json}");
+}

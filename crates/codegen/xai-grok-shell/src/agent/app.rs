@@ -326,8 +326,8 @@ pub async fn run_headless(
     crate::http::set_process_client_mode_headless();
     use crate::agent::relay::spawn_relay_connection_with_callback;
     use tokio_util::sync::CancellationToken;
-    const HEADLESS_NO_SESSION: &str = "Headless mode requires a signed-in session. \
-        Run `chutes-build login` to sign in, or use `chutes-build agent stdio` for API-key access.";
+    const HEADLESS_NO_SESSION: &str = "Headless mode requires a Chutes API key. \
+        Set CHUTES_API_KEY, or use `chutes-build agent stdio` for API-key access.";
     xai_file_utils::queue::cleanup_orphaned_uploads(
         &grok_home::grok_home(),
         xai_file_utils::queue::DEFAULT_MAX_AGE,

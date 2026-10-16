@@ -47,7 +47,7 @@ pub enum ManagedConfigError {
     )]
     DeploymentKeyRejected,
     #[error(
-        "Your team sign-in was rejected. It may have expired or lack access. Run `chutes-build login` to sign in again."
+        "Your team sign-in was rejected. It may have expired or lack access. Set CHUTES_API_KEY to your Chutes API key and retry."
     )]
     TeamAuthRejected,
     #[error("The server returned an unexpected error (HTTP {status}). Try again in a few minutes.")]

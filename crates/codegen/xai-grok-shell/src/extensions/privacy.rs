@@ -30,7 +30,7 @@ async fn handle_set(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let auth = agent.auth_manager.auth().await.map_err(|e| {
         tracing::warn!(error = %e, "privacy: auth resolution failed");
         acp::Error::auth_required()
-            .data("Authentication required. Run `chutes-build login` to re-authenticate.")
+            .data("Authentication required. Set CHUTES_API_KEY to your Chutes API key.")
     })?;
 
     // Local-only: Chutes serves no coding-data-retention API, so there is

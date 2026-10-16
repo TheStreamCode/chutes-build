@@ -59,6 +59,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
         Some(
             Command::Inspect { .. }
             | Command::Doctor(_)
+            | Command::Account(_)
             | Command::Leader(_)
             | Command::Logout
             | Command::Mcp(_)
@@ -99,6 +100,7 @@ fn command_needs_pre_sandbox_policy_heal(command: Option<&Command>) -> bool {
         Some(
             Command::Inspect { .. }
             | Command::Doctor(_)
+            | Command::Account(_)
             | Command::Leader(_)
             | Command::Logout
             | Command::Login { .. }
@@ -2312,6 +2314,11 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
                 return xai_grok_pager::usage_cmd::run(usage_args);
+            }
+            Command::Account(account_args) => {
+                init_tracing_simple("cli");
+                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
+                return xai_grok_pager::account_cmd::run(account_args).await;
             }
             Command::Share(ref share_args) => {
                 init_tracing_simple("cli");

@@ -52,6 +52,9 @@ pub enum SessionEvent {
         /// Wall-clock elapsed time for the turn.
         /// `None` when unknown: a wake turn whose deltas carried no `turnStartMs` (old shells) renders without a duration instead of a fake "0.0s".
         elapsed: Option<Duration>,
+        /// Output tokens per API second for the turn (`None` when usage or
+        /// timing is missing: renders no speed instead of a fake one).
+        tokens_per_second: Option<f64>,
     },
     /// Agent turn was cancelled.
     TurnCancelled {
@@ -121,7 +124,7 @@ pub enum SessionEvent {
         detail: String,
     },
     /// The server rejected the credentials (401 / auth error) and automatic recovery was exhausted.
-    /// Rendered as a prominent call-to-action that points the user at `/login` to re-authenticate.
+    /// Rendered as a prominent call-to-action that points the user at re-authentication (the API key in this build).
     /// It replaces the raw "Retry failed: Unauthorized (401) …" dump.
     ReAuthRequired,
     /// Terminal context overflow, ideally unreachable since auto-compaction should shrink the conversation first.
@@ -375,10 +378,21 @@ impl SessionEvent {
             // Deliberately period-less: don't re-punctuate
             SessionEvent::TurnCompleted {
                 elapsed: Some(elapsed),
+                tokens_per_second,
             } => {
-                format!("Worked for {}", format_duration(*elapsed))
+                let mut text = format!("Worked for {}", format_duration(*elapsed));
+                if let Some(tps) = tokens_per_second {
+                    text.push_str(&format!(" · {tps:.1} tok/s"));
+                }
+                text
             }
-            SessionEvent::TurnCompleted { elapsed: None } => "Turn completed.".to_string(),
+            SessionEvent::TurnCompleted {
+                elapsed: None,
+                tokens_per_second,
+            } => match tokens_per_second {
+                Some(tps) => format!("Turn completed · {tps:.1} tok/s"),
+                None => "Turn completed.".to_string(),
+            },
             SessionEvent::TurnCancelled {
                 elapsed: Some(elapsed),
                 cause,
@@ -823,8 +837,19 @@ mod tests {
     fn turn_completed_message() {
         let event = SessionEvent::TurnCompleted {
             elapsed: Some(Duration::from_secs(125)),
+            tokens_per_second: None,
         };
         assert_eq!(event.message(), "Worked for 2m5s");
+        let event = SessionEvent::TurnCompleted {
+            elapsed: Some(Duration::from_secs(125)),
+            tokens_per_second: Some(42.26),
+        };
+        assert_eq!(event.message(), "Worked for 2m5s · 42.3 tok/s");
+        let event = SessionEvent::TurnCompleted {
+            elapsed: None,
+            tokens_per_second: Some(7.0),
+        };
+        assert_eq!(event.message(), "Turn completed · 7.0 tok/s");
     }
 
     #[test]
@@ -949,13 +974,22 @@ mod tests {
     }
 
     #[test]
-    fn reauth_required_message_points_at_login() {
+    fn reauth_required_message_points_at_api_key() {
         let msg = SessionEvent::ReAuthRequired.message();
-        assert!(msg.contains("/login"), "must tell the user to run /login");
+        // This build has no account sign-in: /login refuses, so the message must
+        // never point at it. Re-authentication means fixing the API key.
+        assert!(
+            !msg.contains("/login"),
+            "must not point at /login in this build: {msg}"
+        );
         assert!(
             msg.to_lowercase().contains("authentication")
-                || msg.to_lowercase().contains("credentials"),
+                || msg.to_lowercase().contains("credential"),
             "must explain it is an auth problem: {msg}"
+        );
+        assert!(
+            msg.contains("key"),
+            "must point at the API key: {msg}"
         );
     }
 
@@ -1521,6 +1555,7 @@ mod tests {
     fn non_recap_events_stay_non_interactive() {
         let block = SessionEventBlock::new(SessionEvent::TurnCompleted {
             elapsed: Some(Duration::from_secs(5)),
+            tokens_per_second: None,
         });
         assert!(!block.is_foldable());
         assert!(!block.is_selectable());

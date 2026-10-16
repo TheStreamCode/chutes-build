@@ -1324,8 +1324,8 @@ pub enum RetryState {
     },
 }
 
-/// Whether a terminal retry failure is a recoverable authentication error (expired/invalid credentials, 401). The user can fix those by signing in again; this drives the actionable re-auth banner.
-/// `legacy_auth` is excluded: its message carries its own migration guidance (`chutes-build update` / `chutes-build logout` / `chutes-build login`), shown verbatim.
+/// Whether a terminal retry failure is a recoverable authentication error (expired/invalid credentials, 401). The user can fix those with a fresh API key; this drives the actionable re-auth banner.
+/// `legacy_auth` is excluded: its message carries its own migration guidance (set `CHUTES_API_KEY`), shown verbatim.
 /// `auth_transient` is excluded for the opposite reason: it is emitted only when the failure self-heals (`AuthManager::requires_manual_reauth`). Its message already says it recovers on its own, so no `/login` banner is shown.
 pub fn is_reauthable_failure(error_type: Option<&str>, message: &str) -> bool {
     if matches!(error_type, Some("legacy_auth") | Some("auth_transient")) {

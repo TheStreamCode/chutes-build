@@ -7,4 +7,5 @@ Session usage (since start or last resume):
   Output tokens:  10 (0 reasoning)
   Total tokens:   110
   Model calls:    1 · API time: 1.0s
+  Speed:          10.0 tok/s
   Cost:           not available (not reported)

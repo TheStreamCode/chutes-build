@@ -43,7 +43,7 @@ use super::session::modal::remove_agent_and_cleanup;
 use super::session::picker_routing::PickerRequest;
 use super::settings::ui::{apply_setting_rollback, refresh_open_settings_modals};
 use super::status::{
-    handle_coding_data_sharing_failed, handle_coding_data_sharing_updated,
+    handle_account_result, handle_coding_data_sharing_failed, handle_coding_data_sharing_updated,
     handle_context_info_complete, handle_session_usage_result, toast_persist_failure,
     usage_modal_state_mut,
 };
@@ -1688,6 +1688,14 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             &session_id,
             format!("Couldn't load session usage: {error}"),
             nonce,
+        ),
+        TaskResult::AccountComplete { agent_id, text } => {
+            handle_account_result(app, agent_id, text)
+        }
+        TaskResult::AccountFailed { agent_id, error } => handle_account_result(
+            app,
+            agent_id,
+            format!("Couldn't load account: {error}"),
         ),
         TaskResult::FeedbackComplete {
             agent_id,

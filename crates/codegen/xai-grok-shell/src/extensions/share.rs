@@ -164,7 +164,7 @@ fn require_xai_auth_for_share(
     super::auth_gate::require_xai_auth(
         auth_manager,
         "Authentication required to share session",
-        "Share session is disabled. Run `chutes-build login` to authenticate.",
+        "Share session is disabled. Set CHUTES_API_KEY to your Chutes API key.",
     )
 }
 

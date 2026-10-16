@@ -276,6 +276,8 @@ pub(super) fn finish_wake_turn(
                 // The error arm above closed silently, so this Error arm is unreachable
                 error_kind: None,
                 error_banner_present: false,
+                // Wake turns carry no usage: no speed on the marker.
+                tokens_per_second: None,
             },
         ),
     };

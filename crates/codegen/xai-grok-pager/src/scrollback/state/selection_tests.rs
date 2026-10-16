@@ -353,6 +353,7 @@ fn collapsed_turn_marker_breaks_dense_run_walks() {
         .collect();
     let marker = state.push_block(RenderBlock::session_event(SessionEvent::TurnCompleted {
         elapsed: Some(Duration::from_secs(3)),
+        tokens_per_second: None,
     }));
     state
         .get_by_id_mut(marker)

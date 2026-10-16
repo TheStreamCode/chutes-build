@@ -929,22 +929,12 @@ async fn legacy_auth_hint_on_404_model_not_found() {
                 "404 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build update"),
-                "hint must mention `chutes-build update` before re-login, got: {msg}"
+                msg.contains("CHUTES_API_KEY"),
+                "hint must mention `CHUTES_API_KEY`, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build logout"),
-                "hint must mention `chutes-build logout`, got: {msg}"
-            );
-            assert!(
-                msg.contains("chutes-build login"),
-                "hint must mention `chutes-build login`, got: {msg}"
-            );
-            let update_at = msg.find("chutes-build update").expect("chutes-build update");
-            let logout_at = msg.find("chutes-build logout").expect("chutes-build logout");
-            assert!(
-                update_at < logout_at,
-                "update must come before logout, got: {msg}"
+                !msg.contains("chutes-build login"),
+                "hint must not mention the unavailable login, got: {msg}"
             );
             assert!(
                 msg.contains("Version:"),
@@ -1009,22 +999,12 @@ async fn legacy_auth_hint_on_401_unauthorized() {
                 "401 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build update"),
-                "hint must mention `chutes-build update` before re-login, got: {msg}"
+                msg.contains("CHUTES_API_KEY"),
+                "hint must mention `CHUTES_API_KEY`, got: {msg}"
             );
             assert!(
-                msg.contains("chutes-build logout"),
-                "hint must mention `chutes-build logout`, got: {msg}"
-            );
-            assert!(
-                msg.contains("chutes-build login"),
-                "hint must mention `chutes-build login`, got: {msg}"
-            );
-            let update_at = msg.find("chutes-build update").expect("chutes-build update");
-            let logout_at = msg.find("chutes-build logout").expect("chutes-build logout");
-            assert!(
-                update_at < logout_at,
-                "update must come before logout, got: {msg}"
+                !msg.contains("chutes-build login"),
+                "hint must not mention the unavailable login, got: {msg}"
             );
         })
         .await;

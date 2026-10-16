@@ -676,6 +676,8 @@ pub enum Action {
     ShowContextInfo,
     /// `/usage`: session token/cost, plus consumer credits when visible.
     ShowUsage,
+    /// `/account`: Chutes plan, quotas, usage, and credit for the configured API key.
+    ShowAccount,
     /// `/usage manage`: open consumer billing (a no-op when billing is hidden).
     ManageBilling,
     /// Commit a read-only list of the queued prompts as a system block (`/queue`).
@@ -2212,6 +2214,8 @@ pub enum Effect {
         /// Usage-modal fetch generation; echoed back on the task result.
         nonce: u64,
     },
+    /// Fetch the Chutes account summary directly (no session needed: account data is global).
+    FetchAccount { agent_id: AgentId },
     /// Re-fetch remote settings to check subscription gate.
     RefreshGate,
     /// Spawn a debounce sleep task for shell suggestions.
@@ -2954,6 +2958,10 @@ pub enum TaskResult {
         error: String,
         nonce: u64,
     },
+    /// `/account` summary fetched. Account data is session-independent: only the agent must exist.
+    AccountComplete { agent_id: AgentId, text: String },
+    /// `/account` fetch failed.
+    AccountFailed { agent_id: AgentId, error: String },
     /// Feedback submitted successfully (fire-and-forget).
     /// A modal-origin completion only takes the consent parked for its exact submission; anything else is stale and a no-op.
     FeedbackComplete {

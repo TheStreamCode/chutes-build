@@ -2909,6 +2909,7 @@ mod tests {
         agent.scrollback.push_block(RenderBlock::session_event(
             crate::scrollback::blocks::SessionEvent::TurnCompleted {
                 elapsed: Some(std::time::Duration::from_secs(2)),
+                tokens_per_second: None,
             },
         ));
         agent

@@ -416,22 +416,34 @@ Create, edit, and delete personas. A subagent can apply a persona to shape how i
 
 ### `/login`
 
-Log in or re-authenticate without leaving the session.
+Unavailable: this build has no account sign-in. It prints the API-key setup
+guidance instead of starting a flow.
 
 ### `/logout`
 
-Log out and return to the login screen.
+Unavailable: this build has no account sign-in.
+
+### `/account`
+
+Show the Chutes plan, quotas, usage windows, and PAYG credit for the
+configured API key. Same data as `chutes-build account` (which also offers
+`--json` for scripts).
 
 ### `/usage`
 
-View credit usage or manage billing. Alias: `/cost`.
+View this session's token, cost, and inference-speed totals. Alias: `/cost`.
 
 ```
 /usage
 /usage manage
 ```
 
-Inside a session this opens the usage modal with the account allowance plus that session's context and token totals. From the [Agent Dashboard](23-dashboard.md#dispatch-input) the same modal opens over the dashboard; there is no session there, so only the **Usage limit** tab carries data.
+Inside a session this opens the usage modal with that session's context and
+token totals, including a **Speed** row (output tokens per API second).
+`/usage manage` opens the Chutes usage page. From the
+[Agent Dashboard](23-dashboard.md#dispatch-input) the same modal opens over
+the dashboard; there is no session there, so only the **Usage limit** tab
+carries data.
 
 For persisted per-turn token and cost totals of any local session, use `grok usage <session-id> [turn]` from the shell. See [Session Management](17-sessions.md#the-grok-usage-subcommand).
 

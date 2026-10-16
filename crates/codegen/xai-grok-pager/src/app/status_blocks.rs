@@ -197,6 +197,12 @@ pub(crate) fn session_usage_block_text(
         group_thousands(t.model_calls),
         format_duration(std::time::Duration::from_millis(t.api_duration_ms)),
     ));
+    if let Some(tps) = crate::app::turn_completion::tokens_per_second(
+        t.output_tokens,
+        t.api_duration_ms,
+    ) {
+        rows.push(format!("  Speed:          {tps:.1} tok/s"));
+    }
     rows.push(format!("  Cost:           {}", format_cost(t)));
     if usage.model_usage.len() > 1 {
         rows.push(String::new());
@@ -219,10 +225,13 @@ fn format_by_model_row(
     m: &xai_grok_shell::extensions::notification::PromptUsageModel,
 ) -> String {
     let tokens = group_thousands(m.total_tokens);
+    let speed = crate::app::turn_completion::tokens_per_second(m.output_tokens, m.api_duration_ms)
+        .map(|tps| format!(" · {tps:.1} tok/s"))
+        .unwrap_or_default();
     if m.cost_usd_ticks.is_some() {
-        format!("    {model}: {tokens} Tokens · {}", format_cost(m))
+        format!("    {model}: {tokens} Tokens{speed} · {}", format_cost(m))
     } else {
-        format!("    {model}: {tokens} Tokens")
+        format!("    {model}: {tokens} Tokens{speed}")
     }
 }
 /// Formats the cost cell. Ticks are 1e10 per USD; a partial sum is reported as absent.
@@ -317,7 +326,7 @@ mod tests {
             .insert("chutes-build".into(), model_row(100, 10, None));
         usage
             .model_usage
-            .insert("grok-4".into(), model_row(50, 5, None));
+            .insert("model-router".into(), model_row(50, 5, None));
         let text = session_usage_block_text(&usage);
         insta::assert_snapshot!("session_usage_block_by_model", text);
     }
@@ -328,12 +337,12 @@ mod tests {
             ..Default::default()
         };
         usage.model_usage.insert(
-            "grok-4.7-build".into(),
+            "model-router".into(),
             model_row(123_456, 1_000, Some(20_000_000)),
         );
         usage
             .model_usage
-            .insert("grok-4".into(), model_row(100, 10, None));
+            .insert("model-router-fallback".into(), model_row(100, 10, None));
         let text = session_usage_block_text(&usage);
         let rows: Vec<&str> = text
             .lines()
@@ -343,8 +352,8 @@ mod tests {
         assert_eq!(
             rows,
             [
-                "    grok-4.7-build: 124,456 Tokens · $0.0020",
-                "    grok-4: 110 Tokens",
+                "    model-router: 124,456 Tokens · 1000.0 tok/s · $0.0020",
+                "    model-router-fallback: 110 Tokens · 10.0 tok/s",
             ],
             "{text}"
         );

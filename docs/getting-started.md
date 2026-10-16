@@ -48,25 +48,15 @@ chutes-build
 ```
 
 Avoid command-line arguments for secrets because process listings and shell
-history may expose them. `login --api-key-stdin` is intended only for protected
-automation.
+history may expose them.
 
-### Browser OAuth (opt-in)
+### No browser login
 
-Browser login requires an OAuth application registered in your own Chutes account
-area; there is no bundled client ID, because one app cannot sign in on behalf of
-other accounts. Register the app, then give Chutes Build its client ID:
-
-```powershell
-$env:CHUTES_BUILD_OAUTH2_CLIENT_ID = "cid_..."
-$env:CHUTES_BUILD_OAUTH2_CLIENT_SECRET = "csc_..."   # only for a confidential app
-chutes-build
-```
-
-With those set, press `l` or run `/login` to start OAuth 2.0 Authorization Code +
-PKCE. Chutes Build never persists a configured client secret; it reads it from the
-environment for token exchange and refresh. Without a client ID configured there is
-no OAuth method to offer, and `login` says so instead of opening a browser.
+There is no account sign-in: no browser or device-code flow, no login
+screen, no session token. `chutes-build login`, `chutes-build logout`, `/login`,
+and `/logout` only print this same setup guidance (the CLI forms exit
+non-zero). Starting without a key shows a setup screen naming `CHUTES_API_KEY`
+instead of a login option.
 
 ## First session
 
@@ -81,7 +71,8 @@ Useful first commands:
 | `/help` | Browse commands and shortcuts. |
 | `/model` | Choose Auto or a concrete Chutes model. |
 | `/effort` | Select a supported reasoning mode for the active model. |
-| `/usage` | Inspect available plan and quota windows. |
+| `/usage` | Inspect this session's token, cost, and inference-speed totals. |
+| `/account` | Inspect the API key's Chutes plan, quotas, usage, and credit. |
 | `/docs` | Open concise guides embedded in the application. |
 | `/settings` | Review interface and runtime preferences. |
 | `/rewind` or `/undo` | Rewind the current session to a previous turn. |
@@ -94,6 +85,11 @@ chain steps down to a live inline pool from the current catalogue (fastest
 warm model first) so Auto works without a dashboard setup. Pin a concrete catalogue id with `/model` or
 `CHUTES_BUILD_DEFAULT_MODEL`. Use `chutes-build models --json` when scripts
 need the resolved catalog.
+
+After each turn, Chutes Build reports the inference speed next to the
+elapsed time (`Worked for 12.4s · 38.2 tok/s`); `/usage` repeats the
+per-session totals, and `chutes-build account` (or `/account`) shows what
+the API key's plan, quotas, and credit allow.
 
 When revising a proposed plan, type revision notes and press Enter to request
 changes. An empty Enter does not approve the plan; press `a` explicitly when

@@ -41,6 +41,13 @@ impl ChutesAccountClient {
         })
     }
 
+    /// Returns the `/users/me` profile payload, or `Null` when the endpoint
+    /// fails. User surfaces (CLI, TUI) use it for the credit balance and plan
+    /// context; the agent tool deliberately never sees the profile.
+    pub async fn profile(&self) -> serde_json::Value {
+        self.get_json("/users/me").await.unwrap_or(serde_json::Value::Null)
+    }
+
     /// Returns account consumption data without fetching the user profile.
     pub async fn usage_snapshot(
         &self,

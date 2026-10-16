@@ -370,6 +370,30 @@ pub(super) fn dispatch_show_usage(app: &mut AppView) -> Vec<Effect> {
     }
 }
 
+/// `/account`: fetch the Chutes account summary into scrollback. Account data is
+/// global, so no session is needed — only an agent view to render into.
+pub(super) fn dispatch_show_account(app: &mut AppView) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    if !app.agents.contains_key(&id) {
+        return vec![];
+    }
+    vec![Effect::FetchAccount { agent_id: id }]
+}
+
+/// Route an account result (success or failure text) into scrollback.
+pub(super) fn handle_account_result(
+    app: &mut AppView,
+    agent_id: AgentId,
+    text: String,
+) -> Vec<Effect> {
+    if let Some(agent) = app.agents.get_mut(&agent_id) {
+        push_and_page_flip(&mut agent.scrollback, RenderBlock::system(text));
+    }
+    vec![]
+}
+
 /// Route a session-usage result (success or failure text) into the open usage modal, or into scrollback in minimal mode.
 /// Stale results are dropped.
 pub(super) fn handle_session_usage_result(

@@ -49,10 +49,11 @@ may add more commands at runtime.
 
 | Command | Purpose |
 | --- | --- |
-| `/login` | Choose how to authenticate: browser login or API key |
-| `/apikey` | Enter a Chutes API key directly |
-| `/logout` | Clear the cached credential |
-| `/usage` | View Chutes usage; `/usage manage` opens the Chutes usage page |
+| `/login` | Unavailable: this build has no account sign-in (prints API-key setup guidance) |
+| `/apikey` | Show how to authenticate with a Chutes API key |
+| `/logout` | Unavailable: this build has no account sign-in |
+| `/usage` | View this session's token, cost, and inference-speed totals; `/usage manage` opens the Chutes usage page |
+| `/account` | View the API key's Chutes plan, quotas, usage, and credit |
 | `/imagine` | Generate an image with a Chutes media model |
 | `/imagine-video` | Generate a video with a Chutes media model |
 | `/voice` | Configure or activate manual voice input |

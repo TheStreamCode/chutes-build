@@ -3838,6 +3838,14 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::FetchAccount { agent_id } => {
+            tasks.spawn(async move {
+                match fetch_account_text().await {
+                    Ok(text) => TaskResult::AccountComplete { agent_id, text },
+                    Err(error) => TaskResult::AccountFailed { agent_id, error },
+                }
+            });
+        }
         Effect::FetchSessionUsage { agent_id, session_id, nonce } => {
             let tx = acp_tx.clone();
             tasks
@@ -5187,6 +5195,20 @@ async fn fetch_session_info(
     }
     envelope.result.ok_or_else(|| "session info response missing result".to_string())
 }
+/// Fetch the account dashboard text for `/account` (same source as `chutes-build account`).
+async fn fetch_account_text() -> Result<String, String> {
+    let client = chutes_build_core::account::ChutesAccountClient::from_env()
+        .map_err(|error| error.to_string())?;
+    let snapshot = client
+        .usage_snapshot(true)
+        .await
+        .map_err(|error| format!("Chutes account request failed: {error}"))?;
+    let profile = client.profile().await;
+    let summary =
+        chutes_build_core::account_summary::summarize_snapshot(&snapshot, &profile);
+    Ok(crate::account_cmd::format_human(&summary))
+}
+
 /// Fetch [`PromptUsage`] via `chutes.ai/session/usage` (bare response, no envelope).
 async fn fetch_session_usage(
     session_id: &acp::SessionId,

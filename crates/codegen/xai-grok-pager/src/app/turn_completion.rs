@@ -79,6 +79,25 @@ pub(crate) struct TerminalMarkerInput<'a> {
     /// Typed kind of a failed stop; picks error-specific failure copy.
     pub error_kind: Option<WireErrorType>,
     pub error_banner_present: bool,
+    /// Output tokens per API second for the turn; rendered on the end marker when known.
+    pub tokens_per_second: Option<f64>,
+}
+
+/// Output tokens per API second: output tokens over measured model time.
+/// `None` when either is missing or zero, so callers render no speed instead of a fake one.
+pub(crate) fn tokens_per_second(output_tokens: u64, api_duration_ms: u64) -> Option<f64> {
+    if output_tokens == 0 || api_duration_ms == 0 {
+        return None;
+    }
+    let tps = output_tokens as f64 / (api_duration_ms as f64 / 1000.0);
+    tps.is_finite().then_some(tps)
+}
+
+/// Tokens per second for whole-prompt billing, from a `TurnCompleted`/`PromptResponse` usage payload.
+pub(crate) fn prompt_tokens_per_second(
+    usage: &xai_grok_shell::extensions::notification::PromptUsage,
+) -> Option<f64> {
+    tokens_per_second(usage.totals.output_tokens, usage.totals.api_duration_ms)
 }
 
 /// Saturating `Duration` to ms conversion; missing stays `None`.
@@ -94,7 +113,10 @@ pub(crate) fn terminal_marker(input: TerminalMarkerInput<'_>) -> Option<SessionE
         | TurnStopReason::Refusal
         | TurnStopReason::MaxTokens
         | TurnStopReason::MaxTurnRequests
-        | TurnStopReason::Unknown => Some(SessionEvent::TurnCompleted { elapsed }),
+        | TurnStopReason::Unknown => Some(SessionEvent::TurnCompleted {
+            elapsed,
+            tokens_per_second: input.tokens_per_second,
+        }),
         TurnStopReason::Cancelled if input.send_now_cancel => None,
         TurnStopReason::Cancelled => Some(cancelled_turn_event(
             input.cancel_trigger,
@@ -359,6 +381,8 @@ pub(super) struct TerminalSignal<'a> {
     pub cancellation_context: Option<&'a serde_json::Value>,
     /// Typed kind of a failed stop, parsed at the wire ingress (`wire_error_kind`: absent maps to `None`, unknown to `Some(Other)`).
     pub error_kind: Option<WireErrorType>,
+    /// Output tokens per API second for the turn, from the terminal usage payload.
+    pub tokens_per_second: Option<f64>,
 }
 
 /// What applying a terminal turn signal did to one agent.
@@ -389,6 +413,7 @@ fn arm_driver_turn_end_reconcile(
         cancellation_category,
         cancellation_context,
         error_kind,
+        ..
     } = signal;
     if agent.session.loading_replay {
         return false;
@@ -505,6 +530,7 @@ pub(super) fn finalize_turn_from_terminal(
         cancellation_category,
         cancellation_context,
         error_kind,
+        tokens_per_second,
     } = signal;
     if !agent.attached_as_viewer {
         if arm_driver_turn_end_reconcile(agent, session_id, signal) {
@@ -554,6 +580,7 @@ pub(super) fn finalize_turn_from_terminal(
         error_banner_present: super::dispatch::scrollback_has_recent_error_banner(
             &agent.scrollback,
         ),
+        tokens_per_second,
     });
     push_turn_terminal_marker(agent, event);
 
@@ -612,6 +639,7 @@ pub(super) fn finalize_child_view_turn(
         cancel_trigger,
         cancellation_category,
         error_kind,
+        tokens_per_second,
         ..
     } = signal;
 
@@ -656,6 +684,7 @@ pub(super) fn finalize_child_view_turn(
         error_banner_present: super::dispatch::scrollback_has_recent_error_banner(
             &child.scrollback,
         ),
+        tokens_per_second,
     });
     if other_prompt {
         if let Some(event) = event {

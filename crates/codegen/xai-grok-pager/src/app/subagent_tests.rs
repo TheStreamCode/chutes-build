@@ -72,7 +72,10 @@ fn scrollback_is_footer_only_classifies_content() {
     assert!(scrollback_is_footer_only(&empty.scrollback), "empty");
     let mut footer = make_min_child_view();
     footer.scrollback.push_block(RenderBlock::session_event(
-        crate::scrollback::blocks::SessionEvent::TurnCompleted { elapsed: None },
+        crate::scrollback::blocks::SessionEvent::TurnCompleted {
+            elapsed: None,
+            tokens_per_second: None,
+        },
     ));
     assert!(scrollback_is_footer_only(&footer.scrollback), "footer");
     let mut prompt = make_min_child_view();

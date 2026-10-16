@@ -163,7 +163,7 @@ async fn attempt_auth_recovery(
     context: &str,
 ) -> bool {
     let Some(ref am) = config.auth_manager else {
-        teprintln!("Authentication required. Run `chutes-build login` to re-authenticate.");
+        teprintln!("Authentication required. Set CHUTES_API_KEY to your Chutes API key.");
         cancel.cancel();
         return false;
     };

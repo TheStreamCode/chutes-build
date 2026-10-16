@@ -9,6 +9,7 @@
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
 #![deny(clippy::indexing_slicing)]
+pub mod account_cmd;
 pub mod acp;
 pub mod actions;
 pub mod agent_runtime;

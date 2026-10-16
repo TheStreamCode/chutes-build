@@ -467,6 +467,8 @@ pub(super) fn handle_prompt_complete(notif: &acp::ExtNotification, app: &mut App
         cancellation_category: payload.cancellation_category(),
         cancellation_context: payload.cancellation_context(),
         error_kind: payload.error_kind(),
+        // Legacy `prompt_complete` carries no usage: no speed on the marker.
+        tokens_per_second: None,
     };
     if let SessionMatch::Child(_) = matched {
         let Some(agent) = app.agents.get_mut(&id) else {

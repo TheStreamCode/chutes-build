@@ -1774,3 +1774,49 @@ fn billing_error_surfaces_in_usage_modal_without_scrollback() {
     assert_eq!(state.billing_error.as_deref(), Some("billing boom"));
     assert_eq!(agent_scrollback_len(&app), before);
 }
+
+#[test]
+fn show_account_schedules_direct_fetch() {
+    let mut app = test_app_with_agent();
+    let effects = dispatch(Action::ShowAccount, &mut app);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::FetchAccount { agent_id }] if *agent_id == AgentId(0)
+        ),
+        "unexpected effects: {effects:?}"
+    );
+}
+
+#[test]
+fn account_complete_renders_dashboard_text() {
+    let mut app = test_app_with_agent();
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::AccountComplete {
+            agent_id: AgentId(0),
+            text: "Chutes account\n\nPlan: Pro".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "unexpected effects: {effects:?}");
+    let text = last_system_text(&app, AgentId(0));
+    assert!(text.contains("Plan: Pro"), "unexpected text: {text}");
+}
+
+#[test]
+fn account_failed_renders_honest_error() {
+    let mut app = test_app_with_agent();
+    let effects = dispatch(
+        Action::TaskComplete(TaskResult::AccountFailed {
+            agent_id: AgentId(0),
+            error: "no API key".to_string(),
+        }),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "unexpected effects: {effects:?}");
+    let text = last_system_text(&app, AgentId(0));
+    assert!(
+        text.contains("Couldn't load account: no API key"),
+        "unexpected text: {text}"
+    );
+}

@@ -1,4 +1,5 @@
 //! Each command lives in its own submodule. This module re-exports command structs and provides `builtin_commands()` for registry construction.
+pub mod account;
 pub mod always_approve;
 pub mod announcements;
 pub mod apikey;
@@ -118,6 +119,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(copy::CopyCommand),
         Arc::new(find::FindCommand),
         Arc::new(usage::UsageCommand),
+        Arc::new(account::AccountCommand),
         Arc::new(tasks::TasksCommand),
         // Extending the agent.
         Arc::new(plugin::SkillsCommand),
@@ -525,6 +527,19 @@ mod tests {
         ctx.billing_surface_visible = billing;
         ctx.usage_command_visible = usage_cmd;
         usage::UsageCommand.run(&mut ctx, args)
+    }
+    #[test]
+    fn account_dispatches_show_account() {
+        let models = ModelState::default();
+        let mut ctx = make_ctx(&models);
+        assert!(matches!(
+            account::AccountCommand.run(&mut ctx, ""),
+            CommandResult::Action(Action::ShowAccount)
+        ));
+        assert!(matches!(
+            account::AccountCommand.run(&mut ctx, "bogus"),
+            CommandResult::Error(_)
+        ));
     }
     #[test]
     fn usage_consumer_show_and_manage() {

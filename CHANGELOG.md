@@ -4,6 +4,41 @@ All notable changes to Chutes Build will be documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-16
+
+### Added
+
+- **Account dashboard from the API key alone.** `chutes-build account` (human
+  or `--json`) and the TUI `/account` command show the key's Chutes plan,
+  quotas, usage windows, and PAYG credit, normalized from the account
+  endpoints. No key, no network, or an API error reports honestly instead of
+  rendering fake zeros.
+- **Inference speed after every turn.** Completed turns report output tokens
+  per API second next to the elapsed time (`Worked for 12.4s · 38.2 tok/s`),
+  the session usage totals gain a Speed row (per model when several were
+  used), and API timing persists in the usage file. Missing timing renders
+  no speed, never `0`.
+
+### Fixed
+
+- The re-authentication banner no longer points at `/login` (which this
+  build refuses): it names the rejected credential and the API key.
+- **Docs describe shipped behavior again** (spec §5.1): the opt-in browser
+  OAuth section, the `login --api-key-stdin` flag, and the login/logout
+  command rows — none of which can run in this build — are replaced with
+  the API-key-only truth, and `/account` is documented everywhere `/usage`
+  is.
+
+### Tests
+
+- New pins: account CLI dashboard (full and degraded), `/account` slash
+  dispatch plus the fetch/render/honest-error pipeline, the re-auth text
+  contract, and the `tok/s` footer plus Speed-row snapshots.
+- Known pre-existing: `manual_meta_false_clears_display_name` and
+  `manual_meta_false_empty_summary_keeps_leftover_auto_title` fail
+  identically on the clean tree (verified by stash comparison); unrelated
+  to this release.
+
 ## [1.5.1] - 2026-10-15
 
 ### Fixed

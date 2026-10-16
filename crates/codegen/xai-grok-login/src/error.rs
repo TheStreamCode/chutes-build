@@ -5,15 +5,15 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AuthError {
-    #[error("Not logged in. Run `chutes-build login`.")]
+    #[error("Not authenticated. Set CHUTES_API_KEY to your Chutes API key.")]
     NotLoggedIn,
 
     /// The token expired and no refresh authority is available.
-    #[error("Token expired. Run `chutes-build login` to re-authenticate.")]
+    #[error("Token expired. Set CHUTES_API_KEY to your Chutes API key and retry.")]
     TokenExpiredNoRefresh,
 
     /// Server rejected the token (401) with no recovery path.
-    #[error("Authentication rejected by server. Run `chutes-build login` to re-authenticate.")]
+    #[error("Authentication rejected by server. Set CHUTES_API_KEY to your Chutes API key.")]
     ServerRejectedNoRecovery,
 
     /// All recovery strategies are exhausted.
@@ -22,11 +22,11 @@ pub enum AuthError {
 
     /// A session's team principal violates the `force_login_team_uuid` pin.
     /// `message` states which team is required and which was returned.
-    #[error("{message} Run `chutes-build login` to sign in with the required team.")]
+    #[error("{message} Set CHUTES_API_KEY to a key for the required team.")]
     PinnedTeamMismatch { message: String },
 
     /// The cached API-key session was rejected because API-key auth is disabled.
-    #[error("API-key auth is disabled by your administrator. Run `chutes-build login` to authenticate.")]
+    #[error("API-key auth is disabled by your administrator.")]
     ApiKeyAuthDisabled,
 
     /// Outcome of a refresh-authority attempt.
@@ -108,15 +108,15 @@ impl RefreshTokenFailedReason {
     pub fn user_message(self) -> Cow<'static, str> {
         match self {
             Self::RefreshTokenRejected => {
-                "Your session has expired. Run `chutes-build login` to sign in again.".into()
+                "Your credential has expired. Set CHUTES_API_KEY to your Chutes API key and retry.".into()
             }
             Self::ClientRejected => {
-                "Authentication is temporarily unavailable. Run `chutes-build login` if this persists."
+                "Authentication is temporarily unavailable. Check CHUTES_API_KEY if this persists."
                     .into()
             }
             Self::ProviderInteractiveRequired => provider_login_message(None),
             Self::Other => {
-                "Authentication could not be refreshed. Run `chutes-build login` to sign in again.".into()
+                "Authentication could not be refreshed. Set CHUTES_API_KEY to your Chutes API key and retry.".into()
             }
         }
     }
@@ -126,12 +126,12 @@ impl RefreshTokenFailedReason {
 pub fn provider_login_message(label: Option<&str>) -> Cow<'static, str> {
     match label {
         Some(label) => format!(
-            "Your session expired and {label} could not renew it in the background. \
-             Run /login to sign in again."
+            "Your credential expired and {label} could not renew it in the background. \
+             Set CHUTES_API_KEY to your Chutes API key and retry."
         )
         .into(),
-        None => "Your session expired and your sign-in helper could not renew it in the \
-                 background. Run /login to sign in again."
+        None => "Your credential expired and your sign-in helper could not renew it in the \
+                 background. Set CHUTES_API_KEY to your Chutes API key and retry."
             .into(),
     }
 }

@@ -126,6 +126,7 @@ fn synthesize_replay_turn_marker(
     agent_result: Option<&str>,
     error_kind: Option<crate::app::error_display::WireErrorType>,
     elapsed_ms: Option<u64>,
+    tokens_per_second: Option<f64>,
     meta: Option<&serde_json::Value>,
 ) -> Option<crate::scrollback::blocks::SessionEvent> {
     use crate::app::turn_completion::{
@@ -164,6 +165,7 @@ fn synthesize_replay_turn_marker(
             cancellation_category,
             error_kind,
             error_banner_present: banner,
+            tokens_per_second,
         })
     };
     marker.or_else(|| {
@@ -337,10 +339,14 @@ pub(super) fn handle_session_notification_with_origin(
             stop_reason,
             agent_result,
             error_kind,
+            usage,
             elapsed_ms,
             ..
         } => {
             let error_kind = crate::app::error_display::wire_error_kind(error_kind.as_deref());
+            let tokens_per_second = usage
+                .as_ref()
+                .and_then(super::super::turn_completion::prompt_tokens_per_second);
             if agent.session.loading_replay {
                 let first = agent.replayed_terminal_prompts.insert(prompt_id.clone());
                 if first
@@ -352,6 +358,7 @@ pub(super) fn handle_session_notification_with_origin(
                         agent_result.as_deref(),
                         error_kind,
                         elapsed_ms,
+                        tokens_per_second,
                         session_notif.meta.as_ref(),
                     )
                 {
@@ -437,6 +444,7 @@ pub(super) fn handle_session_notification_with_origin(
                             prompt_id: Some(&prompt_id),
                             stop_reason: Some(&stop_reason),
                             agent_result: agent_result.as_deref(),
+                            tokens_per_second,
                             cancel_trigger: terminal_meta_str(
                                 session_notif.meta.as_ref(),
                                 super::super::turn_completion::CANCEL_TRIGGER_KEY,
@@ -1531,12 +1539,16 @@ pub(super) fn handle_child_session_notification(
             stop_reason,
             agent_result,
             error_kind,
+            usage,
             elapsed_ms,
             ..
         } => {
             if NotificationMeta::from_json(meta.and_then(|v| v.as_object())).is_replay {
                 return false;
             }
+            let tokens_per_second = usage
+                .as_ref()
+                .and_then(super::super::turn_completion::prompt_tokens_per_second);
             let (finished, label) = {
                 let Some(child_view) = agent.child_view_for_live_update_mut(child_sid) else {
                     return false;
@@ -1561,6 +1573,7 @@ pub(super) fn handle_child_session_notification(
                         error_kind: crate::app::error_display::wire_error_kind(
                             error_kind.as_deref(),
                         ),
+                        tokens_per_second,
                     },
                     elapsed_ms,
                 );

@@ -109,10 +109,10 @@ cargo check --workspace                # fast validation
 ```
 
 The binary artifact is named `xai-grok-pager`; official installs ship it as
-`chutes-build`. On first launch it asks for a Chutes API key — the primary
-credential, created at [chutes.ai/app/api](https://chutes.ai/app/api) and also
-readable from `CHUTES_API_KEY`. Browser login is opt-in and needs an OAuth app you
-register yourself; see the
+`chutes-build`. The only credential is a Chutes API key, created at
+[chutes.ai/app/api](https://chutes.ai/app/api) and read from `CHUTES_API_KEY`.
+There is no browser login: `chutes-build login` only prints the API-key setup
+guidance; see the
 [authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
 
 ## Documentation

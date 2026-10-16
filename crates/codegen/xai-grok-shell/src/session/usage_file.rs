@@ -39,6 +39,13 @@ pub struct UsageSummary {
     pub total_tokens: u64,
     #[serde(default)]
     pub model_calls: u64,
+    /// Measured model time in milliseconds, folded from per-call API durations.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub api_duration_ms: u64,
+    /// Output tokens per API second, derived from `output_tokens`/`api_duration_ms`.
+    /// `None` (skipped) when either is zero, so old files and untimed rows show no speed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_per_second: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd_ticks: Option<i64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -84,6 +91,8 @@ impl UsageSummary {
             reasoning_tokens: totals.reasoning_tokens,
             total_tokens: totals.total_tokens(),
             model_calls: totals.model_calls,
+            api_duration_ms: totals.api_duration_ms,
+            tokens_per_second: tokens_per_second(totals.output_tokens, totals.api_duration_ms),
             cost_usd_ticks: totals.cost_usd_ticks,
             cost_is_partial: totals.cost_is_partial(),
             usage_is_incomplete: incomplete,
@@ -91,6 +100,12 @@ impl UsageSummary {
             primary_model_id: None,
             model_usage: IndexMap::new(),
         }
+    }
+
+    /// Output tokens per API second, derived (never folded): `None` when
+    /// either input is zero, so untimed rows show no speed instead of a fake one.
+    pub fn tokens_per_second(&self) -> Option<f64> {
+        tokens_per_second(self.output_tokens, self.api_duration_ms)
     }
 
     /// True when `self` is a same-process continuation of `previous` (no bucket shrank), so the turn delta is a subtract, not a full clone.
@@ -114,9 +129,11 @@ impl UsageSummary {
     }
 
     fn saturating_add_row(&self, other: &Self) -> Self {
+        let output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        let api_duration_ms = self.api_duration_ms.saturating_add(other.api_duration_ms);
         Self {
             input_tokens: self.input_tokens.saturating_add(other.input_tokens),
-            output_tokens: self.output_tokens.saturating_add(other.output_tokens),
+            output_tokens,
             cached_read_tokens: self
                 .cached_read_tokens
                 .saturating_add(other.cached_read_tokens),
@@ -126,6 +143,8 @@ impl UsageSummary {
             reasoning_tokens: self.reasoning_tokens.saturating_add(other.reasoning_tokens),
             total_tokens: self.total_tokens.saturating_add(other.total_tokens),
             model_calls: self.model_calls.saturating_add(other.model_calls),
+            api_duration_ms,
+            tokens_per_second: tokens_per_second(output_tokens, api_duration_ms),
             cost_usd_ticks: merge_cost_ticks(self.cost_usd_ticks, other.cost_usd_ticks),
             cost_is_partial: self.cost_is_partial || other.cost_is_partial,
             usage_is_incomplete: self.usage_is_incomplete || other.usage_is_incomplete,
@@ -151,9 +170,11 @@ impl UsageSummary {
     }
 
     fn saturating_sub_row(&self, other: &Self) -> Self {
+        let output_tokens = self.output_tokens.saturating_sub(other.output_tokens);
+        let api_duration_ms = self.api_duration_ms.saturating_sub(other.api_duration_ms);
         Self {
             input_tokens: self.input_tokens.saturating_sub(other.input_tokens),
-            output_tokens: self.output_tokens.saturating_sub(other.output_tokens),
+            output_tokens,
             cached_read_tokens: self
                 .cached_read_tokens
                 .saturating_sub(other.cached_read_tokens),
@@ -163,6 +184,8 @@ impl UsageSummary {
             reasoning_tokens: self.reasoning_tokens.saturating_sub(other.reasoning_tokens),
             total_tokens: self.total_tokens.saturating_sub(other.total_tokens),
             model_calls: self.model_calls.saturating_sub(other.model_calls),
+            api_duration_ms,
+            tokens_per_second: tokens_per_second(output_tokens, api_duration_ms),
             cost_usd_ticks: sub_cost_ticks(self.cost_usd_ticks, other.cost_usd_ticks),
             cost_is_partial: self.cost_is_partial || other.cost_is_partial,
             usage_is_incomplete: self.usage_is_incomplete,
@@ -339,6 +362,14 @@ fn load_for_session_in_root(
         Ok(file) => Ok(UsageLoad::Ready(Box::new(file))),
         Err(e) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
     }
+}
+
+fn tokens_per_second(output_tokens: u64, api_duration_ms: u64) -> Option<f64> {
+    if output_tokens == 0 || api_duration_ms == 0 {
+        return None;
+    }
+    let tps = output_tokens as f64 / (api_duration_ms as f64 / 1000.0);
+    tps.is_finite().then_some(tps)
 }
 
 fn is_zero_u64(value: &u64) -> bool {

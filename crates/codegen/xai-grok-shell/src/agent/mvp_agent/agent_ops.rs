@@ -2373,7 +2373,7 @@ impl MvpAgent {
         if relay_sync_enabled {
             tracing::info!("[grok] Relay sync: ENABLED");
         } else if tui_mode && relay_config_enabled && !has_xai_auth {
-            tracing::info!("[grok] Relay sync: DISABLED (no auth - run 'chutes-build login' first)");
+            tracing::info!("Relay sync: DISABLED (no auth - set CHUTES_API_KEY first)");
         } else if tui_mode && !relay_config_enabled {
             tracing::debug!("Relay sync: DISABLED (not configured in config.toml or env)");
         } else {

@@ -16,11 +16,13 @@ pub enum Command {
     },
     /// Check terminal, clipboard, color, and input support without starting Chutes Build
     Doctor(crate::doctor_cmd::DoctorArgs),
+    /// Show the Chutes account plan, quotas, usage, and credit for the configured API key
+    Account(crate::account_cmd::AccountArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
-    /// Sign out and clear cached credentials
+    /// Unavailable: this build has no account sign-in (prints API-key setup guidance)
     Logout,
-    /// Sign in to Chutes Build
+    /// Unavailable: this build has no account sign-in (prints API-key setup guidance)
     Login {
         /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
         #[arg(long, hide = true)]

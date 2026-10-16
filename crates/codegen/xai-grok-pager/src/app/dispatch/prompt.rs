@@ -1687,6 +1687,20 @@ pub(super) fn handle_prompt_response(
         agent.session.finish_turn(&mut agent.scrollback);
 
         // Insert the session event message (skip TurnCompleted for bash-mode, which has no agent turn)
+        let tokens_per_second = result
+            .as_ref()
+            .ok()
+            .and_then(|pr| pr.meta.as_ref())
+            .and_then(|meta| meta.get("usage"))
+            .and_then(|usage| {
+                serde_json::from_value::<
+                    xai_grok_shell::extensions::notification::PromptUsage,
+                >(usage.clone())
+                .ok()
+            })
+            .and_then(|usage| {
+                crate::app::turn_completion::prompt_tokens_per_second(&usage)
+            });
         let event = match (&result, was_cancelling) {
             (Ok(_), false) if agent.bash_turn => None,
             (Err(_), _) if dedicated_ux_shown => None,
@@ -1713,6 +1727,7 @@ pub(super) fn handle_prompt_response(
                         // Ok-path marker: the Error arm is unreachable here.
                         error_kind: None,
                         error_banner_present: false,
+                        tokens_per_second,
                     },
                 )
             }

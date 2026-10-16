@@ -81,30 +81,12 @@ chutes-build update
 
 ## Authentication
 
-### Browser Login (Default)
-
-On first launch, Chutes Build opens your browser to authenticate with chutes.ai:
-
-```bash
-chutes-build
-```
-
-Credentials are stored in `~/.chutes-build/auth.json` and persist across sessions. Tokens expire after 7 days; Chutes Build will prompt you to re-authenticate when needed.
-
-### Re-authenticate
-
-To switch accounts or fix authentication issues:
+Chutes Build authenticates with a Chutes API key only. There is no browser
+login, no session store, and no re-authentication flow: get a key from
+[console.chutes.ai](https://console.chutes.ai) and set it before starting:
 
 ```bash
-chutes-build login
-```
-
-### API Key
-
-For CI/CD, automation, or environments without browser access, use an API key from [console.chutes.ai](https://console.chutes.ai):
-
-```bash
-export CHUTES_API_KEY="xai-..."
+export CHUTES_API_KEY="cpk-..."
 chutes-build
 ```
 

@@ -1187,6 +1187,7 @@ fn real_end_marker_stays_plain_with_running_work() {
         &mut agent,
         Some(SessionEvent::TurnCompleted {
             elapsed: Some(std::time::Duration::from_secs(2)),
+            tokens_per_second: None,
         }),
     );
 
@@ -1207,6 +1208,7 @@ fn workless_marker_renders_legacy_text() {
         &mut agent,
         Some(SessionEvent::TurnCompleted {
             elapsed: Some(std::time::Duration::from_secs(2)),
+            tokens_per_second: None,
         }),
     );
 
@@ -1343,6 +1345,7 @@ fn turn_end_after_park_pushes_single_marker() {
         &mut agent,
         Some(SessionEvent::TurnCompleted {
             elapsed: Some(std::time::Duration::from_secs(5)),
+            tokens_per_second: None,
         }),
     );
 
@@ -1364,6 +1367,7 @@ fn base_input<'a>(stop: TurnStopReason) -> TerminalMarkerInput<'a> {
         cancellation_category: None,
         error_kind: None,
         error_banner_present: false,
+        tokens_per_second: None,
     }
 }
 
@@ -1403,7 +1407,10 @@ fn classifier_completed_with_elapsed() {
     let ev = terminal_marker(base_input(TurnStopReason::EndTurn)).unwrap();
     assert!(matches!(
         ev,
-        SessionEvent::TurnCompleted { elapsed: Some(d) } if d == std::time::Duration::from_millis(1000)
+        SessionEvent::TurnCompleted {
+            elapsed: Some(d),
+            ..
+        } if d == std::time::Duration::from_millis(1000)
     ));
 }
 
@@ -1412,7 +1419,13 @@ fn classifier_completed_without_elapsed_is_none() {
     let mut input = base_input(TurnStopReason::EndTurn);
     input.elapsed_ms = None;
     let ev = terminal_marker(input).unwrap();
-    assert!(matches!(ev, SessionEvent::TurnCompleted { elapsed: None }));
+    assert!(matches!(
+        ev,
+        SessionEvent::TurnCompleted {
+            elapsed: None,
+            ..
+        }
+    ));
 }
 
 #[test]

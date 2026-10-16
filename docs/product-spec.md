@@ -97,6 +97,16 @@ hop.
 primary is unavailable or failing, and MUST return an honest error when no
 fallback exists at all — never a silent wrong result.
 
+4.4. Account data (plan, quotas, usage windows, PAYG credit) MUST be
+derivable from the API key alone and visible via `chutes-build account`
+(human and `--json`) and `/account`. Failures (no key, network error)
+MUST report honestly, never as fake zeros.
+
+4.5. Inference speed MUST be reported as output tokens per API second
+(`tok/s`): after each turn next to the elapsed time, and as a Speed row
+in the session usage totals. Missing usage or timing MUST render no
+speed, never `0`.
+
 ## 5. Docs and naming truth
 
 5.1. Public docs, embedded `/docs` guides, `--help`, and privacy/security
@@ -149,6 +159,10 @@ Any behavior change MUST, in one commit:
 | 2.4/2.6 no upsell | `xai-grok-pager` `format_session_info_api_key_auth_suggests_no_login` |
 | 4.3 fallback | `chutes-build-core` `equivalent_model_skips_excluded_aliases_and_pools`, `equivalent_model_returns_none_when_only_excluded_remains` |
 | 4.2 delegation | UNPINNED — locate the vision-delegation tests and name them here |
+| 2.4/2.6 re-auth text | `xai-grok-pager` `reauth_required_message_points_at_api_key` |
+| 4.4 account CLI | `xai-grok-pager` `account_cmd::tests::*` |
+| 4.4 account TUI | `xai-grok-pager` `show_account_schedules_direct_fetch`, `account_complete_renders_dashboard_text`, `account_failed_renders_honest_error`, `account_dispatches_show_account` |
+| 4.5 inference speed | `xai-grok-pager` `turn_completed_message`, `status_blocks` `session_usage_block_*` + snapshots |
 
 When a clause has no passing row here, the clause is aspirational: add the
 test or weaken the clause.
